@@ -52,10 +52,10 @@ impl<'a> Lexer<'a> {
                 }
                 TokenKind::Ident(ident)
             }
-            Some(&ch) if ch.is_digit(10) => {
+            Some(&ch) if ch.is_ascii_digit() => {
                 let mut num_str = String::new();
                 while let Some(&ch) = self.source.peek()
-                    && ch.is_digit(10)
+                    && ch.is_ascii_digit()
                 {
                     num_str.push(ch);
                     self.advance();
@@ -92,6 +92,23 @@ impl<'a> Lexer<'a> {
                 panic!("Unexpected character: {ch}");
             }
             None => TokenKind::Eof,
+        }
+    }
+
+    pub fn tokens(self) -> impl Iterator<Item = TokenKind> {
+        self
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = TokenKind;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let token = self.next_token();
+        if token == TokenKind::Eof {
+            None
+        } else {
+            Some(token)
         }
     }
 }
