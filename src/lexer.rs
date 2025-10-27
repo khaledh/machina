@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     Ident(String),
     IntLit(u32),
@@ -10,6 +10,10 @@ pub enum TokenKind {
     LBrace,
     RBrace,
     Arrow,
+    Plus,
+    Minus,
+    Star,
+    Slash,
     Eof,
 }
 
@@ -63,6 +67,27 @@ impl<'a> Lexer<'a> {
                 let value = num_str.parse::<u32>().unwrap();
                 TokenKind::IntLit(value)
             }
+            Some(&'-') => {
+                self.advance();
+                if matches!(self.source.peek(), Some(&'>')) {
+                    self.advance();
+                    TokenKind::Arrow
+                } else {
+                    TokenKind::Minus
+                }
+            }
+            Some(&'+') => {
+                self.advance();
+                TokenKind::Plus
+            }
+            Some(&'*') => {
+                self.advance();
+                TokenKind::Star
+            }
+            Some(&'/') => {
+                self.advance();
+                TokenKind::Slash
+            }
             Some(&'(') => {
                 self.advance();
                 TokenKind::LParen
@@ -78,15 +103,6 @@ impl<'a> Lexer<'a> {
             Some(&'}') => {
                 self.advance();
                 TokenKind::RBrace
-            }
-            Some(&'-') => {
-                self.advance();
-                if let Some(&'>') = self.source.peek() {
-                    self.advance();
-                    TokenKind::Arrow
-                } else {
-                    panic!("Unexpected character after '-'");
-                }
             }
             Some(&ch) => {
                 panic!("Unexpected character: {ch}");

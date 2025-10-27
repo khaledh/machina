@@ -13,4 +13,17 @@ pub enum Type {
 #[derive(Debug)]
 pub enum Expr {
     UInt32Lit(u32),
+    BinOp {
+        left: Box<Expr>,
+        op: BinOp,
+        right: Box<Expr>,
+    },
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
