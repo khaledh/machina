@@ -22,6 +22,7 @@ pub enum Expr {
         op: UnaryOp,
         expr: Box<Expr>,
     },
+    Block(Vec<Expr>),
 }
 
 #[derive(Debug, Copy, Clone)]

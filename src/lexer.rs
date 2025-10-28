@@ -14,6 +14,7 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Semicolon,
     Eof,
 }
 
@@ -103,6 +104,10 @@ impl<'a> Lexer<'a> {
             Some(&'}') => {
                 self.advance();
                 TokenKind::RBrace
+            }
+            Some(&';') => {
+                self.advance();
+                TokenKind::Semicolon
             }
             Some(&ch) => {
                 panic!("Unexpected character: {ch}");

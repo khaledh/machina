@@ -26,6 +26,7 @@ impl Codegen {
             ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
+            ast::Expr::Block(body) => self.gen_block(body, reg),
         }
     }
 
@@ -59,6 +60,14 @@ impl Codegen {
         result.push_str(&self.gen_expr(expr, reg));
         match op {
             ast::UnaryOp::Neg => result.push_str(&format!("  neg w{reg}, w{reg}\n")),
+        }
+        result
+    }
+
+    fn gen_block(&self, body: &Vec<ast::Expr>, reg: u8) -> String {
+        let mut result = String::new();
+        for expr in body {
+            result.push_str(&self.gen_expr(expr, reg));
         }
         result
     }

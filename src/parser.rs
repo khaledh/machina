@@ -82,14 +82,8 @@ where
         // Parse return type
         let return_type = self.parse_type();
 
-        // Expect '{'
-        self.consume(&TokenKind::LBrace);
-
         // Parse function body
         let body = self.parse_expr(0);
-
-        // Expect '}'
-        self.consume(&TokenKind::RBrace);
 
         Function {
             name,
@@ -114,10 +108,26 @@ where
                 Expr::UInt32Lit(value)
             }
             Some(TokenKind::LParen) => {
+                // Parenthesized expression
                 self.advance();
                 let inner = self.parse_expr(0);
                 self.consume(&TokenKind::RParen);
                 inner
+            }
+            Some(TokenKind::LBrace) => {
+                // Block expression
+                self.advance();
+                let mut body = Vec::new();
+                while self.curr_token != Some(TokenKind::RBrace) {
+                    body.push(self.parse_expr(0));
+                    if self.curr_token == Some(TokenKind::Semicolon) {
+                        self.advance();
+                    } else if self.curr_token != Some(TokenKind::RBrace) {
+                        panic!("Expected ';' or '}}' after expression in block");
+                    }
+                }
+                self.consume(&TokenKind::RBrace);
+                Expr::Block(body)
             }
             other => panic!("Expected primary expression, found: {other:?}"),
         }
