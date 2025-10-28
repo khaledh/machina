@@ -27,6 +27,8 @@ impl Codegen {
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
             ast::Expr::Block(body) => self.gen_block(body, reg),
+            ast::Expr::Let { .. } => "".to_string(),
+            ast::Expr::VarRef(name) => "".to_string(),
         }
     }
 

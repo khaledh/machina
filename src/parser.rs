@@ -101,11 +101,41 @@ where
         typ
     }
 
+    fn parse_block(&mut self) -> Vec<Expr> {
+        let mut body = Vec::new();
+        while self.curr_token != Some(TokenKind::RBrace) {
+            let expr = match &self.curr_token {
+                Some(TokenKind::Ident(name)) if name == "let" => self.parse_let(),
+                _ => self.parse_expr(0),
+            };
+            body.push(expr);
+            if self.curr_token == Some(TokenKind::Semicolon) {
+                self.advance();
+            }
+        }
+        body
+    }
+
+    fn parse_let(&mut self) -> Expr {
+        self.consume_keyword("let");
+        let name = self.parse_ident();
+        self.consume(&TokenKind::Equals);
+        let value = self.parse_expr(0);
+        Expr::Let {
+            name,
+            value: Box::new(value),
+        }
+    }
+
     fn parse_primary(&mut self) -> Expr {
         match self.curr_token.clone() {
             Some(TokenKind::IntLit(value)) => {
                 self.advance();
                 Expr::UInt32Lit(value)
+            }
+            Some(TokenKind::Ident(name)) => {
+                self.advance();
+                Expr::VarRef(name)
             }
             Some(TokenKind::LParen) => {
                 // Parenthesized expression
@@ -117,15 +147,7 @@ where
             Some(TokenKind::LBrace) => {
                 // Block expression
                 self.advance();
-                let mut body = Vec::new();
-                while self.curr_token != Some(TokenKind::RBrace) {
-                    body.push(self.parse_expr(0));
-                    if self.curr_token == Some(TokenKind::Semicolon) {
-                        self.advance();
-                    } else if self.curr_token != Some(TokenKind::RBrace) {
-                        panic!("Expected ';' or '}}' after expression in block");
-                    }
-                }
+                let body = self.parse_block();
                 self.consume(&TokenKind::RBrace);
                 Expr::Block(body)
             }

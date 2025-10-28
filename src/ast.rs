@@ -23,6 +23,11 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Block(Vec<Expr>),
+    Let {
+        name: String,
+        value: Box<Expr>,
+    },
+    VarRef(String),
 }
 
 #[derive(Debug, Copy, Clone)]
