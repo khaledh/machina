@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr, Function, Type};
+use crate::ast::{BinOp, Expr, Function, Type, UnaryOp};
 use crate::lexer::TokenKind;
 use std::collections::HashMap;
 use std::iter::Peekable;
@@ -108,16 +108,33 @@ where
     }
 
     fn parse_primary(&mut self) -> Expr {
-        let expr = match &self.curr_token {
-            Some(TokenKind::IntLit(value)) => Expr::UInt32Lit(*value),
+        match self.curr_token.clone() {
+            Some(TokenKind::IntLit(value)) => {
+                self.advance();
+                Expr::UInt32Lit(value)
+            }
+            Some(TokenKind::LParen) => {
+                self.advance();
+                let inner = self.parse_expr(0);
+                self.consume(&TokenKind::RParen);
+                inner
+            }
             other => panic!("Expected primary expression, found: {other:?}"),
-        };
-        self.advance();
-        expr
+        }
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Expr {
-        let mut left = self.parse_primary();
+        let mut left = if self.curr_token == Some(TokenKind::Minus) {
+            self.advance();
+            let operand = self.parse_expr(10); // highest binding power
+            Expr::UnaryOp {
+                op: UnaryOp::Neg,
+                expr: Box::new(operand),
+            }
+        } else {
+            self.parse_primary()
+        };
+
         while let Some(token) = &self.curr_token {
             if let Some(&op) = BINARY_OPS_MAP.get(token) {
                 let bp = Self::binding_power(op);

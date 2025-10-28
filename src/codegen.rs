@@ -24,7 +24,8 @@ impl Codegen {
     fn gen_expr(&self, expr: &ast::Expr, reg: u8) -> String {
         match expr {
             ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
-            ast::Expr::BinOp { left, op, right } => self.gen_binop(*op, left, right, reg),
+            ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
+            ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
         }
     }
 
@@ -32,7 +33,13 @@ impl Codegen {
         format!("  mov w{reg}, #{value}\n")
     }
 
-    fn gen_binop(&self, op: ast::BinOp, left: &ast::Expr, right: &ast::Expr, reg: u8) -> String {
+    fn gen_binary_op(
+        &self,
+        op: ast::BinOp,
+        left: &ast::Expr,
+        right: &ast::Expr,
+        reg: u8,
+    ) -> String {
         let lreg = reg;
         let rreg = reg + 1;
         let mut result = String::new();
@@ -43,6 +50,15 @@ impl Codegen {
             ast::BinOp::Sub => result.push_str(&format!("  sub w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Mul => result.push_str(&format!("  mul w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Div => result.push_str(&format!("  div w{reg}, w{lreg}, w{rreg}\n")),
+        }
+        result
+    }
+
+    fn gen_unary_op(&self, op: ast::UnaryOp, expr: &ast::Expr, reg: u8) -> String {
+        let mut result = String::new();
+        result.push_str(&self.gen_expr(expr, reg));
+        match op {
+            ast::UnaryOp::Neg => result.push_str(&format!("  neg w{reg}, w{reg}\n")),
         }
         result
     }

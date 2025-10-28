@@ -7,7 +7,7 @@ mod parser;
 
 const SOURCE: &str = r#"
 fn main() -> u32 {
-    1 + 2 * 3
+    -5 + -(1 + -9) * 2
 }
 "#;
 
