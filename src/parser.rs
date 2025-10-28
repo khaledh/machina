@@ -18,6 +18,7 @@ where
     I: Iterator<Item = TokenKind>,
 {
     tokens: Peekable<I>,
+    curr_token: Option<TokenKind>,
 }
 
 impl<I> Parser<I>
@@ -27,98 +28,125 @@ where
     pub fn new(tokens: I) -> Self {
         Parser {
             tokens: tokens.peekable(),
+            curr_token: None,
         }
     }
 
-    fn advance(&mut self) -> Option<TokenKind> {
-        self.tokens.next()
+    fn advance(&mut self) {
+        self.curr_token = self.tokens.next();
     }
 
-    fn peek(&mut self) -> Option<&TokenKind> {
-        self.tokens.peek()
-    }
-
-    fn expect(&mut self, expected: &TokenKind) {
-        match self.advance() {
-            Some(token) if &token == expected => {}
+    fn consume(&mut self, expected: &TokenKind) {
+        match &self.curr_token {
+            Some(token) if token == expected => {
+                self.advance();
+            }
             other => panic!("Expected {expected:?}, found: {other:?}"),
         }
     }
 
+    fn consume_keyword(&mut self, expected: &str) {
+        match &self.curr_token {
+            Some(TokenKind::Ident(name)) if name == expected => {
+                self.advance();
+            }
+            other => panic!("Expected {expected}, found: {other:?}"),
+        }
+    }
+
+    fn parse_ident(&mut self) -> String {
+        let name = match &self.curr_token {
+            Some(TokenKind::Ident(name)) => name.clone(),
+            other => panic!("Expected identifier, found: {other:?}"),
+        };
+        self.advance();
+        name
+    }
+
     fn parse_function(&mut self) -> Function {
         // Expect 'fn'
-        match self.advance() {
-            Some(TokenKind::Ident(name)) if name == "fn" => {}
-            other => panic!("Expected 'fn', found: {other:?}"),
-        }
+        self.consume_keyword("fn");
 
         // Expect function name
-        let name = match self.advance() {
-            Some(TokenKind::Ident(name)) => name,
-            other => panic!("Expected function name, found: {other:?}"),
-        };
+        let name = self.parse_ident();
 
         // Expect '('
-        self.expect(&TokenKind::LParen);
+        self.consume(&TokenKind::LParen);
 
         // Expect ')'
-        self.expect(&TokenKind::RParen);
+        self.consume(&TokenKind::RParen);
 
         // Expect '->'
-        self.expect(&TokenKind::Arrow);
+        self.consume(&TokenKind::Arrow);
 
         // Parse return type
-        let typ = self.parse_type();
+        let return_type = self.parse_type();
 
         // Expect '{'
-        self.expect(&TokenKind::LBrace);
+        self.consume(&TokenKind::LBrace);
 
         // Parse function body
-        let body = self.parse_expr();
+        let body = self.parse_expr(0);
 
         // Expect '}'
-        self.expect(&TokenKind::RBrace);
+        self.consume(&TokenKind::RBrace);
 
         Function {
             name,
-            return_type: typ,
+            return_type,
             body,
         }
     }
 
     fn parse_type(&mut self) -> Type {
-        match self.advance() {
+        let typ = match &self.curr_token {
             Some(TokenKind::Ident(name)) if name == "u32" => Type::UInt32,
             other => panic!("Expected type, found: {other:?}"),
-        }
+        };
+        self.advance();
+        typ
     }
 
-    fn parse_expr(&mut self) -> Expr {
-        match self.advance() {
-            Some(TokenKind::IntLit(value)) => {
-                let lit = Expr::UInt32Lit(value);
-                let is_binop = matches!(
-                    self.peek(),
-                    Some(TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash)
-                );
-                if is_binop {
-                    let op_kind = self.advance().unwrap();
-                    let right = self.parse_expr();
-                    Expr::BinOp {
-                        left: Box::new(lit),
-                        op: BINARY_OPS_MAP[&op_kind],
-                        right: Box::new(right),
-                    }
-                } else {
-                    lit
+    fn parse_primary(&mut self) -> Expr {
+        let expr = match &self.curr_token {
+            Some(TokenKind::IntLit(value)) => Expr::UInt32Lit(*value),
+            other => panic!("Expected primary expression, found: {other:?}"),
+        };
+        self.advance();
+        expr
+    }
+
+    fn parse_expr(&mut self, min_bp: u8) -> Expr {
+        let mut left = self.parse_primary();
+        while let Some(token) = &self.curr_token {
+            if let Some(&op) = BINARY_OPS_MAP.get(token) {
+                let bp = Self::binding_power(op);
+                if bp < min_bp {
+                    break;
                 }
+                self.advance();
+                let right = self.parse_expr(bp + 1);
+                left = Expr::BinOp {
+                    left: Box::new(left),
+                    op,
+                    right: Box::new(right),
+                };
+            } else {
+                break;
             }
-            Some(token) => panic!("Unexpected token in expression: {token:?}"),
-            None => panic!("Unexpected eof while parsing expression"),
+        }
+        left
+    }
+
+    fn binding_power(op: BinOp) -> u8 {
+        match op {
+            BinOp::Add | BinOp::Sub => 1,
+            BinOp::Mul | BinOp::Div => 2,
         }
     }
 
     pub fn parse(&mut self) -> Function {
+        self.advance();
         self.parse_function()
     }
 }
