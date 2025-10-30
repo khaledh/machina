@@ -1,22 +1,42 @@
 use crate::ast;
+use crate::semantic::Symbol;
+use std::collections::HashMap;
 
 pub struct Codegen {
     function: ast::Function,
+    symbols: HashMap<String, Symbol>,
 }
 
 impl Codegen {
-    pub fn new(function: ast::Function) -> Self {
-        Codegen { function }
+    pub fn new(function: ast::Function, symbols: HashMap<String, Symbol>) -> Self {
+        Codegen { function, symbols }
     }
 }
 
 impl Codegen {
     pub fn generate(&self) -> String {
         let mut asm = String::new();
-        asm.push_str(".global _main\n");
+
+        let var_count = self.symbols.len();
+        // arm64 requires 16-byte stack alignment
+        let stack_size = (var_count * 8 + 15) & !15;
+
         asm.push_str(".align 2\n");
+
+        // Function prologue
+        asm.push_str(".global _main\n");
         asm.push_str("_main:\n");
+        if stack_size > 0 {
+            asm.push_str(&format!("  sub sp, sp, #{stack_size}\n"));
+        }
+
+        // Function body
         asm.push_str(&self.gen_expr(&self.function.body, 0));
+
+        // Function epilogue
+        if stack_size > 0 {
+            asm.push_str(&format!("  add sp, sp, #{stack_size}\n"));
+        }
         asm.push_str("  ret\n");
         asm
     }
@@ -27,8 +47,23 @@ impl Codegen {
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
             ast::Expr::Block(body) => self.gen_block(body, reg),
-            ast::Expr::Let { .. } => "".to_string(),
-            ast::Expr::VarRef(name) => "".to_string(),
+            ast::Expr::Let { name, value } => {
+                if let Some(Symbol::Variable { stack_offset, .. }) = self.symbols.get(name) {
+                    let mut result = String::new();
+                    result.push_str(&self.gen_expr(value, reg));
+                    result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
+                    result
+                } else {
+                    panic!("Variable not found: {name}");
+                }
+            }
+            ast::Expr::VarRef(name) => {
+                if let Some(Symbol::Variable { stack_offset, .. }) = self.symbols.get(name) {
+                    format!("  ldr w{reg}, [sp, #{stack_offset}]\n")
+                } else {
+                    panic!("Variable not found: {name}");
+                }
+            }
         }
     }
 
