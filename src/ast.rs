@@ -30,6 +30,11 @@ pub enum Expr {
         value: Box<Expr>,
     },
     VarRef(String),
+    If {
+        cond: Box<Expr>,
+        then_body: Box<Expr>,
+        else_body: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Copy, Clone)]

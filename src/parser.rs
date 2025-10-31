@@ -142,6 +142,18 @@ where
                 self.advance();
                 Expr::UInt32Lit(value)
             }
+            Some(TokenKind::Ident(name)) if name == "if" => {
+                self.advance();
+                let cond = Box::new(self.parse_expr(0));
+                let then_body = Box::new(self.parse_expr(0));
+                self.consume_keyword("else");
+                let else_body = Box::new(self.parse_expr(0));
+                Expr::If {
+                    cond,
+                    then_body,
+                    else_body,
+                }
+            }
             Some(TokenKind::Ident(name)) => {
                 self.advance();
                 if name == "true" {

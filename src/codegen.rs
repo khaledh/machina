@@ -1,15 +1,21 @@
 use crate::ast;
 use crate::semantic::Symbol;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 pub struct Codegen {
     function: ast::Function,
     symbols: HashMap<String, Symbol>,
+    label_counter: RefCell<u32>,
 }
 
 impl Codegen {
     pub fn new(function: ast::Function, symbols: HashMap<String, Symbol>) -> Self {
-        Codegen { function, symbols }
+        Codegen {
+            function,
+            symbols,
+            label_counter: RefCell::new(0),
+        }
     }
 }
 
@@ -41,6 +47,12 @@ impl Codegen {
         asm
     }
 
+    fn next_label(&self) -> String {
+        let curr = *self.label_counter.borrow();
+        self.label_counter.replace(curr + 1);
+        format!(".L{}", curr)
+    }
+
     fn gen_expr(&self, expr: &ast::Expr, reg: u8) -> String {
         match expr {
             ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
@@ -49,14 +61,14 @@ impl Codegen {
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
             ast::Expr::Block(body) => self.gen_block(body, reg),
             ast::Expr::Let { name, value } => {
-                if let Some(Symbol::Variable { stack_offset, .. }) = self.symbols.get(name) {
-                    let mut result = String::new();
-                    result.push_str(&self.gen_expr(value, reg));
-                    result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
-                    result
-                } else {
-                    panic!("Variable not found: {name}");
-                }
+                let stack_offset = match self.symbols.get(name) {
+                    Some(Symbol::Variable { stack_offset, .. }) => *stack_offset,
+                    _ => panic!("Variable not found: {name}"),
+                };
+                let mut result = String::new();
+                result.push_str(&self.gen_expr(value, reg));
+                result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
+                result
             }
             ast::Expr::VarRef(name) => {
                 if let Some(Symbol::Variable { stack_offset, .. }) = self.symbols.get(name) {
@@ -64,6 +76,25 @@ impl Codegen {
                 } else {
                     panic!("Variable not found: {name}");
                 }
+            }
+            ast::Expr::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let mut result = String::new();
+                let else_label = self.next_label();
+                let end_label = self.next_label();
+
+                result.push_str(&self.gen_expr(cond, reg));
+                result.push_str(&format!("  cmp w{reg}, 0\n"));
+                result.push_str(&format!("  b.eq {else_label}\n"));
+                result.push_str(&self.gen_expr(then_body, reg));
+                result.push_str(&format!("  b {end_label}\n"));
+                result.push_str(&format!("{else_label}:\n"));
+                result.push_str(&self.gen_expr(else_body, reg));
+                result.push_str(&format!("{end_label}:\n"));
+                result
             }
         }
     }

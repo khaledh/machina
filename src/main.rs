@@ -8,8 +8,7 @@ mod semantic;
 
 const SOURCE: &str = r#"
 fn main() -> bool {
-    let x = 2 <= 3;
-    x == true
+    if 5 < 10 { 42 } else { 99 }
 }
 "#;
 

@@ -75,6 +75,16 @@ impl SemanticAnalyzer {
                     self.errors.push(format!("Undefined variable: {name}"));
                 }
             }
+
+            ast::Expr::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.analyze_expr(cond);
+                self.analyze_expr(then_body);
+                self.analyze_expr(else_body);
+            }
         }
     }
 }
