@@ -16,6 +16,12 @@ pub enum TokenKind {
     Slash,
     Semicolon,
     Equals,
+    EqEq,
+    NotEq,
+    LessThan,
+    GreaterThan,
+    LessThanEq,
+    GreaterThanEq,
     Eof,
 }
 
@@ -112,7 +118,39 @@ impl<'a> Lexer<'a> {
             }
             Some(&'=') => {
                 self.advance();
-                TokenKind::Equals
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    TokenKind::EqEq
+                } else {
+                    TokenKind::Equals
+                }
+            }
+            Some(&'!') => {
+                self.advance();
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    TokenKind::NotEq
+                } else {
+                    panic!("Unexpected character: {}", self.source.peek().unwrap());
+                }
+            }
+            Some(&'<') => {
+                self.advance();
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    TokenKind::LessThanEq
+                } else {
+                    TokenKind::LessThan
+                }
+            }
+            Some(&'>') => {
+                self.advance();
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    TokenKind::GreaterThanEq
+                } else {
+                    TokenKind::GreaterThan
+                }
             }
             Some(&ch) => {
                 panic!("Unexpected character: {ch}");

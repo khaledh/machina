@@ -6,10 +6,18 @@ use std::sync::LazyLock;
 
 static BINARY_OPS_MAP: LazyLock<HashMap<TokenKind, BinOp>> = LazyLock::new(|| {
     HashMap::from([
+        // Arithmetic operators
         (TokenKind::Plus, BinOp::Add),
         (TokenKind::Minus, BinOp::Sub),
         (TokenKind::Star, BinOp::Mul),
         (TokenKind::Slash, BinOp::Div),
+        // Comparison operators
+        (TokenKind::EqEq, BinOp::Eq),
+        (TokenKind::NotEq, BinOp::Ne),
+        (TokenKind::LessThan, BinOp::Lt),
+        (TokenKind::GreaterThan, BinOp::Gt),
+        (TokenKind::LessThanEq, BinOp::LtEq),
+        (TokenKind::GreaterThanEq, BinOp::GtEq),
     ])
 });
 
@@ -198,6 +206,7 @@ where
         match op {
             BinOp::Add | BinOp::Sub => 1,
             BinOp::Mul | BinOp::Div => 2,
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => 3,
         }
     }
 

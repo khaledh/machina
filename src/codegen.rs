@@ -90,10 +90,37 @@ impl Codegen {
         result.push_str(&self.gen_expr(left, lreg));
         result.push_str(&self.gen_expr(right, rreg));
         match op {
+            // Arithmetic operators
             ast::BinOp::Add => result.push_str(&format!("  add w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Sub => result.push_str(&format!("  sub w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Mul => result.push_str(&format!("  mul w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Div => result.push_str(&format!("  div w{reg}, w{lreg}, w{rreg}\n")),
+
+            // Comparison operators
+            ast::BinOp::Eq => {
+                result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
+                result.push_str(&format!("  cset w{reg}, eq\n"));
+            }
+            ast::BinOp::Ne => {
+                result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
+                result.push_str(&format!("  cset w{reg}, ne\n"));
+            }
+            ast::BinOp::Lt => {
+                result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
+                result.push_str(&format!("  cset w{reg}, lt\n"));
+            }
+            ast::BinOp::Gt => {
+                result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
+                result.push_str(&format!("  cset w{reg}, gt\n"));
+            }
+            ast::BinOp::LtEq => {
+                result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
+                result.push_str(&format!("  cset w{reg}, le\n"));
+            }
+            ast::BinOp::GtEq => {
+                result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
+                result.push_str(&format!("  cset w{reg}, ge\n"));
+            }
         }
         result
     }
