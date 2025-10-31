@@ -7,10 +7,9 @@ mod parser;
 mod semantic;
 
 const SOURCE: &str = r#"
-fn main() -> u32 {
-    let x = 5;
-    let y = 10;
-    x + y
+fn main() -> bool {
+    let x = true;
+    x
 }
 "#;
 

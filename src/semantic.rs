@@ -37,7 +37,7 @@ impl SemanticAnalyzer {
     fn analyze_expr(&mut self, expr: &ast::Expr) {
         match expr {
             ast::Expr::UInt32Lit(_) => {}
-
+            ast::Expr::BoolLit(_) => {}
             ast::Expr::BinOp { left, right, .. } => {
                 self.analyze_expr(left);
                 self.analyze_expr(right);

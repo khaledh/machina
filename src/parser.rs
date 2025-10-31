@@ -95,6 +95,7 @@ where
     fn parse_type(&mut self) -> Type {
         let typ = match &self.curr_token {
             Some(TokenKind::Ident(name)) if name == "u32" => Type::UInt32,
+            Some(TokenKind::Ident(name)) if name == "bool" => Type::Bool,
             other => panic!("Expected type, found: {other:?}"),
         };
         self.advance();
@@ -135,7 +136,13 @@ where
             }
             Some(TokenKind::Ident(name)) => {
                 self.advance();
-                Expr::VarRef(name)
+                if name == "true" {
+                    Expr::BoolLit(true)
+                } else if name == "false" {
+                    Expr::BoolLit(false)
+                } else {
+                    Expr::VarRef(name)
+                }
             }
             Some(TokenKind::LParen) => {
                 // Parenthesized expression

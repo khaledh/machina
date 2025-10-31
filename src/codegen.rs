@@ -44,6 +44,7 @@ impl Codegen {
     fn gen_expr(&self, expr: &ast::Expr, reg: u8) -> String {
         match expr {
             ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
+            ast::Expr::BoolLit(value) => self.gen_bool_imm(value, reg),
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
             ast::Expr::Block(body) => self.gen_block(body, reg),
@@ -68,6 +69,11 @@ impl Codegen {
     }
 
     fn gen_u32_imm(&self, value: &u32, reg: u8) -> String {
+        format!("  mov w{reg}, #{value}\n")
+    }
+
+    fn gen_bool_imm(&self, value: &bool, reg: u8) -> String {
+        let value = if *value { 1 } else { 0 };
         format!("  mov w{reg}, #{value}\n")
     }
 

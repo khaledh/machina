@@ -8,11 +8,13 @@ pub struct Function {
 #[derive(Debug)]
 pub enum Type {
     UInt32,
+    Bool,
 }
 
 #[derive(Debug)]
 pub enum Expr {
     UInt32Lit(u32),
+    BoolLit(bool),
     BinOp {
         left: Box<Expr>,
         op: BinOp,
