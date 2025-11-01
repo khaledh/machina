@@ -57,6 +57,7 @@ impl Codegen {
         match expr {
             ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
             ast::Expr::BoolLit(value) => self.gen_bool_imm(value, reg),
+            ast::Expr::UnitLit => format!("  mov w{reg}, 0\n"),
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
             ast::Expr::Block(body) => self.gen_block(body, reg),

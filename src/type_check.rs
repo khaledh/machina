@@ -34,6 +34,7 @@ impl TypeChecker {
         match expr {
             Expr::UInt32Lit(_) => Ok(Type::UInt32),
             Expr::BoolLit(_) => Ok(Type::Bool),
+            Expr::UnitLit => Ok(Type::Unit),
             Expr::BinOp { left, op, right } => {
                 let left_type = self.type_check_expr(left)?;
                 let right_type = self.type_check_expr(right)?;

@@ -202,6 +202,11 @@ where
                 self.advance();
                 Expr::UInt32Lit(value)
             }
+            Some(TokenKind::LParen) if self.tokens.peek() == Some(&TokenKind::RParen) => {
+                self.advance();
+                self.advance();
+                Expr::UnitLit
+            }
             Some(TokenKind::LParen) => {
                 // Parenthesized expression
                 self.advance();

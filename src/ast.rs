@@ -16,6 +16,7 @@ pub enum Type {
 pub enum Expr {
     UInt32Lit(u32),
     BoolLit(bool),
+    UnitLit,
     BinOp {
         left: Box<Expr>,
         op: BinOp,
