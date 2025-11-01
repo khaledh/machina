@@ -102,6 +102,11 @@ where
 
     fn parse_type(&mut self) -> Type {
         let typ = match &self.curr_token {
+            Some(TokenKind::LParen) if self.tokens.peek() == Some(&TokenKind::RParen) => {
+                self.advance();
+                self.advance();
+                Type::Unit
+            }
             Some(TokenKind::Ident(name)) if name == "u32" => Type::UInt32,
             Some(TokenKind::Ident(name)) if name == "bool" => Type::Bool,
             other => panic!("Expected type, found: {other:?}"),

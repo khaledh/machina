@@ -6,7 +6,7 @@ Program      ::= Function
 Function     ::= "fn" Identifier "(" ")" "->" Type Block
 
 # Types
-Type         ::= "u32" | "bool"
+Type         ::= "()" | "u32" | "bool"
 
 # Blocks
 Block        ::= "{" BlockItem* "}"
