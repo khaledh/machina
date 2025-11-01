@@ -1,0 +1,47 @@
+# Machina programming language grammar
+
+# Top-level
+Program      ::= Function
+
+Function     ::= "fn" Identifier "(" ")" "->" Type Block
+
+# Types
+Type         ::= "u32" | "bool"
+
+# Blocks
+Block        ::= "{" BlockItem* "}"
+BlockItem    ::= Let | Var | Assign | Expr
+
+# Statements/Expressions
+Let          ::= "let" Identifier "=" Expr ";"
+Var          ::= "var" Identifier "=" Expr ";"
+Assign       ::= Identifier "=" Expr ";"
+
+# Expressions (by precedence, lowest to highest)
+Expr         ::= If | While | LogicalExpr
+
+If           ::= "if" Expr Block "else" Block
+While        ::= "while" Expr Block
+
+LogicalExpr  ::= CompareExpr (("==" | "!=") CompareExpr)*
+
+CompareExpr  ::= AddExpr (("<" | "<=" | ">" | ">=") AddExpr)*
+
+AddExpr      ::= MulExpr (("+" | "-") MulExpr)*
+
+MulExpr      ::= UnaryExpr (("*" | "/") UnaryExpr)*
+
+UnaryExpr    ::= "-" UnaryExpr | Primary
+
+Primary      ::= Unit
+               | Integer
+               | Boolean
+               | Identifier
+               | "(" Expr ")"
+               | Block
+
+# Terminals
+Unit         ::= "()"
+Integer      ::= [0-9]+
+Boolean      ::= "true" | "false"
+Identifier   ::= [a-zA-Z_][a-zA-Z0-9_]*
