@@ -9,7 +9,8 @@ mod type_check;
 
 const SOURCE: &str = r#"
 fn main() -> u32 {
-    let x = 42;
+    var x = 40;
+    x = x + 2;
     if x <= 100 { x } else { 100 }
 }
 "#;

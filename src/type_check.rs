@@ -108,6 +108,26 @@ impl TypeChecker {
                     }
                 }
             }
+            Expr::Var { name, value } => {
+                let expr_type = self.type_check_expr(value)?;
+                self.symbols.insert(name.clone(), expr_type.clone());
+                Ok(expr_type)
+            }
+            Expr::Assign { name, value } => match self.symbols.get(name) {
+                Some(lhs_type) => {
+                    let lhs_type = lhs_type.clone();
+                    let rhs_type = self.type_check_expr(value)?;
+                    if lhs_type != rhs_type {
+                        Err(format!(
+                            "Type mismatch in assignment: lhs type {:?} != rhs type {:?}",
+                            lhs_type, rhs_type
+                        ))
+                    } else {
+                        Ok(Type::Unit)
+                    }
+                }
+                None => Err(format!("Undefined variable: {name}")),
+            },
         }
     }
 }

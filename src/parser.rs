@@ -115,6 +115,10 @@ where
         while self.curr_token != Some(TokenKind::RBrace) {
             let expr = match &self.curr_token {
                 Some(TokenKind::Ident(name)) if name == "let" => self.parse_let(),
+                Some(TokenKind::Ident(name)) if name == "var" => self.parse_var(),
+                Some(TokenKind::Ident(_)) if self.tokens.peek() == Some(&TokenKind::Equals) => {
+                    self.parse_assign()
+                }
                 _ => self.parse_expr(0),
             };
             body.push(expr);
@@ -131,6 +135,27 @@ where
         self.consume(&TokenKind::Equals);
         let value = self.parse_expr(0);
         Expr::Let {
+            name,
+            value: Box::new(value),
+        }
+    }
+
+    fn parse_var(&mut self) -> Expr {
+        self.consume_keyword("var");
+        let name = self.parse_ident();
+        self.consume(&TokenKind::Equals);
+        let value = self.parse_expr(0);
+        Expr::Var {
+            name,
+            value: Box::new(value),
+        }
+    }
+
+    fn parse_assign(&mut self) -> Expr {
+        let name = self.parse_ident();
+        self.consume(&TokenKind::Equals);
+        let value = self.parse_expr(0);
+        Expr::Assign {
             name,
             value: Box::new(value),
         }

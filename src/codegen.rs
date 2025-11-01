@@ -96,6 +96,26 @@ impl Codegen {
                 result.push_str(&format!("{end_label}:\n"));
                 result
             }
+            ast::Expr::Var { name, value } => {
+                let stack_offset = match self.symbols.get(name) {
+                    Some(Symbol::Variable { stack_offset, .. }) => *stack_offset,
+                    _ => panic!("Variable not found: {name}"),
+                };
+                let mut result = String::new();
+                result.push_str(&self.gen_expr(value, reg));
+                result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
+                result
+            }
+            ast::Expr::Assign { name, value } => {
+                let stack_offset = match self.symbols.get(name) {
+                    Some(Symbol::Variable { stack_offset, .. }) => *stack_offset,
+                    _ => panic!("Variable not found: {name}"),
+                };
+                let mut result = String::new();
+                result.push_str(&self.gen_expr(value, reg));
+                result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
+                result
+            }
         }
     }
 

@@ -3,7 +3,11 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub enum Symbol {
-    Variable { name: String, stack_offset: u32 },
+    Variable {
+        name: String,
+        is_mutable: bool,
+        stack_offset: u32,
+    },
 }
 
 pub struct SemanticAnalyzer {
@@ -63,6 +67,7 @@ impl SemanticAnalyzer {
                         name.clone(),
                         Symbol::Variable {
                             name: name.clone(),
+                            is_mutable: false,
                             stack_offset: self.next_offset,
                         },
                     );
@@ -85,6 +90,28 @@ impl SemanticAnalyzer {
                 self.analyze_expr(then_body);
                 self.analyze_expr(else_body);
             }
+
+            ast::Expr::Var { name, value } => {
+                self.analyze_expr(value);
+                self.symbols.insert(
+                    name.clone(),
+                    Symbol::Variable {
+                        name: name.clone(),
+                        is_mutable: true,
+                        stack_offset: self.next_offset,
+                    },
+                );
+                self.next_offset += 8;
+            }
+
+            ast::Expr::Assign { name, value } => match self.symbols.get(name) {
+                Some(Symbol::Variable { is_mutable, .. }) if !*is_mutable => {
+                    self.errors
+                        .push(format!("Cannot assign to immutable variable: {name}"));
+                }
+                Some(_) => self.analyze_expr(value),
+                None => self.errors.push(format!("Undefined variable: {name}")),
+            },
         }
     }
 }

@@ -27,6 +27,16 @@ pub enum Expr {
     },
     Block(Vec<Expr>),
     Let {
+        // immutable binding
+        name: String,
+        value: Box<Expr>,
+    },
+    Var {
+        // mutable binding
+        name: String,
+        value: Box<Expr>,
+    },
+    Assign {
         name: String,
         value: Box<Expr>,
     },
