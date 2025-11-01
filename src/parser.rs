@@ -161,24 +161,33 @@ where
         }
     }
 
+    fn parse_if(&mut self) -> Expr {
+        self.consume_keyword("if");
+        let cond = self.parse_expr(0);
+        let then_body = self.parse_expr(0);
+        self.consume_keyword("else");
+        let else_body = self.parse_expr(0);
+        Expr::If {
+            cond: Box::new(cond),
+            then_body: Box::new(then_body),
+            else_body: Box::new(else_body),
+        }
+    }
+
+    fn parse_while(&mut self) -> Expr {
+        self.consume_keyword("while");
+        let cond = self.parse_expr(0);
+        let body = self.parse_expr(0);
+        Expr::While {
+            cond: Box::new(cond),
+            body: Box::new(body),
+        }
+    }
+
     fn parse_primary(&mut self) -> Expr {
         match self.curr_token.clone() {
-            Some(TokenKind::IntLit(value)) => {
-                self.advance();
-                Expr::UInt32Lit(value)
-            }
-            Some(TokenKind::Ident(name)) if name == "if" => {
-                self.advance();
-                let cond = Box::new(self.parse_expr(0));
-                let then_body = Box::new(self.parse_expr(0));
-                self.consume_keyword("else");
-                let else_body = Box::new(self.parse_expr(0));
-                Expr::If {
-                    cond,
-                    then_body,
-                    else_body,
-                }
-            }
+            Some(TokenKind::Ident(name)) if name == "if" => self.parse_if(),
+            Some(TokenKind::Ident(name)) if name == "while" => self.parse_while(),
             Some(TokenKind::Ident(name)) => {
                 self.advance();
                 if name == "true" {
@@ -188,6 +197,10 @@ where
                 } else {
                     Expr::VarRef(name)
                 }
+            }
+            Some(TokenKind::IntLit(value)) => {
+                self.advance();
+                Expr::UInt32Lit(value)
             }
             Some(TokenKind::LParen) => {
                 // Parenthesized expression

@@ -108,6 +108,18 @@ impl TypeChecker {
                     }
                 }
             }
+            Expr::While { cond, body } => {
+                let cond_type = self.type_check_expr(cond)?;
+                if cond_type != Type::Bool {
+                    Err(format!(
+                        "Condition must be a boolean, found {:?}",
+                        cond_type
+                    ))
+                } else {
+                    let _ = self.type_check_expr(body)?;
+                    Ok(Type::Unit)
+                }
+            }
             Expr::Var { name, value } => {
                 let expr_type = self.type_check_expr(value)?;
                 self.symbols.insert(name.clone(), expr_type.clone());

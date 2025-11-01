@@ -116,6 +116,20 @@ impl Codegen {
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 result
             }
+            ast::Expr::While { cond, body } => {
+                let mut result = String::new();
+                let loop_label = self.next_label();
+                let end_label = self.next_label();
+
+                result.push_str(&format!("{loop_label}:\n"));
+                result.push_str(&self.gen_expr(cond, reg));
+                result.push_str(&format!("  cmp w{reg}, 0\n"));
+                result.push_str(&format!("  b.eq {end_label}\n"));
+                result.push_str(&self.gen_expr(body, reg));
+                result.push_str(&format!("  b {loop_label}\n"));
+                result.push_str(&format!("{end_label}:\n"));
+                result
+            }
         }
     }
 

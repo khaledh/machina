@@ -46,6 +46,10 @@ pub enum Expr {
         then_body: Box<Expr>,
         else_body: Box<Expr>,
     },
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Copy, Clone)]

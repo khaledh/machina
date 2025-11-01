@@ -9,9 +9,11 @@ mod type_check;
 
 const SOURCE: &str = r#"
 fn main() -> u32 {
-    var x = 40;
-    x = x + 2;
-    if x <= 100 { x } else { 100 }
+    var i = 0;
+    while i < 10 {
+        i = i + 1;
+    }
+    i
 }
 "#;
 

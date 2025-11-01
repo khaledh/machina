@@ -112,6 +112,10 @@ impl SemanticAnalyzer {
                 Some(_) => self.analyze_expr(value),
                 None => self.errors.push(format!("Undefined variable: {name}")),
             },
+            ast::Expr::While { cond, body } => {
+                self.analyze_expr(cond);
+                self.analyze_expr(body);
+            }
         }
     }
 }
