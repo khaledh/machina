@@ -78,13 +78,9 @@ where
         // Expect function name
         let name = self.parse_ident();
 
-        // Expect '('
+        // Expect '(', ')', '->' (no parameters supported yet)
         self.consume(&TokenKind::LParen);
-
-        // Expect ')'
         self.consume(&TokenKind::RParen);
-
-        // Expect '->'
         self.consume(&TokenKind::Arrow);
 
         // Parse return type

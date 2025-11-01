@@ -4,7 +4,7 @@ mod ast;
 mod codegen;
 mod lexer;
 mod parser;
-mod semantic;
+mod sem_analysis;
 mod type_check;
 
 const SOURCE: &str = r#"
@@ -36,7 +36,7 @@ fn compile(source: &str) -> Result<String, Vec<String>> {
     let function = parser.parse();
     println!("AST:\n{:#?}", function);
 
-    let mut semantic = semantic::SemanticAnalyzer::new();
+    let mut semantic = sem_analysis::SemanticAnalyzer::new();
     let symbols = semantic.analyze(&function)?;
     println!("Symbols:\n{:#?}", symbols);
 

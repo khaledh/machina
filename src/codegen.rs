@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::semantic::Symbol;
+use crate::sem_analysis::Symbol;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
