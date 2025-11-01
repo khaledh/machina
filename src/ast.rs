@@ -5,8 +5,9 @@ pub struct Function {
     pub body: Expr,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
+    Unit,
     UInt32,
     Bool,
 }
