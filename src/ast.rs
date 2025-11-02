@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Function {
     pub name: String,
     pub return_type: Type,
@@ -12,7 +12,7 @@ pub enum Type {
     Bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     UInt32Lit(u32),
     BoolLit(bool),

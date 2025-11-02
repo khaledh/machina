@@ -9,8 +9,15 @@ mod type_check;
 
 const SOURCE: &str = r#"
 fn main() -> u32 {
-    let x = ();
-    if x == () { 42 } else { 99 }
+    let x = 5;
+    let y = {
+        let x = 10;
+        x
+    };
+    {
+        let x = y + 10;
+        x
+    }
 }
 "#;
 
@@ -44,7 +51,7 @@ fn compile(source: &str) -> Result<String, Vec<String>> {
     let return_type = type_checker.type_check(&function)?;
     println!("Return type: {:#?}", return_type);
 
-    let codegen = codegen::Codegen::new(function, symbols);
+    let mut codegen = codegen::Codegen::new(function);
     let asm = codegen.generate();
 
     Ok(asm)

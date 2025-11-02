@@ -1,31 +1,45 @@
 use crate::ast;
-use crate::sem_analysis::Symbol;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::HashMap;
 
 pub struct Codegen {
     function: ast::Function,
-    symbols: HashMap<String, Symbol>,
-    label_counter: RefCell<u32>,
+    scopes: Vec<CodegenScope>,
+    label_counter: Cell<u32>,
+    max_stack_offset: Cell<u32>,
+}
+
+struct CodegenVar {
+    name: String,
+    stack_offset: u32,
+}
+
+struct CodegenScope {
+    vars: HashMap<String, CodegenVar>,
+    next_offset: Cell<u32>,
 }
 
 impl Codegen {
-    pub fn new(function: ast::Function, symbols: HashMap<String, Symbol>) -> Self {
+    pub fn new(function: ast::Function) -> Self {
         Codegen {
             function,
-            symbols,
-            label_counter: RefCell::new(0),
+            scopes: Vec::new(),
+            label_counter: Cell::new(0),
+            max_stack_offset: Cell::new(0),
         }
     }
 }
 
 impl Codegen {
-    pub fn generate(&self) -> String {
+    pub fn generate(&mut self) -> String {
         let mut asm = String::new();
 
-        let var_count = self.symbols.len();
+        // Generate function body first to get stack size
+        let body = self.function.body.clone();
+        let body_asm = self.gen_expr(&body, 0);
+
         // arm64 requires 16-byte stack alignment
-        let stack_size = (var_count * 8 + 15) & !15;
+        let stack_size = (self.max_stack_offset.get() + 15) & !15;
 
         asm.push_str(".align 2\n");
 
@@ -37,7 +51,7 @@ impl Codegen {
         }
 
         // Function body
-        asm.push_str(&self.gen_expr(&self.function.body, 0));
+        asm.push_str(&body_asm);
 
         // Function epilogue
         if stack_size > 0 {
@@ -47,36 +61,71 @@ impl Codegen {
         asm
     }
 
+    fn enter_scope(&mut self) {
+        let next_offset = match self.scopes.last() {
+            Some(scope) => scope.next_offset.clone(),
+            None => Cell::new(0),
+        };
+        let scope = CodegenScope {
+            vars: HashMap::new(),
+            next_offset,
+        };
+        self.scopes.push(scope);
+    }
+
+    fn exit_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn alloc_stack(&self, size: u32) -> u32 {
+        match self.scopes.last() {
+            Some(scope) => {
+                let offset = scope.next_offset.get();
+                scope.next_offset.replace(offset + size);
+                if offset + size > self.max_stack_offset.get() {
+                    self.max_stack_offset.replace(offset + size);
+                }
+                offset
+            }
+            None => panic!("No current scope"),
+        }
+    }
+
+    fn insert_var(&mut self, name: &str, var: CodegenVar) {
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .vars
+            .insert(name.to_string(), var);
+    }
+
+    fn lookup_var(&self, name: &str) -> Option<&CodegenVar> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(var) = scope.vars.get(name) {
+                return Some(var);
+            }
+        }
+        None
+    }
+
     fn next_label(&self) -> String {
-        let curr = *self.label_counter.borrow();
+        let curr = self.label_counter.get();
         self.label_counter.replace(curr + 1);
         format!(".L{}", curr)
     }
 
-    fn gen_expr(&self, expr: &ast::Expr, reg: u8) -> String {
+    fn gen_expr(&mut self, expr: &ast::Expr, reg: u8) -> String {
         match expr {
             ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
             ast::Expr::BoolLit(value) => self.gen_bool_imm(value, reg),
             ast::Expr::UnitLit => format!("  mov w{reg}, 0\n"),
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
-            ast::Expr::Block(body) => self.gen_block(body, reg),
-            ast::Expr::Let { name, value } => {
-                let stack_offset = match self.symbols.get(name) {
-                    Some(Symbol::Variable { stack_offset, .. }) => *stack_offset,
-                    _ => panic!("Variable not found: {name}"),
-                };
-                let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg));
-                result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
+            ast::Expr::Block(body) => {
+                self.enter_scope();
+                let result = self.gen_block(body, reg);
+                self.exit_scope();
                 result
-            }
-            ast::Expr::VarRef(name) => {
-                if let Some(Symbol::Variable { stack_offset, .. }) = self.symbols.get(name) {
-                    format!("  ldr w{reg}, [sp, #{stack_offset}]\n")
-                } else {
-                    panic!("Variable not found: {name}");
-                }
             }
             ast::Expr::If {
                 cond,
@@ -97,21 +146,42 @@ impl Codegen {
                 result.push_str(&format!("{end_label}:\n"));
                 result
             }
-            ast::Expr::Var { name, value } => {
-                let stack_offset = match self.symbols.get(name) {
-                    Some(Symbol::Variable { stack_offset, .. }) => *stack_offset,
-                    _ => panic!("Variable not found: {name}"),
-                };
+            ast::Expr::Let { name, value } => {
+                let stack_offset = self.alloc_stack(8);
+                self.insert_var(
+                    name,
+                    CodegenVar {
+                        name: name.to_string(),
+                        stack_offset,
+                    },
+                );
                 let mut result = String::new();
                 result.push_str(&self.gen_expr(value, reg));
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 result
             }
+            ast::Expr::Var { name, value } => {
+                let stack_offset = self.alloc_stack(8);
+                self.insert_var(
+                    name,
+                    CodegenVar {
+                        name: name.to_string(),
+                        stack_offset,
+                    },
+                );
+                let mut result = String::new();
+                result.push_str(&self.gen_expr(value, reg));
+                result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
+                result
+            }
+            ast::Expr::VarRef(name) => {
+                format!(
+                    "  ldr w{reg}, [sp, #{}]\n",
+                    self.lookup_var(name).unwrap().stack_offset
+                )
+            }
             ast::Expr::Assign { name, value } => {
-                let stack_offset = match self.symbols.get(name) {
-                    Some(Symbol::Variable { stack_offset, .. }) => *stack_offset,
-                    _ => panic!("Variable not found: {name}"),
-                };
+                let stack_offset = self.lookup_var(name).unwrap().stack_offset;
                 let mut result = String::new();
                 result.push_str(&self.gen_expr(value, reg));
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
@@ -144,7 +214,7 @@ impl Codegen {
     }
 
     fn gen_binary_op(
-        &self,
+        &mut self,
         op: ast::BinOp,
         left: &ast::Expr,
         right: &ast::Expr,
@@ -191,7 +261,7 @@ impl Codegen {
         result
     }
 
-    fn gen_unary_op(&self, op: ast::UnaryOp, expr: &ast::Expr, reg: u8) -> String {
+    fn gen_unary_op(&mut self, op: ast::UnaryOp, expr: &ast::Expr, reg: u8) -> String {
         let mut result = String::new();
         result.push_str(&self.gen_expr(expr, reg));
         match op {
@@ -200,7 +270,7 @@ impl Codegen {
         result
     }
 
-    fn gen_block(&self, body: &Vec<ast::Expr>, reg: u8) -> String {
+    fn gen_block(&mut self, body: &Vec<ast::Expr>, reg: u8) -> String {
         let mut result = String::new();
         for expr in body {
             result.push_str(&self.gen_expr(expr, reg));
