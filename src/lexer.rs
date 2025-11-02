@@ -14,6 +14,8 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Comma,
+    Colon,
     Semicolon,
     Equals,
     EqEq,
@@ -104,6 +106,18 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 TokenKind::RParen
             }
+            Some(&',') => {
+                self.advance();
+                TokenKind::Comma
+            }
+            Some(&':') => {
+                self.advance();
+                TokenKind::Colon
+            }
+            Some(&';') => {
+                self.advance();
+                TokenKind::Semicolon
+            }
             Some(&'{') => {
                 self.advance();
                 TokenKind::LBrace
@@ -111,10 +125,6 @@ impl<'a> Lexer<'a> {
             Some(&'}') => {
                 self.advance();
                 TokenKind::RBrace
-            }
-            Some(&';') => {
-                self.advance();
-                TokenKind::Semicolon
             }
             Some(&'=') => {
                 self.advance();

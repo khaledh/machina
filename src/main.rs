@@ -8,12 +8,16 @@ mod sem_analysis;
 mod type_check;
 
 const SOURCE: &str = r#"
-fn main() -> u32 {
-    foo()
+fn inc(a: u32) -> u32 {
+    a + 1
 }
 
-fn foo() -> u32 {
-    42
+fn ge(a: u32, b: u32) -> bool {
+    a >= b
+}
+
+fn main() -> u32 {
+    if ge(inc(41), 42) { 42 } else { 99 }
 }
 "#;
 

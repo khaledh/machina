@@ -11,7 +11,7 @@ development. The compiler currently targets only ARM64 assembly.
 - Arithmetic and comparison operators
 - Blocks (last expression is the block value)
 - Control flow: `if`/`else`, `while`
-- Functions and function calls (no parameters yet)
+- Functions and function calls (recursion supported)
 - Code generation to ARM64 assembly
 
 ## Example

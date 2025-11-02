@@ -1,50 +1,50 @@
 # Machina programming language grammar
 
 # Top-level
-Module       ::= Function*
+Module             ::= Function*
 
-Function     ::= "fn" Identifier "(" ")" "->" Type Block
+Function           ::= "fn" Identifier "(" FunctionParamList? ")" "->" Type Block
+
+FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
+FunctionParam      ::= Identifier ":" Type
 
 # Types
-Type         ::= "()" | "u32" | "bool"
+Type               ::= "()" | "u32" | "bool"
 
 # Blocks
-Block        ::= "{" BlockItem* "}"
-BlockItem    ::= Let | Var | Assign | Expr
+Block              ::= "{" BlockItem* "}"
+BlockItem          ::= Let | Var | Assign | Expr | Function
 
 # Statements/Expressions
-Let          ::= "let" Identifier "=" Expr ";"
-Var          ::= "var" Identifier "=" Expr ";"
-Assign       ::= Identifier "=" Expr ";"
+Let                ::= "let" Identifier "=" Expr ";"
+Var                ::= "var" Identifier "=" Expr ";"
+Assign             ::= Identifier "=" Expr ";"
 
 # Expressions (by precedence, lowest to highest)
-Expr         ::= If | While | LogicalExpr
+Expr               ::= If | While | LogicalExpr
 
-If           ::= "if" Expr Block "else" Block
-While        ::= "while" Expr Block
+If                 ::= "if" Expr Block "else" Block
+While              ::= "while" Expr Block
 
-LogicalExpr  ::= CompareExpr (("==" | "!=") CompareExpr)*
+LogicalExpr        ::= CompareExpr (("==" | "!=") CompareExpr)*
+CompareExpr        ::= AddExpr (("<" | "<=" | ">" | ">=") AddExpr)*
+AddExpr            ::= MulExpr (("+" | "-") MulExpr)*
+MulExpr            ::= UnaryExpr (("*" | "/") UnaryExpr)*
+UnaryExpr          ::= "-" UnaryExpr | Primary
 
-CompareExpr  ::= AddExpr (("<" | "<=" | ">" | ">=") AddExpr)*
+Primary            ::= Unit
+                     | Integer
+                     | Boolean
+                     | Call
+                     | Identifier
+                     | "(" Expr ")"
+                     | Block
 
-AddExpr      ::= MulExpr (("+" | "-") MulExpr)*
-
-MulExpr      ::= UnaryExpr (("*" | "/") UnaryExpr)*
-
-UnaryExpr    ::= "-" UnaryExpr | Primary
-
-Primary      ::= Unit
-               | Integer
-               | Boolean
-               | Call
-               | Identifier
-               | "(" Expr ")"
-               | Block
-
-Call         ::= Identifier "(" ")"   # no arguments supported yet
+Call               ::= Identifier "(" CallArgList? ")"
+CallArgList        ::= Expr ("," Expr)* ","?
 
 # Terminals
-Unit         ::= "()"
-Integer      ::= [0-9]+
-Boolean      ::= "true" | "false"
-Identifier   ::= [a-zA-Z_][a-zA-Z0-9_]*
+Unit               ::= "()"
+Integer            ::= [0-9]+
+Boolean            ::= "true" | "false"
+Identifier         ::= [a-zA-Z_][a-zA-Z0-9_]*

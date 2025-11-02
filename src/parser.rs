@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr, Function, Module, Type, UnaryOp};
+use crate::ast::{BinOp, Expr, Function, FunctionParam, Module, Type, UnaryOp};
 use crate::lexer::Lexer;
 use crate::lexer::TokenKind;
 use std::collections::HashMap;
@@ -72,6 +72,22 @@ where
         name
     }
 
+    fn parse_list<T>(
+        &mut self,
+        sep_token: TokenKind,
+        end_token: TokenKind,
+        mut parse_item: impl FnMut(&mut Self) -> T,
+    ) -> Vec<T> {
+        let mut items = Vec::new();
+        while self.curr_token != Some(end_token.clone()) {
+            items.push(parse_item(self));
+            if self.curr_token == Some(sep_token.clone()) {
+                self.advance();
+            }
+        }
+        items
+    }
+
     fn parse_function(&mut self) -> Function {
         // Expect 'fn'
         self.consume_keyword("fn");
@@ -79,12 +95,13 @@ where
         // Expect function name
         let name = self.parse_ident();
 
-        // Expect '(', ')', '->' (no parameters supported yet)
+        // Parse function params
         self.consume(&TokenKind::LParen);
+        let params = self.parse_func_params();
         self.consume(&TokenKind::RParen);
-        self.consume(&TokenKind::Arrow);
 
         // Parse return type
+        self.consume(&TokenKind::Arrow);
         let return_type = self.parse_type();
 
         // Parse function body
@@ -92,9 +109,19 @@ where
 
         Function {
             name,
+            params,
             return_type,
             body,
         }
+    }
+
+    fn parse_func_params(&mut self) -> Vec<FunctionParam> {
+        self.parse_list(TokenKind::Comma, TokenKind::RParen, |parser| {
+            let name = parser.parse_ident();
+            parser.consume(&TokenKind::Colon);
+            let typ = parser.parse_type();
+            FunctionParam { name, typ }
+        })
     }
 
     fn parse_type(&mut self) -> Type {
@@ -188,11 +215,11 @@ where
 
     fn parse_call(&mut self, name: String) -> Expr {
         self.consume(&TokenKind::LParen);
+        let args = self.parse_list(TokenKind::Comma, TokenKind::RParen, |parser| {
+            parser.parse_expr(0)
+        });
         self.consume(&TokenKind::RParen);
-        Expr::Call {
-            name,
-            args: Vec::new(),
-        }
+        Expr::Call { name, args }
     }
 
     fn parse_primary(&mut self) -> Expr {
@@ -289,9 +316,7 @@ where
         if self.curr_token.is_some() {
             panic!("Unexpected token: {:?}", self.curr_token);
         }
-        Module {
-            funcs: functions,
-        }
+        Module { funcs: functions }
     }
 }
 

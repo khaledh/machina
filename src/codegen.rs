@@ -45,6 +45,31 @@ impl Codegen {
     fn gen_func(&mut self, func: &ast::Function) -> String {
         let mut asm = String::new();
 
+        self.enter_scope();
+
+        // Generate function parameters
+        // ARM64 ABI: first 8 parameters in registers x0-x7, rest on stack
+        // TODO: handle more than 8 parameters
+        if func.params.len() > 8 {
+            panic!(
+                "Only 8 parameters are supported for now, found: {}",
+                func.params.len()
+            );
+        }
+        let mut copy_params_asm = String::new();
+        // Copy parameters to stack (TODO: optimize this later to use incoming arguments registers)
+        for (i, param) in func.params.iter().enumerate() {
+            let stack_offset = self.alloc_stack(8);
+            copy_params_asm.push_str(&format!("  str x{i}, [sp, #{stack_offset}]\n"));
+            self.insert_var(
+                &param.name,
+                CodegenVar {
+                    name: param.name.clone(),
+                    stack_offset,
+                },
+            );
+        }
+
         // Generate function body first to get stack size
         let body = func.body.clone();
         let body_asm = self.gen_expr(&body, 0);
@@ -60,6 +85,9 @@ impl Codegen {
         if stack_size > 0 {
             asm.push_str(&format!("  sub sp, sp, #{stack_size}\n"));
         }
+        if !copy_params_asm.is_empty() {
+            asm.push_str(&copy_params_asm);
+        }
 
         // Function body
         asm.push_str(&body_asm);
@@ -71,6 +99,9 @@ impl Codegen {
         // restore frame pointer and return address (TODO: omit this for leaf functions)
         asm.push_str("  ldp x29, x30, [sp], #16\n");
         asm.push_str("  ret\n");
+
+        self.exit_scope();
+
         asm
     }
 
@@ -160,6 +191,10 @@ impl Codegen {
                 result
             }
             ast::Expr::Let { name, value } => {
+                // Evaluate initializer in the current scope (before shadowing)
+                let mut result = String::new();
+                result.push_str(&self.gen_expr(value, reg));
+                // Now allocate and bind the new variable, then store the value
                 let stack_offset = self.alloc_stack(8);
                 self.insert_var(
                     name,
@@ -168,12 +203,13 @@ impl Codegen {
                         stack_offset,
                     },
                 );
-                let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg));
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 result
             }
             ast::Expr::Var { name, value } => {
+                // Evaluate initializer before introducing the new mutable binding
+                let mut result = String::new();
+                result.push_str(&self.gen_expr(value, reg));
                 let stack_offset = self.alloc_stack(8);
                 self.insert_var(
                     name,
@@ -182,8 +218,6 @@ impl Codegen {
                         stack_offset,
                     },
                 );
-                let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg));
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 result
             }
@@ -216,7 +250,18 @@ impl Codegen {
             }
             ast::Expr::Call { name, args } => {
                 let mut result = String::new();
+                // ARM64 ABI: first 8 arguments in registers x0-x7, rest on stack
+                if args.len() > 8 {
+                    panic!(
+                        "Only 8 arguments are supported for now, found: {}",
+                        args.len()
+                    );
+                }
+                for (i, arg) in args.iter().enumerate() {
+                    result.push_str(&self.gen_expr(arg, i as u8));
+                }
                 result.push_str(&format!("  bl _{}\n", name));
+                result.push_str(&format!("  mov w{reg}, w0\n"));
                 result
             }
         }
@@ -241,8 +286,18 @@ impl Codegen {
         let lreg = reg;
         let rreg = reg + 1;
         let mut result = String::new();
+
+        // Evaluate left, spill to stack to preserve across potential calls in right
         result.push_str(&self.gen_expr(left, lreg));
+        let spill_offset = self.alloc_stack(8);
+        result.push_str(&format!("  str w{lreg}, [sp, #{spill_offset}]\n"));
+
+        // Evaluate right; this may involve calls that clobber w0
         result.push_str(&self.gen_expr(right, rreg));
+
+        // Reload left value after right-hand evaluation
+        result.push_str(&format!("  ldr w{lreg}, [sp, #{spill_offset}]\n"));
+
         match op {
             // Arithmetic operators
             ast::BinOp::Add => result.push_str(&format!("  add w{reg}, w{lreg}, w{rreg}\n")),

@@ -1,9 +1,14 @@
 use crate::ast::{BinOp, Expr, Function, Module, Type};
 use std::collections::HashMap;
 
+struct FuncSig {
+    params: Vec<Type>,
+    return_type: Type,
+}
+
 pub struct TypeChecker {
     vars: HashMap<String, Type>,
-    funcs: HashMap<String, Type>,
+    funcs: HashMap<String, FuncSig>,
     errors: Vec<String>,
 }
 
@@ -18,8 +23,13 @@ impl TypeChecker {
 
     fn populate_function_symbols(&mut self, functions: &Vec<Function>) {
         for function in functions {
-            self.funcs
-                .insert(function.name.clone(), function.return_type.clone());
+            self.funcs.insert(
+                function.name.clone(),
+                FuncSig {
+                    params: function.params.iter().map(|p| p.typ.clone()).collect(),
+                    return_type: function.return_type.clone(),
+                },
+            );
         }
     }
 
@@ -38,6 +48,11 @@ impl TypeChecker {
     }
 
     pub fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<String>> {
+        self.vars.clear();
+        for param in &function.params {
+            self.vars.insert(param.name.clone(), param.typ.clone());
+        }
+
         let return_type = self.type_check_expr(&function.body).map_err(|e| vec![e])?;
         if return_type != function.return_type {
             self.errors.push(format!(
@@ -51,6 +66,36 @@ impl TypeChecker {
         } else {
             Err(self.errors.clone())
         }
+    }
+
+    fn type_check_call(&mut self, name: &str, args: &Vec<Expr>) -> Result<Type, String> {
+        // Compute argument types first to avoid holding an immutable borrow of self.funcs
+        let mut arg_types = Vec::new();
+        for arg in args {
+            let ty = self.type_check_expr(arg)?;
+            arg_types.push(ty);
+        }
+        // Get function signature
+        let Some(func_sig) = self.funcs.get(name) else {
+            return Err(format!("Undefined function: {name}"));
+        };
+        // Check number of arguments
+        if arg_types.len() != func_sig.params.len() {
+            return Err(format!(
+                "Invalid number of arguments for function: {name}, expected: {:?}, found: {:?}",
+                func_sig.params, arg_types
+            ));
+        }
+        // Check argument types
+        for (i, arg_type) in arg_types.iter().enumerate() {
+            if arg_type != &func_sig.params[i] {
+                return Err(format!(
+                    "Type mismatch in argument {i} for function: {name}, expected: {:?}, found: {:?}",
+                    func_sig.params[i], arg_type
+                ));
+            }
+        }
+        Ok(func_sig.return_type.clone())
     }
 
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, String> {
@@ -164,10 +209,7 @@ impl TypeChecker {
                 }
                 None => Err(format!("Undefined variable: {name}")),
             },
-            Expr::Call { name, .. } => match self.funcs.get(name) {
-                Some(return_type) => Ok(return_type.clone()),
-                None => Err(format!("Undefined function: {name}")),
-            },
+            Expr::Call { name, args } => self.type_check_call(name, args),
         }
     }
 }

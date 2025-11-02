@@ -7,7 +7,14 @@ pub struct Module {
 pub struct Function {
     pub name: String,
     pub return_type: Type,
+    pub params: Vec<FunctionParam>,
     pub body: Expr,
+}
+
+#[derive(Clone, Debug)]
+pub struct FunctionParam {
+    pub name: String,
+    pub typ: Type,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -101,14 +101,20 @@ impl SemanticAnalyzer {
     }
 
     fn analyze_function(&mut self, function: &ast::Function) {
-        self.analyze_expr(&function.body);
-        self.insert_symbol(
-            &function.name,
-            Symbol {
-                name: function.name.clone(),
-                kind: SymbolKind::Func,
-            },
-        );
+        self.with_scope(|analyzer| {
+            // add parameters to scope
+            for param in &function.params {
+                analyzer.insert_symbol(
+                    &param.name,
+                    Symbol {
+                        name: param.name.clone(),
+                        kind: SymbolKind::Var { is_mutable: false },
+                    },
+                );
+            }
+            // analyze function body
+            analyzer.analyze_expr(&function.body);
+        });
     }
 
     fn analyze_expr(&mut self, expr: &ast::Expr) {
