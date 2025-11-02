@@ -100,9 +100,14 @@ where
         let params = self.parse_func_params();
         self.consume(&TokenKind::RParen);
 
-        // Parse return type
-        self.consume(&TokenKind::Arrow);
-        let return_type = self.parse_type();
+        // Parse return type (default to unit if not specified)
+        let return_type = match self.curr_token {
+            Some(TokenKind::Arrow) => {
+                self.advance();
+                self.parse_type()
+            }
+            _ => Type::Unit,
+        };
 
         // Parse function body
         let body = self.parse_expr(0);
