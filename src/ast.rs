@@ -1,4 +1,9 @@
 #[derive(Clone, Debug)]
+pub struct Module {
+    pub funcs: Vec<Function>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Function {
     pub name: String,
     pub return_type: Type,
@@ -50,6 +55,10 @@ pub enum Expr {
     While {
         cond: Box<Expr>,
         body: Box<Expr>,
+    },
+    Call {
+        name: String,
+        args: Vec<Expr>,
     },
 }
 

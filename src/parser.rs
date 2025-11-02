@@ -1,4 +1,5 @@
-use crate::ast::{BinOp, Expr, Function, Type, UnaryOp};
+use crate::ast::{BinOp, Expr, Function, Module, Type, UnaryOp};
+use crate::lexer::Lexer;
 use crate::lexer::TokenKind;
 use std::collections::HashMap;
 use std::iter::Peekable;
@@ -185,18 +186,29 @@ where
         }
     }
 
+    fn parse_call(&mut self, name: String) -> Expr {
+        self.consume(&TokenKind::LParen);
+        self.consume(&TokenKind::RParen);
+        Expr::Call {
+            name,
+            args: Vec::new(),
+        }
+    }
+
     fn parse_primary(&mut self) -> Expr {
         match self.curr_token.clone() {
             Some(TokenKind::Ident(name)) if name == "if" => self.parse_if(),
             Some(TokenKind::Ident(name)) if name == "while" => self.parse_while(),
+            Some(TokenKind::Ident(name)) if self.tokens.peek() == Some(&TokenKind::LParen) => {
+                self.advance();
+                self.parse_call(name)
+            }
             Some(TokenKind::Ident(name)) => {
                 self.advance();
-                if name == "true" {
-                    Expr::BoolLit(true)
-                } else if name == "false" {
-                    Expr::BoolLit(false)
-                } else {
-                    Expr::VarRef(name)
+                match name.as_str() {
+                    "true" => Expr::BoolLit(true),
+                    "false" => Expr::BoolLit(false),
+                    _ => Expr::VarRef(name),
                 }
             }
             Some(TokenKind::IntLit(value)) => {
@@ -266,8 +278,30 @@ where
         }
     }
 
-    pub fn parse(&mut self) -> Function {
+    pub fn parse(&mut self) -> Module {
         self.advance();
-        self.parse_function()
+        let mut functions = Vec::new();
+        while let Some(TokenKind::Ident(name)) = &self.curr_token
+            && name == "fn"
+        {
+            functions.push(self.parse_function());
+        }
+        if self.curr_token.is_some() {
+            panic!("Unexpected token: {:?}", self.curr_token);
+        }
+        Module {
+            funcs: functions,
+        }
     }
+}
+
+pub fn parse_string(source: &str) -> Module {
+    let tokens = Lexer::new(source).tokens();
+    let mut parser = Parser::new(tokens);
+    parser.parse()
+}
+
+pub fn parse_tokens(tokens: impl Iterator<Item = TokenKind>) -> Module {
+    let mut parser = Parser::new(tokens);
+    parser.parse()
 }

@@ -1,7 +1,7 @@
 # Machina programming language grammar
 
 # Top-level
-Program      ::= Function
+Module       ::= Function*
 
 Function     ::= "fn" Identifier "(" ")" "->" Type Block
 
@@ -36,9 +36,12 @@ UnaryExpr    ::= "-" UnaryExpr | Primary
 Primary      ::= Unit
                | Integer
                | Boolean
+               | Call
                | Identifier
                | "(" Expr ")"
                | Block
+
+Call         ::= Identifier "(" ")"   # no arguments supported yet
 
 # Terminals
 Unit         ::= "()"

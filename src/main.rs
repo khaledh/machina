@@ -9,15 +9,11 @@ mod type_check;
 
 const SOURCE: &str = r#"
 fn main() -> u32 {
-    let x = 5;
-    let y = {
-        let x = 10;
-        x
-    };
-    {
-        let x = y + 10;
-        x
-    }
+    foo()
+}
+
+fn foo() -> u32 {
+    42
 }
 "#;
 
@@ -39,19 +35,16 @@ fn compile(source: &str) -> Result<String, Vec<String>> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokens();
 
-    let mut parser = parser::Parser::new(tokens);
-    let function = parser.parse();
-    println!("AST:\n{:#?}", function);
+    let module = parser::parse_tokens(tokens);
+    println!("Module:\n{:#?}", module);
 
-    let mut semantic = sem_analysis::SemanticAnalyzer::new();
-    let symbols = semantic.analyze(&function)?;
-    println!("Symbols:\n{:#?}", symbols);
+    let mut sem = sem_analysis::SemanticAnalyzer::new();
+    sem.analyze(&module)?;
 
     let mut type_checker = type_check::TypeChecker::new();
-    let return_type = type_checker.type_check(&function)?;
-    println!("Return type: {:#?}", return_type);
+    type_checker.type_check(&module)?;
 
-    let mut codegen = codegen::Codegen::new(function);
+    let mut codegen = codegen::Codegen::new(&module);
     let asm = codegen.generate();
 
     Ok(asm)

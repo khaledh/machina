@@ -3,7 +3,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 pub struct Codegen {
-    function: ast::Function,
+    funcs: Vec<ast::Function>,
     scopes: Vec<CodegenScope>,
     label_counter: Cell<u32>,
     max_stack_offset: Cell<u32>,
@@ -20,9 +20,9 @@ struct CodegenScope {
 }
 
 impl Codegen {
-    pub fn new(function: ast::Function) -> Self {
+    pub fn new(module: &ast::Module) -> Self {
         Codegen {
-            function,
+            funcs: module.funcs.clone(),
             scopes: Vec::new(),
             label_counter: Cell::new(0),
             max_stack_offset: Cell::new(0),
@@ -33,19 +33,30 @@ impl Codegen {
 impl Codegen {
     pub fn generate(&mut self) -> String {
         let mut asm = String::new();
+        asm.push_str(".align 2\n");
+
+        for func in self.funcs.clone() {
+            asm.push_str("\n");
+            asm.push_str(&self.gen_func(&func));
+        }
+        asm
+    }
+
+    fn gen_func(&mut self, func: &ast::Function) -> String {
+        let mut asm = String::new();
 
         // Generate function body first to get stack size
-        let body = self.function.body.clone();
+        let body = func.body.clone();
         let body_asm = self.gen_expr(&body, 0);
 
         // arm64 requires 16-byte stack alignment
         let stack_size = (self.max_stack_offset.get() + 15) & !15;
 
-        asm.push_str(".align 2\n");
-
         // Function prologue
-        asm.push_str(".global _main\n");
-        asm.push_str("_main:\n");
+        asm.push_str(&format!(".global _{}\n", func.name));
+        asm.push_str(&format!("_{}:\n", func.name));
+        // save frame pointer and return address (TODO: omit this for leaf functions)
+        asm.push_str("  stp x29, x30, [sp, #-16]!\n");
         if stack_size > 0 {
             asm.push_str(&format!("  sub sp, sp, #{stack_size}\n"));
         }
@@ -57,6 +68,8 @@ impl Codegen {
         if stack_size > 0 {
             asm.push_str(&format!("  add sp, sp, #{stack_size}\n"));
         }
+        // restore frame pointer and return address (TODO: omit this for leaf functions)
+        asm.push_str("  ldp x29, x30, [sp], #16\n");
         asm.push_str("  ret\n");
         asm
     }
@@ -199,6 +212,11 @@ impl Codegen {
                 result.push_str(&self.gen_expr(body, reg));
                 result.push_str(&format!("  b {loop_label}\n"));
                 result.push_str(&format!("{end_label}:\n"));
+                result
+            }
+            ast::Expr::Call { name, args } => {
+                let mut result = String::new();
+                result.push_str(&format!("  bl _{}\n", name));
                 result
             }
         }

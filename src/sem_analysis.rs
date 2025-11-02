@@ -1,14 +1,22 @@
 use crate::ast;
+use crate::ast::Module;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
-pub enum Symbol {
-    Variable { name: String, is_mutable: bool },
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SymbolKind {
+    Var { is_mutable: bool },
+    Func,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Symbol {
+    name: String,
+    kind: SymbolKind,
 }
 
 #[derive(Clone, Debug)]
 pub struct Scope {
-    pub symbols: HashMap<String, Symbol>,
+    symbols: HashMap<String, Symbol>,
 }
 
 pub struct SemanticAnalyzer {
@@ -64,14 +72,43 @@ impl SemanticAnalyzer {
             .insert(name.to_string(), symbol);
     }
 
-    pub fn analyze(&mut self, function: &ast::Function) -> Result<Vec<Scope>, Vec<String>> {
-        self.analyze_expr(&function.body);
+    fn populate_funcs(&mut self, functions: &Vec<ast::Function>) {
+        for function in functions {
+            self.insert_symbol(
+                &function.name,
+                Symbol {
+                    name: function.name.clone(),
+                    kind: SymbolKind::Func,
+                },
+            );
+        }
+    }
+
+    pub fn analyze(&mut self, module: &Module) -> Result<(), Vec<String>> {
+        self.with_scope(|analyzer| {
+            // global scope
+            analyzer.populate_funcs(&module.funcs);
+            for function in &module.funcs {
+                analyzer.analyze_function(&function);
+            }
+        });
 
         if self.errors.is_empty() {
-            Ok(self.scopes.clone())
+            Ok(())
         } else {
             Err(self.errors.clone())
         }
+    }
+
+    fn analyze_function(&mut self, function: &ast::Function) {
+        self.analyze_expr(&function.body);
+        self.insert_symbol(
+            &function.name,
+            Symbol {
+                name: function.name.clone(),
+                kind: SymbolKind::Func,
+            },
+        );
     }
 
     fn analyze_expr(&mut self, expr: &ast::Expr) {
@@ -102,11 +139,13 @@ impl SemanticAnalyzer {
                         .push(format!("Variable already defined in current scope: {name}"));
                 } else {
                     self.analyze_expr(value);
-                    let symbol = Symbol::Variable {
-                        name: name.to_string(),
-                        is_mutable: false,
-                    };
-                    self.insert_symbol(name, symbol);
+                    self.insert_symbol(
+                        name,
+                        Symbol {
+                            name: name.to_string(),
+                            kind: SymbolKind::Var { is_mutable: false },
+                        },
+                    );
                 }
             }
 
@@ -116,11 +155,13 @@ impl SemanticAnalyzer {
                         .push(format!("Variable already defined in current scope: {name}"));
                 } else {
                     self.analyze_expr(value);
-                    let symbol = Symbol::Variable {
-                        name: name.to_string(),
-                        is_mutable: true,
-                    };
-                    self.insert_symbol(name, symbol);
+                    self.insert_symbol(
+                        name,
+                        Symbol {
+                            name: name.to_string(),
+                            kind: SymbolKind::Var { is_mutable: true },
+                        },
+                    );
                 }
             }
 
@@ -141,16 +182,30 @@ impl SemanticAnalyzer {
             }
 
             ast::Expr::Assign { name, value } => match self.lookup_symbol(name) {
-                Some(Symbol::Variable { is_mutable, .. }) if *is_mutable => {
+                Some(symbol) if symbol.kind == SymbolKind::Var { is_mutable: true } => {
                     self.analyze_expr(value)
                 }
                 _ => self
                     .errors
                     .push(format!("Cannot assign to immutable variable: {name}")),
             },
+
             ast::Expr::While { cond, body } => {
                 self.analyze_expr(cond);
                 self.analyze_expr(body);
+            }
+
+            ast::Expr::Call { name, args } => {
+                if self
+                    .lookup_symbol(name)
+                    .map(|s| s.kind == SymbolKind::Func)
+                    .is_none()
+                {
+                    self.errors.push(format!("Undefined function: {name}"));
+                }
+                for arg in args {
+                    self.analyze_expr(arg);
+                }
             }
         }
     }
