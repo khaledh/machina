@@ -27,6 +27,11 @@ pub enum TokenKind {
     Eof,
 }
 
+#[derive(Debug)]
+pub enum LexError {
+    UnexpectedCharacter(char),
+}
+
 pub struct Lexer<'a> {
     source: Peekable<Chars<'a>>,
     pos: usize,
@@ -53,7 +58,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> TokenKind {
+    pub fn next_token(&mut self) -> Result<TokenKind, LexError> {
         self.skip_whitespace();
         match self.source.peek() {
             Some(&ch) if ch.is_alphabetic() => {
@@ -64,7 +69,7 @@ impl<'a> Lexer<'a> {
                     ident.push(ch);
                     self.advance();
                 }
-                TokenKind::Ident(ident)
+                Ok(TokenKind::Ident(ident))
             }
             Some(&ch) if ch.is_ascii_digit() => {
                 let mut num_str = String::new();
@@ -75,114 +80,111 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 let value = num_str.parse::<u32>().unwrap();
-                TokenKind::IntLit(value)
+                Ok(TokenKind::IntLit(value))
             }
             Some(&'-') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'>')) {
                     self.advance();
-                    TokenKind::Arrow
+                    Ok(TokenKind::Arrow)
                 } else {
-                    TokenKind::Minus
+                    Ok(TokenKind::Minus)
                 }
             }
             Some(&'+') => {
                 self.advance();
-                TokenKind::Plus
+                Ok(TokenKind::Plus)
             }
             Some(&'*') => {
                 self.advance();
-                TokenKind::Star
+                Ok(TokenKind::Star)
             }
             Some(&'/') => {
                 self.advance();
-                TokenKind::Slash
+                Ok(TokenKind::Slash)
             }
             Some(&'(') => {
                 self.advance();
-                TokenKind::LParen
+                Ok(TokenKind::LParen)
             }
             Some(&')') => {
                 self.advance();
-                TokenKind::RParen
+                Ok(TokenKind::RParen)
             }
             Some(&',') => {
                 self.advance();
-                TokenKind::Comma
+                Ok(TokenKind::Comma)
             }
             Some(&':') => {
                 self.advance();
-                TokenKind::Colon
+                Ok(TokenKind::Colon)
             }
             Some(&';') => {
                 self.advance();
-                TokenKind::Semicolon
+                Ok(TokenKind::Semicolon)
             }
             Some(&'{') => {
                 self.advance();
-                TokenKind::LBrace
+                Ok(TokenKind::LBrace)
             }
             Some(&'}') => {
                 self.advance();
-                TokenKind::RBrace
+                Ok(TokenKind::RBrace)
             }
             Some(&'=') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'=')) {
                     self.advance();
-                    TokenKind::EqEq
+                    Ok(TokenKind::EqEq)
                 } else {
-                    TokenKind::Equals
+                    Ok(TokenKind::Equals)
                 }
             }
             Some(&'!') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'=')) {
                     self.advance();
-                    TokenKind::NotEq
+                    Ok(TokenKind::NotEq)
                 } else {
-                    panic!("Unexpected character: {}", self.source.peek().unwrap());
+                    Err(LexError::UnexpectedCharacter(*self.source.peek().unwrap()))
                 }
             }
             Some(&'<') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'=')) {
                     self.advance();
-                    TokenKind::LessThanEq
+                    Ok(TokenKind::LessThanEq)
                 } else {
-                    TokenKind::LessThan
+                    Ok(TokenKind::LessThan)
                 }
             }
             Some(&'>') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'=')) {
                     self.advance();
-                    TokenKind::GreaterThanEq
+                    Ok(TokenKind::GreaterThanEq)
                 } else {
-                    TokenKind::GreaterThan
+                    Ok(TokenKind::GreaterThan)
                 }
             }
-            Some(&ch) => {
-                panic!("Unexpected character: {ch}");
-            }
-            None => TokenKind::Eof,
+            Some(&ch) => Err(LexError::UnexpectedCharacter(ch)),
+            None => Ok(TokenKind::Eof),
         }
     }
 
-    pub fn tokens(self) -> impl Iterator<Item = TokenKind> {
+    pub fn tokens(self) -> impl Iterator<Item = Result<TokenKind, LexError>> {
         self
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = TokenKind;
+    type Item = Result<TokenKind, LexError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let token = self.next_token();
-        if token == TokenKind::Eof {
-            None
-        } else {
-            Some(token)
+        match self.next_token() {
+            Ok(TokenKind::Eof) => None,
+            Ok(token) => Some(Ok(token)),
+            Err(error) => Some(Err(error)),
         }
     }
 }

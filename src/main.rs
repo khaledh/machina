@@ -1,4 +1,4 @@
-use crate::lexer::Lexer;
+use crate::lexer::{LexError, Lexer, TokenKind};
 
 mod ast;
 mod codegen;
@@ -37,9 +37,12 @@ fn main() {
 
 fn compile(source: &str) -> Result<String, Vec<String>> {
     let lexer = Lexer::new(source);
-    let tokens = lexer.tokens();
+    let tokens = lexer
+        .tokens()
+        .collect::<Result<Vec<TokenKind>, LexError>>()
+        .map_err(|e| vec![format!("{e:?}")])?;
 
-    let module = parser::parse_tokens(tokens);
+    let module = parser::parse_tokens(tokens.into_iter()).map_err(|e| vec![e])?;
     println!("Module:\n{:#?}", module);
 
     let mut sem = sem_analysis::SemanticAnalyzer::new();
@@ -49,7 +52,7 @@ fn compile(source: &str) -> Result<String, Vec<String>> {
     type_checker.type_check(&module)?;
 
     let mut codegen = codegen::Codegen::new(&module);
-    let asm = codegen.generate();
+    let asm = codegen.generate().map_err(|e| vec![e])?;
 
     Ok(asm)
 }

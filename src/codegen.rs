@@ -31,18 +31,18 @@ impl Codegen {
 }
 
 impl Codegen {
-    pub fn generate(&mut self) -> String {
+    pub fn generate(&mut self) -> Result<String, String> {
         let mut asm = String::new();
         asm.push_str(".align 2\n");
 
         for func in self.funcs.clone() {
             asm.push_str("\n");
-            asm.push_str(&self.gen_func(&func));
+            asm.push_str(&self.gen_func(&func)?);
         }
-        asm
+        Ok(asm)
     }
 
-    fn gen_func(&mut self, func: &ast::Function) -> String {
+    fn gen_func(&mut self, func: &ast::Function) -> Result<String, String> {
         let mut asm = String::new();
 
         self.enter_scope();
@@ -51,15 +51,15 @@ impl Codegen {
         // ARM64 ABI: first 8 parameters in registers x0-x7, rest on stack
         // TODO: handle more than 8 parameters
         if func.params.len() > 8 {
-            panic!(
+            return Err(format!(
                 "Only 8 parameters are supported for now, found: {}",
                 func.params.len()
-            );
+            ));
         }
         let mut copy_params_asm = String::new();
         // Copy parameters to stack (TODO: optimize this later to use incoming arguments registers)
         for (i, param) in func.params.iter().enumerate() {
-            let stack_offset = self.alloc_stack(8);
+            let stack_offset = self.alloc_stack(8)?;
             copy_params_asm.push_str(&format!("  str x{i}, [sp, #{stack_offset}]\n"));
             self.insert_var(
                 &param.name,
@@ -72,7 +72,7 @@ impl Codegen {
 
         // Generate function body first to get stack size
         let body = func.body.clone();
-        let body_asm = self.gen_expr(&body, 0);
+        let body_asm = self.gen_expr(&body, 0)?;
 
         // arm64 requires 16-byte stack alignment
         let stack_size = (self.max_stack_offset.get() + 15) & !15;
@@ -102,7 +102,7 @@ impl Codegen {
 
         self.exit_scope();
 
-        asm
+        Ok(asm)
     }
 
     fn enter_scope(&mut self) {
@@ -121,7 +121,7 @@ impl Codegen {
         self.scopes.pop();
     }
 
-    fn alloc_stack(&self, size: u32) -> u32 {
+    fn alloc_stack(&self, size: u32) -> Result<u32, String> {
         match self.scopes.last() {
             Some(scope) => {
                 let offset = scope.next_offset.get();
@@ -129,9 +129,9 @@ impl Codegen {
                 if offset + size > self.max_stack_offset.get() {
                     self.max_stack_offset.replace(offset + size);
                 }
-                offset
+                Ok(offset)
             }
-            None => panic!("No current scope"),
+            None => panic!("No current scope. This is a bug."),
         }
     }
 
@@ -158,18 +158,18 @@ impl Codegen {
         format!(".L{}", curr)
     }
 
-    fn gen_expr(&mut self, expr: &ast::Expr, reg: u8) -> String {
+    fn gen_expr(&mut self, expr: &ast::Expr, reg: u8) -> Result<String, String> {
         match expr {
-            ast::Expr::UInt32Lit(value) => self.gen_u32_imm(value, reg),
-            ast::Expr::BoolLit(value) => self.gen_bool_imm(value, reg),
-            ast::Expr::UnitLit => format!("  mov w{reg}, 0\n"),
+            ast::Expr::UInt32Lit(value) => Ok(self.gen_u32_imm(value, reg)),
+            ast::Expr::BoolLit(value) => Ok(self.gen_bool_imm(value, reg)),
+            ast::Expr::UnitLit => Ok(format!("  mov w{reg}, 0\n")),
             ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
             ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
             ast::Expr::Block(body) => {
                 self.enter_scope();
-                let result = self.gen_block(body, reg);
+                let result = self.gen_block(body, reg)?;
                 self.exit_scope();
-                result
+                Ok(result)
             }
             ast::Expr::If {
                 cond,
@@ -180,22 +180,22 @@ impl Codegen {
                 let else_label = self.next_label();
                 let end_label = self.next_label();
 
-                result.push_str(&self.gen_expr(cond, reg));
+                result.push_str(&self.gen_expr(cond, reg)?);
                 result.push_str(&format!("  cmp w{reg}, 0\n"));
                 result.push_str(&format!("  b.eq {else_label}\n"));
-                result.push_str(&self.gen_expr(then_body, reg));
+                result.push_str(&self.gen_expr(then_body, reg)?);
                 result.push_str(&format!("  b {end_label}\n"));
                 result.push_str(&format!("{else_label}:\n"));
-                result.push_str(&self.gen_expr(else_body, reg));
+                result.push_str(&self.gen_expr(else_body, reg)?);
                 result.push_str(&format!("{end_label}:\n"));
-                result
+                Ok(result)
             }
             ast::Expr::Let { name, value } => {
                 // Evaluate initializer in the current scope (before shadowing)
                 let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg));
+                result.push_str(&self.gen_expr(value, reg)?);
                 // Now allocate and bind the new variable, then store the value
-                let stack_offset = self.alloc_stack(8);
+                let stack_offset = self.alloc_stack(8)?;
                 self.insert_var(
                     name,
                     CodegenVar {
@@ -204,13 +204,13 @@ impl Codegen {
                     },
                 );
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
-                result
+                Ok(result)
             }
             ast::Expr::Var { name, value } => {
                 // Evaluate initializer before introducing the new mutable binding
                 let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg));
-                let stack_offset = self.alloc_stack(8);
+                result.push_str(&self.gen_expr(value, reg)?);
+                let stack_offset = self.alloc_stack(8)?;
                 self.insert_var(
                     name,
                     CodegenVar {
@@ -219,20 +219,18 @@ impl Codegen {
                     },
                 );
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
-                result
+                Ok(result)
             }
-            ast::Expr::VarRef(name) => {
-                format!(
-                    "  ldr w{reg}, [sp, #{}]\n",
-                    self.lookup_var(name).unwrap().stack_offset
-                )
-            }
+            ast::Expr::VarRef(name) => Ok(format!(
+                "  ldr w{reg}, [sp, #{}]\n",
+                self.lookup_var(name).unwrap().stack_offset
+            )),
             ast::Expr::Assign { name, value } => {
                 let stack_offset = self.lookup_var(name).unwrap().stack_offset;
                 let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg));
+                result.push_str(&self.gen_expr(value, reg)?);
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
-                result
+                Ok(result)
             }
             ast::Expr::While { cond, body } => {
                 let mut result = String::new();
@@ -240,29 +238,29 @@ impl Codegen {
                 let end_label = self.next_label();
 
                 result.push_str(&format!("{loop_label}:\n"));
-                result.push_str(&self.gen_expr(cond, reg));
+                result.push_str(&self.gen_expr(cond, reg)?);
                 result.push_str(&format!("  cmp w{reg}, 0\n"));
                 result.push_str(&format!("  b.eq {end_label}\n"));
-                result.push_str(&self.gen_expr(body, reg));
+                result.push_str(&self.gen_expr(body, reg)?);
                 result.push_str(&format!("  b {loop_label}\n"));
                 result.push_str(&format!("{end_label}:\n"));
-                result
+                Ok(result)
             }
             ast::Expr::Call { name, args } => {
                 let mut result = String::new();
                 // ARM64 ABI: first 8 arguments in registers x0-x7, rest on stack
                 if args.len() > 8 {
-                    panic!(
+                    return Err(format!(
                         "Only 8 arguments are supported for now, found: {}",
                         args.len()
-                    );
+                    ));
                 }
                 for (i, arg) in args.iter().enumerate() {
-                    result.push_str(&self.gen_expr(arg, i as u8));
+                    result.push_str(&self.gen_expr(arg, i as u8)?);
                 }
                 result.push_str(&format!("  bl _{}\n", name));
                 result.push_str(&format!("  mov w{reg}, w0\n"));
-                result
+                Ok(result)
             }
         }
     }
@@ -282,18 +280,18 @@ impl Codegen {
         left: &ast::Expr,
         right: &ast::Expr,
         reg: u8,
-    ) -> String {
+    ) -> Result<String, String> {
         let lreg = reg;
         let rreg = reg + 1;
         let mut result = String::new();
 
         // Evaluate left, spill to stack to preserve across potential calls in right
-        result.push_str(&self.gen_expr(left, lreg));
-        let spill_offset = self.alloc_stack(8);
+        result.push_str(&self.gen_expr(left, lreg)?);
+        let spill_offset = self.alloc_stack(8)?;
         result.push_str(&format!("  str w{lreg}, [sp, #{spill_offset}]\n"));
 
         // Evaluate right; this may involve calls that clobber w0
-        result.push_str(&self.gen_expr(right, rreg));
+        result.push_str(&self.gen_expr(right, rreg)?);
 
         // Reload left value after right-hand evaluation
         result.push_str(&format!("  ldr w{lreg}, [sp, #{spill_offset}]\n"));
@@ -331,23 +329,28 @@ impl Codegen {
                 result.push_str(&format!("  cset w{reg}, ge\n"));
             }
         }
-        result
+        Ok(result)
     }
 
-    fn gen_unary_op(&mut self, op: ast::UnaryOp, expr: &ast::Expr, reg: u8) -> String {
+    fn gen_unary_op(
+        &mut self,
+        op: ast::UnaryOp,
+        expr: &ast::Expr,
+        reg: u8,
+    ) -> Result<String, String> {
         let mut result = String::new();
-        result.push_str(&self.gen_expr(expr, reg));
+        result.push_str(&self.gen_expr(expr, reg)?);
         match op {
             ast::UnaryOp::Neg => result.push_str(&format!("  neg w{reg}, w{reg}\n")),
         }
-        result
+        Ok(result)
     }
 
-    fn gen_block(&mut self, body: &Vec<ast::Expr>, reg: u8) -> String {
+    fn gen_block(&mut self, body: &Vec<ast::Expr>, reg: u8) -> Result<String, String> {
         let mut result = String::new();
         for expr in body {
-            result.push_str(&self.gen_expr(expr, reg));
+            result.push_str(&self.gen_expr(expr, reg)?);
         }
-        result
+        Ok(result)
     }
 }
