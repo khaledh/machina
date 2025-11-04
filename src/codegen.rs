@@ -81,7 +81,7 @@ impl Codegen {
                     name: param.name.clone(),
                     stack_offset,
                 },
-            );
+            )?;
         }
 
         // Generate function body first to get stack size
@@ -149,21 +149,23 @@ impl Codegen {
         }
     }
 
-    fn insert_var(&mut self, name: &str, var: CodegenVar) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .vars
-            .insert(name.to_string(), var);
+    fn insert_var(&mut self, name: &str, var: CodegenVar) -> Result<(), CodegenError> {
+        match self.scopes.last_mut() {
+            Some(scope) => {
+                scope.vars.insert(name.to_string(), var);
+                Ok(())
+            }
+            None => return Err(CodegenError::NoCurrentScope),
+        }
     }
 
-    fn lookup_var(&self, name: &str) -> Option<&CodegenVar> {
+    fn lookup_var(&self, name: &str) -> Result<&CodegenVar, CodegenError> {
         for scope in self.scopes.iter().rev() {
             if let Some(var) = scope.vars.get(name) {
-                return Some(var);
+                return Ok(var);
             }
         }
-        None
+        Err(CodegenError::VarNotFound(name.to_string()))
     }
 
     fn next_label(&self) -> String {
@@ -216,7 +218,7 @@ impl Codegen {
                         name: name.to_string(),
                         stack_offset,
                     },
-                );
+                )?;
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 Ok(result)
             }
@@ -231,19 +233,16 @@ impl Codegen {
                         name: name.to_string(),
                         stack_offset,
                     },
-                );
+                )?;
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 Ok(result)
             }
-            ast::Expr::VarRef(name) => Ok(format!(
-                "  ldr w{reg}, [sp, #{}]\n",
-                self.lookup_var(name).unwrap().stack_offset
-            )),
+            ast::Expr::VarRef(name) => {
+                let stack_offset = self.lookup_var(name)?.stack_offset;
+                Ok(format!("  ldr w{reg}, [sp, #{stack_offset}]\n"))
+            }
             ast::Expr::Assign { name, value } => {
-                let stack_offset = match self.lookup_var(name) {
-                    Some(var) => var.stack_offset,
-                    None => return Err(CodegenError::VarNotFound(name.to_string())),
-                };
+                let stack_offset = self.lookup_var(name)?.stack_offset;
                 let mut result = String::new();
                 result.push_str(&self.gen_expr(value, reg)?);
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
