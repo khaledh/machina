@@ -36,11 +36,11 @@ fn inc(a: u32) -> u32 {
 }
 
 fn ge(a: u32, b: u32) -> bool {
-    a >= c
+    a >= b
 }
 
 fn main() -> u32 {
-    if ge(inc(41), 42) { 42 } else { 99 }
+    if ge(inc(41), 42) { 42 / 2 } else { 99 }
 }
 "#;
 

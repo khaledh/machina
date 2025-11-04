@@ -315,7 +315,7 @@ impl Codegen {
             ast::BinOp::Add => result.push_str(&format!("  add w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Sub => result.push_str(&format!("  sub w{reg}, w{lreg}, w{rreg}\n")),
             ast::BinOp::Mul => result.push_str(&format!("  mul w{reg}, w{lreg}, w{rreg}\n")),
-            ast::BinOp::Div => result.push_str(&format!("  div w{reg}, w{lreg}, w{rreg}\n")),
+            ast::BinOp::Div => result.push_str(&format!("  udiv w{reg}, w{lreg}, w{rreg}\n")),
 
             // Comparison operators
             ast::BinOp::Eq => {
