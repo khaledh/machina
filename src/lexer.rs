@@ -1,5 +1,7 @@
 use std::iter::Peekable;
+use std::num::ParseIntError;
 use std::str::Chars;
+use thiserror::Error;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum TokenKind {
@@ -27,9 +29,13 @@ pub enum TokenKind {
     Eof,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum LexError {
+    #[error("Unexpected character: {0}")]
     UnexpectedCharacter(char),
+
+    #[error("Invalid integer: {0}")]
+    InvalidInteger(ParseIntError),
 }
 
 pub struct Lexer<'a> {
@@ -79,7 +85,9 @@ impl<'a> Lexer<'a> {
                     num_str.push(ch);
                     self.advance();
                 }
-                let value = num_str.parse::<u32>().unwrap();
+                let value = num_str
+                    .parse::<u32>()
+                    .map_err(|e| LexError::InvalidInteger(e))?;
                 Ok(TokenKind::IntLit(value))
             }
             Some(&'-') => {
@@ -146,7 +154,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(TokenKind::NotEq)
                 } else {
-                    Err(LexError::UnexpectedCharacter(*self.source.peek().unwrap()))
+                    Err(LexError::UnexpectedCharacter('!'))
                 }
             }
             Some(&'<') => {

@@ -1,6 +1,7 @@
 use crate::ast;
 use std::cell::Cell;
 use std::collections::HashMap;
+use thiserror::Error;
 
 pub struct Codegen {
     funcs: Vec<ast::Function>,
@@ -19,6 +20,21 @@ struct CodegenScope {
     next_offset: Cell<u32>,
 }
 
+#[derive(Debug, Error)]
+pub enum CodegenError {
+    #[error("Variable not found: {0}")]
+    VarNotFound(String),
+
+    #[error("Too many parameters. Only 8 are supported, found: {0}")]
+    TooManyParams(usize),
+
+    #[error("Too many arguments. Only 8 are supported, found: {0}")]
+    TooManyArgs(usize),
+
+    #[error("No current scope. This is a bug.")]
+    NoCurrentScope,
+}
+
 impl Codegen {
     pub fn new(module: &ast::Module) -> Self {
         Codegen {
@@ -31,7 +47,7 @@ impl Codegen {
 }
 
 impl Codegen {
-    pub fn generate(&mut self) -> Result<String, String> {
+    pub fn generate(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
         asm.push_str(".align 2\n");
 
@@ -42,7 +58,7 @@ impl Codegen {
         Ok(asm)
     }
 
-    fn gen_func(&mut self, func: &ast::Function) -> Result<String, String> {
+    fn gen_func(&mut self, func: &ast::Function) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
         self.enter_scope();
@@ -51,10 +67,7 @@ impl Codegen {
         // ARM64 ABI: first 8 parameters in registers x0-x7, rest on stack
         // TODO: handle more than 8 parameters
         if func.params.len() > 8 {
-            return Err(format!(
-                "Only 8 parameters are supported for now, found: {}",
-                func.params.len()
-            ));
+            return Err(CodegenError::TooManyParams(func.params.len()));
         }
         let mut copy_params_asm = String::new();
         // Copy parameters to stack (TODO: optimize this later to use incoming arguments registers)
@@ -121,7 +134,7 @@ impl Codegen {
         self.scopes.pop();
     }
 
-    fn alloc_stack(&self, size: u32) -> Result<u32, String> {
+    fn alloc_stack(&self, size: u32) -> Result<u32, CodegenError> {
         match self.scopes.last() {
             Some(scope) => {
                 let offset = scope.next_offset.get();
@@ -131,7 +144,7 @@ impl Codegen {
                 }
                 Ok(offset)
             }
-            None => panic!("No current scope. This is a bug."),
+            None => Err(CodegenError::NoCurrentScope),
         }
     }
 
@@ -158,7 +171,7 @@ impl Codegen {
         format!(".L{}", curr)
     }
 
-    fn gen_expr(&mut self, expr: &ast::Expr, reg: u8) -> Result<String, String> {
+    fn gen_expr(&mut self, expr: &ast::Expr, reg: u8) -> Result<String, CodegenError> {
         match expr {
             ast::Expr::UInt32Lit(value) => Ok(self.gen_u32_imm(value, reg)),
             ast::Expr::BoolLit(value) => Ok(self.gen_bool_imm(value, reg)),
@@ -226,7 +239,10 @@ impl Codegen {
                 self.lookup_var(name).unwrap().stack_offset
             )),
             ast::Expr::Assign { name, value } => {
-                let stack_offset = self.lookup_var(name).unwrap().stack_offset;
+                let stack_offset = match self.lookup_var(name) {
+                    Some(var) => var.stack_offset,
+                    None => return Err(CodegenError::VarNotFound(name.to_string())),
+                };
                 let mut result = String::new();
                 result.push_str(&self.gen_expr(value, reg)?);
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
@@ -250,10 +266,7 @@ impl Codegen {
                 let mut result = String::new();
                 // ARM64 ABI: first 8 arguments in registers x0-x7, rest on stack
                 if args.len() > 8 {
-                    return Err(format!(
-                        "Only 8 arguments are supported for now, found: {}",
-                        args.len()
-                    ));
+                    return Err(CodegenError::TooManyArgs(args.len()));
                 }
                 for (i, arg) in args.iter().enumerate() {
                     result.push_str(&self.gen_expr(arg, i as u8)?);
@@ -280,7 +293,7 @@ impl Codegen {
         left: &ast::Expr,
         right: &ast::Expr,
         reg: u8,
-    ) -> Result<String, String> {
+    ) -> Result<String, CodegenError> {
         let lreg = reg;
         let rreg = reg + 1;
         let mut result = String::new();
@@ -337,7 +350,7 @@ impl Codegen {
         op: ast::UnaryOp,
         expr: &ast::Expr,
         reg: u8,
-    ) -> Result<String, String> {
+    ) -> Result<String, CodegenError> {
         let mut result = String::new();
         result.push_str(&self.gen_expr(expr, reg)?);
         match op {
@@ -346,7 +359,7 @@ impl Codegen {
         Ok(result)
     }
 
-    fn gen_block(&mut self, body: &Vec<ast::Expr>, reg: u8) -> Result<String, String> {
+    fn gen_block(&mut self, body: &Vec<ast::Expr>, reg: u8) -> Result<String, CodegenError> {
         let mut result = String::new();
         for expr in body {
             result.push_str(&self.gen_expr(expr, reg)?);

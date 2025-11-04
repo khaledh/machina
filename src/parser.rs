@@ -3,6 +3,7 @@ use crate::lexer::{LexError, Lexer, TokenKind};
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::sync::LazyLock;
+use thiserror::Error;
 
 static BINARY_OPS_MAP: LazyLock<HashMap<TokenKind, BinOp>> = LazyLock::new(|| {
     HashMap::from([
@@ -20,6 +21,27 @@ static BINARY_OPS_MAP: LazyLock<HashMap<TokenKind, BinOp>> = LazyLock::new(|| {
         (TokenKind::GreaterThanEq, BinOp::GtEq),
     ])
 });
+
+#[derive(Debug, Error)]
+pub enum ParserError {
+    #[error("Expected {0:?}, found: {1:?}")]
+    ExpectedFound(TokenKind, TokenKind),
+
+    #[error("Expected {0}, found: {1:?}")]
+    ExpectedKeyword(String, TokenKind),
+
+    #[error("Expected identifier, found: {0:?}")]
+    ExpectedIdent(TokenKind),
+
+    #[error("Expected type, found: {0:?}")]
+    ExpectedType(TokenKind),
+
+    #[error("Expected primary expression, found: {0:?}")]
+    ExpectedPrimary(TokenKind),
+
+    #[error("Unexpected token: {0:?}")]
+    UnexpectedToken(TokenKind),
+}
 
 pub struct Parser<I>
 where
@@ -44,33 +66,43 @@ where
         self.curr_token = self.tokens.next();
     }
 
-    fn consume(&mut self, expected: &TokenKind) -> Result<(), String> {
+    fn consume(&mut self, expected: &TokenKind) -> Result<(), ParserError> {
         match &self.curr_token {
             Some(token) if token == expected => {
                 self.advance();
                 Ok(())
             }
-            other => Err(format!("Expected {expected:?}, found: {other:?}")),
+            Some(token) => Err(ParserError::ExpectedFound(expected.clone(), token.clone())),
+            None => Err(ParserError::ExpectedFound(expected.clone(), TokenKind::Eof)),
         }
     }
 
-    fn consume_keyword(&mut self, expected: &str) -> Result<(), String> {
+    fn consume_keyword(&mut self, expected: &str) -> Result<(), ParserError> {
         match &self.curr_token {
             Some(TokenKind::Ident(name)) if name == expected => {
                 self.advance();
                 Ok(())
             }
-            other => Err(format!("Expected {expected}, found: {other:?}")),
+            Some(token) => Err(ParserError::ExpectedKeyword(
+                expected.to_string(),
+                token.clone(),
+            )),
+            None => Err(ParserError::ExpectedKeyword(
+                expected.to_string(),
+                TokenKind::Eof,
+            )),
         }
     }
 
-    fn parse_ident(&mut self) -> Result<String, String> {
-        if let Some(TokenKind::Ident(name)) = &self.curr_token {
-            let name = name.clone();
-            self.advance();
-            Ok(name)
-        } else {
-            Err(format!("Expected identifier, found: {:?}", self.curr_token))
+    fn parse_ident(&mut self) -> Result<String, ParserError> {
+        match &self.curr_token {
+            Some(TokenKind::Ident(name)) => {
+                let name = name.clone();
+                self.advance();
+                Ok(name)
+            }
+            Some(token) => Err(ParserError::ExpectedIdent(token.clone())),
+            None => Err(ParserError::ExpectedIdent(TokenKind::Eof)),
         }
     }
 
@@ -78,8 +110,8 @@ where
         &mut self,
         sep_token: TokenKind,
         end_token: TokenKind,
-        mut parse_item: impl FnMut(&mut Self) -> Result<T, String>,
-    ) -> Result<Vec<T>, String> {
+        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParserError>,
+    ) -> Result<Vec<T>, ParserError> {
         let mut items = Vec::new();
         while self.curr_token != Some(end_token.clone()) {
             items.push(parse_item(self)?);
@@ -90,7 +122,7 @@ where
         Ok(items)
     }
 
-    fn parse_function(&mut self) -> Result<Function, String> {
+    fn parse_function(&mut self) -> Result<Function, ParserError> {
         // Expect 'fn'
         self.consume_keyword("fn")?;
 
@@ -122,7 +154,7 @@ where
         })
     }
 
-    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, String> {
+    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParserError> {
         self.parse_list(TokenKind::Comma, TokenKind::RParen, |parser| {
             let name = parser.parse_ident()?;
             parser.consume(&TokenKind::Colon)?;
@@ -131,7 +163,7 @@ where
         })
     }
 
-    fn parse_type(&mut self) -> Result<Type, String> {
+    fn parse_type(&mut self) -> Result<Type, ParserError> {
         let typ = match &self.curr_token {
             Some(TokenKind::LParen) if self.tokens.peek() == Some(&TokenKind::RParen) => {
                 self.advance();
@@ -140,7 +172,8 @@ where
             }
             Some(TokenKind::Ident(name)) if name == "u32" => Ok(Type::UInt32),
             Some(TokenKind::Ident(name)) if name == "bool" => Ok(Type::Bool),
-            other => Err(format!("Expected type, found: {other:?}")),
+            Some(token) => Err(ParserError::ExpectedType(token.clone())),
+            None => Err(ParserError::ExpectedType(TokenKind::Eof)),
         };
         match typ {
             Ok(typ) => {
@@ -151,7 +184,7 @@ where
         }
     }
 
-    fn parse_block(&mut self) -> Result<Vec<Expr>, String> {
+    fn parse_block(&mut self) -> Result<Vec<Expr>, ParserError> {
         let mut body = Vec::new();
         while self.curr_token != Some(TokenKind::RBrace) {
             let expr = match &self.curr_token {
@@ -170,7 +203,7 @@ where
         body.into_iter().collect()
     }
 
-    fn parse_let(&mut self) -> Result<Expr, String> {
+    fn parse_let(&mut self) -> Result<Expr, ParserError> {
         self.consume_keyword("let")?;
         let name = self.parse_ident()?;
         self.consume(&TokenKind::Equals)?;
@@ -181,7 +214,7 @@ where
         })
     }
 
-    fn parse_var(&mut self) -> Result<Expr, String> {
+    fn parse_var(&mut self) -> Result<Expr, ParserError> {
         self.consume_keyword("var")?;
         let name = self.parse_ident()?;
         self.consume(&TokenKind::Equals)?;
@@ -192,7 +225,7 @@ where
         })
     }
 
-    fn parse_assign(&mut self) -> Result<Expr, String> {
+    fn parse_assign(&mut self) -> Result<Expr, ParserError> {
         let name = self.parse_ident()?;
         self.consume(&TokenKind::Equals)?;
         let value = self.parse_expr(0)?;
@@ -202,7 +235,7 @@ where
         })
     }
 
-    fn parse_if(&mut self) -> Result<Expr, String> {
+    fn parse_if(&mut self) -> Result<Expr, ParserError> {
         self.consume_keyword("if")?;
         let cond = self.parse_expr(0)?;
         let then_body = self.parse_expr(0)?;
@@ -215,7 +248,7 @@ where
         })
     }
 
-    fn parse_while(&mut self) -> Result<Expr, String> {
+    fn parse_while(&mut self) -> Result<Expr, ParserError> {
         self.consume_keyword("while")?;
         let cond = self.parse_expr(0)?;
         let body = self.parse_expr(0)?;
@@ -225,7 +258,7 @@ where
         })
     }
 
-    fn parse_call(&mut self, name: String) -> Result<Expr, String> {
+    fn parse_call(&mut self, name: String) -> Result<Expr, ParserError> {
         self.consume(&TokenKind::LParen)?;
         let args = self.parse_list(TokenKind::Comma, TokenKind::RParen, |parser| {
             parser.parse_expr(0)
@@ -234,7 +267,7 @@ where
         Ok(Expr::Call { name, args })
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, String> {
+    fn parse_primary(&mut self) -> Result<Expr, ParserError> {
         match self.curr_token.clone() {
             Some(TokenKind::Ident(name)) if name == "if" => self.parse_if(),
             Some(TokenKind::Ident(name)) if name == "while" => self.parse_while(),
@@ -273,12 +306,12 @@ where
                 self.consume(&TokenKind::RBrace)?;
                 Ok(Expr::Block(body))
             }
-            Some(token) => Err(format!("Expected primary expression, found: {token:?}")),
-            None => Err("Unexpected end of input".to_string()),
+            Some(token) => Err(ParserError::ExpectedPrimary(token.clone())),
+            None => Err(ParserError::ExpectedPrimary(TokenKind::Eof)),
         }
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, String> {
+    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParserError> {
         let mut left = if self.curr_token == Some(TokenKind::Minus) {
             self.advance();
             let operand = self.parse_expr(10)?; // highest binding power
@@ -318,7 +351,7 @@ where
         }
     }
 
-    pub fn parse(&mut self) -> Result<Module, String> {
+    pub fn parse(&mut self) -> Result<Module, ParserError> {
         self.advance();
         let mut functions = Vec::new();
         while let Some(TokenKind::Ident(name)) = &self.curr_token
@@ -328,21 +361,7 @@ where
         }
         match &self.curr_token {
             None => Ok(Module { funcs: functions }),
-            Some(token) => Err(format!("Unexpected token: {token:?}")),
+            Some(token) => Err(ParserError::UnexpectedToken(token.clone())),
         }
     }
-}
-
-pub fn parse_string(source: &str) -> Result<Module, String> {
-    let tokens = Lexer::new(source)
-        .tokens()
-        .collect::<Result<Vec<TokenKind>, LexError>>()
-        .map_err(|e| format!("{e:?}"))?;
-    let mut parser = Parser::new(tokens.into_iter());
-    parser.parse()
-}
-
-pub fn parse_tokens(tokens: impl Iterator<Item = TokenKind>) -> Result<Module, String> {
-    let mut parser = Parser::new(tokens);
-    parser.parse()
 }

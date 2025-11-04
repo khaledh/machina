@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::ast::Module;
 use std::collections::HashMap;
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SymbolKind {
@@ -19,9 +20,24 @@ pub struct Scope {
     symbols: HashMap<String, Symbol>,
 }
 
+#[derive(Clone, Debug, Error)]
+pub enum SemError {
+    #[error("Variable already defined in current scope: {0}")]
+    VarAlreadyDefined(String),
+
+    #[error("Undefined variable: {0}")]
+    VarUndefined(String),
+
+    #[error("Cannot assign to immutable variable: {0}")]
+    VarImmutable(String),
+
+    #[error("Undefined function: {0}")]
+    FuncUndefined(String),
+}
+
 pub struct SemanticAnalyzer {
     scopes: Vec<Scope>,
-    errors: Vec<String>,
+    errors: Vec<SemError>,
 }
 
 impl SemanticAnalyzer {
@@ -84,7 +100,7 @@ impl SemanticAnalyzer {
         }
     }
 
-    pub fn analyze(&mut self, module: &Module) -> Result<(), Vec<String>> {
+    pub fn analyze(&mut self, module: &Module) -> Result<(), Vec<SemError>> {
         self.with_scope(|analyzer| {
             // global scope
             analyzer.populate_funcs(&module.funcs);
@@ -142,7 +158,7 @@ impl SemanticAnalyzer {
             ast::Expr::Let { name, value } => {
                 if self.lookup_symbol_direct(name).is_some() {
                     self.errors
-                        .push(format!("Variable already defined in current scope: {name}"));
+                        .push(SemError::VarAlreadyDefined(name.to_string()));
                 } else {
                     self.analyze_expr(value);
                     self.insert_symbol(
@@ -158,7 +174,7 @@ impl SemanticAnalyzer {
             ast::Expr::Var { name, value } => {
                 if self.lookup_symbol_direct(name).is_some() {
                     self.errors
-                        .push(format!("Variable already defined in current scope: {name}"));
+                        .push(SemError::VarAlreadyDefined(name.to_string()));
                 } else {
                     self.analyze_expr(value);
                     self.insert_symbol(
@@ -173,7 +189,7 @@ impl SemanticAnalyzer {
 
             ast::Expr::VarRef(name) => {
                 if self.lookup_symbol(name).is_none() {
-                    self.errors.push(format!("Undefined variable: {name}"));
+                    self.errors.push(SemError::VarUndefined(name.to_string()));
                 }
             }
 
@@ -191,9 +207,7 @@ impl SemanticAnalyzer {
                 Some(symbol) if symbol.kind == SymbolKind::Var { is_mutable: true } => {
                     self.analyze_expr(value)
                 }
-                _ => self
-                    .errors
-                    .push(format!("Cannot assign to immutable variable: {name}")),
+                _ => self.errors.push(SemError::VarImmutable(name.to_string())),
             },
 
             ast::Expr::While { cond, body } => {
@@ -207,7 +221,7 @@ impl SemanticAnalyzer {
                     .map(|s| s.kind == SymbolKind::Func)
                     .is_none()
                 {
-                    self.errors.push(format!("Undefined function: {name}"));
+                    self.errors.push(SemError::FuncUndefined(name.to_string()));
                 }
                 for arg in args {
                     self.analyze_expr(arg);

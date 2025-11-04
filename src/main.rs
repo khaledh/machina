@@ -1,4 +1,8 @@
+use crate::codegen::CodegenError;
 use crate::lexer::{LexError, Lexer, TokenKind};
+use crate::parser::{Parser, ParserError};
+use crate::sem_analysis::SemError;
+use thiserror::Error;
 
 mod ast;
 mod codegen;
@@ -7,13 +11,31 @@ mod parser;
 mod sem_analysis;
 mod type_check;
 
+#[derive(Debug, Error)]
+enum CompileError {
+    #[error(transparent)]
+    LexError(#[from] LexError),
+
+    #[error(transparent)]
+    ParserError(#[from] ParserError),
+
+    #[error("Semantic analysis errors: {0:#?}")]
+    SemError(Vec<SemError>),
+
+    #[error("Type check error: {0}")]
+    TypeCheckError(String),
+
+    #[error(transparent)]
+    CodegenError(#[from] CodegenError),
+}
+
 const SOURCE: &str = r#"
 fn inc(a: u32) -> u32 {
     a + 1
 }
 
 fn ge(a: u32, b: u32) -> bool {
-    a >= b
+    a >= c
 }
 
 fn main() -> u32 {
@@ -25,34 +47,40 @@ fn main() {
     let output = compile(SOURCE);
 
     match output {
-        Ok(asm) => {
-            std::fs::write("output.s", asm).unwrap();
-            println!("Assembly written to output.s");
-        }
+        Ok(asm) => match std::fs::write("output.s", asm) {
+            Ok(_) => println!("[SUCCESS] assembly written to output.s"),
+            Err(e) => println!("[ERROR] failed to write assembly: {e}"),
+        },
         Err(errors) => {
-            println!("Errors:\n{:#?}", errors);
+            for error in errors {
+                println!("{error}");
+            }
         }
     }
 }
 
-fn compile(source: &str) -> Result<String, Vec<String>> {
+fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokens()
         .collect::<Result<Vec<TokenKind>, LexError>>()
-        .map_err(|e| vec![format!("{e:?}")])?;
+        .map_err(|e| vec![e.into()])?;
 
-    let module = parser::parse_tokens(tokens.into_iter()).map_err(|e| vec![e])?;
-    println!("Module:\n{:#?}", module);
+    let mut parser = Parser::new(tokens.into_iter());
+    let module = parser.parse().map_err(|e| vec![e.into()])?;
+    // println!("AST:\n{:#?}", module);
 
     let mut sem = sem_analysis::SemanticAnalyzer::new();
-    sem.analyze(&module)?;
+    sem.analyze(&module)
+        .map_err(|errs| vec![CompileError::SemError(errs)])?;
 
     let mut type_checker = type_check::TypeChecker::new();
-    type_checker.type_check(&module)?;
+    type_checker
+        .type_check(&module)
+        .map_err(|e| vec![CompileError::TypeCheckError(e.join("\n"))])?;
 
     let mut codegen = codegen::Codegen::new(&module);
-    let asm = codegen.generate().map_err(|e| vec![e])?;
+    let asm = codegen.generate().map_err(|e| vec![e.into()])?;
 
     Ok(asm)
 }
