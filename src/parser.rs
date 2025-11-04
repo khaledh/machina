@@ -331,7 +331,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse(&mut self) -> Result<Module, ParserError> {
         let mut functions = Vec::new();
-        while self.curr_token.kind == TokenKind::Ident("fn".to_string()) {
+        while matches!(&self.curr_token.kind, TokenKind::Ident(name) if name == "fn") {
             functions.push(self.parse_function()?);
         }
         if self.curr_token.kind != TokenKind::Eof {
