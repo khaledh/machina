@@ -1,25 +1,6 @@
 use crate::ast::{BinOp, Expr, Function, FunctionParam, Module, Type, UnaryOp};
 use crate::lexer::{Token, TokenKind};
-use std::collections::HashMap;
-use std::sync::LazyLock;
 use thiserror::Error;
-
-static BINARY_OPS_MAP: LazyLock<HashMap<TokenKind, BinOp>> = LazyLock::new(|| {
-    HashMap::from([
-        // Arithmetic operators
-        (TokenKind::Plus, BinOp::Add),
-        (TokenKind::Minus, BinOp::Sub),
-        (TokenKind::Star, BinOp::Mul),
-        (TokenKind::Slash, BinOp::Div),
-        // Comparison operators
-        (TokenKind::EqEq, BinOp::Eq),
-        (TokenKind::NotEq, BinOp::Ne),
-        (TokenKind::LessThan, BinOp::Lt),
-        (TokenKind::GreaterThan, BinOp::Gt),
-        (TokenKind::LessThanEq, BinOp::LtEq),
-        (TokenKind::GreaterThanEq, BinOp::GtEq),
-    ])
-});
 
 #[derive(Debug, Error)]
 pub enum ParserError {
@@ -306,7 +287,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParserError> {
-        let mut left = if self.curr_token.kind == TokenKind::Minus {
+        let mut lhs = if self.curr_token.kind == TokenKind::Minus {
             self.advance();
             let operand = self.parse_expr(10)?; // highest binding power
             Expr::UnaryOp {
@@ -317,31 +298,34 @@ impl<'a> Parser<'a> {
             self.parse_primary()?
         };
 
-        while self.curr_token.kind != TokenKind::Eof {
-            if let Some(&op) = BINARY_OPS_MAP.get(&self.curr_token.kind) {
-                let bp = Self::binding_power(op);
-                if bp < min_bp {
-                    break;
-                }
-                self.advance();
-                let right = self.parse_expr(bp + 1)?;
-                left = Expr::BinOp {
-                    left: Box::new(left),
-                    op,
-                    right: Box::new(right),
-                };
-            } else {
+        while let Some((op, bp)) = Self::bin_op_from_token(&self.curr_token.kind) {
+            if bp < min_bp {
                 break;
             }
+            self.advance();
+            let rhs = self.parse_expr(bp + 1)?;
+            lhs = Expr::BinOp {
+                left: Box::new(lhs),
+                op,
+                right: Box::new(rhs),
+            };
         }
-        Ok(left)
+        Ok(lhs)
     }
 
-    fn binding_power(op: BinOp) -> u8 {
-        match op {
-            BinOp::Add | BinOp::Sub => 1,
-            BinOp::Mul | BinOp::Div => 2,
-            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => 3,
+    fn bin_op_from_token(token: &TokenKind) -> Option<(BinOp, u8)> {
+        match token {
+            TokenKind::Plus => Some((BinOp::Add, 1)),
+            TokenKind::Minus => Some((BinOp::Sub, 1)),
+            TokenKind::Star => Some((BinOp::Mul, 2)),
+            TokenKind::Slash => Some((BinOp::Div, 2)),
+            TokenKind::EqEq => Some((BinOp::Eq, 3)),
+            TokenKind::NotEq => Some((BinOp::Ne, 3)),
+            TokenKind::LessThan => Some((BinOp::Lt, 3)),
+            TokenKind::GreaterThan => Some((BinOp::Gt, 3)),
+            TokenKind::LessThanEq => Some((BinOp::LtEq, 3)),
+            TokenKind::GreaterThanEq => Some((BinOp::GtEq, 3)),
+            _ => None,
         }
     }
 
