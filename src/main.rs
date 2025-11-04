@@ -1,15 +1,16 @@
-use crate::codegen::CodegenError;
-use crate::lexer::{LexError, Lexer, TokenKind};
-use crate::parser::{Parser, ParserError};
-use crate::sem_analysis::SemError;
-use thiserror::Error;
-
 mod ast;
 mod codegen;
+mod diagnostics;
 mod lexer;
 mod parser;
 mod sem_analysis;
 mod type_check;
+
+use crate::codegen::CodegenError;
+use crate::lexer::{LexError, Lexer, Token};
+use crate::parser::{Parser, ParserError};
+use crate::sem_analysis::SemError;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 enum CompileError {
@@ -63,10 +64,10 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokens()
-        .collect::<Result<Vec<TokenKind>, LexError>>()
+        .collect::<Result<Vec<Token>, LexError>>()
         .map_err(|e| vec![e.into()])?;
 
-    let mut parser = Parser::new(tokens.into_iter());
+    let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
     // println!("AST:\n{:#?}", module);
 

@@ -11,6 +11,7 @@ pub struct Codegen {
 }
 
 struct CodegenVar {
+    #[allow(unused)]
     name: String,
     stack_offset: u32,
 }

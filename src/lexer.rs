@@ -1,7 +1,14 @@
+use crate::diagnostics::Span;
 use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
 use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum TokenKind {
@@ -41,6 +48,7 @@ pub enum LexError {
 pub struct Lexer<'a> {
     source: Peekable<Chars<'a>>,
     pos: usize,
+    at_eof: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -48,6 +56,7 @@ impl<'a> Lexer<'a> {
         Lexer {
             source: source.chars().peekable(),
             pos: 0,
+            at_eof: false,
         }
     }
 
@@ -64,9 +73,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> Result<TokenKind, LexError> {
+    pub fn next_token(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace();
-        match self.source.peek() {
+
+        let start = self.pos;
+        let kind = match self.source.peek() {
             Some(&ch) if ch.is_alphabetic() => {
                 let mut ident = String::new();
                 while let Some(&ch) = self.source.peek()
@@ -176,21 +187,31 @@ impl<'a> Lexer<'a> {
                 }
             }
             Some(&ch) => Err(LexError::UnexpectedCharacter(ch)),
-            None => Ok(TokenKind::Eof),
-        }
+            None => {
+                self.at_eof = true;
+                Ok(TokenKind::Eof)
+            }
+        }?;
+        let end = self.pos;
+        Ok(Token {
+            kind,
+            span: Span::new(start, end),
+        })
     }
 
-    pub fn tokens(self) -> impl Iterator<Item = Result<TokenKind, LexError>> {
+    pub fn tokens(self) -> impl Iterator<Item = Result<Token, LexError>> {
         self
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<TokenKind, LexError>;
+    type Item = Result<Token, LexError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.at_eof {
+            return None;
+        }
         match self.next_token() {
-            Ok(TokenKind::Eof) => None,
             Ok(token) => Some(Ok(token)),
             Err(error) => Some(Err(error)),
         }

@@ -1,7 +1,6 @@
 use crate::ast::{BinOp, Expr, Function, FunctionParam, Module, Type, UnaryOp};
-use crate::lexer::{LexError, Lexer, TokenKind};
+use crate::lexer::{Token, TokenKind};
 use std::collections::HashMap;
-use std::iter::Peekable;
 use std::sync::LazyLock;
 use thiserror::Error;
 
@@ -25,84 +24,84 @@ static BINARY_OPS_MAP: LazyLock<HashMap<TokenKind, BinOp>> = LazyLock::new(|| {
 #[derive(Debug, Error)]
 pub enum ParserError {
     #[error("Expected {0:?}, found: {1:?}")]
-    ExpectedFound(TokenKind, TokenKind),
+    ExpectedToken(TokenKind, Token),
 
     #[error("Expected {0}, found: {1:?}")]
-    ExpectedKeyword(String, TokenKind),
+    ExpectedKeyword(String, Token),
 
     #[error("Expected identifier, found: {0:?}")]
-    ExpectedIdent(TokenKind),
+    ExpectedIdent(Token),
 
     #[error("Expected type, found: {0:?}")]
-    ExpectedType(TokenKind),
+    ExpectedType(Token),
 
     #[error("Expected primary expression, found: {0:?}")]
-    ExpectedPrimary(TokenKind),
+    ExpectedPrimary(Token),
 
     #[error("Unexpected token: {0:?}")]
-    UnexpectedToken(TokenKind),
+    UnexpectedToken(Token),
 }
 
-pub struct Parser<I>
-where
-    I: Iterator<Item = TokenKind>,
-{
-    tokens: Peekable<I>,
-    curr_token: Option<TokenKind>,
+pub struct Parser<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+    curr_token: &'a Token,
 }
 
-impl<I> Parser<I>
-where
-    I: Iterator<Item = TokenKind>,
-{
-    pub fn new(tokens: I) -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(tokens: &'a [Token]) -> Self {
         Parser {
-            tokens: tokens.peekable(),
-            curr_token: None,
+            tokens,
+            pos: 0,
+            curr_token: &tokens[0],
         }
     }
 
     fn advance(&mut self) {
-        self.curr_token = self.tokens.next();
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+            self.curr_token = &self.tokens[self.pos];
+        }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        if self.pos + 1 < self.tokens.len() {
+            Some(&self.tokens[self.pos + 1])
+        } else {
+            None
+        }
     }
 
     fn consume(&mut self, expected: &TokenKind) -> Result<(), ParserError> {
-        match &self.curr_token {
-            Some(token) if token == expected => {
-                self.advance();
-                Ok(())
-            }
-            Some(token) => Err(ParserError::ExpectedFound(expected.clone(), token.clone())),
-            None => Err(ParserError::ExpectedFound(expected.clone(), TokenKind::Eof)),
+        if self.curr_token.kind == *expected {
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParserError::ExpectedToken(
+                expected.clone(),
+                self.curr_token.clone(),
+            ))
         }
     }
 
     fn consume_keyword(&mut self, expected: &str) -> Result<(), ParserError> {
-        match &self.curr_token {
-            Some(TokenKind::Ident(name)) if name == expected => {
-                self.advance();
-                Ok(())
-            }
-            Some(token) => Err(ParserError::ExpectedKeyword(
+        if self.curr_token.kind == TokenKind::Ident(expected.to_string()) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParserError::ExpectedKeyword(
                 expected.to_string(),
-                token.clone(),
-            )),
-            None => Err(ParserError::ExpectedKeyword(
-                expected.to_string(),
-                TokenKind::Eof,
-            )),
+                self.curr_token.clone(),
+            ))
         }
     }
 
     fn parse_ident(&mut self) -> Result<String, ParserError> {
-        match &self.curr_token {
-            Some(TokenKind::Ident(name)) => {
-                let name = name.clone();
-                self.advance();
-                Ok(name)
-            }
-            Some(token) => Err(ParserError::ExpectedIdent(token.clone())),
-            None => Err(ParserError::ExpectedIdent(TokenKind::Eof)),
+        if let TokenKind::Ident(name) = &self.curr_token.kind {
+            self.advance();
+            Ok(name.clone())
+        } else {
+            Err(ParserError::ExpectedIdent(self.curr_token.clone()))
         }
     }
 
@@ -113,9 +112,9 @@ where
         mut parse_item: impl FnMut(&mut Self) -> Result<T, ParserError>,
     ) -> Result<Vec<T>, ParserError> {
         let mut items = Vec::new();
-        while self.curr_token != Some(end_token.clone()) {
+        while self.curr_token.kind != end_token {
             items.push(parse_item(self)?);
-            if self.curr_token == Some(sep_token.clone()) {
+            if self.curr_token.kind == sep_token {
                 self.advance();
             }
         }
@@ -135,8 +134,8 @@ where
         self.consume(&TokenKind::RParen)?;
 
         // Parse return type (default to unit if not specified)
-        let return_type = match self.curr_token {
-            Some(TokenKind::Arrow) => {
+        let return_type = match self.curr_token.kind {
+            TokenKind::Arrow => {
                 self.advance();
                 self.parse_type()?
             }
@@ -164,43 +163,38 @@ where
     }
 
     fn parse_type(&mut self) -> Result<Type, ParserError> {
-        let typ = match &self.curr_token {
-            Some(TokenKind::LParen) if self.tokens.peek() == Some(&TokenKind::RParen) => {
-                self.advance();
+        let result = match &self.curr_token.kind {
+            TokenKind::LParen if self.peek().map(|t| &t.kind) == Some(&TokenKind::RParen) => {
                 self.advance();
                 Ok(Type::Unit)
             }
-            Some(TokenKind::Ident(name)) if name == "u32" => Ok(Type::UInt32),
-            Some(TokenKind::Ident(name)) if name == "bool" => Ok(Type::Bool),
-            Some(token) => Err(ParserError::ExpectedType(token.clone())),
-            None => Err(ParserError::ExpectedType(TokenKind::Eof)),
+            TokenKind::Ident(name) if name == "u32" => Ok(Type::UInt32),
+            TokenKind::Ident(name) if name == "bool" => Ok(Type::Bool),
+            _ => Err(ParserError::ExpectedType(self.curr_token.clone())),
         };
-        match typ {
-            Ok(typ) => {
-                self.advance();
-                Ok(typ)
-            }
-            Err(e) => Err(e),
-        }
+        result.map(|typ| {
+            self.advance();
+            typ
+        })
     }
 
     fn parse_block(&mut self) -> Result<Vec<Expr>, ParserError> {
         let mut body = Vec::new();
-        while self.curr_token != Some(TokenKind::RBrace) {
-            let expr = match &self.curr_token {
-                Some(TokenKind::Ident(name)) if name == "let" => self.parse_let(),
-                Some(TokenKind::Ident(name)) if name == "var" => self.parse_var(),
-                Some(TokenKind::Ident(_)) if self.tokens.peek() == Some(&TokenKind::Equals) => {
-                    self.parse_assign()
+        while self.curr_token.kind != TokenKind::RBrace {
+            let expr = match &self.curr_token.kind {
+                TokenKind::Ident(name) if name == "let" => self.parse_let()?,
+                TokenKind::Ident(name) if name == "var" => self.parse_var()?,
+                TokenKind::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TokenKind::Equals) => {
+                    self.parse_assign()?
                 }
-                _ => self.parse_expr(0),
+                _ => self.parse_expr(0)?,
             };
             body.push(expr);
-            if self.curr_token == Some(TokenKind::Semicolon) {
+            if self.curr_token.kind == TokenKind::Semicolon {
                 self.advance();
             }
         }
-        body.into_iter().collect()
+        Ok(body)
     }
 
     fn parse_let(&mut self) -> Result<Expr, ParserError> {
@@ -268,51 +262,51 @@ where
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParserError> {
-        match self.curr_token.clone() {
-            Some(TokenKind::Ident(name)) if name == "if" => self.parse_if(),
-            Some(TokenKind::Ident(name)) if name == "while" => self.parse_while(),
-            Some(TokenKind::Ident(name)) if self.tokens.peek() == Some(&TokenKind::LParen) => {
+        match &self.curr_token.kind {
+            TokenKind::Ident(name) if name == "if" => self.parse_if(),
+            TokenKind::Ident(name) if name == "while" => self.parse_while(),
+            TokenKind::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TokenKind::LParen) => {
+                let func_name = name.to_string();
                 self.advance();
-                self.parse_call(name)
+                self.parse_call(func_name)
             }
-            Some(TokenKind::Ident(name)) => {
+            TokenKind::Ident(name) => {
                 self.advance();
                 match name.as_str() {
                     "true" => Ok(Expr::BoolLit(true)),
                     "false" => Ok(Expr::BoolLit(false)),
-                    _ => Ok(Expr::VarRef(name)),
+                    _ => Ok(Expr::VarRef(name.clone())),
                 }
             }
-            Some(TokenKind::IntLit(value)) => {
+            TokenKind::IntLit(value) => {
                 self.advance();
-                Ok(Expr::UInt32Lit(value))
+                Ok(Expr::UInt32Lit(*value))
             }
-            Some(TokenKind::LParen) if self.tokens.peek() == Some(&TokenKind::RParen) => {
+            TokenKind::LParen if self.peek().map(|t| &t.kind) == Some(&TokenKind::RParen) => {
                 self.advance();
                 self.advance();
                 Ok(Expr::UnitLit)
             }
-            Some(TokenKind::LParen) => {
+            TokenKind::LParen => {
                 // Parenthesized expression
                 self.advance();
                 let inner = self.parse_expr(0)?;
                 self.consume(&TokenKind::RParen)?;
                 Ok(inner)
             }
-            Some(TokenKind::LBrace) => {
+            TokenKind::LBrace => {
                 // Block expression
                 self.advance();
                 let body = self.parse_block()?;
                 self.consume(&TokenKind::RBrace)?;
                 Ok(Expr::Block(body))
             }
-            Some(token) => Err(ParserError::ExpectedPrimary(token.clone())),
-            None => Err(ParserError::ExpectedPrimary(TokenKind::Eof)),
+            _ => Err(ParserError::ExpectedPrimary(self.curr_token.clone())),
         }
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParserError> {
-        let mut left = if self.curr_token == Some(TokenKind::Minus) {
+        let mut left = if self.curr_token.kind == TokenKind::Minus {
             self.advance();
             let operand = self.parse_expr(10)?; // highest binding power
             Expr::UnaryOp {
@@ -323,8 +317,8 @@ where
             self.parse_primary()?
         };
 
-        while let Some(token) = &self.curr_token {
-            if let Some(&op) = BINARY_OPS_MAP.get(token) {
+        while self.curr_token.kind != TokenKind::Eof {
+            if let Some(&op) = BINARY_OPS_MAP.get(&self.curr_token.kind) {
                 let bp = Self::binding_power(op);
                 if bp < min_bp {
                     break;
@@ -352,16 +346,13 @@ where
     }
 
     pub fn parse(&mut self) -> Result<Module, ParserError> {
-        self.advance();
         let mut functions = Vec::new();
-        while let Some(TokenKind::Ident(name)) = &self.curr_token
-            && name == "fn"
-        {
+        while self.curr_token.kind == TokenKind::Ident("fn".to_string()) {
             functions.push(self.parse_function()?);
         }
-        match &self.curr_token {
-            None => Ok(Module { funcs: functions }),
-            Some(token) => Err(ParserError::UnexpectedToken(token.clone())),
+        if self.curr_token.kind != TokenKind::Eof {
+            return Err(ParserError::UnexpectedToken(self.curr_token.clone()));
         }
+        Ok(Module { funcs: functions })
     }
 }
