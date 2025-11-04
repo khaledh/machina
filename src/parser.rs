@@ -39,7 +39,7 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) {
-        if self.pos < self.tokens.len() {
+        if self.pos + 1 < self.tokens.len() {
             self.pos += 1;
             self.curr_token = &self.tokens[self.pos];
         }
