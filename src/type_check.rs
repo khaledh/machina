@@ -1,15 +1,49 @@
 use crate::ast::{BinOp, Expr, Function, Module, Type};
 use std::collections::HashMap;
+use thiserror::Error;
 
 struct FuncSig {
     params: Vec<Type>,
     return_type: Type,
 }
 
+#[derive(Debug, Error, Clone)]
+pub enum TypeCheckError {
+    #[error("Undefined variable: {0}")]
+    VarUndefined(String),
+
+    #[error("Undefined function: {0}")]
+    FuncUndefined(String),
+
+    #[error("Type mismatch: expected {0:?}, found {1:?}")]
+    FuncReturnTypeMismatch(Type, Type),
+
+    #[error("Invalid types for arithmetic operation: {0:?} != {1:?}")]
+    ArithTypeMismatch(Type, Type),
+
+    #[error("Invalid types for comparison operation: {0:?} != {1:?}")]
+    CmpTypeMismatch(Type, Type),
+
+    #[error("Condition must be a boolean, found {0:?}")]
+    CondTypeMismatch(Type),
+
+    #[error("Then and else branches have different types: {0:?} != {1:?}")]
+    ThenElseTypeMismatch(Type, Type),
+
+    #[error("Type mismatch in assignment: lhs type {0:?} != rhs type {1:?}")]
+    AssignTypeMismatch(Type, Type),
+
+    #[error("Invalid argument count for function {0}: expected {1}, found {2}")]
+    ArgCountMismatch(String, usize, usize),
+
+    #[error("Type mismatch in argument {0} for function {1}: expected {2:?}, found {3:?}")]
+    ArgTypeMismatch(usize, String, Type, Type),
+}
+
 pub struct TypeChecker {
     vars: HashMap<String, Type>,
     funcs: HashMap<String, FuncSig>,
-    errors: Vec<String>,
+    errors: Vec<TypeCheckError>,
 }
 
 impl TypeChecker {
@@ -33,7 +67,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn type_check(&mut self, module: &Module) -> Result<(), Vec<String>> {
+    pub fn type_check(&mut self, module: &Module) -> Result<(), Vec<TypeCheckError>> {
         self.populate_function_symbols(&module.funcs);
 
         for function in &module.funcs {
@@ -47,7 +81,10 @@ impl TypeChecker {
         }
     }
 
-    pub fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<String>> {
+    pub fn type_check_function(
+        &mut self,
+        function: &Function,
+    ) -> Result<Type, Vec<TypeCheckError>> {
         self.vars.clear();
         for param in &function.params {
             self.vars.insert(param.name.clone(), param.typ.clone());
@@ -55,9 +92,9 @@ impl TypeChecker {
 
         let return_type = self.type_check_expr(&function.body).map_err(|e| vec![e])?;
         if return_type != function.return_type {
-            self.errors.push(format!(
-                "Return type mismatch: expected {:?}, found {:?}",
-                function.return_type, return_type
+            self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
+                function.return_type.clone(),
+                return_type.clone(),
             ));
         }
 
@@ -68,7 +105,7 @@ impl TypeChecker {
         }
     }
 
-    fn type_check_call(&mut self, name: &str, args: &Vec<Expr>) -> Result<Type, String> {
+    fn type_check_call(&mut self, name: &str, args: &Vec<Expr>) -> Result<Type, TypeCheckError> {
         // Compute argument types first to avoid holding an immutable borrow of self.funcs
         let mut arg_types = Vec::new();
         for arg in args {
@@ -77,28 +114,31 @@ impl TypeChecker {
         }
         // Get function signature
         let Some(func_sig) = self.funcs.get(name) else {
-            return Err(format!("Undefined function: {name}"));
+            return Err(TypeCheckError::FuncUndefined(name.to_string()));
         };
         // Check number of arguments
         if arg_types.len() != func_sig.params.len() {
-            return Err(format!(
-                "Invalid number of arguments for function: {name}, expected: {:?}, found: {:?}",
-                func_sig.params, arg_types
+            return Err(TypeCheckError::ArgCountMismatch(
+                name.to_string(),
+                func_sig.params.len(),
+                arg_types.len(),
             ));
         }
         // Check argument types
         for (i, arg_type) in arg_types.iter().enumerate() {
             if arg_type != &func_sig.params[i] {
-                return Err(format!(
-                    "Type mismatch in argument {i} for function: {name}, expected: {:?}, found: {:?}",
-                    func_sig.params[i], arg_type
+                return Err(TypeCheckError::ArgTypeMismatch(
+                    i,
+                    name.to_string(),
+                    func_sig.params[i].clone(),
+                    arg_type.clone(),
                 ));
             }
         }
         Ok(func_sig.return_type.clone())
     }
 
-    fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, String> {
+    fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
         match expr {
             Expr::UInt32Lit(_) => Ok(Type::UInt32),
             Expr::BoolLit(_) => Ok(Type::Bool),
@@ -110,20 +150,14 @@ impl TypeChecker {
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                         if left_type != Type::UInt32 || right_type != Type::UInt32 {
-                            Err(format!(
-                                "Invalid types for arithmetic operation: {:?} != {:?}",
-                                left_type, right_type
-                            ))
+                            Err(TypeCheckError::ArithTypeMismatch(left_type, right_type))
                         } else {
                             Ok(Type::UInt32)
                         }
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
                         if left_type != right_type {
-                            Err(format!(
-                                "Invalid types for comparison operation: {:?} != {:?}",
-                                left_type, right_type
-                            ))
+                            Err(TypeCheckError::CmpTypeMismatch(left_type, right_type))
                         } else {
                             Ok(Type::Bool)
                         }
@@ -150,7 +184,7 @@ impl TypeChecker {
                 if let Some(expr_type) = self.vars.get(name) {
                     Ok(expr_type.clone())
                 } else {
-                    Err(format!("Undefined variable: {name}"))
+                    Err(TypeCheckError::VarUndefined(name.clone()))
                 }
             }
             Expr::If {
@@ -160,18 +194,12 @@ impl TypeChecker {
             } => {
                 let cond_type = self.type_check_expr(cond)?;
                 if cond_type != Type::Bool {
-                    Err(format!(
-                        "Condition must be a boolean, found {:?}",
-                        cond_type
-                    ))
+                    Err(TypeCheckError::CondTypeMismatch(cond_type))
                 } else {
                     let then_type = self.type_check_expr(then_body)?;
                     let else_type = self.type_check_expr(else_body)?;
                     if then_type != else_type {
-                        Err(format!(
-                            "Then and else branches have different types: {:?} != {:?}",
-                            then_type, else_type
-                        ))
+                        Err(TypeCheckError::ThenElseTypeMismatch(then_type, else_type))
                     } else {
                         Ok(then_type)
                     }
@@ -180,10 +208,7 @@ impl TypeChecker {
             Expr::While { cond, body } => {
                 let cond_type = self.type_check_expr(cond)?;
                 if cond_type != Type::Bool {
-                    Err(format!(
-                        "Condition must be a boolean, found {:?}",
-                        cond_type
-                    ))
+                    Err(TypeCheckError::CondTypeMismatch(cond_type))
                 } else {
                     let _ = self.type_check_expr(body)?;
                     Ok(Type::Unit)
@@ -199,15 +224,12 @@ impl TypeChecker {
                     let lhs_type = lhs_type.clone();
                     let rhs_type = self.type_check_expr(value)?;
                     if lhs_type != rhs_type {
-                        Err(format!(
-                            "Type mismatch in assignment: lhs type {:?} != rhs type {:?}",
-                            lhs_type, rhs_type
-                        ))
+                        Err(TypeCheckError::AssignTypeMismatch(lhs_type, rhs_type))
                     } else {
                         Ok(Type::Unit)
                     }
                 }
-                None => Err(format!("Undefined variable: {name}")),
+                None => Err(TypeCheckError::VarUndefined(name.clone())),
             },
             Expr::Call { name, args } => self.type_check_call(name, args),
         }

@@ -10,6 +10,7 @@ use crate::codegen::CodegenError;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parser::{Parser, ParserError};
 use crate::sem_analysis::SemError;
+use crate::type_check::TypeCheckError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,8 +24,8 @@ enum CompileError {
     #[error("Semantic analysis errors: {0:#?}")]
     SemError(Vec<SemError>),
 
-    #[error("Type check error: {0}")]
-    TypeCheckError(String),
+    #[error("Type check errors: {0:#?}")]
+    TypeCheckError(Vec<TypeCheckError>),
 
     #[error(transparent)]
     CodegenError(#[from] CodegenError),
@@ -78,7 +79,7 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let mut type_checker = type_check::TypeChecker::new();
     type_checker
         .type_check(&module)
-        .map_err(|e| vec![CompileError::TypeCheckError(e.join("\n"))])?;
+        .map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
 
     let mut codegen = codegen::Codegen::new(&module);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
