@@ -1,4 +1,6 @@
-use crate::diagnostics::Span;
+use crate::diagnostics::{Position, Span};
+use enum_display::EnumDisplay;
+use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
 use std::num::ParseIntError;
 use std::str::Chars;
@@ -10,44 +12,81 @@ pub struct Token {
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+impl Display for Token {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, EnumDisplay)]
 pub enum TokenKind {
+    #[display("{0}")]
     Ident(String),
+    #[display("{0}")]
     IntLit(u32),
+    #[display("(")]
     LParen,
+    #[display(")")]
     RParen,
+    #[display("{{")]
     LBrace,
+    #[display("}}")]
     RBrace,
+    #[display("->")]
     Arrow,
+    #[display("+")]
     Plus,
+    #[display("-")]
     Minus,
+    #[display("*")]
     Star,
+    #[display("/")]
     Slash,
+    #[display(",")]
     Comma,
+    #[display(":")]
     Colon,
+    #[display(";")]
     Semicolon,
+    #[display("=")]
     Equals,
+    #[display("==")]
     EqEq,
+    #[display("!=")]
     NotEq,
+    #[display("<")]
     LessThan,
+    #[display(">")]
     GreaterThan,
+    #[display("<=")]
     LessThanEq,
+    #[display(">=")]
     GreaterThanEq,
+    #[display("EOF")]
     Eof,
 }
 
 #[derive(Debug, Error)]
 pub enum LexError {
     #[error("Unexpected character: {0}")]
-    UnexpectedCharacter(char),
+    UnexpectedCharacter(char, Span),
 
     #[error("Invalid integer: {0}")]
-    InvalidInteger(ParseIntError),
+    InvalidInteger(ParseIntError, Span),
+}
+
+impl LexError {
+    pub fn span(&self) -> Span {
+        match self {
+            LexError::UnexpectedCharacter(_, span) => *span,
+            LexError::InvalidInteger(_, span) => *span,
+        }
+    }
 }
 
 pub struct Lexer<'a> {
     source: Peekable<Chars<'a>>,
-    pos: usize,
+    pos: Position,
     at_eof: bool,
 }
 
@@ -55,14 +94,30 @@ impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
         Lexer {
             source: source.chars().peekable(),
-            pos: 0,
+            pos: Position {
+                offset: 0,
+                line: 1,
+                column: 1,
+            },
             at_eof: false,
         }
     }
 
     fn advance(&mut self) {
-        self.source.next();
-        self.pos += 1;
+        match self.source.next() {
+            Some(ch) => {
+                self.pos.offset += 1;
+                if ch == '\n' {
+                    self.pos.line += 1;
+                    self.pos.column = 1;
+                } else {
+                    self.pos.column += 1;
+                }
+            }
+            None => {
+                self.at_eof = true;
+            }
+        }
     }
 
     fn skip_whitespace(&mut self) {
@@ -76,7 +131,11 @@ impl<'a> Lexer<'a> {
     pub fn next_token(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace();
 
-        let start = self.pos;
+        let start = Position {
+            offset: self.pos.offset,
+            line: self.pos.line,
+            column: self.pos.column,
+        };
         let kind = match self.source.peek() {
             Some(&ch) if ch.is_alphabetic() => {
                 let mut ident = String::new();
@@ -98,7 +157,7 @@ impl<'a> Lexer<'a> {
                 }
                 let value = num_str
                     .parse::<u32>()
-                    .map_err(|e| LexError::InvalidInteger(e))?;
+                    .map_err(|e| LexError::InvalidInteger(e, Span::new(start, self.pos)))?;
                 Ok(TokenKind::IntLit(value))
             }
             Some(&'-') => {
@@ -165,7 +224,10 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(TokenKind::NotEq)
                 } else {
-                    Err(LexError::UnexpectedCharacter('!'))
+                    Err(LexError::UnexpectedCharacter(
+                        '!',
+                        Span::new(start, self.pos),
+                    ))
                 }
             }
             Some(&'<') => {
@@ -186,13 +248,20 @@ impl<'a> Lexer<'a> {
                     Ok(TokenKind::GreaterThan)
                 }
             }
-            Some(&ch) => Err(LexError::UnexpectedCharacter(ch)),
+            Some(&ch) => Err(LexError::UnexpectedCharacter(
+                ch,
+                Span::new(start, self.pos),
+            )),
             None => {
                 self.at_eof = true;
                 Ok(TokenKind::Eof)
             }
         }?;
-        let end = self.pos;
+        let end = Position {
+            offset: self.pos.offset,
+            line: self.pos.line,
+            column: self.pos.column,
+        };
         Ok(Token {
             kind,
             span: Span::new(start, end),

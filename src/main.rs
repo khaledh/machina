@@ -6,33 +6,15 @@ mod parser;
 mod sem_analysis;
 mod type_check;
 
-use crate::codegen::CodegenError;
+use crate::codegen::Codegen;
+use crate::diagnostics::{CompileError, format_error};
 use crate::lexer::{LexError, Lexer, Token};
-use crate::parser::{Parser, ParserError};
-use crate::sem_analysis::SemError;
-use crate::type_check::TypeCheckError;
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-enum CompileError {
-    #[error(transparent)]
-    LexError(#[from] LexError),
-
-    #[error(transparent)]
-    ParserError(#[from] ParserError),
-
-    #[error("Semantic analysis errors: {0:#?}")]
-    SemError(Vec<SemError>),
-
-    #[error("Type check errors: {0:#?}")]
-    TypeCheckError(Vec<TypeCheckError>),
-
-    #[error(transparent)]
-    CodegenError(#[from] CodegenError),
-}
+use crate::parser::Parser;
+use crate::sem_analysis::SemanticAnalyzer;
+use crate::type_check::TypeChecker;
 
 const SOURCE: &str = r#"
-fn inc(a: u32) -> u32 {
+fn inc(a: u32) u32 {
     a + 1
 }
 
@@ -55,7 +37,17 @@ fn main() {
         },
         Err(errors) => {
             for error in errors {
-                println!("{error}");
+                match error {
+                    CompileError::LexError(e) => {
+                        println!("[ERROR] {}", format_error(SOURCE, e.span(), e));
+                    }
+                    CompileError::ParserError(e) => {
+                        println!("[ERROR] {}", format_error(SOURCE, e.span(), e));
+                    }
+                    error => {
+                        println!("{error:?}");
+                    }
+                }
             }
         }
     }
@@ -72,16 +64,16 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let module = parser.parse().map_err(|e| vec![e.into()])?;
     // println!("AST:\n{:#?}", module);
 
-    let mut sem = sem_analysis::SemanticAnalyzer::new();
+    let mut sem = SemanticAnalyzer::new();
     sem.analyze(&module)
         .map_err(|errs| vec![CompileError::SemError(errs)])?;
 
-    let mut type_checker = type_check::TypeChecker::new();
+    let mut type_checker = TypeChecker::new();
     type_checker
         .type_check(&module)
         .map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
 
-    let mut codegen = codegen::Codegen::new(&module);
+    let mut codegen = Codegen::new(&module);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
 
     Ok(asm)

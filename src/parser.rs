@@ -1,26 +1,36 @@
 use crate::ast::{BinOp, Expr, Function, FunctionParam, Module, Type, UnaryOp};
+use crate::diagnostics::Span;
 use crate::lexer::{Token, TokenKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ParserError {
-    #[error("Expected {0:?}, found: {1:?}")]
+    #[error("Expected {0}, found: {1}")]
     ExpectedToken(TokenKind, Token),
 
-    #[error("Expected {0}, found: {1:?}")]
+    #[error("Expected keyword {0}, found: {1}")]
     ExpectedKeyword(String, Token),
 
-    #[error("Expected identifier, found: {0:?}")]
+    #[error("Expected identifier, found: {0}")]
     ExpectedIdent(Token),
 
-    #[error("Expected type, found: {0:?}")]
+    #[error("Expected type, found: {0}")]
     ExpectedType(Token),
 
-    #[error("Expected primary expression, found: {0:?}")]
+    #[error("Expected primary expression, found: {0}")]
     ExpectedPrimary(Token),
+}
 
-    #[error("Unexpected token: {0:?}")]
-    UnexpectedToken(Token),
+impl ParserError {
+    pub fn span(&self) -> Span {
+        match self {
+            ParserError::ExpectedToken(_, token) => token.span,
+            ParserError::ExpectedKeyword(_, token) => token.span,
+            ParserError::ExpectedIdent(token) => token.span,
+            ParserError::ExpectedType(token) => token.span,
+            ParserError::ExpectedPrimary(token) => token.span,
+        }
+    }
 }
 
 pub struct Parser<'a> {
@@ -124,7 +134,9 @@ impl<'a> Parser<'a> {
         };
 
         // Parse function body
+        self.consume(&TokenKind::LBrace)?;
         let body = self.parse_expr(0)?;
+        self.consume(&TokenKind::RBrace)?;
 
         Ok(Function {
             name,
@@ -331,11 +343,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse(&mut self) -> Result<Module, ParserError> {
         let mut functions = Vec::new();
-        while matches!(&self.curr_token.kind, TokenKind::Ident(name) if name == "fn") {
+        while self.curr_token.kind != TokenKind::Eof {
             functions.push(self.parse_function()?);
-        }
-        if self.curr_token.kind != TokenKind::Eof {
-            return Err(ParserError::UnexpectedToken(self.curr_token.clone()));
         }
         Ok(Module { funcs: functions })
     }
