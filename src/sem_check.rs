@@ -22,7 +22,7 @@ pub struct Scope {
 }
 
 #[derive(Clone, Debug, Error)]
-pub enum SemError {
+pub enum SemCheckError {
     #[error("Variable already defined in current scope: {0}")]
     VarAlreadyDefined(String, Span),
 
@@ -36,23 +36,23 @@ pub enum SemError {
     FuncUndefined(String, Span),
 }
 
-impl SemError {
+impl SemCheckError {
     pub fn span(&self) -> Span {
         match self {
-            SemError::VarAlreadyDefined(_, span) => *span,
-            SemError::VarUndefined(_, span) => *span,
-            SemError::VarImmutable(_, span) => *span,
-            SemError::FuncUndefined(_, span) => *span,
+            SemCheckError::VarAlreadyDefined(_, span) => *span,
+            SemCheckError::VarUndefined(_, span) => *span,
+            SemCheckError::VarImmutable(_, span) => *span,
+            SemCheckError::FuncUndefined(_, span) => *span,
         }
     }
 }
 
-pub struct SemanticAnalyzer {
+pub struct SemanticChecker {
     scopes: Vec<Scope>,
-    errors: Vec<SemError>,
+    errors: Vec<SemCheckError>,
 }
 
-impl SemanticAnalyzer {
+impl SemanticChecker {
     pub fn new() -> Self {
         Self {
             scopes: Vec::new(),
@@ -112,12 +112,12 @@ impl SemanticAnalyzer {
         }
     }
 
-    pub fn analyze(&mut self, module: &Module) -> Result<(), Vec<SemError>> {
-        self.with_scope(|analyzer| {
+    pub fn check(&mut self, module: &Module) -> Result<(), Vec<SemCheckError>> {
+        self.with_scope(|checker| {
             // global scope
-            analyzer.populate_funcs(&module.funcs);
+            checker.populate_funcs(&module.funcs);
             for function in &module.funcs {
-                analyzer.analyze_function(&function);
+                checker.check_function(&function);
             }
         });
 
@@ -128,11 +128,11 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn analyze_function(&mut self, function: &ast::Function) {
-        self.with_scope(|analyzer| {
+    fn check_function(&mut self, function: &ast::Function) {
+        self.with_scope(|checker| {
             // add parameters to scope
             for param in &function.params {
-                analyzer.insert_symbol(
+                checker.insert_symbol(
                     &param.name,
                     Symbol {
                         name: param.name.clone(),
@@ -140,12 +140,12 @@ impl SemanticAnalyzer {
                     },
                 );
             }
-            // analyze function body
-            analyzer.analyze_expr(&function.body);
+            // check function body
+            checker.check_expr(&function.body);
         });
     }
 
-    fn analyze_expr(&mut self, expr: &ast::Expr) {
+    fn check_expr(&mut self, expr: &ast::Expr) {
         match expr {
             ast::Expr {
                 kind: ExprKind::UInt32Lit(_),
@@ -163,24 +163,24 @@ impl SemanticAnalyzer {
                 kind: ExprKind::BinOp { left, right, .. },
                 ..
             } => {
-                self.analyze_expr(left);
-                self.analyze_expr(right);
+                self.check_expr(left);
+                self.check_expr(right);
             }
 
             ast::Expr {
                 kind: ExprKind::UnaryOp { expr, .. },
                 ..
             } => {
-                self.analyze_expr(expr);
+                self.check_expr(expr);
             }
 
             ast::Expr {
                 kind: ExprKind::Block(body),
                 ..
             } => {
-                self.with_scope(|analyzer| {
+                self.with_scope(|checker| {
                     for expr in body {
-                        analyzer.analyze_expr(expr);
+                        checker.check_expr(expr);
                     }
                 });
             }
@@ -190,10 +190,12 @@ impl SemanticAnalyzer {
                 ..
             } => {
                 if self.lookup_symbol_direct(name).is_some() {
-                    self.errors
-                        .push(SemError::VarAlreadyDefined(name.to_string(), expr.span));
+                    self.errors.push(SemCheckError::VarAlreadyDefined(
+                        name.to_string(),
+                        expr.span,
+                    ));
                 } else {
-                    self.analyze_expr(value);
+                    self.check_expr(value);
                     self.insert_symbol(
                         name,
                         Symbol {
@@ -209,10 +211,12 @@ impl SemanticAnalyzer {
                 ..
             } => {
                 if self.lookup_symbol_direct(name).is_some() {
-                    self.errors
-                        .push(SemError::VarAlreadyDefined(name.to_string(), expr.span));
+                    self.errors.push(SemCheckError::VarAlreadyDefined(
+                        name.to_string(),
+                        expr.span,
+                    ));
                 } else {
-                    self.analyze_expr(value);
+                    self.check_expr(value);
                     self.insert_symbol(
                         name,
                         Symbol {
@@ -229,7 +233,7 @@ impl SemanticAnalyzer {
             } => {
                 if self.lookup_symbol(name).is_none() {
                     self.errors
-                        .push(SemError::VarUndefined(name.to_string(), expr.span));
+                        .push(SemCheckError::VarUndefined(name.to_string(), expr.span));
                 }
             }
 
@@ -242,9 +246,9 @@ impl SemanticAnalyzer {
                     },
                 ..
             } => {
-                self.analyze_expr(cond);
-                self.analyze_expr(then_body);
-                self.analyze_expr(else_body);
+                self.check_expr(cond);
+                self.check_expr(then_body);
+                self.check_expr(else_body);
             }
 
             ast::Expr {
@@ -252,11 +256,11 @@ impl SemanticAnalyzer {
                 ..
             } => match self.lookup_symbol(name) {
                 Some(symbol) if symbol.kind == SymbolKind::Var { is_mutable: true } => {
-                    self.analyze_expr(value)
+                    self.check_expr(value)
                 }
                 _ => {
                     self.errors
-                        .push(SemError::VarImmutable(name.to_string(), expr.span));
+                        .push(SemCheckError::VarImmutable(name.to_string(), expr.span));
                 }
             },
 
@@ -264,8 +268,8 @@ impl SemanticAnalyzer {
                 kind: ExprKind::While { cond, body },
                 ..
             } => {
-                self.analyze_expr(cond);
-                self.analyze_expr(body);
+                self.check_expr(cond);
+                self.check_expr(body);
             }
 
             ast::Expr {
@@ -278,10 +282,10 @@ impl SemanticAnalyzer {
                     .is_none()
                 {
                     self.errors
-                        .push(SemError::FuncUndefined(name.to_string(), expr.span));
+                        .push(SemCheckError::FuncUndefined(name.to_string(), expr.span));
                 }
                 for arg in args {
-                    self.analyze_expr(arg);
+                    self.check_expr(arg);
                 }
             }
         }

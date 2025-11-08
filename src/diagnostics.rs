@@ -1,7 +1,7 @@
 use crate::codegen::CodegenError;
 use crate::lexer::LexError;
 use crate::parser::ParserError;
-use crate::sem_analysis::SemError;
+use crate::sem_check::SemCheckError;
 use crate::type_check::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;
@@ -14,8 +14,8 @@ pub enum CompileError {
     #[error(transparent)]
     ParserError(#[from] ParserError),
 
-    #[error("Semantic analysis errors: {0:#?}")]
-    SemError(Vec<SemError>),
+    #[error("Semantic check errors: {0:#?}")]
+    SemError(Vec<SemCheckError>),
 
     #[error("Type check errors: {0:#?}")]
     TypeCheckError(Vec<TypeCheckError>),

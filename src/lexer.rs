@@ -268,7 +268,7 @@ impl<'a> Lexer<'a> {
         })
     }
 
-    pub fn tokens(self) -> impl Iterator<Item = Result<Token, LexError>> {
+    pub fn tokenize(self) -> impl Iterator<Item = Result<Token, LexError>> {
         self
     }
 }

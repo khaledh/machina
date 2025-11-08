@@ -7,7 +7,7 @@ struct FuncSig {
     return_type: Type,
 }
 
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum TypeCheckError {
     #[error("Undefined variable: {0}")]
     VarUndefined(String),
@@ -25,7 +25,7 @@ pub enum TypeCheckError {
     CmpTypeMismatch(Type, Type),
 
     #[error("Condition must be a boolean, found {0:?}")]
-    CondTypeMismatch(Type),
+    CondNotBoolean(Type),
 
     #[error("Then and else branches have different types: {0:?} != {1:?}")]
     ThenElseTypeMismatch(Type, Type),
@@ -67,7 +67,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn type_check(&mut self, module: &Module) -> Result<(), Vec<TypeCheckError>> {
+    pub fn check(&mut self, module: &Module) -> Result<(), Vec<TypeCheckError>> {
         self.populate_function_symbols(&module.funcs);
 
         for function in &module.funcs {
@@ -222,7 +222,7 @@ impl TypeChecker {
             } => {
                 let cond_type = self.type_check_expr(cond)?;
                 if cond_type != Type::Bool {
-                    Err(TypeCheckError::CondTypeMismatch(cond_type))
+                    Err(TypeCheckError::CondNotBoolean(cond_type))
                 } else {
                     let then_type = self.type_check_expr(then_body)?;
                     let else_type = self.type_check_expr(else_body)?;
@@ -239,7 +239,7 @@ impl TypeChecker {
             } => {
                 let cond_type = self.type_check_expr(cond)?;
                 if cond_type != Type::Bool {
-                    Err(TypeCheckError::CondTypeMismatch(cond_type))
+                    Err(TypeCheckError::CondNotBoolean(cond_type))
                 } else {
                     let _ = self.type_check_expr(body)?;
                     Ok(Type::Unit)

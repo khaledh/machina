@@ -3,14 +3,14 @@ mod codegen;
 mod diagnostics;
 mod lexer;
 mod parser;
-mod sem_analysis;
+mod sem_check;
 mod type_check;
 
 use crate::codegen::Codegen;
 use crate::diagnostics::{CompileError, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parser::Parser;
-use crate::sem_analysis::SemanticAnalyzer;
+use crate::sem_check::SemanticChecker;
 use crate::type_check::TypeChecker;
 
 const SOURCE: &str = r#"
@@ -61,21 +61,21 @@ fn main() {
 fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let lexer = Lexer::new(source);
     let tokens = lexer
-        .tokens()
+        .tokenize()
         .collect::<Result<Vec<Token>, LexError>>()
         .map_err(|e| vec![e.into()])?;
 
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
-    // println!("AST:\n{:#?}", module);
 
-    let mut sem = SemanticAnalyzer::new();
-    sem.analyze(&module)
+    let mut sem_checker = SemanticChecker::new();
+    sem_checker
+        .check(&module)
         .map_err(|errs| vec![CompileError::SemError(errs)])?;
 
     let mut type_checker = TypeChecker::new();
     type_checker
-        .type_check(&module)
+        .check(&module)
         .map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
 
     let mut codegen = Codegen::new(&module);
