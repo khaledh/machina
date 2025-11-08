@@ -1,5 +1,6 @@
 use crate::ast::{BinOp, Expr, ExprKind, Function, FunctionParam, Module, Type, UnaryOp};
 use crate::diagnostics::{Position, Span};
+use crate::ids::{NodeId, NodeIdGen};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 use thiserror::Error;
 
@@ -42,6 +43,7 @@ pub struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
     curr_token: &'a Token,
+    id_gen: NodeIdGen,
 }
 
 impl<'a> Parser<'a> {
@@ -50,6 +52,7 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             curr_token: &tokens[0],
+            id_gen: NodeIdGen::new(),
         }
     }
 
@@ -152,6 +155,7 @@ impl<'a> Parser<'a> {
         let body = self.parse_block()?;
 
         Ok(Function {
+            id: self.id_gen.new_id(),
             name,
             params,
             return_type,
@@ -204,6 +208,7 @@ impl<'a> Parser<'a> {
         }
         self.consume(&TK::RBrace)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::Block(items),
             span: self.close(marker),
         })
@@ -216,6 +221,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::Equals)?;
         let value = self.parse_expr(0)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::Let {
                 name,
                 value: Box::new(value),
@@ -231,6 +237,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::Equals)?;
         let value = self.parse_expr(0)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::Var {
                 name,
                 value: Box::new(value),
@@ -245,6 +252,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::Equals)?;
         let value = self.parse_expr(0)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::Assign {
                 name,
                 value: Box::new(value),
@@ -261,6 +269,7 @@ impl<'a> Parser<'a> {
         self.consume_keyword("else")?;
         let else_body = self.parse_expr(0)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::If {
                 cond: Box::new(cond),
                 then_body: Box::new(then_body),
@@ -276,6 +285,7 @@ impl<'a> Parser<'a> {
         let cond = self.parse_expr(0)?;
         let body = self.parse_expr(0)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::While {
                 cond: Box::new(cond),
                 body: Box::new(body),
@@ -291,6 +301,7 @@ impl<'a> Parser<'a> {
         let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
         self.consume(&TK::RParen)?;
         Ok(Expr {
+            id: self.id_gen.new_id(),
             kind: ExprKind::Call { name, args },
             span: self.close(marker),
         })
@@ -316,14 +327,17 @@ impl<'a> Parser<'a> {
                 self.advance();
                 match name.as_str() {
                     "true" => Ok(Expr {
+                        id: self.id_gen.new_id(),
                         kind: ExprKind::BoolLit(true),
                         span: span,
                     }),
                     "false" => Ok(Expr {
+                        id: self.id_gen.new_id(),
                         kind: ExprKind::BoolLit(false),
                         span: span,
                     }),
                     _ => Ok(Expr {
+                        id: self.id_gen.new_id(),
                         kind: ExprKind::VarRef(name.clone()),
                         span: span,
                     }),
@@ -333,6 +347,7 @@ impl<'a> Parser<'a> {
                 let span = self.curr_token.span;
                 self.advance();
                 Ok(Expr {
+                    id: self.id_gen.new_id(),
                     kind: ExprKind::UInt32Lit(*value),
                     span: span,
                 })
@@ -351,6 +366,7 @@ impl<'a> Parser<'a> {
                 let span = self.close(marker);
                 self.advance(); // consume ')'
                 Ok(Expr {
+                    id: self.id_gen.new_id(),
                     kind: ExprKind::UnitLit,
                     span: span,
                 })
@@ -376,6 +392,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let operand = self.parse_expr(10)?; // highest binding power
             Expr {
+                id: self.id_gen.new_id(),
                 kind: ExprKind::UnaryOp {
                     op: UnaryOp::Neg,
                     expr: Box::new(operand),
@@ -393,6 +410,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let rhs = self.parse_expr(bp + 1)?;
             lhs = Expr {
+                id: self.id_gen.new_id(),
                 kind: ExprKind::BinOp {
                     left: Box::new(lhs),
                     op,

@@ -1,6 +1,7 @@
 mod ast;
 mod codegen;
 mod diagnostics;
+mod ids;
 mod lexer;
 mod parser;
 mod sem_check;

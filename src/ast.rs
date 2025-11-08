@@ -1,4 +1,5 @@
 use crate::diagnostics::Span;
+use crate::ids::NodeId;
 
 #[derive(Clone, Debug)]
 pub struct Module {
@@ -7,6 +8,7 @@ pub struct Module {
 
 #[derive(Clone, Debug)]
 pub struct Function {
+    pub id: NodeId,
     pub name: String,
     pub return_type: Type,
     pub params: Vec<FunctionParam>,
@@ -28,6 +30,7 @@ pub enum Type {
 
 #[derive(Clone, Debug)]
 pub struct Expr {
+    pub id: NodeId,
     pub kind: ExprKind,
     pub span: Span,
 }
