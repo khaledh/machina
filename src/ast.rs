@@ -1,3 +1,5 @@
+use crate::diagnostics::Span;
+
 #[derive(Clone, Debug)]
 pub struct Module {
     pub funcs: Vec<Function>,
@@ -25,7 +27,13 @@ pub enum Type {
 }
 
 #[derive(Clone, Debug)]
-pub enum Expr {
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum ExprKind {
     UInt32Lit(u32),
     BoolLit(bool),
     UnitLit,

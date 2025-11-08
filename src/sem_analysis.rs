@@ -1,5 +1,6 @@
 use crate::ast;
-use crate::ast::Module;
+use crate::ast::{ExprKind, Module};
+use crate::diagnostics::Span;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -23,16 +24,27 @@ pub struct Scope {
 #[derive(Clone, Debug, Error)]
 pub enum SemError {
     #[error("Variable already defined in current scope: {0}")]
-    VarAlreadyDefined(String),
+    VarAlreadyDefined(String, Span),
 
     #[error("Undefined variable: {0}")]
-    VarUndefined(String),
+    VarUndefined(String, Span),
 
     #[error("Cannot assign to immutable variable: {0}")]
-    VarImmutable(String),
+    VarImmutable(String, Span),
 
     #[error("Undefined function: {0}")]
-    FuncUndefined(String),
+    FuncUndefined(String, Span),
+}
+
+impl SemError {
+    pub fn span(&self) -> Span {
+        match self {
+            SemError::VarAlreadyDefined(_, span) => *span,
+            SemError::VarUndefined(_, span) => *span,
+            SemError::VarImmutable(_, span) => *span,
+            SemError::FuncUndefined(_, span) => *span,
+        }
+    }
 }
 
 pub struct SemanticAnalyzer {
@@ -135,19 +147,37 @@ impl SemanticAnalyzer {
 
     fn analyze_expr(&mut self, expr: &ast::Expr) {
         match expr {
-            ast::Expr::UInt32Lit(_) => {}
-            ast::Expr::BoolLit(_) => {}
-            ast::Expr::UnitLit => {}
-            ast::Expr::BinOp { left, right, .. } => {
+            ast::Expr {
+                kind: ExprKind::UInt32Lit(_),
+                ..
+            } => {}
+            ast::Expr {
+                kind: ExprKind::BoolLit(_),
+                ..
+            } => {}
+            ast::Expr {
+                kind: ExprKind::UnitLit,
+                ..
+            } => {}
+            ast::Expr {
+                kind: ExprKind::BinOp { left, right, .. },
+                ..
+            } => {
                 self.analyze_expr(left);
                 self.analyze_expr(right);
             }
 
-            ast::Expr::UnaryOp { expr, .. } => {
+            ast::Expr {
+                kind: ExprKind::UnaryOp { expr, .. },
+                ..
+            } => {
                 self.analyze_expr(expr);
             }
 
-            ast::Expr::Block(body) => {
+            ast::Expr {
+                kind: ExprKind::Block(body),
+                ..
+            } => {
                 self.with_scope(|analyzer| {
                     for expr in body {
                         analyzer.analyze_expr(expr);
@@ -155,10 +185,13 @@ impl SemanticAnalyzer {
                 });
             }
 
-            ast::Expr::Let { name, value } => {
+            ast::Expr {
+                kind: ExprKind::Let { name, value },
+                ..
+            } => {
                 if self.lookup_symbol_direct(name).is_some() {
                     self.errors
-                        .push(SemError::VarAlreadyDefined(name.to_string()));
+                        .push(SemError::VarAlreadyDefined(name.to_string(), expr.span));
                 } else {
                     self.analyze_expr(value);
                     self.insert_symbol(
@@ -171,10 +204,13 @@ impl SemanticAnalyzer {
                 }
             }
 
-            ast::Expr::Var { name, value } => {
+            ast::Expr {
+                kind: ExprKind::Var { name, value },
+                ..
+            } => {
                 if self.lookup_symbol_direct(name).is_some() {
                     self.errors
-                        .push(SemError::VarAlreadyDefined(name.to_string()));
+                        .push(SemError::VarAlreadyDefined(name.to_string(), expr.span));
                 } else {
                     self.analyze_expr(value);
                     self.insert_symbol(
@@ -187,41 +223,62 @@ impl SemanticAnalyzer {
                 }
             }
 
-            ast::Expr::VarRef(name) => {
+            ast::Expr {
+                kind: ExprKind::VarRef(name),
+                ..
+            } => {
                 if self.lookup_symbol(name).is_none() {
-                    self.errors.push(SemError::VarUndefined(name.to_string()));
+                    self.errors
+                        .push(SemError::VarUndefined(name.to_string(), expr.span));
                 }
             }
 
-            ast::Expr::If {
-                cond,
-                then_body,
-                else_body,
+            ast::Expr {
+                kind:
+                    ExprKind::If {
+                        cond,
+                        then_body,
+                        else_body,
+                    },
+                ..
             } => {
                 self.analyze_expr(cond);
                 self.analyze_expr(then_body);
                 self.analyze_expr(else_body);
             }
 
-            ast::Expr::Assign { name, value } => match self.lookup_symbol(name) {
+            ast::Expr {
+                kind: ExprKind::Assign { name, value },
+                ..
+            } => match self.lookup_symbol(name) {
                 Some(symbol) if symbol.kind == SymbolKind::Var { is_mutable: true } => {
                     self.analyze_expr(value)
                 }
-                _ => self.errors.push(SemError::VarImmutable(name.to_string())),
+                _ => {
+                    self.errors
+                        .push(SemError::VarImmutable(name.to_string(), expr.span));
+                }
             },
 
-            ast::Expr::While { cond, body } => {
+            ast::Expr {
+                kind: ExprKind::While { cond, body },
+                ..
+            } => {
                 self.analyze_expr(cond);
                 self.analyze_expr(body);
             }
 
-            ast::Expr::Call { name, args } => {
+            ast::Expr {
+                kind: ExprKind::Call { name, args },
+                ..
+            } => {
                 if self
                     .lookup_symbol(name)
                     .map(|s| s.kind == SymbolKind::Func)
                     .is_none()
                 {
-                    self.errors.push(SemError::FuncUndefined(name.to_string()));
+                    self.errors
+                        .push(SemError::FuncUndefined(name.to_string(), expr.span));
                 }
                 for arg in args {
                     self.analyze_expr(arg);

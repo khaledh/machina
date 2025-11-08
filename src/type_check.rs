@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr, Function, Module, Type};
+use crate::ast::{BinOp, Expr, ExprKind, Function, Module, Type};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -140,10 +140,22 @@ impl TypeChecker {
 
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
         match expr {
-            Expr::UInt32Lit(_) => Ok(Type::UInt32),
-            Expr::BoolLit(_) => Ok(Type::Bool),
-            Expr::UnitLit => Ok(Type::Unit),
-            Expr::BinOp { left, op, right } => {
+            Expr {
+                kind: ExprKind::UInt32Lit(_),
+                ..
+            } => Ok(Type::UInt32),
+            Expr {
+                kind: ExprKind::BoolLit(_),
+                ..
+            } => Ok(Type::Bool),
+            Expr {
+                kind: ExprKind::UnitLit,
+                ..
+            } => Ok(Type::Unit),
+            Expr {
+                kind: ExprKind::BinOp { left, op, right },
+                ..
+            } => {
                 let left_type = self.type_check_expr(left)?;
                 let right_type = self.type_check_expr(right)?;
 
@@ -164,33 +176,49 @@ impl TypeChecker {
                     }
                 }
             }
-            Expr::UnaryOp { expr, .. } => {
+            Expr {
+                kind: ExprKind::UnaryOp { expr, .. },
+                ..
+            } => {
                 let expr_type = self.type_check_expr(expr)?;
                 Ok(expr_type)
             }
-            Expr::Block(body) => {
+            Expr {
+                kind: ExprKind::Block(body),
+                ..
+            } => {
                 let mut last_type = Type::Unit;
                 for expr in body {
                     last_type = self.type_check_expr(expr)?;
                 }
                 Ok(last_type)
             }
-            Expr::Let { name, value } => {
+            Expr {
+                kind: ExprKind::Let { name, value },
+                ..
+            } => {
                 let expr_type = self.type_check_expr(value)?;
                 self.vars.insert(name.clone(), expr_type);
                 Ok(Type::Unit)
             }
-            Expr::VarRef(name) => {
+            Expr {
+                kind: ExprKind::VarRef(name),
+                ..
+            } => {
                 if let Some(expr_type) = self.vars.get(name) {
                     Ok(expr_type.clone())
                 } else {
                     Err(TypeCheckError::VarUndefined(name.clone()))
                 }
             }
-            Expr::If {
-                cond,
-                then_body,
-                else_body,
+            Expr {
+                kind:
+                    ExprKind::If {
+                        cond,
+                        then_body,
+                        else_body,
+                    },
+                ..
             } => {
                 let cond_type = self.type_check_expr(cond)?;
                 if cond_type != Type::Bool {
@@ -205,7 +233,10 @@ impl TypeChecker {
                     }
                 }
             }
-            Expr::While { cond, body } => {
+            Expr {
+                kind: ExprKind::While { cond, body },
+                ..
+            } => {
                 let cond_type = self.type_check_expr(cond)?;
                 if cond_type != Type::Bool {
                     Err(TypeCheckError::CondTypeMismatch(cond_type))
@@ -214,12 +245,18 @@ impl TypeChecker {
                     Ok(Type::Unit)
                 }
             }
-            Expr::Var { name, value } => {
+            Expr {
+                kind: ExprKind::Var { name, value },
+                ..
+            } => {
                 let expr_type = self.type_check_expr(value)?;
                 self.vars.insert(name.clone(), expr_type.clone());
                 Ok(expr_type)
             }
-            Expr::Assign { name, value } => match self.vars.get(name) {
+            Expr {
+                kind: ExprKind::Assign { name, value },
+                ..
+            } => match self.vars.get(name) {
                 Some(lhs_type) => {
                     let lhs_type = lhs_type.clone();
                     let rhs_type = self.type_check_expr(value)?;
@@ -231,7 +268,10 @@ impl TypeChecker {
                 }
                 None => Err(TypeCheckError::VarUndefined(name.clone())),
             },
-            Expr::Call { name, args } => self.type_check_call(name, args),
+            Expr {
+                kind: ExprKind::Call { name, args },
+                ..
+            } => self.type_check_call(name, args),
         }
     }
 }

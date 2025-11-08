@@ -47,6 +47,10 @@ impl Span {
     pub fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
+
+    pub fn len(&self) -> usize {
+        self.end.offset - self.start.offset
+    }
 }
 
 impl Display for Span {
@@ -61,27 +65,25 @@ fn get_line(source: &str, line: usize) -> &str {
 
 /// Formats an error message with a marker line that points to the error location.
 ///
-/// # Example
+/// If the span is a single character, it will be marked with a caret.
 /// ```
 /// let a = @;
-///    -----^
+///         ^
 /// ```
-/// or if there are not enough space for the dashes, makes the dashes trailing instead of leading
+/// Otherwise, it will be marked with dashes.
 /// ```
-/// if @
-///    ^-----
+/// if 1 + 2 {
+///    -----
 /// ```
 pub fn format_error(source: &str, span: Span, error: impl Display) -> String {
     let line = span.start.line;
     let column = span.start.column;
     let line_contents = get_line(source, line);
-    let marker_line = if column > 6 {
-        // 5 dashes + 1 caret
-        let leading_space_count = (column - 6).max(0);
-        " ".repeat(leading_space_count) + &"-".repeat(5) + "^"
+
+    let marker_line = if span.len() == 1 {
+        " ".repeat(span.start.column - 1) + "^"
     } else {
-        let leading_space_count = column - 1;
-        " ".repeat(leading_space_count) + "^" + &"-".repeat(5)
+        " ".repeat(span.start.column - 1) + &"-".repeat(span.len() - 1)
     };
-    format!("({line}:{column}): {error}\n\n{line_contents}\n{marker_line}\n")
+    format!("({line}:{column}): {error}\n\n{line_contents}\n{marker_line}")
 }

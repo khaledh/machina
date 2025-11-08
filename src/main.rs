@@ -14,7 +14,7 @@ use crate::sem_analysis::SemanticAnalyzer;
 use crate::type_check::TypeChecker;
 
 const SOURCE: &str = r#"
-fn inc(a: u32) u32 {
+fn inc(a: u32) -> u32 {
     a + 1
 }
 
@@ -44,8 +44,13 @@ fn main() {
                     CompileError::ParserError(e) => {
                         println!("[ERROR] {}", format_error(SOURCE, e.span(), e));
                     }
+                    CompileError::SemError(errors) => {
+                        for error in errors {
+                            println!("[ERROR] {}", format_error(SOURCE, error.span(), error));
+                        }
+                    }
                     error => {
-                        println!("{error:?}");
+                        println!("[ERROR] {error:?}");
                     }
                 }
             }

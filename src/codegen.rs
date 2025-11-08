@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::ast::{self, Expr, ExprKind};
 use std::cell::Cell;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -86,7 +86,7 @@ impl Codegen {
 
         // Generate function body first to get stack size
         let body = func.body.clone();
-        let body_asm = self.gen_expr(&body, 0)?;
+        let body_asm = self.gen_expr(&body.kind, 0)?;
 
         // arm64 requires 16-byte stack alignment
         let stack_size = (self.max_stack_offset.get() + 15) & !15;
@@ -174,20 +174,22 @@ impl Codegen {
         format!(".L{}", curr)
     }
 
-    fn gen_expr(&mut self, expr: &ast::Expr, reg: u8) -> Result<String, CodegenError> {
-        match expr {
-            ast::Expr::UInt32Lit(value) => Ok(self.gen_u32_imm(value, reg)),
-            ast::Expr::BoolLit(value) => Ok(self.gen_bool_imm(value, reg)),
-            ast::Expr::UnitLit => Ok(format!("  mov w{reg}, 0\n")),
-            ast::Expr::BinOp { left, op, right } => self.gen_binary_op(*op, left, right, reg),
-            ast::Expr::UnaryOp { op, expr } => self.gen_unary_op(*op, expr, reg),
-            ast::Expr::Block(body) => {
+    fn gen_expr(&mut self, expr_kind: &ExprKind, reg: u8) -> Result<String, CodegenError> {
+        match expr_kind {
+            ExprKind::UInt32Lit(value) => Ok(self.gen_u32_imm(value, reg)),
+            ExprKind::BoolLit(value) => Ok(self.gen_bool_imm(&value, reg)),
+            ExprKind::UnitLit => Ok(format!("  mov w{reg}, 0\n")),
+            ExprKind::BinOp { left, op, right } => {
+                self.gen_binary_op(*op, &left.kind, &right.kind, reg)
+            }
+            ExprKind::UnaryOp { op, expr } => self.gen_unary_op(*op, &expr.kind, reg),
+            ExprKind::Block(body) => {
                 self.enter_scope();
                 let result = self.gen_block(body, reg)?;
                 self.exit_scope();
                 Ok(result)
             }
-            ast::Expr::If {
+            ExprKind::If {
                 cond,
                 then_body,
                 else_body,
@@ -196,20 +198,20 @@ impl Codegen {
                 let else_label = self.next_label();
                 let end_label = self.next_label();
 
-                result.push_str(&self.gen_expr(cond, reg)?);
+                result.push_str(&self.gen_expr(&cond.kind, reg)?);
                 result.push_str(&format!("  cmp w{reg}, 0\n"));
                 result.push_str(&format!("  b.eq {else_label}\n"));
-                result.push_str(&self.gen_expr(then_body, reg)?);
+                result.push_str(&self.gen_expr(&then_body.kind, reg)?);
                 result.push_str(&format!("  b {end_label}\n"));
                 result.push_str(&format!("{else_label}:\n"));
-                result.push_str(&self.gen_expr(else_body, reg)?);
+                result.push_str(&self.gen_expr(&else_body.kind, reg)?);
                 result.push_str(&format!("{end_label}:\n"));
                 Ok(result)
             }
-            ast::Expr::Let { name, value } => {
+            ExprKind::Let { name, value } => {
                 // Evaluate initializer in the current scope (before shadowing)
                 let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg)?);
+                result.push_str(&self.gen_expr(&value.kind, reg)?);
                 // Now allocate and bind the new variable, then store the value
                 let stack_offset = self.alloc_stack(8)?;
                 self.insert_var(
@@ -222,10 +224,10 @@ impl Codegen {
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 Ok(result)
             }
-            ast::Expr::Var { name, value } => {
+            ExprKind::Var { name, value } => {
                 // Evaluate initializer before introducing the new mutable binding
                 let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg)?);
+                result.push_str(&self.gen_expr(&value.kind, reg)?);
                 let stack_offset = self.alloc_stack(8)?;
                 self.insert_var(
                     name,
@@ -237,39 +239,39 @@ impl Codegen {
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 Ok(result)
             }
-            ast::Expr::VarRef(name) => {
+            ExprKind::VarRef(name) => {
                 let stack_offset = self.lookup_var(name)?.stack_offset;
                 Ok(format!("  ldr w{reg}, [sp, #{stack_offset}]\n"))
             }
-            ast::Expr::Assign { name, value } => {
+            ExprKind::Assign { name, value } => {
                 let stack_offset = self.lookup_var(name)?.stack_offset;
                 let mut result = String::new();
-                result.push_str(&self.gen_expr(value, reg)?);
+                result.push_str(&self.gen_expr(&value.kind, reg)?);
                 result.push_str(&format!("  str w{reg}, [sp, #{stack_offset}]\n"));
                 Ok(result)
             }
-            ast::Expr::While { cond, body } => {
+            ExprKind::While { cond, body } => {
                 let mut result = String::new();
                 let loop_label = self.next_label();
                 let end_label = self.next_label();
 
                 result.push_str(&format!("{loop_label}:\n"));
-                result.push_str(&self.gen_expr(cond, reg)?);
+                result.push_str(&self.gen_expr(&cond.kind, reg)?);
                 result.push_str(&format!("  cmp w{reg}, 0\n"));
                 result.push_str(&format!("  b.eq {end_label}\n"));
-                result.push_str(&self.gen_expr(body, reg)?);
+                result.push_str(&self.gen_expr(&body.kind, reg)?);
                 result.push_str(&format!("  b {loop_label}\n"));
                 result.push_str(&format!("{end_label}:\n"));
                 Ok(result)
             }
-            ast::Expr::Call { name, args } => {
+            ExprKind::Call { name, args } => {
                 let mut result = String::new();
                 // ARM64 ABI: first 8 arguments in registers x0-x7, rest on stack
                 if args.len() > 8 {
                     return Err(CodegenError::TooManyArgs(args.len()));
                 }
                 for (i, arg) in args.iter().enumerate() {
-                    result.push_str(&self.gen_expr(arg, i as u8)?);
+                    result.push_str(&self.gen_expr(&arg.kind, i as u8)?);
                 }
                 result.push_str(&format!("  bl _{}\n", name));
                 result.push_str(&format!("  mov w{reg}, w0\n"));
@@ -290,8 +292,8 @@ impl Codegen {
     fn gen_binary_op(
         &mut self,
         op: ast::BinOp,
-        left: &ast::Expr,
-        right: &ast::Expr,
+        left: &ExprKind,
+        right: &ExprKind,
         reg: u8,
     ) -> Result<String, CodegenError> {
         let lreg = reg;
@@ -348,7 +350,7 @@ impl Codegen {
     fn gen_unary_op(
         &mut self,
         op: ast::UnaryOp,
-        expr: &ast::Expr,
+        expr: &ExprKind,
         reg: u8,
     ) -> Result<String, CodegenError> {
         let mut result = String::new();
@@ -359,10 +361,10 @@ impl Codegen {
         Ok(result)
     }
 
-    fn gen_block(&mut self, body: &Vec<ast::Expr>, reg: u8) -> Result<String, CodegenError> {
+    fn gen_block(&mut self, body: &Vec<Expr>, reg: u8) -> Result<String, CodegenError> {
         let mut result = String::new();
         for expr in body {
-            result.push_str(&self.gen_expr(expr, reg)?);
+            result.push_str(&self.gen_expr(&expr.kind, reg)?);
         }
         Ok(result)
     }
