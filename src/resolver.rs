@@ -1,6 +1,8 @@
+use crate::analysis::{ResolutionBuilder, ResolutionMap};
 use crate::ast;
 use crate::ast::{ExprKind, Module};
 use crate::diagnostics::Span;
+use crate::ids::{DefId, DefIdGen};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -12,17 +14,18 @@ enum SymbolKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Symbol {
+    def_id: DefId,
     name: String,
     kind: SymbolKind,
 }
 
 #[derive(Clone, Debug)]
 pub struct Scope {
-    symbols: HashMap<String, Symbol>,
+    defs: HashMap<String, Symbol>,
 }
 
 #[derive(Clone, Debug, Error)]
-pub enum SemCheckError {
+pub enum ResolveError {
     #[error("Variable already defined in current scope: {0}")]
     VarAlreadyDefined(String, Span),
 
@@ -36,33 +39,37 @@ pub enum SemCheckError {
     FuncUndefined(String, Span),
 }
 
-impl SemCheckError {
+impl ResolveError {
     pub fn span(&self) -> Span {
         match self {
-            SemCheckError::VarAlreadyDefined(_, span) => *span,
-            SemCheckError::VarUndefined(_, span) => *span,
-            SemCheckError::VarImmutable(_, span) => *span,
-            SemCheckError::FuncUndefined(_, span) => *span,
+            ResolveError::VarAlreadyDefined(_, span) => *span,
+            ResolveError::VarUndefined(_, span) => *span,
+            ResolveError::VarImmutable(_, span) => *span,
+            ResolveError::FuncUndefined(_, span) => *span,
         }
     }
 }
 
-pub struct SemanticChecker {
+pub struct SymbolResolver {
     scopes: Vec<Scope>,
-    errors: Vec<SemCheckError>,
+    errors: Vec<ResolveError>,
+    def_id_gen: DefIdGen,
+    res_builder: ResolutionBuilder,
 }
 
-impl SemanticChecker {
+impl SymbolResolver {
     pub fn new() -> Self {
         Self {
             scopes: Vec::new(),
             errors: Vec::new(),
+            def_id_gen: DefIdGen::new(),
+            res_builder: ResolutionBuilder::new(),
         }
     }
 
     fn enter_scope(&mut self) {
         self.scopes.push(Scope {
-            symbols: HashMap::new(),
+            defs: HashMap::new(),
         });
     }
 
@@ -81,7 +88,7 @@ impl SemanticChecker {
 
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
         for scope in self.scopes.iter().rev() {
-            if let Some(symbol) = scope.symbols.get(name) {
+            if let Some(symbol) = scope.defs.get(name) {
                 return Some(symbol);
             }
         }
@@ -89,22 +96,24 @@ impl SemanticChecker {
     }
 
     fn lookup_symbol_direct(&self, name: &str) -> Option<&Symbol> {
-        self.scopes.last().unwrap().symbols.get(name)
+        self.scopes.last().unwrap().defs.get(name)
     }
 
     fn insert_symbol(&mut self, name: &str, symbol: Symbol) {
         self.scopes
             .last_mut()
             .unwrap()
-            .symbols
+            .defs
             .insert(name.to_string(), symbol);
     }
 
     fn populate_funcs(&mut self, functions: &Vec<ast::Function>) {
         for function in functions {
+            let def_id = self.def_id_gen.new_id();
             self.insert_symbol(
                 &function.name,
                 Symbol {
+                    def_id,
                     name: function.name.clone(),
                     kind: SymbolKind::Func,
                 },
@@ -112,7 +121,7 @@ impl SemanticChecker {
         }
     }
 
-    pub fn check(&mut self, module: &Module) -> Result<(), Vec<SemCheckError>> {
+    pub fn check(&mut self, module: &Module) -> Result<(), Vec<ResolveError>> {
         self.with_scope(|checker| {
             // global scope
             checker.populate_funcs(&module.funcs);
@@ -132,9 +141,11 @@ impl SemanticChecker {
         self.with_scope(|checker| {
             // add parameters to scope
             for param in &function.params {
+                let def_id = checker.def_id_gen.new_id();
                 checker.insert_symbol(
                     &param.name,
                     Symbol {
+                        def_id,
                         name: param.name.clone(),
                         kind: SymbolKind::Var { is_mutable: false },
                     },
@@ -190,15 +201,16 @@ impl SemanticChecker {
                 ..
             } => {
                 if self.lookup_symbol_direct(name).is_some() {
-                    self.errors.push(SemCheckError::VarAlreadyDefined(
-                        name.to_string(),
-                        expr.span,
-                    ));
+                    self.errors
+                        .push(ResolveError::VarAlreadyDefined(name.to_string(), expr.span));
                 } else {
                     self.check_expr(value);
+                    let def_id = self.def_id_gen.new_id();
+                    self.res_builder.record_def(def_id, expr.id);
                     self.insert_symbol(
                         name,
                         Symbol {
+                            def_id,
                             name: name.to_string(),
                             kind: SymbolKind::Var { is_mutable: false },
                         },
@@ -211,15 +223,16 @@ impl SemanticChecker {
                 ..
             } => {
                 if self.lookup_symbol_direct(name).is_some() {
-                    self.errors.push(SemCheckError::VarAlreadyDefined(
-                        name.to_string(),
-                        expr.span,
-                    ));
+                    self.errors
+                        .push(ResolveError::VarAlreadyDefined(name.to_string(), expr.span));
                 } else {
                     self.check_expr(value);
+                    let def_id = self.def_id_gen.new_id();
+                    self.res_builder.record_def(def_id, expr.id);
                     self.insert_symbol(
                         name,
                         Symbol {
+                            def_id,
                             name: name.to_string(),
                             kind: SymbolKind::Var { is_mutable: true },
                         },
@@ -230,12 +243,12 @@ impl SemanticChecker {
             ast::Expr {
                 kind: ExprKind::VarRef(name),
                 ..
-            } => {
-                if self.lookup_symbol(name).is_none() {
-                    self.errors
-                        .push(SemCheckError::VarUndefined(name.to_string(), expr.span));
-                }
-            }
+            } => match self.lookup_symbol(name) {
+                Some(symbol) => self.res_builder.record_use(expr.id, symbol.def_id),
+                None => self
+                    .errors
+                    .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
+            },
 
             ast::Expr {
                 kind:
@@ -255,12 +268,24 @@ impl SemanticChecker {
                 kind: ExprKind::Assign { name, value },
                 ..
             } => match self.lookup_symbol(name) {
-                Some(symbol) if symbol.kind == SymbolKind::Var { is_mutable: true } => {
-                    self.check_expr(value)
-                }
-                _ => {
+                Some(symbol) => match symbol.kind {
+                    SymbolKind::Var { is_mutable: true } => {
+                        self.res_builder.record_use(expr.id, symbol.def_id);
+                        self.check_expr(value)
+                    }
+                    SymbolKind::Var { is_mutable: false } => {
+                        self.res_builder.record_use(expr.id, symbol.def_id);
+                        self.errors
+                            .push(ResolveError::VarImmutable(name.to_string(), expr.span));
+                    }
+                    _ => {
+                        self.errors
+                            .push(ResolveError::VarUndefined(name.to_string(), expr.span));
+                    }
+                },
+                None => {
                     self.errors
-                        .push(SemCheckError::VarImmutable(name.to_string(), expr.span));
+                        .push(ResolveError::VarUndefined(name.to_string(), expr.span));
                 }
             },
 
@@ -275,19 +300,24 @@ impl SemanticChecker {
             ast::Expr {
                 kind: ExprKind::Call { name, args },
                 ..
-            } => {
-                if self
-                    .lookup_symbol(name)
-                    .map(|s| s.kind == SymbolKind::Func)
-                    .is_none()
-                {
-                    self.errors
-                        .push(SemCheckError::FuncUndefined(name.to_string(), expr.span));
+            } => match self.lookup_symbol(name) {
+                Some(symbol) if symbol.kind == SymbolKind::Func => {
+                    self.res_builder.record_use(expr.id, symbol.def_id);
+                    for arg in args {
+                        self.check_expr(arg);
+                    }
                 }
-                for arg in args {
-                    self.check_expr(arg);
-                }
-            }
+                _ => self
+                    .errors
+                    .push(ResolveError::FuncUndefined(name.to_string(), expr.span)),
+            },
         }
     }
+}
+
+#[allow(unused)]
+pub fn resolve(module: &Module) -> (ResolutionMap, Vec<ResolveError>) {
+    let mut checker = SymbolResolver::new();
+    checker.check(module);
+    (checker.res_builder.finish(), checker.errors)
 }

@@ -1,11 +1,11 @@
 use crate::ast::{BinOp, Expr, ExprKind, Function, FunctionParam, Module, Type, UnaryOp};
 use crate::diagnostics::{Position, Span};
-use crate::ids::{NodeId, NodeIdGen};
+use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum ParserError {
+pub enum ParseError {
     #[error("Expected {0}, found: {1}")]
     ExpectedToken(TokenKind, Token),
 
@@ -22,14 +22,14 @@ pub enum ParserError {
     ExpectedPrimary(Token),
 }
 
-impl ParserError {
+impl ParseError {
     pub fn span(&self) -> Span {
         match self {
-            ParserError::ExpectedToken(_, token) => token.span,
-            ParserError::ExpectedKeyword(_, token) => token.span,
-            ParserError::ExpectedIdent(token) => token.span,
-            ParserError::ExpectedType(token) => token.span,
-            ParserError::ExpectedPrimary(token) => token.span,
+            ParseError::ExpectedToken(_, token) => token.span,
+            ParseError::ExpectedKeyword(_, token) => token.span,
+            ParseError::ExpectedIdent(token) => token.span,
+            ParseError::ExpectedType(token) => token.span,
+            ParseError::ExpectedPrimary(token) => token.span,
         }
     }
 }
@@ -81,36 +81,36 @@ impl<'a> Parser<'a> {
         Span::new(marker.pos, self.curr_token.span.end)
     }
 
-    fn consume(&mut self, expected: &TokenKind) -> Result<(), ParserError> {
+    fn consume(&mut self, expected: &TokenKind) -> Result<(), ParseError> {
         if self.curr_token.kind == *expected {
             self.advance();
             Ok(())
         } else {
-            Err(ParserError::ExpectedToken(
+            Err(ParseError::ExpectedToken(
                 expected.clone(),
                 self.curr_token.clone(),
             ))
         }
     }
 
-    fn consume_keyword(&mut self, expected: &str) -> Result<(), ParserError> {
+    fn consume_keyword(&mut self, expected: &str) -> Result<(), ParseError> {
         if self.curr_token.kind == TK::Ident(expected.to_string()) {
             self.advance();
             Ok(())
         } else {
-            Err(ParserError::ExpectedKeyword(
+            Err(ParseError::ExpectedKeyword(
                 expected.to_string(),
                 self.curr_token.clone(),
             ))
         }
     }
 
-    fn parse_ident(&mut self) -> Result<String, ParserError> {
+    fn parse_ident(&mut self) -> Result<String, ParseError> {
         if let TK::Ident(name) = &self.curr_token.kind {
             self.advance();
             Ok(name.clone())
         } else {
-            Err(ParserError::ExpectedIdent(self.curr_token.clone()))
+            Err(ParseError::ExpectedIdent(self.curr_token.clone()))
         }
     }
 
@@ -118,8 +118,8 @@ impl<'a> Parser<'a> {
         &mut self,
         sep_token: TokenKind,
         end_token: TokenKind,
-        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParserError>,
-    ) -> Result<Vec<T>, ParserError> {
+        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<Vec<T>, ParseError> {
         let mut items = Vec::new();
         while self.curr_token.kind != end_token {
             items.push(parse_item(self)?);
@@ -130,7 +130,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_function(&mut self) -> Result<Function, ParserError> {
+    fn parse_function(&mut self) -> Result<Function, ParseError> {
         // Expect 'fn'
         self.consume_keyword("fn")?;
 
@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParserError> {
+    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParseError> {
         self.parse_list(TK::Comma, TK::RParen, |parser| {
             let name = parser.parse_ident()?;
             parser.consume(&TK::Colon)?;
@@ -172,7 +172,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_type(&mut self) -> Result<Type, ParserError> {
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
         let result = match &self.curr_token.kind {
             TK::LParen if self.peek().map(|t| &t.kind) == Some(&TK::RParen) => {
                 self.advance();
@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
             }
             TK::Ident(name) if name == "u32" => Ok(Type::UInt32),
             TK::Ident(name) if name == "bool" => Ok(Type::Bool),
-            _ => Err(ParserError::ExpectedType(self.curr_token.clone())),
+            _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
         };
         result.map(|typ| {
             self.advance();
@@ -188,7 +188,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_block(&mut self) -> Result<Expr, ParserError> {
+    fn parse_block(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume(&TK::LBrace)?;
         let mut items = Vec::new();
@@ -214,7 +214,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_let(&mut self) -> Result<Expr, ParserError> {
+    fn parse_let(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume_keyword("let")?;
         let name = self.parse_ident()?;
@@ -230,7 +230,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_var(&mut self) -> Result<Expr, ParserError> {
+    fn parse_var(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume_keyword("var")?;
         let name = self.parse_ident()?;
@@ -246,7 +246,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_assign(&mut self) -> Result<Expr, ParserError> {
+    fn parse_assign(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         let name = self.parse_ident()?;
         self.consume(&TK::Equals)?;
@@ -261,7 +261,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_if(&mut self) -> Result<Expr, ParserError> {
+    fn parse_if(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume_keyword("if")?;
         let cond = self.parse_expr(0)?;
@@ -279,7 +279,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_while(&mut self) -> Result<Expr, ParserError> {
+    fn parse_while(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume_keyword("while")?;
         let cond = self.parse_expr(0)?;
@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_call(&mut self) -> Result<Expr, ParserError> {
+    fn parse_call(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         let name = self.parse_ident()?;
         self.consume(&TK::LParen)?;
@@ -307,7 +307,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, ParserError> {
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match &self.curr_token.kind {
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
@@ -329,17 +329,17 @@ impl<'a> Parser<'a> {
                     "true" => Ok(Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::BoolLit(true),
-                        span: span,
+                        span,
                     }),
                     "false" => Ok(Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::BoolLit(false),
-                        span: span,
+                        span,
                     }),
                     _ => Ok(Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::VarRef(name.clone()),
-                        span: span,
+                        span,
                     }),
                 }
             }
@@ -349,7 +349,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::UInt32Lit(*value),
-                    span: span,
+                    span,
                 })
             }
             TK::LParen
@@ -368,7 +368,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::UnitLit,
-                    span: span,
+                    span,
                 })
             }
             TK::LParen => {
@@ -382,11 +382,11 @@ impl<'a> Parser<'a> {
                 // Block expression
                 self.parse_block()
             }
-            _ => Err(ParserError::ExpectedPrimary(self.curr_token.clone())),
+            _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParserError> {
+    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let marker = self.mark();
         let mut lhs = if self.curr_token.kind == TK::Minus {
             self.advance();
@@ -438,7 +438,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Module, ParserError> {
+    pub fn parse(&mut self) -> Result<Module, ParseError> {
         let mut functions = Vec::new();
         while self.curr_token.kind != TK::Eof {
             functions.push(self.parse_function()?);

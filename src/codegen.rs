@@ -155,7 +155,7 @@ impl Codegen {
                 scope.vars.insert(name.to_string(), var);
                 Ok(())
             }
-            None => return Err(CodegenError::NoCurrentScope),
+            None => Err(CodegenError::NoCurrentScope),
         }
     }
 
