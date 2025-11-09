@@ -71,7 +71,7 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
 
-    let context = Context::new(module.clone());
+    let context = Context::new(module);
 
     let resolved_context = resolve(context).map_err(|errs| {
         errs.into_iter()
@@ -82,7 +82,7 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let type_checked_context =
         type_check(resolved_context).map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
 
-    let mut codegen = Codegen::new(&module);
+    let mut codegen = Codegen::new(type_checked_context);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
 
     Ok(asm)

@@ -1,10 +1,11 @@
 use crate::ast::{self, Expr, ExprKind};
+use crate::context::TypeCheckedContext;
 use std::cell::Cell;
 use std::collections::HashMap;
 use thiserror::Error;
 
 pub struct Codegen {
-    funcs: Vec<ast::Function>,
+    context: TypeCheckedContext,
     scopes: Vec<CodegenScope>,
     label_counter: Cell<u32>,
     max_stack_offset: Cell<u32>,
@@ -37,9 +38,9 @@ pub enum CodegenError {
 }
 
 impl Codegen {
-    pub fn new(module: &ast::Module) -> Self {
+    pub fn new(context: TypeCheckedContext) -> Self {
         Codegen {
-            funcs: module.funcs.clone(),
+            context: context,
             scopes: Vec::new(),
             label_counter: Cell::new(0),
             max_stack_offset: Cell::new(0),
@@ -52,7 +53,7 @@ impl Codegen {
         let mut asm = String::new();
         asm.push_str(".align 2\n");
 
-        for func in self.funcs.clone() {
+        for func in self.context.module.funcs.clone() {
             asm.push_str("\n");
             asm.push_str(&self.gen_func(&func)?);
         }
