@@ -11,11 +11,12 @@ mod type_check;
 mod types;
 
 use crate::codegen::Codegen;
+use crate::context::Context;
 use crate::diagnostics::{CompileError, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parser::Parser;
 use crate::resolver::resolve;
-use crate::type_check::TypeChecker;
+use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
 fn inc(a: u32) -> u32 {
@@ -70,15 +71,16 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
 
-    let (def_map, errors) = resolve(&module);
-    if !errors.is_empty() {
-        return Err(errors.into_iter().map(|e| e.into()).collect());
-    }
+    let context = Context::new(module.clone());
 
-    let mut type_checker = TypeChecker::new();
-    type_checker
-        .check(&module)
-        .map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
+    let resolved_context = resolve(context).map_err(|errs| {
+        errs.into_iter()
+            .map(|e| e.into())
+            .collect::<Vec<CompileError>>()
+    })?;
+
+    let type_checked_context =
+        type_check(resolved_context).map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
 
     let mut codegen = Codegen::new(&module);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;

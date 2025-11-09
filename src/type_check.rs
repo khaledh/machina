@@ -1,4 +1,7 @@
-use crate::ast::{BinOp, Expr, ExprKind, Function, Module};
+use crate::analysis::{TypeMap, TypeMapBuilder};
+use crate::ast::{BinOp, Expr, ExprKind, Function};
+use crate::context::{ResolvedContext, TypeCheckedContext};
+use crate::ids::NodeId;
 use crate::types::Type;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -10,12 +13,6 @@ struct FuncSig {
 
 #[derive(Debug, Clone, Error)]
 pub enum TypeCheckError {
-    #[error("Undefined variable: {0}")]
-    VarUndefined(String),
-
-    #[error("Undefined function: {0}")]
-    FuncUndefined(String),
-
     #[error("Type mismatch: expected {0:?}, found {1:?}")]
     FuncReturnTypeMismatch(Type, Type),
 
@@ -42,23 +39,65 @@ pub enum TypeCheckError {
 }
 
 pub struct TypeChecker {
-    vars: HashMap<String, Type>,
-    funcs: HashMap<String, FuncSig>,
+    context: ResolvedContext,
+    type_map_builder: TypeMapBuilder,
+    func_sigs: HashMap<String, FuncSig>,
     errors: Vec<TypeCheckError>,
 }
 
+// Internal helper used during checking to avoid self-borrow conflicts. It holds
+// split borrows into the owning TypeChecker fields so we can iterate over
+// functions (&context.module.funcs) while still mutably updating the builder
+// and error vec. This removes the need for moving the functions Vec out of the
+// context (previous mem::take workaround) and keeps borrow scopes minimal.
+struct Checker<'c, 'b> {
+    context: &'c ResolvedContext,
+    func_sigs: &'c HashMap<String, FuncSig>,
+    builder: &'b mut TypeMapBuilder,
+    errors: &'b mut Vec<TypeCheckError>,
+}
+
 impl TypeChecker {
-    pub fn new() -> Self {
+    pub fn new(context: ResolvedContext) -> Self {
         Self {
-            vars: HashMap::new(),
-            funcs: HashMap::new(),
+            context,
+            type_map_builder: TypeMapBuilder::new(),
+            func_sigs: HashMap::new(),
             errors: Vec::new(),
         }
     }
 
-    fn populate_function_symbols(&mut self, functions: &Vec<Function>) {
-        for function in functions {
-            self.funcs.insert(
+    pub fn check(&mut self) -> Result<TypeMap, Vec<TypeCheckError>> {
+        self.populate_function_symbols();
+
+        // Create split borrows so we can iterate immutably over functions while
+        // mutably updating the builder & errors.
+        let mut checker = Checker {
+            context: &self.context,
+            func_sigs: &self.func_sigs,
+            builder: &mut self.type_map_builder,
+            errors: &mut self.errors,
+        };
+
+        for function in &self.context.module.funcs {
+            checker.type_check_function(function)?;
+            if !checker.errors.is_empty() {
+                break;
+            }
+        }
+
+        if self.errors.is_empty() {
+            // Workaround for moving out of a field: replace with new one, then finish the old
+            let builder = std::mem::replace(&mut self.type_map_builder, TypeMapBuilder::new());
+            Ok(builder.finish())
+        } else {
+            Err(std::mem::take(&mut self.errors))
+        }
+    }
+
+    fn populate_function_symbols(&mut self) {
+        for function in &self.context.module.funcs {
+            self.func_sigs.insert(
                 function.name.clone(),
                 FuncSig {
                     params: function.params.iter().map(|p| p.typ.clone()).collect(),
@@ -67,42 +106,95 @@ impl TypeChecker {
             );
         }
     }
+}
 
-    pub fn check(&mut self, module: &Module) -> Result<(), Vec<TypeCheckError>> {
-        self.populate_function_symbols(&module.funcs);
-
-        for function in &module.funcs {
-            self.type_check_function(function)?;
-        }
-
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
-            Err(self.errors.clone())
-        }
+impl<'c, 'b> Checker<'c, 'b> {
+    fn lookup_def_type(&self, node: NodeId) -> Option<Type> {
+        self.context
+            .def_map
+            .lookup_def(node)
+            .and_then(|def_id| self.builder.lookup_def_type(def_id))
     }
 
-    pub fn type_check_function(
-        &mut self,
-        function: &Function,
-    ) -> Result<Type, Vec<TypeCheckError>> {
-        self.vars.clear();
+    fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
+        // record param types
         for param in &function.params {
-            self.vars.insert(param.name.clone(), param.typ.clone());
+            if let Some(def_id) = self.context.def_map.lookup_def(param.id) {
+                self.builder.record_def_type(def_id, param.typ);
+            }
         }
 
+        // type check body
         let return_type = self.type_check_expr(&function.body).map_err(|e| vec![e])?;
-        if return_type != function.return_type {
+
+        // check return type
+        if return_type != Type::Unknown && return_type != function.return_type {
             self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
                 function.return_type.clone(),
                 return_type.clone(),
             ));
         }
 
+        // record return type
+        self.builder.record_node_type(function.id, return_type);
         if self.errors.is_empty() {
             Ok(return_type)
         } else {
             Err(self.errors.clone())
+        }
+    }
+
+    fn type_check_block(&mut self, body: &Vec<Expr>) -> Result<Type, TypeCheckError> {
+        let mut last_type = Type::Unit;
+        for expr in body {
+            last_type = self.type_check_expr(expr)?;
+        }
+        Ok(last_type)
+    }
+
+    fn type_check_let(&mut self, let_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
+        match self.context.def_map.lookup_def(let_expr.id) {
+            Some(def_id) => {
+                let expr_type = self.type_check_expr(value)?;
+                self.builder.record_def_type(def_id, expr_type);
+                Ok(Type::Unit)
+            }
+            None => Ok(Type::Unknown),
+        }
+    }
+
+    fn type_check_var(&mut self, var_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
+        match self.context.def_map.lookup_def(var_expr.id) {
+            Some(def_id) => {
+                let expr_type = self.type_check_expr(value)?;
+                self.builder.record_def_type(def_id, expr_type);
+                Ok(Type::Unit)
+            }
+            None => Ok(Type::Unknown),
+        }
+    }
+
+    fn type_check_assign(&mut self, var_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
+        match self.lookup_def_type(var_expr.id) {
+            Some(lhs_type) => {
+                let rhs_type = self.type_check_expr(value)?;
+                if lhs_type == Type::Unknown || rhs_type == Type::Unknown {
+                    return Ok(Type::Unknown);
+                }
+                if lhs_type != rhs_type {
+                    Err(TypeCheckError::AssignTypeMismatch(lhs_type, rhs_type))
+                } else {
+                    Ok(Type::Unit)
+                }
+            }
+            None => Ok(Type::Unknown),
+        }
+    }
+
+    fn type_check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
+        match self.lookup_def_type(var_ref_expr.id) {
+            Some(def_type) => Ok(def_type.clone()),
+            None => Ok(Type::Unknown),
         }
     }
 
@@ -114,8 +206,8 @@ impl TypeChecker {
             arg_types.push(ty);
         }
         // Get function signature
-        let Some(func_sig) = self.funcs.get(name) else {
-            return Err(TypeCheckError::FuncUndefined(name.to_string()));
+        let Some(func_sig) = self.func_sigs.get(name) else {
+            return Ok(Type::Unknown);
         };
         // Check number of arguments
         if arg_types.len() != func_sig.params.len() {
@@ -139,79 +231,124 @@ impl TypeChecker {
         Ok(func_sig.return_type.clone())
     }
 
+    fn type_check_if(
+        &mut self,
+        cond: &Expr,
+        then_body: &Expr,
+        else_body: &Expr,
+    ) -> Result<Type, TypeCheckError> {
+        let cond_type = self.type_check_expr(cond)?;
+        if cond_type != Type::Bool {
+            Err(TypeCheckError::CondNotBoolean(cond_type))
+        } else {
+            let then_type = self.type_check_expr(then_body)?;
+            let else_type = self.type_check_expr(else_body)?;
+            if then_type != else_type {
+                Err(TypeCheckError::ThenElseTypeMismatch(then_type, else_type))
+            } else {
+                Ok(then_type)
+            }
+        }
+    }
+
+    fn type_check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
+        let cond_type = self.type_check_expr(cond)?;
+        if cond_type != Type::Bool {
+            Err(TypeCheckError::CondNotBoolean(cond_type))
+        } else {
+            let _ = self.type_check_expr(body)?;
+            Ok(Type::Unit)
+        }
+    }
+
+    fn type_check_bin_op(
+        &mut self,
+        left: &Expr,
+        op: &BinOp,
+        right: &Expr,
+    ) -> Result<Type, TypeCheckError> {
+        let left_type = self.type_check_expr(left)?;
+        let right_type = self.type_check_expr(right)?;
+
+        if left_type == Type::Unknown || right_type == Type::Unknown {
+            return Ok(Type::Unknown);
+        }
+
+        match op {
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                if left_type != Type::UInt32 || right_type != Type::UInt32 {
+                    Err(TypeCheckError::ArithTypeMismatch(left_type, right_type))
+                } else {
+                    Ok(Type::UInt32)
+                }
+            }
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+                if left_type != right_type {
+                    Err(TypeCheckError::CmpTypeMismatch(left_type, right_type))
+                } else {
+                    Ok(Type::Bool)
+                }
+            }
+        }
+    }
+
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
-        match expr {
+        let result = match expr {
             Expr {
                 kind: ExprKind::UInt32Lit(_),
                 ..
             } => Ok(Type::UInt32),
+
             Expr {
                 kind: ExprKind::BoolLit(_),
                 ..
             } => Ok(Type::Bool),
+
             Expr {
                 kind: ExprKind::UnitLit,
                 ..
             } => Ok(Type::Unit),
+
             Expr {
                 kind: ExprKind::BinOp { left, op, right },
                 ..
-            } => {
-                let left_type = self.type_check_expr(left)?;
-                let right_type = self.type_check_expr(right)?;
+            } => self.type_check_bin_op(left, op, right),
 
-                match op {
-                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                        if left_type != Type::UInt32 || right_type != Type::UInt32 {
-                            Err(TypeCheckError::ArithTypeMismatch(left_type, right_type))
-                        } else {
-                            Ok(Type::UInt32)
-                        }
-                    }
-                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
-                        if left_type != right_type {
-                            Err(TypeCheckError::CmpTypeMismatch(left_type, right_type))
-                        } else {
-                            Ok(Type::Bool)
-                        }
-                    }
-                }
-            }
             Expr {
                 kind: ExprKind::UnaryOp { expr, .. },
                 ..
-            } => {
-                let expr_type = self.type_check_expr(expr)?;
-                Ok(expr_type)
-            }
+            } => self.type_check_expr(expr),
+
             Expr {
                 kind: ExprKind::Block(body),
                 ..
-            } => {
-                let mut last_type = Type::Unit;
-                for expr in body {
-                    last_type = self.type_check_expr(expr)?;
-                }
-                Ok(last_type)
-            }
+            } => self.type_check_block(body),
+
             Expr {
-                kind: ExprKind::Let { name, value },
+                kind: ExprKind::Let { value, .. },
                 ..
-            } => {
-                let expr_type = self.type_check_expr(value)?;
-                self.vars.insert(name.clone(), expr_type);
-                Ok(Type::Unit)
-            }
+            } => self.type_check_let(expr, value),
+
             Expr {
-                kind: ExprKind::VarRef(name),
+                kind: ExprKind::Var { value, .. },
                 ..
-            } => {
-                if let Some(expr_type) = self.vars.get(name) {
-                    Ok(expr_type.clone())
-                } else {
-                    Err(TypeCheckError::VarUndefined(name.clone()))
-                }
-            }
+            } => self.type_check_var(expr, value),
+
+            Expr {
+                kind: ExprKind::Assign { value, .. },
+                ..
+            } => self.type_check_assign(&expr, value),
+
+            Expr {
+                kind: ExprKind::VarRef(_),
+                ..
+            } => self.type_check_var_ref(expr),
+
+            Expr {
+                kind: ExprKind::Call { name, args },
+                ..
+            } => self.type_check_call(name, args),
+
             Expr {
                 kind:
                     ExprKind::If {
@@ -220,59 +357,24 @@ impl TypeChecker {
                         else_body,
                     },
                 ..
-            } => {
-                let cond_type = self.type_check_expr(cond)?;
-                if cond_type != Type::Bool {
-                    Err(TypeCheckError::CondNotBoolean(cond_type))
-                } else {
-                    let then_type = self.type_check_expr(then_body)?;
-                    let else_type = self.type_check_expr(else_body)?;
-                    if then_type != else_type {
-                        Err(TypeCheckError::ThenElseTypeMismatch(then_type, else_type))
-                    } else {
-                        Ok(then_type)
-                    }
-                }
-            }
+            } => self.type_check_if(cond, then_body, else_body),
+
             Expr {
                 kind: ExprKind::While { cond, body },
                 ..
-            } => {
-                let cond_type = self.type_check_expr(cond)?;
-                if cond_type != Type::Bool {
-                    Err(TypeCheckError::CondNotBoolean(cond_type))
-                } else {
-                    let _ = self.type_check_expr(body)?;
-                    Ok(Type::Unit)
-                }
-            }
-            Expr {
-                kind: ExprKind::Var { name, value },
-                ..
-            } => {
-                let expr_type = self.type_check_expr(value)?;
-                self.vars.insert(name.clone(), expr_type.clone());
-                Ok(expr_type)
-            }
-            Expr {
-                kind: ExprKind::Assign { name, value },
-                ..
-            } => match self.vars.get(name) {
-                Some(lhs_type) => {
-                    let lhs_type = lhs_type.clone();
-                    let rhs_type = self.type_check_expr(value)?;
-                    if lhs_type != rhs_type {
-                        Err(TypeCheckError::AssignTypeMismatch(lhs_type, rhs_type))
-                    } else {
-                        Ok(Type::Unit)
-                    }
-                }
-                None => Err(TypeCheckError::VarUndefined(name.clone())),
-            },
-            Expr {
-                kind: ExprKind::Call { name, args },
-                ..
-            } => self.type_check_call(name, args),
-        }
+            } => self.type_check_while(cond, body),
+        };
+
+        result.map(|ty| {
+            self.builder.record_node_type(expr.id, ty);
+            ty
+        })
     }
+}
+
+pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+    let mut type_checker = TypeChecker::new(context.clone());
+    let type_map = type_checker.check()?;
+    let type_checked_context = context.with_type_map(type_map);
+    Ok(type_checked_context)
 }

@@ -1,6 +1,7 @@
 use crate::analysis::{DefMap, DefMapBuilder};
 use crate::ast;
 use crate::ast::{ExprKind, Module};
+use crate::context::{Context, ResolvedContext};
 use crate::diagnostics::Span;
 use crate::ids::{DefId, DefIdGen};
 use std::collections::HashMap;
@@ -122,7 +123,7 @@ impl SymbolResolver {
         }
     }
 
-    pub fn check(&mut self, module: &Module) -> Result<(), Vec<ResolveError>> {
+    pub fn resolve(&mut self, module: &Module) -> Result<DefMap, Vec<ResolveError>> {
         self.with_scope(|checker| {
             // global scope
             checker.populate_funcs(&module.funcs);
@@ -132,7 +133,9 @@ impl SymbolResolver {
         });
 
         if self.errors.is_empty() {
-            Ok(())
+            let def_map =
+                std::mem::replace(&mut self.def_map_builder, DefMapBuilder::new()).finish();
+            Ok(def_map)
         } else {
             Err(self.errors.clone())
         }
@@ -317,8 +320,9 @@ impl SymbolResolver {
     }
 }
 
-pub fn resolve(module: &Module) -> (DefMap, Vec<ResolveError>) {
-    let mut checker = SymbolResolver::new();
-    checker.check(module);
-    (checker.def_map_builder.finish(), checker.errors)
+pub fn resolve(context: Context) -> Result<ResolvedContext, Vec<ResolveError>> {
+    let mut resolver = SymbolResolver::new();
+    let def_map = resolver.resolve(&context.module)?;
+    let resolved_context = context.with_def_map(def_map);
+    Ok(resolved_context)
 }
