@@ -1,4 +1,5 @@
 use crate::ids::{DefId, NodeId};
+use crate::types::Type;
 use std::collections::HashMap;
 
 mod resolution {

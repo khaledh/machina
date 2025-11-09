@@ -1,5 +1,6 @@
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
+use crate::types::Type;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -20,13 +21,6 @@ pub struct Function {
 pub struct FunctionParam {
     pub name: String,
     pub typ: Type,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Type {
-    Unit,
-    UInt32,
-    Bool,
 }
 
 #[derive(Clone, Debug)]
@@ -139,7 +133,7 @@ impl fmt::Display for Function {
 
 impl fmt::Display for FunctionParam {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {:?} [{}]", self.name, self.typ, self.id)?;
+        write!(f, "{}: {:?}", self.name, self.typ)?;
         Ok(())
     }
 }

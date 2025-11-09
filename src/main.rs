@@ -8,6 +8,7 @@ mod lexer;
 mod parser;
 mod resolver;
 mod type_check;
+mod types;
 
 use crate::codegen::Codegen;
 use crate::diagnostics::{CompileError, format_error};

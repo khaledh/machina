@@ -1,4 +1,5 @@
-use crate::ast::{BinOp, Expr, ExprKind, Function, Module, Type};
+use crate::ast::{BinOp, Expr, ExprKind, Function, Module};
+use crate::types::Type;
 use std::collections::HashMap;
 use thiserror::Error;
 

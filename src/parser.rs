@@ -1,7 +1,8 @@
-use crate::ast::{BinOp, Expr, ExprKind, Function, FunctionParam, Module, Type, UnaryOp};
+use crate::ast::{BinOp, Expr, ExprKind, Function, FunctionParam, Module, UnaryOp};
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
+use crate::types::Type;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
