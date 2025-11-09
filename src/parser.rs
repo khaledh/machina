@@ -169,7 +169,11 @@ impl<'a> Parser<'a> {
             let name = parser.parse_ident()?;
             parser.consume(&TK::Colon)?;
             let typ = parser.parse_type()?;
-            Ok(FunctionParam { name, typ })
+            Ok(FunctionParam {
+                id: parser.id_gen.new_id(),
+                name,
+                typ,
+            })
         })
     }
 

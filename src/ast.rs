@@ -19,6 +19,7 @@ pub struct Function {
 
 #[derive(Clone, Debug)]
 pub struct FunctionParam {
+    pub id: NodeId,
     pub name: String,
     pub typ: Type,
 }
@@ -133,7 +134,7 @@ impl fmt::Display for Function {
 
 impl fmt::Display for FunctionParam {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {:?}", self.name, self.typ)?;
+        write!(f, "{}: {:?} [{}]", self.name, self.typ, self.id)?;
         Ok(())
     }
 }
