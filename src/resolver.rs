@@ -1,4 +1,4 @@
-use crate::analysis::{ResolutionBuilder, ResolutionMap};
+use crate::analysis::{DefMap, DefMapBuilder};
 use crate::ast;
 use crate::ast::{ExprKind, Module};
 use crate::diagnostics::Span;
@@ -54,7 +54,7 @@ pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
     def_id_gen: DefIdGen,
-    res_builder: ResolutionBuilder,
+    def_map_builder: DefMapBuilder,
 }
 
 impl SymbolResolver {
@@ -63,7 +63,7 @@ impl SymbolResolver {
             scopes: Vec::new(),
             errors: Vec::new(),
             def_id_gen: DefIdGen::new(),
-            res_builder: ResolutionBuilder::new(),
+            def_map_builder: DefMapBuilder::new(),
         }
     }
 
@@ -110,6 +110,7 @@ impl SymbolResolver {
     fn populate_funcs(&mut self, functions: &Vec<ast::Function>) {
         for function in functions {
             let def_id = self.def_id_gen.new_id();
+            self.def_map_builder.record_def(def_id, function.id);
             self.insert_symbol(
                 &function.name,
                 Symbol {
@@ -142,6 +143,7 @@ impl SymbolResolver {
             // add parameters to scope
             for param in &function.params {
                 let def_id = checker.def_id_gen.new_id();
+                checker.def_map_builder.record_def(def_id, param.id);
                 checker.insert_symbol(
                     &param.name,
                     Symbol {
@@ -206,7 +208,7 @@ impl SymbolResolver {
                 } else {
                     self.check_expr(value);
                     let def_id = self.def_id_gen.new_id();
-                    self.res_builder.record_def(def_id, expr.id);
+                    self.def_map_builder.record_def(def_id, expr.id);
                     self.insert_symbol(
                         name,
                         Symbol {
@@ -228,7 +230,7 @@ impl SymbolResolver {
                 } else {
                     self.check_expr(value);
                     let def_id = self.def_id_gen.new_id();
-                    self.res_builder.record_def(def_id, expr.id);
+                    self.def_map_builder.record_def(def_id, expr.id);
                     self.insert_symbol(
                         name,
                         Symbol {
@@ -244,7 +246,7 @@ impl SymbolResolver {
                 kind: ExprKind::VarRef(name),
                 ..
             } => match self.lookup_symbol(name) {
-                Some(symbol) => self.res_builder.record_use(expr.id, symbol.def_id),
+                Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id),
                 None => self
                     .errors
                     .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
@@ -270,11 +272,11 @@ impl SymbolResolver {
             } => match self.lookup_symbol(name) {
                 Some(symbol) => match symbol.kind {
                     SymbolKind::Var { is_mutable: true } => {
-                        self.res_builder.record_use(expr.id, symbol.def_id);
+                        self.def_map_builder.record_use(expr.id, symbol.def_id);
                         self.check_expr(value)
                     }
                     SymbolKind::Var { is_mutable: false } => {
-                        self.res_builder.record_use(expr.id, symbol.def_id);
+                        self.def_map_builder.record_use(expr.id, symbol.def_id);
                         self.errors
                             .push(ResolveError::VarImmutable(name.to_string(), expr.span));
                     }
@@ -302,7 +304,7 @@ impl SymbolResolver {
                 ..
             } => match self.lookup_symbol(name) {
                 Some(symbol) if symbol.kind == SymbolKind::Func => {
-                    self.res_builder.record_use(expr.id, symbol.def_id);
+                    self.def_map_builder.record_use(expr.id, symbol.def_id);
                     for arg in args {
                         self.check_expr(arg);
                     }
@@ -315,9 +317,8 @@ impl SymbolResolver {
     }
 }
 
-#[allow(unused)]
-pub fn resolve(module: &Module) -> (ResolutionMap, Vec<ResolveError>) {
+pub fn resolve(module: &Module) -> (DefMap, Vec<ResolveError>) {
     let mut checker = SymbolResolver::new();
     checker.check(module);
-    (checker.res_builder.finish(), checker.errors)
+    (checker.def_map_builder.finish(), checker.errors)
 }

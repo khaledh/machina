@@ -1,21 +1,21 @@
-use crate::analysis::ResolutionMap;
+use crate::analysis::DefMap;
 use crate::ast::Module;
 
 pub struct Context<'a> {
     module: &'a Module,
-    resolution: Option<&'a ResolutionMap>,
+    def_map: Option<&'a DefMap>,
 }
 
 impl<'a> Context<'a> {
     pub fn new(module: &'a Module) -> Self {
         Self {
             module,
-            resolution: None,
+            def_map: None,
         }
     }
 
-    pub fn with_resolution(mut self, resolution: &'a ResolutionMap) -> Self {
-        self.resolution = Some(resolution);
+    pub fn with_def_map(mut self, def_map: &'a DefMap) -> Self {
+        self.def_map = Some(def_map);
         self
     }
 }

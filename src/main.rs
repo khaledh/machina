@@ -70,7 +70,7 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
 
-    let (resolution, errors) = resolve(&module);
+    let (def_map, errors) = resolve(&module);
     if !errors.is_empty() {
         return Err(errors.into_iter().map(|e| e.into()).collect());
     }
