@@ -1,7 +1,15 @@
+use std::fmt;
+
 // AST Node IDs
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
+
+impl fmt::Display for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 pub struct NodeIdGen {
     next_id: u32,
@@ -23,6 +31,12 @@ impl NodeIdGen {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DefId(pub u32);
+
+impl fmt::Display for DefId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 pub struct DefIdGen {
     next_id: u32,

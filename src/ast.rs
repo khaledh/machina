@@ -1,5 +1,6 @@
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
+use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct Module {
@@ -100,4 +101,176 @@ pub enum BinOp {
 #[derive(Debug, Copy, Clone)]
 pub enum UnaryOp {
     Neg,
+}
+
+impl fmt::Display for Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, func) in self.funcs.iter().enumerate() {
+            func.fmt_with_indent(f, 0)?;
+            if i + 1 != self.funcs.len() {
+                writeln!(f, "--------------------------------")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Function {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Function [{}]", pad, self.id)?;
+        writeln!(f, "{}Name: {}", pad1, self.name)?;
+        writeln!(f, "{}Return Type: {:?}", pad1, self.return_type)?;
+        writeln!(f, "{}Params", pad1)?;
+        for param in &self.params {
+            writeln!(f, "{}{}", indent(level + 2), param)?;
+        }
+        self.body.fmt_with_indent(f, level + 1)?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_with_indent(f, 0)
+    }
+}
+
+impl fmt::Display for FunctionParam {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {:?} [{}]", self.name, self.typ, self.id)?;
+        Ok(())
+    }
+}
+
+impl Expr {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match &self.kind {
+            ExprKind::UInt32Lit(value) => {
+                writeln!(f, "{}UInt32Lit({}) [{}]", pad, value, self.id)?;
+            }
+            ExprKind::BoolLit(value) => {
+                writeln!(f, "{}BoolLit({}) [{}]", pad, value, self.id)?;
+            }
+            ExprKind::UnitLit => {
+                writeln!(f, "{}UnitLit [{}]", pad, self.id)?;
+            }
+            ExprKind::BinOp { left, op, right } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}BinOp [{}]", pad, self.id)?;
+                writeln!(f, "{}Left:", pad1)?;
+                left.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Op: {}", pad1, op)?;
+                writeln!(f, "{}Right:", pad1)?;
+                right.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::UnaryOp { op, expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}UnaryOp [{}]", pad, self.id)?;
+                writeln!(f, "{}Op: {}", pad1, op)?;
+                writeln!(f, "{}Operand:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Block(body) => {
+                writeln!(f, "{}Block [{}]", pad, self.id)?;
+                for expr in body {
+                    expr.fmt_with_indent(f, level + 1)?;
+                }
+            }
+            ExprKind::Let { name, value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Let [{}]", pad, self.id)?;
+                writeln!(f, "{}Name: {}", pad1, name)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Var { name, value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Var [{}]", pad, self.id)?;
+                writeln!(f, "{}Name: {}", pad1, name)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Assign { name, value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Assign [{}]", pad, self.id)?;
+                writeln!(f, "{}Name: {}", pad1, name)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::VarRef(name) => {
+                writeln!(f, "{}VarRef({}) [{}]", pad, name, self.id)?;
+            }
+            ExprKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}If [{}]", pad, self.id)?;
+                writeln!(f, "{}Cond:", pad1)?;
+                cond.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Then:", pad1)?;
+                then_body.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Else:", pad1)?;
+                else_body.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::While { cond, body } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}While [{}]", pad, self.id)?;
+                writeln!(f, "{}Cond:", pad1)?;
+                cond.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Body:", pad1)?;
+                body.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Call { name, args } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Call({}) [{}]", pad, name, self.id)?;
+                writeln!(f, "{}Args:", pad1)?;
+                for arg in args {
+                    arg.fmt_with_indent(f, level + 2)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_with_indent(f, 0)
+    }
+}
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinOp::Add => write!(f, "+")?,
+            BinOp::Sub => write!(f, "-")?,
+            BinOp::Mul => write!(f, "*")?,
+            BinOp::Div => write!(f, "/")?,
+            BinOp::Eq => write!(f, "==")?,
+            BinOp::Ne => write!(f, "!=")?,
+            BinOp::Lt => write!(f, "<")?,
+            BinOp::Gt => write!(f, ">")?,
+            BinOp::LtEq => write!(f, "<=")?,
+            BinOp::GtEq => write!(f, ">=")?,
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnaryOp::Neg => write!(f, "-")?,
+        }
+        Ok(())
+    }
+}
+
+fn indent(level: usize) -> String {
+    "  ".repeat(level)
 }
