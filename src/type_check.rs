@@ -1,6 +1,7 @@
 use crate::analysis::{TypeMap, TypeMapBuilder};
 use crate::ast::{BinOp, Expr, ExprKind, Function};
 use crate::context::{ResolvedContext, TypeCheckedContext};
+use crate::diagnostics::Span;
 use crate::ids::NodeId;
 use crate::types::Type;
 use std::collections::HashMap;
@@ -13,29 +14,44 @@ struct FuncSig {
 
 #[derive(Debug, Clone, Error)]
 pub enum TypeCheckError {
-    #[error("Type mismatch: expected {0:?}, found {1:?}")]
-    FuncReturnTypeMismatch(Type, Type),
+    #[error("Function return type mismatch: expected {0}, found {1}")]
+    FuncReturnTypeMismatch(Type, Type, Span),
 
-    #[error("Invalid types for arithmetic operation: {0:?} != {1:?}")]
-    ArithTypeMismatch(Type, Type),
+    #[error("Invalid types for arithmetic operation: {0} != {1}")]
+    ArithTypeMismatch(Type, Type, Span),
 
-    #[error("Invalid types for comparison operation: {0:?} != {1:?}")]
-    CmpTypeMismatch(Type, Type),
+    #[error("Invalid types for comparison operation: {0} != {1}")]
+    CmpTypeMismatch(Type, Type, Span),
 
-    #[error("Condition must be a boolean, found {0:?}")]
-    CondNotBoolean(Type),
+    #[error("Condition must be a boolean, found {0}")]
+    CondNotBoolean(Type, Span),
 
-    #[error("Then and else branches have different types: {0:?} != {1:?}")]
-    ThenElseTypeMismatch(Type, Type),
+    #[error("Then and else branches have different types: {0} != {1}")]
+    ThenElseTypeMismatch(Type, Type, Span),
 
-    #[error("Type mismatch in assignment: lhs type {0:?} != rhs type {1:?}")]
-    AssignTypeMismatch(Type, Type),
+    #[error("Type mismatch in assignment: lhs type {0} != rhs type {1}")]
+    AssignTypeMismatch(Type, Type, Span),
 
     #[error("Invalid argument count for function {0}: expected {1}, found {2}")]
-    ArgCountMismatch(String, usize, usize),
+    ArgCountMismatch(String, usize, usize, Span),
 
-    #[error("Type mismatch in argument {0} for function {1}: expected {2:?}, found {3:?}")]
-    ArgTypeMismatch(usize, String, Type, Type),
+    #[error("Type mismatch in argument {0} for function {1}: expected {2}, found {3}")]
+    ArgTypeMismatch(usize, String, Type, Type, Span),
+}
+
+impl TypeCheckError {
+    pub fn span(&self) -> Span {
+        match self {
+            TypeCheckError::FuncReturnTypeMismatch(_, _, span) => *span,
+            TypeCheckError::ArithTypeMismatch(_, _, span) => *span,
+            TypeCheckError::CmpTypeMismatch(_, _, span) => *span,
+            TypeCheckError::CondNotBoolean(_, span) => *span,
+            TypeCheckError::ThenElseTypeMismatch(_, _, span) => *span,
+            TypeCheckError::AssignTypeMismatch(_, _, span) => *span,
+            TypeCheckError::ArgCountMismatch(_, _, _, span) => *span,
+            TypeCheckError::ArgTypeMismatch(_, _, _, _, span) => *span,
+        }
+    }
 }
 
 pub struct TypeChecker {
@@ -129,9 +145,15 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         // check return type
         if return_type != Type::Unknown && return_type != function.return_type {
+            // get the span of the last expression in the body
+            let span = match &function.body.kind {
+                ExprKind::Block(body) => body.last().unwrap().span,
+                _ => function.body.span,
+            };
             self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
                 function.return_type.clone(),
                 return_type.clone(),
+                span,
             ));
         }
 
@@ -182,7 +204,11 @@ impl<'c, 'b> Checker<'c, 'b> {
                     return Ok(Type::Unknown);
                 }
                 if lhs_type != rhs_type {
-                    Err(TypeCheckError::AssignTypeMismatch(lhs_type, rhs_type))
+                    Err(TypeCheckError::AssignTypeMismatch(
+                        lhs_type,
+                        rhs_type,
+                        var_expr.span,
+                    ))
                 } else {
                     Ok(Type::Unit)
                 }
@@ -198,7 +224,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_call(&mut self, name: &str, args: &Vec<Expr>) -> Result<Type, TypeCheckError> {
+    fn type_check_call(&mut self, call_expr: &Expr, name: &str, args: &Vec<Expr>) -> Result<Type, TypeCheckError> {
         // Compute argument types first to avoid holding an immutable borrow of self.funcs
         let mut arg_types = Vec::new();
         for arg in args {
@@ -215,16 +241,19 @@ impl<'c, 'b> Checker<'c, 'b> {
                 name.to_string(),
                 func_sig.params.len(),
                 arg_types.len(),
+                call_expr.span,
             ));
         }
         // Check argument types
         for (i, arg_type) in arg_types.iter().enumerate() {
             if arg_type != &func_sig.params[i] {
+                let span = args[i].span;
                 return Err(TypeCheckError::ArgTypeMismatch(
-                    i,
+                    i + 1,
                     name.to_string(),
                     func_sig.params[i].clone(),
                     arg_type.clone(),
+                    span,
                 ));
             }
         }
@@ -239,12 +268,25 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         let cond_type = self.type_check_expr(cond)?;
         if cond_type != Type::Bool {
-            Err(TypeCheckError::CondNotBoolean(cond_type))
+            Err(TypeCheckError::CondNotBoolean(cond_type, cond.span))
         } else {
             let then_type = self.type_check_expr(then_body)?;
             let else_type = self.type_check_expr(else_body)?;
             if then_type != else_type {
-                Err(TypeCheckError::ThenElseTypeMismatch(then_type, else_type))
+                // create a span that covers both the then and else bodies so the
+                // diagnostic highlights the whole region
+                let then_span = match &then_body.kind {
+                    ExprKind::Block(body) => body.last().unwrap().span,
+                    _ => then_body.span,
+                };
+                let else_span = match &else_body.kind {
+                    ExprKind::Block(body) => body.last().unwrap().span,
+                    _ => else_body.span,
+                };
+                let span = Span::merge_all(vec![then_span, else_span]);
+                Err(TypeCheckError::ThenElseTypeMismatch(
+                    then_type, else_type, span,
+                ))
             } else {
                 Ok(then_type)
             }
@@ -254,7 +296,7 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
         let cond_type = self.type_check_expr(cond)?;
         if cond_type != Type::Bool {
-            Err(TypeCheckError::CondNotBoolean(cond_type))
+            Err(TypeCheckError::CondNotBoolean(cond_type, cond.span))
         } else {
             let _ = self.type_check_expr(body)?;
             Ok(Type::Unit)
@@ -277,14 +319,18 @@ impl<'c, 'b> Checker<'c, 'b> {
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                 if left_type != Type::UInt32 || right_type != Type::UInt32 {
-                    Err(TypeCheckError::ArithTypeMismatch(left_type, right_type))
+                    let span = Span::merge_all(vec![left.span, right.span]);
+                    Err(TypeCheckError::ArithTypeMismatch(
+                        left_type, right_type, span,
+                    ))
                 } else {
                     Ok(Type::UInt32)
                 }
             }
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
                 if left_type != right_type {
-                    Err(TypeCheckError::CmpTypeMismatch(left_type, right_type))
+                    let span = Span::merge_all(vec![left.span, right.span]);
+                    Err(TypeCheckError::CmpTypeMismatch(left_type, right_type, span))
                 } else {
                     Ok(Type::Bool)
                 }
@@ -347,7 +393,7 @@ impl<'c, 'b> Checker<'c, 'b> {
             Expr {
                 kind: ExprKind::Call { name, args },
                 ..
-            } => self.type_check_call(name, args),
+            } => self.type_check_call(expr, name, args),
 
             Expr {
                 kind:

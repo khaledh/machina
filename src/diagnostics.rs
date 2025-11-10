@@ -17,8 +17,8 @@ pub enum CompileError {
     #[error(transparent)]
     ResolveError(#[from] ResolveError),
 
-    #[error("Type check errors: {0:#?}")]
-    TypeCheckError(Vec<TypeCheckError>),
+    #[error(transparent)]
+    TypeCheckError(#[from] TypeCheckError),
 
     #[error(transparent)]
     CodegenError(#[from] CodegenError),
@@ -50,6 +50,28 @@ impl Span {
 
     pub fn len(&self) -> usize {
         self.end.offset - self.start.offset
+    }
+
+    pub fn merge_all(spans: Vec<Span>) -> Span {
+        if spans.is_empty() {
+            // Return a harmless 1:1 zero-length span instead of line 0.
+            return Span::new(
+                Position {
+                    offset: 0,
+                    line: 1,
+                    column: 1,
+                },
+                Position {
+                    offset: 0,
+                    line: 1,
+                    column: 1,
+                },
+            );
+        }
+        // Assume spans are in source order; take start from first, end from last.
+        let start = spans[0].start;
+        let end = spans.last().unwrap().end;
+        Span::new(start, end)
     }
 }
 

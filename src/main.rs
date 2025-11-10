@@ -44,16 +44,19 @@ fn main() {
             for error in errors {
                 match error {
                     CompileError::LexError(e) => {
-                        println!("[ERROR] {}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(SOURCE, e.span(), e));
                     }
                     CompileError::ParserError(e) => {
-                        println!("[ERROR] {}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(SOURCE, e.span(), e));
                     }
                     CompileError::ResolveError(e) => {
-                        println!("[ERROR] {}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(SOURCE, e.span(), e));
+                    }
+                    CompileError::TypeCheckError(e) => {
+                        println!("{}", format_error(SOURCE, e.span(), e));
                     }
                     error => {
-                        println!("[ERROR] {error:?}");
+                        println!("{error:?}");
                     }
                 }
             }
@@ -79,8 +82,11 @@ fn compile(source: &str) -> Result<String, Vec<CompileError>> {
             .collect::<Vec<CompileError>>()
     })?;
 
-    let type_checked_context =
-        type_check(resolved_context).map_err(|errs| vec![CompileError::TypeCheckError(errs)])?;
+    let type_checked_context = type_check(resolved_context).map_err(|errs| {
+        errs.into_iter()
+            .map(|e| e.into())
+            .collect::<Vec<CompileError>>()
+    })?;
 
     let mut codegen = Codegen::new(type_checked_context);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
