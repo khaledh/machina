@@ -28,7 +28,11 @@ fn ge(a: u32, b: u32) -> bool {
 }
 
 fn main() -> u32 {
-    if ge(inc(41), 42) { 42 / 2 } else { 99 }
+    if ge(inc(41), 42) {
+        42 / 2
+    } else {
+       99
+    }
 }
 "#;
 
