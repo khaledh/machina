@@ -34,7 +34,6 @@ mod def_resolution {
         pub fn finish(self) -> DefMap {
             DefMap {
                 node_def: self.node_def,
-                def_node: self.def_node,
             }
         }
     }
@@ -42,7 +41,6 @@ mod def_resolution {
     #[derive(Clone)]
     pub struct DefMap {
         node_def: HashMap<NodeId, DefId>,
-        def_node: HashMap<DefId, NodeId>,
     }
 
     impl DefMap {
@@ -93,11 +91,13 @@ mod type_resolution {
         }
     }
 
+    #[allow(unused)]
     #[derive(Clone)]
     pub struct TypeMap {
         node_type: HashMap<NodeId, Type>,
     }
 
+    #[allow(unused)]
     impl TypeMap {
         pub fn lookup_node_type(&self, node: NodeId) -> Option<Type> {
             self.node_type.get(&node).copied()

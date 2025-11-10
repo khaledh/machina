@@ -35,6 +35,7 @@ impl ResolvedContext {
     }
 }
 
+#[allow(unused)]
 #[derive(Clone)]
 pub struct TypeCheckedContext {
     pub module: Module,

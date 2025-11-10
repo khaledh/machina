@@ -48,10 +48,6 @@ impl Span {
         Self { start, end }
     }
 
-    pub fn len(&self) -> usize {
-        self.end.offset - self.start.offset
-    }
-
     pub fn merge_all(spans: Vec<Span>) -> Span {
         if spans.is_empty() {
             // Return a harmless 1:1 zero-length span instead of line 0.
