@@ -1,5 +1,5 @@
 use crate::analysis::{TypeMap, TypeMapBuilder};
-use crate::ast::{BinOp, Expr, ExprKind, Function};
+use crate::ast::{BinaryOp, Expr, ExprKind, Function};
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
@@ -224,7 +224,12 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_call(&mut self, call_expr: &Expr, name: &str, args: &Vec<Expr>) -> Result<Type, TypeCheckError> {
+    fn type_check_call(
+        &mut self,
+        call_expr: &Expr,
+        name: &str,
+        args: &Vec<Expr>,
+    ) -> Result<Type, TypeCheckError> {
         // Compute argument types first to avoid holding an immutable borrow of self.funcs
         let mut arg_types = Vec::new();
         for arg in args {
@@ -306,7 +311,7 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_bin_op(
         &mut self,
         left: &Expr,
-        op: &BinOp,
+        op: &BinaryOp,
         right: &Expr,
     ) -> Result<Type, TypeCheckError> {
         let left_type = self.type_check_expr(left)?;
@@ -317,7 +322,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
 
         match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                 if left_type != Type::UInt32 || right_type != Type::UInt32 {
                     let span = Span::merge_all(vec![left.span, right.span]);
                     Err(TypeCheckError::ArithTypeMismatch(
@@ -327,7 +332,12 @@ impl<'c, 'b> Checker<'c, 'b> {
                     Ok(Type::UInt32)
                 }
             }
-            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::LtEq
+            | BinaryOp::GtEq => {
                 if left_type != right_type {
                     let span = Span::merge_all(vec![left.span, right.span]);
                     Err(TypeCheckError::CmpTypeMismatch(left_type, right_type, span))

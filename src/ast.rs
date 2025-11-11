@@ -38,7 +38,7 @@ pub enum ExprKind {
     UnitLit,
     BinOp {
         left: Box<Expr>,
-        op: BinOp,
+        op: BinaryOp,
         right: Box<Expr>,
     },
     UnaryOp {
@@ -77,7 +77,7 @@ pub enum ExprKind {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum BinOp {
+pub enum BinaryOp {
     // Arithmetic operators
     Add,
     Sub,
@@ -239,19 +239,19 @@ impl fmt::Display for Expr {
     }
 }
 
-impl fmt::Display for BinOp {
+impl fmt::Display for BinaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BinOp::Add => write!(f, "+")?,
-            BinOp::Sub => write!(f, "-")?,
-            BinOp::Mul => write!(f, "*")?,
-            BinOp::Div => write!(f, "/")?,
-            BinOp::Eq => write!(f, "==")?,
-            BinOp::Ne => write!(f, "!=")?,
-            BinOp::Lt => write!(f, "<")?,
-            BinOp::Gt => write!(f, ">")?,
-            BinOp::LtEq => write!(f, "<=")?,
-            BinOp::GtEq => write!(f, ">=")?,
+            BinaryOp::Add => write!(f, "+")?,
+            BinaryOp::Sub => write!(f, "-")?,
+            BinaryOp::Mul => write!(f, "*")?,
+            BinaryOp::Div => write!(f, "/")?,
+            BinaryOp::Eq => write!(f, "==")?,
+            BinaryOp::Ne => write!(f, "!=")?,
+            BinaryOp::Lt => write!(f, "<")?,
+            BinaryOp::Gt => write!(f, ">")?,
+            BinaryOp::LtEq => write!(f, "<=")?,
+            BinaryOp::GtEq => write!(f, ">=")?,
         }
         Ok(())
     }

@@ -292,7 +292,7 @@ impl Codegen {
 
     fn gen_binary_op(
         &mut self,
-        op: ast::BinOp,
+        op: ast::BinaryOp,
         left: &ExprKind,
         right: &ExprKind,
         reg: u8,
@@ -314,33 +314,33 @@ impl Codegen {
 
         match op {
             // Arithmetic operators
-            ast::BinOp::Add => result.push_str(&format!("  add w{reg}, w{lreg}, w{rreg}\n")),
-            ast::BinOp::Sub => result.push_str(&format!("  sub w{reg}, w{lreg}, w{rreg}\n")),
-            ast::BinOp::Mul => result.push_str(&format!("  mul w{reg}, w{lreg}, w{rreg}\n")),
-            ast::BinOp::Div => result.push_str(&format!("  udiv w{reg}, w{lreg}, w{rreg}\n")),
+            ast::BinaryOp::Add => result.push_str(&format!("  add w{reg}, w{lreg}, w{rreg}\n")),
+            ast::BinaryOp::Sub => result.push_str(&format!("  sub w{reg}, w{lreg}, w{rreg}\n")),
+            ast::BinaryOp::Mul => result.push_str(&format!("  mul w{reg}, w{lreg}, w{rreg}\n")),
+            ast::BinaryOp::Div => result.push_str(&format!("  udiv w{reg}, w{lreg}, w{rreg}\n")),
 
             // Comparison operators
-            ast::BinOp::Eq => {
+            ast::BinaryOp::Eq => {
                 result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
                 result.push_str(&format!("  cset w{reg}, eq\n"));
             }
-            ast::BinOp::Ne => {
+            ast::BinaryOp::Ne => {
                 result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
                 result.push_str(&format!("  cset w{reg}, ne\n"));
             }
-            ast::BinOp::Lt => {
+            ast::BinaryOp::Lt => {
                 result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
                 result.push_str(&format!("  cset w{reg}, lt\n"));
             }
-            ast::BinOp::Gt => {
+            ast::BinaryOp::Gt => {
                 result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
                 result.push_str(&format!("  cset w{reg}, gt\n"));
             }
-            ast::BinOp::LtEq => {
+            ast::BinaryOp::LtEq => {
                 result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
                 result.push_str(&format!("  cset w{reg}, le\n"));
             }
-            ast::BinOp::GtEq => {
+            ast::BinaryOp::GtEq => {
                 result.push_str(&format!("  cmp w{lreg}, w{rreg}\n"));
                 result.push_str(&format!("  cset w{reg}, ge\n"));
             }

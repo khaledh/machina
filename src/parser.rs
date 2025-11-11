@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr, ExprKind, Function, FunctionParam, Module, UnaryOp};
+use crate::ast::{BinaryOp, Expr, ExprKind, Function, FunctionParam, Module, UnaryOp};
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
@@ -427,18 +427,18 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn bin_op_from_token(token: &TokenKind) -> Option<(BinOp, u8)> {
+    fn bin_op_from_token(token: &TokenKind) -> Option<(BinaryOp, u8)> {
         match token {
-            TK::Plus => Some((BinOp::Add, 1)),
-            TK::Minus => Some((BinOp::Sub, 1)),
-            TK::Star => Some((BinOp::Mul, 2)),
-            TK::Slash => Some((BinOp::Div, 2)),
-            TK::EqEq => Some((BinOp::Eq, 3)),
-            TK::NotEq => Some((BinOp::Ne, 3)),
-            TK::LessThan => Some((BinOp::Lt, 3)),
-            TK::GreaterThan => Some((BinOp::Gt, 3)),
-            TK::LessThanEq => Some((BinOp::LtEq, 3)),
-            TK::GreaterThanEq => Some((BinOp::GtEq, 3)),
+            TK::Plus => Some((BinaryOp::Add, 1)),
+            TK::Minus => Some((BinaryOp::Sub, 1)),
+            TK::Star => Some((BinaryOp::Mul, 2)),
+            TK::Slash => Some((BinaryOp::Div, 2)),
+            TK::EqEq => Some((BinaryOp::Eq, 3)),
+            TK::NotEq => Some((BinaryOp::Ne, 3)),
+            TK::LessThan => Some((BinaryOp::Lt, 3)),
+            TK::GreaterThan => Some((BinaryOp::Gt, 3)),
+            TK::LessThanEq => Some((BinaryOp::LtEq, 3)),
+            TK::GreaterThanEq => Some((BinaryOp::GtEq, 3)),
             _ => None,
         }
     }
