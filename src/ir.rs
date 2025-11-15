@@ -187,7 +187,7 @@ impl<'a> IrBlockBuilder<'a> {
         }
     }
 
-    fn new_addr(&mut self, typ: Type) -> IrAddrId {
+    pub fn new_addr(&mut self, typ: Type) -> IrAddrId {
         let id = IrAddrId(self.addrs.len() as u32);
         let size = typ.size_of();
         let align = typ.align_of();
@@ -195,7 +195,7 @@ impl<'a> IrBlockBuilder<'a> {
         id
     }
 
-    fn new_temp(&mut self, typ: Type) -> IrTempId {
+    pub fn new_temp(&mut self, typ: Type) -> IrTempId {
         let id = IrTempId(self.temps.len() as u32);
         self.temps.push(IrTempType { typ });
         id
@@ -358,7 +358,10 @@ impl IrFunctionBuilder {
         block_id
     }
 
-    pub fn build_block(&mut self, block_id: IrBlockId, f: impl FnOnce(IrBlockBuilder) -> IrBlock) {
+    pub fn build_block<E, F>(&mut self, block_id: IrBlockId, f: F) -> Result<(), E>
+    where
+        F: FnOnce(IrBlockBuilder) -> Result<IrBlock, E>,
+    {
         assert!(block_id.0 < self.blocks.len() as u32, "Block ID not found");
         let block_builder = IrBlockBuilder::new(
             block_id,
@@ -366,16 +369,20 @@ impl IrFunctionBuilder {
             &mut self.temps,
             &mut self.addrs,
         );
-        let block = f(block_builder);
+        let block = f(block_builder)?;
         self.blocks[block_id.0 as usize] = block; // replace the placeholder with the actual block
+        Ok(())
     }
 
-    pub fn build_expr_block(
+    pub fn build_expr_block<E, F>(
         &mut self,
         block_id: IrBlockId,
         result: IrTempId,
-        f: impl FnOnce(IrBlockBuilder, IrTempId) -> IrBlock,
-    ) {
+        f: F,
+    ) -> Result<(), E>
+    where
+        F: FnOnce(IrBlockBuilder, IrTempId) -> Result<IrBlock, E>,
+    {
         assert!(block_id.0 < self.blocks.len() as u32, "Block ID not found");
         let block_builder = IrBlockBuilder::new(
             block_id,
@@ -383,9 +390,9 @@ impl IrFunctionBuilder {
             &mut self.temps,
             &mut self.addrs,
         );
-        // pass the result to the block builder so it can populate it
-        let block = f(block_builder, result);
+        let block = f(block_builder, result)?;
         self.blocks[block_id.0 as usize] = block; // replace the placeholder with the actual block
+        Ok(())
     }
 
     pub fn finish(self) -> IrFunction {
@@ -620,40 +627,56 @@ mod tests {
         let merge_b = fn_builder.new_block("merge".to_string());
 
         // Build the entry block
-        fn_builder.build_block(entry_bb, |mut builder| {
-            let lhs = builder.new_temp(Type::UInt32);
-            let rhs = builder.new_temp(Type::UInt32);
-            let cond = builder.new_temp(Type::Bool);
-            builder.const_u32(lhs, 2);
-            builder.const_u32(rhs, 1);
-            builder.binary_op(cond, BinaryOp::Gt, lhs, rhs);
-            builder.terminate(IrTerminator::CondBr {
-                cond,
-                then_b,
-                else_b,
+        fn_builder
+            .build_block(entry_bb, |mut builder| -> Result<IrBlock, ()> {
+                let lhs = builder.new_temp(Type::UInt32);
+                let rhs = builder.new_temp(Type::UInt32);
+                let cond = builder.new_temp(Type::Bool);
+                builder.const_u32(lhs, 2);
+                builder.const_u32(rhs, 1);
+                builder.binary_op(cond, BinaryOp::Gt, lhs, rhs);
+                Ok(builder.terminate(IrTerminator::CondBr {
+                    cond,
+                    then_b,
+                    else_b,
+                }))
             })
-        });
+            .expect("Failed to build entry block");
 
         let if_result = fn_builder.new_temp(Type::UInt32);
 
         // Then block
-        fn_builder.build_expr_block(then_b, if_result, |mut builder, result| {
-            builder.const_u32(result, 42);
-            builder.terminate(IrTerminator::Br { target: merge_b })
-        });
+        fn_builder
+            .build_expr_block(
+                then_b,
+                if_result,
+                |mut builder, result| -> Result<IrBlock, ()> {
+                    builder.const_u32(result, 42);
+                    Ok(builder.terminate(IrTerminator::Br { target: merge_b }))
+                },
+            )
+            .expect("Failed to build then block");
 
         // Else block
-        fn_builder.build_expr_block(else_b, if_result, |mut builder, result| {
-            builder.const_u32(result, 99);
-            builder.terminate(IrTerminator::Br { target: merge_b })
-        });
+        fn_builder
+            .build_expr_block(
+                else_b,
+                if_result,
+                |mut builder, result| -> Result<IrBlock, ()> {
+                    builder.const_u32(result, 99);
+                    Ok(builder.terminate(IrTerminator::Br { target: merge_b }))
+                },
+            )
+            .expect("Failed to build else block");
 
         // Merge block
-        fn_builder.build_block(merge_b, |builder| {
-            builder.terminate(IrTerminator::Ret {
-                value: Some(if_result),
+        fn_builder
+            .build_block(merge_b, |builder| -> Result<IrBlock, ()> {
+                Ok(builder.terminate(IrTerminator::Ret {
+                    value: Some(if_result),
+                }))
             })
-        });
+            .expect("Failed to build merge block");
 
         let function = fn_builder.finish();
 

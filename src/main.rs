@@ -6,6 +6,7 @@ mod diagnostics;
 mod ids;
 mod ir;
 mod lexer;
+mod lower;
 mod parser;
 mod resolver;
 mod type_check;

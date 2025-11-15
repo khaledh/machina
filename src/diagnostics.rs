@@ -71,6 +71,23 @@ impl Span {
     }
 }
 
+impl Default for Span {
+    fn default() -> Self {
+        Self {
+            start: Position {
+                offset: 0,
+                line: 1,
+                column: 1,
+            },
+            end: Position {
+                offset: 0,
+                line: 1,
+                column: 1,
+            },
+        }
+    }
+}
+
 impl Display for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}..{}", self.start, self.end)
