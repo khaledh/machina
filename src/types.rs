@@ -18,3 +18,23 @@ impl fmt::Display for Type {
         }
     }
 }
+
+impl Type {
+    pub fn size_of(&self) -> usize {
+        match self {
+            Type::Unit => 0,
+            Type::UInt32 => 4,
+            Type::Bool => 1,
+            Type::Unknown => panic!("Unknown type"),
+        }
+    }
+
+    pub fn align_of(&self) -> usize {
+        match self {
+            Type::Unit => 1,
+            Type::UInt32 => 4,
+            Type::Bool => 1,
+            Type::Unknown => panic!("Unknown type"),
+        }
+    }
+}
