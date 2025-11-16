@@ -76,7 +76,7 @@ pub enum ExprKind {
     },
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOp {
     // Arithmetic operators
     Add,
@@ -93,7 +93,7 @@ pub enum BinaryOp {
     GtEq,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
 }

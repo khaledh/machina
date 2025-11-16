@@ -6,21 +6,33 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IrBlockId(u32);
 
-/// SSA-like ephemeral value (not enforced yet)
-#[allow(unused)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IrTempId(u32);
-
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct IrTempType {
     pub typ: Type,
 }
 
+/// SSA-like ephemeral value (not enforced yet)
+#[allow(unused)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IrTempId(u32);
+
+impl IrTempId {
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
+
 /// Stable stack slot pointer (aggregate later)
 #[allow(unused)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IrAddrId(u32);
+
+impl IrAddrId {
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
@@ -222,6 +234,16 @@ impl<'a> IrBlockBuilder<'a> {
         let value = self.new_temp(typ);
         self.insts.push(IrInst::LoadVar { value, addr, typ });
         value
+    }
+
+    pub fn load_var_into(&mut self, target: IrTempId, addr: IrAddrId) {
+        let typ = self.addrs[addr.0 as usize].typ;
+        debug_assert_eq!(self.temps[target.0 as usize].typ, typ);
+        self.insts.push(IrInst::LoadVar {
+            value: target,
+            addr,
+            typ,
+        });
     }
 
     pub fn const_u32(&mut self, result: IrTempId, value: u32) {
@@ -482,8 +504,8 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             write!(
                 f,
                 "store %t{} -> &a{} : {}",
-                addr.0,
                 value.0,
+                addr.0,
                 func.addr_type(*addr)
             )?;
         }

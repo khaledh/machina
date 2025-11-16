@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 mod def_resolution {
     use super::{DefId, HashMap, NodeId};
+    use std::fmt;
 
     pub struct DefMapBuilder {
         node_def: HashMap<NodeId, DefId>,
@@ -46,6 +47,15 @@ mod def_resolution {
     impl DefMap {
         pub fn lookup_def(&self, node: NodeId) -> Option<DefId> {
             self.node_def.get(&node).copied()
+        }
+    }
+
+    impl fmt::Display for DefMap {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            for (node, def) in self.node_def.iter() {
+                writeln!(f, "Node [{}] -> Def [{}]", node, def)?;
+            }
+            Ok(())
         }
     }
 }
