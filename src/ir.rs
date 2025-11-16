@@ -2,31 +2,35 @@ use crate::ast::{BinaryOp, UnaryOp};
 use crate::types::Type;
 use std::fmt;
 
-#[allow(unused)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IrBlockId(u32);
+pub struct IrBlockId(pub(crate) u32);
 
-#[allow(unused)]
+impl IrBlockId {
+    #[inline]
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IrTempType {
     pub typ: Type,
 }
 
 /// SSA-like ephemeral value (not enforced yet)
-#[allow(unused)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IrTempId(u32);
+pub struct IrTempId(pub(crate) u32);
 
 impl IrTempId {
+    #[inline]
     pub fn id(&self) -> u32 {
         self.0
     }
 }
 
 /// Stable stack slot pointer (aggregate later)
-#[allow(unused)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IrAddrId(u32);
+pub struct IrAddrId(pub(crate) u32);
 
 impl IrAddrId {
     pub fn id(&self) -> u32 {
@@ -34,7 +38,6 @@ impl IrAddrId {
     }
 }
 
-#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct IrAddrType {
     pub typ: Type,
@@ -42,7 +45,6 @@ pub struct IrAddrType {
     pub size: usize,
 }
 
-#[allow(unused)]
 #[derive(Debug)]
 pub struct IrFunction {
     pub name: String,
@@ -53,7 +55,6 @@ pub struct IrFunction {
     pub addrs: Vec<IrAddrType>,
 }
 
-#[allow(unused)]
 impl IrFunction {
     pub fn temp_type(&self, id: IrTempId) -> Type {
         self.temps[id.0 as usize].typ
@@ -65,14 +66,12 @@ impl IrFunction {
 }
 
 #[derive(Debug)]
-#[allow(unused)]
 pub struct IrParam {
     pub name: String,
     pub typ: Type,
 }
 
 #[derive(Debug)]
-#[allow(unused)]
 pub struct IrBlock {
     id: IrBlockId,
     name: String,
@@ -80,7 +79,6 @@ pub struct IrBlock {
     term: IrTerminator,
 }
 
-#[allow(unused)]
 impl IrBlock {
     pub fn id(&self) -> IrBlockId {
         self.id
@@ -97,7 +95,6 @@ impl IrBlock {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-#[allow(unused)]
 pub enum IrTerminator {
     Ret {
         value: Option<IrTempId>,
@@ -115,7 +112,6 @@ pub enum IrTerminator {
 }
 
 #[derive(Debug)]
-#[allow(unused)]
 pub enum IrInst {
     // Variable slots (scalars only for now)
     AllocVar {
@@ -167,36 +163,90 @@ pub enum IrInst {
         args: Vec<IrTempId>,
         return_type: Type,
     },
+
+    Phi {
+        result: IrTempId,
+        incoming: Vec<(IrBlockId, IrTempId)>,
+    },
 }
 
 // -----------------------------------------------------------------------------
 // IR Builder
 // -----------------------------------------------------------------------------
 
-#[allow(unused)]
-pub struct IrBlockBuilder<'a> {
-    id: IrBlockId,
+pub struct IrFunctionBuilder {
     name: String,
-    insts: Vec<IrInst>,
-    temps: &'a mut Vec<IrTempType>,
-    addrs: &'a mut Vec<IrAddrType>,
+    params: Vec<IrParam>,
+    return_type: Type,
+    blocks: Vec<IrBlock>,
+    curr_block: IrBlockId,
+    temps: Vec<IrTempType>,
+    addrs: Vec<IrAddrType>,
 }
 
-#[allow(unused)]
-impl<'a> IrBlockBuilder<'a> {
-    pub fn new(
-        id: IrBlockId,
-        name: String,
-        temps: &'a mut Vec<IrTempType>,
-        addrs: &'a mut Vec<IrAddrType>,
-    ) -> Self {
-        Self {
-            id,
+impl IrFunctionBuilder {
+    pub fn new(name: String, params: Vec<IrParam>, return_type: Type) -> Self {
+        let entry_block = IrBlock {
+            id: IrBlockId(0),
+            name: "entry".to_string(),
             insts: vec![],
+            term: IrTerminator::_Unterminated,
+        };
+        Self {
             name,
-            temps,
-            addrs,
+            params,
+            return_type,
+            blocks: vec![entry_block],
+            curr_block: IrBlockId(0),
+            temps: vec![],
+            addrs: vec![],
         }
+    }
+
+    pub fn new_block(&mut self, name: String) -> IrBlockId {
+        let block_id = IrBlockId(self.blocks.len() as u32);
+        self.blocks.push(IrBlock {
+            id: block_id,
+            name,
+            insts: vec![],
+            term: IrTerminator::_Unterminated,
+        });
+        block_id
+    }
+
+    #[inline]
+    fn curr_block(&self) -> &IrBlock {
+        &self.blocks[self.curr_block.id() as usize]
+    }
+
+    #[inline]
+    fn curr_block_mut(&mut self) -> &mut IrBlock {
+        let idx = self.curr_block.id() as usize;
+        &mut self.blocks[idx]
+    }
+
+    pub fn select_block(&mut self, id: IrBlockId) {
+        let idx = id.id() as usize;
+        assert!(idx < self.blocks.len(), "Block ID not found: {}", id.id());
+        assert!(
+            self.blocks[idx].term == IrTerminator::_Unterminated,
+            "Cannot select a terminated block: {}",
+            self.blocks[idx].name
+        );
+        self.curr_block = id;
+    }
+
+    pub fn terminate(&mut self, term: IrTerminator) {
+        assert!(
+            term != IrTerminator::_Unterminated,
+            "Cannot terminate block with Unterminated"
+        );
+        let block = self.curr_block_mut();
+        assert!(
+            block.term == IrTerminator::_Unterminated,
+            "Block already terminated"
+        );
+        block.term = term;
     }
 
     pub fn new_addr(&mut self, typ: Type) -> IrAddrId {
@@ -213,9 +263,25 @@ impl<'a> IrBlockBuilder<'a> {
         id
     }
 
+    fn emit_inst(&mut self, inst: IrInst) {
+        debug_assert!(
+            matches!(self.curr_block().term, IrTerminator::_Unterminated),
+            "Cannot emit into terminated block"
+        );
+        if let IrInst::Phi { .. } = inst {
+            let block = self.curr_block();
+            debug_assert!(
+                block.insts.is_empty()
+                    || block.insts.iter().all(|i| matches!(i, IrInst::Phi { .. })),
+                "Phi must appear before non-phi instructions in a block"
+            );
+        }
+        self.curr_block_mut().insts.push(inst);
+    }
+
     pub fn alloc_var(&mut self, typ: Type, name_hint: String) -> IrAddrId {
         let addr = self.new_addr(typ);
-        self.insts.push(IrInst::AllocVar {
+        self.emit_inst(IrInst::AllocVar {
             addr,
             typ,
             name_hint,
@@ -226,20 +292,20 @@ impl<'a> IrBlockBuilder<'a> {
     pub fn store_var(&mut self, addr: IrAddrId, value: IrTempId) {
         let typ = self.temps[value.0 as usize].typ;
         debug_assert_eq!(self.addrs[addr.0 as usize].typ, typ);
-        self.insts.push(IrInst::StoreVar { addr, value, typ });
+        self.emit_inst(IrInst::StoreVar { addr, value, typ });
     }
 
     pub fn load_var(&mut self, addr: IrAddrId) -> IrTempId {
         let typ = self.addrs[addr.0 as usize].typ;
         let value = self.new_temp(typ);
-        self.insts.push(IrInst::LoadVar { value, addr, typ });
+        self.emit_inst(IrInst::LoadVar { value, addr, typ });
         value
     }
 
     pub fn load_var_into(&mut self, target: IrTempId, addr: IrAddrId) {
         let typ = self.addrs[addr.0 as usize].typ;
         debug_assert_eq!(self.temps[target.0 as usize].typ, typ);
-        self.insts.push(IrInst::LoadVar {
+        self.emit_inst(IrInst::LoadVar {
             value: target,
             addr,
             typ,
@@ -247,15 +313,15 @@ impl<'a> IrBlockBuilder<'a> {
     }
 
     pub fn const_u32(&mut self, result: IrTempId, value: u32) {
-        self.insts.push(IrInst::ConstU32 { result, value });
+        self.emit_inst(IrInst::ConstU32 { result, value });
     }
 
     pub fn const_bool(&mut self, result: IrTempId, value: bool) {
-        self.insts.push(IrInst::ConstBool { result, value });
+        self.emit_inst(IrInst::ConstBool { result, value });
     }
 
     pub fn const_unit(&mut self, result: IrTempId) {
-        self.insts.push(IrInst::ConstUnit { result });
+        self.emit_inst(IrInst::ConstUnit { result });
     }
 
     pub fn binary_op(&mut self, result: IrTempId, op: BinaryOp, lhs: IrTempId, rhs: IrTempId) {
@@ -267,7 +333,7 @@ impl<'a> IrBlockBuilder<'a> {
         let result_type = self.temps[result.0 as usize].typ;
         debug_assert_eq!(expected_type, result_type);
 
-        self.insts.push(IrInst::BinaryOp {
+        self.emit_inst(IrInst::BinaryOp {
             result,
             op,
             lhs,
@@ -282,7 +348,7 @@ impl<'a> IrBlockBuilder<'a> {
         let result_type = self.temps[result.0 as usize].typ;
         debug_assert_eq!(expected_type, result_type);
 
-        self.insts.push(IrInst::UnaryOp {
+        self.emit_inst(IrInst::UnaryOp {
             result,
             op,
             operand,
@@ -314,7 +380,7 @@ impl<'a> IrBlockBuilder<'a> {
         args: Vec<IrTempId>,
         return_type: Type,
     ) {
-        self.insts.push(IrInst::Call {
+        self.emit_inst(IrInst::Call {
             result,
             name,
             args,
@@ -322,105 +388,18 @@ impl<'a> IrBlockBuilder<'a> {
         });
     }
 
-    pub fn terminate(self, term: IrTerminator) -> IrBlock {
-        // Finalize the block by consuming the builder, setting the terminator, and returning the
-        // terminated block. This can be called only once per block builder since the
-        // builder doesn't derive Clone/Copy.
-        assert!(
-            term != IrTerminator::_Unterminated,
-            "Cannot terminate block with Unterminated"
+    pub fn phi(&mut self, result: IrTempId, incoming: Vec<(IrBlockId, IrTempId)>) {
+        // assert that all incoming temps share the same type and match result’s type.
+        let expected = self.temps[result.id() as usize].typ;
+        debug_assert!(
+            incoming
+                .iter()
+                .all(|(_, t)| self.temps[t.id() as usize].typ == expected)
         );
-        IrBlock {
-            id: self.id,
-            name: self.name,
-            insts: self.insts,
-            term,
-        }
-    }
-}
-
-#[allow(unused)]
-pub struct IrFunctionBuilder {
-    name: String,
-    params: Vec<IrParam>,
-    return_type: Type,
-    blocks: Vec<IrBlock>,
-    temps: Vec<IrTempType>,
-    addrs: Vec<IrAddrType>,
-}
-
-#[allow(unused)]
-impl IrFunctionBuilder {
-    pub fn new(name: String, params: Vec<IrParam>, return_type: Type) -> Self {
-        Self {
-            name,
-            params,
-            return_type,
-            blocks: vec![],
-            temps: vec![],
-            addrs: vec![],
-        }
-    }
-
-    pub fn new_temp(&mut self, typ: Type) -> IrTempId {
-        let id = IrTempId(self.temps.len() as u32);
-        self.temps.push(IrTempType { typ });
-        id
-    }
-
-    pub fn new_block(&mut self, name: String) -> IrBlockId {
-        let block_id = IrBlockId(self.blocks.len() as u32);
-        let placeholder = IrBlock {
-            id: block_id,
-            name,
-            insts: vec![],
-            term: IrTerminator::_Unterminated,
-        };
-        self.blocks.push(placeholder);
-        block_id
-    }
-
-    pub fn build_block<E, F>(&mut self, block_id: IrBlockId, f: F) -> Result<(), E>
-    where
-        F: FnOnce(IrBlockBuilder) -> Result<IrBlock, E>,
-    {
-        assert!(block_id.0 < self.blocks.len() as u32, "Block ID not found");
-        let block_builder = IrBlockBuilder::new(
-            block_id,
-            self.blocks[block_id.0 as usize].name.clone(),
-            &mut self.temps,
-            &mut self.addrs,
-        );
-        let block = f(block_builder)?;
-        self.blocks[block_id.0 as usize] = block; // replace the placeholder with the actual block
-        Ok(())
-    }
-
-    pub fn build_expr_block<E, F>(
-        &mut self,
-        block_id: IrBlockId,
-        result: IrTempId,
-        f: F,
-    ) -> Result<(), E>
-    where
-        F: FnOnce(IrBlockBuilder, IrTempId) -> Result<IrBlock, E>,
-    {
-        assert!(block_id.0 < self.blocks.len() as u32, "Block ID not found");
-        let block_builder = IrBlockBuilder::new(
-            block_id,
-            self.blocks[block_id.0 as usize].name.clone(),
-            &mut self.temps,
-            &mut self.addrs,
-        );
-        let block = f(block_builder, result)?;
-        self.blocks[block_id.0 as usize] = block; // replace the placeholder with the actual block
-        Ok(())
+        self.emit_inst(IrInst::Phi { result, incoming });
     }
 
     pub fn finish(self) -> IrFunction {
-        // Note: No need to check if blocks are terminated, since by design only terminated blocks
-        // are added to the function in end_block.
-
         // Check that we have at least one block
         assert!(!self.blocks.is_empty(), "No blocks in function");
 
@@ -428,20 +407,18 @@ impl IrFunctionBuilder {
         for block in &self.blocks {
             assert!(
                 block.term != IrTerminator::_Unterminated,
-                "Block ({}) is not terminated",
+                "Block '{}' is not terminated",
                 block.name
             );
         }
 
-        let temps_vec = self.temps.clone();
-        let addrs_vec = self.addrs.clone();
         IrFunction {
             name: self.name,
             params: self.params,
             return_type: self.return_type,
             blocks: self.blocks,
-            temps: temps_vec,
-            addrs: addrs_vec,
+            temps: self.temps,
+            addrs: self.addrs,
         }
     }
 }
@@ -497,15 +474,19 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             write!(
                 f,
                 "&a{} = alloc {} (size={}, align={}) name_hint={}",
-                addr.0, typ, addr_type.size, addr_type.align, name_hint
+                addr.id(),
+                typ,
+                addr_type.size,
+                addr_type.align,
+                name_hint
             )?;
         }
         IrInst::StoreVar { addr, value, .. } => {
             write!(
                 f,
                 "store %t{} -> &a{} : {}",
-                value.0,
-                addr.0,
+                value.id(),
+                addr.id(),
                 func.addr_type(*addr)
             )?;
         }
@@ -513,19 +494,19 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             write!(
                 f,
                 "%t{} <- load &a{} : {}",
-                value.0,
-                addr.0,
+                value.id(),
+                addr.id(),
                 func.addr_type(*addr)
             )?;
         }
         IrInst::ConstU32 { result, value } => {
-            write!(f, "%t{} = const.u32 {}", result.0, value)?;
+            write!(f, "%t{} = const.u32 {}", result.id(), value)?;
         }
         IrInst::ConstBool { result, value } => {
-            write!(f, "%t{} = const.bool {}", result.0, value)?;
+            write!(f, "%t{} = const.bool {}", result.id(), value)?;
         }
         IrInst::ConstUnit { result } => {
-            write!(f, "%t{} = const.unit", result.0)?;
+            write!(f, "%t{} = const.unit", result.id())?;
         }
         IrInst::BinaryOp {
             result,
@@ -536,10 +517,10 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             write!(
                 f,
                 "%t{} = binop.{} %t{}, %t{} : {}",
-                result.0,
+                result.id(),
                 format_binary_op(op),
-                lhs.0,
-                rhs.0,
+                lhs.id(),
+                rhs.id(),
                 func.temp_type(*result)
             )?;
         }
@@ -551,9 +532,9 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             write!(
                 f,
                 "%t{} = unop.{} %t{} : {}",
-                result.0,
+                result.id(),
                 format_unary_op(op),
-                operand.0,
+                operand.id(),
                 func.temp_type(*result)
             )?;
         }
@@ -564,16 +545,27 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             return_type,
         } => {
             match result {
-                Some(result) => write!(f, "%t{} = {}(", result.0, name)?,
+                Some(result) => write!(f, "%t{} = {}(", result.id(), name)?,
                 None => write!(f, "{}(", name)?,
             }
             for (i, arg) in args.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "%t{}", arg.0)?;
+                write!(f, "%t{}", arg.id())?;
             }
             write!(f, ") : {}", return_type)?;
+        }
+        IrInst::Phi { result, incoming } => {
+            write!(f, "%t{} = phi [", result.id())?;
+            for (i, (block_id, value)) in incoming.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                let block_name = func.blocks[block_id.id() as usize].name.as_str();
+                write!(f, "({} -> %t{})", block_name, value.id())?;
+            }
+            write!(f, "]")?;
         }
     }
     Ok(())
@@ -607,11 +599,11 @@ fn format_terminator(
 ) -> fmt::Result {
     match terminator {
         IrTerminator::Ret { value } => match value {
-            Some(value) => write!(f, "ret %t{}", value.0)?,
+            Some(value) => write!(f, "ret %t{}", value.id())?,
             None => write!(f, "ret")?,
         },
         IrTerminator::Br { target } => {
-            let name = func.blocks[target.0 as usize].name.as_str();
+            let name = func.blocks[target.id() as usize].name.as_str();
             write!(f, "br {}", name)?;
         }
         IrTerminator::CondBr {
@@ -619,9 +611,9 @@ fn format_terminator(
             then_b,
             else_b,
         } => {
-            let then_name = func.blocks[then_b.0 as usize].name.as_str();
-            let else_name = func.blocks[else_b.0 as usize].name.as_str();
-            write!(f, "condbr %t{}, {}, {}", cond.0, then_name, else_name)?;
+            let then_name = func.blocks[then_b.id() as usize].name.as_str();
+            let else_name = func.blocks[else_b.id() as usize].name.as_str();
+            write!(f, "condbr %t{}, {}, {}", cond.id(), then_name, else_name)?;
         }
         IrTerminator::_Unterminated => {
             write!(f, "<unterminated>")?;
@@ -643,62 +635,45 @@ mod tests {
         let mut fn_builder = IrFunctionBuilder::new("foo".to_string(), vec![], Type::UInt32);
 
         // Create the required blocks
-        let entry_bb = fn_builder.new_block("entry".to_string());
         let then_b = fn_builder.new_block("then".to_string());
         let else_b = fn_builder.new_block("else".to_string());
         let merge_b = fn_builder.new_block("merge".to_string());
 
         // Build the entry block
-        fn_builder
-            .build_block(entry_bb, |mut builder| -> Result<IrBlock, ()> {
-                let lhs = builder.new_temp(Type::UInt32);
-                let rhs = builder.new_temp(Type::UInt32);
-                let cond = builder.new_temp(Type::Bool);
-                builder.const_u32(lhs, 2);
-                builder.const_u32(rhs, 1);
-                builder.binary_op(cond, BinaryOp::Gt, lhs, rhs);
-                Ok(builder.terminate(IrTerminator::CondBr {
-                    cond,
-                    then_b,
-                    else_b,
-                }))
-            })
-            .expect("Failed to build entry block");
-
-        let if_result = fn_builder.new_temp(Type::UInt32);
+        let lhs = fn_builder.new_temp(Type::UInt32);
+        let rhs = fn_builder.new_temp(Type::UInt32);
+        let cond = fn_builder.new_temp(Type::Bool);
+        fn_builder.const_u32(lhs, 2);
+        fn_builder.const_u32(rhs, 1);
+        fn_builder.binary_op(cond, BinaryOp::Gt, lhs, rhs);
+        fn_builder.terminate(IrTerminator::CondBr {
+            cond,
+            then_b,
+            else_b,
+        });
 
         // Then block
-        fn_builder
-            .build_expr_block(
-                then_b,
-                if_result,
-                |mut builder, result| -> Result<IrBlock, ()> {
-                    builder.const_u32(result, 42);
-                    Ok(builder.terminate(IrTerminator::Br { target: merge_b }))
-                },
-            )
-            .expect("Failed to build then block");
+        fn_builder.select_block(then_b);
+        let then_result = fn_builder.new_temp(Type::UInt32);
+        fn_builder.const_u32(then_result, 42);
+        fn_builder.terminate(IrTerminator::Br { target: merge_b });
 
         // Else block
-        fn_builder
-            .build_expr_block(
-                else_b,
-                if_result,
-                |mut builder, result| -> Result<IrBlock, ()> {
-                    builder.const_u32(result, 99);
-                    Ok(builder.terminate(IrTerminator::Br { target: merge_b }))
-                },
-            )
-            .expect("Failed to build else block");
+        fn_builder.select_block(else_b);
+        let else_result = fn_builder.new_temp(Type::UInt32);
+        fn_builder.const_u32(else_result, 99);
+        fn_builder.terminate(IrTerminator::Br { target: merge_b });
 
         // Merge block
-        fn_builder
-            .build_block(merge_b, |builder| -> Result<IrBlock, ()> {
-                Ok(builder.terminate(IrTerminator::Ret {
-                    value: Some(if_result),
-                }))
-            })
-            .expect("Failed to build merge block");
+        fn_builder.select_block(merge_b);
+        let merge_result = fn_builder.new_temp(Type::UInt32);
+        fn_builder.phi(
+            merge_result,
+            vec![(then_b, then_result), (else_b, else_result)],
+        );
+        fn_builder.terminate(IrTerminator::Ret {
+            value: Some(merge_result),
+        });
 
         let function = fn_builder.finish();
 
@@ -706,91 +681,29 @@ mod tests {
         assert_eq!(function.blocks[0].insts.len(), 3);
         assert_eq!(function.blocks[1].insts.len(), 1);
         assert_eq!(function.blocks[2].insts.len(), 1);
-        assert_eq!(function.blocks[3].insts.len(), 0);
+        assert_eq!(function.blocks[3].insts.len(), 1);
 
         println!("{function}");
 
         // Output:
-        // IrFunction {
-        //     name: "foo",
-        //     params: [],
-        //     return_type: UInt32,
-        //     blocks: [
-        //         IrBlock {
-        //             id: IrBlockId(0),
-        //             name: "entry",
-        //             insts: [
-        //                 ConstU32 {
-        //                     result: IrTempId(0),
-        //                     value: 2
-        //                 },
-        //                 ConstU32 {
-        //                     result: IrTempId(1),
-        //                     value: 1
-        //                 },
-        //                 BinaryOp {
-        //                     result: IrTempId(2),
-        //                     op: Gt,
-        //                     lhs: IrTempId(0),
-        //                     rhs: IrTempId(1)
-        //                 }
-        //             ],
-        //             term: CondBr {
-        //                 cond: IrTempId(2),
-        //                 then_b: IrBlockId(1),
-        //                 else_b: IrBlockId(2)
-        //             }
-        //         },
-        //         IrBlock {
-        //             id: IrBlockId(1),
-        //             name: "then",
-        //             insts: [
-        //                 ConstU32 {
-        //                     result: IrTempId(3),
-        //                     value: 42
-        //                 }
-        //             ],
-        //             term: Br {
-        //                 target: IrBlockId(3)
-        //             }
-        //         },
-        //         IrBlock {
-        //             id: IrBlockId(2),
-        //             name: "else",
-        //             insts: [
-        //                 ConstU32 {
-        //                     result: IrTempId(3),
-        //                     value: 99
-        //                 }
-        //             ],
-        //             term: Br {
-        //                 target: IrBlockId(3)
-        //             }
-        //         },
-        //         IrBlock {
-        //             id: IrBlockId(3),
-        //             name: "merge",
-        //             insts: [],
-        //             term: Ret {
-        //                 value: Some(IrTempId(3))
-        //             }
-        //         }
-        //     ],
-        //     temps: [
-        //         IrTempType {
-        //             typ: UInt32
-        //         },
-        //         IrTempType {
-        //             typ: UInt32
-        //         },
-        //         IrTempType {
-        //             typ: Bool
-        //         },
-        //         IrTempType {
-        //             typ: UInt32
-        //         }
-        //     ],
-        //     addrs: []
+        // fn foo() -> u32 {
+        // entry:
+        //     %t0 = const.u32 2
+        //     %t1 = const.u32 1
+        //     %t2 = binop.gt %t0, %t1 : bool
+        //     condbr %t2, then, else
+        //
+        // then:
+        //     %t3 = const.u32 42
+        //     br merge
+        //
+        // else:
+        //     %t4 = const.u32 99
+        //     br merge
+        //
+        // merge:
+        //     %t5 = phi [(then -> %t3), (else -> %t4)]
+        //     ret %t5
         // }
     }
 }
