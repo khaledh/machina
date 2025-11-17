@@ -15,7 +15,7 @@ mod type_check;
 mod types;
 
 use crate::codegen::Codegen;
-use crate::context::Context;
+use crate::context::AstContext;
 use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::lower::lower;
@@ -108,9 +108,9 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         println!("--------------------------------");
     }
 
-    let context = Context::new(module);
+    let ast_contet = AstContext::new(module);
 
-    let resolved_context = resolve(context).map_err(|errs| {
+    let resolved_context = resolve(ast_contet).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

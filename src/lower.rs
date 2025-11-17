@@ -339,7 +339,7 @@ pub fn lower(context: TypeCheckedContext) -> Result<LoweredContext, LowerError> 
 mod tests {
     use super::*;
     use crate::ast::BinaryOp;
-    use crate::context::Context;
+    use crate::context::AstContext;
     use crate::ir::{IrBlockId, IrInst, IrTempId};
     use crate::lexer::{LexError, Lexer, Token};
     use crate::parser::Parser;
@@ -356,8 +356,8 @@ mod tests {
         let mut parser = Parser::new(&tokens);
         let module = parser.parse().expect("Failed to parse");
 
-        let context = Context::new(module);
-        let resolved_context = resolve(context).expect("Failed to resolve");
+        let ast_context = AstContext::new(module);
+        let resolved_context = resolve(ast_context).expect("Failed to resolve");
         let type_checked_context = type_check(resolved_context).expect("Failed to type check");
 
         let mut lowerer = Lowerer::new(&type_checked_context);

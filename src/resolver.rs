@@ -1,7 +1,7 @@
 use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
 use crate::ast::{ExprKind, Module};
-use crate::context::{Context, ResolvedContext};
+use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
 use crate::ids::{DefId, DefIdGen};
 use std::collections::HashMap;
@@ -342,9 +342,9 @@ impl SymbolResolver {
     }
 }
 
-pub fn resolve(context: Context) -> Result<ResolvedContext, Vec<ResolveError>> {
+pub fn resolve(ast_context: AstContext) -> Result<ResolvedContext, Vec<ResolveError>> {
     let mut resolver = SymbolResolver::new();
-    let def_map = resolver.resolve(&context.module)?;
-    let resolved_context = context.with_def_map(def_map);
+    let def_map = resolver.resolve(&ast_context.module)?;
+    let resolved_context = ast_context.with_def_map(def_map);
     Ok(resolved_context)
 }

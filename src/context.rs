@@ -3,11 +3,11 @@ use crate::ast::Module;
 use crate::ir::IrFunction;
 
 #[derive(Clone)]
-pub struct Context {
+pub struct AstContext {
     pub module: Module,
 }
 
-impl Context {
+impl AstContext {
     pub fn new(module: Module) -> Self {
         Self { module }
     }
