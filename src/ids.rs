@@ -29,7 +29,7 @@ impl NodeIdGen {
 
 // Definition IDs
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(pub u32);
 
 impl fmt::Display for DefId {

@@ -1,4 +1,4 @@
-use crate::analysis::{DefMap, DefMapBuilder};
+use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
 use crate::ast::{ExprKind, Module};
 use crate::context::{Context, ResolvedContext};
@@ -111,7 +111,12 @@ impl SymbolResolver {
     fn populate_funcs(&mut self, functions: &Vec<ast::Function>) {
         for function in functions {
             let def_id = self.def_id_gen.new_id();
-            self.def_map_builder.record_def(def_id, function.id);
+            let def = Def {
+                id: def_id,
+                name: function.name.clone(),
+                kind: DefKind::Func,
+            };
+            self.def_map_builder.record_def(def, function.id);
             self.insert_symbol(
                 &function.name,
                 Symbol {
@@ -144,9 +149,16 @@ impl SymbolResolver {
     fn check_function(&mut self, function: &ast::Function) {
         self.with_scope(|checker| {
             // add parameters to scope
-            for param in &function.params {
+            for (index, param) in function.params.iter().enumerate() {
                 let def_id = checker.def_id_gen.new_id();
-                checker.def_map_builder.record_def(def_id, param.id);
+                let def = Def {
+                    id: def_id,
+                    name: param.name.clone(),
+                    kind: DefKind::Param {
+                        index: index as u32,
+                    },
+                };
+                checker.def_map_builder.record_def(def, param.id);
                 checker.insert_symbol(
                     &param.name,
                     Symbol {
@@ -211,7 +223,12 @@ impl SymbolResolver {
                 } else {
                     self.check_expr(value);
                     let def_id = self.def_id_gen.new_id();
-                    self.def_map_builder.record_def(def_id, expr.id);
+                    let def = Def {
+                        id: def_id,
+                        name: name.to_string(),
+                        kind: DefKind::LocalVar,
+                    };
+                    self.def_map_builder.record_def(def, expr.id);
                     self.insert_symbol(
                         name,
                         Symbol {
@@ -233,7 +250,12 @@ impl SymbolResolver {
                 } else {
                     self.check_expr(value);
                     let def_id = self.def_id_gen.new_id();
-                    self.def_map_builder.record_def(def_id, expr.id);
+                    let def = Def {
+                        id: def_id,
+                        name: name.to_string(),
+                        kind: DefKind::LocalVar,
+                    };
+                    self.def_map_builder.record_def(def, expr.id);
                     self.insert_symbol(
                         name,
                         Symbol {

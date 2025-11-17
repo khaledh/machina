@@ -2,13 +2,16 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::ast;
-use crate::context::TypeCheckedContext;
+use crate::context::{LoweredContext, TypeCheckedContext};
 use crate::ids::{DefId, NodeId};
-use crate::ir::{IrAddrId, IrFunction, IrFunctionBuilder, IrTempId, IrTerminator};
+use crate::ir::{IrAddrId, IrFunction, IrFunctionBuilder, IrParam, IrTempId, IrTerminator};
 use crate::types::Type;
 
 #[derive(Debug, Error)]
 pub enum LowerError {
+    #[error("Parameter definition not found: Node {0}")]
+    ParamDefNotFound(NodeId),
+
     #[error("Node type not found: Node {0}")]
     NodeTypeNotFound(NodeId),
 
@@ -20,15 +23,18 @@ pub enum LowerError {
 
     #[error("Variable address not found: Node {0}, Def {1}")]
     VarAddrNotFound(NodeId, DefId),
+
+    #[error("Mismatched branch types: Node {0} type {1} != Node {2} type {3}")]
+    MismatchedBranchTypes(NodeId, Type, NodeId, Type),
 }
 
-pub struct Lowerer {
-    ctx: TypeCheckedContext,
+pub struct Lowerer<'a> {
+    ctx: &'a TypeCheckedContext,
     def_addr: HashMap<DefId, IrAddrId>,
 }
 
-impl Lowerer {
-    pub fn new(ctx: TypeCheckedContext) -> Self {
+impl<'a> Lowerer<'a> {
+    pub fn new(ctx: &'a TypeCheckedContext) -> Self {
         Self {
             ctx,
             def_addr: HashMap::new(),
@@ -39,8 +45,29 @@ impl Lowerer {
         // clear the def_addr map for each function
         self.def_addr.clear();
 
+        let ir_params = func
+            .params
+            .iter()
+            .map(|param| IrParam {
+                name: param.name.clone(),
+                typ: param.typ.clone(),
+            })
+            .collect::<Vec<IrParam>>();
+
         let mut fn_builder =
-            IrFunctionBuilder::new(func.name.clone(), vec![], func.return_type.clone());
+            IrFunctionBuilder::new(func.name.clone(), ir_params, func.return_type.clone());
+
+        // allocate stack slots for params
+        for param in func.params.iter() {
+            // get the def of the param
+            match self.ctx.def_map.lookup_def(param.id) {
+                Some(def) => {
+                    let addr = fn_builder.alloc_var(param.typ, def.name.clone());
+                    self.def_addr.insert(def.id, addr);
+                }
+                None => return Err(LowerError::ParamDefNotFound(param.id)),
+            }
+        }
 
         let ret_temp = if func.return_type != Type::Unit {
             let ret_temp = fn_builder.new_temp(func.return_type);
@@ -106,6 +133,9 @@ impl Lowerer {
             } => {
                 self.lower_if(fn_builder, cond, then_body, else_body, target)?;
             }
+            ast::ExprKind::While { cond, body } => {
+                self.lower_while(fn_builder, cond, body)?;
+            }
             _ => todo!("Implement other expression kinds"),
         }
         Ok(())
@@ -133,11 +163,11 @@ impl Lowerer {
         value: &ast::Expr,
     ) -> Result<(), LowerError> {
         match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def_id) => {
+            Some(def) => {
                 let addr = fn_builder.alloc_var(self.get_node_type(value)?, name.clone());
                 let value = self.lower_expr(fn_builder, value)?;
                 fn_builder.store_var(addr, value);
-                self.def_addr.insert(def_id, addr);
+                self.def_addr.insert(def.id, addr);
             }
             None => return Err(LowerError::VarDefNotFound(expr.id)),
         }
@@ -151,10 +181,10 @@ impl Lowerer {
         value: &ast::Expr,
     ) -> Result<(), LowerError> {
         match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def_id) => {
-                let addr = match self.def_addr.get(&def_id) {
+            Some(def) => {
+                let addr = match self.def_addr.get(&def.id) {
                     Some(addr) => *addr,
-                    None => return Err(LowerError::VarAddrNotFound(expr.id, def_id)),
+                    None => return Err(LowerError::VarAddrNotFound(expr.id, def.id)),
                 };
                 let assigned_value = fn_builder.new_temp(self.get_node_type(value)?);
                 self.lower_expr_into(fn_builder, value, assigned_value)?;
@@ -172,10 +202,10 @@ impl Lowerer {
         target: IrTempId,
     ) -> Result<(), LowerError> {
         match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def_id) => {
-                let addr = match self.def_addr.get(&def_id) {
+            Some(def) => {
+                let addr = match self.def_addr.get(&def.id) {
                     Some(addr) => *addr,
-                    None => return Err(LowerError::VarAddrNotFound(expr.id, def_id)),
+                    None => return Err(LowerError::VarAddrNotFound(expr.id, def.id)),
                 };
                 fn_builder.load_var_into(target, addr);
             }
@@ -192,6 +222,18 @@ impl Lowerer {
         else_body: &ast::Expr,
         target: IrTempId,
     ) -> Result<(), LowerError> {
+        // Validate that the then and else bodies have the same type
+        let then_type = self.get_node_type(then_body)?;
+        let else_type = self.get_node_type(else_body)?;
+        if then_type != else_type {
+            return Err(LowerError::MismatchedBranchTypes(
+                then_body.id,
+                then_type,
+                else_body.id,
+                else_type,
+            ));
+        }
+
         // Create the required blocks
         let then_b = fn_builder.new_block("then".to_string());
         let else_b = fn_builder.new_block("else".to_string());
@@ -224,6 +266,39 @@ impl Lowerer {
         Ok(())
     }
 
+    fn lower_while(
+        &mut self,
+        fn_builder: &mut IrFunctionBuilder,
+        cond: &ast::Expr,
+        body: &ast::Expr,
+    ) -> Result<(), LowerError> {
+        let header_b = fn_builder.new_block("loop_header".to_string());
+        let body_b = fn_builder.new_block("loop_body".to_string());
+        let after_b = fn_builder.new_block("loop_after".to_string());
+
+        // Terminate current block
+        fn_builder.terminate(IrTerminator::Br { target: header_b });
+
+        // Build the header block
+        fn_builder.select_block(header_b);
+        let cond = self.lower_expr(fn_builder, cond)?;
+        fn_builder.terminate(IrTerminator::CondBr {
+            cond,
+            then_b: body_b,
+            else_b: after_b,
+        });
+
+        // Body block
+        fn_builder.select_block(body_b);
+        self.lower_expr(fn_builder, body)?;
+        fn_builder.terminate(IrTerminator::Br { target: header_b });
+
+        // After block
+        fn_builder.select_block(after_b);
+
+        Ok(())
+    }
+
     fn lower_block_into(
         &mut self,
         fn_builder: &mut IrFunctionBuilder,
@@ -250,13 +325,22 @@ impl Lowerer {
     }
 }
 
+pub fn lower(context: TypeCheckedContext) -> Result<LoweredContext, LowerError> {
+    let mut lowerer = Lowerer::new(&context);
+    let mut ir_funcs = Vec::new();
+    for func in &context.module.funcs {
+        let ir_func = lowerer.lower_func(&func)?;
+        ir_funcs.push(ir_func);
+    }
+    Ok(context.with_ir_funcs(ir_funcs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{DefMapBuilder, TypeMapBuilder};
     use crate::ast::BinaryOp;
     use crate::context::Context;
-    use crate::ir::{IrAddrId, IrBlockId, IrInst, IrTempId};
+    use crate::ir::{IrBlockId, IrInst, IrTempId};
     use crate::lexer::{LexError, Lexer, Token};
     use crate::parser::Parser;
     use crate::resolver::resolve;
@@ -276,7 +360,7 @@ mod tests {
         let resolved_context = resolve(context).expect("Failed to resolve");
         let type_checked_context = type_check(resolved_context).expect("Failed to type check");
 
-        let mut lowerer = Lowerer::new(type_checked_context.clone());
+        let mut lowerer = Lowerer::new(&type_checked_context);
         let ir_func = lowerer
             .lower_func(&type_checked_context.module.funcs[0])
             .expect("Failed to lower function");
@@ -334,19 +418,19 @@ mod tests {
 
         assert_eq!(ir_func.blocks.len(), 4);
 
-        let entry_block = &ir_func.blocks[0];
+        let entry_block = &ir_func.blocks[&IrBlockId(0)];
         let entry_insts = entry_block.insts();
         assert_eq!(entry_insts.len(), 9);
 
-        let then_block = &ir_func.blocks[1];
+        let then_block = &ir_func.blocks[&IrBlockId(1)];
         let then_insts = then_block.insts();
         assert_eq!(then_insts.len(), 1);
 
-        let else_block = &ir_func.blocks[2];
+        let else_block = &ir_func.blocks[&IrBlockId(2)];
         let else_insts = else_block.insts();
         assert_eq!(else_insts.len(), 1);
 
-        let merge_block = &ir_func.blocks[3];
+        let merge_block = &ir_func.blocks[&IrBlockId(3)];
         let merge_insts = merge_block.insts();
         assert_eq!(merge_insts.len(), 5);
 
@@ -466,6 +550,171 @@ mod tests {
         // ret %t0
         assert!(
             matches!(&merge_block.term(), IrTerminator::Ret { value: Some(result) }
+            if result.id() == 0)
+        );
+    }
+
+    #[test]
+    fn test_lower_while() {
+        let source = r#"
+            fn test() -> u32 {
+                var x = 0;
+                while x < 10 {
+                    x = x + 1;
+                }
+                x
+            }
+        "#;
+
+        let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+        // Assert
+        // if result is Err, print the error
+        println!("{}", ir_func);
+
+        // Output:
+        // fn test() -> u32 {
+        // entry:
+        //     &a0 = alloc u32 (size=4, align=4) name_hint=x
+        //     %t2 = const.u32 0
+        //     store %t2 -> &a0 : u32
+        //     br loop_header
+        //
+        // loop_header:
+        //     %t5 <- load &a0 : u32
+        //     %t6 = const.u32 10
+        //     %t4 = binop.lt %t5, %t6 : bool
+        //     condbr %t4, loop_body, loop_after
+        //
+        // loop_body:
+        //     %t9 <- load &a0 : u32
+        //     %t10 = const.u32 1
+        //     %t8 = binop.add %t9, %t10 : u32
+        //     store %t8 -> &a0 : u32
+        //     br loop_header
+        //
+        // loop_after:
+        //     %t0 <- load &a0 : u32
+        //     ret %t0
+        // }
+
+        assert_eq!(ir_func.blocks.len(), 4);
+
+        let entry_block = &ir_func.blocks[&IrBlockId(0)];
+        let entry_insts = entry_block.insts();
+        assert_eq!(entry_insts.len(), 3);
+
+        let loop_header_block = &ir_func.blocks[&IrBlockId(1)];
+        let loop_header_insts = loop_header_block.insts();
+        assert_eq!(loop_header_insts.len(), 3);
+
+        let loop_body_block = &ir_func.blocks[&IrBlockId(2)];
+        let loop_body_insts = loop_body_block.insts();
+        assert_eq!(loop_body_insts.len(), 4);
+
+        let loop_after_block = &ir_func.blocks[&IrBlockId(3)];
+        let loop_after_insts = loop_after_block.insts();
+        assert_eq!(loop_after_insts.len(), 1);
+
+        //
+        // entry block instructions
+        //
+
+        // &a0 = alloc u32 (size=4, align=4) name_hint=x
+        assert!(
+            matches!(&entry_insts[0], IrInst::AllocVar { addr, typ, name_hint }
+            if addr.id() == 0 && *typ == Type::UInt32 && name_hint == "x")
+        );
+
+        // %t2 = const.u32 0
+        assert!(matches!(&entry_insts[1], IrInst::ConstU32 { result, value }
+            if result.id() == 2 && *value == 0));
+
+        // store %t2 -> &a0 : u32
+        assert!(
+            matches!(&entry_insts[2], IrInst::StoreVar { addr, value, typ }
+            if addr.id() == 0 && value.id() == 2 && *typ == Type::UInt32)
+        );
+
+        // br loop_header
+        assert!(matches!(&entry_block.term(), IrTerminator::Br { target }
+            if *target == loop_header_block.id()));
+
+        //
+        // loop header block instructions
+        //
+
+        // %t5 <- load &a0 : u32
+        assert!(
+            matches!(&loop_header_insts[0], IrInst::LoadVar { value, addr, typ }
+            if value.id() == 5 && addr.id() == 0 && *typ == Type::UInt32)
+        );
+
+        // %t6 = const.u32 10
+        assert!(
+            matches!(&loop_header_insts[1], IrInst::ConstU32 { result, value }
+            if result.id() == 6 && *value == 10)
+        );
+
+        // %t4 = binop.lt %t5, %t6 : bool
+        assert!(
+            matches!(&loop_header_insts[2], IrInst::BinaryOp { result, op, lhs, rhs }
+            if result.id() == 4 && *op == BinaryOp::Lt && lhs.id() == 5 && rhs.id() == 6)
+        );
+
+        // condbr %t4, loop_body, loop_after
+        assert!(
+            matches!(&loop_header_block.term(), IrTerminator::CondBr { cond, then_b, else_b }
+            if cond.id() == 4 && *then_b == loop_body_block.id() && *else_b == loop_after_block.id())
+        );
+
+        //
+        // loop body block instructions
+        //
+
+        // %t9 <- load &a0 : u32
+        assert!(
+            matches!(&loop_body_insts[0], IrInst::LoadVar { value, addr, typ }
+            if value.id() == 9 && addr.id() == 0 && *typ == Type::UInt32)
+        );
+
+        // %t10 = const.u32 1
+        assert!(
+            matches!(&loop_body_insts[1], IrInst::ConstU32 { result, value }
+            if result.id() == 10 && *value == 1)
+        );
+
+        // %t8 = binop.add %t9, %t10 : u32
+        assert!(
+            matches!(&loop_body_insts[2], IrInst::BinaryOp { result, op, lhs, rhs }
+            if result.id() == 8 && *op == BinaryOp::Add && lhs.id() == 9 && rhs.id() == 10)
+        );
+
+        // store %t8 -> &a0 : u32
+        assert!(
+            matches!(&loop_body_insts[3], IrInst::StoreVar { addr, value, typ }
+            if addr.id() == 0 && value.id() == 8 && *typ == Type::UInt32)
+        );
+
+        // br loop_header
+        assert!(
+            matches!(&loop_body_block.term(), IrTerminator::Br { target }
+            if *target == loop_header_block.id())
+        );
+
+        //
+        // loop after block instructions
+        //
+
+        // %t0 <- load &a0 : u32
+        assert!(
+            matches!(&loop_after_block.insts()[0], IrInst::LoadVar { value, addr, typ }
+            if value.id() == 0 && addr.id() == 0 && *typ == Type::UInt32)
+        );
+
+        // ret %t0
+        assert!(
+            matches!(&loop_after_block.term(), IrTerminator::Ret { value: Some(result) }
             if result.id() == 0)
         );
     }

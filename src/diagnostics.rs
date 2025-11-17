@@ -1,5 +1,6 @@
 use crate::codegen::CodegenError;
 use crate::lexer::LexError;
+use crate::lower::LowerError;
 use crate::parser::ParseError;
 use crate::resolver::ResolveError;
 use crate::type_check::TypeCheckError;
@@ -19,6 +20,9 @@ pub enum CompileError {
 
     #[error(transparent)]
     TypeCheckError(#[from] TypeCheckError),
+
+    #[error(transparent)]
+    LowerError(#[from] LowerError),
 
     #[error(transparent)]
     CodegenError(#[from] CodegenError),

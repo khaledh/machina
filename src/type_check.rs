@@ -129,14 +129,14 @@ impl<'c, 'b> Checker<'c, 'b> {
         self.context
             .def_map
             .lookup_def(node)
-            .and_then(|def_id| self.builder.lookup_def_type(def_id))
+            .and_then(|def| self.builder.lookup_def_type(def))
     }
 
     fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
         // record param types
         for param in &function.params {
-            if let Some(def_id) = self.context.def_map.lookup_def(param.id) {
-                self.builder.record_def_type(def_id, param.typ);
+            if let Some(def) = self.context.def_map.lookup_def(param.id) {
+                self.builder.record_def_type(def.clone(), param.typ);
             }
         }
 
@@ -176,9 +176,9 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn type_check_let(&mut self, let_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
         match self.context.def_map.lookup_def(let_expr.id) {
-            Some(def_id) => {
+            Some(def) => {
                 let expr_type = self.type_check_expr(value)?;
-                self.builder.record_def_type(def_id, expr_type);
+                self.builder.record_def_type(def.clone(), expr_type);
                 Ok(Type::Unit)
             }
             None => Ok(Type::Unknown),
@@ -187,9 +187,9 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn type_check_var(&mut self, var_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
         match self.context.def_map.lookup_def(var_expr.id) {
-            Some(def_id) => {
+            Some(def) => {
                 let expr_type = self.type_check_expr(value)?;
-                self.builder.record_def_type(def_id, expr_type);
+                self.builder.record_def_type(def.clone(), expr_type);
                 Ok(Type::Unit)
             }
             None => Ok(Type::Unknown),

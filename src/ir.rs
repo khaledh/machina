@@ -1,8 +1,90 @@
-use crate::ast::{BinaryOp, UnaryOp};
-use crate::types::Type;
+use indexmap::IndexMap;
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use crate::ast::{BinaryOp, UnaryOp};
+use crate::types::Type;
+
+/// IR for Machina
+///
+/// ## Concepts:
+///
+/// - Functions are the basic units of lowering.
+/// - Blocks are the basic units of control flow within a function.
+/// - Instructions are the basic units of computation within a block.
+/// - Temps are register-sized units of data within a function.
+/// - Addresses are the basic units of memory within a function.
+///
+/// ## Functions
+///
+/// Each function has a name, parameters, return type, blocks, temps, and addresses. Functions are
+/// lowered from a function AST node using an IR function builder.
+///
+/// ## Blocks
+///
+/// Each block has an id, name, instructions, and a terminator. Block ids are assigned sequentially
+/// starting from 0 within a function. The function builder uses a vector to store the blocks,
+/// indexed by block id.
+///
+/// ## IR Function Builder
+///
+/// - Supports creation of blocks, temps, and addresses.
+/// - Always starts with an entry block.
+/// - Other blocks can be selected for emission of instructions at any time (although only one block
+///   can be selected at a time).
+/// - Blocks must be terminated with a terminator instruction (e.g. `br`, `condbr`, `ret`).
+/// - Returns an immutable `IrFunction` when finished.
+///
+/// ## Instructions
+///
+/// Each instruction has its own representation in the IR. Depending on the instruction, it may have
+/// operands, a result, and a type.
+///
+/// ## Terminators
+///
+/// Each block must be terminated with a terminator instruction. The terminator instruction is the
+/// last instruction in the block. The terminator instruction determines the next block to execute,
+/// or the end of the function if the block is the last block in the function.
+///
+/// ## Temps
+///
+/// Each temp has a type. Temps are assigned sequentially starting from 0 within a function. Temps
+/// are used to represent the result of an instruction or the value of a variable.
+/// The function builder uses a vector to store the temps, indexed by temp id.
+///
+/// ## Addresses
+///
+/// Each address has a type. The address type includes its size and alignment. The function builder
+/// uses a vector to store the addresses, indexed by address id.
+///
+/// ## Types
+///
+/// The IR uses the `Type` enum to represent the type of a value. The type enum is defined in the
+/// `types` module.
+///
+/// ## Load and Store Instructions
+///
+/// The IR supports load and store instructions for variables. The load instruction reads the value
+/// from an address and stores it in a temp. The store instruction writes the value from a temp to
+/// an address.
+///
+/// ## Constants
+///
+/// The IR supports constants for the following types: u32, bool, and unit.
+///
+/// ## Operations
+///
+/// The IR supports binary operations (e.g. add, sub, mul, div) and unary operations (e.g. neg).
+///
+/// ## Calls
+///
+/// The call instruction takes a function name, arguments, and a return type.
+///
+/// ## Phi Instructions
+///
+/// The IR supports phi instructions for the control flow of the function. The phi instruction is
+/// used to merge the values of the incoming blocks into a single value.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct IrBlockId(pub(crate) u32);
 
 impl IrBlockId {
@@ -45,12 +127,12 @@ pub struct IrAddrType {
     pub size: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IrFunction {
     pub name: String,
     pub params: Vec<IrParam>,
     pub return_type: Type,
-    pub blocks: Vec<IrBlock>,
+    pub blocks: IndexMap<IrBlockId, IrBlock>,
     pub temps: Vec<IrTempType>,
     pub addrs: Vec<IrAddrType>,
 }
@@ -65,13 +147,13 @@ impl IrFunction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IrParam {
     pub name: String,
     pub typ: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IrBlock {
     id: IrBlockId,
     name: String,
@@ -94,7 +176,7 @@ impl IrBlock {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrTerminator {
     Ret {
         value: Option<IrTempId>,
@@ -111,9 +193,15 @@ pub enum IrTerminator {
     _Unterminated,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum IrInst {
     // Variable slots (scalars only for now)
+    Param {
+        index: u32,
+        result: IrTempId,
+        typ: Type,
+        name_hint: String,
+    },
     AllocVar {
         addr: IrAddrId,
         typ: Type,
@@ -178,8 +266,9 @@ pub struct IrFunctionBuilder {
     name: String,
     params: Vec<IrParam>,
     return_type: Type,
-    blocks: Vec<IrBlock>,
     curr_block: IrBlockId,
+    blocks: Vec<IrBlock>,
+    termination_order: Vec<IrBlockId>,
     temps: Vec<IrTempType>,
     addrs: Vec<IrAddrType>,
 }
@@ -192,14 +281,16 @@ impl IrFunctionBuilder {
             insts: vec![],
             term: IrTerminator::_Unterminated,
         };
+
         Self {
             name,
-            params,
+            params: params.clone(),
             return_type,
             blocks: vec![entry_block],
             curr_block: IrBlockId(0),
             temps: vec![],
             addrs: vec![],
+            termination_order: vec![],
         }
     }
 
@@ -228,8 +319,9 @@ impl IrFunctionBuilder {
     pub fn select_block(&mut self, id: IrBlockId) {
         let idx = id.id() as usize;
         assert!(idx < self.blocks.len(), "Block ID not found: {}", id.id());
-        assert!(
-            self.blocks[idx].term == IrTerminator::_Unterminated,
+        assert_eq!(
+            self.blocks[idx].term,
+            IrTerminator::_Unterminated,
             "Cannot select a terminated block: {}",
             self.blocks[idx].name
         );
@@ -237,16 +329,20 @@ impl IrFunctionBuilder {
     }
 
     pub fn terminate(&mut self, term: IrTerminator) {
-        assert!(
-            term != IrTerminator::_Unterminated,
+        assert_ne!(
+            term,
+            IrTerminator::_Unterminated,
             "Cannot terminate block with Unterminated"
         );
         let block = self.curr_block_mut();
-        assert!(
-            block.term == IrTerminator::_Unterminated,
+        assert_eq!(
+            block.term,
+            IrTerminator::_Unterminated,
             "Block already terminated"
         );
         block.term = term;
+        // maintain termination order
+        self.termination_order.push(self.curr_block);
     }
 
     pub fn new_addr(&mut self, typ: Type) -> IrAddrId {
@@ -405,18 +501,33 @@ impl IrFunctionBuilder {
 
         // Check that all blocks are terminated
         for block in &self.blocks {
-            assert!(
-                block.term != IrTerminator::_Unterminated,
+            assert_ne!(
+                block.term,
+                IrTerminator::_Unterminated,
                 "Block '{}' is not terminated",
                 block.name
             );
+        }
+
+        // Check that termination_order is complete and references blocks in the function (id < len)
+        assert_eq!(self.termination_order.len(), self.blocks.len());
+        assert!(
+            self.termination_order
+                .iter()
+                .all(|id| id.id() < self.blocks.len() as u32)
+        );
+
+        // Build an IndexMap from block id to block in termination order
+        let mut ordered_blocks = IndexMap::new();
+        for id in self.termination_order.iter() {
+            ordered_blocks.insert(*id, self.blocks[id.id() as usize].clone());
         }
 
         IrFunction {
             name: self.name,
             params: self.params,
             return_type: self.return_type,
-            blocks: self.blocks,
+            blocks: ordered_blocks,
             temps: self.temps,
             addrs: self.addrs,
         }
@@ -440,8 +551,8 @@ impl fmt::Display for IrFunction {
         writeln!(f, ") -> {} {{", self.return_type)?;
 
         // Blocks
-        for (i, block) in self.blocks.iter().enumerate() {
-            if i > 0 {
+        for (id, block) in self.blocks.iter() {
+            if id.id() > 0 {
                 writeln!(f, "")?;
             }
             writeln!(f, "{}:", block.name)?;
@@ -465,6 +576,21 @@ impl fmt::Display for IrFunction {
 
 fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> fmt::Result {
     match inst {
+        IrInst::Param {
+            index,
+            result,
+            typ,
+            name_hint,
+        } => {
+            write!(
+                f,
+                "%t{} = param.{} : {} (name_hint={})",
+                result.id(),
+                index,
+                typ,
+                name_hint
+            )?;
+        }
         IrInst::AllocVar {
             addr,
             typ,
@@ -562,7 +688,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                let block_name = func.blocks[block_id.id() as usize].name.as_str();
+                let block_name = func.blocks[block_id].name.as_str();
                 write!(f, "({} -> %t{})", block_name, value.id())?;
             }
             write!(f, "]")?;
@@ -603,7 +729,7 @@ fn format_terminator(
             None => write!(f, "ret")?,
         },
         IrTerminator::Br { target } => {
-            let name = func.blocks[target.id() as usize].name.as_str();
+            let name = func.blocks[target].name.as_str();
             write!(f, "br {}", name)?;
         }
         IrTerminator::CondBr {
@@ -611,8 +737,8 @@ fn format_terminator(
             then_b,
             else_b,
         } => {
-            let then_name = func.blocks[then_b.id() as usize].name.as_str();
-            let else_name = func.blocks[else_b.id() as usize].name.as_str();
+            let then_name = func.blocks[then_b].name.as_str();
+            let else_name = func.blocks[else_b].name.as_str();
             write!(f, "condbr %t{}, {}, {}", cond.id(), then_name, else_name)?;
         }
         IrTerminator::_Unterminated => {
@@ -678,10 +804,10 @@ mod tests {
         let function = fn_builder.finish();
 
         assert_eq!(function.blocks.len(), 4);
-        assert_eq!(function.blocks[0].insts.len(), 3);
-        assert_eq!(function.blocks[1].insts.len(), 1);
-        assert_eq!(function.blocks[2].insts.len(), 1);
-        assert_eq!(function.blocks[3].insts.len(), 1);
+        assert_eq!(function.blocks[&IrBlockId(0)].insts.len(), 3);
+        assert_eq!(function.blocks[&IrBlockId(1)].insts.len(), 1);
+        assert_eq!(function.blocks[&IrBlockId(2)].insts.len(), 1);
+        assert_eq!(function.blocks[&IrBlockId(3)].insts.len(), 1);
 
         println!("{function}");
 

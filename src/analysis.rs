@@ -10,22 +10,61 @@ mod def_resolution {
     use super::{DefId, HashMap, NodeId};
     use std::fmt;
 
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub enum DefKind {
+        Func,
+        LocalVar,
+        Param { index: u32 },
+    }
+
+    impl fmt::Display for DefKind {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                DefKind::Func => write!(f, "Func"),
+                DefKind::LocalVar => write!(f, "LocalVar"),
+                DefKind::Param { index } => write!(f, "Param[{}]", index),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Eq, Hash)]
+    pub struct Def {
+        pub id: DefId,
+        pub name: String,
+        pub kind: DefKind,
+    }
+
+    impl PartialEq for Def {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id
+        }
+    }
+
+    impl PartialOrd for Def {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.id.cmp(&other.id))
+        }
+    }
+
     pub struct DefMapBuilder {
-        node_def: HashMap<NodeId, DefId>,
+        defs: Vec<Def>,
         def_node: HashMap<DefId, NodeId>,
+        node_def: HashMap<NodeId, DefId>,
     }
 
     impl DefMapBuilder {
         pub fn new() -> Self {
             Self {
-                node_def: HashMap::new(),
+                defs: Vec::new(),
                 def_node: HashMap::new(),
+                node_def: HashMap::new(),
             }
         }
 
-        pub fn record_def(&mut self, def_id: DefId, node_id: NodeId) {
-            self.def_node.insert(def_id, node_id);
-            self.node_def.insert(node_id, def_id);
+        pub fn record_def(&mut self, def: Def, node_id: NodeId) {
+            self.def_node.insert(def.id, node_id);
+            self.node_def.insert(node_id, def.id);
+            self.defs.push(def);
         }
 
         pub fn record_use(&mut self, node_id: NodeId, def_id: DefId) {
@@ -34,6 +73,7 @@ mod def_resolution {
 
         pub fn finish(self) -> DefMap {
             DefMap {
+                defs: self.defs,
                 node_def: self.node_def,
             }
         }
@@ -41,18 +81,38 @@ mod def_resolution {
 
     #[derive(Clone)]
     pub struct DefMap {
+        defs: Vec<Def>,
         node_def: HashMap<NodeId, DefId>,
     }
 
     impl DefMap {
-        pub fn lookup_def(&self, node: NodeId) -> Option<DefId> {
-            self.node_def.get(&node).copied()
+        pub fn lookup_def(&self, node: NodeId) -> Option<&Def> {
+            self.node_def
+                .get(&node)
+                .map(|def_id| &self.defs[def_id.0 as usize])
+        }
+    }
+
+    impl IntoIterator for DefMap {
+        type Item = Def;
+        type IntoIter = std::vec::IntoIter<Def>;
+        fn into_iter(self) -> Self::IntoIter {
+            self.defs.into_iter()
         }
     }
 
     impl fmt::Display for DefMap {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            for (node, def) in self.node_def.iter() {
+            writeln!(f, "Defs:")?;
+            for def in self.defs.iter() {
+                writeln!(f, "Def [{}] {}: {}", def.id, def.name, def.kind)?;
+            }
+            // sort def map by node id
+            writeln!(f, "")?;
+            writeln!(f, "Node -> Def:")?;
+            let mut node_def = self.node_def.iter().collect::<Vec<(&NodeId, &DefId)>>();
+            node_def.sort_by_key(|(node, _)| node.0);
+            for (node, def) in node_def {
                 writeln!(f, "Node [{}] -> Def [{}]", node, def)?;
             }
             Ok(())
@@ -60,18 +120,19 @@ mod def_resolution {
     }
 }
 
-pub use def_resolution::{DefMap, DefMapBuilder};
+pub use def_resolution::{Def, DefKind, DefMap, DefMapBuilder};
 
 // -----------------------------------------------------------------------------
 // Type Resolution
 // -----------------------------------------------------------------------------
 
 mod type_resolution {
-    use super::{DefId, HashMap, NodeId, Type};
+    use super::{Def, HashMap, NodeId, Type};
+    use std::fmt;
 
     pub struct TypeMapBuilder {
         node_type: HashMap<NodeId, Type>,
-        def_type: HashMap<DefId, Type>,
+        def_type: HashMap<Def, Type>,
     }
 
     impl TypeMapBuilder {
@@ -82,20 +143,21 @@ mod type_resolution {
             }
         }
 
-        pub fn record_def_type(&mut self, def_id: DefId, typ: Type) {
-            self.def_type.insert(def_id, typ);
+        pub fn record_def_type(&mut self, def: Def, typ: Type) {
+            self.def_type.insert(def, typ);
         }
 
         pub fn record_node_type(&mut self, node_id: NodeId, typ: Type) {
             self.node_type.insert(node_id, typ);
         }
 
-        pub fn lookup_def_type(&self, def_id: DefId) -> Option<Type> {
-            self.def_type.get(&def_id).copied()
+        pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
+            self.def_type.get(def).copied()
         }
 
         pub fn finish(self) -> TypeMap {
             TypeMap {
+                def_type: self.def_type,
                 node_type: self.node_type,
             }
         }
@@ -104,6 +166,7 @@ mod type_resolution {
     #[allow(unused)]
     #[derive(Clone)]
     pub struct TypeMap {
+        def_type: HashMap<Def, Type>,
         node_type: HashMap<NodeId, Type>,
     }
 
@@ -111,6 +174,29 @@ mod type_resolution {
     impl TypeMap {
         pub fn lookup_node_type(&self, node: NodeId) -> Option<Type> {
             self.node_type.get(&node).copied()
+        }
+    }
+
+    impl<'a> IntoIterator for &'a TypeMap {
+        type Item = (&'a Def, &'a Type);
+        type IntoIter = std::vec::IntoIter<(&'a Def, &'a Type)>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            let mut items: Vec<_> = self.def_type.iter().collect();
+            items.sort_by_key(|(def, _)| def.id);
+            items.into_iter()
+        }
+    }
+
+    impl fmt::Display for TypeMap {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            // sort by node id
+            let mut node_type = self.node_type.iter().collect::<Vec<(&NodeId, &Type)>>();
+            node_type.sort_by_key(|(node, _)| node.0);
+            for (node, typ) in node_type {
+                writeln!(f, "Node [{}] -> Type [{}]", node, typ)?;
+            }
+            Ok(())
         }
     }
 }

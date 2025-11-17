@@ -40,7 +40,7 @@ pub enum CodegenError {
 impl Codegen {
     pub fn new(context: TypeCheckedContext) -> Self {
         Codegen {
-            context: context,
+            context,
             scopes: Vec::new(),
             label_counter: Cell::new(0),
             max_stack_offset: Cell::new(0),
