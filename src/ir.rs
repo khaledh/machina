@@ -196,16 +196,15 @@ pub enum IrTerminator {
 #[derive(Debug, Clone)]
 pub enum IrInst {
     // Variable slots (scalars only for now)
-    Param {
-        index: u32,
-        result: IrTempId,
-        typ: Type,
-        name_hint: String,
-    },
     AllocVar {
         addr: IrAddrId,
         typ: Type,
         name_hint: String,
+    },
+    StoreParam {
+        addr: IrAddrId,
+        index: u32,
+        typ: Type,
     },
     StoreVar {
         addr: IrAddrId,
@@ -385,6 +384,11 @@ impl IrFunctionBuilder {
         addr
     }
 
+    pub fn store_param(&mut self, addr: IrAddrId, index: u32, typ: Type) {
+        debug_assert_eq!(self.addrs[addr.0 as usize].typ, typ);
+        self.emit_inst(IrInst::StoreParam { addr, index, typ });
+    }
+
     pub fn store_var(&mut self, addr: IrAddrId, value: IrTempId) {
         let typ = self.temps[value.0 as usize].typ;
         debug_assert_eq!(self.addrs[addr.0 as usize].typ, typ);
@@ -523,6 +527,13 @@ impl IrFunctionBuilder {
             ordered_blocks.insert(*id, self.blocks[id.id() as usize].clone());
         }
 
+        // Check that the last block is terminated with a ret
+        let (_, last_block) = ordered_blocks.last().unwrap();
+        assert!(
+            matches!(last_block.term, IrTerminator::Ret { .. }),
+            "Last block must be terminated with a ret"
+        );
+
         IrFunction {
             name: self.name,
             params: self.params,
@@ -576,20 +587,8 @@ impl fmt::Display for IrFunction {
 
 fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> fmt::Result {
     match inst {
-        IrInst::Param {
-            index,
-            result,
-            typ,
-            name_hint,
-        } => {
-            write!(
-                f,
-                "%t{} = param.{} : {} (name_hint={})",
-                result.id(),
-                index,
-                typ,
-                name_hint
-            )?;
+        IrInst::StoreParam { addr, index, typ } => {
+            write!(f, "store param.{} -> &a{} : {}", index, addr.id(), typ)?;
         }
         IrInst::AllocVar {
             addr,

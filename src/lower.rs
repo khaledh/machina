@@ -58,11 +58,12 @@ impl<'a> Lowerer<'a> {
             IrFunctionBuilder::new(func.name.clone(), ir_params, func.return_type.clone());
 
         // allocate stack slots for params
-        for param in func.params.iter() {
+        for (i, param) in func.params.iter().enumerate() {
             // get the def of the param
             match self.ctx.def_map.lookup_def(param.id) {
                 Some(def) => {
                     let addr = fn_builder.alloc_var(param.typ, def.name.clone());
+                    fn_builder.store_param(addr, i as u32, param.typ);
                     self.def_addr.insert(def.id, addr);
                 }
                 None => return Err(LowerError::ParamDefNotFound(param.id)),

@@ -28,12 +28,11 @@ fn main(a: u32, b: u32) -> u32 {
     var x = 10;
     var y = 0;
     while (x > 0) {
-        x = x + 1;
+        x = x - 1;
         y = y + if (x < 5) { 10 } else { 20 };
     }
     y
 }
-
 "#;
 
 #[derive(ClapParser)]
