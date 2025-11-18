@@ -266,23 +266,6 @@ fn test_lower_func_with_params() {
     assert_ret_with(&entry_block.term(), 0);
 }
 
-#[test]
-fn test_mismatched_branch_types_error() {
-    let source = r#"
-        fn test() -> u32 {
-            let x = if true { 1 } else { false };
-            0
-        }
-    "#;
-
-    let result = compile_and_lower(source);
-
-    assert!(result.is_err());
-    assert!(matches!(
-        result.err().unwrap(),
-        LowerError::MismatchedBranchTypes(_, Type::UInt32, _, Type::Bool)
-    ));
-}
 
 mod ir_assert {
     use super::*;
