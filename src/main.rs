@@ -2,6 +2,7 @@ use clap::Parser as ClapParser;
 
 mod analysis;
 mod ast;
+mod cfg;
 mod codegen;
 mod context;
 mod diagnostics;

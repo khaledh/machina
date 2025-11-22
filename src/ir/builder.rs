@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 
 use crate::ast::{BinaryOp, UnaryOp};
+use crate::cfg::ControlFlowGraph;
 use crate::ir::types::*;
 use crate::types::Type;
 
@@ -277,6 +278,9 @@ impl IrFunctionBuilder {
             "Last block must be terminated with a ret"
         );
 
+        // Build the control flow graph
+        let cfg = ControlFlowGraph::from(&ordered_blocks);
+
         IrFunction {
             name: self.name,
             params: self.params,
@@ -284,6 +288,7 @@ impl IrFunctionBuilder {
             blocks: ordered_blocks,
             temps: self.temps,
             addrs: self.addrs,
+            cfg,
         }
     }
 }

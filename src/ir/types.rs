@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use std::fmt;
 
 use crate::ast::{BinaryOp, UnaryOp};
+use crate::cfg::ControlFlowGraph;
 use crate::types::Type;
 
 /// IR for Machina
@@ -135,6 +136,7 @@ pub struct IrFunction {
     pub blocks: IndexMap<IrBlockId, IrBlock>,
     pub temps: Vec<IrTempType>,
     pub addrs: Vec<IrAddrType>,
+    pub cfg: ControlFlowGraph,
 }
 
 impl IrFunction {
