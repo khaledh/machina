@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::BinaryOp;
 use crate::context::AstContext;
-use crate::ir::{IrBlockId, IrInst, IrTempId};
+use crate::ir::types::{IrBlockId, IrInst, IrTempId, IrTerminator};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parser::Parser;
 use crate::resolver::resolve;

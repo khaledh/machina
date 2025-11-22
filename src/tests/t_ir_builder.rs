@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use crate::ast::BinaryOp;
     use crate::ir::builder::IrFunctionBuilder;
-    use crate::ir::*;
+    use crate::ir::types::*;
     use crate::types::Type;
 
     /// This is just a proof of concept to validate how the IR builder works.

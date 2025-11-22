@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 
-use crate::ir::*;
+use crate::ast::{BinaryOp, UnaryOp};
+use crate::ir::types::*;
 use crate::types::Type;
 
 pub struct IrFunctionBuilder {
@@ -286,3 +287,7 @@ impl IrFunctionBuilder {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/t_ir_builder.rs"]
+mod tests;

@@ -1,6 +1,6 @@
 use crate::analysis::{DefMap, TypeMap};
 use crate::ast::Module;
-use crate::ir::IrFunction;
+use crate::ir::types::IrFunction;
 
 #[derive(Clone)]
 pub struct AstContext {

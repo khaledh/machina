@@ -5,7 +5,7 @@ use crate::ast;
 use crate::context::{LoweredContext, TypeCheckedContext};
 use crate::ids::{DefId, NodeId};
 use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::{IrAddrId, IrFunction, IrParam, IrTempId, IrTerminator};
+use crate::ir::types::{IrAddrId, IrFunction, IrParam, IrTempId, IrTerminator};
 use crate::types::Type;
 
 #[derive(Debug, Error)]
