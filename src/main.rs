@@ -12,6 +12,7 @@ mod ir;
 mod lexer;
 mod lower;
 mod parser;
+mod regalloc;
 mod resolver;
 mod type_check;
 mod types;
