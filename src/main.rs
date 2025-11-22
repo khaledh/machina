@@ -5,6 +5,7 @@ mod ast;
 mod cfg;
 mod codegen;
 mod context;
+mod dataflow;
 mod diagnostics;
 mod ids;
 mod ir;
