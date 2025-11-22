@@ -3,10 +3,6 @@ use indexmap::IndexMap;
 use crate::ir::*;
 use crate::types::Type;
 
-// -----------------------------------------------------------------------------
-// IR Builder
-// -----------------------------------------------------------------------------
-
 pub struct IrFunctionBuilder {
     name: String,
     params: Vec<IrParam>,

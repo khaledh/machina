@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::ir::*;
     use crate::ir::builder::IrFunctionBuilder;
+    use crate::ir::*;
     use crate::types::Type;
 
     /// This is just a proof of concept to validate how the IR builder works.

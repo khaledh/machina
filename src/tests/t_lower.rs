@@ -266,7 +266,6 @@ fn test_lower_func_with_params() {
     assert_ret_with(&entry_block.term(), 0);
 }
 
-
 mod ir_assert {
     use super::*;
     use crate::types::Type;
