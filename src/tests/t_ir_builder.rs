@@ -66,8 +66,6 @@ mod tests {
         assert_eq!(function.blocks[&IrBlockId(2)].insts.len(), 0);
         assert_eq!(function.blocks[&IrBlockId(3)].insts.len(), 1);
 
-        println!("{function}");
-
         // Output:
         // fn foo() -> u32 {
         // entry:

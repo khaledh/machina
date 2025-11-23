@@ -134,7 +134,6 @@ impl RegAlloc {
 
         // 2. Sort intervals by start pos
         let mut sorted_intervals = Self::sort_intervals(&intervals);
-        println!("{:?}", sorted_intervals);
 
         // 3. Initialize free registers
         let mut free_regs = VecDeque::from(regs);

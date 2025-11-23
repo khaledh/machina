@@ -167,6 +167,7 @@ pub struct IrTempInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IrType {
+    Unit,
     Int { bits: u8, signed: bool },
     Bool,
     Ptr(Box<IrType>),
@@ -327,6 +328,7 @@ impl fmt::Display for IrFunction {
 
 fn format_type(ty: &IrType) -> String {
     match ty {
+        IrType::Unit => "()".to_string(),
         IrType::Bool => "bool".to_string(),
         IrType::Int { bits, signed } => {
             if *signed {
