@@ -1,12 +1,44 @@
+use std::collections::HashSet;
+
 use crate::ast::BinaryOp;
 use crate::dataflow::liveness::LivenessAnalysis;
 use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::types::{IrBlockId, IrTerminator};
-use crate::types::Type;
+use crate::ir::types::{IrConst, IrOperand, IrTempId, IrTerminator, IrType};
 
 // Helper to build a minimal function with given name / signature
 fn mk_builder() -> IrFunctionBuilder {
-    IrFunctionBuilder::new("test".to_string(), vec![], Type::Unit)
+    IrFunctionBuilder::new(
+        "test".to_string(),
+        IrType::Int {
+            bits: 1,
+            signed: false,
+        },
+    )
+}
+
+// Helpers for common types and operands
+
+fn u32_ty() -> IrType {
+    IrType::Int {
+        bits: 32,
+        signed: false,
+    }
+}
+
+fn bool_ty() -> IrType {
+    IrType::Bool
+}
+
+fn const_u32(value: i64) -> IrOperand {
+    IrOperand::Const(IrConst::Int {
+        value,
+        bits: 32,
+        signed: false,
+    })
+}
+
+fn temp(id: u32) -> IrOperand {
+    IrOperand::Temp(IrTempId(id))
 }
 
 #[test]
@@ -14,22 +46,16 @@ fn gen_kill_simple_block() {
     // Build:
     //
     // entry:
-    //   %t0 = const.u32 1      // defines t0
-    //   %t1 = const.u32 2      // defines t1
-    //   %t2 = binop.add t0, t1 // uses t0, t1; defines t2
-    //   ret %t2
+    //   %t0 = binop.add const.u32 1, const.u32 2 // uses consts; defines t0
+    //   ret %t0
     let mut b = mk_builder();
 
-    let t0 = b.new_temp(Type::UInt32);
-    b.const_u32(t0, 1);
+    let t0 = b.new_temp(u32_ty());
+    b.binary_op(t0, BinaryOp::Add, const_u32(1), const_u32(2));
 
-    let t1 = b.new_temp(Type::UInt32);
-    b.const_u32(t1, 2);
-
-    let t2 = b.new_temp(Type::UInt32);
-    b.binary_op(t2, BinaryOp::Add, t0, t1);
-
-    b.terminate(IrTerminator::Ret { value: Some(t2) });
+    b.terminate(IrTerminator::Ret {
+        value: Some(temp(0)),
+    });
     let func = b.finish();
 
     let analysis = LivenessAnalysis::new(func.clone());
@@ -42,7 +68,7 @@ fn gen_kill_simple_block() {
 
     // At entry, nothing is live-in in this simple example.
     assert!(live_entry.live_in.is_empty());
-    // At exit, nothing is live-out because ret uses t2 and then leaves the function.
+    // At exit, nothing is live-out because ret uses t0 and then leaves the function.
     assert!(live_entry.live_out.is_empty());
 }
 
@@ -56,15 +82,15 @@ fn liveness_across_branch() {
     //
     // then:
     //   %t1 = const.u32 2
-    //   %t2 = binop.add t0, t1
+    //   %t2 = binop.add %t0, %t1
     //   ret %t2
     //
     // We expect:
     // - t0 live-out of entry and live-in to then.
     let mut b = mk_builder();
 
-    let t0 = b.new_temp(Type::UInt32);
-    b.const_u32(t0, 1);
+    let t0 = b.new_temp(u32_ty());
+    b.move_to(t0, const_u32(1));
 
     let then_id = b.new_block("then".to_string());
 
@@ -72,11 +98,13 @@ fn liveness_across_branch() {
 
     // then block
     b.select_block(then_id);
-    let t1 = b.new_temp(Type::UInt32);
-    b.const_u32(t1, 2);
-    let t2 = b.new_temp(Type::UInt32);
-    b.binary_op(t2, BinaryOp::Add, t0, t1);
-    b.terminate(IrTerminator::Ret { value: Some(t2) });
+    let t1 = b.new_temp(u32_ty());
+    b.move_to(t1, const_u32(2));
+    let t2 = b.new_temp(u32_ty());
+    b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t0), const_u32(2));
+    b.terminate(IrTerminator::Ret {
+        value: Some(temp(2)),
+    });
 
     let func = b.finish();
     let analysis = LivenessAnalysis::new(func.clone());
@@ -89,73 +117,87 @@ fn liveness_across_branch() {
     let entry_live = &live_map[entry_id];
     let then_live = &live_map[then_id];
 
-    // t0 is needed in then, so it must be live-out of entry and live-in to then.
-    assert!(entry_live.live_out.contains(&t0));
-    assert!(then_live.live_in.contains(&t0));
+    // Entry: no live-in, t0 is live-out.
+    assert!(entry_live.live_in.is_empty());
+    assert_eq!(entry_live.live_out, HashSet::from([t0]));
 
-    // t1 is only used inside then; it should not be live-out of entry.
-    assert!(!entry_live.live_out.contains(&t1));
+    // Then: t0 is live-in, no live-out.
+    assert_eq!(then_live.live_in, HashSet::from([t0]));
+    assert!(then_live.live_out.is_empty());
 }
 
 #[test]
 fn liveness_with_phi() {
-    // Build:
+    // Code:
+    //
+    // fn test() -> u32 {
+    //   var x = 1;
+    //   let y = if x < 2 {
+    //     x
+    //   } else {
+    //     x + 1
+    //   }
+    //   y
+    // }
+
+    // IR:
     //
     // entry:
-    //   %t0 = const.u32 1
-    //   %t1 = const.u32 2
-    //   %t2 = binop.lt t0, t1
-    //   condbr %t2, then, join
+    //   %t0 = move const.u32 1
+    //   %t1 = binop.lt %t0, const.u32 2
+    //   condbr %t1, then, else
     //
     // then:
-    //   %t3 = const.u32 3
+    //   // %t0 is live-out of then due to the phi
+    //   br join
+    //
+    // else:
+    //   %t2 = binop.add %t0, const.u32 1
     //   br join
     //
     // join:
-    //   %t4 = phi [(entry, t0), (then, t3)]
-    //   %t5 = const.u32 5
-    //   %t6 = binop.add t4, t5
-    //   ret %t6
+    //   %t3 = phi [(then, %t0), (else, %t2)]
+    //   ret %t3
     //
     // Expectations:
-    // - On edge entry -> join, t0 is live-out of entry.
-    // - On edge then -> join, t3 is live-out of then.
-    // - t4 is a local def in join; it should not force t0/t3 to be live in both preds.
+    // - On edge then -> join, t0 is live-out of then.
+    // - On edge else -> join, t2 is live-out of else.
+    // - t3 is a local def in join; it should not force t0 to be live-in to else, nor t2 to be live-in to then.
     let mut b = mk_builder();
 
     let then_id = b.new_block("then".to_string());
+    let else_id = b.new_block("else".to_string());
     let join_id = b.new_block("join".to_string());
 
     // entry block
-    let t0 = b.new_temp(Type::UInt32);
-    b.const_u32(t0, 1);
-    let t1 = b.new_temp(Type::UInt32);
-    b.const_u32(t1, 2);
-    let t2 = b.new_temp(Type::Bool);
-    b.binary_op(t2, BinaryOp::Lt, t0, t1);
+    let t0 = b.new_temp(u32_ty());
+    b.move_to(t0, const_u32(1));
+    let t1 = b.new_temp(bool_ty());
+    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u32(2));
     b.terminate(IrTerminator::CondBr {
-        cond: t2,
+        cond: IrOperand::Temp(t1),
         then_b: then_id,
-        else_b: join_id,
+        else_b: else_id,
     });
 
     // then block
     b.select_block(then_id);
-    let t3 = b.new_temp(Type::UInt32);
-    b.const_u32(t3, 3);
+    b.terminate(IrTerminator::Br { target: join_id });
+
+    // else block
+    b.select_block(else_id);
+    let t2 = b.new_temp(u32_ty());
+    b.binary_op(t2, BinaryOp::Add, temp(0), const_u32(1));
     b.terminate(IrTerminator::Br { target: join_id });
 
     // join block
     b.select_block(join_id);
-    let t4 = b.new_temp(Type::UInt32);
-    b.phi(t4, vec![(IrBlockId(0), t0), (then_id, t3)]);
+    let t3 = b.new_temp(u32_ty());
+    b.phi(t3, vec![(then_id, temp(0)), (else_id, temp(2))]);
 
-    let t5 = b.new_temp(Type::UInt32);
-    b.const_u32(t5, 5);
-
-    let t6 = b.new_temp(Type::UInt32);
-    b.binary_op(t6, BinaryOp::Add, t4, t5);
-    b.terminate(IrTerminator::Ret { value: Some(t6) });
+    b.terminate(IrTerminator::Ret {
+        value: Some(IrOperand::Temp(t3)),
+    });
 
     let func = b.finish();
     let analysis = LivenessAnalysis::new(func.clone());
@@ -165,23 +207,29 @@ fn liveness_with_phi() {
     let mut blocks_iter = func.blocks.keys();
     let entry_id = blocks_iter.next().unwrap();
     let then_id = blocks_iter.next().unwrap();
+    let else_id = blocks_iter.next().unwrap();
     let join_id = blocks_iter.next().unwrap();
 
     let entry_live = &live_map[entry_id];
     let then_live = &live_map[then_id];
+    let else_live = &live_map[else_id];
     let join_live = &live_map[join_id];
 
-    // On edge entry -> join, the phi uses t0, so t0 must be live-out of entry.
-    assert!(entry_live.live_out.contains(&t0));
-    // t3 should not be forced live-out of entry just because it is another phi operand.
-    assert!(!entry_live.live_out.contains(&t3));
+    // In entry, t0 is live-out.
+    assert!(entry_live.live_in.is_empty());
+    assert_eq!(entry_live.live_out, HashSet::from([t0]));
 
-    // On edge then -> join, the phi uses t3, so t3 must be live-out of then.
-    assert!(then_live.live_out.contains(&t3));
-    // t0 should not be forced live-out of then.
-    assert!(!then_live.live_out.contains(&t0));
+    // On edge then -> join, t0 is both live-in and live-out of then.
+    assert_eq!(then_live.live_in, HashSet::from([t0]));
+    assert_eq!(then_live.live_out, HashSet::from([t0]));
 
-    // In join, t4 is defined by the phi; its operands are not required to be live-in.
-    assert!(!join_live.live_in.contains(&t0));
-    assert!(!join_live.live_in.contains(&t3));
+    // On edge else -> join, t0 is live-in; t2 is live-out.
+    assert_eq!(else_live.live_in, HashSet::from([t0]));
+    assert_eq!(else_live.live_out, HashSet::from([t2]));
+
+    // In join, t3 is defined by the phi in this block and then
+    // immediately consumed by the ret, so nothing is live-in or
+    // live-out.
+    assert!(join_live.live_in.is_empty());
+    assert!(join_live.live_out.is_empty());
 }

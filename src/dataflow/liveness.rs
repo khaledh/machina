@@ -1,4 +1,4 @@
-use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrTempId, IrTerminator};
+use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator};
 use std::collections::{HashMap, HashSet};
 
 /// A block's GenKillSet
@@ -32,13 +32,20 @@ impl GenKillSet {
         let mut gen_kill_set = GenKillSet::new();
 
         for inst in block.insts() {
-            // Skip Phi sources:
-            //   Phi operands are treated as used at the end of each predecessor block, not as uses
-            //   in the current block.
-            if !matches!(inst, IrInst::Phi { .. }) {
-                for source in inst.get_sources() {
-                    if !gen_kill_set.kill_set.contains(&source) {
-                        gen_kill_set.gen_set.insert(source);
+            // Phi sources are treated as used at the end of each predecessor block, not as uses
+            // in the current block. The Phi destination is defined at the start of the block,
+            // so it belongs in Kill but not Gen.
+            if let IrInst::Phi { .. } = inst {
+                if let Some(dest) = inst.get_dest() {
+                    gen_kill_set.kill_set.insert(dest);
+                }
+                continue;
+            }
+
+            for source in inst.get_sources() {
+                if let IrOperand::Temp(temp_id) = source {
+                    if !gen_kill_set.kill_set.contains(&temp_id) {
+                        gen_kill_set.gen_set.insert(temp_id);
                     }
                 }
             }
@@ -49,14 +56,16 @@ impl GenKillSet {
 
         match block.term() {
             IrTerminator::CondBr { cond, .. } => {
-                if !gen_kill_set.kill_set.contains(cond) {
-                    gen_kill_set.gen_set.insert(*cond);
+                if let IrOperand::Temp(temp_id) = cond {
+                    if !gen_kill_set.kill_set.contains(temp_id) {
+                        gen_kill_set.gen_set.insert(*temp_id);
+                    }
                 }
             }
             IrTerminator::Ret { value } => {
-                if let Some(value) = value {
-                    if !gen_kill_set.kill_set.contains(value) {
-                        gen_kill_set.gen_set.insert(*value);
+                if let Some(IrOperand::Temp(temp_id)) = value {
+                    if !gen_kill_set.kill_set.contains(temp_id) {
+                        gen_kill_set.gen_set.insert(*temp_id);
                     }
                 }
             }
@@ -138,7 +147,9 @@ impl LivenessAnalysis {
                         if let IrInst::Phi { incoming, .. } = inst {
                             for (pred_id, source) in incoming.iter() {
                                 if *pred_id == *block_id {
-                                    new_live_out.insert(*source);
+                                    if let IrOperand::Temp(temp_id) = source {
+                                        new_live_out.insert(*temp_id);
+                                    }
                                 }
                             }
                         }
@@ -188,13 +199,15 @@ pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveInterv
     let mut pos = 0;
     for block in func.blocks.values() {
         for inst in block.insts().iter() {
-            for temp_id in inst.get_sources() {
-                map.entry(temp_id)
-                    .and_modify(|interval| interval.end = pos)
-                    .or_insert(LiveInterval {
-                        start: pos,
-                        end: pos,
-                    });
+            for operand in inst.get_sources() {
+                if let IrOperand::Temp(temp_id) = operand {
+                    map.entry(temp_id)
+                        .and_modify(|interval| interval.end = pos)
+                        .or_insert(LiveInterval {
+                            start: pos,
+                            end: pos,
+                        });
+                }
             }
             if let Some(temp_id) = inst.get_dest() {
                 map.entry(temp_id)
