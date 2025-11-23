@@ -9,6 +9,7 @@ mod dataflow;
 mod diagnostics;
 mod ids;
 mod ir;
+// mod ir_codegen;
 mod lexer;
 mod lower;
 mod parser;
@@ -41,20 +42,9 @@ fn main(a: u32, b: u32) -> u32 {
 #[derive(ClapParser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Comma-separated list of things to dump: ast,defmap,typemap,ir,liveness,regalloc,asm
     #[clap(long)]
-    dump_ast: bool,
-
-    #[clap(long)]
-    dump_def_map: bool,
-
-    #[clap(long)]
-    dump_type_map: bool,
-
-    #[clap(long)]
-    dump_ir: bool,
-
-    #[clap(long)]
-    dump_asm: bool,
+    dump: Option<String>,
 }
 
 fn main() {
@@ -94,6 +84,33 @@ fn main() {
 }
 
 fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
+    // Parse dump flags from comma-separated list, e.g. --dump ast,ir,liveness
+    let mut dump_ast = false;
+    let mut dump_def_map = false;
+    let mut dump_type_map = false;
+    let mut dump_ir = false;
+    let mut dump_liveness = false;
+    let mut dump_regalloc = false;
+    let mut dump_asm = false;
+
+    if let Some(dump) = &args.dump {
+        for item in dump.split(',').map(|s| s.trim().to_lowercase()) {
+            match item.as_str() {
+                "ast" => dump_ast = true,
+                "defmap" => dump_def_map = true,
+                "typemap" => dump_type_map = true,
+                "ir" => dump_ir = true,
+                "liveness" => dump_liveness = true,
+                "regalloc" => dump_regalloc = true,
+                "asm" => dump_asm = true,
+                "" => {}
+                _ => {
+                    eprintln!("[WARN] unknown dump flag: {item}");
+                }
+            }
+        }
+    }
+
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -103,7 +120,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
 
-    if args.dump_ast {
+    if dump_ast {
         println!("AST:");
         println!("--------------------------------");
         println!("{}", module);
@@ -118,7 +135,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
             .collect::<Vec<CompileError>>()
     })?;
 
-    if args.dump_def_map {
+    if dump_def_map {
         println!("Def Map:");
         println!("--------------------------------");
         println!("{}", resolved_context.def_map);
@@ -131,7 +148,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
             .collect::<Vec<CompileError>>()
     })?;
 
-    if args.dump_type_map {
+    if dump_type_map {
         println!("Type Map:");
         println!("--------------------------------");
         println!("{}", type_checked_context.type_map);
@@ -139,7 +156,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     }
 
     let lowered_context = lower(type_checked_context.clone()).map_err(|e| vec![e.into()])?;
-    if args.dump_ir {
+    if dump_ir {
         println!("IR:");
         println!("--------------------------------");
         for func in &lowered_context.ir_funcs {
@@ -148,8 +165,44 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         }
     }
 
+    // Liveness analysis
+    if dump_liveness {
+        use crate::dataflow::liveness::{LiveMapDisplay, LivenessAnalysis};
+        for func in &lowered_context.ir_funcs {
+            let live_map = LivenessAnalysis::new(func.clone()).analyze();
+            println!("Live Map ({}):", func.name);
+            println!("--------------------------------");
+            println!(
+                "{}",
+                LiveMapDisplay {
+                    func,
+                    live_map: &live_map
+                }
+            );
+            println!("--------------------------------");
+        }
+    }
+
+    // register allocation
+    if dump_regalloc {
+        for func in &lowered_context.ir_funcs {
+            let alloc_map = regalloc::RegAlloc::new().alloc(&func);
+            println!("Reg Alloc Map ({}):", func.name);
+            println!("--------------------------------");
+            println!("{}", regalloc::TempAllocMapDisplay(&alloc_map));
+            println!("--------------------------------");
+        }
+    }
+
     let mut codegen = Codegen::new(type_checked_context);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
+
+    if dump_asm {
+        println!("ASM:");
+        println!("--------------------------------");
+        println!("{}", asm);
+        println!("--------------------------------");
+    }
 
     Ok(asm)
 }

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 
 use crate::dataflow::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
@@ -16,6 +17,27 @@ pub enum MappedTemp {
 }
 
 pub type TempAllocMap = HashMap<IrTempId, MappedTemp>;
+
+/// Helper wrapper to pretty-print a TempAllocMap in a stable order.
+pub struct TempAllocMapDisplay<'a>(pub &'a TempAllocMap);
+
+impl<'a> fmt::Display for TempAllocMapDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut entries: Vec<_> = self.0.iter().collect();
+        entries.sort_by_key(|(temp, _)| temp.id());
+
+        for (i, (temp, mapped)) in entries.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            match mapped {
+                MappedTemp::Reg(reg) => write!(f, "%t{} -> {}", temp.id(), reg)?,
+                MappedTemp::Stack(slot) => write!(f, "%t{} -> stack[{}]", temp.id(), slot.0)?,
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct ActiveTemp {

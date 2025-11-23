@@ -1,5 +1,6 @@
 use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 /// A block's GenKillSet
 ///
@@ -94,6 +95,46 @@ impl LiveSet {
 }
 
 pub type LiveMap = HashMap<IrBlockId, LiveSet>;
+
+/// Helper wrapper to pretty-print a `LiveMap` in block order.
+pub struct LiveMapDisplay<'a> {
+    pub func: &'a IrFunction,
+    pub live_map: &'a LiveMap,
+}
+
+impl<'a> fmt::Display for LiveMapDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "LiveMap:")?;
+        for block_id in &self.func.cfg.block_ids {
+            let block = &self.func.blocks[block_id];
+            let live = &self.live_map[block_id];
+            write!(f, "{}:{}\n", block_id.id(), block.name)?;
+
+            write!(f, "  live_in: [")?;
+            let mut temps: Vec<_> = live.live_in.iter().cloned().collect();
+            temps.sort_by_key(|t| t.id());
+            for (i, t) in temps.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "%t{}", t.id())?;
+            }
+            writeln!(f, "]")?;
+
+            write!(f, "  live_out: [")?;
+            let mut temps: Vec<_> = live.live_out.iter().cloned().collect();
+            temps.sort_by_key(|t| t.id());
+            for (i, t) in temps.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "%t{}", t.id())?;
+            }
+            writeln!(f, "]")?;
+        }
+        Ok(())
+    }
+}
 
 pub struct LivenessAnalysis {
     func: IrFunction,

@@ -293,9 +293,9 @@ impl fmt::Display for IrFunction {
             .enumerate()
         {
             if let Some(name) = &temp.debug_name {
-                write!(f, "{}: {}", name, format_type(&temp.ty));
+                write!(f, "{}: {}", name, format_type(&temp.ty))?;
             } else {
-                write!(f, "%t{}: {}", i, format_type(&temp.ty));
+                write!(f, "%t{}: {}", i, format_type(&temp.ty))?;
             }
         }
 
@@ -307,7 +307,7 @@ impl fmt::Display for IrFunction {
             if id.id() > 0 {
                 writeln!(f, "")?;
             }
-            writeln!(f, "{}:", block.name)?;
+            writeln!(f, "{}:{}:", id.id(), block.name)?;
 
             // Instructions
             for inst in block.insts.iter() {
@@ -322,6 +322,9 @@ impl fmt::Display for IrFunction {
             writeln!(f, "")?;
         }
         writeln!(f, "}}")?;
+        writeln!(f, "---")?;
+        writeln!(f, "CFG:")?;
+        write!(f, "{}", self.cfg)?;
         Ok(())
     }
 }
