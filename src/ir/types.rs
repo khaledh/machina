@@ -85,6 +85,25 @@ use crate::types::Type;
 /// The IR supports phi instructions for the control flow of the function. The phi instruction is
 /// used to merge the values of the incoming blocks into a single value.
 
+// ----------- Function -----------
+
+#[derive(Debug, Clone)]
+pub struct IrFunction {
+    pub name: String,
+    pub ret_ty: IrType,
+    pub blocks: IndexMap<IrBlockId, IrBlock>,
+    pub temps: Vec<IrTempInfo>,
+    pub cfg: ControlFlowGraph,
+}
+
+impl IrFunction {
+    pub fn temp_type(&self, id: IrTempId) -> &IrType {
+        &self.temps[id.0 as usize].ty
+    }
+}
+
+// ----------- Block -----------
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct IrBlockId(pub(crate) u32);
 
@@ -93,66 +112,6 @@ impl IrBlockId {
     pub fn id(&self) -> u32 {
         self.0
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct IrTempType {
-    pub typ: Type,
-}
-
-/// SSA-like ephemeral value (not enforced yet)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct IrTempId(pub(crate) u32);
-
-impl IrTempId {
-    #[inline]
-    pub fn id(&self) -> u32 {
-        self.0
-    }
-}
-
-/// Stable stack slot pointer (aggregate later)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct IrAddrId(pub(crate) u32);
-
-impl IrAddrId {
-    pub fn id(&self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IrAddrType {
-    pub typ: Type,
-    pub align: usize,
-    pub size: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct IrFunction {
-    pub name: String,
-    pub params: Vec<IrParam>,
-    pub return_type: Type,
-    pub blocks: IndexMap<IrBlockId, IrBlock>,
-    pub temps: Vec<IrTempType>,
-    pub addrs: Vec<IrAddrType>,
-    pub cfg: ControlFlowGraph,
-}
-
-impl IrFunction {
-    pub fn temp_type(&self, id: IrTempId) -> Type {
-        self.temps[id.0 as usize].typ
-    }
-
-    pub fn addr_type(&self, id: IrAddrId) -> Type {
-        self.addrs[id.0 as usize].typ
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IrParam {
-    pub name: String,
-    pub typ: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -178,16 +137,83 @@ impl IrBlock {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// ----------- Operand -----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrOperand {
+    Temp(IrTempId),
+    Const(IrConst),
+}
+
+// ----------- Temp -----------
+
+/// SSA-like ephemeral value (not enforced yet)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct IrTempId(pub(crate) u32);
+
+impl IrTempId {
+    #[inline]
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IrTempInfo {
+    pub ty: IrType,
+    pub role: IrTempRole,
+    pub debug_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IrType {
+    Int { bits: u8, signed: bool },
+    Bool,
+    Ptr(Box<IrType>),
+    // Agg, Array, etc.
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IrTempRole {
+    Local,
+    Param { index: u32 },
+}
+
+// ----------- Const -----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrConst {
+    Int { value: i64, bits: u8, signed: bool },
+    Bool(bool),
+    Unit,
+}
+
+impl fmt::Display for IrConst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IrConst::Int {
+                value,
+                bits,
+                signed,
+            } => write!(f, "{}", value),
+            IrConst::Bool(value) => write!(f, "const.bool {}", value),
+            IrConst::Unit => write!(f, "const.unit"),
+        }
+    }
+}
+
+// ----------- Terminator -----------
+
+#[derive(Debug, Clone)]
 pub enum IrTerminator {
     Ret {
-        value: Option<IrTempId>,
+        value: Option<IrOperand>,
     },
     Br {
         target: IrBlockId,
     },
     CondBr {
-        cond: IrTempId,
+        cond: IrOperand,
         then_b: IrBlockId,
         else_b: IrBlockId,
     },
@@ -195,80 +221,44 @@ pub enum IrTerminator {
     _Unterminated,
 }
 
+// ----------- Instruction -----------
+
 #[derive(Debug, Clone)]
 pub enum IrInst {
-    // Variable slots (scalars only for now)
-    AllocVar {
-        addr: IrAddrId,
-        typ: Type,
-        name_hint: String,
+    Move {
+        dest: IrTempId,
+        src: IrOperand,
     },
-    StoreParam {
-        addr: IrAddrId,
-        index: u32,
-        typ: Type,
-    },
-    StoreVar {
-        addr: IrAddrId,
-        value: IrTempId,
-        typ: Type,
-    },
-    LoadVar {
-        value: IrTempId,
-        addr: IrAddrId,
-        typ: Type,
-    },
-
-    // Constants
-    ConstU32 {
-        result: IrTempId,
-        value: u32,
-    },
-    ConstBool {
-        result: IrTempId,
-        value: bool,
-    },
-    ConstUnit {
-        result: IrTempId,
-    },
-
-    // Operations
     BinaryOp {
         result: IrTempId,
         op: BinaryOp,
-        lhs: IrTempId,
-        rhs: IrTempId,
+        lhs: IrOperand,
+        rhs: IrOperand,
     },
     UnaryOp {
         result: IrTempId,
         op: UnaryOp,
-        operand: IrTempId,
+        operand: IrOperand,
     },
 
     // Calls (all args passed by value; no aggregates yet)
     Call {
         result: Option<IrTempId>,
         name: String,
-        args: Vec<IrTempId>,
-        return_type: Type,
+        args: Vec<IrOperand>,
+        ret_ty: IrType,
     },
 
     Phi {
         result: IrTempId,
-        incoming: Vec<(IrBlockId, IrTempId)>,
+        incoming: Vec<(IrBlockId, IrOperand)>,
     },
 }
 
 impl IrInst {
     pub fn get_dest(&self) -> Option<IrTempId> {
         match self {
-            IrInst::AllocVar { .. } => None,   // dest is an address, not a temp
-            IrInst::StoreParam { .. } => None, // dest is an address, not a temp
-            IrInst::StoreVar { .. } => None,   // dest is an address, not a temp
-            IrInst::LoadVar { value, .. } => Some(*value),
-            IrInst::ConstU32 { result, .. } => Some(*result),
-            IrInst::ConstBool { result, .. } => Some(*result),
-            IrInst::ConstUnit { result, .. } => Some(*result),
+            IrInst::Move { dest, .. } => Some(*dest),
             IrInst::BinaryOp { result, .. } => Some(*result),
             IrInst::UnaryOp { result, .. } => Some(*result),
             IrInst::Call { result, .. } => *result,
@@ -276,22 +266,18 @@ impl IrInst {
         }
     }
 
-    pub fn get_sources(&self) -> Vec<IrTempId> {
+    pub fn get_sources(&self) -> Vec<IrOperand> {
         match self {
-            IrInst::AllocVar { .. } => vec![],
-            IrInst::StoreParam { .. } => vec![],
-            IrInst::StoreVar { value, .. } => vec![*value],
-            IrInst::LoadVar { .. } => vec![],
-            IrInst::ConstU32 { .. } => vec![],
-            IrInst::ConstBool { .. } => vec![],
-            IrInst::ConstUnit { .. } => vec![],
+            IrInst::Move { src, .. } => vec![*src],
             IrInst::BinaryOp { lhs, rhs, .. } => vec![*lhs, *rhs],
             IrInst::UnaryOp { operand, .. } => vec![*operand],
             IrInst::Call { args, .. } => args.clone(),
-            IrInst::Phi { incoming, .. } => incoming.iter().map(|(_, temp)| *temp).collect(),
+            IrInst::Phi { incoming, .. } => incoming.iter().map(|(_, operand)| *operand).collect(),
         }
     }
 }
+
+// ----------- Display -----------
 
 impl fmt::Display for IrFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -299,15 +285,21 @@ impl fmt::Display for IrFunction {
         write!(f, "fn {}(", self.name)?;
 
         // Parameters
-        for (i, param) in self.params.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
+        for (i, temp) in self
+            .temps
+            .iter()
+            .filter(|temp| matches!(temp.role, IrTempRole::Param { .. }))
+            .enumerate()
+        {
+            if let Some(name) = &temp.debug_name {
+                write!(f, "{}: {}", name, format_type(&temp.ty));
+            } else {
+                write!(f, "%t{}: {}", i, format_type(&temp.ty));
             }
-            write!(f, "{}: {}", param.name, param.typ)?;
         }
 
         // Return type
-        writeln!(f, ") -> {} {{", self.return_type)?;
+        writeln!(f, ") -> {} {{", format_type(&self.ret_ty))?;
 
         // Blocks
         for (id, block) in self.blocks.iter() {
@@ -333,53 +325,33 @@ impl fmt::Display for IrFunction {
     }
 }
 
+fn format_type(ty: &IrType) -> String {
+    match ty {
+        IrType::Bool => "bool".to_string(),
+        IrType::Int { bits, signed } => {
+            if *signed {
+                format!("i{}", bits)
+            } else {
+                format!("u{}", bits)
+            }
+        }
+        IrType::Ptr(ty) => {
+            format!("ptr {}", format_type(ty))
+        }
+    }
+}
+
+fn format_operand(operand: &IrOperand) -> String {
+    match operand {
+        IrOperand::Temp(temp) => format!("%t{}", temp.id()),
+        IrOperand::Const(c) => format!("const.{}", c),
+    }
+}
+
 fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> fmt::Result {
     match inst {
-        IrInst::StoreParam { addr, index, typ } => {
-            write!(f, "store param.{} -> &a{} : {}", index, addr.id(), typ)?;
-        }
-        IrInst::AllocVar {
-            addr,
-            typ,
-            name_hint,
-        } => {
-            let addr_type = &func.addrs[addr.0 as usize];
-            write!(
-                f,
-                "&a{} = alloc {} (size={}, align={}) name_hint={}",
-                addr.id(),
-                typ,
-                addr_type.size,
-                addr_type.align,
-                name_hint
-            )?;
-        }
-        IrInst::StoreVar { addr, value, .. } => {
-            write!(
-                f,
-                "store %t{} -> &a{} : {}",
-                value.id(),
-                addr.id(),
-                func.addr_type(*addr)
-            )?;
-        }
-        IrInst::LoadVar { value, addr, .. } => {
-            write!(
-                f,
-                "%t{} <- load &a{} : {}",
-                value.id(),
-                addr.id(),
-                func.addr_type(*addr)
-            )?;
-        }
-        IrInst::ConstU32 { result, value } => {
-            write!(f, "%t{} = const.u32 {}", result.id(), value)?;
-        }
-        IrInst::ConstBool { result, value } => {
-            write!(f, "%t{} = const.bool {}", result.id(), value)?;
-        }
-        IrInst::ConstUnit { result } => {
-            write!(f, "%t{} = const.unit", result.id())?;
+        IrInst::Move { dest, src } => {
+            write!(f, "%t{} = move {}", dest.id(), format_operand(src))?;
         }
         IrInst::BinaryOp {
             result,
@@ -392,9 +364,9 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 "%t{} = binop.{} %t{}, %t{} : {}",
                 result.id(),
                 format_binary_op(op),
-                lhs.id(),
-                rhs.id(),
-                func.temp_type(*result)
+                format_operand(lhs),
+                format_operand(rhs),
+                format_type(func.temp_type(*result))
             )?;
         }
         IrInst::UnaryOp {
@@ -407,15 +379,15 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 "%t{} = unop.{} %t{} : {}",
                 result.id(),
                 format_unary_op(op),
-                operand.id(),
-                func.temp_type(*result)
+                format_operand(operand),
+                format_type(func.temp_type(*result))
             )?;
         }
         IrInst::Call {
             result,
             name,
             args,
-            return_type,
+            ret_ty,
         } => {
             match result {
                 Some(result) => write!(f, "%t{} = {}(", result.id(), name)?,
@@ -425,9 +397,9 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "%t{}", arg.id())?;
+                format_operand(arg);
             }
-            write!(f, ") : {}", return_type)?;
+            write!(f, ") : {}", format_type(ret_ty));
         }
         IrInst::Phi { result, incoming } => {
             write!(f, "%t{} = phi [", result.id())?;
@@ -436,7 +408,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                     write!(f, ", ")?;
                 }
                 let block_name = func.blocks[block_id].name.as_str();
-                write!(f, "({} -> %t{})", block_name, value.id())?;
+                write!(f, "({} -> {})", block_name, format_operand(value));
             }
             write!(f, "]")?;
         }
@@ -472,7 +444,7 @@ fn format_terminator(
 ) -> fmt::Result {
     match terminator {
         IrTerminator::Ret { value } => match value {
-            Some(value) => write!(f, "ret %t{}", value.id())?,
+            Some(value) => write!(f, "ret {}", format_operand(value))?,
             None => write!(f, "ret")?,
         },
         IrTerminator::Br { target } => {
@@ -486,7 +458,13 @@ fn format_terminator(
         } => {
             let then_name = func.blocks[then_b].name.as_str();
             let else_name = func.blocks[else_b].name.as_str();
-            write!(f, "condbr %t{}, {}, {}", cond.id(), then_name, else_name)?;
+            write!(
+                f,
+                "condbr {}, {}, {}",
+                format_operand(cond),
+                then_name,
+                else_name
+            )?;
         }
         IrTerminator::_Unterminated => {
             write!(f, "<unterminated>")?;
