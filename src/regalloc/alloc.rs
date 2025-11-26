@@ -6,9 +6,7 @@ use crate::dataflow::liveness::{
 };
 use crate::ir::types::{IrFunction, IrTempId, IrTempRole};
 use crate::regalloc::regs::{self, Arm64Reg, CALLER_SAVED_REGS};
-
-#[derive(Debug, Clone, Copy)]
-pub struct StackSlotId(u32);
+use crate::regalloc::spill::{SpillAllocator, StackSlotId};
 
 #[derive(Debug, Clone)]
 pub enum MappedTemp {
@@ -51,7 +49,7 @@ type ActiveSet = VecDeque<ActiveTemp>;
 pub struct RegAlloc {
     active_set: ActiveSet,
     alloc_map: TempAllocMap,
-    next_stack_slot: u32,
+    spill_alloc: SpillAllocator,
 }
 
 impl RegAlloc {
@@ -59,14 +57,8 @@ impl RegAlloc {
         Self {
             active_set: ActiveSet::new(),
             alloc_map: TempAllocMap::new(),
-            next_stack_slot: 0,
+            spill_alloc: SpillAllocator::new(),
         }
-    }
-
-    fn new_stack_slot(&mut self) -> StackSlotId {
-        let slot = StackSlotId(self.next_stack_slot);
-        self.next_stack_slot += 1;
-        slot
     }
 
     fn initial_free_regs(&self) -> Vec<Arm64Reg> {
@@ -110,7 +102,7 @@ impl RegAlloc {
     }
 
     fn spill(&mut self, active_temp: ActiveTemp) {
-        let stack_slot = self.new_stack_slot();
+        let stack_slot = self.spill_alloc.alloc_slot();
         self.alloc_map
             .insert(active_temp.temp_id, MappedTemp::Stack(stack_slot));
         self.active_set.retain(|a| {
@@ -197,7 +189,7 @@ impl RegAlloc {
 
                     if victim.interval.end <= interval.end {
                         // Spill current since it lives longer (it doesn't enter the active set)
-                        let stack_slot = self.new_stack_slot();
+                        let stack_slot = self.spill_alloc.alloc_slot();
                         self.alloc_map
                             .insert(temp_id, MappedTemp::Stack(stack_slot));
                     } else {
