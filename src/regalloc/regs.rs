@@ -50,6 +50,43 @@ pub enum Arm64Reg {
     XZR,
 }
 
+pub const CALLER_SAVED_REGS: [Arm64Reg; 16] = [
+    Arm64Reg::X0,
+    Arm64Reg::X1,
+    Arm64Reg::X2,
+    Arm64Reg::X3,
+    Arm64Reg::X4,
+    Arm64Reg::X5,
+    Arm64Reg::X6,
+    Arm64Reg::X7,
+    Arm64Reg::X8,
+    Arm64Reg::X9,
+    Arm64Reg::X10,
+    Arm64Reg::X11,
+    Arm64Reg::X12,
+    Arm64Reg::X13,
+    Arm64Reg::X14,
+    Arm64Reg::X15,
+];
+
+pub fn get_param_reg(index: u32) -> Arm64Reg {
+    match index {
+        0 => Arm64Reg::X0,
+        1 => Arm64Reg::X1,
+        2 => Arm64Reg::X2,
+        3 => Arm64Reg::X3,
+        4 => Arm64Reg::X4,
+        5 => Arm64Reg::X5,
+        6 => Arm64Reg::X6,
+        7 => Arm64Reg::X7,
+        _ => panic!("Invalid arm64 param index: {}", index),
+    }
+}
+
+pub fn get_result_reg() -> Arm64Reg {
+    Arm64Reg::X0
+}
+
 impl fmt::Display for Arm64Reg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

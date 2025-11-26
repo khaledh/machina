@@ -4,8 +4,8 @@ use std::fmt;
 use crate::dataflow::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
 };
-use crate::ir::types::{IrFunction, IrTempId};
-use crate::regalloc::regs::Arm64Reg;
+use crate::ir::types::{IrFunction, IrTempId, IrTempRole};
+use crate::regalloc::regs::{self, Arm64Reg, CALLER_SAVED_REGS};
 
 #[derive(Debug, Clone, Copy)]
 pub struct StackSlotId(u32);
@@ -70,18 +70,7 @@ impl RegAlloc {
     }
 
     fn initial_free_regs(&self) -> Vec<Arm64Reg> {
-        vec![
-            Arm64Reg::X19,
-            Arm64Reg::X20,
-            Arm64Reg::X21,
-            Arm64Reg::X22,
-            Arm64Reg::X23,
-            Arm64Reg::X24,
-            Arm64Reg::X25,
-            Arm64Reg::X26,
-            Arm64Reg::X27,
-            Arm64Reg::X28,
-        ]
+        CALLER_SAVED_REGS.to_vec()
     }
 
     fn sort_intervals(intervals: &LiveIntervalMap) -> Vec<(IrTempId, LiveInterval)> {
@@ -138,14 +127,38 @@ impl RegAlloc {
         });
     }
 
+    fn alloc_param_regs(
+        &mut self,
+        func: &IrFunction,
+        free_regs: &mut VecDeque<Arm64Reg>,
+        intervals: &LiveIntervalMap,
+    ) {
+        for (i, temp) in func.temps.iter().enumerate() {
+            let temp_id = IrTempId(i as u32);
+            if let IrTempRole::Param { index } = temp.role {
+                if index > 8 {
+                    panic!(
+                        "Only 8 parameters are supported. Stack parameters are not supported yet."
+                    );
+                }
+                let reg = regs::get_param_reg(index);
+                let interval = intervals.get(&temp_id).expect(&format!(
+                    "Param temp {} not found in intervals",
+                    temp_id.id()
+                ));
+                self.assign_reg(temp_id, *interval, reg);
+                // remove the param from the free list
+                free_regs.retain(|r| *r != reg);
+            }
+        }
+    }
+
     pub fn alloc(&mut self, func: &IrFunction) -> TempAllocMap {
         self.alloc_into(func, self.initial_free_regs())
     }
 
     pub fn alloc_into(&mut self, func: &IrFunction, regs: Vec<Arm64Reg>) -> TempAllocMap {
-        // The linear-scan allocator assumes there is at least one allocatable
-        // register; spilling logic relies on always having an active interval
-        // when we run out of free registers. Enforce this at the API boundary.
+        // Assumes there is at least one allocatable register.
         assert!(
             !regs.is_empty(),
             "RegAlloc::alloc_into called with an empty register list"
@@ -160,18 +173,21 @@ impl RegAlloc {
         // 3. Initialize free registers
         let mut free_regs = VecDeque::from(regs);
 
-        // 4. Scan intervals from earliest to latest
+        // 4. Pre-allocate parameters to ABI registers
+        self.alloc_param_regs(func, &mut free_regs, &intervals);
+
+        // 5. Scan intervals from earliest to latest
         for (temp_id, interval) in sorted_intervals.drain(..) {
-            // 4.1. Expire old intervals
+            // 5.1. Expire old intervals
             self.expire_old_intervals(&mut free_regs, interval.start);
 
             match free_regs.pop_front() {
                 Some(reg) => {
-                    // 4.2. Allocate register to interval
+                    // 5.2. Allocate register to interval
                     self.assign_reg(temp_id, interval, reg);
                 }
                 None => {
-                    // 4.3. No free registers, we need to spill
+                    // 5.3. No free registers, we need to spill
 
                     // Choose a victim from the active set (the one with the highest end)
                     let victim = *self
