@@ -4,8 +4,10 @@ use std::fmt;
 use crate::dataflow::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
 };
-use crate::ir::types::{IrFunction, IrTempId, IrTempRole};
-use crate::regalloc::regs::{self, Arm64Reg, CALLER_SAVED_REGS};
+use crate::ir::types::{IrFunction, IrTempId};
+use crate::regalloc::constraints::ConstraintMap;
+use crate::regalloc::moves::FnMoveList;
+use crate::regalloc::regs::{Arm64Reg, CALLER_SAVED_REGS};
 use crate::regalloc::spill::{SpillAllocator, StackSlotId};
 
 #[derive(Debug, Clone)]
@@ -46,18 +48,30 @@ struct ActiveTemp {
 
 type ActiveSet = VecDeque<ActiveTemp>;
 
-pub struct RegAlloc {
+pub struct AllocationResult {
+    pub alloc_map: TempAllocMap,
+    pub moves: FnMoveList,
+    pub frame_size: u32,
+}
+
+pub struct RegAlloc<'a> {
+    func: &'a IrFunction,
+    constraints: &'a ConstraintMap,
     active_set: ActiveSet,
     alloc_map: TempAllocMap,
     spill_alloc: SpillAllocator,
+    moves: FnMoveList,
 }
 
-impl RegAlloc {
-    pub fn new() -> Self {
+impl<'a> RegAlloc<'a> {
+    pub fn new(func: &'a IrFunction, constraints: &'a ConstraintMap) -> Self {
         Self {
+            func,
+            constraints,
             active_set: ActiveSet::new(),
             alloc_map: TempAllocMap::new(),
             spill_alloc: SpillAllocator::new(),
+            moves: FnMoveList::new(),
         }
     }
 
@@ -121,52 +135,47 @@ impl RegAlloc {
 
     fn alloc_param_regs(
         &mut self,
-        func: &IrFunction,
         free_regs: &mut VecDeque<Arm64Reg>,
         intervals: &LiveIntervalMap,
     ) {
-        for (i, temp) in func.temps.iter().enumerate() {
-            let temp_id = IrTempId(i as u32);
-            if let IrTempRole::Param { index } = temp.role {
-                if index > 8 {
-                    panic!(
-                        "Only 8 parameters are supported. Stack parameters are not supported yet."
-                    );
-                }
-                let reg = regs::get_param_reg(index);
-                let interval = intervals.get(&temp_id).expect(&format!(
-                    "Param temp {} not found in intervals",
-                    temp_id.id()
-                ));
-                self.assign_reg(temp_id, *interval, reg);
-                // remove the param from the free list
-                free_regs.retain(|r| *r != reg);
-            }
+        for param_constraint in self.constraints.fn_param_constraints.iter() {
+            let temp_id = param_constraint.temp;
+            let reg = param_constraint.reg;
+            let interval = intervals.get(&temp_id).expect(&format!(
+                "Param temp {} not found in intervals",
+                temp_id.id()
+            ));
+            self.assign_reg(temp_id, *interval, reg);
+            free_regs.retain(|r| *r != reg);
         }
     }
 
-    pub fn alloc(&mut self, func: &IrFunction) -> TempAllocMap {
-        self.alloc_into(func, self.initial_free_regs())
+    // Note: this consumes self, rendering it unusable after calling this method.
+    pub fn alloc(self) -> AllocationResult {
+        let free_regs = self.initial_free_regs();
+        self.alloc_into(free_regs)
     }
 
-    pub fn alloc_into(&mut self, func: &IrFunction, regs: Vec<Arm64Reg>) -> TempAllocMap {
+    // Note: this consumes self, rendering it unusable after calling this method.
+    pub fn alloc_into(mut self, free_regs: Vec<Arm64Reg>) -> AllocationResult {
         // Assumes there is at least one allocatable register.
         assert!(
-            !regs.is_empty(),
+            !free_regs.is_empty(),
             "RegAlloc::alloc_into called with an empty register list"
         );
+
         // 1. Build the live map and intervals
-        let live_map = LivenessAnalysis::new(func.clone()).analyze();
-        let intervals = build_live_intervals(func, &live_map);
+        let live_map = LivenessAnalysis::new(self.func.clone()).analyze();
+        let intervals = build_live_intervals(self.func, &live_map);
 
         // 2. Sort intervals by start pos
         let mut sorted_intervals = Self::sort_intervals(&intervals);
 
         // 3. Initialize free registers
-        let mut free_regs = VecDeque::from(regs);
+        let mut free_regs = VecDeque::from(free_regs);
 
         // 4. Pre-allocate parameters to ABI registers
-        self.alloc_param_regs(func, &mut free_regs, &intervals);
+        self.alloc_param_regs(&mut free_regs, &intervals);
 
         // 5. Scan intervals from earliest to latest
         for (temp_id, interval) in sorted_intervals.drain(..) {
@@ -201,7 +210,11 @@ impl RegAlloc {
             }
         }
 
-        self.alloc_map.clone()
+        AllocationResult {
+            alloc_map: self.alloc_map.clone(),
+            moves: self.moves,
+            frame_size: self.spill_alloc.frame_size_bytes(),
+        }
     }
 }
 

@@ -88,6 +88,13 @@ pub fn analyze_call(func: &IrFunction) -> Vec<CallConstraint> {
     constraints
 }
 
+pub fn analyze_constraints(func: &IrFunction) -> ConstraintMap {
+    let mut constraints = ConstraintMap::new();
+    constraints.fn_param_constraints = analyze_fn_params(func);
+    constraints.call_constraints = analyze_call(func);
+    constraints
+}
+
 #[cfg(test)]
 #[path = "../tests/t_regalloc_constraints.rs"]
 mod tests;

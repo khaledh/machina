@@ -1,6 +1,7 @@
 use crate::ast::BinaryOp;
 use crate::ir::builder::IrFunctionBuilder;
 use crate::ir::types::{IrBlockId, IrOperand, IrTerminator, IrType};
+use crate::regalloc::constraints::{ConstraintMap, analyze_constraints};
 use crate::regalloc::{Arm64Reg as R, MappedTemp, RegAlloc};
 
 fn u32_ty() -> IrType {
@@ -32,7 +33,9 @@ fn test_regalloc_empty_function() {
     b.terminate(IrTerminator::Ret { value: None });
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc(&func);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc();
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 0);
 }
@@ -49,7 +52,9 @@ fn test_regalloc_simple_function() {
     });
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc(&func);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc();
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 1);
     // t0 should be in a register.
@@ -71,7 +76,9 @@ fn test_regalloc_simple_function_with_two_temps() {
     });
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0, R::X1]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0, R::X1]);
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 2);
     // t0 and t1 share the same register since their liveness doesn't overlap.
@@ -106,7 +113,9 @@ fn test_regalloc_overlapping_temps_use_different_regs() {
     });
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0, R::X1]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0, R::X1]);
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 2);
     // t0 and t1 should be in different registers since their liveness overlaps.
@@ -144,7 +153,9 @@ fn test_regalloc_reuses_single_register_without_spilling() {
     let func = b.finish();
 
     // Only X0 is available; the allocator should just keep reusing it.
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0]);
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 3);
     // t0, t1, and t2 should all be in the same register since their liveness doesn't overlap.
@@ -169,7 +180,9 @@ fn test_regalloc_default_reg_set_is_used() {
     });
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc(&func);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc();
+    let alloc_map = alloc_result.alloc_map;
 
     // Both temps should reside in registers drawn from the default pool.
     assert_eq!(alloc_map.len(), 2);
@@ -223,7 +236,9 @@ fn test_regalloc_spills_multiple_temps_with_one_reg() {
 
     // Only a single allocatable register, so some of the overlapping temps
     // must be mapped to stack slots.
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0]);
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 5);
 
@@ -286,7 +301,9 @@ fn test_regalloc_spills_victim_when_new_interval_ends_earlier() {
     });
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0]);
+    let alloc_map = alloc_result.alloc_map;
 
     assert_eq!(alloc_map.len(), 4);
 
@@ -375,7 +392,9 @@ fn test_regalloc_if_expression_shape() {
 
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0, R::X1]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0, R::X1]);
+    let alloc_map = alloc_result.alloc_map;
 
     // With two registers, the behaviour is:
     // - `cond` gets a register (X0)
@@ -494,7 +513,9 @@ fn test_regalloc_while_expression_shape() {
 
     let func = b.finish();
 
-    let alloc_map = RegAlloc::new().alloc_into(&func, vec![R::X0, R::X1]);
+    let constraints = analyze_constraints(&func);
+    let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0, R::X1]);
+    let alloc_map = alloc_result.alloc_map;
 
     // With two registers, current behaviour is:
     // - `i0` and `three` reside in X0,

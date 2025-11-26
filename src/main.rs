@@ -24,6 +24,8 @@ use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::lower::lower;
 use crate::parser::Parser;
+use crate::regalloc::alloc::{RegAlloc, TempAllocMapDisplay};
+use crate::regalloc::constraints::analyze_constraints;
 use crate::resolver::resolve;
 use crate::type_check::type_check;
 
@@ -186,10 +188,11 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     // register allocation
     if dump_regalloc {
         for func in &lowered_context.ir_funcs {
-            let alloc_map = regalloc::RegAlloc::new().alloc(&func);
+            let constraints = analyze_constraints(&func);
+            let alloc_result = RegAlloc::new(&func, &constraints).alloc();
             println!("Reg Alloc Map ({}):", func.name);
             println!("--------------------------------");
-            println!("{}", regalloc::TempAllocMapDisplay(&alloc_map));
+            println!("{}", TempAllocMapDisplay(&alloc_result.alloc_map));
             println!("--------------------------------");
         }
     }
