@@ -2,44 +2,8 @@ use std::collections::HashSet;
 
 use crate::ast::BinaryOp;
 use crate::dataflow::liveness::LivenessAnalysis;
-use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::types::{IrConst, IrOperand, IrTempId, IrTerminator, IrType};
 
-// Helper to build a minimal function with given name / signature
-fn mk_builder() -> IrFunctionBuilder {
-    IrFunctionBuilder::new(
-        "test".to_string(),
-        IrType::Int {
-            bits: 1,
-            signed: false,
-        },
-    )
-}
-
-// Helpers for common types and operands
-
-fn u32_ty() -> IrType {
-    IrType::Int {
-        bits: 32,
-        signed: false,
-    }
-}
-
-fn bool_ty() -> IrType {
-    IrType::Bool
-}
-
-fn const_u32(value: i64) -> IrOperand {
-    IrOperand::Const(IrConst::Int {
-        value,
-        bits: 32,
-        signed: false,
-    })
-}
-
-fn temp(id: u32) -> IrOperand {
-    IrOperand::Temp(IrTempId(id))
-}
+include!("ir_test_utils.rs");
 
 #[test]
 fn gen_kill_simple_block() {
@@ -203,17 +167,12 @@ fn liveness_with_phi() {
     let analysis = LivenessAnalysis::new(func.clone());
     let live_map = analysis.analyze();
 
-    // blocks are in termination order: entry, then, join
-    let mut blocks_iter = func.blocks.keys();
-    let entry_id = blocks_iter.next().unwrap();
-    let then_id = blocks_iter.next().unwrap();
-    let else_id = blocks_iter.next().unwrap();
-    let join_id = blocks_iter.next().unwrap();
+    let entry_id = func.blocks.keys().next().unwrap();
 
     let entry_live = &live_map[entry_id];
-    let then_live = &live_map[then_id];
-    let else_live = &live_map[else_id];
-    let join_live = &live_map[join_id];
+    let then_live = &live_map[&then_id];
+    let else_live = &live_map[&else_id];
+    let join_live = &live_map[&join_id];
 
     // In entry, t0 is live-out.
     assert!(entry_live.live_in.is_empty());

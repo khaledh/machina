@@ -8,8 +8,7 @@ pub struct IrFunctionBuilder {
     name: String,
     ret_ty: IrType,
     curr_block: IrBlockId,
-    blocks: Vec<IrBlock>,
-    termination_order: Vec<IrBlockId>,
+    blocks: IndexMap<IrBlockId, IrBlock>,
     temps: Vec<IrTempInfo>,
 }
 
@@ -25,10 +24,9 @@ impl IrFunctionBuilder {
         Self {
             name,
             ret_ty,
-            blocks: vec![entry_block],
+            blocks: IndexMap::from_iter([(IrBlockId(0), entry_block)]),
             curr_block: IrBlockId(0),
             temps: vec![],
-            termination_order: vec![],
         }
     }
 
@@ -80,12 +78,15 @@ impl IrFunctionBuilder {
 
     pub fn new_block(&mut self, name: String) -> IrBlockId {
         let block_id = IrBlockId(self.blocks.len() as u32);
-        self.blocks.push(IrBlock {
-            id: block_id,
-            name,
-            insts: vec![],
-            term: IrTerminator::_Unterminated,
-        });
+        self.blocks.insert(
+            block_id,
+            IrBlock {
+                id: block_id,
+                name,
+                insts: vec![],
+                term: IrTerminator::_Unterminated,
+            },
+        );
         block_id
     }
 
@@ -122,8 +123,6 @@ impl IrFunctionBuilder {
             "Block already terminated"
         );
         block.term = term;
-        // maintain termination order
-        self.termination_order.push(self.curr_block);
     }
 
     fn emit_inst(&mut self, inst: IrInst) {
@@ -222,12 +221,12 @@ impl IrFunctionBuilder {
         self.emit_inst(IrInst::Phi { result, incoming });
     }
 
-    pub fn finish(self) -> IrFunction {
+    pub fn finish(mut self) -> IrFunction {
         // Check that we have at least one block
         assert!(!self.blocks.is_empty(), "No blocks in function");
 
         // All blocks must be terminated
-        for block in &self.blocks {
+        for (_, block) in &self.blocks {
             assert!(
                 !matches!(block.term, IrTerminator::_Unterminated),
                 "Block '{}' is not terminated",
@@ -235,48 +234,34 @@ impl IrFunctionBuilder {
             );
         }
 
-        // termination_order must reference valid blocks and cover all of them exactly once
-        assert_eq!(
-            self.termination_order.len(),
-            self.blocks.len(),
-            "termination_order must contain each block exactly once"
-        );
-        let mut seen = vec![false; self.blocks.len()];
-        for id in &self.termination_order {
-            let idx = id.id() as usize;
-            assert!(
-                idx < self.blocks.len(),
-                "termination_order contains invalid block id {}",
-                id.id()
-            );
-            assert!(
-                !seen[idx],
-                "Block id {} appears multiple times in termination_order",
-                id.id()
-            );
-            seen[idx] = true;
-        }
-
-        // Build an IndexMap from block id to block in termination order
-        let mut ordered_blocks = IndexMap::new();
-        for id in &self.termination_order {
-            ordered_blocks.insert(*id, self.blocks[id.id() as usize].clone());
-        }
-
-        // Check that the last block is terminated with a ret
-        let (_, last_block) = ordered_blocks.last().unwrap();
-        assert!(
-            matches!(last_block.term, IrTerminator::Ret { .. }),
-            "Last block must be terminated with a ret"
-        );
-
         // Build the control flow graph
-        let cfg = ControlFlowGraph::from(&ordered_blocks);
+        let blocks_vec: Vec<IrBlock> = self.blocks.values().cloned().collect();
+        let cfg = ControlFlowGraph::from(&blocks_vec);
+
+        // Sort the blocks by their id in cfg.block_ids (sorted in RPO)
+        let mut sorted_blocks = IndexMap::new();
+        for block_id in &cfg.block_ids {
+            let block = self
+                .blocks
+                .get(block_id)
+                .expect("Block in CFG not found in blocks")
+                .clone();
+            sorted_blocks.insert(*block_id, block);
+        }
+
+        // Check that the function has at least one ret terminator
+        let has_ret = sorted_blocks
+            .values()
+            .any(|block| matches!(block.term, IrTerminator::Ret { .. }));
+        assert!(
+            has_ret,
+            "Function must have at least one block with a ret terminator"
+        );
 
         IrFunction {
             name: self.name,
             ret_ty: self.ret_ty,
-            blocks: ordered_blocks,
+            blocks: sorted_blocks,
             temps: self.temps,
             cfg,
         }

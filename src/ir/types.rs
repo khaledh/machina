@@ -3,7 +3,6 @@ use std::fmt;
 
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::cfg::ControlFlowGraph;
-use crate::types::Type;
 
 /// IR for Machina
 ///
