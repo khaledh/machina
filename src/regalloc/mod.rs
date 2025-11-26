@@ -1,4 +1,5 @@
 pub mod alloc;
+pub mod constraints;
 pub mod moves;
 pub mod regs;
 
