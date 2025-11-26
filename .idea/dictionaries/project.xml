@@ -3,11 +3,14 @@
     <words>
       <w>condbr</w>
       <w>cset</w>
+      <w>defmap</w>
       <w>funcs</w>
       <w>hammouda</w>
       <w>insts</w>
       <w>lreg</w>
+      <w>regalloc</w>
       <w>rreg</w>
+      <w>typemap</w>
     </words>
   </dictionary>
 </component>

@@ -1,5 +1,5 @@
 use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::types::{IrType, IrConst, IrTempId, IrOperand, IrTerminator};
+use crate::ir::types::{IrConst, IrOperand, IrTempId, IrTerminator, IrType};
 
 // Helper to build a minimal function with given name / signature
 fn mk_builder() -> IrFunctionBuilder {

@@ -1,7 +1,7 @@
 use crate::ast::BinaryOp;
 use crate::ir::builder::IrFunctionBuilder;
 use crate::ir::types::{IrBlockId, IrOperand, IrTerminator, IrType};
-use crate::regalloc::constraints::{ConstraintMap, analyze_constraints};
+use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::{Arm64Reg as R, MappedTemp, RegAlloc};
 
 fn u32_ty() -> IrType {
@@ -101,12 +101,7 @@ fn test_regalloc_overlapping_temps_use_different_regs() {
 
     let t1 = b.new_temp(u32_ty());
     // This ensures t0 is still live when t1 is defined.
-    b.binary_op(
-        t1,
-        crate::ast::BinaryOp::Add,
-        IrOperand::Temp(t0),
-        IrOperand::Temp(t0),
-    );
+    b.binary_op(t1, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t0));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t1)),
@@ -214,20 +209,10 @@ fn test_regalloc_spills_multiple_temps_with_one_reg() {
     b.move_to(t2, const_u32(3));
 
     let t3 = b.new_temp(u32_ty());
-    b.binary_op(
-        t3,
-        crate::ast::BinaryOp::Add,
-        IrOperand::Temp(t0),
-        IrOperand::Temp(t1),
-    );
+    b.binary_op(t3, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t1));
 
     let t4 = b.new_temp(u32_ty());
-    b.binary_op(
-        t4,
-        crate::ast::BinaryOp::Add,
-        IrOperand::Temp(t3),
-        IrOperand::Temp(t2),
-    );
+    b.binary_op(t4, BinaryOp::Add, IrOperand::Temp(t3), IrOperand::Temp(t2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t4)),
@@ -281,20 +266,10 @@ fn test_regalloc_spills_victim_when_new_interval_ends_earlier() {
     b.move_to(t1, const_u32(2));
 
     let t2 = b.new_temp(u32_ty());
-    b.binary_op(
-        t2,
-        crate::ast::BinaryOp::Add,
-        IrOperand::Temp(t1),
-        IrOperand::Temp(t1),
-    );
+    b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t1), IrOperand::Temp(t1));
 
     let t3 = b.new_temp(u32_ty());
-    b.binary_op(
-        t3,
-        crate::ast::BinaryOp::Add,
-        IrOperand::Temp(t0),
-        IrOperand::Temp(t2),
-    );
+    b.binary_op(t3, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t3)),

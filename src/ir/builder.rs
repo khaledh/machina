@@ -40,7 +40,7 @@ impl IrFunctionBuilder {
         id
     }
 
-    pub fn to_local(&mut self, temp: IrTempId, name: String) {
+    pub fn make_local(&mut self, temp: IrTempId, name: String) {
         match self.temps.get_mut(temp.id() as usize) {
             Some(temp) => {
                 temp.role = IrTempRole::Local;
@@ -221,7 +221,7 @@ impl IrFunctionBuilder {
         self.emit_inst(IrInst::Phi { result, incoming });
     }
 
-    pub fn finish(mut self) -> IrFunction {
+    pub fn finish(self) -> IrFunction {
         // Check that we have at least one block
         assert!(!self.blocks.is_empty(), "No blocks in function");
 

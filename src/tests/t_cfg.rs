@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use crate::ast::BinaryOp;
-use crate::cfg::ControlFlowGraph;
 use crate::ir::builder::IrFunctionBuilder;
 use crate::ir::types::{IrConst, IrOperand, IrTempId, IrTerminator, IrType};
 

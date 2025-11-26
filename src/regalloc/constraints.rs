@@ -50,7 +50,7 @@ pub fn analyze_fn_params(func: &IrFunction) -> Vec<FnParamConstraint> {
             let reg = regs::get_param_reg(index);
             constraints.push(FnParamConstraint {
                 temp: IrTempId(i as u32),
-                reg: reg,
+                reg,
             });
         }
     }
@@ -63,7 +63,6 @@ pub fn analyze_call(func: &IrFunction) -> Vec<CallConstraint> {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
             if let IrInst::Call { result, args, .. } = inst {
                 let pos = InstPos::new(block.id(), inst_idx);
-                // Only temp args need a constraint
                 let arg_constraints = args
                     .iter()
                     .enumerate()
@@ -77,7 +76,7 @@ pub fn analyze_call(func: &IrFunction) -> Vec<CallConstraint> {
                     reg: regs::get_result_reg(),
                 });
                 constraints.push(CallConstraint {
-                    pos: pos,
+                    pos,
                     args: arg_constraints,
                     result: result_constraint,
                     clobbers: regs::CALLER_SAVED_REGS.to_vec(),

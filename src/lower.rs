@@ -5,7 +5,7 @@ use crate::ast;
 use crate::context::{LoweredContext, TypeCheckedContext};
 use crate::ids::{DefId, NodeId};
 use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::types::{IrFunction, IrOperand, IrTempId, IrTempInfo, IrTerminator, IrType};
+use crate::ir::types::{IrFunction, IrOperand, IrTerminator, IrType};
 use crate::types::Type;
 
 #[derive(Debug, Error)]
@@ -21,9 +21,6 @@ pub enum LowerError {
 
     #[error("Variable definition not found: Node {0}")]
     VarDefNotFound(NodeId),
-
-    #[error("Variable address not found: Node {0}, Def {1}")]
-    VarAddrNotFound(NodeId, DefId),
 
     #[error("Destination is not a temp: Node {0}, Operand {1:?}")]
     DestIsNotTemp(NodeId, IrOperand),
@@ -70,7 +67,7 @@ impl<'a> Lowerer<'a> {
         let mut fb = IrFunctionBuilder::new(func.name.clone(), self.lower_type(&func.return_type));
 
         // lower params and store them in the def_temp map
-        for (i, param) in func.params.iter().enumerate() {
+        for param in func.params.iter() {
             match self.ctx.def_map.lookup_def(param.id) {
                 Some(def) => {
                     let param_temp = fb.new_temp(self.lower_type(&param.typ));
@@ -104,7 +101,7 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::Let { name, value } => self.lower_let(fb, expr, name.clone(), value),
             ast::ExprKind::Var { name, value } => self.lower_var(fb, expr, name.clone(), value),
             ast::ExprKind::Assign { value, .. } => self.lower_assign(fb, expr, value),
-            ast::ExprKind::VarRef(_) => self.lower_var_ref(fb, expr),
+            ast::ExprKind::VarRef(_) => self.lower_var_ref(expr),
             ast::ExprKind::If {
                 cond,
                 then_body,
@@ -141,7 +138,7 @@ impl<'a> Lowerer<'a> {
                 let value_op = self.lower_expr(fb, value)?;
                 // let bindings are immutable; they can hold any operand.
                 if let IrOperand::Temp(temp) = value_op {
-                    fb.to_local(temp, name);
+                    fb.make_local(temp, name);
                 }
                 self.def_op.insert(def.id, value_op);
             }
@@ -170,7 +167,7 @@ impl<'a> Lowerer<'a> {
                         t
                     }
                 };
-                fb.to_local(temp, name);
+                fb.make_local(temp, name);
                 self.def_op.insert(def.id, IrOperand::Temp(temp));
             }
             None => return Err(LowerError::VarDefNotFound(expr.id)),
@@ -199,17 +196,13 @@ impl<'a> Lowerer<'a> {
         Ok(fb.new_const_unit())
     }
 
-    fn lower_var_ref(
-        &mut self,
-        fb: &mut IrFunctionBuilder,
-        expr: &ast::Expr,
-    ) -> Result<IrOperand, LowerError> {
+    fn lower_var_ref(&mut self, expr: &ast::Expr) -> Result<IrOperand, LowerError> {
         match self.ctx.def_map.lookup_def(expr.id) {
             Some(def) => match self.def_op.get(&def.id) {
                 Some(op) => Ok(*op),
                 None => Err(LowerError::OperandNotFound(expr.id, def.id)),
             },
-            None => return Err(LowerError::VarDefNotFound(expr.id)),
+            None => Err(LowerError::VarDefNotFound(expr.id)),
         }
     }
 
@@ -308,7 +301,7 @@ impl<'a> Lowerer<'a> {
         }
         match body.last() {
             Some(expr) => Ok(self.lower_expr(fb, expr)?),
-            None => return Err(LowerError::BlockEmpty(id)),
+            None => Err(LowerError::BlockEmpty(id)),
         }
     }
 

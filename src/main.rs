@@ -129,9 +129,9 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         println!("--------------------------------");
     }
 
-    let ast_contet = AstContext::new(module);
+    let ast_context = AstContext::new(module);
 
-    let resolved_context = resolve(ast_contet).map_err(|errs| {
+    let resolved_context = resolve(ast_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

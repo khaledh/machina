@@ -24,7 +24,7 @@ pub enum Arm64Reg {
     X14,
     X15,
     // Intra-procedure call temp (Caller-saved)
-    // Reserved as "scratch" registers for the linker or dynamic loader)
+    // Reserved as "scratch" registers for the linker or dynamic loader
     X16,
     X17,
     // Platform register (Reserved for platform-specific use by the OS)

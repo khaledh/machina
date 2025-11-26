@@ -181,7 +181,7 @@ impl LivenessAnalysis {
                 }
 
                 // For each phi in a successor block, add its incoming operand form this block to
-                // the new live out set.
+                // the new live-out set.
                 for succ_id in self.func.cfg.succ[block_id].iter() {
                     let succ_block = &self.func.blocks[succ_id];
                     for inst in succ_block.insts().iter() {

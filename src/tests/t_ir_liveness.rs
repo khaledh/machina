@@ -26,7 +26,7 @@ fn gen_kill_simple_block() {
     let live_map = analysis.analyze();
 
     // For a straight-line block, everything used flows from defs in the same block.
-    // Therefore Gen should be empty at entry, and Kill should contain all temps.
+    // Therefore, Gen should be empty at entry, and Kill should contain all temps.
     let entry_id = func.blocks.keys().next().unwrap();
     let live_entry = &live_map[entry_id];
 

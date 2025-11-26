@@ -4,5 +4,5 @@ pub mod moves;
 pub mod regs;
 pub mod spill;
 
-pub use alloc::{MappedTemp, RegAlloc, TempAllocMapDisplay};
+pub use alloc::{MappedTemp, RegAlloc};
 pub use regs::Arm64Reg;
