@@ -25,6 +25,11 @@ fn bool_ty() -> IrType {
     IrType::Bool
 }
 
+fn unit_ty() -> IrType {
+    IrType::Unit
+}
+
+
 fn const_u32(value: i64) -> IrOperand {
     IrOperand::Const(IrConst::Int {
         value,

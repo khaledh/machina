@@ -234,33 +234,33 @@ pub type LiveIntervalMap = HashMap<IrTempId, LiveInterval>;
 pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveIntervalMap {
     let mut map = LiveIntervalMap::new();
 
-    let mut block_last_pos = HashMap::new();
+    let mut block_last_inst_idx = HashMap::new();
 
     // 1. For each instruction, assign a start and end position
-    let mut pos = 0;
+    let mut inst_idx = 0;
     for block in func.blocks.values() {
         for inst in block.insts().iter() {
             for operand in inst.get_sources() {
                 if let IrOperand::Temp(temp_id) = operand {
                     map.entry(temp_id)
-                        .and_modify(|interval| interval.end = pos)
+                        .and_modify(|interval| interval.end = inst_idx + 1)
                         .or_insert(LiveInterval {
-                            start: pos,
-                            end: pos,
+                            start: inst_idx,
+                            end: inst_idx + 1,
                         });
                 }
             }
             if let Some(temp_id) = inst.get_dest() {
                 map.entry(temp_id)
-                    .and_modify(|interval| interval.end = pos)
+                    .and_modify(|interval| interval.end = inst_idx + 1)
                     .or_insert(LiveInterval {
-                        start: pos,
-                        end: pos,
+                        start: inst_idx,
+                        end: inst_idx + 1,
                     });
             }
-            pos += 1;
+            inst_idx += 1;
         }
-        block_last_pos.insert(block.id(), pos);
+        block_last_inst_idx.insert(block.id(), inst_idx);
     }
 
     // 2. Extend intervals across block boundaries using live_out
@@ -269,11 +269,11 @@ pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveInterv
         for temp_id in live_out.iter() {
             map.entry(*temp_id)
                 .and_modify(|interval| {
-                    interval.end = std::cmp::max(interval.end, block_last_pos[block_id])
+                    interval.end = std::cmp::max(interval.end, block_last_inst_idx[block_id] + 1)
                 })
                 .or_insert(LiveInterval {
-                    start: block_last_pos[block_id],
-                    end: block_last_pos[block_id],
+                    start: block_last_inst_idx[block_id],
+                    end: block_last_inst_idx[block_id] + 1,
                 });
         }
     }
