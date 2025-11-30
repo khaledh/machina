@@ -74,7 +74,9 @@ enum PosEventKind {
 impl fmt::Display for PosEventKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PosEventKind::IntervalStart { temp_id, is_param, .. } => {
+            PosEventKind::IntervalStart {
+                temp_id, is_param, ..
+            } => {
                 write!(f, "IntervalStart(%t{})", temp_id.id())?;
                 if *is_param {
                     write!(f, " (param)")?;
@@ -197,32 +199,20 @@ impl<'a> RegAlloc<'a> {
         CALLER_SAVED_REGS.to_vec()
     }
 
-    fn handle_interval_end(&mut self, free_regs: &mut VecDeque<Arm64Reg>, temp_id: IrTempId) {
-        // If the temp was spilled, it's no longer in the active set, so we can skip it.
-        if let Some(expired) = self.active_set.remove(&temp_id) {
-            // Keep this register hot for future intervals.
-            free_regs.push_front(expired.reg);
-        }
-    }
-
-    fn insert_into_active_set(&mut self, active_temp: ActiveTemp) {
-        self.active_set.insert(active_temp.temp_id, active_temp);
-    }
-
-    fn spill(&mut self, active_temp: ActiveTemp) {
-        let stack_slot = self.spill_alloc.alloc_slot();
-        self.alloc_map
-            .insert(active_temp.temp_id, MappedTemp::Stack(stack_slot));
-        self.active_set.remove(&active_temp.temp_id);
-    }
-
     fn assign_reg(&mut self, temp_id: IrTempId, interval: LiveInterval, reg: Arm64Reg) {
         self.alloc_map.insert(temp_id, MappedTemp::Reg(reg));
-        self.insert_into_active_set(ActiveTemp {
+        self.active_set.insert(temp_id, ActiveTemp {
             temp_id,
             interval,
             reg,
         });
+    }
+    
+    fn spill_temp(&mut self, active_temp: ActiveTemp) {
+        let stack_slot = self.spill_alloc.alloc_slot();
+        self.alloc_map
+            .insert(active_temp.temp_id, MappedTemp::Stack(stack_slot));
+        self.active_set.remove(&active_temp.temp_id);
     }
 
     fn alloc_param_regs(
@@ -242,7 +232,11 @@ impl<'a> RegAlloc<'a> {
         }
     }
 
-    fn build_pos_events(&self, intervals: &LiveIntervalMap, param_constraints: &[FnParamConstraint]) -> Vec<PosEvent> {
+    fn build_pos_events(
+        &self,
+        intervals: &LiveIntervalMap,
+        param_constraints: &[FnParamConstraint],
+    ) -> Vec<PosEvent> {
         let mut events = Vec::new();
 
         // Add interval start/end events
@@ -277,41 +271,11 @@ impl<'a> RegAlloc<'a> {
         events
     }
 
-    fn handle_interval_start(
-        &mut self,
-        free_regs: &mut VecDeque<Arm64Reg>,
-        temp_id: IrTempId,
-        interval: LiveInterval,
-    ) {
-        // Skip if already allocated (e.g., function params)
-        if self.alloc_map.contains_key(&temp_id) {
-            return;
-        }
-
-        match free_regs.pop_front() {
-            Some(reg) => {
-                // Allocate register to interval
-                self.assign_reg(temp_id, interval, reg);
-            }
-            None => {
-                // Choose a victim from the active set (the one with the highest end)
-                let victim = *self
-                    .active_set
-                    .values()
-                    .max_by_key(|a| a.interval.end)
-                    .expect("active set should not be empty when spilling");
-
-                if victim.interval.end <= interval.end {
-                    // Spill current since it lives longer (it doesn't enter the active set)
-                    let stack_slot = self.spill_alloc.alloc_slot();
-                    self.alloc_map
-                        .insert(temp_id, MappedTemp::Stack(stack_slot));
-                } else {
-                    // Spill victim, give its reg to current
-                    self.assign_reg(temp_id, interval, victim.reg);
-                    self.spill(victim);
-                }
-            }
+    fn handle_interval_end(&mut self, free_regs: &mut VecDeque<Arm64Reg>, temp_id: IrTempId) {
+        // If the temp was spilled, it's no longer in the active set, so we can skip it.
+        if let Some(expired) = self.active_set.remove(&temp_id) {
+            // Keep this register hot for future intervals.
+            free_regs.push_front(expired.reg);
         }
     }
 
@@ -358,7 +322,8 @@ impl<'a> RegAlloc<'a> {
         for active_temp in self.active_set.values() {
             // Is this temp in a caller-saved register and live after the call?
             if CALLER_SAVED_REGS.contains(&active_temp.reg)
-                && (active_temp.interval.end - 1) > call_inst_idx as u32 // end is exclusive
+                && (active_temp.interval.end - 1) > call_inst_idx as u32
+            // end is exclusive
             {
                 let stack_slot = self.spill_alloc.alloc_slot();
                 // Save the temp to the stack before the call
@@ -373,6 +338,44 @@ impl<'a> RegAlloc<'a> {
                     Location::Stack(stack_slot),
                     Location::Reg(active_temp.reg),
                 );
+            }
+        }
+    }
+
+    fn handle_interval_start(
+        &mut self,
+        free_regs: &mut VecDeque<Arm64Reg>,
+        temp_id: IrTempId,
+        interval: LiveInterval,
+    ) {
+        // Skip if already allocated (e.g., function params)
+        if self.alloc_map.contains_key(&temp_id) {
+            return;
+        }
+
+        match free_regs.pop_front() {
+            Some(reg) => {
+                // Allocate register to interval
+                self.assign_reg(temp_id, interval, reg);
+            }
+            None => {
+                // Choose a victim from the active set (the one with the highest end)
+                let victim = *self
+                    .active_set
+                    .values()
+                    .max_by_key(|a| a.interval.end)
+                    .expect("active set should not be empty when spilling");
+
+                if victim.interval.end <= interval.end {
+                    // Spill current since it lives longer (it doesn't enter the active set)
+                    let stack_slot = self.spill_alloc.alloc_slot();
+                    self.alloc_map
+                        .insert(temp_id, MappedTemp::Stack(stack_slot));
+                } else {
+                    // Spill victim, give its reg to current
+                    self.assign_reg(temp_id, interval, victim.reg);
+                    self.spill_temp(victim);
+                }
             }
         }
     }
@@ -414,7 +417,9 @@ impl<'a> RegAlloc<'a> {
                     let constr = &self.constraints.call_constraints[constr_idx];
                     self.handle_call(constr);
                 }
-                PosEventKind::IntervalStart { temp_id, interval, .. } => {
+                PosEventKind::IntervalStart {
+                    temp_id, interval, ..
+                } => {
                     self.handle_interval_start(&mut free_regs, temp_id, interval);
                 }
             }
