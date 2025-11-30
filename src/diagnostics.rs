@@ -1,4 +1,4 @@
-use crate::codegen::CodegenError;
+use crate::codegen::arm64::CodegenError;
 use crate::lexer::LexError;
 use crate::lower::LowerError;
 use crate::parser::ParseError;

@@ -9,7 +9,6 @@ mod dataflow;
 mod diagnostics;
 mod ids;
 mod ir;
-// mod ir_codegen;
 mod lexer;
 mod lower;
 mod parser;
@@ -18,7 +17,7 @@ mod resolver;
 mod type_check;
 mod types;
 
-use crate::codegen::Codegen;
+use crate::codegen::arm64::Arm64Codegen;
 use crate::context::AstContext;
 use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
@@ -186,6 +185,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     }
 
     // register allocation
+    let mut alloc_results = Vec::new();
     if dump_regalloc {
         for func in &lowered_context.ir_funcs {
             let constraints = analyze_constraints(&func);
@@ -194,10 +194,12 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
             println!("--------------------------------");
             println!("{}", TempAllocMapDisplay(&alloc_result.alloc_map));
             println!("--------------------------------");
+            alloc_results.push(alloc_result);
         }
     }
 
-    let mut codegen = Codegen::new(type_checked_context);
+    let lowered_regalloc_context = lowered_context.with_alloc_results(alloc_results);
+    let mut codegen = Arm64Codegen::new(lowered_regalloc_context);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
 
     if dump_asm {

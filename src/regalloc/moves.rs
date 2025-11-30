@@ -27,6 +27,13 @@ pub struct Move {
     pub to: Location,
 }
 
+impl fmt::Display for Move {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} -> {}", self.from, self.to)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct InstMoveList {
     pub pos: InstPos,

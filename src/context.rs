@@ -1,6 +1,7 @@
 use crate::analysis::{DefMap, TypeMap};
 use crate::ast::Module;
 use crate::ir::types::IrFunction;
+use crate::regalloc::alloc::AllocationResult;
 
 #[derive(Clone)]
 pub struct AstContext {
@@ -61,4 +62,21 @@ pub struct LoweredContext {
     pub def_map: DefMap,
     pub type_map: TypeMap,
     pub ir_funcs: Vec<IrFunction>,
+}
+
+impl LoweredContext {
+    pub fn with_alloc_results(
+        self,
+        alloc_results: Vec<AllocationResult>,
+    ) -> LoweredRegAllocContext {
+        LoweredRegAllocContext {
+            ir_funcs: self.ir_funcs,
+            alloc_results,
+        }
+    }
+}
+
+pub struct LoweredRegAllocContext {
+    pub ir_funcs: Vec<IrFunction>,
+    pub alloc_results: Vec<AllocationResult>,
 }

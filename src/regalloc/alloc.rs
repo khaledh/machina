@@ -153,6 +153,7 @@ pub struct AllocationResult {
     pub moves: FnMoveList,
     pub frame_size: u32,
     pub used_callee_saved: Vec<Arm64Reg>,
+    pub spill_slot_count: u32,
 }
 
 pub struct RegAlloc<'a> {
@@ -450,6 +451,7 @@ impl<'a> RegAlloc<'a> {
             moves: self.moves,
             frame_size,
             used_callee_saved,
+            spill_slot_count: self.spill_alloc.total_slots(),
         }
     }
 }
