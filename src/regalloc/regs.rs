@@ -69,6 +69,19 @@ pub const CALLER_SAVED_REGS: [Arm64Reg; 16] = [
     Arm64Reg::X15,
 ];
 
+pub const CALLEE_SAVED_REGS: [Arm64Reg; 10] = [
+    Arm64Reg::X19,
+    Arm64Reg::X20,
+    Arm64Reg::X21,
+    Arm64Reg::X22,
+    Arm64Reg::X23,
+    Arm64Reg::X24,
+    Arm64Reg::X25,
+    Arm64Reg::X26,
+    Arm64Reg::X27,
+    Arm64Reg::X28,
+];
+
 pub fn get_param_reg(index: u32) -> Arm64Reg {
     match index {
         0 => Arm64Reg::X0,

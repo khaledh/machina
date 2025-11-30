@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 use crate::dataflow::liveness::{
@@ -8,7 +8,7 @@ use crate::ir::pos::{InstPos, RelInstPos};
 use crate::ir::types::{IrFunction, IrOperand, IrTempId};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::moves::{FnMoveList, Location};
-use crate::regalloc::regs::{Arm64Reg, CALLER_SAVED_REGS};
+use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
 use crate::regalloc::spill::{SpillAllocator, StackSlotId};
 
 #[derive(Debug, Clone)]
@@ -152,6 +152,7 @@ pub struct AllocationResult {
     pub alloc_map: TempAllocMap,
     pub moves: FnMoveList,
     pub frame_size: u32,
+    pub used_callee_saved: Vec<Arm64Reg>,
 }
 
 pub struct RegAlloc<'a> {
@@ -162,6 +163,7 @@ pub struct RegAlloc<'a> {
     alloc_map: TempAllocMap,
     spill_alloc: SpillAllocator,
     moves: FnMoveList,
+    used_callee_saved: HashSet<Arm64Reg>,
 }
 
 impl<'a> RegAlloc<'a> {
@@ -174,6 +176,7 @@ impl<'a> RegAlloc<'a> {
             alloc_map: TempAllocMap::new(),
             spill_alloc: SpillAllocator::new(),
             moves: FnMoveList::new(),
+            used_callee_saved: HashSet::new(),
         }
     }
 
@@ -196,18 +199,26 @@ impl<'a> RegAlloc<'a> {
     }
 
     fn initial_free_regs(&self) -> Vec<Arm64Reg> {
-        CALLER_SAVED_REGS.to_vec()
+        [CALLER_SAVED_REGS.to_vec(), CALLEE_SAVED_REGS.to_vec()].concat()
     }
 
     fn assign_reg(&mut self, temp_id: IrTempId, interval: LiveInterval, reg: Arm64Reg) {
         self.alloc_map.insert(temp_id, MappedTemp::Reg(reg));
-        self.active_set.insert(temp_id, ActiveTemp {
+        self.active_set.insert(
             temp_id,
-            interval,
-            reg,
-        });
+            ActiveTemp {
+                temp_id,
+                interval,
+                reg,
+            },
+        );
+
+        // Track used callee-saved registers
+        if CALLEE_SAVED_REGS.contains(&reg) {
+            self.used_callee_saved.insert(reg);
+        }
     }
-    
+
     fn spill_temp(&mut self, active_temp: ActiveTemp) {
         let stack_slot = self.spill_alloc.alloc_slot();
         self.alloc_map
@@ -425,10 +436,20 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
+        // Sort the used callee-saved registers by reg
+        let mut used_callee_saved: Vec<Arm64Reg> = self.used_callee_saved.into_iter().collect();
+        used_callee_saved.sort_by_key(|r| *r as u8);
+
+        // Calculate the total frame size
+        let callee_saved_size = used_callee_saved.len() * 8;
+        let spilled_size = self.spill_alloc.frame_size_bytes();
+        let frame_size = callee_saved_size as u32 + spilled_size as u32;
+
         AllocationResult {
             alloc_map: self.alloc_map.clone(),
             moves: self.moves,
-            frame_size: self.spill_alloc.frame_size_bytes(),
+            frame_size,
+            used_callee_saved,
         }
     }
 }
