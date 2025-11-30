@@ -365,7 +365,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
         } => {
             write!(
                 f,
-                "%t{} = binop.{} %t{}, %t{} : {}",
+                "%t{} = binop.{} {}, {} : {}",
                 result.id(),
                 format_binary_op(op),
                 format_operand(lhs),
@@ -401,7 +401,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                format_operand(arg);
+                write!(f, "{}", format_operand(arg))?;
             }
             write!(f, ") : {}", format_type(ret_ty))?;
         }
