@@ -354,7 +354,27 @@ impl<'a> RegAlloc<'a> {
         }
 
         // 3. Handle caller-saved register preservation
-        // TODO: implement this
+        let call_inst_idx = self.pos_map.pos_to_idx[&constr.pos];
+        for active_temp in self.active_set.values() {
+            // Is this temp in a caller-saved register and live after the call?
+            if CALLER_SAVED_REGS.contains(&active_temp.reg)
+                && (active_temp.interval.end - 1) > call_inst_idx as u32 // end is exclusive
+            {
+                let stack_slot = self.spill_alloc.alloc_slot();
+                // Save the temp to the stack before the call
+                self.moves.add_inst_move(
+                    RelInstPos::Before(constr.pos),
+                    Location::Reg(active_temp.reg),
+                    Location::Stack(stack_slot),
+                );
+                // Load the temp from the stack after the call
+                self.moves.add_inst_move(
+                    RelInstPos::After(constr.pos),
+                    Location::Stack(stack_slot),
+                    Location::Reg(active_temp.reg),
+                );
+            }
+        }
     }
 
     // Note: this consumes self, rendering it unusable after calling this method.

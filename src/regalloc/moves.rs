@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::ir::pos::{InstPos, RelInstPos};
 use crate::regalloc::regs::Arm64Reg;
@@ -8,6 +9,16 @@ use crate::regalloc::spill::StackSlotId;
 pub enum Location {
     Reg(Arm64Reg),
     Stack(StackSlotId),
+}
+
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Location::Reg(reg) => write!(f, "Reg({})", reg)?,
+            Location::Stack(slot) => write!(f, "Stack({})", slot.0)?,
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -56,5 +67,30 @@ impl FnMoveList {
 
     pub fn get_inst_moves(&self, inst_pos: InstPos) -> Option<&InstMoveList> {
         self.inst_moves.get(&inst_pos)
+    }
+}
+
+impl fmt::Display for InstMoveList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "  before:")?;
+        for m in &self.before_moves {
+            writeln!(f, "    {} -> {}", m.from, m.to)?;
+        }
+        writeln!(f, "  after:")?;
+        for m in &self.after_moves {
+            writeln!(f, "    {} -> {}", m.from, m.to)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for FnMoveList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (pos, moves) in &self.inst_moves {
+            writeln!(f, "InstMoveList:")?;
+            writeln!(f, "  pos: {}", pos)?;
+            writeln!(f, "  moves: {}", moves)?;
+        }
+        Ok(())
     }
 }

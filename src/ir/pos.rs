@@ -1,4 +1,5 @@
 use crate::ir::types::IrBlockId;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InstPos {
@@ -16,4 +17,11 @@ impl InstPos {
 pub enum RelInstPos {
     Before(InstPos),
     After(InstPos),
+}
+
+impl fmt::Display for InstPos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "block.{}:{}", self.block.id(), self.index)?;
+        Ok(())
+    }
 }

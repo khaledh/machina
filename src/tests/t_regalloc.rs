@@ -4,6 +4,7 @@ use crate::ir::pos::InstPos;
 use crate::ir::types::IrBlockId;
 use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::moves::Location;
+use crate::regalloc::spill::StackSlotId;
 use crate::regalloc::{Arm64Reg as R, MappedTemp, RegAlloc};
 
 include!("ir_test_utils.rs");
@@ -44,6 +45,12 @@ fn test_regalloc_simple_function() {
 
 #[test]
 fn test_regalloc_simple_function_with_two_temps() {
+    // fn test() -> u32 {
+    // 0:entry:
+    //   %t0 = const.u32 1
+    //   %t1 = const.u32 2
+    //   ret %t1
+    // }
     let mut b = IrFunctionBuilder::new("test".to_string(), u32_ty());
 
     let t0 = b.new_temp(u32_ty());
@@ -53,13 +60,15 @@ fn test_regalloc_simple_function_with_two_temps() {
     b.move_to(t1, const_u32(2));
 
     b.terminate(IrTerminator::Ret {
-        value: Some(IrOperand::Temp(t0)),
+        value: Some(IrOperand::Temp(t1)),
     });
     let func = b.finish();
 
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0, R::X1]);
     let alloc_map = alloc_result.alloc_map;
+
+    println!("alloc_map:\n{}", TempAllocMapDisplay(&alloc_map));
 
     assert_eq!(alloc_map.len(), 2);
     // t0 and t1 share the same register since their liveness doesn't overlap.
@@ -491,7 +500,7 @@ fn test_call_no_arg_moves() {
     let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
     let x = fb.new_param(0, "x".to_string(), u32_ty()); // X0
     let y = fb.new_param(1, "y".to_string(), u32_ty()); // X1
-    
+
     let result = fb.new_temp(u32_ty());
     fb.call(
         Some(result),
@@ -499,15 +508,19 @@ fn test_call_no_arg_moves() {
         vec![temp_operand(x), temp_operand(y)], // Same order!
         u32_ty(),
     );
-    
-    fb.terminate(IrTerminator::Ret { value: Some(temp_operand(result)) });
+
+    fb.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
     let func = fb.finish();
-    
+
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc();
-    
+
     // Should have NO moves before the call (args already in place)
-    let moves = alloc_result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 0));
+    let moves = alloc_result
+        .moves
+        .get_inst_moves(InstPos::new(IrBlockId(0), 0));
     if let Some(moves) = moves {
         assert_eq!(moves.before_moves.len(), 0);
     }
@@ -517,10 +530,10 @@ fn test_call_no_arg_moves() {
 fn test_call_result_already_in_x0() {
     // Result of call is used as arg to another call - stays in X0
     let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
-    
+
     let result1 = fb.new_temp(u32_ty());
     fb.call(Some(result1), "bar".to_string(), vec![], u32_ty());
-    
+
     // Use result1 as first arg to another call (should stay in X0)
     let result2 = fb.new_temp(u32_ty());
     fb.call(
@@ -529,16 +542,18 @@ fn test_call_result_already_in_x0() {
         vec![temp_operand(result1)],
         u32_ty(),
     );
-    
+
     fb.terminate(IrTerminator::Ret { value: None });
     let func = fb.finish();
-    
+
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc();
-    
+
     // First call should have no after-moves (result stays in X0 for next call)
     // Second call should have no before-moves (arg already in X0)
-    let moves = alloc_result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 0));
+    let moves = alloc_result
+        .moves
+        .get_inst_moves(InstPos::new(IrBlockId(0), 0));
     if let Some(moves) = moves {
         assert_eq!(moves.after_moves.len(), 0);
         assert_eq!(moves.before_moves.len(), 0);
@@ -548,7 +563,7 @@ fn test_call_result_already_in_x0() {
 #[test]
 fn test_call_with_const_args() {
     let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
-    
+
     let result = fb.new_temp(u32_ty());
     fb.call(
         Some(result),
@@ -556,15 +571,19 @@ fn test_call_with_const_args() {
         vec![const_u32(42), const_u32(100)],
         u32_ty(),
     );
-    
-    fb.terminate(IrTerminator::Ret { value: Some(temp_operand(result)) });
+
+    fb.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
     let func = fb.finish();
-    
+
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc();
-    
+
     // Constants don't generate moves (they'll be loaded directly in codegen)
-    let moves = alloc_result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 0));
+    let moves = alloc_result
+        .moves
+        .get_inst_moves(InstPos::new(IrBlockId(0), 0));
     if let Some(moves) = moves {
         assert_eq!(moves.before_moves.len(), 0);
     }
@@ -572,50 +591,55 @@ fn test_call_with_const_args() {
 
 #[test]
 fn test_multiple_calls() {
+    // fn foo() -> u32 {
+    // 0:entry:
+    //   %t0 = fn1() : u32
+    //   %t1 = fn2() : u32
+    //   %t2 = fn3(%t0, %t1) : u32
+    //   ret %t2
+    // }
     let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
-    
-    let r1 = fb.new_temp(u32_ty());
-    fb.call(Some(r1), "fn1".to_string(), vec![], u32_ty());
-    
-    let r2 = fb.new_temp(u32_ty());
-    fb.call(Some(r2), "fn2".to_string(), vec![], u32_ty());
-    
-    let r3 = fb.new_temp(u32_ty());
+
+    let t0 = fb.new_temp(u32_ty());
+    fb.call(Some(t0), "fn1".to_string(), vec![], u32_ty());
+
+    let t1 = fb.new_temp(u32_ty());
+    fb.call(Some(t1), "fn2".to_string(), vec![], u32_ty());
+
+    let t2 = fb.new_temp(u32_ty());
     fb.call(
-        Some(r3),
+        Some(t2),
         "fn3".to_string(),
-        vec![temp_operand(r1), temp_operand(r2)],
+        vec![temp_operand(t0), temp_operand(t1)],
         u32_ty(),
     );
-    
-    fb.terminate(IrTerminator::Ret { value: Some(temp_operand(r3)) });
+
+    fb.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(t2)),
+    });
     let func = fb.finish();
-    
+
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc();
-    
-    // Verify moves for third call (needs to move r1 and r2 into X0 and X1)
-    let moves = alloc_result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 2));
-    assert!(moves.is_some());
-    let moves = moves.unwrap();
-    assert_eq!(moves.before_moves.len(), 2);
 
-    // r1 -> X0, r2 -> X1
-    assert_eq!(moves.before_moves[0].from, Location::Reg(R::X1));
-    assert_eq!(moves.before_moves[0].to, Location::Reg(R::X0));
-    assert_eq!(moves.before_moves[1].from, Location::Reg(R::X0));
-    assert_eq!(moves.before_moves[1].to, Location::Reg(R::X1));
+    // Verify moves for third call (needs to move t0 and t1 into X0 and X1)
+    let moves = alloc_result
+        .moves
+        .get_inst_moves(InstPos::new(IrBlockId(0), 2));
 
-    // r3 -> X2
-    assert_eq!(moves.after_moves.len(), 1);
-    assert_eq!(moves.after_moves[0].from, Location::Reg(R::X0));
-    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X2));
+    // No moves since t0 and t1 are already in X0 and X1 (param registers for fn3)
+    assert!(moves.is_none());
 }
 
 #[test]
 fn test_call_arg_swap() {
-    // Create function: foo(x, y) calls bar(y, x)  (swapped args)
-    let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
+    // 
+    // fn foo(x: u32, y: u32) -> () {
+    // 0:entry:
+    //   %t2 = bar(%t0, %t1) : u32 // swapped args
+    //   ret %t2
+    // }
+    let mut fb = IrFunctionBuilder::new("foo".to_string(), unit_ty());
     let x = fb.new_param(0, "x".to_string(), u32_ty()); // -> X0
     let y = fb.new_param(1, "y".to_string(), u32_ty()); // -> X1
 
@@ -645,37 +669,89 @@ fn test_call_arg_swap() {
         .get_inst_moves(InstPos::new(IrBlockId(0), 0));
     assert!(moves.is_some());
     let moves = moves.unwrap();
+    println!("moves:\n{}", moves);
+
     assert_eq!(moves.before_moves.len(), 2);
-    println!("before_moves: {:?}", moves.before_moves);
     assert_eq!(moves.before_moves[0].from, Location::Reg(R::X1));
     assert_eq!(moves.before_moves[0].to, Location::Reg(R::X0));
     assert_eq!(moves.before_moves[1].from, Location::Reg(R::X0));
     assert_eq!(moves.before_moves[1].to, Location::Reg(R::X1));
 
-    // Should have one move after the call to move the call result from X0 to X2 (result temp)
-    assert_eq!(moves.after_moves.len(), 1);
-    println!("after_moves: {:?}", moves.after_moves);
-    assert_eq!(moves.after_moves[0].from, Location::Reg(R::X0));
-    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X2));
+    // No after moves since the result is not used
+    assert_eq!(moves.after_moves.len(), 0);
 }
 
 #[test]
 #[should_panic(expected = "Invalid arm64 param index: 8")]
 fn test_call_with_9_args() {
     let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
-    
+
     // Create 9 temp arguments
-    let args = (0..9).map(|_| {
-        let t = fb.new_temp(u32_ty());
-        temp_operand(t)
-    }).collect();
-    
+    let args = (0..9)
+        .map(|_| {
+            let t = fb.new_temp(u32_ty());
+            temp_operand(t)
+        })
+        .collect();
+
     let result = fb.new_temp(u32_ty());
     fb.call(Some(result), "bar".to_string(), args, u32_ty());
-    
+
     fb.terminate(IrTerminator::Ret { value: None });
     let func = fb.finish();
-    
+
     // Should panic during constraint analysis
     let _ = analyze_constraints(&func);
+}
+
+#[test]
+fn test_caller_saved_preservation() {
+    // fn test() -> () {
+    // 0:entry:
+    //   %t0 = move const.42
+    //   %t1 = foo(%t0) : u32
+    //   %t2 = binop.add %t0, %t1 : u32
+    //   ret
+    // }
+    let mut fb = IrFunctionBuilder::new("test".to_string(), unit_ty());
+
+    // Create and use t0 which will be live across a call
+    let t0 = fb.new_temp(u32_ty()); // X0
+    fb.move_to(t0, const_u32(42));
+
+    // Make a call (t0 should be preserved across it)
+    let t1 = fb.new_temp(u32_ty()); // X1
+    fb.call(Some(t1), "foo".to_string(), vec![temp_operand(t0)], u32_ty());
+
+    // Use t0 after the call
+    let t2 = fb.new_temp(u32_ty()); // spilled (not enough registers)
+    fb.binary_op(t2, BinaryOp::Add, temp_operand(t0), temp_operand(t1));
+
+    fb.terminate(IrTerminator::Ret { value: None });
+    let func = fb.finish();
+
+    // Run allocation
+    let constraints = analyze_constraints(&func);
+    let alloc = RegAlloc::new(&func, &constraints);
+    let result = alloc.alloc_into(vec![R::X0, R::X1]);
+
+    // println!("alloc_map:\n{}", TempAllocMapDisplay(&result.alloc_map));
+
+    // Verify that t0 has save/restore moves around the call
+    let moves = result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 1));
+    assert!(moves.is_some());
+    let moves = moves.unwrap();
+    // println!("moves:\n{}", moves);
+
+    // before moves:
+    //   t0 -> stack[0]
+    assert_eq!(moves.before_moves.len(), 1);
+    assert_eq!(moves.before_moves[0].from, Location::Reg(R::X0));
+    assert_eq!(moves.before_moves[0].to, Location::Stack(StackSlotId(0)));
+
+    // after moves:
+    //   stack[0] -> t0
+    assert_eq!(moves.after_moves.len(), 1);
+    assert_eq!(moves.after_moves[0].from, Location::Stack(StackSlotId(0)));
+    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X0));
 }
