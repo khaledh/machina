@@ -239,6 +239,7 @@ pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveInterv
     // 1. For each instruction, assign a start and end position
     let mut inst_idx = 0;
     for block in func.blocks.values() {
+        // process block instructions
         for inst in block.insts().iter() {
             for operand in inst.get_sources() {
                 if let IrOperand::Temp(temp_id) = operand {
@@ -260,6 +261,38 @@ pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveInterv
             }
             inst_idx += 1;
         }
+
+        // process block terminator
+        match block.term() {
+            IrTerminator::Br { .. } => {
+            }
+            IrTerminator::CondBr { cond, .. } => {
+                // cond is a source
+                if let IrOperand::Temp(temp_id) = cond {
+                    map.entry(*temp_id)
+                        .and_modify(|interval| interval.end = inst_idx + 1)
+                        .or_insert(LiveInterval {
+                            start: inst_idx,
+                            end: inst_idx + 1,
+                        });
+                }
+            }
+            IrTerminator::Ret { value } => {
+                // value is a source
+                if let Some(IrOperand::Temp(temp_id)) = value {
+                    map.entry(*temp_id)
+                        .and_modify(|interval| interval.end = inst_idx + 1)
+                        .or_insert(LiveInterval {
+                            start: inst_idx,
+                            end: inst_idx + 1,
+                        });
+                }
+            }
+            IrTerminator::_Unterminated => {
+                panic!("Block is not terminated");
+            }
+        }
+        inst_idx += 1;
         block_last_inst_idx.insert(block.id(), inst_idx);
     }
 
