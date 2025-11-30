@@ -264,8 +264,7 @@ pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveInterv
 
         // process block terminator
         match block.term() {
-            IrTerminator::Br { .. } => {
-            }
+            IrTerminator::Br { .. } => {}
             IrTerminator::CondBr { cond, .. } => {
                 // cond is a source
                 if let IrOperand::Temp(temp_id) = cond {

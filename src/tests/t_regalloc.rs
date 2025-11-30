@@ -633,7 +633,7 @@ fn test_multiple_calls() {
 
 #[test]
 fn test_call_arg_swap() {
-    // 
+    //
     // fn foo(x: u32, y: u32) -> () {
     // 0:entry:
     //   %t2 = bar(%t0, %t1) : u32 // swapped args
@@ -721,7 +721,12 @@ fn test_caller_saved_preservation() {
 
     // Make a call (t0 should be preserved across it)
     let t1 = fb.new_temp(u32_ty()); // X1
-    fb.call(Some(t1), "foo".to_string(), vec![temp_operand(t0)], u32_ty());
+    fb.call(
+        Some(t1),
+        "foo".to_string(),
+        vec![temp_operand(t0)],
+        u32_ty(),
+    );
 
     // Use t0 after the call
     let t2 = fb.new_temp(u32_ty()); // spilled (not enough registers)
