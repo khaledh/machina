@@ -6,7 +6,7 @@ use crate::dataflow::liveness::{
 };
 use crate::ir::pos::{InstPos, RelInstPos};
 use crate::ir::types::{IrFunction, IrOperand, IrTempId};
-use crate::regalloc::constraints::{CallConstraint, ConstraintMap};
+use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::regs::{Arm64Reg, CALLER_SAVED_REGS};
 use crate::regalloc::spill::{SpillAllocator, StackSlotId};
@@ -60,6 +60,7 @@ enum PosEventKind {
     IntervalStart {
         temp_id: IrTempId,
         interval: LiveInterval,
+        is_param: bool,
     },
     IntervalEnd {
         temp_id: IrTempId,
@@ -73,8 +74,12 @@ enum PosEventKind {
 impl fmt::Display for PosEventKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PosEventKind::IntervalStart { temp_id, .. } => {
-                write!(f, "IntervalStart(%t{})", temp_id.id())
+            PosEventKind::IntervalStart { temp_id, is_param, .. } => {
+                write!(f, "IntervalStart(%t{})", temp_id.id())?;
+                if *is_param {
+                    write!(f, " (param)")?;
+                }
+                Ok(())
             }
             PosEventKind::IntervalEnd { temp_id, .. } => {
                 write!(f, "IntervalEnd(%t{})", temp_id.id())
@@ -118,10 +123,15 @@ impl Ord for PosEvent {
 
 impl PosEventKind {
     fn priority(&self) -> u8 {
+        if let PosEventKind::IntervalStart { is_param, .. } = self {
+            if *is_param {
+                return 0;
+            }
+        }
         match self {
             PosEventKind::IntervalEnd { .. } => 0,
-            PosEventKind::IntervalStart { .. } => 1,
-            PosEventKind::Call { .. } => 2,
+            PosEventKind::Call { .. } => 1,
+            PosEventKind::IntervalStart { .. } => 2,
         }
     }
 
@@ -232,16 +242,18 @@ impl<'a> RegAlloc<'a> {
         }
     }
 
-    fn build_pos_events(&self, intervals: &LiveIntervalMap) -> Vec<PosEvent> {
+    fn build_pos_events(&self, intervals: &LiveIntervalMap, param_constraints: &[FnParamConstraint]) -> Vec<PosEvent> {
         let mut events = Vec::new();
 
         // Add interval start/end events
         for (temp_id, interval) in intervals.iter() {
+            let is_param = param_constraints.iter().any(|c| c.temp == *temp_id);
             events.push(PosEvent {
                 inst_idx: interval.start as usize,
                 kind: PosEventKind::IntervalStart {
                     temp_id: *temp_id,
                     interval: *interval,
+                    is_param,
                 },
             });
             events.push(PosEvent {
@@ -370,7 +382,7 @@ impl<'a> RegAlloc<'a> {
         self.alloc_param_regs(&mut free_regs, &intervals);
 
         // 4. Build instruction position events
-        let pos_events = self.build_pos_events(&intervals);
+        let pos_events = self.build_pos_events(&intervals, &self.constraints.fn_param_constraints);
 
         // 5. Process events
         for event in pos_events {
@@ -382,7 +394,7 @@ impl<'a> RegAlloc<'a> {
                     let constr = &self.constraints.call_constraints[constr_idx];
                     self.handle_call(constr);
                 }
-                PosEventKind::IntervalStart { temp_id, interval } => {
+                PosEventKind::IntervalStart { temp_id, interval, .. } => {
                     self.handle_interval_start(&mut free_regs, temp_id, interval);
                 }
             }
