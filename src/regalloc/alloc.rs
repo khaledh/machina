@@ -441,6 +441,26 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
+        // 6. Add return moves
+        // Note: this doesn't handle constant return operands; left for codegen to handle.
+        for (block_id, ret_constr) in self.constraints.fn_return_constraints.iter() {
+            let operand_loc = match ret_constr.operand {
+                IrOperand::Temp(temp_id) => match self.alloc_map.get(&temp_id) {
+                    Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
+                    Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                    None => panic!("Temp {} not found in alloc map", temp_id.id()),
+                },
+                IrOperand::Const(_) => {
+                    // Let codegen handle the constant return operand.
+                    continue;
+                }
+            };
+            if operand_loc != Location::Reg(ret_constr.reg) {
+                self.moves
+                    .add_return_move(*block_id, operand_loc, Location::Reg(ret_constr.reg));
+            }
+        }
+
         // Sort the used callee-saved registers by reg
         let mut used_callee_saved: Vec<Arm64Reg> = self.used_callee_saved.into_iter().collect();
         used_callee_saved.sort_by_key(|r| *r as u8);

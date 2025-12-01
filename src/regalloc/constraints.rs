@@ -1,11 +1,21 @@
+use std::collections::HashMap;
+
 use crate::ir::pos::InstPos;
-use crate::ir::types::{IrFunction, IrInst, IrOperand, IrTempId, IrTempRole};
+use crate::ir::types::{
+    IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTempRole, IrTerminator, IrType,
+};
 use crate::regalloc::regs::{self, Arm64Reg};
 
 #[derive(Debug)]
 pub struct FnParamConstraint {
     pub temp: IrTempId,
     pub reg: Arm64Reg, // param arrives in this register on function entry
+}
+
+#[derive(Debug)]
+pub struct FnReturnConstraint {
+    pub operand: IrOperand,
+    pub reg: Arm64Reg, // return value is returned in this register after the function returns
 }
 
 #[derive(Debug)]
@@ -32,6 +42,7 @@ pub struct CallConstraint {
 pub struct ConstraintMap {
     pub call_constraints: Vec<CallConstraint>,
     pub fn_param_constraints: Vec<FnParamConstraint>,
+    pub fn_return_constraints: HashMap<IrBlockId, FnReturnConstraint>,
 }
 
 impl ConstraintMap {
@@ -39,6 +50,7 @@ impl ConstraintMap {
         Self {
             call_constraints: Vec::new(),
             fn_param_constraints: Vec::new(),
+            fn_return_constraints: HashMap::new(),
         }
     }
 }
@@ -52,6 +64,29 @@ pub fn analyze_fn_params(func: &IrFunction) -> Vec<FnParamConstraint> {
                 temp: IrTempId(i as u32),
                 reg,
             });
+        }
+    }
+    constraints
+}
+
+pub fn analyze_fn_return(func: &IrFunction) -> HashMap<IrBlockId, FnReturnConstraint> {
+    if func.ret_ty == IrType::Unit {
+        return HashMap::new();
+    }
+
+    let mut constraints = HashMap::new();
+    for block in func.blocks.values() {
+        if let IrTerminator::Ret {
+            value: Some(operand),
+        } = block.term
+        {
+            constraints.insert(
+                block.id(),
+                FnReturnConstraint {
+                    operand,
+                    reg: regs::get_result_reg(),
+                },
+            );
         }
     }
     constraints
@@ -91,6 +126,7 @@ pub fn analyze_constraints(func: &IrFunction) -> ConstraintMap {
     let mut constraints = ConstraintMap::new();
     constraints.fn_param_constraints = analyze_fn_params(func);
     constraints.call_constraints = analyze_call(func);
+    constraints.fn_return_constraints = analyze_fn_return(func);
     constraints
 }
 
