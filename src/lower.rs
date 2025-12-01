@@ -97,6 +97,7 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::BoolLit(value) => Ok(fb.new_const_bool(*value)),
             ast::ExprKind::UnitLit => Ok(fb.new_const_unit()),
             ast::ExprKind::BinOp { left, op, right } => self.lower_binary_op(fb, op, left, right),
+            ast::ExprKind::UnaryOp { op, expr } => self.lower_unary_op(fb, op, expr),
             ast::ExprKind::Block(body) => self.lower_block_into(fb, expr.id, body),
             ast::ExprKind::Let { name, value } => self.lower_let(fb, expr, name.clone(), value),
             ast::ExprKind::Var { name, value } => self.lower_var(fb, expr, name.clone(), value),
@@ -108,7 +109,7 @@ impl<'a> Lowerer<'a> {
                 else_body,
             } => self.lower_if(fb, cond, then_body, else_body),
             ast::ExprKind::While { cond, body } => self.lower_while(fb, cond, body),
-            _ => todo!("Implement other expression kinds"),
+            ast::ExprKind::Call { name, args } => self.lower_call(fb, expr, name.clone(), args),
         }
     }
 
@@ -123,6 +124,18 @@ impl<'a> Lowerer<'a> {
         let left_op = self.lower_expr(fb, left)?;
         let right_op = self.lower_expr(fb, right)?;
         fb.binary_op(result, *op, left_op, right_op);
+        Ok(IrOperand::Temp(result))
+    }
+
+    fn lower_unary_op(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        op: &ast::UnaryOp,
+        expr: &ast::Expr,
+    ) -> Result<IrOperand, LowerError> {
+        let result = fb.new_temp(self.lower_type(&self.get_node_type(expr)?));
+        let expr_op = self.lower_expr(fb, expr)?;
+        fb.unary_op(result, *op, expr_op);
         Ok(IrOperand::Temp(result))
     }
 
@@ -304,6 +317,23 @@ impl<'a> Lowerer<'a> {
         fb.select_block(after_b);
 
         Ok(fb.new_const_unit())
+    }
+
+    fn lower_call(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        name: String,
+        args: &Vec<ast::Expr>,
+    ) -> Result<IrOperand, LowerError> {
+        let ret_ty = self.lower_type(&self.get_node_type(expr)?);
+        let result = fb.new_temp(ret_ty.clone());
+        let args = args
+            .iter()
+            .map(|arg| self.lower_expr(fb, arg))
+            .collect::<Result<Vec<IrOperand>, LowerError>>()?;
+        fb.call(Some(result), name, args, ret_ty);
+        Ok(IrOperand::Temp(result))
     }
 
     fn lower_block_into(
