@@ -29,18 +29,20 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
+fn inc(a: u32) -> u32 {
+    a + 1
+}
+
+fn ge(a: u32, b: u32) -> bool {
+    a >= b
+}
+
 fn main() -> u32 {
-    var x = 10;
-    var y = 0;
-    while (x > 0) {
-        x = x - 1;
-        y = y + if (x < 5) {
-          20
-        } else {
-          10
-        };
+    if ge(inc(41), 42) {
+        42 / 2
+    } else {
+       99
     }
-    y
 }
 "#;
 

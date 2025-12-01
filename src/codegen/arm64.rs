@@ -33,6 +33,19 @@ pub enum CodegenError {
 
     #[error("Unterminated block: {0}")]
     UnterminatedBlock(String),
+
+    #[error("Unsupported move: {0} -> {1}")]
+    UnsupportedMove(Location, Location),
+}
+
+// Controls how integer constants are encoded for a given instruction.
+// Some instructions (e.g. add/sub/cmp) support limited immediates, others
+// (e.g. mul, neg, udiv) require register operands.
+enum ImmPolicy {
+    /// Use add/sub style immediates when they fit; otherwise materialize into a register.
+    AddSubImm,
+    /// Always materialize the value into a register (no immediate encoding allowed).
+    RegOnly,
 }
 
 pub struct Arm64Codegen {
@@ -306,28 +319,113 @@ impl<'a> FuncCodegen<'a> {
                 rhs,
             } => {
                 let result_reg = self.get_reg(result)?;
-                let lhs_operand = match lhs {
-                    IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                    IrOperand::Const(c) => {
-                        return Err(CodegenError::ConstLeftOperand(*c));
-                    }
-                };
-                let rhs_operand = match rhs {
-                    IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                    IrOperand::Const(IrConst::Int { value, .. }) => {
-                        if *value > 4096 {
-                            // Use a scratch register
-                            asm.push_str(&format!("  mov x16, ={}\n", value));
-                            "x16".to_string()
-                        } else {
-                            format!("#{}", value)
+                match op {
+                    // Division needs both operands in registers: UDIV Xd, Xn, Xm
+                    BOp::Div => {
+                        let scratch = "x16";
+                        match (lhs, rhs) {
+                            // temp / temp
+                            (IrOperand::Temp(lhs_temp), IrOperand::Temp(rhs_temp)) => {
+                                let lhs_reg = self.get_reg(lhs_temp)?;
+                                let rhs_reg = self.get_reg(rhs_temp)?;
+                                asm.push_str(&format!(
+                                    "  udiv {}, {}, {}\n",
+                                    result_reg, lhs_reg, rhs_reg
+                                ));
+                            }
+                            // temp / const
+                            (
+                                IrOperand::Temp(lhs_temp),
+                                IrOperand::Const(IrConst::Int { value: rhs_val, .. }),
+                            ) => {
+                                let lhs_reg = self.get_reg(lhs_temp)?;
+                                asm.push_str(&format!("  mov {}, #{}\n", scratch, rhs_val));
+                                asm.push_str(&format!(
+                                    "  udiv {}, {}, {}\n",
+                                    result_reg, lhs_reg, scratch
+                                ));
+                            }
+                            // const / temp  — reuse result_reg for the lhs constant
+                            (
+                                IrOperand::Const(IrConst::Int { value: lhs_val, .. }),
+                                IrOperand::Temp(rhs_temp),
+                            ) => {
+                                let rhs_reg = self.get_reg(rhs_temp)?;
+                                asm.push_str(&format!("  mov {}, #{}\n", result_reg, lhs_val));
+                                asm.push_str(&format!(
+                                    "  udiv {}, {}, {}\n",
+                                    result_reg, result_reg, rhs_reg
+                                ));
+                            }
+                            // const / const — lhs in result_reg, rhs in scratch
+                            (
+                                IrOperand::Const(IrConst::Int { value: lhs_val, .. }),
+                                IrOperand::Const(IrConst::Int { value: rhs_val, .. }),
+                            ) => {
+                                asm.push_str(&format!("  mov {}, #{}\n", result_reg, lhs_val));
+                                asm.push_str(&format!("  mov {}, #{}\n", scratch, rhs_val));
+                                asm.push_str(&format!(
+                                    "  udiv {}, {}, {}\n",
+                                    result_reg, result_reg, scratch
+                                ));
+                            }
+                            // Any other constant kinds are not yet supported
+                            _ => todo!("handle other constant operands for division"),
                         }
                     }
-                    _ => todo!("handle other constant operands"),
-                };
-                match op {
-                    // Arithmetic operators
-                    BOp::Add | BOp::Sub | BOp::Mul | BOp::Div => {
+                    // Other arithmetic operators
+                    BOp::Add | BOp::Sub => {
+                        let lhs_operand = match lhs {
+                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                            IrOperand::Const(IrConst::Int { value, .. }) => self
+                                .operand_for_int_with_policy(
+                                    *value,
+                                    ImmPolicy::AddSubImm,
+                                    &mut asm,
+                                    0,
+                                ),
+                            _ => todo!("handle other constant operands"),
+                        };
+                        let rhs_operand = match rhs {
+                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                            IrOperand::Const(IrConst::Int { value, .. }) => self
+                                .operand_for_int_with_policy(
+                                    *value,
+                                    ImmPolicy::AddSubImm,
+                                    &mut asm,
+                                    1,
+                                ),
+                            _ => todo!("handle other constant operands"),
+                        };
+                        let op_str = self.get_op_str(op);
+                        asm.push_str(&format!(
+                            "  {} {}, {}, {}\n",
+                            op_str, result_reg, lhs_operand, rhs_operand
+                        ));
+                    }
+                    BOp::Mul => {
+                        let lhs_operand = match lhs {
+                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                            IrOperand::Const(IrConst::Int { value, .. }) => self
+                                .operand_for_int_with_policy(
+                                    *value,
+                                    ImmPolicy::RegOnly,
+                                    &mut asm,
+                                    0,
+                                ),
+                            _ => todo!("handle other constant operands"),
+                        };
+                        let rhs_operand = match rhs {
+                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                            IrOperand::Const(IrConst::Int { value, .. }) => self
+                                .operand_for_int_with_policy(
+                                    *value,
+                                    ImmPolicy::RegOnly,
+                                    &mut asm,
+                                    1,
+                                ),
+                            _ => todo!("handle other constant operands"),
+                        };
                         let op_str = self.get_op_str(op);
                         asm.push_str(&format!(
                             "  {} {}, {}, {}\n",
@@ -336,6 +434,28 @@ impl<'a> FuncCodegen<'a> {
                     }
                     // Comparison operators
                     BOp::Eq | BOp::Ne | BOp::Lt | BOp::Gt | BOp::LtEq | BOp::GtEq => {
+                        let lhs_operand = match lhs {
+                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                            IrOperand::Const(IrConst::Int { value, .. }) => self
+                                .operand_for_int_with_policy(
+                                    *value,
+                                    ImmPolicy::AddSubImm,
+                                    &mut asm,
+                                    0,
+                                ),
+                            _ => todo!("handle other constant operands"),
+                        };
+                        let rhs_operand = match rhs {
+                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                            IrOperand::Const(IrConst::Int { value, .. }) => self
+                                .operand_for_int_with_policy(
+                                    *value,
+                                    ImmPolicy::AddSubImm,
+                                    &mut asm,
+                                    1,
+                                ),
+                            _ => todo!("handle other constant operands"),
+                        };
                         let op_str = self.get_op_str(op);
                         asm.push_str(&format!("  cmp {}, {}\n", lhs_operand, rhs_operand));
                         asm.push_str(&format!("  cset {}, {}\n", result_reg, op_str));
@@ -350,6 +470,10 @@ impl<'a> FuncCodegen<'a> {
                 let result_reg = self.get_reg(result)?;
                 let operand_str = match operand {
                     IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                    IrOperand::Const(IrConst::Int { value, .. }) => {
+                        // NEG uses a register operand; materialize consts into a register.
+                        self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0)
+                    }
                     IrOperand::Const(c) => format!("#{}", c),
                 };
                 match op {
@@ -463,6 +587,48 @@ impl<'a> FuncCodegen<'a> {
     }
 
     // Helpers
+
+    /// Check whether an integer fits the AArch64 add/sub immediate encoding:
+    /// imm12 optionally shifted left by 12 bits (i.e. imm = u12 << {0,12}).
+    fn int_fits_add_sub_imm(value: i64) -> bool {
+        if value < 0 {
+            return false;
+        }
+        let v = value as u64;
+        if v < (1 << 12) {
+            true
+        } else if v < (1 << 24) && (v & ((1 << 12) - 1)) == 0 {
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Decide how to encode an integer operand based on the provided policy:
+    /// either as an immediate (`#imm`) when it fits, or by materializing it
+    /// into a scratch register (`x16` or `x17`) and returning that register.
+    fn operand_for_int_with_policy(
+        &mut self,
+        value: i64,
+        policy: ImmPolicy,
+        asm: &mut String,
+        scratch_index: u8,
+    ) -> String {
+        match policy {
+            ImmPolicy::AddSubImm if Self::int_fits_add_sub_imm(value) => {
+                format!("#{}", value)
+            }
+            ImmPolicy::AddSubImm | ImmPolicy::RegOnly => {
+                let scratch = match scratch_index {
+                    0 => "x16",
+                    1 => "x17",
+                    _ => "x16",
+                };
+                asm.push_str(&format!("  mov {}, #{}\n", scratch, value));
+                scratch.to_string()
+            }
+        }
+    }
 
     fn get_reg(&self, temp: &IrTempId) -> Result<Arm64Reg, CodegenError> {
         match self.alloc_result.alloc_map.get(temp) {
