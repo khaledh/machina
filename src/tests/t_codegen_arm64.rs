@@ -1,14 +1,17 @@
 use indoc::indoc;
 use textwrap::indent;
 
+use crate::ast::BinaryOp;
 use crate::codegen::arm64::FuncCodegen;
-use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::types::{IrFunction, IrTerminator, IrType};
+use crate::ir::types::IrFunction;
 use crate::regalloc::Arm64Reg as R;
-use crate::regalloc::alloc::AllocationResult;
+use crate::regalloc::alloc::{AllocationResult, RegAlloc};
+use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::moves::FnMoveList;
 use crate::regalloc::spill::StackSlotId;
 use std::collections::HashMap;
+
+include!("ir_test_utils.rs");
 
 // Helper to create a minimal IrFunction for testing
 fn create_test_function(name: &str) -> IrFunction {
@@ -157,4 +160,107 @@ fn test_mixed_callee_saved_and_spills() {
         stp x19, x20, [sp, #16]
     "};
     assert_eq!(prologue, expected);
+}
+
+#[test]
+fn test_simple_addition() {
+    // fn add_five() -> u32 {
+    //   5 + 10
+    // }
+    let mut builder = mk_builder();
+
+    let five = builder.new_temp(u32_ty());
+    let ten = builder.new_temp(u32_ty());
+    let result = builder.new_temp(u32_ty());
+
+    builder.move_to(five, const_u32(5));
+    builder.move_to(ten, const_u32(10));
+    builder.binary_op(result, BinaryOp::Add, temp_operand(five), temp_operand(ten));
+    builder.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
+
+    let func = builder.finish();
+
+    // Run register allocation
+    let constraints = analyze_constraints(&func);
+    let mut allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    // Generate code
+    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let asm = codegen.generate().unwrap();
+
+    println!("Generated assembly:\n{}", asm);
+
+    // Basic sanity checks
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        mov x0, #5
+        mov x1, #10
+        add x2, x0, x1
+        mov x0, x2
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_function_call() {
+    // fn caller() -> u32 {
+    //   callee(5, 10)
+    // }
+    let mut builder = mk_builder();
+
+    let arg1 = builder.new_temp(u32_ty());
+    let arg2 = builder.new_temp(u32_ty());
+    let result = builder.new_temp(u32_ty());
+
+    builder.move_to(arg1, const_u32(5));
+    builder.move_to(arg2, const_u32(10));
+    builder.call(
+        Some(result),
+        "callee".to_string(),
+        vec![temp_operand(arg1), temp_operand(arg2)],
+        u32_ty(),
+    );
+    builder.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
+
+    let func = builder.finish();
+
+    // Run register allocation
+    let constraints = analyze_constraints(&func);
+    let mut allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    // print moves
+    println!("moves:\n{}", alloc_result.moves);
+
+    // Generate code
+    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let asm = codegen.generate().unwrap();
+
+    println!("Generated assembly:\n{}", asm);
+
+    // Expected: args moved to x0/x1, call, result already in x0
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        mov x0, #5
+        mov x1, #10
+        bl _callee
+        mov x2, x0
+        mov x0, x2
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
 }

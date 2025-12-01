@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::ir::pos::{InstPos, RelInstPos};
+use crate::ir::types::IrBlockId;
 use crate::regalloc::regs::Arm64Reg;
 use crate::regalloc::spill::StackSlotId;
 
@@ -44,12 +45,14 @@ pub struct InstMoveList {
 #[derive(Debug)]
 pub struct FnMoveList {
     inst_moves: HashMap<InstPos, InstMoveList>,
+    return_moves: HashMap<IrBlockId, Move>,
 }
 
 impl FnMoveList {
     pub fn new() -> Self {
         Self {
             inst_moves: HashMap::new(),
+            return_moves: HashMap::new(),
         }
     }
 
@@ -72,8 +75,16 @@ impl FnMoveList {
         }
     }
 
+    pub fn add_return_move(&mut self, block_id: IrBlockId, from: Location, to: Location) {
+        self.return_moves.insert(block_id, Move { from, to });
+    }
+
     pub fn get_inst_moves(&self, inst_pos: InstPos) -> Option<&InstMoveList> {
         self.inst_moves.get(&inst_pos)
+    }
+
+    pub fn get_return_move(&self, block_id: IrBlockId) -> Option<&Move> {
+        self.return_moves.get(&block_id)
     }
 }
 
@@ -97,6 +108,10 @@ impl fmt::Display for FnMoveList {
             writeln!(f, "InstMoveList:")?;
             writeln!(f, "  pos: {}", pos)?;
             writeln!(f, "  moves: {}", moves)?;
+        }
+        writeln!(f, "ReturnMoves:")?;
+        for (block_id, mov) in &self.return_moves {
+            write!(f, "  block_id: {}, {}", block_id.id(), mov)?;
         }
         Ok(())
     }

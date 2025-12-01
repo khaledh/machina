@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 use thiserror::Error;
 
+use crate::ast::{BinaryOp as BOp, UnaryOp as UOp};
 use crate::context::LoweredRegAllocContext;
-use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrTempId, IrTerminator};
+use crate::ir::pos::InstPos;
+use crate::ir::types::{
+    IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator,
+};
 use crate::regalloc::moves::Move;
 use crate::regalloc::regs::Arm64Reg;
 use crate::regalloc::{AllocationResult, MappedTemp, StackSlotId};
 
 #[derive(Debug, Error)]
 pub enum CodegenError {
-    #[error("Placeholder error: {0}")]
-    PlaceholderError(String),
-
     #[error("Temp {0} is spilled to stack (no register assigned)")]
     TempIsSpilled(u32),
 
@@ -23,6 +24,15 @@ pub enum CodegenError {
 
     #[error("Stack slot is out of bounds: offset {0} > {1}")]
     StackSlotOutOfBounds(u32, u32),
+
+    #[error("Constant left operand not supported yet: {0}")]
+    ConstLeftOperand(IrConst),
+
+    #[error("Constant condition value must be boolean, found {0}")]
+    CondTypeNotBoolean(IrConst),
+
+    #[error("Unterminated block: {0}")]
+    UnterminatedBlock(String),
 }
 
 pub struct Arm64Codegen {
@@ -60,6 +70,8 @@ struct FuncCodegen<'a> {
     func: &'a IrFunction,
     alloc_result: &'a AllocationResult,
     spilled_size: u32,
+    label_counter: u32,
+    block_labels: HashMap<IrBlockId, String>,
 }
 
 impl<'a> FuncCodegen<'a> {
@@ -70,6 +82,8 @@ impl<'a> FuncCodegen<'a> {
             func,
             alloc_result,
             spilled_size,
+            label_counter: 0,
+            block_labels: HashMap::new(),
         }
     }
 
@@ -78,6 +92,15 @@ impl<'a> FuncCodegen<'a> {
 
         // Prologue
         asm.push_str(&self.emit_prologue()?);
+
+        // Pre-generate block labels
+        for block in self.func.blocks.values() {
+            if block.id() != IrBlockId(0) {
+                let label = self.next_label();
+                let block_label = format!("{}_{}", label, block.name());
+                self.block_labels.insert(block.id(), block_label);
+            }
+        }
 
         // Function body
         for block in self.func.blocks.values() {
@@ -225,20 +248,180 @@ impl<'a> FuncCodegen<'a> {
     // Blocks, instructions, terminators
 
     pub fn emit_block(&mut self, block: &IrBlock) -> Result<String, CodegenError> {
-        Ok(String::new())
+        let mut asm = String::new();
+
+        // Block label (skip entry block, it uses function label from prologue)
+        if block.id() != IrBlockId(0) {
+            asm.push_str(&format!("{}:\n", self.block_labels[&block.id()]));
+        }
+
+        // Block instructions
+        for (idx, inst) in block.insts().iter().enumerate() {
+            let pos = InstPos::new(block.id(), idx);
+
+            // Emit before moves
+            if let Some(moves) = self.alloc_result.moves.get_inst_moves(pos) {
+                asm.push_str(&self.emit_moves(&moves.before_moves)?);
+            }
+
+            // Emit instruction
+            asm.push_str(&self.emit_inst(inst)?);
+
+            // Emit after moves
+            if let Some(moves) = self.alloc_result.moves.get_inst_moves(pos) {
+                asm.push_str(&self.emit_moves(&moves.after_moves)?);
+            }
+        }
+
+        // Emit return moves
+        if let Some(ret_move) = self.alloc_result.moves.get_return_move(block.id()) {
+            asm.push_str(&self.emit_move(ret_move)?);
+        }
+
+        // Block terminator
+        asm.push_str(&self.emit_terminator(block.term(), &block.name())?);
+
+        Ok(asm)
     }
 
     pub fn emit_inst(&mut self, inst: &IrInst) -> Result<String, CodegenError> {
-        Ok(String::new())
+        let mut asm = String::new();
+        match inst {
+            IrInst::Move { dest, src } => {
+                let dest_reg = self.get_reg(dest)?;
+                match src {
+                    IrOperand::Temp(temp) => {
+                        let src_reg = self.get_reg(temp)?;
+                        asm.push_str(&format!("  mov {}, {}\n", dest_reg, src_reg));
+                    }
+                    IrOperand::Const(c) => {
+                        asm.push_str(&format!("  mov {}, #{}\n", dest_reg, c));
+                    }
+                }
+            }
+            IrInst::BinaryOp {
+                result,
+                op,
+                lhs,
+                rhs,
+            } => {
+                let result_reg = self.get_reg(result)?;
+                let lhs_operand = match lhs {
+                    IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                    IrOperand::Const(c) => {
+                        return Err(CodegenError::ConstLeftOperand(*c));
+                    }
+                };
+                let rhs_operand = match rhs {
+                    IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                    IrOperand::Const(IrConst::Int { value, .. }) => {
+                        if *value > 4096 {
+                            // Use a scratch register
+                            asm.push_str(&format!("  mov x16, ={}\n", value));
+                            "x16".to_string()
+                        } else {
+                            format!("#{}", value)
+                        }
+                    }
+                    _ => todo!("handle other constant operands"),
+                };
+                match op {
+                    // Arithmetic operators
+                    BOp::Add | BOp::Sub | BOp::Mul | BOp::Div => {
+                        let op_str = self.get_op_str(op);
+                        asm.push_str(&format!(
+                            "  {} {}, {}, {}\n",
+                            op_str, result_reg, lhs_operand, rhs_operand
+                        ));
+                    }
+                    // Comparison operators
+                    BOp::Eq | BOp::Ne | BOp::Lt | BOp::Gt | BOp::LtEq | BOp::GtEq => {
+                        let op_str = self.get_op_str(op);
+                        asm.push_str(&format!("  cmp {}, {}\n", lhs_operand, rhs_operand));
+                        asm.push_str(&format!("  cset {}, {}\n", result_reg, op_str));
+                    }
+                }
+            }
+            IrInst::UnaryOp {
+                result,
+                op,
+                operand,
+            } => {
+                let result_reg = self.get_reg(result)?;
+                let operand_str = match operand {
+                    IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
+                    IrOperand::Const(c) => format!("#{}", c),
+                };
+                match op {
+                    UOp::Neg => {
+                        asm.push_str(&format!("  neg {}, {}\n", result_reg, operand_str));
+                    }
+                }
+            }
+            IrInst::Call { name, .. } => {
+                asm.push_str(&format!("  bl _{}\n", name));
+            }
+            IrInst::Phi { .. } => {
+                // Phi nodes are handled by register allocator moves
+                // No code needs to be emitted here
+            }
+        }
+        Ok(asm)
     }
 
-    pub fn emit_terminator(&mut self, terminator: &IrTerminator) -> Result<String, CodegenError> {
-        Ok(String::new())
+    pub fn emit_terminator(
+        &mut self,
+        terminator: &IrTerminator,
+        block_label: &String,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+        match terminator {
+            IrTerminator::Ret { value } => {
+                // Handle constant return value
+                if let Some(IrOperand::Const(c)) = value {
+                    asm.push_str(&format!("  mov x0, #{}\n", c));
+                }
+                asm.push_str(&self.emit_epilogue()?);
+            }
+            IrTerminator::Br { target } => {
+                asm.push_str(&format!("  b {}\n", self.block_labels[target]));
+            }
+            IrTerminator::CondBr {
+                cond,
+                then_b,
+                else_b,
+            } => {
+                match cond {
+                    IrOperand::Temp(temp) => {
+                        // cond expr already evaluated (cmp, cset)
+                        let cond_reg = self.get_reg(temp)?;
+                        // branch to then_b if cond is true, else_b if false
+                        asm.push_str(&format!(
+                            "  cbnz {}, {}\n",
+                            cond_reg, self.block_labels[then_b]
+                        ));
+                        asm.push_str(&format!("  b {}\n", self.block_labels[else_b]));
+                    }
+                    IrOperand::Const(IrConst::Bool(value)) => {
+                        // cond is a constant, emit either then or else block (but not both)
+                        let target_block = if *value { then_b } else { else_b };
+                        asm.push_str(&format!("  b {}\n", self.block_labels[target_block]));
+                    }
+                    IrOperand::Const(c) => {
+                        return Err(CodegenError::CondTypeNotBoolean(*c));
+                    }
+                }
+            }
+            IrTerminator::_Unterminated => {
+                return Err(CodegenError::UnterminatedBlock(block_label.clone()));
+            }
+        }
+        Ok(asm)
     }
 
     // Moves
 
-    pub fn emit_moves(&mut self, moves: &Vec<Move>) -> Result<String, CodegenError> {
+    pub fn emit_moves(&mut self, moves: &[Move]) -> Result<String, CodegenError> {
         moves.iter().map(|mov| self.emit_move(mov)).collect()
     }
 
@@ -286,6 +469,27 @@ impl<'a> FuncCodegen<'a> {
         // first spilled slot is at offset (spilled size - 8)
         let offset = self.spilled_size - slot.offset_bytes() - 8;
         Ok(offset)
+    }
+
+    fn next_label(&mut self) -> String {
+        let label = format!(".L{}", self.label_counter);
+        self.label_counter += 1;
+        label
+    }
+
+    fn get_op_str(&self, op: &BOp) -> &str {
+        match op {
+            BOp::Add => "add",
+            BOp::Sub => "sub",
+            BOp::Mul => "mul",
+            BOp::Div => "udiv",
+            BOp::Eq => "eq",
+            BOp::Ne => "ne",
+            BOp::Lt => "lt",
+            BOp::Gt => "gt",
+            BOp::LtEq => "le",
+            BOp::GtEq => "ge",
+        }
     }
 }
 

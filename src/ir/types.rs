@@ -144,6 +144,15 @@ pub enum IrOperand {
     Const(IrConst),
 }
 
+impl fmt::Display for IrOperand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IrOperand::Temp(temp) => write!(f, "%t{}", temp.id()),
+            IrOperand::Const(c) => write!(f, "const.{}", c),
+        }
+    }
+}
+
 // ----------- Temp -----------
 
 /// SSA-like ephemeral value (not enforced yet)
