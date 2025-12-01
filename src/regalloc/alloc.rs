@@ -114,7 +114,7 @@ impl Ord for PosEvent {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // sort by:
         // 1. inst_idx
-        // 2. kind: IntervalEnd < Call < IntervalStart
+        // 2. kind: IntervalEnd < IntervalStart < Call
         // 3. temp_id (for deterministic ordering when inst_idx and priority are equal)
         self.inst_idx
             .cmp(&other.inst_idx)
@@ -132,8 +132,8 @@ impl PosEventKind {
         }
         match self {
             PosEventKind::IntervalEnd { .. } => 0,
-            PosEventKind::Call { .. } => 1,
-            PosEventKind::IntervalStart { .. } => 2,
+            PosEventKind::IntervalStart { .. } => 1,
+            PosEventKind::Call { .. } => 2,
         }
     }
 
@@ -332,8 +332,12 @@ impl<'a> RegAlloc<'a> {
         // 3. Handle caller-saved register preservation
         let call_inst_idx = self.pos_map.pos_to_idx[&constr.pos];
         for active_temp in self.active_set.values() {
-            // Is this temp in a caller-saved register and live after the call?
+            // Only preserve temps that are:
+            // - in a caller-saved reg
+            // - live *before* the call (start < call_inst_idx)
+            // - live *after* the call (end-1 > call_inst_idx)
             if CALLER_SAVED_REGS.contains(&active_temp.reg)
+                && active_temp.interval.start < call_inst_idx as u32
                 && (active_temp.interval.end - 1) > call_inst_idx as u32
             // end is exclusive
             {

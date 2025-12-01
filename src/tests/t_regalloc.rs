@@ -627,8 +627,16 @@ fn test_multiple_calls() {
         .moves
         .get_inst_moves(InstPos::new(IrBlockId(0), 2));
 
-    // No moves since t0 and t1 are already in X0 and X1 (param registers for fn3)
-    assert!(moves.is_none());
+    assert!(moves.is_some());
+    let moves = moves.unwrap();
+
+    // No moves before call since t0 and t1 are already in X0 and X1 (param registers for fn3)
+    assert_eq!(moves.before_moves.len(), 0);
+
+    // Move result from x0 to x2
+    assert_eq!(moves.after_moves.len(), 1);
+    assert_eq!(moves.after_moves[0].from, Location::Reg(R::X0));
+    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X2));
 }
 
 #[test]
@@ -671,14 +679,17 @@ fn test_call_arg_swap() {
     let moves = moves.unwrap();
     println!("moves:\n{}", moves);
 
+    // swap x0 and x1
     assert_eq!(moves.before_moves.len(), 2);
     assert_eq!(moves.before_moves[0].from, Location::Reg(R::X1));
     assert_eq!(moves.before_moves[0].to, Location::Reg(R::X0));
     assert_eq!(moves.before_moves[1].from, Location::Reg(R::X0));
     assert_eq!(moves.before_moves[1].to, Location::Reg(R::X1));
 
-    // No after moves since the result is not used
-    assert_eq!(moves.after_moves.len(), 0);
+    // move result from x0 to x2
+    assert_eq!(moves.after_moves.len(), 1);
+    assert_eq!(moves.after_moves[0].from, Location::Reg(R::X0));
+    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X2));
 }
 
 #[test]
@@ -746,17 +757,20 @@ fn test_caller_saved_preservation() {
     let moves = result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 1));
     assert!(moves.is_some());
     let moves = moves.unwrap();
-    // println!("moves:\n{}", moves);
+    println!("moves:\n{}", moves);
 
     // before moves:
-    //   t0 -> stack[0]
+    //   t0 -> stack[0] (saved before call)
     assert_eq!(moves.before_moves.len(), 1);
     assert_eq!(moves.before_moves[0].from, Location::Reg(R::X0));
     assert_eq!(moves.before_moves[0].to, Location::Stack(StackSlotId(0)));
 
     // after moves:
-    //   stack[0] -> t0
-    assert_eq!(moves.after_moves.len(), 1);
-    assert_eq!(moves.after_moves[0].from, Location::Stack(StackSlotId(0)));
-    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X0));
+    //   x0 -> x1 (call result)
+    //   stack[0] -> t0 (restored after call)
+    assert_eq!(moves.after_moves.len(), 2);
+    assert_eq!(moves.after_moves[0].from, Location::Reg(R::X0));
+    assert_eq!(moves.after_moves[0].to, Location::Reg(R::X1));
+    assert_eq!(moves.after_moves[1].from, Location::Stack(StackSlotId(0)));
+    assert_eq!(moves.after_moves[1].to, Location::Reg(R::X0));
 }
