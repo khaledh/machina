@@ -5,7 +5,7 @@ use crate::dataflow::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
 };
 use crate::ir::pos::{InstPos, RelInstPos};
-use crate::ir::types::{IrFunction, IrOperand, IrTempId};
+use crate::ir::types::{IrFunction, IrInst, IrOperand, IrTempId};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
@@ -396,6 +396,77 @@ impl<'a> RegAlloc<'a> {
         }
     }
 
+    fn process_pos_events(&mut self, pos_events: &[PosEvent], free_regs: &mut VecDeque<Arm64Reg>) {
+        for event in pos_events {
+            match event.kind {
+                PosEventKind::IntervalEnd { temp_id, .. } => {
+                    self.handle_interval_end(free_regs, temp_id);
+                }
+                PosEventKind::Call { constr_idx } => {
+                    let constr = &self.constraints.call_constraints[constr_idx];
+                    self.handle_call(constr);
+                }
+                PosEventKind::IntervalStart {
+                    temp_id, interval, ..
+                } => {
+                    self.handle_interval_start(free_regs, temp_id, interval);
+                }
+            }
+        }
+    }
+
+    fn add_edge_moves(&mut self) {
+        for block in self.func.blocks.values() {
+            for inst in block.insts.iter() {
+                if let IrInst::Phi { result, incoming } = inst {
+                    println!("phi inst: {:?}", inst);
+                    // get the result location
+                    let result_loc = match self.alloc_map.get(result) {
+                        Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
+                        Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                        None => panic!("Temp {} not found in alloc map", result.id()),
+                    };
+                    println!("result_loc: {}", result_loc);
+                    for (pred_block_id, temp_id) in incoming {
+                        // get the source location
+                        println!("temp_id: {}", temp_id.id());
+                        let source_loc = match self.alloc_map.get(temp_id) {
+                            Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
+                            Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                            None => panic!("Temp {} not found in alloc map", temp_id.id()),
+                        };
+                        if result_loc != source_loc {
+                            println!("adding edge move: {} -> {}", source_loc, result_loc);
+                            self.moves
+                                .add_edge_move(*pred_block_id, source_loc, result_loc);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_return_moves(&mut self) {
+        // Note: this doesn't handle constant return operands; left for codegen to handle.
+        for (block_id, ret_constr) in self.constraints.fn_return_constraints.iter() {
+            let operand_loc = match ret_constr.operand {
+                IrOperand::Temp(temp_id) => match self.alloc_map.get(&temp_id) {
+                    Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
+                    Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                    None => panic!("Temp {} not found in alloc map", temp_id.id()),
+                },
+                IrOperand::Const(_) => {
+                    // Let codegen handle the constant return operand.
+                    continue;
+                }
+            };
+            if operand_loc != Location::Reg(ret_constr.reg) {
+                self.moves
+                    .add_return_move(*block_id, operand_loc, Location::Reg(ret_constr.reg));
+            }
+        }
+    }
+
     // Note: this consumes self, rendering it unusable after calling this method.
     pub fn alloc(self) -> AllocationResult {
         let free_regs = self.initial_free_regs();
@@ -424,42 +495,13 @@ impl<'a> RegAlloc<'a> {
         let pos_events = self.build_pos_events(&intervals, &self.constraints.fn_param_constraints);
 
         // 5. Process events
-        for event in pos_events {
-            match event.kind {
-                PosEventKind::IntervalEnd { temp_id, .. } => {
-                    self.handle_interval_end(&mut free_regs, temp_id);
-                }
-                PosEventKind::Call { constr_idx } => {
-                    let constr = &self.constraints.call_constraints[constr_idx];
-                    self.handle_call(constr);
-                }
-                PosEventKind::IntervalStart {
-                    temp_id, interval, ..
-                } => {
-                    self.handle_interval_start(&mut free_regs, temp_id, interval);
-                }
-            }
-        }
+        self.process_pos_events(&pos_events, &mut free_regs);
 
-        // 6. Add return moves
-        // Note: this doesn't handle constant return operands; left for codegen to handle.
-        for (block_id, ret_constr) in self.constraints.fn_return_constraints.iter() {
-            let operand_loc = match ret_constr.operand {
-                IrOperand::Temp(temp_id) => match self.alloc_map.get(&temp_id) {
-                    Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
-                    Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
-                    None => panic!("Temp {} not found in alloc map", temp_id.id()),
-                },
-                IrOperand::Const(_) => {
-                    // Let codegen handle the constant return operand.
-                    continue;
-                }
-            };
-            if operand_loc != Location::Reg(ret_constr.reg) {
-                self.moves
-                    .add_return_move(*block_id, operand_loc, Location::Reg(ret_constr.reg));
-            }
-        }
+        // 6. Add edge moves
+        self.add_edge_moves();
+
+        // 7. Add return moves
+        self.add_return_moves();
 
         // Sort the used callee-saved registers by reg
         let mut used_callee_saved: Vec<Arm64Reg> = self.used_callee_saved.into_iter().collect();

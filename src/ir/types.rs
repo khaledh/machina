@@ -260,7 +260,7 @@ pub enum IrInst {
 
     Phi {
         result: IrTempId,
-        incoming: Vec<(IrBlockId, IrOperand)>,
+        incoming: Vec<(IrBlockId, IrTempId)>,
     },
 }
 
@@ -281,7 +281,10 @@ impl IrInst {
             IrInst::BinaryOp { lhs, rhs, .. } => vec![*lhs, *rhs],
             IrInst::UnaryOp { operand, .. } => vec![*operand],
             IrInst::Call { args, .. } => args.clone(),
-            IrInst::Phi { incoming, .. } => incoming.iter().map(|(_, operand)| *operand).collect(),
+            IrInst::Phi { incoming, .. } => incoming
+                .iter()
+                .map(|(_, temp)| IrOperand::Temp(*temp))
+                .collect(),
         }
     }
 }
@@ -421,7 +424,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                     write!(f, ", ")?;
                 }
                 let block_name = func.blocks[block_id].name.as_str();
-                write!(f, "({} -> {})", block_name, format_operand(value))?;
+                write!(f, "({} -> %t{})", block_name, value.id())?;
             }
             write!(f, "]")?;
         }

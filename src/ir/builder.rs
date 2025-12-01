@@ -210,7 +210,7 @@ impl IrFunctionBuilder {
         });
     }
 
-    pub fn phi(&mut self, result: IrTempId, incoming: Vec<(IrBlockId, IrOperand)>) {
+    pub fn phi(&mut self, result: IrTempId, incoming: Vec<(IrBlockId, IrTempId)>) {
         // TODO: assert that all incoming temps share the same type and match result’s type.
         // let expected = self.temps[result.id() as usize].ty;
         // debug_assert!(

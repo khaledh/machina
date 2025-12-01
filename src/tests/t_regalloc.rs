@@ -344,13 +344,7 @@ fn test_regalloc_if_expression_shape() {
     // join block
     b.select_block(join_id);
     let t_phi = b.new_temp(u32_ty());
-    b.phi(
-        t_phi,
-        vec![
-            (then_id, IrOperand::Temp(t_then)),
-            (else_id, IrOperand::Temp(t_else)),
-        ],
-    );
+    b.phi(t_phi, vec![(then_id, t_then), (else_id, t_else)]);
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t_phi)),
     });
@@ -429,13 +423,7 @@ fn test_regalloc_while_expression_shape() {
     let i_next = b.new_temp(u32_ty()); // value produced by the body
 
     // Note: predecessor blocks are (entry, loop_body)
-    b.phi(
-        i,
-        vec![
-            (IrBlockId(0), IrOperand::Temp(i0)),
-            (loop_body, IrOperand::Temp(i_next)),
-        ],
-    );
+    b.phi(i, vec![(IrBlockId(0), i0), (loop_body, i_next)]);
 
     let three = b.new_temp(u32_ty());
     b.move_to(three, const_u32(3));

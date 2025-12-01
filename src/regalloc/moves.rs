@@ -45,6 +45,7 @@ pub struct InstMoveList {
 #[derive(Debug)]
 pub struct FnMoveList {
     inst_moves: HashMap<InstPos, InstMoveList>,
+    edge_moves: HashMap<IrBlockId, Vec<Move>>,
     return_moves: HashMap<IrBlockId, Move>,
 }
 
@@ -52,6 +53,7 @@ impl FnMoveList {
     pub fn new() -> Self {
         Self {
             inst_moves: HashMap::new(),
+            edge_moves: HashMap::new(),
             return_moves: HashMap::new(),
         }
     }
@@ -75,12 +77,23 @@ impl FnMoveList {
         }
     }
 
+    pub fn add_edge_move(&mut self, from_block_id: IrBlockId, from: Location, to: Location) {
+        self.edge_moves
+            .entry(from_block_id)
+            .or_insert(vec![])
+            .push(Move { from, to });
+    }
+
     pub fn add_return_move(&mut self, block_id: IrBlockId, from: Location, to: Location) {
         self.return_moves.insert(block_id, Move { from, to });
     }
 
     pub fn get_inst_moves(&self, inst_pos: InstPos) -> Option<&InstMoveList> {
         self.inst_moves.get(&inst_pos)
+    }
+
+    pub fn get_edge_moves(&self, from_block_id: IrBlockId) -> Option<&Vec<Move>> {
+        self.edge_moves.get(&from_block_id)
     }
 
     pub fn get_return_move(&self, block_id: IrBlockId) -> Option<&Move> {
@@ -109,9 +122,16 @@ impl fmt::Display for FnMoveList {
             writeln!(f, "  pos: {}", pos)?;
             writeln!(f, "  moves: {}", moves)?;
         }
+        writeln!(f, "EdgeMoves:")?;
+        for (block_id, moves) in &self.edge_moves {
+            writeln!(f, "  block_id: {}", block_id.id())?;
+            for mov in moves {
+                writeln!(f, "    {} -> {}", mov.from, mov.to)?;
+            }
+        }
         writeln!(f, "ReturnMoves:")?;
         for (block_id, mov) in &self.return_moves {
-            write!(f, "  block_id: {}, {}", block_id.id(), mov)?;
+            writeln!(f, "  block_id: {}, {}", block_id.id(), mov)?;
         }
         Ok(())
     }

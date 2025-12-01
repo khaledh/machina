@@ -188,9 +188,7 @@ impl LivenessAnalysis {
                         if let IrInst::Phi { incoming, .. } = inst {
                             for (pred_id, source) in incoming.iter() {
                                 if *pred_id == *block_id {
-                                    if let IrOperand::Temp(temp_id) = source {
-                                        new_live_out.insert(*temp_id);
-                                    }
+                                    new_live_out.insert(*source);
                                 }
                             }
                         }

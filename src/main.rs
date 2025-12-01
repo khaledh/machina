@@ -29,12 +29,16 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn main(a: u32, b: u32) -> u32 {
+fn main() -> u32 {
     var x = 10;
     var y = 0;
     while (x > 0) {
         x = x - 1;
-        y = y + if (x < 5) { 10 } else { 20 };
+        y = y + if (x < 5) {
+          20
+        } else {
+          10
+        };
     }
     y
 }

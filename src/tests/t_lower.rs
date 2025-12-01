@@ -53,17 +53,17 @@ fn test_lower_func() {
     //   condbr const.bool true, then, else
 
     // then:
-    //   // const.int 2
+    //   %t2 = move const.2
     //   br merge
 
     // else:
-    //   // const.int 3
+    //   %t3 = move const.3
     //   br merge
 
     // merge:
-    //   %t2 = phi [(then -> const.2), (else -> const.3)]
-    //   %t3 = binop.add %t0, %t2 : u32
-    //   ret %t3
+    //   %t4 = phi [(then -> t2), (else -> t3)]
+    //   %t5 = binop.add %t0, %t4 : u32
+    //   ret %t5
     // }
 
     assert_eq!(ir_func.blocks.len(), 4);
@@ -74,11 +74,11 @@ fn test_lower_func() {
 
     let then_block = &ir_func.blocks[&IrBlockId(1)];
     let then_insts = then_block.insts();
-    assert_eq!(then_insts.len(), 0);
+    assert_eq!(then_insts.len(), 1);
 
     let else_block = &ir_func.blocks[&IrBlockId(2)];
     let else_insts = else_block.insts();
-    assert_eq!(else_insts.len(), 0);
+    assert_eq!(else_insts.len(), 1);
 
     let merge_block = &ir_func.blocks[&IrBlockId(3)];
     let merge_insts = merge_block.insts();
@@ -99,22 +99,24 @@ fn test_lower_func() {
     }
 
     // then block
+    assert_move(&then_block.insts()[0], 2, const_u32(2));
     assert_br_to(&then_block.term(), merge_block.id());
 
     // else block
+    assert_move(&else_block.insts()[0], 3, const_u32(3));
     assert_br_to(&else_block.term(), merge_block.id());
 
     // merge block
     assert_phi(
         &merge_block.insts()[0],
-        2,
+        4,
         vec![
-            (then_block.id(), const_u32(2)),
-            (else_block.id(), const_u32(3)),
+            (then_block.id(), IrTempId(2)),
+            (else_block.id(), IrTempId(3)),
         ],
     );
-    assert_binary_op(&merge_block.insts()[1], 3, BinaryOp::Add, temp(0), temp(2));
-    assert_ret_with(&merge_block.term(), 3);
+    assert_binary_op(&merge_block.insts()[1], 5, BinaryOp::Add, temp(0), temp(4));
+    assert_ret_with(&merge_block.term(), 5);
 }
 
 #[test]
@@ -269,7 +271,7 @@ mod ir_assert {
     pub fn assert_phi(
         inst: &IrInst,
         result_id: u32,
-        incoming_expected: Vec<(IrBlockId, IrOperand)>,
+        incoming_expected: Vec<(IrBlockId, IrTempId)>,
     ) {
         match inst {
             IrInst::Phi { result, incoming } => {
@@ -285,12 +287,12 @@ mod ir_assert {
                 );
 
                 // Assert that the incoming operands match
-                let incoming_operands: Vec<IrOperand> = incoming.iter().map(|(_, o)| *o).collect();
-                let expected_operands: Vec<IrOperand> =
-                    incoming_expected.iter().map(|(_, o)| *o).collect();
+                let incoming_temps: Vec<IrTempId> = incoming.iter().map(|(_, t)| *t).collect();
+                let expected_temps: Vec<IrTempId> =
+                    incoming_expected.iter().map(|(_, t)| *t).collect();
                 assert_eq!(
-                    incoming_operands, expected_operands,
-                    "phi incoming operands mismatch"
+                    incoming_temps, expected_temps,
+                    "phi incoming temps mismatch"
                 );
             }
             other => panic!("Expected Phi, found {:?}", other),

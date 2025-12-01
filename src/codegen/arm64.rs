@@ -279,7 +279,7 @@ impl<'a> FuncCodegen<'a> {
         }
 
         // Block terminator
-        asm.push_str(&self.emit_terminator(block.term(), &block.name())?);
+        asm.push_str(&self.emit_terminator(block.term(), block.id())?);
 
         Ok(asm)
     }
@@ -372,7 +372,7 @@ impl<'a> FuncCodegen<'a> {
     pub fn emit_terminator(
         &mut self,
         terminator: &IrTerminator,
-        block_label: &String,
+        block_id: IrBlockId,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
         match terminator {
@@ -384,6 +384,10 @@ impl<'a> FuncCodegen<'a> {
                 asm.push_str(&self.emit_epilogue()?);
             }
             IrTerminator::Br { target } => {
+                // Emit edge moves if any
+                if let Some(edge_moves) = self.alloc_result.moves.get_edge_moves(block_id) {
+                    asm.push_str(&self.emit_moves(&edge_moves)?);
+                }
                 asm.push_str(&format!("  b {}\n", self.block_labels[target]));
             }
             IrTerminator::CondBr {
@@ -391,6 +395,10 @@ impl<'a> FuncCodegen<'a> {
                 then_b,
                 else_b,
             } => {
+                // Emit edge moves if any
+                if let Some(edge_moves) = self.alloc_result.moves.get_edge_moves(block_id) {
+                    asm.push_str(&self.emit_moves(&edge_moves)?);
+                }
                 match cond {
                     IrOperand::Temp(temp) => {
                         // cond expr already evaluated (cmp, cset)
@@ -413,7 +421,8 @@ impl<'a> FuncCodegen<'a> {
                 }
             }
             IrTerminator::_Unterminated => {
-                return Err(CodegenError::UnterminatedBlock(block_label.clone()));
+                let block_label = self.block_labels[&block_id].clone();
+                return Err(CodegenError::UnterminatedBlock(block_label));
             }
         }
         Ok(asm)

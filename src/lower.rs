@@ -240,12 +240,28 @@ impl<'a> Lowerer<'a> {
 
         // Then block
         fb.select_block(then_b);
-        let then_op = self.lower_expr(fb, then_body)?;
+        let then_op = match self.lower_expr(fb, then_body)? {
+            IrOperand::Temp(temp) => temp,
+            other => {
+                // Materialize the constant to a temp (so that phi can use it)
+                let temp = fb.new_temp(self.lower_type(&self.get_node_type(then_body)?));
+                fb.move_to(temp, other);
+                temp
+            }
+        };
         fb.terminate(IrTerminator::Br { target: merge_b });
 
         // Else block
         fb.select_block(else_b);
-        let else_op = self.lower_expr(fb, else_body)?;
+        let else_op = match self.lower_expr(fb, else_body)? {
+            IrOperand::Temp(temp) => temp,
+            other => {
+                // Materialize the constant to a temp (so that phi can use it)
+                let temp = fb.new_temp(self.lower_type(&self.get_node_type(else_body)?));
+                fb.move_to(temp, other);
+                temp
+            }
+        };
         fb.terminate(IrTerminator::Br { target: merge_b });
 
         // Merge block

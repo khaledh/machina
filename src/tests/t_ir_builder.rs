@@ -35,12 +35,22 @@ pub fn test_if_expr() {
 
     // Then block
     fb.select_block(then_b);
-    let then_result = fb.new_const_int(42, 32, false);
+    let then_result = fb.new_temp(IrType::Int {
+        bits: 32,
+        signed: false,
+    });
+    let then_const = fb.new_const_int(42, 32, false);
+    fb.move_to(then_result, then_const);
     fb.terminate(IrTerminator::Br { target: merge_b });
 
     // Else block
     fb.select_block(else_b);
-    let else_result = fb.new_const_int(99, 32, false);
+    let else_result = fb.new_temp(IrType::Int {
+        bits: 32,
+        signed: false,
+    });
+    let else_const = fb.new_const_int(99, 32, false);
+    fb.move_to(else_result, else_const);
     fb.terminate(IrTerminator::Br { target: merge_b });
 
     // Merge block
@@ -61,8 +71,8 @@ pub fn test_if_expr() {
 
     assert_eq!(function.blocks.len(), 4);
     assert_eq!(function.blocks[&IrBlockId(0)].insts.len(), 1);
-    assert_eq!(function.blocks[&IrBlockId(1)].insts.len(), 0);
-    assert_eq!(function.blocks[&IrBlockId(2)].insts.len(), 0);
+    assert_eq!(function.blocks[&IrBlockId(1)].insts.len(), 1);
+    assert_eq!(function.blocks[&IrBlockId(2)].insts.len(), 1);
     assert_eq!(function.blocks[&IrBlockId(3)].insts.len(), 1);
 
     // Output:

@@ -157,7 +157,7 @@ fn liveness_with_phi() {
     // join block
     b.select_block(join_id);
     let t3 = b.new_temp(u32_ty());
-    b.phi(t3, vec![(then_id, temp(0)), (else_id, temp(2))]);
+    b.phi(t3, vec![(then_id, t0), (else_id, t2)]);
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t3)),
