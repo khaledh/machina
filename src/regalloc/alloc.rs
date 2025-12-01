@@ -5,7 +5,7 @@ use crate::dataflow::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
 };
 use crate::ir::pos::{InstPos, RelInstPos};
-use crate::ir::types::{IrFunction, IrInst, IrOperand, IrTempId};
+use crate::ir::types::{IrConst, IrFunction, IrInst, IrOperand, IrTempId};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
@@ -294,20 +294,40 @@ impl<'a> RegAlloc<'a> {
     fn handle_call(&mut self, constr: &CallConstraint) {
         // 1. Move args into their respective registers before call
         for arg_constr in &constr.args {
-            if let IrOperand::Temp(temp_id) = arg_constr.operand {
-                let current_loc = match self.alloc_map.get(&temp_id) {
-                    Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
-                    Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
-                    None => panic!("Temp {} not found in alloc map", temp_id.id()),
-                };
-                let target_loc = Location::Reg(arg_constr.reg);
+            match arg_constr.operand {
+                IrOperand::Temp(temp_id) => {
+                    let current_loc = match self.alloc_map.get(&temp_id) {
+                        Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
+                        Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                        None => panic!("Temp {} not found in alloc map", temp_id.id()),
+                    };
+                    let target_loc = Location::Reg(arg_constr.reg);
 
-                // If not already in the target location, add a move
-                if current_loc != target_loc {
+                    // If not already in the target location, add a move
+                    if current_loc != target_loc {
+                        self.moves.add_inst_move(
+                            RelInstPos::Before(constr.pos),
+                            current_loc,
+                            target_loc,
+                        );
+                    }
+                }
+                IrOperand::Const(c) => {
+                    let value = match c {
+                        IrConst::Int { value, .. } => value as i64,
+                        IrConst::Bool(value) => {
+                            if value {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        IrConst::Unit => 0,
+                    };
                     self.moves.add_inst_move(
                         RelInstPos::Before(constr.pos),
-                        current_loc,
-                        target_loc,
+                        Location::Imm(value),
+                        Location::Reg(arg_constr.reg),
                     );
                 }
             }
@@ -447,7 +467,6 @@ impl<'a> RegAlloc<'a> {
     }
 
     fn add_return_moves(&mut self) {
-        // Note: this doesn't handle constant return operands; left for codegen to handle.
         for (block_id, ret_constr) in self.constraints.fn_return_constraints.iter() {
             let operand_loc = match ret_constr.operand {
                 IrOperand::Temp(temp_id) => match self.alloc_map.get(&temp_id) {
@@ -455,9 +474,22 @@ impl<'a> RegAlloc<'a> {
                     Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
                     None => panic!("Temp {} not found in alloc map", temp_id.id()),
                 },
-                IrOperand::Const(_) => {
-                    // Let codegen handle the constant return operand.
-                    continue;
+                IrOperand::Const(c) => {
+                    let value = match c {
+                        IrConst::Int { value, .. } => value as i64,
+                        IrConst::Bool(value) => {
+                            if value {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        IrConst::Unit => 0,
+                    };
+                    let loc = Location::Imm(value);
+                    self.moves
+                        .add_return_move(*block_id, loc, Location::Reg(ret_constr.reg));
+                    loc
                 }
             };
             if operand_loc != Location::Reg(ret_constr.reg) {

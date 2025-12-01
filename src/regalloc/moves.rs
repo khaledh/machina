@@ -10,6 +10,7 @@ use crate::regalloc::spill::StackSlotId;
 pub enum Location {
     Reg(Arm64Reg),
     Stack(StackSlotId),
+    Imm(i64),
 }
 
 impl fmt::Display for Location {
@@ -17,6 +18,7 @@ impl fmt::Display for Location {
         match self {
             Location::Reg(reg) => write!(f, "Reg({})", reg)?,
             Location::Stack(slot) => write!(f, "Stack({})", slot.0)?,
+            Location::Imm(value) => write!(f, "Imm({})", value)?,
         }
         Ok(())
     }

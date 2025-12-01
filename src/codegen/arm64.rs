@@ -7,7 +7,7 @@ use crate::ir::pos::InstPos;
 use crate::ir::types::{
     IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator,
 };
-use crate::regalloc::moves::Move;
+use crate::regalloc::moves::{Location, Move};
 use crate::regalloc::regs::Arm64Reg;
 use crate::regalloc::{AllocationResult, MappedTemp, StackSlotId};
 
@@ -376,11 +376,7 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
         match terminator {
-            IrTerminator::Ret { value } => {
-                // Handle constant return value
-                if let Some(IrOperand::Const(c)) = value {
-                    asm.push_str(&format!("  mov x0, #{}\n", c));
-                }
+            IrTerminator::Ret { .. } => {
                 asm.push_str(&self.emit_epilogue()?);
             }
             IrTerminator::Br { target } => {
@@ -452,6 +448,15 @@ impl<'a> FuncCodegen<'a> {
             }
             (Location::Stack(_), Location::Stack(_)) => {
                 return Err(CodegenError::StackToStackMove(mov.clone()));
+            }
+            (Location::Imm(from_imm), Location::Reg(to_reg)) => {
+                asm.push_str(&format!("  mov {}, #{}\n", to_reg, from_imm));
+            }
+            (from_loc, to_loc) => {
+                return Err(CodegenError::UnsupportedMove(
+                    from_loc.clone(),
+                    to_loc.clone(),
+                ));
             }
         }
         Ok(asm)
