@@ -34,7 +34,7 @@ fn compile_and_lower(source: &str) -> Result<IrFunction, LowerError> {
 #[test]
 fn test_lower_func() {
     let source = r#"
-        fn test() -> u32 {
+        fn test() -> u64 {
             var x = 20;
             x = x * 2;
             let y = if true { 2 } else { 3 };
@@ -45,7 +45,7 @@ fn test_lower_func() {
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
     // Output:
-    // fn test() -> u32 {
+    // fn test() -> u64 {
     // entry:
     //   %t0 = move const.20
     //   %t1 = binop.mul %t0, const.2 : u32
@@ -85,8 +85,8 @@ fn test_lower_func() {
     assert_eq!(merge_insts.len(), 2);
 
     // entry block
-    assert_move(&entry_insts[0], 0, const_u32(20));
-    assert_binary_op(&entry_insts[1], 1, BinaryOp::Mul, temp(0), const_u32(2));
+    assert_move(&entry_insts[0], 0, const_u64(20));
+    assert_binary_op(&entry_insts[1], 1, BinaryOp::Mul, temp(0), const_u64(2));
     assert_move(&entry_insts[2], 0, IrOperand::Temp(IrTempId(1)));
 
     // condbr in entry: constant condition, so just assert the targets
@@ -99,11 +99,11 @@ fn test_lower_func() {
     }
 
     // then block
-    assert_move(&then_block.insts()[0], 2, const_u32(2));
+    assert_move(&then_block.insts()[0], 2, const_u64(2));
     assert_br_to(&then_block.term(), merge_block.id());
 
     // else block
-    assert_move(&else_block.insts()[0], 3, const_u32(3));
+    assert_move(&else_block.insts()[0], 3, const_u64(3));
     assert_br_to(&else_block.term(), merge_block.id());
 
     // merge block
@@ -122,7 +122,7 @@ fn test_lower_func() {
 #[test]
 fn test_lower_while() {
     let source = r#"
-        fn test() -> u32 {
+        fn test() -> u64 {
             var x = 0;
             while x < 10 {
                 x = x + 1;
@@ -134,7 +134,7 @@ fn test_lower_while() {
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
     // Output:
-    // fn test() -> u32 {
+    // fn test() -> u64 {
     // entry:
     //   %t0 = move const.0
     //   br loop_header
@@ -171,7 +171,7 @@ fn test_lower_while() {
     assert_eq!(loop_after_insts.len(), 0);
 
     // entry block
-    assert_move(&entry_insts[0], 0, const_u32(0));
+    assert_move(&entry_insts[0], 0, const_u64(0));
     assert_br_to(&entry_block.term(), loop_header_block.id());
 
     // loop header block
@@ -180,7 +180,7 @@ fn test_lower_while() {
         1,
         BinaryOp::Lt,
         temp(0),
-        const_u32(10),
+        const_u64(10),
     );
     assert_cond_br(
         &loop_header_block.term(),
@@ -190,7 +190,7 @@ fn test_lower_while() {
     );
 
     // loop body block
-    assert_binary_op(&loop_body_insts[0], 2, BinaryOp::Add, temp(0), const_u32(1));
+    assert_binary_op(&loop_body_insts[0], 2, BinaryOp::Add, temp(0), const_u64(1));
     assert_move(&loop_body_insts[1], 0, IrOperand::Temp(IrTempId(2)));
     assert_br_to(&loop_body_block.term(), loop_header_block.id());
 
@@ -201,7 +201,7 @@ fn test_lower_while() {
 #[test]
 fn test_lower_func_with_params() {
     let source = r#"
-        fn test(a: u32, b: u32) -> u32 {
+        fn test(a: u64, b: u64) -> u64 {
             a + b
         }
     "#;
@@ -209,7 +209,7 @@ fn test_lower_func_with_params() {
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
     // Output:
-    // fn test(a: u32, b: u32) -> u32 {
+    // fn test(a: u64, b: u64) -> u64 {
     // entry:
     //   %t2 = binop.add %t0, %t1 : u32
     //   ret %t2
@@ -357,10 +357,10 @@ mod ir_assert {
         IrOperand::Temp(IrTempId(id))
     }
 
-    pub fn const_u32(value: u32) -> IrOperand {
+    pub fn const_u64(value: u32) -> IrOperand {
         IrOperand::Const(IrConst::Int {
             value: value as i64,
-            bits: 32,
+            bits: 64,
             signed: false,
         })
     }

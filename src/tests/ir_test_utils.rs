@@ -14,9 +14,9 @@ fn mk_builder() -> IrFunctionBuilder {
 
 // Helpers for common types and operands
 
-fn u32_ty() -> IrType {
+fn u64_ty() -> IrType {
     IrType::Int {
-        bits: 32,
+        bits: 64,
         signed: false,
     }
 }
@@ -30,10 +30,10 @@ fn unit_ty() -> IrType {
 }
 
 
-fn const_u32(value: i64) -> IrOperand {
+fn const_u64(value: i64) -> IrOperand {
     IrOperand::Const(IrConst::Int {
         value,
-        bits: 32,
+        bits: 64,
         signed: false,
     })
 }

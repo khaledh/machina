@@ -69,7 +69,7 @@ use crate::cfg::ControlFlowGraph;
 ///
 /// ## Constants
 ///
-/// The IR supports constants for the following types: u32, bool, and unit.
+/// The IR supports constants for the following types: u64, bool, and unit.
 ///
 /// ## Operations
 ///

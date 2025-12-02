@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Type::Unit)
             }
-            TK::Ident(name) if name == "u32" => Ok(Type::UInt32),
+            TK::Ident(name) if name == "u64" => Ok(Type::UInt64),
             TK::Ident(name) if name == "bool" => Ok(Type::Bool),
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
         };
@@ -353,7 +353,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expr {
                     id: self.id_gen.new_id(),
-                    kind: ExprKind::UInt32Lit(*value),
+                    kind: ExprKind::UInt64Lit(*value),
                     span,
                 })
             }

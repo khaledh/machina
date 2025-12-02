@@ -47,8 +47,8 @@ impl<'a> Lowerer<'a> {
 
     fn lower_type(&self, ty: &Type) -> IrType {
         match ty {
-            Type::UInt32 => IrType::Int {
-                bits: 32,
+            Type::UInt64 => IrType::Int {
+                bits: 64,
                 signed: false,
             },
             Type::Bool => IrType::Bool,
@@ -93,7 +93,7 @@ impl<'a> Lowerer<'a> {
         expr: &ast::Expr,
     ) -> Result<IrOperand, LowerError> {
         match &expr.kind {
-            ast::ExprKind::UInt32Lit(value) => Ok(fb.new_const_int(*value as i64, 32, false)),
+            ast::ExprKind::UInt64Lit(value) => Ok(fb.new_const_int(*value as i64, 64, false)),
             ast::ExprKind::BoolLit(value) => Ok(fb.new_const_bool(*value)),
             ast::ExprKind::UnitLit => Ok(fb.new_const_unit()),
             ast::ExprKind::BinOp { left, op, right } => self.lower_binary_op(fb, op, left, right),

@@ -9,9 +9,9 @@ mod tests {
 
     #[test]
     fn test_analyze_fn_params() {
-        let mut fb = IrFunctionBuilder::new("test".to_string(), u32_ty());
-        let p0 = fb.new_param(0, "a".to_string(), u32_ty());
-        let p1 = fb.new_param(1, "b".to_string(), u32_ty());
+        let mut fb = IrFunctionBuilder::new("test".to_string(), u64_ty());
+        let p0 = fb.new_param(0, "a".to_string(), u64_ty());
+        let p1 = fb.new_param(1, "b".to_string(), u64_ty());
         fb.terminate(IrTerminator::Ret { value: None });
         let func = fb.finish();
 
@@ -28,19 +28,19 @@ mod tests {
 #[test]
 fn test_analyze_call_constraints() {
     // Build a function that calls another function
-    let mut fb = IrFunctionBuilder::new("caller".to_string(), u32_ty());
+    let mut fb = IrFunctionBuilder::new("caller".to_string(), u64_ty());
 
     // Create two temps for arguments
-    let arg1 = fb.new_temp(u32_ty());
-    let arg2 = fb.new_temp(u32_ty());
+    let arg1 = fb.new_temp(u64_ty());
+    let arg2 = fb.new_temp(u64_ty());
 
     // Make a call: result = callee(arg1, arg2)
-    let result = fb.new_temp(u32_ty());
+    let result = fb.new_temp(u64_ty());
     fb.call(
         Some(result),
         "callee".to_string(),
         vec![temp_operand(arg1), temp_operand(arg2)],
-        u32_ty(),
+        u64_ty(),
     );
 
     fb.terminate(IrTerminator::Ret { value: None });

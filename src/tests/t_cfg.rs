@@ -17,7 +17,7 @@ fn mk_builder() -> IrFunctionBuilder {
 
 // Helpers for common types and operands
 
-fn u32_ty() -> IrType {
+fn u64_ty() -> IrType {
     IrType::Int {
         bits: 32,
         signed: false,
@@ -28,7 +28,7 @@ fn bool_ty() -> IrType {
     IrType::Bool
 }
 
-fn const_u32(value: i64) -> IrOperand {
+fn const_u64(value: i64) -> IrOperand {
     IrOperand::Const(IrConst::Int {
         value,
         bits: 32,
@@ -54,8 +54,8 @@ fn simple_linear_cfg() {
     // - pred: entry -> []
     let mut b = mk_builder();
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
     b.terminate(IrTerminator::Ret {
         value: Some(temp(0)),
     });
@@ -90,8 +90,8 @@ fn cfg_with_unconditional_branch() {
     // - pred: entry -> [], then -> [entry]
     let mut b = mk_builder();
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
     let then_id = b.new_block("then".to_string());
     b.terminate(IrTerminator::Br { target: then_id });
@@ -143,10 +143,10 @@ fn cfg_with_conditional_branch() {
     let then_id = b.new_block("then".to_string());
     let else_id = b.new_block("else".to_string());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
     let t1 = b.new_temp(bool_ty());
-    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u32(2));
+    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(2));
     b.terminate(IrTerminator::CondBr {
         cond: temp(1),
         then_b: then_id,
@@ -155,12 +155,12 @@ fn cfg_with_conditional_branch() {
 
     b.select_block(then_id);
     b.terminate(IrTerminator::Ret {
-        value: Some(const_u32(10)),
+        value: Some(const_u64(10)),
     });
 
     b.select_block(else_id);
     b.terminate(IrTerminator::Ret {
-        value: Some(const_u32(20)),
+        value: Some(const_u64(20)),
     });
 
     let func = b.finish();
@@ -211,10 +211,10 @@ fn cfg_with_join_block() {
     let else_id = b.new_block("else".to_string());
     let join_id = b.new_block("join".to_string());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
     let t1 = b.new_temp(bool_ty());
-    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u32(2));
+    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(2));
     b.terminate(IrTerminator::CondBr {
         cond: temp(1),
         then_b: then_id,
@@ -229,7 +229,7 @@ fn cfg_with_join_block() {
 
     b.select_block(join_id);
     b.terminate(IrTerminator::Ret {
-        value: Some(const_u32(0)),
+        value: Some(const_u64(0)),
     });
 
     let func = b.finish();
@@ -353,10 +353,10 @@ fn cfg_with_loop() {
 
     // Loop header
     b.select_block(loop_header_id);
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(0));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(0));
     let t1 = b.new_temp(bool_ty());
-    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u32(10));
+    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(10));
     b.terminate(IrTerminator::CondBr {
         cond: temp(1),
         then_b: loop_body_id,

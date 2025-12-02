@@ -176,7 +176,7 @@ impl SymbolResolver {
     fn check_expr(&mut self, expr: &ast::Expr) {
         match expr {
             ast::Expr {
-                kind: ExprKind::UInt32Lit(_),
+                kind: ExprKind::UInt64Lit(_),
                 ..
             } => {}
             ast::Expr {

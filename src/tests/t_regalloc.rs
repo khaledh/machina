@@ -24,10 +24,10 @@ fn test_regalloc_empty_function() {
 
 #[test]
 fn test_regalloc_simple_function() {
-    let mut b = IrFunctionBuilder::new("test".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t0)),
@@ -51,13 +51,13 @@ fn test_regalloc_simple_function_with_two_temps() {
     //   %t1 = const.u32 2
     //   ret %t1
     // }
-    let mut b = IrFunctionBuilder::new("test".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
-    let t1 = b.new_temp(u32_ty());
-    b.move_to(t1, const_u32(2));
+    let t1 = b.new_temp(u64_ty());
+    b.move_to(t1, const_u64(2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t1)),
@@ -84,12 +84,12 @@ fn test_regalloc_overlapping_temps_use_different_regs() {
     //   %t0 = const.u32 1       // live at position 0
     //   %t1 = binop.add t0, t0  // uses t0; t0 and t1 overlap
     //   ret %t1
-    let mut b = IrFunctionBuilder::new("test".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
-    let t1 = b.new_temp(u32_ty());
+    let t1 = b.new_temp(u64_ty());
     // This ensures t0 is still live when t1 is defined.
     b.binary_op(t1, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t0));
 
@@ -121,16 +121,16 @@ fn test_regalloc_reuses_single_register_without_spilling() {
     // Build a function with three independent temps but only one allocatable
     // register; since their lifetimes do not overlap, all of them should fit
     // in that single register without any spills.
-    let mut b = IrFunctionBuilder::new("test".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
-    let t1 = b.new_temp(u32_ty());
-    b.move_to(t1, const_u32(2));
+    let t1 = b.new_temp(u64_ty());
+    b.move_to(t1, const_u64(2));
 
-    let t2 = b.new_temp(u32_ty());
-    b.move_to(t2, const_u32(3));
+    let t2 = b.new_temp(u64_ty());
+    b.move_to(t2, const_u64(3));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t2)),
@@ -152,13 +152,13 @@ fn test_regalloc_reuses_single_register_without_spilling() {
 #[test]
 fn test_regalloc_default_reg_set_is_used() {
     // Smoke test for RegAlloc::alloc using its built-in register set.
-    let mut b = IrFunctionBuilder::new("test".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
-    let t1 = b.new_temp(u32_ty());
-    b.move_to(t1, const_u32(2));
+    let t1 = b.new_temp(u64_ty());
+    b.move_to(t1, const_u64(2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t1)),
@@ -187,21 +187,21 @@ fn test_regalloc_spills_multiple_temps_with_one_reg() {
     //   %t3 = binop.add t0, t1
     //   %t4 = binop.add t3, t2
     //   ret %t4
-    let mut b = IrFunctionBuilder::new("spill_many".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("spill_many".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
-    let t1 = b.new_temp(u32_ty());
-    b.move_to(t1, const_u32(2));
+    let t1 = b.new_temp(u64_ty());
+    b.move_to(t1, const_u64(2));
 
-    let t2 = b.new_temp(u32_ty());
-    b.move_to(t2, const_u32(3));
+    let t2 = b.new_temp(u64_ty());
+    b.move_to(t2, const_u64(3));
 
-    let t3 = b.new_temp(u32_ty());
+    let t3 = b.new_temp(u64_ty());
     b.binary_op(t3, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t1));
 
-    let t4 = b.new_temp(u32_ty());
+    let t4 = b.new_temp(u64_ty());
     b.binary_op(t4, BinaryOp::Add, IrOperand::Temp(t3), IrOperand::Temp(t2));
 
     b.terminate(IrTerminator::Ret {
@@ -247,18 +247,18 @@ fn test_regalloc_spills_victim_when_new_interval_ends_earlier() {
     // - t0 is allocated first, then spilled when t1 (shorter interval) arrives
     //   (exercising the "spill victim, keep current in reg" path).
     // - Later temps force additional spills, but t1 and t3 end up in a reg.
-    let mut b = IrFunctionBuilder::new("spill_victim".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("spill_victim".to_string(), u64_ty());
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
-    let t1 = b.new_temp(u32_ty());
-    b.move_to(t1, const_u32(2));
+    let t1 = b.new_temp(u64_ty());
+    b.move_to(t1, const_u64(2));
 
-    let t2 = b.new_temp(u32_ty());
+    let t2 = b.new_temp(u64_ty());
     b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t1), IrOperand::Temp(t1));
 
-    let t3 = b.new_temp(u32_ty());
+    let t3 = b.new_temp(u64_ty());
     b.binary_op(t3, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t2));
 
     b.terminate(IrTerminator::Ret {
@@ -310,7 +310,7 @@ fn test_regalloc_if_expression_shape() {
     // join:
     //   %t3 = phi [(entry, t1), (else, t2)]
     //   ret %t3
-    let mut b = IrFunctionBuilder::new("if_expr".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("if_expr".to_string(), u64_ty());
 
     // entry
     let cond = b.new_temp(bool_ty());
@@ -331,19 +331,19 @@ fn test_regalloc_if_expression_shape() {
 
     // then block
     b.select_block(then_id);
-    let t_then = b.new_temp(u32_ty());
-    b.move_to(t_then, const_u32(1));
+    let t_then = b.new_temp(u64_ty());
+    b.move_to(t_then, const_u64(1));
     b.terminate(IrTerminator::Br { target: join_id });
 
     // else block
     b.select_block(else_id);
-    let t_else = b.new_temp(u32_ty());
-    b.move_to(t_else, const_u32(2));
+    let t_else = b.new_temp(u64_ty());
+    b.move_to(t_else, const_u64(2));
     b.terminate(IrTerminator::Br { target: join_id });
 
     // join block
     b.select_block(join_id);
-    let t_phi = b.new_temp(u32_ty());
+    let t_phi = b.new_temp(u64_ty());
     b.phi(t_phi, vec![(then_id, t_then), (else_id, t_else)]);
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t_phi)),
@@ -403,11 +403,11 @@ fn test_regalloc_while_expression_shape() {
     //
     // exit:
     //   ret %i
-    let mut b = IrFunctionBuilder::new("while_expr".to_string(), u32_ty());
+    let mut b = IrFunctionBuilder::new("while_expr".to_string(), u64_ty());
 
     // entry
-    let i0 = b.new_temp(u32_ty());
-    b.move_to(i0, const_u32(0));
+    let i0 = b.new_temp(u64_ty());
+    b.move_to(i0, const_u64(0));
     let loop_header = b.new_block("loop_header".to_string());
     b.terminate(IrTerminator::Br {
         target: loop_header,
@@ -419,14 +419,14 @@ fn test_regalloc_while_expression_shape() {
     let exit = b.new_block("exit".to_string());
 
     // Temps representing the loop-carried value on entry/after body.
-    let i = b.new_temp(u32_ty()); // value visible in the header / exit
-    let i_next = b.new_temp(u32_ty()); // value produced by the body
+    let i = b.new_temp(u64_ty()); // value visible in the header / exit
+    let i_next = b.new_temp(u64_ty()); // value produced by the body
 
     // Note: predecessor blocks are (entry, loop_body)
     b.phi(i, vec![(IrBlockId(0), i0), (loop_body, i_next)]);
 
-    let three = b.new_temp(u32_ty());
-    b.move_to(three, const_u32(3));
+    let three = b.new_temp(u64_ty());
+    b.move_to(three, const_u64(3));
 
     let cond = b.new_temp(bool_ty());
     b.binary_op(
@@ -444,8 +444,8 @@ fn test_regalloc_while_expression_shape() {
 
     // loop_body
     b.select_block(loop_body);
-    let one = b.new_temp(u32_ty());
-    b.move_to(one, const_u32(1));
+    let one = b.new_temp(u64_ty());
+    b.move_to(one, const_u64(1));
 
     b.binary_op(
         i_next,
@@ -485,16 +485,16 @@ fn test_regalloc_while_expression_shape() {
 #[test]
 fn test_call_no_arg_moves() {
     // foo(x, y) calls bar(x, y) - no shuffling needed
-    let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
-    let x = fb.new_param(0, "x".to_string(), u32_ty()); // X0
-    let y = fb.new_param(1, "y".to_string(), u32_ty()); // X1
+    let mut fb = IrFunctionBuilder::new("foo".to_string(), u64_ty());
+    let x = fb.new_param(0, "x".to_string(), u64_ty()); // X0
+    let y = fb.new_param(1, "y".to_string(), u64_ty()); // X1
 
-    let result = fb.new_temp(u32_ty());
+    let result = fb.new_temp(u64_ty());
     fb.call(
         Some(result),
         "bar".to_string(),
         vec![temp_operand(x), temp_operand(y)], // Same order!
-        u32_ty(),
+        u64_ty(),
     );
 
     fb.terminate(IrTerminator::Ret {
@@ -517,18 +517,18 @@ fn test_call_no_arg_moves() {
 #[test]
 fn test_call_result_already_in_x0() {
     // Result of call is used as arg to another call - stays in X0
-    let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
+    let mut fb = IrFunctionBuilder::new("foo".to_string(), u64_ty());
 
-    let result1 = fb.new_temp(u32_ty());
-    fb.call(Some(result1), "bar".to_string(), vec![], u32_ty());
+    let result1 = fb.new_temp(u64_ty());
+    fb.call(Some(result1), "bar".to_string(), vec![], u64_ty());
 
     // Use result1 as first arg to another call (should stay in X0)
-    let result2 = fb.new_temp(u32_ty());
+    let result2 = fb.new_temp(u64_ty());
     fb.call(
         Some(result2),
         "baz".to_string(),
         vec![temp_operand(result1)],
-        u32_ty(),
+        u64_ty(),
     );
 
     fb.terminate(IrTerminator::Ret { value: None });
@@ -550,14 +550,14 @@ fn test_call_result_already_in_x0() {
 
 #[test]
 fn test_call_with_const_args() {
-    let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
+    let mut fb = IrFunctionBuilder::new("foo".to_string(), u64_ty());
 
-    let result = fb.new_temp(u32_ty());
+    let result = fb.new_temp(u64_ty());
     fb.call(
         Some(result),
         "bar".to_string(),
-        vec![const_u32(42), const_u32(100)],
-        u32_ty(),
+        vec![const_u64(42), const_u64(100)],
+        u64_ty(),
     );
 
     fb.terminate(IrTerminator::Ret {
@@ -568,12 +568,13 @@ fn test_call_with_const_args() {
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc();
 
-    // Constants don't generate moves (they'll be loaded directly in codegen)
+    // Constants need to be moved into parameter registers (X0, X1, etc.)
+    // So we expect 2 before_moves for the 2 constant arguments
     let moves = alloc_result
         .moves
         .get_inst_moves(InstPos::new(IrBlockId(0), 0));
     if let Some(moves) = moves {
-        assert_eq!(moves.before_moves.len(), 0);
+        assert_eq!(moves.before_moves.len(), 2);
     }
 }
 
@@ -586,20 +587,20 @@ fn test_multiple_calls() {
     //   %t2 = fn3(%t0, %t1) : u32
     //   ret %t2
     // }
-    let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
+    let mut fb = IrFunctionBuilder::new("foo".to_string(), u64_ty());
 
-    let t0 = fb.new_temp(u32_ty());
-    fb.call(Some(t0), "fn1".to_string(), vec![], u32_ty());
+    let t0 = fb.new_temp(u64_ty());
+    fb.call(Some(t0), "fn1".to_string(), vec![], u64_ty());
 
-    let t1 = fb.new_temp(u32_ty());
-    fb.call(Some(t1), "fn2".to_string(), vec![], u32_ty());
+    let t1 = fb.new_temp(u64_ty());
+    fb.call(Some(t1), "fn2".to_string(), vec![], u64_ty());
 
-    let t2 = fb.new_temp(u32_ty());
+    let t2 = fb.new_temp(u64_ty());
     fb.call(
         Some(t2),
         "fn3".to_string(),
         vec![temp_operand(t0), temp_operand(t1)],
-        u32_ty(),
+        u64_ty(),
     );
 
     fb.terminate(IrTerminator::Ret {
@@ -636,15 +637,15 @@ fn test_call_arg_swap() {
     //   ret %t2
     // }
     let mut fb = IrFunctionBuilder::new("foo".to_string(), unit_ty());
-    let x = fb.new_param(0, "x".to_string(), u32_ty()); // -> X0
-    let y = fb.new_param(1, "y".to_string(), u32_ty()); // -> X1
+    let x = fb.new_param(0, "x".to_string(), u64_ty()); // -> X0
+    let y = fb.new_param(1, "y".to_string(), u64_ty()); // -> X1
 
-    let result = fb.new_temp(u32_ty());
+    let result = fb.new_temp(u64_ty());
     fb.call(
         Some(result),
         "bar".to_string(),
         vec![temp_operand(y), temp_operand(x)], // Swapped!
-        u32_ty(),
+        u64_ty(),
     );
 
     fb.terminate(IrTerminator::Ret {
@@ -683,18 +684,18 @@ fn test_call_arg_swap() {
 #[test]
 #[should_panic(expected = "Invalid arm64 param index: 8")]
 fn test_call_with_9_args() {
-    let mut fb = IrFunctionBuilder::new("foo".to_string(), u32_ty());
+    let mut fb = IrFunctionBuilder::new("foo".to_string(), u64_ty());
 
     // Create 9 temp arguments
     let args = (0..9)
         .map(|_| {
-            let t = fb.new_temp(u32_ty());
+            let t = fb.new_temp(u64_ty());
             temp_operand(t)
         })
         .collect();
 
-    let result = fb.new_temp(u32_ty());
-    fb.call(Some(result), "bar".to_string(), args, u32_ty());
+    let result = fb.new_temp(u64_ty());
+    fb.call(Some(result), "bar".to_string(), args, u64_ty());
 
     fb.terminate(IrTerminator::Ret { value: None });
     let func = fb.finish();
@@ -715,20 +716,20 @@ fn test_caller_saved_preservation() {
     let mut fb = IrFunctionBuilder::new("test".to_string(), unit_ty());
 
     // Create and use t0 which will be live across a call
-    let t0 = fb.new_temp(u32_ty()); // X0
-    fb.move_to(t0, const_u32(42));
+    let t0 = fb.new_temp(u64_ty()); // X0
+    fb.move_to(t0, const_u64(42));
 
     // Make a call (t0 should be preserved across it)
-    let t1 = fb.new_temp(u32_ty()); // X1
+    let t1 = fb.new_temp(u64_ty()); // X1
     fb.call(
         Some(t1),
         "foo".to_string(),
         vec![temp_operand(t0)],
-        u32_ty(),
+        u64_ty(),
     );
 
     // Use t0 after the call
-    let t2 = fb.new_temp(u32_ty()); // spilled (not enough registers)
+    let t2 = fb.new_temp(u64_ty()); // spilled (not enough registers)
     fb.binary_op(t2, BinaryOp::Add, temp_operand(t0), temp_operand(t1));
 
     fb.terminate(IrTerminator::Ret { value: None });

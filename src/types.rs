@@ -4,7 +4,7 @@ use std::fmt;
 pub enum Type {
     Unknown,
     Unit,
-    UInt32,
+    UInt64,
     Bool,
 }
 
@@ -13,7 +13,7 @@ impl fmt::Display for Type {
         match self {
             Type::Unknown => write!(f, "unknown"),
             Type::Unit => write!(f, "unit"),
-            Type::UInt32 => write!(f, "u32"),
+            Type::UInt64 => write!(f, "u64"),
             Type::Bool => write!(f, "bool"),
         }
     }
@@ -23,7 +23,7 @@ impl Type {
     pub fn size_of(&self) -> usize {
         match self {
             Type::Unit => 0,
-            Type::UInt32 => 4,
+            Type::UInt64 => 8,
             Type::Bool => 1,
             Type::Unknown => panic!("Unknown type"),
         }
@@ -32,7 +32,7 @@ impl Type {
     pub fn align_of(&self) -> usize {
         match self {
             Type::Unit => 1,
-            Type::UInt32 => 4,
+            Type::UInt64 => 8,
             Type::Bool => 1,
             Type::Unknown => panic!("Unknown type"),
         }

@@ -23,7 +23,7 @@ pub enum TokenKind {
     #[display("{0}")]
     Ident(String),
     #[display("{0}")]
-    IntLit(u32),
+    IntLit(u64),
     #[display("(")]
     LParen,
     #[display(")")]
@@ -156,7 +156,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 let value = num_str
-                    .parse::<u32>()
+                    .parse::<u64>()
                     .map_err(|e| LexError::InvalidInteger(e, Span::new(start, self.pos)))?;
                 Ok(TokenKind::IntLit(value))
             }

@@ -29,15 +29,15 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn inc(a: u32) -> u32 {
+fn inc(a: u64) -> u64 {
     a + 1
 }
 
-fn ge(a: u32, b: u32) -> bool {
+fn ge(a: u64, b: u64) -> bool {
     a >= b
 }
 
-fn main() -> u32 {
+fn main() -> u64 {
     if ge(inc(41), 42) {
         42 / 2
     } else {

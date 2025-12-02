@@ -14,8 +14,8 @@ fn gen_kill_simple_block() {
     //   ret %t0
     let mut b = mk_builder();
 
-    let t0 = b.new_temp(u32_ty());
-    b.binary_op(t0, BinaryOp::Add, const_u32(1), const_u32(2));
+    let t0 = b.new_temp(u64_ty());
+    b.binary_op(t0, BinaryOp::Add, const_u64(1), const_u64(2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(temp(0)),
@@ -53,8 +53,8 @@ fn liveness_across_branch() {
     // - t0 live-out of entry and live-in to then.
     let mut b = mk_builder();
 
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
 
     let then_id = b.new_block("then".to_string());
 
@@ -62,10 +62,10 @@ fn liveness_across_branch() {
 
     // then block
     b.select_block(then_id);
-    let t1 = b.new_temp(u32_ty());
-    b.move_to(t1, const_u32(2));
-    let t2 = b.new_temp(u32_ty());
-    b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t0), const_u32(2));
+    let t1 = b.new_temp(u64_ty());
+    b.move_to(t1, const_u64(2));
+    let t2 = b.new_temp(u64_ty());
+    b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t0), const_u64(2));
     b.terminate(IrTerminator::Ret {
         value: Some(temp(2)),
     });
@@ -134,10 +134,10 @@ fn liveness_with_phi() {
     let join_id = b.new_block("join".to_string());
 
     // entry block
-    let t0 = b.new_temp(u32_ty());
-    b.move_to(t0, const_u32(1));
+    let t0 = b.new_temp(u64_ty());
+    b.move_to(t0, const_u64(1));
     let t1 = b.new_temp(bool_ty());
-    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u32(2));
+    b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(2));
     b.terminate(IrTerminator::CondBr {
         cond: IrOperand::Temp(t1),
         then_b: then_id,
@@ -150,13 +150,13 @@ fn liveness_with_phi() {
 
     // else block
     b.select_block(else_id);
-    let t2 = b.new_temp(u32_ty());
-    b.binary_op(t2, BinaryOp::Add, temp(0), const_u32(1));
+    let t2 = b.new_temp(u64_ty());
+    b.binary_op(t2, BinaryOp::Add, temp(0), const_u64(1));
     b.terminate(IrTerminator::Br { target: join_id });
 
     // join block
     b.select_block(join_id);
-    let t3 = b.new_temp(u32_ty());
+    let t3 = b.new_temp(u64_ty());
     b.phi(t3, vec![(then_id, t0), (else_id, t2)]);
 
     b.terminate(IrTerminator::Ret {

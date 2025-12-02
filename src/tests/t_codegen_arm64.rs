@@ -169,12 +169,12 @@ fn test_simple_addition() {
     // }
     let mut builder = mk_builder();
 
-    let five = builder.new_temp(u32_ty());
-    let ten = builder.new_temp(u32_ty());
-    let result = builder.new_temp(u32_ty());
+    let five = builder.new_temp(u64_ty());
+    let ten = builder.new_temp(u64_ty());
+    let result = builder.new_temp(u64_ty());
 
-    builder.move_to(five, const_u32(5));
-    builder.move_to(ten, const_u32(10));
+    builder.move_to(five, const_u64(5));
+    builder.move_to(ten, const_u64(10));
     builder.binary_op(result, BinaryOp::Add, temp_operand(five), temp_operand(ten));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
@@ -216,17 +216,17 @@ fn test_function_call() {
     // }
     let mut builder = mk_builder();
 
-    let arg1 = builder.new_temp(u32_ty());
-    let arg2 = builder.new_temp(u32_ty());
-    let result = builder.new_temp(u32_ty());
+    let arg1 = builder.new_temp(u64_ty());
+    let arg2 = builder.new_temp(u64_ty());
+    let result = builder.new_temp(u64_ty());
 
-    builder.move_to(arg1, const_u32(5));
-    builder.move_to(arg2, const_u32(10));
+    builder.move_to(arg1, const_u64(5));
+    builder.move_to(arg2, const_u64(10));
     builder.call(
         Some(result),
         "callee".to_string(),
         vec![temp_operand(arg1), temp_operand(arg2)],
-        u32_ty(),
+        u64_ty(),
     );
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),

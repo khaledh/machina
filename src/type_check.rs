@@ -323,13 +323,13 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
-                if left_type != Type::UInt32 || right_type != Type::UInt32 {
+                if left_type != Type::UInt64 || right_type != Type::UInt64 {
                     let span = Span::merge_all(vec![left.span, right.span]);
                     Err(TypeCheckError::ArithTypeMismatch(
                         left_type, right_type, span,
                     ))
                 } else {
-                    Ok(Type::UInt32)
+                    Ok(Type::UInt64)
                 }
             }
             BinaryOp::Eq
@@ -351,9 +351,9 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
         let result = match expr {
             Expr {
-                kind: ExprKind::UInt32Lit(_),
+                kind: ExprKind::UInt64Lit(_),
                 ..
-            } => Ok(Type::UInt32),
+            } => Ok(Type::UInt64),
 
             Expr {
                 kind: ExprKind::BoolLit(_),

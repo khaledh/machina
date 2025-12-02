@@ -33,7 +33,7 @@ pub struct Expr {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
-    UInt32Lit(u32),
+    UInt64Lit(u64),
     BoolLit(bool),
     UnitLit,
     BinOp {
@@ -143,8 +143,8 @@ impl Expr {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
-            ExprKind::UInt32Lit(value) => {
-                writeln!(f, "{}UInt32Lit({}) [{}]", pad, value, self.id)?;
+            ExprKind::UInt64Lit(value) => {
+                writeln!(f, "{}UInt64Lit({}) [{}]", pad, value, self.id)?;
             }
             ExprKind::BoolLit(value) => {
                 writeln!(f, "{}BoolLit({}) [{}]", pad, value, self.id)?;
