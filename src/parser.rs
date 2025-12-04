@@ -21,6 +21,9 @@ pub enum ParseError {
 
     #[error("Expected primary expression, found: {0}")]
     ExpectedPrimary(Token),
+
+    #[error("Expected integer literal, found: {0}")]
+    ExpectedIntLit(Token),
 }
 
 impl ParseError {
@@ -31,6 +34,7 @@ impl ParseError {
             ParseError::ExpectedIdent(token) => token.span,
             ParseError::ExpectedType(token) => token.span,
             ParseError::ExpectedPrimary(token) => token.span,
+            ParseError::ExpectedIntLit(token) => token.span,
         }
     }
 }
@@ -115,6 +119,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_int_lit(&mut self) -> Result<u64, ParseError> {
+        if let TK::IntLit(value) = &self.curr_token.kind {
+            self.advance();
+            Ok(*value)
+        } else {
+            Err(ParseError::ExpectedIntLit(self.curr_token.clone()))
+        }
+    }
+
     fn parse_list<T>(
         &mut self,
         sep_token: TokenKind,
@@ -178,6 +191,24 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        // Parse simple type
+        let mut typ = self.parse_simple_type()?;
+
+        // Check for array type
+        if self.curr_token.kind == TK::LBracket {
+            self.advance();
+            let len = self.parse_int_lit()?;
+            self.consume(&TK::RBracket)?;
+            typ = Type::Array {
+                elem_ty: Box::new(typ),
+                len: len as usize,
+            };
+        }
+
+        Ok(typ)
+    }
+
+    fn parse_simple_type(&mut self) -> Result<Type, ParseError> {
         let result = match &self.curr_token.kind {
             TK::LParen if self.peek().map(|t| &t.kind) == Some(&TK::RParen) => {
                 self.advance();
@@ -196,21 +227,27 @@ impl<'a> Parser<'a> {
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume(&TK::LBrace)?;
+
         let mut items = Vec::new();
         while self.curr_token.kind != TK::RBrace {
             let expr = match &self.curr_token.kind {
                 TK::Ident(name) if name == "let" => self.parse_let()?,
                 TK::Ident(name) if name == "var" => self.parse_var()?,
-                TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::Equals) => {
-                    self.parse_assign()?
+                _ => {
+                    let expr = self.parse_expr(0)?;
+                    if self.curr_token.kind == TK::Equals {
+                        self.parse_assign(expr)?
+                    } else {
+                        expr
+                    }
                 }
-                _ => self.parse_expr(0)?,
             };
             items.push(expr);
             if self.curr_token.kind == TK::Semicolon {
                 self.advance();
             }
         }
+
         self.consume(&TK::RBrace)?;
         Ok(Expr {
             id: self.id_gen.new_id(),
@@ -251,15 +288,14 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_assign(&mut self) -> Result<Expr, ParseError> {
+    fn parse_assign(&mut self, assignee: Expr) -> Result<Expr, ParseError> {
         let marker = self.mark();
-        let name = self.parse_ident()?;
         self.consume(&TK::Equals)?;
         let value = self.parse_expr(0)?;
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Assign {
-                name,
+                assignee: Box::new(assignee),
                 value: Box::new(value),
             },
             span: self.close(marker),
@@ -299,34 +335,51 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_call(&mut self) -> Result<Expr, ParseError> {
+    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
-        let name = self.parse_ident()?;
-        self.consume(&TK::LParen)?;
-        let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
-        self.consume(&TK::RParen)?;
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::Call { name, args },
-            span: self.close(marker),
-        })
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            match self.curr_token.kind {
+                TK::LParen => {
+                    // Call expression
+                    let args =
+                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
+                    self.consume(&TK::RParen)?;
+                    expr = Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::Call {
+                            callee: Box::new(expr),
+                            args,
+                        },
+                        span: self.close(marker.clone()),
+                    };
+                }
+                TK::LBracket => {
+                    // Index expression
+                    self.consume(&TK::LBracket)?;
+                    let index = self.parse_expr(0)?;
+                    self.consume(&TK::RBracket)?;
+                    expr = Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::Index {
+                            target: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                        span: self.close(marker.clone()),
+                    };
+                }
+                _ => break,
+            }
+        }
+
+        Ok(expr)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match &self.curr_token.kind {
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
-            TK::Ident(_)
-                if matches!(
-                    self.peek(),
-                    Some(&Token {
-                        kind: TK::LParen,
-                        ..
-                    })
-                ) =>
-            {
-                self.parse_call()
-            }
             TK::Ident(name) => {
                 let span = self.curr_token.span;
                 self.advance();
@@ -387,6 +440,19 @@ impl<'a> Parser<'a> {
                 // Block expression
                 self.parse_block()
             }
+            TK::LBracket => {
+                // Array literal
+                let marker = self.mark();
+                self.advance(); // consume '['
+                let elems =
+                    self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+                self.consume(&TK::RBracket)?; // consume ']'
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::ArrayLit(elems),
+                    span: self.close(marker),
+                })
+            }
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
     }
@@ -405,7 +471,7 @@ impl<'a> Parser<'a> {
                 span: self.close(marker.clone()),
             }
         } else {
-            self.parse_primary()?
+            self.parse_postfix()?
         };
 
         while let Some((op, bp)) = Self::bin_op_from_token(&self.curr_token.kind) {

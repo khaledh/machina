@@ -24,6 +24,10 @@ pub enum TokenKind {
     Ident(String),
     #[display("{0}")]
     IntLit(u64),
+    #[display("[")]
+    LBracket,
+    #[display("]")]
+    RBracket,
     #[display("(")]
     LParen,
     #[display(")")]
@@ -137,10 +141,10 @@ impl<'a> Lexer<'a> {
             column: self.pos.column,
         };
         let kind = match self.source.peek() {
-            Some(&ch) if ch.is_alphabetic() => {
+            Some(&ch) if ch.is_alphabetic() || ch == '_' => {
                 let mut ident = String::new();
                 while let Some(&ch) = self.source.peek()
-                    && ch.is_alphanumeric()
+                    && (ch.is_alphanumeric() || ch == '_')
                 {
                     ident.push(ch);
                     self.advance();
@@ -188,6 +192,14 @@ impl<'a> Lexer<'a> {
             Some(&')') => {
                 self.advance();
                 Ok(TokenKind::RParen)
+            }
+            Some(&'[') => {
+                self.advance();
+                Ok(TokenKind::LBracket)
+            }
+            Some(&']') => {
+                self.advance();
+                Ok(TokenKind::RBracket)
             }
             Some(&',') => {
                 self.advance();

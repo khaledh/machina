@@ -30,6 +30,12 @@ pub enum LowerError {
 
     #[error("Mismatched branch types: Node {0} type {1} != Node {2} type {3}")]
     MismatchedBranchTypes(NodeId, Type, NodeId, Type),
+
+    #[error("Array is not a temp: Node {0}, Operand {1:?}")]
+    ArrayIsNotTemp(NodeId, IrOperand),
+
+    #[error("Unsupported assignee: Node {0}, Kind {1:?}")]
+    UnsupportedAssignee(NodeId, ast::ExprKind),
 }
 
 pub struct Lowerer<'a> {
@@ -57,6 +63,10 @@ impl<'a> Lowerer<'a> {
                 signed: false,
             },
             Type::Unknown => panic!("Unknown type"),
+            Type::Array { elem_ty, len } => IrType::Array {
+                elem_ty: Box::new(self.lower_type(elem_ty)),
+                len: *len,
+            },
         }
     }
 
@@ -87,6 +97,50 @@ impl<'a> Lowerer<'a> {
         Ok(fb.finish())
     }
 
+    fn lower_array_lit(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        elems: &Vec<ast::Expr>,
+    ) -> Result<IrOperand, LowerError> {
+        let array_ty = self.lower_type(&self.get_node_type(expr)?);
+        let array_temp = fb.new_temp(array_ty);
+
+        // Store each element at its index
+        for (i, elem) in elems.iter().enumerate() {
+            let elem_op = self.lower_expr(fb, elem)?;
+            let index_op = fb.new_const_int(i as i64, 64, false);
+            fb.store_element(array_temp, index_op, elem_op);
+        }
+
+        Ok(IrOperand::Temp(array_temp))
+    }
+
+    fn lower_index(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        target: &ast::Expr,
+        index: &ast::Expr,
+    ) -> Result<IrOperand, LowerError> {
+        let array_op = self.lower_expr(fb, target)?;
+        let index_op = self.lower_expr(fb, index)?;
+
+        // Extract the array temp from the operand
+        let array_temp = match array_op {
+            IrOperand::Temp(temp) => temp,
+            _ => return Err(LowerError::ArrayIsNotTemp(expr.id, array_op)),
+        };
+
+        // Create a new temp for the result
+        let result_ty = self.lower_type(&self.get_node_type(expr)?);
+        let result = fb.new_temp(result_ty);
+
+        fb.load_element(result, array_temp, index_op);
+
+        Ok(IrOperand::Temp(result))
+    }
+
     fn lower_expr(
         &mut self,
         fb: &mut IrFunctionBuilder,
@@ -101,7 +155,9 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::Block(body) => self.lower_block_into(fb, expr.id, body),
             ast::ExprKind::Let { name, value } => self.lower_let(fb, expr, name.clone(), value),
             ast::ExprKind::Var { name, value } => self.lower_var(fb, expr, name.clone(), value),
-            ast::ExprKind::Assign { value, .. } => self.lower_assign(fb, expr, value),
+            ast::ExprKind::Assign {
+                value, assignee, ..
+            } => self.lower_assign(fb, expr, assignee, value),
             ast::ExprKind::VarRef(_) => self.lower_var_ref(expr),
             ast::ExprKind::If {
                 cond,
@@ -109,7 +165,13 @@ impl<'a> Lowerer<'a> {
                 else_body,
             } => self.lower_if(fb, cond, then_body, else_body),
             ast::ExprKind::While { cond, body } => self.lower_while(fb, cond, body),
-            ast::ExprKind::Call { name, args } => self.lower_call(fb, expr, name.clone(), args),
+            ast::ExprKind::Call { callee, args } => match &callee.kind {
+                ast::ExprKind::VarRef(name) => self.lower_call(fb, expr, name.clone(), args),
+                _ => panic!("Unsupported callee: {:?}", callee.kind),
+            },
+            ast::ExprKind::ArrayLit(elems) => self.lower_array_lit(fb, expr, elems),
+            ast::ExprKind::Index { target, index } => self.lower_index(fb, expr, target, index),
+            _ => panic!("Unsupported expression: {:?}", expr.kind),
         }
     }
 
@@ -192,19 +254,43 @@ impl<'a> Lowerer<'a> {
         &mut self,
         fb: &mut IrFunctionBuilder,
         expr: &ast::Expr,
+        assignee: &ast::Expr,
         value: &ast::Expr,
     ) -> Result<IrOperand, LowerError> {
-        match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def) => {
-                let temp = match self.def_op.get(&def.id) {
-                    Some(IrOperand::Temp(temp)) => *temp,
-                    Some(op) => return Err(LowerError::DestIsNotTemp(expr.id, *op)),
+        match &assignee.kind {
+            ast::ExprKind::VarRef(_) => {
+                // Variable assignment
+                match self.ctx.def_map.lookup_def(expr.id) {
+                    Some(def) => {
+                        let temp = match self.def_op.get(&def.id) {
+                            Some(IrOperand::Temp(temp)) => *temp,
+                            Some(op) => return Err(LowerError::DestIsNotTemp(expr.id, *op)),
+                            None => return Err(LowerError::VarDefNotFound(expr.id)),
+                        };
+                        let value = self.lower_expr(fb, value)?;
+                        fb.move_to(temp, value);
+                    }
                     None => return Err(LowerError::VarDefNotFound(expr.id)),
-                };
-                let value = self.lower_expr(fb, value)?;
-                fb.move_to(temp, value);
+                }
             }
-            None => return Err(LowerError::VarDefNotFound(expr.id)),
+            ast::ExprKind::Index { target, index } => {
+                // Array element assignment
+                let array_op = self.lower_expr(fb, target)?;
+                let index_op = self.lower_expr(fb, index)?;
+                let value_op = self.lower_expr(fb, value)?;
+
+                let array_temp = match array_op {
+                    IrOperand::Temp(temp) => temp,
+                    _ => return Err(LowerError::ArrayIsNotTemp(expr.id, array_op)),
+                };
+                fb.store_element(array_temp, index_op, value_op);
+            }
+            _ => {
+                return Err(LowerError::UnsupportedAssignee(
+                    expr.id,
+                    assignee.kind.clone(),
+                ));
+            }
         }
         Ok(fb.new_const_unit())
     }

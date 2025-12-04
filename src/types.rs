@@ -1,11 +1,14 @@
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Unknown,
     Unit,
     UInt64,
     Bool,
+
+    // Compound Types
+    Array { elem_ty: Box<Type>, len: usize },
 }
 
 impl fmt::Display for Type {
@@ -15,6 +18,7 @@ impl fmt::Display for Type {
             Type::Unit => write!(f, "unit"),
             Type::UInt64 => write!(f, "u64"),
             Type::Bool => write!(f, "bool"),
+            Type::Array { elem_ty, len } => write!(f, "{}[{}]", elem_ty, len),
         }
     }
 }
@@ -25,6 +29,7 @@ impl Type {
             Type::Unit => 0,
             Type::UInt64 => 8,
             Type::Bool => 1,
+            Type::Array { elem_ty, len } => elem_ty.size_of() * len,
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -34,6 +39,7 @@ impl Type {
             Type::Unit => 1,
             Type::UInt64 => 8,
             Type::Bool => 1,
+            Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Unknown => panic!("Unknown type"),
         }
     }

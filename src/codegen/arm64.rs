@@ -5,7 +5,7 @@ use crate::ast::{BinaryOp as BOp, UnaryOp as UOp};
 use crate::context::LoweredRegAllocContext;
 use crate::ir::pos::InstPos;
 use crate::ir::types::{
-    IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator,
+    IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator, IrType,
 };
 use crate::regalloc::moves::{Location, Move};
 use crate::regalloc::regs::Arm64Reg;
@@ -36,6 +36,12 @@ pub enum CodegenError {
 
     #[error("Unsupported move: {0} -> {1}")]
     UnsupportedMove(Location, Location),
+
+    #[error("Array {0} should be allocated to stack, not register")]
+    ArrayIsNotStack(IrTempId),
+
+    #[error("Expected temp {0} to be an array, found {1}")]
+    TempIsNotArray(IrTempId, IrType),
 }
 
 // Controls how integer constants are encoded for a given instruction.
@@ -489,7 +495,180 @@ impl<'a> FuncCodegen<'a> {
                 // Phi nodes are handled by register allocator moves
                 // No code needs to be emitted here
             }
+            IrInst::StoreElement {
+                array,
+                index,
+                value,
+            } => {
+                asm.push_str(&self.emit_store_element(*array, index, value)?);
+            }
+            IrInst::LoadElement {
+                array,
+                index,
+                result,
+            } => {
+                asm.push_str(&self.emit_load_element(*result, array, index)?);
+            }
         }
+        Ok(asm)
+    }
+
+    pub fn emit_store_element(
+        &mut self,
+        array: IrTempId,
+        index: &IrOperand,
+        value: &IrOperand,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+
+        // Get the array stack slot
+        let array_slot = match self.alloc_result.alloc_map.get(&array) {
+            Some(MappedTemp::Stack(slot)) => *slot,
+            Some(MappedTemp::Reg(_)) => return Err(CodegenError::ArrayIsNotStack(array)),
+            None => return Err(CodegenError::TempNotFound(array.id())),
+        };
+
+        // Get the element type and size
+        let array_ty = self.func.temp_type(array);
+        let elem_ty = match array_ty {
+            IrType::Array { elem_ty, .. } => elem_ty,
+            _ => return Err(CodegenError::TempIsNotArray(array, array_ty.clone())),
+        };
+        let elem_size = elem_ty.size_of();
+
+        let array_base = array_slot.offset_bytes();
+
+        match index {
+            IrOperand::Const(IrConst::Int { value: idx, .. }) => {
+                // Constant index - compute offset at compile time
+                let elem_offset = array_base + (*idx as u32 * elem_size as u32);
+                match value {
+                    IrOperand::Temp(temp) => {
+                        let value_reg = self.get_reg(temp)?;
+                        asm.push_str(&format!("  str {}, [sp, #{}]\n", value_reg, elem_offset));
+                    }
+                    IrOperand::Const(c) => {
+                        // Materialize the constant into a scratch register
+                        let op_reg = self.operand_for_int_with_policy(
+                            c.int_value(),
+                            ImmPolicy::RegOnly,
+                            &mut asm,
+                            0,
+                        );
+                        asm.push_str(&format!("  str {}, [sp, #{}]\n", op_reg, elem_offset));
+                    }
+                }
+            }
+            IrOperand::Temp(temp) => {
+                // Dynamic index - compute offset at runtime
+                let index_reg = self.get_reg(temp)?;
+                let elem_size_reg = self.operand_for_int_with_policy(
+                    elem_size as i64,
+                    ImmPolicy::RegOnly,
+                    &mut asm,
+                    0,
+                );
+                let elem_offset_reg = "x17"; // TODO: rework how we allocate scratch registers
+                asm.push_str(&format!(
+                    "  mul {}, {}, {}\n",
+                    elem_offset_reg, index_reg, elem_size_reg
+                ));
+                asm.push_str(&format!("  add {}, sp, #{}\n", elem_offset_reg, array_base));
+
+                // Store the value to the computed offset
+                match value {
+                    IrOperand::Temp(temp) => {
+                        let value_reg = self.get_reg(temp)?;
+                        asm.push_str(&format!(
+                            "  str {}, [{}]\n",
+                            value_reg, elem_offset_reg
+                        ));
+                    }
+                    IrOperand::Const(c) => {
+                        let value_reg = self.operand_for_int_with_policy(
+                            c.int_value(),
+                            ImmPolicy::RegOnly,
+                            &mut asm,
+                            0,
+                        );
+                        asm.push_str(&format!(
+                            "  str {}, [{}]\n",
+                            value_reg, elem_offset_reg
+                        ));
+                    }
+                }
+            }
+            _ => todo!("handle other constant operands"),
+        }
+
+        Ok(asm)
+    }
+
+    pub fn emit_load_element(
+        &mut self,
+        result: IrTempId,
+        array: IrTempId,
+        index: &IrOperand,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+
+        // Get the result register
+        let result_reg = self.get_reg(result)?;
+
+        // Get the array stack slot
+        let array_slot = match self.alloc_result.alloc_map.get(&array) {
+            Some(MappedTemp::Stack(slot)) => *slot,
+            Some(MappedTemp::Reg(_)) => return Err(CodegenError::ArrayIsNotStack(array)),
+            None => return Err(CodegenError::TempNotFound(array.id())),
+        };
+
+        // Get the element type and size
+        let array_ty = self.func.temp_type(array);
+        let elem_ty = match array_ty {
+            IrType::Array { elem_ty, .. } => elem_ty,
+            _ => return Err(CodegenError::TempIsNotArray(array, array_ty.clone())),
+        };
+        let elem_size = elem_ty.size_of();
+
+        let array_base = array_slot.offset_bytes();
+
+        match index {
+            IrOperand::Const(IrConst::Int { value: idx, .. }) => {
+                // Constant index - compute offset at compile time
+                let elem_offset = array_base + (*idx as u32 * elem_size as u32);
+                asm.push_str(&format!("  ldr {}, [sp, #{}]\n", result_reg, elem_offset));
+            }
+            IrOperand::Temp(temp) => {
+                // Dynamic index - compute offset at runtime
+                let index_reg = self.get_reg(temp)?;
+                let elem_size_reg = self.operand_for_int_with_policy(
+                    elem_size as i64,
+                    ImmPolicy::RegOnly,
+                    &mut asm,
+                    0,
+                );
+                let elem_offset_reg = "x17"; // TODO: rework how we allocate scratch registers
+                asm.push_str(&format!(
+                    "  mul {}, {}, {}\n",
+                    elem_offset_reg, index_reg, elem_size_reg
+                ));
+                asm.push_str(&format!("  add {}, sp, #{}\n", elem_offset_reg, array_base));
+
+                // Load the value from the computed offset
+                let elem_reg = self.operand_for_int_with_policy(
+                    elem_size as i64,
+                    ImmPolicy::RegOnly,
+                    &mut asm,
+                    0,
+                );
+                asm.push_str(&format!(
+                    "  ldr {}, [sp, #{}]\n",
+                    result_reg, elem_offset_reg
+                ));
+            }
+            _ => todo!("handle other constant operands"),
+        }
+
         Ok(asm)
     }
 

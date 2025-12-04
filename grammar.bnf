@@ -3,45 +3,66 @@
 # Top-level
 Module             ::= Function*
 
-Function           ::= "fn" Identifier "(" FunctionParamList? ")" "->" Type Block
+Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" Type )? Block
 
 FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
 FunctionParam      ::= Identifier ":" Type
 
 # Types
-Type               ::= "()" | "u32" | "bool"
+Type               ::= SimpleType | CompoundType
+SimpleType         ::= "()" | "u64" | "bool"
+CompoundType       ::= ArrayType
+ArrayType          ::= Type "[" Integer "]"
 
 # Blocks
-Block              ::= "{" BlockItem* "}"
-BlockItem          ::= Let | Var | Assign | Expr | Function
+Block              ::= "{" (StmtOrExpr ";")* Expr? "}"
 
-# Statements/Expressions
-Let                ::= "let" Identifier "=" Expr ";"
-Var                ::= "var" Identifier "=" Expr ";"
-Assign             ::= Identifier "=" Expr ";"
+StmtOrExpr         ::= Let
+                     | Var
+                     | Assign
+                     | Expr
 
-# Expressions (by precedence, lowest to highest)
-Expr               ::= If | While | LogicalExpr
+Let                ::= "let" Identifier "=" Expr
+Var                ::= "var" Identifier ( ":" Type )? "=" Expr
+Assign             ::= PostfixExpr "=" Expr
 
-If                 ::= "if" Expr Block "else" Block
+# Expressions
+Expr               ::= If | While | InfixExpr
+
+If                 ::= "if" Expr Block ( "else" Block )?
 While              ::= "while" Expr Block
 
-LogicalExpr        ::= CompareExpr (("==" | "!=") CompareExpr)*
-CompareExpr        ::= AddExpr (("<" | "<=" | ">" | ">=") AddExpr)*
-AddExpr            ::= MulExpr (("+" | "-") MulExpr)*
-MulExpr            ::= UnaryExpr (("*" | "/") UnaryExpr)*
-UnaryExpr          ::= "-" UnaryExpr | Primary
+# Operator Precedence (Lowest to Highest)
+# 1. Comparison (==, !=, <, <=, >, >=)
+# 2. Additive (+, -)
+# 3. Multiplicative (*, /)
+# 4. Unary (-, !)
+# 5. Postfix (Call, Index)
+
+InfixExpr          ::= CompareExpr
+
+CompareExpr        ::= AddExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) AddExpr )*
+AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
+MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
+
+UnaryExpr          ::= ( "-" | "!" ) UnaryExpr 
+                     | PostfixExpr
+
+PostfixExpr        ::= Primary ( Call | Index )*
+
+Call               ::= "(" ArgList? ")"
+Index              ::= "[" Expr "]"
+ArgList            ::= Expr ("," Expr)* ","?
 
 Primary            ::= Unit
                      | Integer
                      | Boolean
-                     | Call
+                     | ArrayLit
                      | Identifier
                      | "(" Expr ")"
                      | Block
 
-Call               ::= Identifier "(" CallArgList? ")"
-CallArgList        ::= Expr ("," Expr)* ","?
+ArrayLit           ::= "[" ( Expr ( "," Expr )* ","? )? "]"
 
 # Terminals
 Unit               ::= "()"

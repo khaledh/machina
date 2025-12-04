@@ -5,7 +5,7 @@ use crate::dataflow::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
 };
 use crate::ir::pos::{InstPos, RelInstPos};
-use crate::ir::types::{IrConst, IrFunction, IrInst, IrOperand, IrTempId};
+use crate::ir::types::{IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrType};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
@@ -389,6 +389,22 @@ impl<'a> RegAlloc<'a> {
             return;
         }
 
+        let temp_ty = self.func.temp_type(temp_id);
+        if temp_ty.is_compound() {
+            // Allocate stack slots for compound type
+            self.alloc_stack(temp_id, temp_ty);
+        } else {
+            // Allocate register for simple type
+            self.alloc_reg(free_regs, temp_id, interval);
+        }
+    }
+
+    fn alloc_reg(
+        &mut self,
+        free_regs: &mut VecDeque<Arm64Reg>,
+        temp_id: IrTempId,
+        interval: LiveInterval,
+    ) {
         match free_regs.pop_front() {
             Some(reg) => {
                 // Allocate register to interval
@@ -414,6 +430,13 @@ impl<'a> RegAlloc<'a> {
                 }
             }
         }
+    }
+
+    fn alloc_stack(&mut self, temp_id: IrTempId, temp_ty: &IrType) {
+        let slot_count = temp_ty.size_of() as u32 / 8;
+        let start_slot = self.spill_alloc.alloc_slots(slot_count);
+        self.alloc_map
+            .insert(temp_id, MappedTemp::Stack(start_slot));
     }
 
     fn process_pos_events(&mut self, pos_events: &[PosEvent], free_regs: &mut VecDeque<Arm64Reg>) {

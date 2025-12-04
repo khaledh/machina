@@ -166,6 +166,12 @@ impl IrTempId {
     }
 }
 
+impl fmt::Display for IrTempId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "%t{}", self.id())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IrTempInfo {
     pub ty: IrType,
@@ -180,6 +186,66 @@ pub enum IrType {
     Bool,
     Ptr(Box<IrType>),
     // Agg, Array, etc.
+    Array { elem_ty: Box<IrType>, len: usize },
+}
+
+impl fmt::Display for IrType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IrType::Unit => write!(f, "unit"),
+            IrType::Int { bits, signed } => {
+                if *signed {
+                    write!(f, "i{}", bits)
+                } else {
+                    write!(f, "u{}", bits)
+                }
+            }
+            IrType::Bool => write!(f, "bool"),
+            IrType::Ptr(ty) => write!(f, "ptr {}", ty),
+            IrType::Array { elem_ty, len } => write!(f, "array[{}, {}]", elem_ty, len),
+        }
+    }
+}
+
+impl IrType {
+    fn round_up_to_power_of_two(value: usize) -> usize {
+        let mut result = 1;
+        while result < value {
+            result <<= 1;
+        }
+        result
+    }
+
+    pub fn size_of(&self) -> usize {
+        match self {
+            IrType::Unit => 0,
+            IrType::Int { bits, .. } => (*bits as usize + 7) / 8,
+            IrType::Bool => 1,
+            IrType::Ptr(ty) => ty.size_of(),
+            IrType::Array { elem_ty, len } => (*elem_ty).size_of() * *len,
+        }
+    }
+
+    pub fn align_of(&self) -> usize {
+        match self {
+            IrType::Unit => 1,
+            IrType::Int { .. } => {
+                let size = Self::round_up_to_power_of_two(self.size_of());
+                match size {
+                    4 => 4,
+                    8 => 8,
+                    _ => 16,
+                }
+            }
+            IrType::Bool => 1,
+            IrType::Ptr(ty) => ty.align_of(),
+            IrType::Array { elem_ty, .. } => (*elem_ty).align_of(),
+        }
+    }
+
+    pub fn is_compound(&self) -> bool {
+        matches!(self, IrType::Array { .. })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -195,6 +261,22 @@ pub enum IrConst {
     Int { value: i64, bits: u8, signed: bool },
     Bool(bool),
     Unit,
+}
+
+impl IrConst {
+    pub fn int_value(&self) -> i64 {
+        match self {
+            IrConst::Int { value, .. } => *value,
+            IrConst::Bool(value) => {
+                if *value {
+                    1
+                } else {
+                    0
+                }
+            }
+            IrConst::Unit => 0,
+        }
+    }
 }
 
 impl fmt::Display for IrConst {
@@ -262,6 +344,18 @@ pub enum IrInst {
         result: IrTempId,
         incoming: Vec<(IrBlockId, IrTempId)>,
     },
+
+    // Array element access
+    StoreElement {
+        array: IrTempId,
+        index: IrOperand,
+        value: IrOperand,
+    },
+    LoadElement {
+        result: IrTempId,
+        array: IrTempId,
+        index: IrOperand,
+    },
 }
 
 impl IrInst {
@@ -272,6 +366,8 @@ impl IrInst {
             IrInst::UnaryOp { result, .. } => Some(*result),
             IrInst::Call { result, .. } => *result,
             IrInst::Phi { result, .. } => Some(*result),
+            IrInst::StoreElement { .. } => None,
+            IrInst::LoadElement { result, .. } => Some(*result),
         }
     }
 
@@ -285,6 +381,8 @@ impl IrInst {
                 .iter()
                 .map(|(_, temp)| IrOperand::Temp(*temp))
                 .collect(),
+            IrInst::StoreElement { index, value, .. } => vec![*index, *value],
+            IrInst::LoadElement { index, .. } => vec![*index],
         }
     }
 }
@@ -353,6 +451,9 @@ fn format_type(ty: &IrType) -> String {
         }
         IrType::Ptr(ty) => {
             format!("ptr {}", format_type(ty))
+        }
+        IrType::Array { elem_ty, len } => {
+            format!("array[{}, {}]", format_type(elem_ty), len)
         }
     }
 }
@@ -427,6 +528,32 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 write!(f, "({} -> %t{})", block_name, value.id())?;
             }
             write!(f, "]")?;
+        }
+        IrInst::StoreElement {
+            array,
+            index,
+            value,
+        } => {
+            write!(
+                f,
+                "store.element %t{}, {}, {}",
+                array.id(),
+                format_operand(index),
+                format_operand(value)
+            )?;
+        }
+        IrInst::LoadElement {
+            result,
+            array,
+            index,
+        } => {
+            write!(
+                f,
+                "%t{} = load.element %t{}, {}",
+                result.id(),
+                array.id(),
+                format_operand(index)
+            )?;
         }
     }
     Ok(())

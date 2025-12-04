@@ -22,6 +22,12 @@ impl SpillAllocator {
         slot
     }
 
+    pub fn alloc_slots(&mut self, count: u32) -> StackSlotId {
+        let start = self.next_slot;
+        self.next_slot += count;
+        StackSlotId(start)
+    }
+
     #[inline]
     pub fn total_slots(&self) -> u32 {
         self.next_slot

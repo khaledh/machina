@@ -38,6 +38,12 @@ pub enum ResolveError {
 
     #[error("Undefined function: {0}")]
     FuncUndefined(String, Span),
+
+    #[error("Invalid assignment target. Expected an l-value, found: {0:?}")]
+    InvalidAssignmentTarget(ExprKind, Span),
+
+    #[error("Invalid callee. Expected a function name, found: {0:?}")]
+    InvalidCallee(ExprKind, Span),
 }
 
 impl ResolveError {
@@ -47,6 +53,8 @@ impl ResolveError {
             ResolveError::VarUndefined(_, span) => *span,
             ResolveError::VarImmutable(_, span) => *span,
             ResolveError::FuncUndefined(_, span) => *span,
+            ResolveError::InvalidAssignmentTarget(_, span) => *span,
+            ResolveError::InvalidCallee(_, span) => *span,
         }
     }
 }
@@ -61,7 +69,9 @@ pub struct SymbolResolver {
 impl SymbolResolver {
     pub fn new() -> Self {
         Self {
-            scopes: Vec::new(),
+            scopes: vec![Scope {
+                defs: HashMap::new(),
+            }],
             errors: Vec::new(),
             def_id_gen: DefIdGen::new(),
             def_map_builder: DefMapBuilder::new(),
@@ -87,6 +97,14 @@ impl SymbolResolver {
         self.exit_scope();
     }
 
+    fn insert_symbol(&mut self, name: &str, symbol: Symbol) {
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .defs
+            .insert(name.to_string(), symbol);
+    }
+
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.defs.get(name) {
@@ -100,28 +118,20 @@ impl SymbolResolver {
         self.scopes.last().unwrap().defs.get(name)
     }
 
-    fn insert_symbol(&mut self, name: &str, symbol: Symbol) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .defs
-            .insert(name.to_string(), symbol);
-    }
-
-    fn populate_funcs(&mut self, functions: &Vec<ast::Function>) {
-        for function in functions {
+    fn populate_funcs(&mut self, funcs: &Vec<ast::Function>) {
+        for func in funcs {
             let def_id = self.def_id_gen.new_id();
             let def = Def {
                 id: def_id,
-                name: function.name.clone(),
+                name: func.name.clone(),
                 kind: DefKind::Func,
             };
-            self.def_map_builder.record_def(def, function.id);
+            self.def_map_builder.record_def(def, func.id);
             self.insert_symbol(
-                &function.name,
+                &func.name,
                 Symbol {
                     def_id,
-                    name: function.name.clone(),
+                    name: func.name.clone(),
                     kind: SymbolKind::Func,
                 },
             );
@@ -173,39 +183,73 @@ impl SymbolResolver {
         });
     }
 
+    fn check_lvalue_mutability(&mut self, expr: &ast::Expr) {
+        match &expr.kind {
+            ExprKind::VarRef(name) => {
+                match self.lookup_symbol(name) {
+                    Some(symbol) => {
+                        match symbol.kind {
+                            SymbolKind::Var { is_mutable: true } => {
+                                // Mutable: ok
+                                self.def_map_builder.record_use(expr.id, symbol.def_id);
+                            }
+                            SymbolKind::Var { is_mutable: false } => {
+                                // Immutable: error
+                                self.def_map_builder.record_use(expr.id, symbol.def_id);
+                                self.errors
+                                    .push(ResolveError::VarImmutable(name.clone(), expr.span));
+                            }
+                            _ => {
+                                self.errors
+                                    .push(ResolveError::VarUndefined(name.clone(), expr.span));
+                            }
+                        }
+                    }
+                    None => {
+                        self.errors
+                            .push(ResolveError::VarUndefined(name.clone(), expr.span));
+                    }
+                }
+            }
+            ExprKind::Index { target, index } => {
+                // Recursively check the target. If target is mutable, then target[index] is mutable.
+                self.check_lvalue_mutability(target);
+                self.check_expr(index);
+            }
+            _ => {
+                self.errors.push(ResolveError::InvalidAssignmentTarget(
+                    expr.kind.clone(),
+                    expr.span,
+                ));
+            }
+        }
+    }
+
     fn check_expr(&mut self, expr: &ast::Expr) {
-        match expr {
-            ast::Expr {
-                kind: ExprKind::UInt64Lit(_),
-                ..
-            } => {}
-            ast::Expr {
-                kind: ExprKind::BoolLit(_),
-                ..
-            } => {}
-            ast::Expr {
-                kind: ExprKind::UnitLit,
-                ..
-            } => {}
-            ast::Expr {
-                kind: ExprKind::BinOp { left, right, .. },
-                ..
-            } => {
+        match &expr.kind {
+            ExprKind::UInt64Lit(_) | ast::ExprKind::BoolLit(_) | ast::ExprKind::UnitLit => {}
+
+            ExprKind::ArrayLit(elems) => {
+                for elem in elems {
+                    self.check_expr(elem);
+                }
+            }
+
+            ExprKind::Index { target, index } => {
+                self.check_expr(target);
+                self.check_expr(index);
+            }
+
+            ExprKind::BinOp { left, right, .. } => {
                 self.check_expr(left);
                 self.check_expr(right);
             }
 
-            ast::Expr {
-                kind: ExprKind::UnaryOp { expr, .. },
-                ..
-            } => {
+            ExprKind::UnaryOp { expr, .. } => {
                 self.check_expr(expr);
             }
 
-            ast::Expr {
-                kind: ExprKind::Block(body),
-                ..
-            } => {
+            ExprKind::Block(body) => {
                 self.with_scope(|checker| {
                     for expr in body {
                         checker.check_expr(expr);
@@ -213,10 +257,7 @@ impl SymbolResolver {
                 });
             }
 
-            ast::Expr {
-                kind: ExprKind::Let { name, value },
-                ..
-            } => {
+            ExprKind::Let { name, value } => {
                 if self.lookup_symbol_direct(name).is_some() {
                     self.errors
                         .push(ResolveError::VarAlreadyDefined(name.to_string(), expr.span));
@@ -240,10 +281,7 @@ impl SymbolResolver {
                 }
             }
 
-            ast::Expr {
-                kind: ExprKind::Var { name, value },
-                ..
-            } => {
+            ExprKind::Var { name, value, .. } => {
                 if self.lookup_symbol_direct(name).is_some() {
                     self.errors
                         .push(ResolveError::VarAlreadyDefined(name.to_string(), expr.span));
@@ -267,77 +305,54 @@ impl SymbolResolver {
                 }
             }
 
-            ast::Expr {
-                kind: ExprKind::VarRef(name),
-                ..
-            } => match self.lookup_symbol(name) {
+            ExprKind::VarRef(name) => match self.lookup_symbol(name) {
                 Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id),
                 None => self
                     .errors
                     .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
             },
 
-            ast::Expr {
-                kind:
-                    ExprKind::If {
-                        cond,
-                        then_body,
-                        else_body,
-                    },
-                ..
+            ExprKind::If {
+                cond,
+                then_body,
+                else_body,
             } => {
                 self.check_expr(cond);
                 self.check_expr(then_body);
                 self.check_expr(else_body);
             }
 
-            ast::Expr {
-                kind: ExprKind::Assign { name, value },
-                ..
-            } => match self.lookup_symbol(name) {
-                Some(symbol) => match symbol.kind {
-                    SymbolKind::Var { is_mutable: true } => {
-                        self.def_map_builder.record_use(expr.id, symbol.def_id);
-                        self.check_expr(value)
-                    }
-                    SymbolKind::Var { is_mutable: false } => {
-                        self.def_map_builder.record_use(expr.id, symbol.def_id);
-                        self.errors
-                            .push(ResolveError::VarImmutable(name.to_string(), expr.span));
-                    }
-                    _ => {
-                        self.errors
-                            .push(ResolveError::VarUndefined(name.to_string(), expr.span));
-                    }
-                },
-                None => {
-                    self.errors
-                        .push(ResolveError::VarUndefined(name.to_string(), expr.span));
-                }
-            },
+            ExprKind::Assign { assignee, value } => {
+                self.check_lvalue_mutability(assignee);
+                self.check_expr(value);
+            }
 
-            ast::Expr {
-                kind: ExprKind::While { cond, body },
-                ..
-            } => {
+            ExprKind::While { cond, body } => {
                 self.check_expr(cond);
                 self.check_expr(body);
             }
 
-            ast::Expr {
-                kind: ExprKind::Call { name, args },
-                ..
-            } => match self.lookup_symbol(name) {
-                Some(symbol) if symbol.kind == SymbolKind::Func => {
-                    self.def_map_builder.record_use(expr.id, symbol.def_id);
-                    for arg in args {
-                        self.check_expr(arg);
-                    }
+            ExprKind::Call { callee, args } => {
+                // For now, callee must be a VarRef to a function.
+                // In the future, this can be generalized.
+                match &callee.kind {
+                    ExprKind::VarRef(name) => match self.lookup_symbol(name) {
+                        Some(symbol) if symbol.kind == SymbolKind::Func => {
+                            self.def_map_builder.record_use(callee.id, symbol.def_id);
+                            for arg in args {
+                                self.check_expr(arg);
+                            }
+                        }
+                        _ => self
+                            .errors
+                            .push(ResolveError::FuncUndefined(name.to_string(), callee.span)),
+                    },
+                    _ => self.errors.push(ResolveError::InvalidCallee(
+                        callee.kind.clone(),
+                        callee.span,
+                    )),
                 }
-                _ => self
-                    .errors
-                    .push(ResolveError::FuncUndefined(name.to_string(), expr.span)),
-            },
+            }
         }
     }
 }

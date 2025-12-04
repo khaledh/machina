@@ -36,6 +36,11 @@ pub enum ExprKind {
     UInt64Lit(u64),
     BoolLit(bool),
     UnitLit,
+    ArrayLit(Vec<Expr>),
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+    },
     BinOp {
         left: Box<Expr>,
         op: BinaryOp,
@@ -57,7 +62,7 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
     Assign {
-        name: String,
+        assignee: Box<Expr>,
         value: Box<Expr>,
     },
     VarRef(String),
@@ -71,7 +76,7 @@ pub enum ExprKind {
         body: Box<Expr>,
     },
     Call {
-        name: String,
+        callee: Box<Expr>,
         args: Vec<Expr>,
     },
 }
@@ -116,10 +121,14 @@ impl Function {
         let pad1 = indent(level + 1);
         writeln!(f, "{}Function [{}]", pad, self.id)?;
         writeln!(f, "{}Name: {}", pad1, self.name)?;
-        writeln!(f, "{}Return Type: {:?}", pad1, self.return_type)?;
-        writeln!(f, "{}Params", pad1)?;
-        for param in &self.params {
-            writeln!(f, "{}{}", indent(level + 2), param)?;
+        writeln!(f, "{}Return Type: {}", pad1, self.return_type)?;
+        if !self.params.is_empty() {
+            writeln!(f, "{}Params:", pad1)?;
+            for param in &self.params {
+                writeln!(f, "{}{}", indent(level + 2), param)?;
+            }
+        } else {
+            writeln!(f, "{}Params: none", pad1)?;
         }
         self.body.fmt_with_indent(f, level + 1)?;
         Ok(())
@@ -134,7 +143,7 @@ impl fmt::Display for Function {
 
 impl fmt::Display for FunctionParam {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {:?} [{}]", self.name, self.typ, self.id)?;
+        write!(f, "{}: {} [{}]", self.name, self.typ, self.id)?;
         Ok(())
     }
 }
@@ -151,6 +160,20 @@ impl Expr {
             }
             ExprKind::UnitLit => {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;
+            }
+            ExprKind::ArrayLit(elems) => {
+                writeln!(f, "{}ArrayLit [{}]", pad, self.id)?;
+                for elem in elems {
+                    elem.fmt_with_indent(f, level + 1)?;
+                }
+            }
+            ExprKind::Index { target, index } => {
+                writeln!(f, "{}Index [{}]", pad, self.id)?;
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Index:", pad1)?;
+                index.fmt_with_indent(f, level + 2)?;
             }
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);
@@ -188,10 +211,11 @@ impl Expr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::Assign { name, value } => {
+            ExprKind::Assign { assignee, value } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Assign [{}]", pad, self.id)?;
-                writeln!(f, "{}Name: {}", pad1, name)?;
+                writeln!(f, "{}Assignee:", pad1)?;
+                assignee.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
@@ -220,7 +244,7 @@ impl Expr {
                 writeln!(f, "{}Body:", pad1)?;
                 body.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::Call { name, args } => {
+            ExprKind::Call { callee: name, args } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Call({}) [{}]", pad, name, self.id)?;
                 writeln!(f, "{}Args:", pad1)?;

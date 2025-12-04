@@ -152,7 +152,7 @@ mod type_resolution {
         }
 
         pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
-            self.def_type.get(def).copied()
+            self.def_type.get(def).map(|typ| typ.clone())
         }
 
         pub fn finish(self) -> TypeMap {
@@ -173,7 +173,7 @@ mod type_resolution {
     #[allow(unused)]
     impl TypeMap {
         pub fn lookup_node_type(&self, node: NodeId) -> Option<Type> {
-            self.node_type.get(&node).copied()
+            self.node_type.get(&node).map(|typ| typ.clone())
         }
     }
 

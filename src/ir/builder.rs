@@ -221,6 +221,22 @@ impl IrFunctionBuilder {
         self.emit_inst(IrInst::Phi { result, incoming });
     }
 
+    pub fn store_element(&mut self, array: IrTempId, index: IrOperand, value: IrOperand) {
+        self.emit_inst(IrInst::StoreElement {
+            array,
+            index,
+            value,
+        });
+    }
+
+    pub fn load_element(&mut self, result: IrTempId, array: IrTempId, index: IrOperand) {
+        self.emit_inst(IrInst::LoadElement {
+            result,
+            array,
+            index,
+        });
+    }
+
     pub fn finish(self) -> IrFunction {
         // Check that we have at least one block
         assert!(!self.blocks.is_empty(), "No blocks in function");

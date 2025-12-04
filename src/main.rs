@@ -29,20 +29,9 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn inc(a: u64) -> u64 {
-    a + 1
-}
-
-fn ge(a: u64, b: u64) -> bool {
-    a >= b
-}
-
-fn main() -> u64 {
-    if ge(inc(41), 42) {
-        42 / 2
-    } else {
-       99
-    }
+fn array_test() -> u64 {
+    var a = [1, 2, 3];
+    a[0] = 4;
 }
 "#;
 
