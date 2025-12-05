@@ -565,7 +565,12 @@ impl<'a> RegAlloc<'a> {
         // Calculate the total frame size
         let callee_saved_size = used_callee_saved.len() * 8;
         let spilled_size = self.spill_alloc.frame_size_bytes();
-        let frame_size = callee_saved_size as u32 + spilled_size as u32;
+        let mut frame_size = callee_saved_size as u32 + spilled_size as u32;
+
+        // Align the frame size to 16 bytes
+        if frame_size % 16 != 0 {
+            frame_size += 16 - (frame_size % 16);
+        }
 
         AllocationResult {
             alloc_map: self.alloc_map.clone(),

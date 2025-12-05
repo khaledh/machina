@@ -29,9 +29,10 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn array_test() -> u64 {
-    var a = [1, 2, 3];
-    a[0] = 4;
+fn main() -> u64 {
+    let arr = [1, 2, 3, 4, 5];
+    let x = arr[2];
+    x
 }
 "#;
 
@@ -70,8 +71,8 @@ fn main() {
                     CompileError::LowerError(e) => {
                         println!("{}", format_error(SOURCE, Span::default(), e));
                     }
-                    error => {
-                        println!("{error:?}");
+                    CompileError::CodegenError(e) => {
+                        println!("{}", format_error(SOURCE, Span::default(), e));
                     }
                 }
             }

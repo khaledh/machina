@@ -202,6 +202,7 @@ impl<'a> FuncCodegen<'a> {
         // Allocate stack space (includes callee-saved regs and spilled temps)
         let frame_size = self.alloc_result.frame_size;
         if frame_size > 0 {
+            assert!(frame_size % 16 == 0); // stack must be aligned to 16 bytes
             asm.push_str(&format!("  sub sp, sp, #{frame_size}\n"));
         }
 
@@ -254,6 +255,7 @@ impl<'a> FuncCodegen<'a> {
 
         // Deallocate stack space
         if frame_size > 0 {
+            assert!(frame_size % 16 == 0); // stack must be aligned to 16 bytes
             asm.push_str(&format!("  add sp, sp, #{frame_size}\n"));
         }
 
@@ -573,30 +575,22 @@ impl<'a> FuncCodegen<'a> {
                     "  mul {}, {}, {}\n",
                     elem_offset_reg, index_reg, elem_size_reg
                 ));
-                asm.push_str(&format!("  add {}, sp, #{}\n", elem_offset_reg, array_base));
+                asm.push_str(&format!(
+                    "  add {}, {}, #{}\n",
+                    elem_offset_reg, elem_offset_reg, array_base
+                ));
 
                 // Store the value to the computed offset
-                match value {
-                    IrOperand::Temp(temp) => {
-                        let value_reg = self.get_reg(temp)?;
-                        asm.push_str(&format!(
-                            "  str {}, [{}]\n",
-                            value_reg, elem_offset_reg
-                        ));
-                    }
-                    IrOperand::Const(c) => {
-                        let value_reg = self.operand_for_int_with_policy(
-                            c.int_value(),
-                            ImmPolicy::RegOnly,
-                            &mut asm,
-                            0,
-                        );
-                        asm.push_str(&format!(
-                            "  str {}, [{}]\n",
-                            value_reg, elem_offset_reg
-                        ));
-                    }
-                }
+                let value_reg = match value {
+                    IrOperand::Temp(temp) => self.get_reg(temp)?.to_string(),
+                    IrOperand::Const(c) => self.operand_for_int_with_policy(
+                        c.int_value(),
+                        ImmPolicy::RegOnly,
+                        &mut asm,
+                        0,
+                    ),
+                };
+                asm.push_str(&format!("  str {}, [sp, {}]\n", value_reg, elem_offset_reg));
             }
             _ => todo!("handle other constant operands"),
         }
@@ -607,26 +601,26 @@ impl<'a> FuncCodegen<'a> {
     pub fn emit_load_element(
         &mut self,
         result: IrTempId,
-        array: IrTempId,
+        array: &IrTempId,
         index: &IrOperand,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
         // Get the result register
-        let result_reg = self.get_reg(result)?;
+        let result_reg = self.get_reg(&result)?;
 
         // Get the array stack slot
         let array_slot = match self.alloc_result.alloc_map.get(&array) {
             Some(MappedTemp::Stack(slot)) => *slot,
-            Some(MappedTemp::Reg(_)) => return Err(CodegenError::ArrayIsNotStack(array)),
+            Some(MappedTemp::Reg(_)) => return Err(CodegenError::ArrayIsNotStack(*array)),
             None => return Err(CodegenError::TempNotFound(array.id())),
         };
 
         // Get the element type and size
-        let array_ty = self.func.temp_type(array);
+        let array_ty = self.func.temp_type(*array);
         let elem_ty = match array_ty {
             IrType::Array { elem_ty, .. } => elem_ty,
-            _ => return Err(CodegenError::TempIsNotArray(array, array_ty.clone())),
+            _ => return Err(CodegenError::TempIsNotArray(*array, array_ty.clone())),
         };
         let elem_size = elem_ty.size_of();
 
@@ -652,17 +646,14 @@ impl<'a> FuncCodegen<'a> {
                     "  mul {}, {}, {}\n",
                     elem_offset_reg, index_reg, elem_size_reg
                 ));
-                asm.push_str(&format!("  add {}, sp, #{}\n", elem_offset_reg, array_base));
+                asm.push_str(&format!(
+                    "  add {}, {}, #{}\n",
+                    elem_offset_reg, elem_offset_reg, array_base
+                ));
 
                 // Load the value from the computed offset
-                let elem_reg = self.operand_for_int_with_policy(
-                    elem_size as i64,
-                    ImmPolicy::RegOnly,
-                    &mut asm,
-                    0,
-                );
                 asm.push_str(&format!(
-                    "  ldr {}, [sp, #{}]\n",
+                    "  ldr {}, [sp, {}]\n",
                     result_reg, elem_offset_reg
                 ));
             }

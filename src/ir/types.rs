@@ -381,8 +381,16 @@ impl IrInst {
                 .iter()
                 .map(|(_, temp)| IrOperand::Temp(*temp))
                 .collect(),
-            IrInst::StoreElement { index, value, .. } => vec![*index, *value],
-            IrInst::LoadElement { index, .. } => vec![*index],
+            IrInst::StoreElement {
+                array,
+                index,
+                value,
+            } => {
+                vec![IrOperand::Temp(*array), *index, *value]
+            }
+            IrInst::LoadElement { array, index, .. } => {
+                vec![IrOperand::Temp(*array), *index]
+            }
         }
     }
 }
