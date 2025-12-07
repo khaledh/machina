@@ -4,10 +4,10 @@ use textwrap::indent;
 use crate::ast::BinaryOp;
 use crate::codegen::arm64::FuncCodegen;
 use crate::ir::types::IrFunction;
-use crate::regalloc::Arm64Reg as R;
 use crate::regalloc::alloc::{AllocationResult, RegAlloc};
 use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::moves::FnMoveList;
+use crate::regalloc::regs::Arm64Reg as R;
 use crate::regalloc::spill::StackSlotId;
 use std::collections::HashMap;
 
@@ -39,7 +39,7 @@ fn create_alloc_result(
 fn test_prologue_no_frame() {
     let func = create_test_function("test");
     let alloc_result = create_alloc_result(0, vec![], 0);
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     let prologue = codegen.emit_prologue().unwrap();
 
@@ -56,7 +56,7 @@ fn test_prologue_no_frame() {
 fn test_epilogue_no_frame() {
     let func = create_test_function("test");
     let alloc_result = create_alloc_result(0, vec![], 0);
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     let epilogue = codegen.emit_epilogue().unwrap();
 
@@ -72,7 +72,7 @@ fn test_epilogue_no_frame() {
 fn test_prologue_two_callee_saved() {
     let func = create_test_function("test");
     let alloc_result = create_alloc_result(16, vec![R::X19, R::X20], 0);
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     let prologue = codegen.emit_prologue().unwrap();
 
@@ -91,7 +91,7 @@ fn test_prologue_two_callee_saved() {
 fn test_epilogue_two_callee_saved() {
     let func = create_test_function("test");
     let alloc_result = create_alloc_result(16, vec![R::X19, R::X20], 0);
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     let epilogue = codegen.emit_epilogue().unwrap();
 
@@ -109,7 +109,7 @@ fn test_epilogue_two_callee_saved() {
 fn test_prologue_three_callee_saved() {
     let func = create_test_function("test");
     let alloc_result = create_alloc_result(24, vec![R::X19, R::X20, R::X21], 0);
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     let prologue = codegen.emit_prologue().unwrap();
 
@@ -130,7 +130,7 @@ fn test_get_stack_offset() {
     let func = create_test_function("test");
     // frame_size = 32, callee_saved = 16 bytes (2 regs), spilled = 16 bytes (2 slots)
     let alloc_result = create_alloc_result(32, vec![R::X19, R::X20], 2);
-    let codegen = FuncCodegen::new(&func, &alloc_result);
+    let codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     // spilled_size = 32 - 16 = 16
     // Slot 0: offset = 16 - 0 - 8 = 8
@@ -147,7 +147,7 @@ fn test_mixed_callee_saved_and_spills() {
     let func = create_test_function("test");
     // frame_size = 32, callee_saved = 16 bytes, spills = 16 bytes
     let alloc_result = create_alloc_result(32, vec![R::X19, R::X20], 2);
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
 
     let prologue = codegen.emit_prologue().unwrap();
 
@@ -184,14 +184,12 @@ fn test_simple_addition() {
 
     // Run register allocation
     let constraints = analyze_constraints(&func);
-    let mut allocator = RegAlloc::new(&func, &constraints);
+    let allocator = RegAlloc::new(&func, &constraints);
     let alloc_result = allocator.alloc();
 
     // Generate code
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
     let asm = codegen.generate().unwrap();
-
-    println!("Generated assembly:\n{}", asm);
 
     // Basic sanity checks
     let expected = indoc! {"
@@ -236,17 +234,12 @@ fn test_function_call() {
 
     // Run register allocation
     let constraints = analyze_constraints(&func);
-    let mut allocator = RegAlloc::new(&func, &constraints);
+    let allocator = RegAlloc::new(&func, &constraints);
     let alloc_result = allocator.alloc();
 
-    // print moves
-    println!("moves:\n{}", alloc_result.moves);
-
     // Generate code
-    let mut codegen = FuncCodegen::new(&func, &alloc_result);
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
     let asm = codegen.generate().unwrap();
-
-    println!("Generated assembly:\n{}", asm);
 
     // Expected: args moved to x0/x1, call, result already in x0
     let expected = indoc! {"

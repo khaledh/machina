@@ -47,20 +47,12 @@ pub struct TypeCheckedContext {
 
 impl TypeCheckedContext {
     pub fn with_ir_funcs(self, ir_funcs: Vec<IrFunction>) -> LoweredContext {
-        LoweredContext {
-            module: self.module,
-            def_map: self.def_map,
-            type_map: self.type_map,
-            ir_funcs,
-        }
+        LoweredContext { ir_funcs }
     }
 }
 
 #[derive(Clone)]
 pub struct LoweredContext {
-    pub module: Module,
-    pub def_map: DefMap,
-    pub type_map: TypeMap,
     pub ir_funcs: Vec<IrFunction>,
 }
 

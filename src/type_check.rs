@@ -52,6 +52,9 @@ pub enum TypeCheckError {
 
     #[error("Index on non-array type: {0}")]
     InvalidIndexTargetType(Type, Span),
+
+    #[error("Type cannot be inferred")]
+    UnknownType(Span),
 }
 
 impl TypeCheckError {
@@ -70,6 +73,7 @@ impl TypeCheckError {
             TypeCheckError::ArrayElementTypeMismatch(_, _, span) => *span,
             TypeCheckError::IndexTypeNotInt(_, span) => *span,
             TypeCheckError::InvalidIndexTargetType(_, span) => *span,
+            TypeCheckError::UnknownType(span) => *span,
         }
     }
 }
@@ -116,8 +120,7 @@ impl TypeChecker {
         };
 
         for function in &self.context.module.funcs {
-            checker.type_check_function(function)?;
-            if !checker.errors.is_empty() {
+            if let Err(_) = checker.type_check_function(function) {
                 break;
             }
         }
@@ -161,7 +164,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
 
         // type check body
-        let ret_ty = self.type_check_expr(&function.body).map_err(|e| vec![e])?;
+        let ret_ty = match self.type_check_expr(&function.body) {
+            Ok(ty) => ty,
+            Err(e) => {
+                self.errors.push(e);
+                return Err(self.errors.clone());
+            }
+        };
 
         // check return type
         if ret_ty != Type::Unknown && ret_ty != function.return_type {
@@ -245,7 +254,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                 self.builder.record_def_type(def.clone(), expr_type);
                 Ok(Type::Unit)
             }
-            None => Ok(Type::Unknown),
+            None => Err(TypeCheckError::UnknownType(let_expr.span)),
         }
     }
 
@@ -256,35 +265,32 @@ impl<'c, 'b> Checker<'c, 'b> {
                 self.builder.record_def_type(def.clone(), expr_type);
                 Ok(Type::Unit)
             }
-            None => Ok(Type::Unknown),
+            None => Err(TypeCheckError::UnknownType(var_expr.span)),
         }
     }
 
-    fn type_check_assign(&mut self, var_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
-        match self.lookup_def_type(var_expr.id) {
-            Some(lhs_type) => {
-                let rhs_type = self.type_check_expr(value)?;
-                if lhs_type == Type::Unknown || rhs_type == Type::Unknown {
-                    return Ok(Type::Unknown);
-                }
-                if lhs_type != rhs_type {
-                    Err(TypeCheckError::AssignTypeMismatch(
-                        lhs_type,
-                        rhs_type,
-                        var_expr.span,
-                    ))
-                } else {
-                    Ok(Type::Unit)
-                }
-            }
-            None => Ok(Type::Unknown),
+    fn type_check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
+        let lhs_type = self.type_check_expr(assignee)?;
+        let rhs_type = self.type_check_expr(value)?;
+
+        // lhs_type or rhs_type are never Unknown now because type_check_expr returns Err instead
+        // or propagates Err.
+
+        if lhs_type != rhs_type {
+            Err(TypeCheckError::AssignTypeMismatch(
+                lhs_type,
+                rhs_type,
+                assignee.span,
+            ))
+        } else {
+            Ok(Type::Unit)
         }
     }
 
     fn type_check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
         match self.lookup_def_type(var_ref_expr.id) {
             Some(def_type) => Ok(def_type.clone()),
-            None => Ok(Type::Unknown),
+            None => Err(TypeCheckError::UnknownType(var_ref_expr.span)),
         }
     }
 
@@ -312,7 +318,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
         // Get function signature
         let Some(func_sig) = self.func_sigs.get(name) else {
-            return Ok(Type::Unknown);
+            return Err(TypeCheckError::UnknownType(callee.span));
         };
         // Check number of arguments
         if arg_types.len() != func_sig.params.len() {
@@ -391,10 +397,6 @@ impl<'c, 'b> Checker<'c, 'b> {
         let left_type = self.type_check_expr(left)?;
         let right_type = self.type_check_expr(right)?;
 
-        if left_type == Type::Unknown || right_type == Type::Unknown {
-            return Ok(Type::Unknown);
-        }
-
         match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                 if left_type != Type::UInt64 || right_type != Type::UInt64 {
@@ -444,7 +446,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::Var { value, .. } => self.type_check_var(expr, value),
 
-            ExprKind::Assign { value, .. } => self.type_check_assign(expr, value),
+            ExprKind::Assign { value, assignee } => self.type_check_assign(assignee, value),
 
             ExprKind::VarRef(_) => self.type_check_var_ref(expr),
 

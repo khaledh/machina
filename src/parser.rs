@@ -343,6 +343,7 @@ impl<'a> Parser<'a> {
             match self.curr_token.kind {
                 TK::LParen => {
                     // Call expression
+                    self.advance();
                     let args =
                         self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
                     self.consume(&TK::RParen)?;

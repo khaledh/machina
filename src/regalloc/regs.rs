@@ -2,6 +2,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub enum Arm64Reg {
     // Params (Caller-saved)
     X0, // also function return register
@@ -98,6 +99,10 @@ pub fn get_param_reg(index: u32) -> Arm64Reg {
 
 pub fn get_result_reg() -> Arm64Reg {
     Arm64Reg::X0
+}
+
+pub fn get_indirect_result_reg() -> Arm64Reg {
+    Arm64Reg::X8
 }
 
 impl fmt::Display for Arm64Reg {

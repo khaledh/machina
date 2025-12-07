@@ -1,11 +1,11 @@
-use crate::TempAllocMapDisplay;
 use crate::ast::BinaryOp;
 use crate::ir::pos::InstPos;
 use crate::ir::types::IrBlockId;
+use crate::regalloc::alloc::{MappedTemp, RegAlloc};
 use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::moves::Location;
+use crate::regalloc::regs::Arm64Reg as R;
 use crate::regalloc::spill::StackSlotId;
-use crate::regalloc::{Arm64Reg as R, MappedTemp, RegAlloc};
 
 include!("ir_test_utils.rs");
 
@@ -67,8 +67,6 @@ fn test_regalloc_simple_function_with_two_temps() {
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc_into(vec![R::X0, R::X1]);
     let alloc_map = alloc_result.alloc_map;
-
-    println!("alloc_map:\n{}", TempAllocMapDisplay(&alloc_map));
 
     assert_eq!(alloc_map.len(), 2);
     // t0 and t1 share the same register since their liveness doesn't overlap.
@@ -655,10 +653,6 @@ fn test_call_arg_swap() {
 
     let constraints = analyze_constraints(&func);
     let alloc_result = RegAlloc::new(&func, &constraints).alloc();
-    println!(
-        "alloc_map:\n{}",
-        TempAllocMapDisplay(&alloc_result.alloc_map)
-    );
 
     // Should have moves to swap X0 and X1 before the call
     let moves = alloc_result
@@ -666,7 +660,6 @@ fn test_call_arg_swap() {
         .get_inst_moves(InstPos::new(IrBlockId(0), 0));
     assert!(moves.is_some());
     let moves = moves.unwrap();
-    println!("moves:\n{}", moves);
 
     // swap x0 and x1
     assert_eq!(moves.before_moves.len(), 2);
@@ -740,13 +733,10 @@ fn test_caller_saved_preservation() {
     let alloc = RegAlloc::new(&func, &constraints);
     let result = alloc.alloc_into(vec![R::X0, R::X1]);
 
-    // println!("alloc_map:\n{}", TempAllocMapDisplay(&result.alloc_map));
-
     // Verify that t0 has save/restore moves around the call
     let moves = result.moves.get_inst_moves(InstPos::new(IrBlockId(0), 1));
     assert!(moves.is_some());
     let moves = moves.unwrap();
-    println!("moves:\n{}", moves);
 
     // before moves:
     //   t0 -> stack[0] (saved before call)

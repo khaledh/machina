@@ -7,9 +7,10 @@ use crate::ir::types::*;
 pub struct IrFunctionBuilder {
     name: String,
     ret_ty: IrType,
-    curr_block: IrBlockId,
-    blocks: IndexMap<IrBlockId, IrBlock>,
+    ret_temp: Option<IrTempId>,
     temps: Vec<IrTempInfo>,
+    blocks: IndexMap<IrBlockId, IrBlock>,
+    curr_block: IrBlockId,
 }
 
 impl IrFunctionBuilder {
@@ -21,13 +22,29 @@ impl IrFunctionBuilder {
             term: IrTerminator::_Unterminated,
         };
 
+        let mut ret_temp = None;
+        let mut temps = vec![];
+        if ret_ty.is_compound() {
+            ret_temp = Some(IrTempId(0));
+            temps.push(IrTempInfo {
+                ty: ret_ty.clone(),
+                role: IrTempRole::Return,
+                debug_name: None,
+            });
+        }
+
         Self {
             name,
             ret_ty,
+            ret_temp,
+            temps,
             blocks: IndexMap::from_iter([(IrBlockId(0), entry_block)]),
             curr_block: IrBlockId(0),
-            temps: vec![],
         }
+    }
+
+    pub fn ret_temp(&self) -> Option<IrTempId> {
+        self.ret_temp
     }
 
     pub fn new_param(&mut self, index: u32, name: String, ty: IrType) -> IrTempId {
@@ -177,6 +194,7 @@ impl IrFunctionBuilder {
         });
     }
 
+    #[allow(dead_code)]
     fn type_for_binary_op(op: BinaryOp, lhs: IrType) -> IrType {
         match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => lhs,
@@ -189,6 +207,7 @@ impl IrFunctionBuilder {
         }
     }
 
+    #[allow(dead_code)]
     fn type_for_unary_op(op: UnaryOp, operand: IrType) -> IrType {
         match op {
             UnaryOp::Neg => operand,
@@ -277,8 +296,9 @@ impl IrFunctionBuilder {
         IrFunction {
             name: self.name,
             ret_ty: self.ret_ty,
-            blocks: sorted_blocks,
             temps: self.temps,
+            ret_temp: self.ret_temp,
+            blocks: sorted_blocks,
             cfg,
         }
     }

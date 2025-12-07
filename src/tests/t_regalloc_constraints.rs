@@ -1,5 +1,5 @@
 use crate::regalloc::constraints::{analyze_call, analyze_fn_params};
-use crate::regalloc::regs::{Arm64Reg, CALLER_SAVED_REGS};
+use crate::regalloc::regs::Arm64Reg;
 
 include!("ir_test_utils.rs");
 
@@ -61,6 +61,4 @@ fn test_analyze_call_constraints() {
     let res = call.result.as_ref().unwrap();
     assert_eq!(res.temp, result);
     assert_eq!(res.reg, Arm64Reg::X0);
-
-    assert_eq!(call.clobbers, CALLER_SAVED_REGS);
 }

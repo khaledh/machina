@@ -20,9 +20,9 @@ impl Display for Token {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, EnumDisplay)]
 pub enum TokenKind {
-    #[display("{0}")]
+    #[display("Ident({0})")]
     Ident(String),
-    #[display("{0}")]
+    #[display("IntLit({0})")]
     IntLit(u64),
     #[display("[")]
     LBracket,

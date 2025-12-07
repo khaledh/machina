@@ -29,10 +29,31 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn main() -> u64 {
-    let arr = [1, 2, 3, 4, 5];
+fn inner_create_array(b: bool, x: u64) -> u64[5] {
+    if b {
+        [1, 2, x, 4, 5]
+    } else {
+        [6, 7, x, 9, 10]
+    }
+}
+
+fn create_array(b: bool) -> u64[5] {
+    let arr = if b {
+        [1, 2, 3, 4, 5]
+    } else {
+        [6, 7, 8, 9, 10]
+    }
+    inner_create_array(b, arr[2])
+}
+
+fn get_third_element(arr: u64[5]) -> u64 {
     let x = arr[2];
     x
+}
+
+fn main() -> u64 {
+    let arr = create_array(false);
+    get_third_element(arr)
 }
 "#;
 
@@ -82,6 +103,7 @@ fn main() {
 
 fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     // Parse dump flags from comma-separated list, e.g. --dump ast,ir,liveness
+    let mut dump_tokens = false;
     let mut dump_ast = false;
     let mut dump_def_map = false;
     let mut dump_type_map = false;
@@ -93,6 +115,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     if let Some(dump) = &args.dump {
         for item in dump.split(',').map(|s| s.trim().to_lowercase()) {
             match item.as_str() {
+                "tokens" => dump_tokens = true,
                 "ast" => dump_ast = true,
                 "defmap" => dump_def_map = true,
                 "typemap" => dump_type_map = true,
@@ -113,6 +136,15 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         .tokenize()
         .collect::<Result<Vec<Token>, LexError>>()
         .map_err(|e| vec![e.into()])?;
+
+    if dump_tokens {
+        println!("Tokens:");
+        println!("--------------------------------");
+        for (i, token) in tokens.iter().enumerate() {
+            println!("{}: {}", i, token);
+        }
+        println!("--------------------------------");
+    }
 
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().map_err(|e| vec![e.into()])?;
@@ -182,15 +214,18 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
 
     // register allocation
     let mut alloc_results = Vec::new();
+    for func in &lowered_context.ir_funcs {
+        let constraints = analyze_constraints(&func);
+        let alloc_result = RegAlloc::new(&func, &constraints).alloc();
+        alloc_results.push(alloc_result);
+    }
+
     if dump_regalloc {
-        for func in &lowered_context.ir_funcs {
-            let constraints = analyze_constraints(&func);
-            let alloc_result = RegAlloc::new(&func, &constraints).alloc();
-            println!("Reg Alloc Map ({}):", func.name);
+        for alloc_result in &alloc_results {
+            println!("Reg Alloc Map:");
             println!("--------------------------------");
             println!("{}", TempAllocMapDisplay(&alloc_result.alloc_map));
             println!("--------------------------------");
-            alloc_results.push(alloc_result);
         }
     }
 

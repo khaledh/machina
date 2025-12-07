@@ -15,6 +15,7 @@ use crate::regalloc::spill::{SpillAllocator, StackSlotId};
 pub enum MappedTemp {
     Reg(Arm64Reg),
     Stack(StackSlotId),
+    StackAddr(StackSlotId),
 }
 
 pub type TempAllocMap = HashMap<IrTempId, MappedTemp>;
@@ -34,6 +35,9 @@ impl<'a> fmt::Display for TempAllocMapDisplay<'a> {
             match mapped {
                 MappedTemp::Reg(reg) => write!(f, "%t{} -> {}", temp.id(), reg)?,
                 MappedTemp::Stack(slot) => write!(f, "%t{} -> stack[{}]", temp.id(), slot.0)?,
+                MappedTemp::StackAddr(slot) => {
+                    write!(f, "%t{} -> stack_addr[{}]", temp.id(), slot.0)?
+                }
             }
         }
         Ok(())
@@ -52,7 +56,6 @@ type ActiveSet = HashMap<IrTempId, ActiveTemp>;
 #[derive(Debug)]
 struct PosIndexMap {
     pos_to_idx: HashMap<InstPos, usize>,
-    idx_to_pos: Vec<InstPos>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -183,20 +186,17 @@ impl<'a> RegAlloc<'a> {
 
     fn build_pos_map(func: &IrFunction) -> PosIndexMap {
         let mut pos_to_idx = HashMap::new();
-        let mut idx_to_pos = Vec::new();
         let mut global_idx = 0;
         for (block_id, block) in func.blocks.iter() {
             for (inst_idx, _) in block.insts.iter().enumerate() {
                 let pos = InstPos::new(*block_id, inst_idx);
                 pos_to_idx.insert(pos, global_idx);
-                idx_to_pos.push(pos);
                 global_idx += 1;
             }
+            // Account for the terminator, to match LiveIntervals indexing
+            global_idx += 1;
         }
-        PosIndexMap {
-            pos_to_idx,
-            idx_to_pos,
-        }
+        PosIndexMap { pos_to_idx }
     }
 
     fn initial_free_regs(&self) -> Vec<Arm64Reg> {
@@ -299,6 +299,7 @@ impl<'a> RegAlloc<'a> {
                     let current_loc = match self.alloc_map.get(&temp_id) {
                         Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
                         Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                        Some(MappedTemp::StackAddr(slot)) => Location::StackAddr(*slot),
                         None => panic!("Temp {} not found in alloc map", temp_id.id()),
                     };
                     let target_loc = Location::Reg(arg_constr.reg);
@@ -341,6 +342,7 @@ impl<'a> RegAlloc<'a> {
                 let target_loc = match allocated_temp {
                     MappedTemp::Reg(reg) => Location::Reg(*reg),
                     MappedTemp::Stack(slot) => Location::Stack(*slot),
+                    MappedTemp::StackAddr(slot) => Location::StackAddr(*slot),
                 };
                 if source_loc != target_loc {
                     self.moves
@@ -436,7 +438,7 @@ impl<'a> RegAlloc<'a> {
         let slot_count = temp_ty.size_of() as u32 / 8;
         let start_slot = self.spill_alloc.alloc_slots(slot_count);
         self.alloc_map
-            .insert(temp_id, MappedTemp::Stack(start_slot));
+            .insert(temp_id, MappedTemp::StackAddr(start_slot));
     }
 
     fn process_pos_events(&mut self, pos_events: &[PosEvent], free_regs: &mut VecDeque<Arm64Reg>) {
@@ -462,24 +464,22 @@ impl<'a> RegAlloc<'a> {
         for block in self.func.blocks.values() {
             for inst in block.insts.iter() {
                 if let IrInst::Phi { result, incoming } = inst {
-                    println!("phi inst: {:?}", inst);
                     // get the result location
                     let result_loc = match self.alloc_map.get(result) {
                         Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
                         Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                        Some(MappedTemp::StackAddr(slot)) => Location::StackAddr(*slot),
                         None => panic!("Temp {} not found in alloc map", result.id()),
                     };
-                    println!("result_loc: {}", result_loc);
                     for (pred_block_id, temp_id) in incoming {
                         // get the source location
-                        println!("temp_id: {}", temp_id.id());
                         let source_loc = match self.alloc_map.get(temp_id) {
                             Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
                             Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                            Some(MappedTemp::StackAddr(slot)) => Location::StackAddr(*slot),
                             None => panic!("Temp {} not found in alloc map", temp_id.id()),
                         };
                         if result_loc != source_loc {
-                            println!("adding edge move: {} -> {}", source_loc, result_loc);
                             self.moves
                                 .add_edge_move(*pred_block_id, source_loc, result_loc);
                         }
@@ -495,6 +495,7 @@ impl<'a> RegAlloc<'a> {
                 IrOperand::Temp(temp_id) => match self.alloc_map.get(&temp_id) {
                     Some(MappedTemp::Reg(reg)) => Location::Reg(*reg),
                     Some(MappedTemp::Stack(slot)) => Location::Stack(*slot),
+                    Some(MappedTemp::StackAddr(slot)) => Location::StackAddr(*slot),
                     None => panic!("Temp {} not found in alloc map", temp_id.id()),
                 },
                 IrOperand::Const(c) => {
@@ -565,12 +566,7 @@ impl<'a> RegAlloc<'a> {
         // Calculate the total frame size
         let callee_saved_size = used_callee_saved.len() * 8;
         let spilled_size = self.spill_alloc.frame_size_bytes();
-        let mut frame_size = callee_saved_size as u32 + spilled_size as u32;
-
-        // Align the frame size to 16 bytes
-        if frame_size % 16 != 0 {
-            frame_size += 16 - (frame_size % 16);
-        }
+        let frame_size = callee_saved_size as u32 + spilled_size as u32;
 
         AllocationResult {
             alloc_map: self.alloc_map.clone(),

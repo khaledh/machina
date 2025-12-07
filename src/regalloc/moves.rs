@@ -8,17 +8,19 @@ use crate::regalloc::spill::StackSlotId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
+    Imm(i64),
     Reg(Arm64Reg),
     Stack(StackSlotId),
-    Imm(i64),
+    StackAddr(StackSlotId),
 }
 
 impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Location::Imm(value) => write!(f, "Imm({})", value)?,
             Location::Reg(reg) => write!(f, "Reg({})", reg)?,
             Location::Stack(slot) => write!(f, "Stack({})", slot.0)?,
-            Location::Imm(value) => write!(f, "Imm({})", value)?,
+            Location::StackAddr(slot) => write!(f, "StackAddr({})", slot.0)?,
         }
         Ok(())
     }
@@ -39,7 +41,6 @@ impl fmt::Display for Move {
 
 #[derive(Debug)]
 pub struct InstMoveList {
-    pub pos: InstPos,
     pub before_moves: Vec<Move>,
     pub after_moves: Vec<Move>,
 }
@@ -67,7 +68,6 @@ impl FnMoveList {
 
         // Create the instruction move list if it doesn't exist
         let move_list = self.inst_moves.entry(inst_pos).or_insert(InstMoveList {
-            pos: inst_pos,
             before_moves: vec![],
             after_moves: vec![],
         });
@@ -122,7 +122,7 @@ impl fmt::Display for FnMoveList {
         for (pos, moves) in &self.inst_moves {
             writeln!(f, "InstMoveList:")?;
             writeln!(f, "  pos: {}", pos)?;
-            writeln!(f, "  moves: {}", moves)?;
+            writeln!(f, "{}", moves)?;
         }
         writeln!(f, "EdgeMoves:")?;
         for (block_id, moves) in &self.edge_moves {

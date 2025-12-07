@@ -90,8 +90,9 @@ use crate::cfg::ControlFlowGraph;
 pub struct IrFunction {
     pub name: String,
     pub ret_ty: IrType,
-    pub blocks: IndexMap<IrBlockId, IrBlock>,
+    pub ret_temp: Option<IrTempId>,
     pub temps: Vec<IrTempInfo>,
+    pub blocks: IndexMap<IrBlockId, IrBlock>,
     pub cfg: ControlFlowGraph,
 }
 
@@ -180,6 +181,7 @@ pub struct IrTempInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum IrType {
     Unit,
     Int { bits: u8, signed: bool },
@@ -207,6 +209,7 @@ impl fmt::Display for IrType {
     }
 }
 
+#[allow(dead_code)]
 impl IrType {
     fn round_up_to_power_of_two(value: usize) -> usize {
         let mut result = 1;
@@ -252,6 +255,7 @@ impl IrType {
 pub enum IrTempRole {
     Local,
     Param { index: u32 },
+    Return,
 }
 
 // ----------- Const -----------
@@ -282,11 +286,7 @@ impl IrConst {
 impl fmt::Display for IrConst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IrConst::Int {
-                value,
-                bits,
-                signed,
-            } => write!(f, "{}", value),
+            IrConst::Int { value, .. } => write!(f, "{}", value),
             IrConst::Bool(value) => write!(f, "const.bool {}", value),
             IrConst::Unit => write!(f, "const.unit"),
         }
