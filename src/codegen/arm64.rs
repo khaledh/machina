@@ -85,7 +85,7 @@ impl Arm64Codegen {
 struct FuncCodegen<'a> {
     func: &'a IrFunction,
     alloc_result: &'a AllocationResult,
-    spilled_size: u32,
+    stack_alloc_size: u32,
     stack_padding: u32,
     label_counter: u32,
     block_labels: HashMap<IrBlockId, String>,
@@ -93,16 +93,16 @@ struct FuncCodegen<'a> {
 
 impl<'a> FuncCodegen<'a> {
     pub fn new(func: &'a IrFunction, alloc_result: &'a AllocationResult, label_start: u32) -> Self {
-        let spilled_size =
+        let stack_alloc_size =
             alloc_result.frame_size - alloc_result.used_callee_saved.len() as u32 * 8;
         let mut stack_padding = 0;
-        if spilled_size % 16 != 0 {
-            stack_padding = 16 - spilled_size % 16;
+        if stack_alloc_size % 16 != 0 {
+            stack_padding = 16 - stack_alloc_size % 16;
         }
         Self {
             func,
             alloc_result,
-            spilled_size,
+            stack_alloc_size,
             stack_padding,
             label_counter: label_start,
             block_labels: HashMap::new(),
@@ -210,7 +210,7 @@ impl<'a> FuncCodegen<'a> {
         }
 
         // Save callee-saved registers (in pairs using stp) at the start of the stack frame
-        // (spilled temps come after callee-saved registers from sp -> sp + spilled size)
+        // (spilled/alloc'ed temps come after callee-saved registers from sp -> sp + spilled size)
         let used_callee = &self.alloc_result.used_callee_saved;
         let mut offset = frame_size as i32;
         if !used_callee.is_empty() {
@@ -538,7 +538,7 @@ impl<'a> FuncCodegen<'a> {
                         asm.push_str(&format!("  add {result_reg}, sp, #{final_offset}\n"));
                     }
                     Some(MappedTemp::Stack(_)) | Some(MappedTemp::Reg(_)) => {
-                        // Case B/C: Param or spilled array - load base then add offset
+                        // Case B/C: Param  or allocated array - load base then add offset
                         let base_reg = match self.alloc_result.alloc_map.get(&array) {
                             Some(MappedTemp::Stack(slot)) => {
                                 let offset = self.get_stack_offset(slot)?;
@@ -893,13 +893,13 @@ impl<'a> FuncCodegen<'a> {
 
     // Get stack offset for a stack slot
     fn get_stack_offset(&self, slot: &StackSlotId) -> Result<u32, CodegenError> {
-        if slot.0 >= self.alloc_result.spill_slot_count {
+        if slot.0 >= self.alloc_result.stack_slot_count {
             return Err(CodegenError::StackSlotOutOfBounds(
                 slot.0,
-                self.alloc_result.spill_slot_count,
+                self.alloc_result.stack_slot_count,
             ));
         }
-        let offset = self.stack_padding + self.spilled_size - slot.offset_bytes();
+        let offset = self.stack_padding + self.stack_alloc_size - slot.offset_bytes();
         Ok(offset)
     }
 

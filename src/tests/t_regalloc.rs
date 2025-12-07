@@ -5,7 +5,7 @@ use crate::regalloc::alloc::{MappedTemp, RegAlloc};
 use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::moves::Location;
 use crate::regalloc::regs::Arm64Reg as R;
-use crate::regalloc::spill::StackSlotId;
+use crate::regalloc::stack::StackSlotId;
 
 include!("ir_test_utils.rs");
 

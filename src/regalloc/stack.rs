@@ -2,7 +2,7 @@
 pub struct StackSlotId(pub u32);
 
 impl StackSlotId {
-    /// Offset relative to the top of spilled area.
+    /// Offset relative to the top of stack allocation area.
     pub fn offset_bytes(&self) -> u32 {
         self.0 * 8 + 8
     }
@@ -31,11 +31,11 @@ impl StackSlotId {
 ///  v
 /// Lower address
 ///
-pub struct SpillAllocator {
+pub struct StackAllocator {
     next_slot: u32,
 }
 
-impl SpillAllocator {
+impl StackAllocator {
     pub fn new() -> Self {
         Self { next_slot: 0 }
     }

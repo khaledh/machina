@@ -4,7 +4,7 @@ use std::fmt;
 use crate::ir::pos::{InstPos, RelInstPos};
 use crate::ir::types::IrBlockId;
 use crate::regalloc::regs::Arm64Reg;
-use crate::regalloc::spill::StackSlotId;
+use crate::regalloc::stack::StackSlotId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {

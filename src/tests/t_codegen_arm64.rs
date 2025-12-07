@@ -8,7 +8,7 @@ use crate::regalloc::alloc::{AllocationResult, RegAlloc};
 use crate::regalloc::constraints::analyze_constraints;
 use crate::regalloc::moves::FnMoveList;
 use crate::regalloc::regs::Arm64Reg as R;
-use crate::regalloc::spill::StackSlotId;
+use crate::regalloc::stack::StackSlotId;
 use std::collections::HashMap;
 
 include!("ir_test_utils.rs");
@@ -24,14 +24,14 @@ fn create_test_function(name: &str) -> IrFunction {
 fn create_alloc_result(
     frame_size: u32,
     used_callee_saved: Vec<R>,
-    spill_slot_count: u32,
+    stack_slot_count: u32,
 ) -> AllocationResult {
     AllocationResult {
         alloc_map: HashMap::new(),
         moves: FnMoveList::new(),
         frame_size,
         used_callee_saved,
-        spill_slot_count,
+        stack_slot_count,
     }
 }
 

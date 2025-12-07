@@ -9,7 +9,7 @@ use crate::ir::types::{IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrType}
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
-use crate::regalloc::spill::{SpillAllocator, StackSlotId};
+use crate::regalloc::stack::{StackAllocator, StackSlotId};
 
 #[derive(Debug, Clone)]
 pub enum MappedTemp {
@@ -156,7 +156,7 @@ pub struct AllocationResult {
     pub moves: FnMoveList,
     pub frame_size: u32,
     pub used_callee_saved: Vec<Arm64Reg>,
-    pub spill_slot_count: u32,
+    pub stack_slot_count: u32,
 }
 
 pub struct RegAlloc<'a> {
@@ -165,7 +165,7 @@ pub struct RegAlloc<'a> {
     pos_map: PosIndexMap,
     active_set: ActiveSet,
     alloc_map: TempAllocMap,
-    spill_alloc: SpillAllocator,
+    stack_alloc: StackAllocator,
     moves: FnMoveList,
     used_callee_saved: HashSet<Arm64Reg>,
 }
@@ -178,7 +178,7 @@ impl<'a> RegAlloc<'a> {
             pos_map: Self::build_pos_map(func),
             active_set: ActiveSet::new(),
             alloc_map: TempAllocMap::new(),
-            spill_alloc: SpillAllocator::new(),
+            stack_alloc: StackAllocator::new(),
             moves: FnMoveList::new(),
             used_callee_saved: HashSet::new(),
         }
@@ -221,7 +221,7 @@ impl<'a> RegAlloc<'a> {
     }
 
     fn spill_temp(&mut self, active_temp: ActiveTemp) {
-        let stack_slot = self.spill_alloc.alloc_slot();
+        let stack_slot = self.stack_alloc.alloc_slot();
         self.alloc_map
             .insert(active_temp.temp_id, MappedTemp::Stack(stack_slot));
         self.active_set.remove(&active_temp.temp_id);
@@ -363,7 +363,7 @@ impl<'a> RegAlloc<'a> {
                 && (active_temp.interval.end - 1) > call_inst_idx as u32
             // end is exclusive
             {
-                let stack_slot = self.spill_alloc.alloc_slot();
+                let stack_slot = self.stack_alloc.alloc_slot();
                 // Save the temp to the stack before the call
                 self.moves.add_inst_move(
                     RelInstPos::Before(constr.pos),
@@ -422,7 +422,7 @@ impl<'a> RegAlloc<'a> {
 
                 if victim.interval.end <= interval.end {
                     // Spill current since it lives longer (it doesn't enter the active set)
-                    let stack_slot = self.spill_alloc.alloc_slot();
+                    let stack_slot = self.stack_alloc.alloc_slot();
                     self.alloc_map
                         .insert(temp_id, MappedTemp::Stack(stack_slot));
                 } else {
@@ -436,7 +436,7 @@ impl<'a> RegAlloc<'a> {
 
     fn alloc_stack(&mut self, temp_id: IrTempId, temp_ty: &IrType) {
         let slot_count = temp_ty.size_of() as u32 / 8;
-        let start_slot = self.spill_alloc.alloc_slots(slot_count);
+        let start_slot = self.stack_alloc.alloc_slots(slot_count);
         self.alloc_map
             .insert(temp_id, MappedTemp::StackAddr(start_slot));
     }
@@ -565,15 +565,15 @@ impl<'a> RegAlloc<'a> {
 
         // Calculate the total frame size
         let callee_saved_size = used_callee_saved.len() * 8;
-        let spilled_size = self.spill_alloc.frame_size_bytes();
-        let frame_size = callee_saved_size as u32 + spilled_size as u32;
+        let stack_alloc_size = self.stack_alloc.frame_size_bytes();
+        let frame_size = callee_saved_size as u32 + stack_alloc_size;
 
         AllocationResult {
             alloc_map: self.alloc_map.clone(),
             moves: self.moves,
             frame_size,
             used_callee_saved,
-            spill_slot_count: self.spill_alloc.total_slots(),
+            stack_slot_count: self.stack_alloc.total_slots(),
         }
     }
 }
