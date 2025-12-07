@@ -128,15 +128,16 @@ impl Ord for PosEvent {
 
 impl PosEventKind {
     fn priority(&self) -> u8 {
-        if let PosEventKind::IntervalStart { is_param, .. } = self {
-            if *is_param {
-                return 0;
+        if let PosEventKind::IntervalStart { is_param, .. } = self
+            && *is_param
+        {
+            0
+        } else {
+            match self {
+                PosEventKind::IntervalEnd { .. } => 0,
+                PosEventKind::IntervalStart { .. } => 1,
+                PosEventKind::Call { .. } => 2,
             }
-        }
-        match self {
-            PosEventKind::IntervalEnd { .. } => 0,
-            PosEventKind::IntervalStart { .. } => 1,
-            PosEventKind::Call { .. } => 2,
         }
     }
 
@@ -235,7 +236,7 @@ impl<'a> RegAlloc<'a> {
         for param_constraint in self.constraints.fn_param_constraints.iter() {
             let temp_id = param_constraint.temp;
             let reg = param_constraint.reg;
-            let interval = intervals.get(&temp_id).expect(&format!(
+            let interval = intervals.get(&temp_id).unwrap_or_else(|| panic!(
                 "Param temp {} not found in intervals",
                 temp_id.id()
             ));
@@ -315,7 +316,7 @@ impl<'a> RegAlloc<'a> {
                 }
                 IrOperand::Const(c) => {
                     let value = match c {
-                        IrConst::Int { value, .. } => value as i64,
+                        IrConst::Int { value, .. } => value,
                         IrConst::Bool(value) => {
                             if value {
                                 1
@@ -500,7 +501,7 @@ impl<'a> RegAlloc<'a> {
                 },
                 IrOperand::Const(c) => {
                     let value = match c {
-                        IrConst::Int { value, .. } => value as i64,
+                        IrConst::Int { value, .. } => value,
                         IrConst::Bool(value) => {
                             if value {
                                 1

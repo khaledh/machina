@@ -143,7 +143,7 @@ impl SymbolResolver {
             // global scope
             checker.populate_funcs(&module.funcs);
             for function in &module.funcs {
-                checker.check_function(&function);
+                checker.check_function(function);
             }
         });
 

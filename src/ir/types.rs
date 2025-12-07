@@ -222,7 +222,7 @@ impl IrType {
     pub fn size_of(&self) -> usize {
         match self {
             IrType::Unit => 0,
-            IrType::Int { bits, .. } => (*bits as usize + 7) / 8,
+            IrType::Int { bits, .. } => (*bits as usize).div_ceil(8),
             IrType::Bool => 1,
             IrType::Ptr(ty) => ty.size_of(),
             IrType::Array { elem_ty, len } => (*elem_ty).size_of() * *len,
@@ -422,7 +422,7 @@ impl fmt::Display for IrFunction {
         // Blocks
         for (id, block) in self.blocks.iter() {
             if id.id() > 0 {
-                writeln!(f, "")?;
+                writeln!(f)?;
             }
             writeln!(f, "{}:{}:", id.id(), block.name)?;
 
@@ -430,13 +430,13 @@ impl fmt::Display for IrFunction {
             for inst in block.insts.iter() {
                 write!(f, "  ")?;
                 format_inst(f, inst, self)?;
-                writeln!(f, "")?;
+                writeln!(f)?;
             }
 
             // Terminator
             write!(f, "  ")?;
             format_terminator(f, &block.term, self)?;
-            writeln!(f, "")?;
+            writeln!(f)?;
         }
         writeln!(f, "}}")?;
         writeln!(f, "---")?;

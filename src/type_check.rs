@@ -35,8 +35,8 @@ pub enum TypeCheckError {
     #[error("Invalid argument count for function {0}: expected {1}, found {2}")]
     ArgCountMismatch(String, usize, usize, Span),
 
-    #[error("Type mismatch in argument {0} for function {1}: expected {2}, found {3}")]
-    ArgTypeMismatch(usize, String, Type, Type, Span),
+    #[error("Type mismatch in arg {0}: expected {1}, found {2}")]
+    ArgTypeMismatch(usize, Type, Type, Span),
 
     #[error("Invalid callee. Expected a function name, found: {0:?}")]
     InvalidCallee(ExprKind, Span),
@@ -67,7 +67,7 @@ impl TypeCheckError {
             TypeCheckError::ThenElseTypeMismatch(_, _, span) => *span,
             TypeCheckError::AssignTypeMismatch(_, _, span) => *span,
             TypeCheckError::ArgCountMismatch(_, _, _, span) => *span,
-            TypeCheckError::ArgTypeMismatch(_, _, _, _, span) => *span,
+            TypeCheckError::ArgTypeMismatch(_, _, _, span) => *span,
             TypeCheckError::InvalidCallee(_, span) => *span,
             TypeCheckError::EmptyArrayLiteral(span) => *span,
             TypeCheckError::ArrayElementTypeMismatch(_, _, span) => *span,
@@ -120,7 +120,7 @@ impl TypeChecker {
         };
 
         for function in &self.context.module.funcs {
-            if let Err(_) = checker.type_check_function(function) {
+            if checker.type_check_function(function).is_err() {
                 break;
             }
         }
@@ -195,7 +195,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_array_lit(&mut self, elems: &Vec<Expr>) -> Result<Type, TypeCheckError> {
+    fn type_check_array_lit(&mut self, elems: &[Expr]) -> Result<Type, TypeCheckError> {
         if elems.is_empty() {
             return Err(TypeCheckError::EmptyArrayLiteral(elems[0].span));
         }
@@ -298,7 +298,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         &mut self,
         call_expr: &Expr,
         callee: &Expr,
-        args: &Vec<Expr>,
+        args: &[Expr],
     ) -> Result<Type, TypeCheckError> {
         let name = match &callee.kind {
             ExprKind::VarRef(name) => name,
@@ -335,7 +335,6 @@ impl<'c, 'b> Checker<'c, 'b> {
                 let span = args[i].span;
                 return Err(TypeCheckError::ArgTypeMismatch(
                     i + 1,
-                    name.to_string(),
                     func_sig.params[i].clone(),
                     arg_type.clone(),
                     span,
@@ -456,9 +455,9 @@ impl<'c, 'b> Checker<'c, 'b> {
                 cond,
                 then_body,
                 else_body,
-            } => self.type_check_if(&cond, &then_body, &else_body),
+            } => self.type_check_if(cond, then_body, else_body),
 
-            ExprKind::While { cond, body } => self.type_check_while(&cond, &body),
+            ExprKind::While { cond, body } => self.type_check_while(cond, body),
         };
 
         result.map(|ty| {

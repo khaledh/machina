@@ -77,22 +77,22 @@ fn main() {
         Err(errors) => {
             for error in errors {
                 match error {
-                    CompileError::LexError(e) => {
+                    CompileError::Lex(e) => {
                         println!("{}", format_error(SOURCE, e.span(), e));
                     }
-                    CompileError::ParserError(e) => {
+                    CompileError::Parse(e) => {
                         println!("{}", format_error(SOURCE, e.span(), e));
                     }
-                    CompileError::ResolveError(e) => {
+                    CompileError::Resolve(e) => {
                         println!("{}", format_error(SOURCE, e.span(), e));
                     }
-                    CompileError::TypeCheckError(e) => {
+                    CompileError::TypeCheck(e) => {
                         println!("{}", format_error(SOURCE, e.span(), e));
                     }
-                    CompileError::LowerError(e) => {
+                    CompileError::Lower(e) => {
                         println!("{}", format_error(SOURCE, Span::default(), e));
                     }
-                    CompileError::CodegenError(e) => {
+                    CompileError::Codegen(e) => {
                         println!("{}", format_error(SOURCE, Span::default(), e));
                     }
                 }
@@ -215,8 +215,8 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     // register allocation
     let mut alloc_results = Vec::new();
     for func in &lowered_context.ir_funcs {
-        let constraints = analyze_constraints(&func);
-        let alloc_result = RegAlloc::new(&func, &constraints).alloc();
+        let constraints = analyze_constraints(func);
+        let alloc_result = RegAlloc::new(func, &constraints).alloc();
         alloc_results.push(alloc_result);
     }
 

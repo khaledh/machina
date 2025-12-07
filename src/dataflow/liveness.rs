@@ -44,10 +44,10 @@ impl GenKillSet {
             }
 
             for source in inst.get_sources() {
-                if let IrOperand::Temp(temp_id) = source {
-                    if !gen_kill_set.kill_set.contains(&temp_id) {
-                        gen_kill_set.gen_set.insert(temp_id);
-                    }
+                if let IrOperand::Temp(temp_id) = source
+                    && !gen_kill_set.kill_set.contains(&temp_id)
+                {
+                    gen_kill_set.gen_set.insert(temp_id);
                 }
             }
             if let Some(dest) = inst.get_dest() {
@@ -57,17 +57,17 @@ impl GenKillSet {
 
         match block.term() {
             IrTerminator::CondBr { cond, .. } => {
-                if let IrOperand::Temp(temp_id) = cond {
-                    if !gen_kill_set.kill_set.contains(temp_id) {
-                        gen_kill_set.gen_set.insert(*temp_id);
-                    }
+                if let IrOperand::Temp(temp_id) = cond
+                    && !gen_kill_set.kill_set.contains(temp_id)
+                {
+                    gen_kill_set.gen_set.insert(*temp_id);
                 }
             }
             IrTerminator::Ret { value } => {
-                if let Some(IrOperand::Temp(temp_id)) = value {
-                    if !gen_kill_set.kill_set.contains(temp_id) {
-                        gen_kill_set.gen_set.insert(*temp_id);
-                    }
+                if let Some(IrOperand::Temp(temp_id)) = value
+                    && !gen_kill_set.kill_set.contains(temp_id)
+                {
+                    gen_kill_set.gen_set.insert(*temp_id);
                 }
             }
             IrTerminator::Br { .. } | IrTerminator::_Unterminated => {}
@@ -108,7 +108,7 @@ impl<'a> fmt::Display for LiveMapDisplay<'a> {
         for block_id in &self.func.cfg.block_ids {
             let block = &self.func.blocks[block_id];
             let live = &self.live_map[block_id];
-            write!(f, "{}:{}\n", block_id.id(), block.name)?;
+            writeln!(f, "{}:{}", block_id.id(), block.name)?;
 
             write!(f, "  live_in: [")?;
             let mut temps: Vec<_> = live.live_in.iter().cloned().collect();

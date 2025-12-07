@@ -10,22 +10,22 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error(transparent)]
-    LexError(#[from] LexError),
+    Lex(#[from] LexError),
 
     #[error(transparent)]
-    ParserError(#[from] ParseError),
+    Parse(#[from] ParseError),
 
     #[error(transparent)]
-    ResolveError(#[from] ResolveError),
+    Resolve(#[from] ResolveError),
 
     #[error(transparent)]
-    TypeCheckError(#[from] TypeCheckError),
+    TypeCheck(#[from] TypeCheckError),
 
     #[error(transparent)]
-    LowerError(#[from] LowerError),
+    Lower(#[from] LowerError),
 
     #[error(transparent)]
-    CodegenError(#[from] CodegenError),
+    Codegen(#[from] CodegenError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

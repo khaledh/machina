@@ -9,6 +9,7 @@ use std::collections::HashMap;
 mod def_resolution {
     use super::{DefId, HashMap, NodeId};
     use std::fmt;
+    use std::hash::{Hash, Hasher};
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum DefKind {
@@ -27,11 +28,17 @@ mod def_resolution {
         }
     }
 
-    #[derive(Debug, Clone, Eq, Hash)]
+    #[derive(Debug, Clone, Eq)]
     pub struct Def {
         pub id: DefId,
         pub name: String,
         pub kind: DefKind,
+    }
+
+    impl Hash for Def {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.id.hash(state);
+        }
     }
 
     impl PartialEq for Def {
@@ -108,7 +115,7 @@ mod def_resolution {
                 writeln!(f, "Def [{}] {}: {}", def.id, def.name, def.kind)?;
             }
             // sort def map by node id
-            writeln!(f, "")?;
+            writeln!(f)?;
             writeln!(f, "Node -> Def:")?;
             let mut node_def = self.node_def.iter().collect::<Vec<(&NodeId, &DefId)>>();
             node_def.sort_by_key(|(node, _)| node.0);
@@ -152,7 +159,7 @@ mod type_resolution {
         }
 
         pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
-            self.def_type.get(def).map(|typ| typ.clone())
+            self.def_type.get(def).cloned()
         }
 
         pub fn finish(self) -> TypeMap {
@@ -173,7 +180,7 @@ mod type_resolution {
     #[allow(unused)]
     impl TypeMap {
         pub fn lookup_node_type(&self, node: NodeId) -> Option<Type> {
-            self.node_type.get(&node).map(|typ| typ.clone())
+            self.node_type.get(&node).cloned()
         }
     }
 

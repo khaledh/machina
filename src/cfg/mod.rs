@@ -1,3 +1,3 @@
-pub mod cfg;
+pub mod graph;
 
-pub use cfg::ControlFlowGraph;
+pub use graph::ControlFlowGraph;

@@ -68,7 +68,7 @@ impl Arm64Codegen {
             let mut func_codegen = FuncCodegen::new(ir_func, alloc_result, next_label_start);
             let func_asm = func_codegen.generate()?;
             asm.push_str(&func_asm);
-            asm.push_str("\n");
+            asm.push('\n');
 
             // Advance the global label counter by the number of non-entry blocks in this function.
             let non_entry_blocks = ir_func
@@ -96,7 +96,7 @@ impl<'a> FuncCodegen<'a> {
         let stack_alloc_size =
             alloc_result.frame_size - alloc_result.used_callee_saved.len() as u32 * 8;
         let mut stack_padding = 0;
-        if stack_alloc_size % 16 != 0 {
+        if !stack_alloc_size.is_multiple_of(16) {
             stack_padding = 16 - stack_alloc_size % 16;
         }
         Self {
@@ -633,16 +633,13 @@ impl<'a> FuncCodegen<'a> {
                 IrOperand::Const(IrConst::Int { value: idx, .. }),
             ) => {
                 // OPTIMIZED PATH: Direct store with immediate offset
-                let array_base = self.get_stack_offset(&slot)?;
+                let array_base = self.get_stack_offset(slot)?;
                 let element_offset = (*idx as u32) * 8;
                 let final_offset = array_base + element_offset;
 
                 // Load value into register if needed
                 let value_reg = match value {
-                    IrOperand::Temp(t) => {
-                        let value_reg = self.get_reg(t)?.to_string();
-                        value_reg
-                    }
+                    IrOperand::Temp(t) => self.get_reg(t)?.to_string(),
                     IrOperand::Const(c) => {
                         asm.push_str(&format!("  mov x16, #{}\n", c.int_value()));
                         "x16".to_string()
@@ -698,13 +695,13 @@ impl<'a> FuncCodegen<'a> {
         let elem_size = elem_ty.size_of();
 
         // Check if we can use optimized immediate offset
-        match (self.alloc_result.alloc_map.get(&array), index) {
+        match (self.alloc_result.alloc_map.get(array), index) {
             (
                 Some(MappedTemp::StackAddr(slot)),
                 IrOperand::Const(IrConst::Int { value: idx, .. }),
             ) => {
                 // OPTIMIZED PATH: Direct load with immediate offset
-                let array_base = self.get_stack_offset(&slot)?;
+                let array_base = self.get_stack_offset(slot)?;
                 let element_offset = (*idx as u32) * 8;
                 let final_offset = array_base + element_offset;
                 asm.push_str(&format!("  ldr {result_reg}, [sp, #{}]\n", final_offset));
@@ -733,7 +730,7 @@ impl<'a> FuncCodegen<'a> {
             IrTerminator::Br { target } => {
                 // Emit edge moves if any
                 if let Some(edge_moves) = self.alloc_result.moves.get_edge_moves(block_id) {
-                    asm.push_str(&self.emit_moves(&edge_moves)?);
+                    asm.push_str(&self.emit_moves(edge_moves)?);
                 }
                 asm.push_str(&format!("  b {}\n", self.block_labels[target]));
             }
@@ -744,7 +741,7 @@ impl<'a> FuncCodegen<'a> {
             } => {
                 // Emit edge moves if any
                 if let Some(edge_moves) = self.alloc_result.moves.get_edge_moves(block_id) {
-                    asm.push_str(&self.emit_moves(&edge_moves)?);
+                    asm.push_str(&self.emit_moves(edge_moves)?);
                 }
                 match cond {
                     IrOperand::Temp(temp) => {
@@ -829,10 +826,7 @@ impl<'a> FuncCodegen<'a> {
             // - StackAddr -> Stack (Can't store address directly without scratch reg)
             // - Anything -> StackAddr (You can't "write" to an address calculation)
             _ => {
-                return Err(CodegenError::UnsupportedMove(
-                    mov.from.clone(),
-                    mov.to.clone(),
-                ));
+                return Err(CodegenError::UnsupportedMove(mov.from, mov.to));
             }
         };
         asm.push_str(&inst);
@@ -848,13 +842,7 @@ impl<'a> FuncCodegen<'a> {
             return false;
         }
         let v = value as u64;
-        if v < (1 << 12) {
-            true
-        } else if v < (1 << 24) && (v & ((1 << 12) - 1)) == 0 {
-            true
-        } else {
-            false
-        }
+        v < (1 << 12) || (v < (1 << 24) && (v & ((1 << 12) - 1)) == 0)
     }
 
     /// Decide how to encode an integer operand based on the provided policy:

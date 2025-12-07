@@ -48,7 +48,7 @@ pub enum Arm64Reg {
     // Stack Pointer (SP) - points to the current top of the stack
     SP,
     // Zero Register (XZR) - always contains 0
-    XZR,
+    Xzr,
 }
 
 pub const CALLER_SAVED_REGS: [Arm64Reg; 16] = [
@@ -109,7 +109,7 @@ impl fmt::Display for Arm64Reg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Arm64Reg::SP => write!(f, "sp"),
-            Arm64Reg::XZR => write!(f, "xzr"),
+            Arm64Reg::Xzr => write!(f, "xzr"),
             _ => write!(f, "x{}", *self as u8),
         }
     }

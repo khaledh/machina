@@ -41,6 +41,25 @@ pub enum LowerError {
     ArrayLitRequiresDestTemp(NodeId),
 }
 
+fn lower_type(ty: &Type) -> IrType {
+    match ty {
+        Type::UInt64 => IrType::Int {
+            bits: 64,
+            signed: false,
+        },
+        Type::Bool => IrType::Bool,
+        Type::Unit => IrType::Int {
+            bits: 1,
+            signed: false,
+        },
+        Type::Unknown => panic!("Unknown type"),
+        Type::Array { elem_ty, len } => IrType::Array {
+            elem_ty: Box::new(lower_type(elem_ty)),
+            len: *len,
+        },
+    }
+}
+
 pub struct Lowerer<'a> {
     ctx: &'a TypeCheckedContext,
     def_op: HashMap<DefId, IrOperand>,
@@ -54,37 +73,18 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn lower_type(&self, ty: &Type) -> IrType {
-        match ty {
-            Type::UInt64 => IrType::Int {
-                bits: 64,
-                signed: false,
-            },
-            Type::Bool => IrType::Bool,
-            Type::Unit => IrType::Int {
-                bits: 1,
-                signed: false,
-            },
-            Type::Unknown => panic!("Unknown type"),
-            Type::Array { elem_ty, len } => IrType::Array {
-                elem_ty: Box::new(self.lower_type(elem_ty)),
-                len: *len,
-            },
-        }
-    }
-
     pub fn lower_func(&mut self, func: &ast::Function) -> Result<IrFunction, LowerError> {
         // clear the def_addr map for each function
         self.def_op.clear();
 
-        let mut fb = IrFunctionBuilder::new(func.name.clone(), self.lower_type(&func.return_type));
+        let mut fb = IrFunctionBuilder::new(func.name.clone(), lower_type(&func.return_type));
 
         // lower params and store them in the def_temp map
         for (i, param) in func.params.iter().enumerate() {
             match self.ctx.def_map.lookup_def(param.id) {
                 Some(def) => {
                     let param_temp =
-                        fb.new_param(i as u32, param.name.clone(), self.lower_type(&param.typ));
+                        fb.new_param(i as u32, param.name.clone(), lower_type(&param.typ));
                     self.def_op.insert(def.id, IrOperand::Temp(param_temp));
                 }
                 None => return Err(LowerError::ParamDefNotFound(param.id)),
@@ -116,7 +116,7 @@ impl<'a> Lowerer<'a> {
     ) -> Result<IrOperand, LowerError> {
         match self.ctx.def_map.lookup_def(expr.id) {
             Some(def) => {
-                let value_ty = self.lower_type(&self.get_node_type(value)?);
+                let value_ty = lower_type(&self.get_node_type(value)?);
                 let dest_temp = if value_ty.is_compound() {
                     Some(fb.new_temp(value_ty))
                 } else {
@@ -143,7 +143,7 @@ impl<'a> Lowerer<'a> {
     ) -> Result<IrOperand, LowerError> {
         match self.ctx.def_map.lookup_def(expr.id) {
             Some(def) => {
-                let value_ty = self.lower_type(&self.get_node_type(value)?);
+                let value_ty = lower_type(&self.get_node_type(value)?);
                 let dest_temp = if value_ty.is_compound() {
                     Some(fb.new_temp(value_ty))
                 } else {
@@ -154,7 +154,7 @@ impl<'a> Lowerer<'a> {
                 let temp = match value_op {
                     IrOperand::Temp(t) => t,
                     other => {
-                        let ty = self.lower_type(&self.get_node_type(value)?);
+                        let ty = lower_type(&self.get_node_type(value)?);
                         let t = fb.new_temp(ty);
                         fb.move_to(t, other);
                         t
@@ -185,7 +185,7 @@ impl<'a> Lowerer<'a> {
                             Some(op) => return Err(LowerError::DestIsNotTemp(expr.id, *op)),
                             None => return Err(LowerError::VarDefNotFound(expr.id)),
                         };
-                        let value_ty = self.lower_type(&self.get_node_type(value)?);
+                        let value_ty = lower_type(&self.get_node_type(value)?);
                         let dest_temp = if value_ty.is_compound() {
                             Some(temp)
                         } else {
@@ -236,7 +236,7 @@ impl<'a> Lowerer<'a> {
     fn lower_array_lit(
         &mut self,
         fb: &mut IrFunctionBuilder,
-        elems: &Vec<ast::Expr>,
+        elems: &[ast::Expr],
         dest_temp: IrTempId,
     ) -> Result<IrOperand, LowerError> {
         // Store each element at its index
@@ -266,7 +266,7 @@ impl<'a> Lowerer<'a> {
         };
 
         // Create a new temp for the result
-        let result_ty = self.lower_type(&self.get_node_type(expr)?);
+        let result_ty = lower_type(&self.get_node_type(expr)?);
         let result = fb.new_temp(result_ty);
 
         fb.load_element(result, array_temp, index_op);
@@ -309,7 +309,7 @@ impl<'a> Lowerer<'a> {
                 if let Some(dest_temp) = dest_temp {
                     self.lower_array_lit(fb, elems, dest_temp)
                 } else {
-                    return Err(LowerError::ArrayLitRequiresDestTemp(expr.id));
+                    Err(LowerError::ArrayLitRequiresDestTemp(expr.id))
                 }
             }
             ast::ExprKind::Index { target, index } => self.lower_index(fb, expr, target, index),
@@ -323,7 +323,7 @@ impl<'a> Lowerer<'a> {
         left: &ast::Expr,
         right: &ast::Expr,
     ) -> Result<IrOperand, LowerError> {
-        let result = fb.new_temp(self.lower_type(&self.get_node_type(left)?));
+        let result = fb.new_temp(lower_type(&self.get_node_type(left)?));
         let left_op = self.lower_expr(fb, left, None)?;
         let right_op = self.lower_expr(fb, right, None)?;
         fb.binary_op(result, *op, left_op, right_op);
@@ -336,7 +336,7 @@ impl<'a> Lowerer<'a> {
         op: &ast::UnaryOp,
         expr: &ast::Expr,
     ) -> Result<IrOperand, LowerError> {
-        let result = fb.new_temp(self.lower_type(&self.get_node_type(expr)?));
+        let result = fb.new_temp(lower_type(&self.get_node_type(expr)?));
         let expr_op = self.lower_expr(fb, expr, None)?;
         fb.unary_op(result, *op, expr_op);
         Ok(IrOperand::Temp(result))
@@ -381,7 +381,7 @@ impl<'a> Lowerer<'a> {
             IrOperand::Temp(temp) => temp,
             other => {
                 // Materialize the constant to a temp (so that phi can use it)
-                let temp = fb.new_temp(self.lower_type(&self.get_node_type(then_body)?));
+                let temp = fb.new_temp(lower_type(&self.get_node_type(then_body)?));
                 fb.move_to(temp, other);
                 temp
             }
@@ -394,7 +394,7 @@ impl<'a> Lowerer<'a> {
             IrOperand::Temp(temp) => temp,
             other => {
                 // Materialize the constant to a temp (so that phi can use it)
-                let temp = fb.new_temp(self.lower_type(&self.get_node_type(else_body)?));
+                let temp = fb.new_temp(lower_type(&self.get_node_type(else_body)?));
                 fb.move_to(temp, other);
                 temp
             }
@@ -407,7 +407,7 @@ impl<'a> Lowerer<'a> {
             Ok(IrOperand::Temp(dest_temp))
         } else {
             let merge_type = self.get_node_type(then_body)?;
-            let merge_op = fb.new_temp(self.lower_type(&merge_type));
+            let merge_op = fb.new_temp(lower_type(&merge_type));
             fb.phi(merge_op, vec![(then_b, then_op), (else_b, else_op)]);
             Ok(IrOperand::Temp(merge_op))
         }
@@ -451,10 +451,10 @@ impl<'a> Lowerer<'a> {
         fb: &mut IrFunctionBuilder,
         expr: &ast::Expr,
         name: String,
-        args: &Vec<ast::Expr>,
+        args: &[ast::Expr],
         dest_temp: Option<IrTempId>,
     ) -> Result<IrOperand, LowerError> {
-        let ret_ty = self.lower_type(&self.get_node_type(expr)?);
+        let ret_ty = lower_type(&self.get_node_type(expr)?);
 
         // Lower the arguments
         let args = args
@@ -479,7 +479,7 @@ impl<'a> Lowerer<'a> {
         &mut self,
         fb: &mut IrFunctionBuilder,
         id: NodeId,
-        body: &Vec<ast::Expr>,
+        body: &[ast::Expr],
         dest_temp: Option<IrTempId>,
     ) -> Result<IrOperand, LowerError> {
         for expr in body.iter().take(body.len().saturating_sub(1)) {
@@ -503,7 +503,7 @@ pub fn lower(context: TypeCheckedContext) -> Result<LoweredContext, LowerError> 
     let mut lowerer = Lowerer::new(&context);
     let mut ir_funcs = Vec::new();
     for func in &context.module.funcs {
-        let ir_func = lowerer.lower_func(&func)?;
+        let ir_func = lowerer.lower_func(func)?;
         ir_funcs.push(ir_func);
     }
     Ok(context.with_ir_funcs(ir_funcs))

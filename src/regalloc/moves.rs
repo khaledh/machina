@@ -82,7 +82,7 @@ impl FnMoveList {
     pub fn add_edge_move(&mut self, from_block_id: IrBlockId, from: Location, to: Location) {
         self.edge_moves
             .entry(from_block_id)
-            .or_insert(vec![])
+            .or_default()
             .push(Move { from, to });
     }
 

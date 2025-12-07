@@ -6,6 +6,7 @@ use crate::types::Type;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(clippy::enum_variant_names)]
 pub enum ParseError {
     #[error("Expected {0}, found: {1}")]
     ExpectedToken(TokenKind, Token),
@@ -218,10 +219,7 @@ impl<'a> Parser<'a> {
             TK::Ident(name) if name == "bool" => Ok(Type::Bool),
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
         };
-        result.map(|typ| {
-            self.advance();
-            typ
-        })
+        result.inspect(|_| self.advance())
     }
 
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
