@@ -6,7 +6,8 @@ development. The compiler currently targets only ARM64 assembly.
 ## Current features
 
 - Expression oriented syntax
-- Basic types: `u32`, `bool`, `()`
+- Basic types: `u64`, `bool`, `()`
+- Compound types: `u64[N]` (arrays)
 - Variables: `let` (immutable), `var` (mutable) with lexical scoping
 - Arithmetic and comparison operators
 - Blocks (last expression is the block value)
@@ -17,16 +18,20 @@ development. The compiler currently targets only ARM64 assembly.
 ## Example
 
 ```
-fn main() -> u32 {
+fn main() -> u64 {
     let x = {
-      let value = foo();
+      let value = create_array()[2];
       value + 2
     };
     x
 }
 
-fn foo() -> u32 {
-    if true { 40 } else { 0 }
+fn create_array(b: bool) -> u64[5] {
+    if b {
+        [1, 2, 3]
+    } else {
+        [4, 5, 6]
+    }
 }
 ```
 
