@@ -8,7 +8,7 @@ use crate::ir::types::{
     IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator, IrType,
 };
 use crate::regalloc::moves::{Location, Move};
-use crate::regalloc::regs::Arm64Reg;
+use crate::regalloc::regs::{Arm64Reg as R, to_w_reg};
 use crate::regalloc::{AllocationResult, MappedTemp, StackSlotId};
 
 #[derive(Debug, Error)]
@@ -33,6 +33,9 @@ pub enum CodegenError {
 
     #[error("Expected temp {0} to be an array, found {1}")]
     TempIsNotArray(IrTempId, IrType),
+
+    #[error("Unsupported size {0} for store/load operation")]
+    UnsupportedSize(usize),
 }
 
 // Controls how integer constants are encoded for a given instruction.
@@ -43,6 +46,11 @@ enum ImmPolicy {
     AddSubImm,
     /// Always materialize the value into a register (no immediate encoding allowed).
     RegOnly,
+}
+
+enum AddressingMode {
+    SpOffset(u32), // [sp, #offset]
+    Register(R),   // [xN]
 }
 
 pub struct Arm64Codegen {
@@ -526,9 +534,8 @@ impl<'a> FuncCodegen<'a> {
         array: IrTempId,
         index: &IrOperand,
         elem_size: usize,
-        result_reg: &str,
         asm: &mut String,
-    ) -> Result<(), CodegenError> {
+    ) -> Result<AddressingMode, CodegenError> {
         match index {
             IrOperand::Const(IrConst::Int { value: idx, .. }) => {
                 let elem_offset = (*idx as usize) * elem_size;
@@ -538,7 +545,7 @@ impl<'a> FuncCodegen<'a> {
                         // Case A: Local array - compute final offset from sp
                         let array_base = self.get_stack_offset(slot)?;
                         let final_offset = array_base + elem_offset as u32;
-                        asm.push_str(&format!("  add {result_reg}, sp, #{final_offset}\n"));
+                        Ok(AddressingMode::SpOffset(final_offset))
                     }
                     Some(MappedTemp::Stack(_)) | Some(MappedTemp::Reg(_)) => {
                         // Case B/C: Param  or allocated array - load base then add offset
@@ -554,19 +561,16 @@ impl<'a> FuncCodegen<'a> {
 
                         // Common immediate offset logic
                         if elem_offset == 0 {
-                            asm.push_str(&format!("  mov {result_reg}, {base_reg}\n"));
+                            asm.push_str(&format!("  mov x17, {base_reg}\n"));
                         } else if elem_offset < 4096 {
-                            asm.push_str(&format!(
-                                "  add {result_reg}, {base_reg}, #{elem_offset}\n"
-                            ));
+                            asm.push_str(&format!("  add x17, {base_reg}, #{elem_offset}\n"));
                         } else {
-                            asm.push_str(&format!("  mov {result_reg}, #{elem_offset}\n"));
-                            asm.push_str(&format!(
-                                "  add {result_reg}, {base_reg}, {result_reg}\n"
-                            ));
+                            asm.push_str(&format!("  mov x17, #{elem_offset}\n"));
+                            asm.push_str(&format!("  add x17, {base_reg}, x17\n"));
                         }
+                        Ok(AddressingMode::Register(R::X17))
                     }
-                    None => return Err(CodegenError::TempNotFound(array.id())),
+                    None => Err(CodegenError::TempNotFound(array.id())),
                 }
             }
             IrOperand::Temp(temp) => {
@@ -582,33 +586,98 @@ impl<'a> FuncCodegen<'a> {
                         asm,
                         0,
                     );
-                    asm.push_str(&format!("  mul {result_reg}, {index_reg}, {size_reg}\n"));
-                    result_reg.to_string()
+                    asm.push_str(&format!("  mul x17, {index_reg}, {size_reg}\n"));
+                    "x17".to_string()
                 };
 
                 match self.alloc_result.alloc_map.get(&array) {
                     Some(MappedTemp::StackAddr(slot)) => {
                         // Case A: Local array - add to sp + array_base
                         let array_base = self.get_stack_offset(slot)?;
-                        asm.push_str(&format!(
-                            "  add {result_reg}, {offset_reg}, #{array_base}\n"
-                        ));
-                        asm.push_str(&format!("  add {result_reg}, sp, {result_reg}\n"));
+                        asm.push_str(&format!("  add x17, {offset_reg}, #{array_base}\n"));
+                        asm.push_str(&format!("  add x17, sp, x17\n"));
+                        Ok(AddressingMode::Register(R::X17))
                     }
                     Some(MappedTemp::Stack(slot)) => {
                         // Case B: Spilled array - load base then add offset
                         let array_base = self.get_stack_offset(slot)?;
                         asm.push_str(&format!("  ldr x16, [sp, #{}]\n", array_base));
-                        asm.push_str(&format!("  add {result_reg}, x16, {offset_reg}\n"));
+                        asm.push_str(&format!("  add x17, x16, {offset_reg}\n"));
+                        Ok(AddressingMode::Register(R::X17))
                     }
                     Some(MappedTemp::Reg(base_reg)) => {
                         // Case C: Param array - add offset to base register
-                        asm.push_str(&format!("  add {result_reg}, {base_reg}, {offset_reg}\n"));
+                        asm.push_str(&format!("  add x17, {base_reg}, {offset_reg}\n"));
+                        Ok(AddressingMode::Register(R::X17))
                     }
-                    None => return Err(CodegenError::TempNotFound(array.id())),
+                    None => Err(CodegenError::TempNotFound(array.id())),
                 }
             }
             _ => todo!("handle other index operand types"),
+        }
+    }
+
+    fn materialize_operand(
+        &mut self,
+        operand: &IrOperand,
+        asm: &mut String,
+    ) -> Result<R, CodegenError> {
+        match operand {
+            IrOperand::Temp(temp) => {
+                let reg = self.get_reg(temp)?;
+                Ok(reg)
+            }
+            IrOperand::Const(c) => {
+                asm.push_str(&format!("  mov x16, #{}\n", c.int_value()));
+                Ok(R::X16)
+            }
+        }
+    }
+
+    fn emit_store_at_address(
+        &mut self,
+        addr: AddressingMode,
+        size: usize,
+        value_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        // Format the addressing mode into instruction syntax
+        let addr_str = match addr {
+            AddressingMode::SpOffset(offset) => format!("[sp, #{}]", offset),
+            AddressingMode::Register(reg) => format!("[{}]", reg),
+        };
+
+        // Emit the store instruction based on size
+        let w_reg = to_w_reg(value_reg);
+        match size {
+            1 => asm.push_str(&format!("  strb {w_reg}, {addr_str}\n")),
+            2 => asm.push_str(&format!("  strh {w_reg}, {addr_str}\n")),
+            4 => asm.push_str(&format!("  str {w_reg}, {addr_str}\n")),
+            8 => asm.push_str(&format!("  str {value_reg}, {addr_str}\n")),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
+    fn emit_load_at_address(
+        &mut self,
+        addr: AddressingMode,
+        size: usize,
+        result_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let addr_str = match addr {
+            AddressingMode::SpOffset(offset) => format!("[sp, #{}]", offset),
+            AddressingMode::Register(reg) => format!("[{}]", reg),
+        };
+
+        let w_reg = to_w_reg(result_reg);
+        match size {
+            1 => asm.push_str(&format!("  ldrb {w_reg}, {addr_str}\n")),
+            2 => asm.push_str(&format!("  ldrh {w_reg}, {addr_str}\n")),
+            4 => asm.push_str(&format!("  ldr {w_reg}, {addr_str}\n")),
+            8 => asm.push_str(&format!("  ldr {result_reg}, {addr_str}\n")),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
         }
         Ok(())
     }
@@ -629,51 +698,14 @@ impl<'a> FuncCodegen<'a> {
         };
         let elem_size = elem_ty.size_of();
 
-        // Check if we can use optimized immediate offset
-        match (self.alloc_result.alloc_map.get(&array), index) {
-            (
-                Some(MappedTemp::StackAddr(slot)),
-                IrOperand::Const(IrConst::Int { value: idx, .. }),
-            ) => {
-                // OPTIMIZED PATH: Direct store with immediate offset
-                let array_base = self.get_stack_offset(slot)?;
-                let element_offset = (*idx as u32) * 8;
-                let final_offset = array_base + element_offset;
+        // Calculate the element address
+        let addr = self.emit_element_address(array, index, elem_size, &mut asm)?;
 
-                // Load value into register if needed
-                let value_reg = match value {
-                    IrOperand::Temp(t) => self.get_reg(t)?.to_string(),
-                    IrOperand::Const(c) => {
-                        asm.push_str(&format!("  mov x16, #{}\n", c.int_value()));
-                        "x16".to_string()
-                    }
-                };
+        // Materialize the value into a register
+        let value_reg = self.materialize_operand(value, &mut asm)?;
 
-                // Direct store: str value_reg, [sp, #offset]
-                asm.push_str(&format!("  str {}, [sp, #{}]\n", value_reg, final_offset));
-            }
-            _ => {
-                // Calculate the element address
-                self.emit_element_address(array, index, elem_size, "x17", &mut asm)?;
-                // Store the value to the element address
-                match value {
-                    IrOperand::Temp(temp) => {
-                        let value_reg = self.get_reg(temp)?;
-                        asm.push_str(&format!("  str {}, [x17]\n", value_reg));
-                    }
-                    IrOperand::Const(c) => {
-                        // Materialize the constant into a scratch register
-                        let value_reg = self.operand_for_int_with_policy(
-                            c.int_value(),
-                            ImmPolicy::RegOnly,
-                            &mut asm,
-                            0,
-                        );
-                        asm.push_str(&format!("  str {}, [x17]\n", value_reg));
-                    }
-                }
-            }
-        }
+        // Store the value at the address
+        self.emit_store_at_address(addr, elem_size, value_reg, &mut asm)?;
 
         Ok(asm)
     }
@@ -697,25 +729,11 @@ impl<'a> FuncCodegen<'a> {
         };
         let elem_size = elem_ty.size_of();
 
-        // Check if we can use optimized immediate offset
-        match (self.alloc_result.alloc_map.get(array), index) {
-            (
-                Some(MappedTemp::StackAddr(slot)),
-                IrOperand::Const(IrConst::Int { value: idx, .. }),
-            ) => {
-                // OPTIMIZED PATH: Direct load with immediate offset
-                let array_base = self.get_stack_offset(slot)?;
-                let element_offset = (*idx as u32) * 8;
-                let final_offset = array_base + element_offset;
-                asm.push_str(&format!("  ldr {result_reg}, [sp, #{}]\n", final_offset));
-            }
-            _ => {
-                // Calculate the element address
-                self.emit_element_address(*array, index, elem_size, "x17", &mut asm)?;
-                // Load the value from the element address
-                asm.push_str(&format!("  ldr {result_reg}, [x17]\n"));
-            }
-        }
+        // Calculate the element address
+        let addr = self.emit_element_address(*array, index, elem_size, &mut asm)?;
+
+        // Load the value from the address into the result register
+        self.emit_load_at_address(addr, elem_size, result_reg, &mut asm)?;
 
         Ok(asm)
     }
@@ -756,20 +774,42 @@ impl<'a> FuncCodegen<'a> {
             _ => return Err(CodegenError::TempNotFound(src.id())),
         }
 
-        // Copy `size` bytes in 8-byte chunks. We assume `size` is a
-        // multiple of 8 (arrays of u64, etc.).
+        // Fast path: copy as many 8-byte chunks as possible.
         let loop_label = self.next_label();
         let done_label = self.next_label();
 
+        asm.push_str("  ; memcpy\n");
+
         let count = size / 8;
-        asm.push_str(&format!("  mov x21, #{count}\n"));
-        asm.push_str(&format!("  cbz x21, {done_label}\n"));
-        asm.push_str(&format!("{loop_label}:\n"));
-        asm.push_str("  ldr x22, [x20], #8\n");
-        asm.push_str("  str x22, [x19], #8\n");
-        asm.push_str("  subs x21, x21, #1\n");
-        asm.push_str(&format!("  b.ne {loop_label}\n"));
-        asm.push_str(&format!("{done_label}:\n"));
+        if count > 0 {
+            asm.push_str(&format!("  mov x21, #{count}\n"));
+            asm.push_str(&format!("  cbz x21, {done_label}\n"));
+            asm.push_str(&format!("{loop_label}:\n"));
+            asm.push_str("  ldr x22, [x20], #8\n");
+            asm.push_str("  str x22, [x19], #8\n");
+            asm.push_str("  subs x21, x21, #1\n");
+            asm.push_str(&format!("  b.ne {loop_label}\n"));
+            asm.push_str(&format!("{done_label}:\n"));
+        }
+
+        // Tail handling for remaining bytes: 4, 2, 1.
+        let mut remaining = size % 8;
+        if remaining >= 4 {
+            asm.push_str("  ldr w22, [x20], #4\n");
+            asm.push_str("  str w22, [x19], #4\n");
+            remaining -= 4;
+        }
+        if remaining >= 2 {
+            asm.push_str("  ldrh w22, [x20], #2\n");
+            asm.push_str("  strh w22, [x19], #2\n");
+            remaining -= 2;
+        }
+        if remaining >= 1 {
+            asm.push_str("  ldrb w22, [x20], #1\n");
+            asm.push_str("  strb w22, [x19], #1\n");
+        }
+
+        asm.push_str("  ; end memcpy\n");
 
         Ok(asm)
     }
@@ -928,7 +968,7 @@ impl<'a> FuncCodegen<'a> {
         }
     }
 
-    fn get_reg(&self, temp: &IrTempId) -> Result<Arm64Reg, CodegenError> {
+    fn get_reg(&self, temp: &IrTempId) -> Result<R, CodegenError> {
         match self.alloc_result.alloc_map.get(temp) {
             Some(MappedTemp::Reg(reg)) => Ok(*reg),
             Some(_) => Err(CodegenError::TempIsNotInRegister(temp.id())),

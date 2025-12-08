@@ -51,6 +51,45 @@ pub enum Arm64Reg {
     Xzr,
 }
 
+/// Return the corresponding 32-bit W-register name for a given X-reg.
+pub fn to_w_reg(reg: Arm64Reg) -> &'static str {
+    match reg {
+        Arm64Reg::X0 => "w0",
+        Arm64Reg::X1 => "w1",
+        Arm64Reg::X2 => "w2",
+        Arm64Reg::X3 => "w3",
+        Arm64Reg::X4 => "w4",
+        Arm64Reg::X5 => "w5",
+        Arm64Reg::X6 => "w6",
+        Arm64Reg::X7 => "w7",
+        Arm64Reg::X8 => "w8",
+        Arm64Reg::X9 => "w9",
+        Arm64Reg::X10 => "w10",
+        Arm64Reg::X11 => "w11",
+        Arm64Reg::X12 => "w12",
+        Arm64Reg::X13 => "w13",
+        Arm64Reg::X14 => "w14",
+        Arm64Reg::X15 => "w15",
+        Arm64Reg::X16 => "w16",
+        Arm64Reg::X17 => "w17",
+        Arm64Reg::X18 => "w18",
+        Arm64Reg::X19 => "w19",
+        Arm64Reg::X20 => "w20",
+        Arm64Reg::X21 => "w21",
+        Arm64Reg::X22 => "w22",
+        Arm64Reg::X23 => "w23",
+        Arm64Reg::X24 => "w24",
+        Arm64Reg::X25 => "w25",
+        Arm64Reg::X26 => "w26",
+        Arm64Reg::X27 => "w27",
+        Arm64Reg::X28 => "w28",
+        Arm64Reg::X29 => "w29",
+        Arm64Reg::X30 => "w30",
+        Arm64Reg::SP => "wsp",
+        Arm64Reg::Xzr => "wzr",
+    }
+}
+
 pub const CALLER_SAVED_REGS: [Arm64Reg; 16] = [
     Arm64Reg::X0,
     Arm64Reg::X1,

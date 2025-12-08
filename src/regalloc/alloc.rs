@@ -435,7 +435,7 @@ impl<'a> RegAlloc<'a> {
     }
 
     fn alloc_stack(&mut self, temp_id: IrTempId, temp_ty: &IrType) {
-        let slot_count = temp_ty.size_of() as u32 / 8;
+        let slot_count = (temp_ty.size_of() as u32).div_ceil(8);
         let start_slot = self.stack_alloc.alloc_slots(slot_count);
         self.alloc_map
             .insert(temp_id, MappedTemp::StackAddr(start_slot));

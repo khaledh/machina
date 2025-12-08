@@ -257,3 +257,312 @@ fn test_function_call() {
     "};
     assert_eq!(asm, expected);
 }
+
+// Array element access tests
+
+fn array_u64_ty(len: usize) -> IrType {
+    IrType::Array {
+        elem_ty: Box::new(u64_ty()),
+        len,
+    }
+}
+
+fn array_u32_ty(len: usize) -> IrType {
+    IrType::Array {
+        elem_ty: Box::new(IrType::Int {
+            bits: 32,
+            signed: false,
+        }),
+        len,
+    }
+}
+
+fn array_u16_ty(len: usize) -> IrType {
+    IrType::Array {
+        elem_ty: Box::new(IrType::Int {
+            bits: 16,
+            signed: false,
+        }),
+        len,
+    }
+}
+
+fn array_u8_ty(len: usize) -> IrType {
+    IrType::Array {
+        elem_ty: Box::new(IrType::Int {
+            bits: 8,
+            signed: false,
+        }),
+        len,
+    }
+}
+
+#[test]
+fn test_store_element_const_index() {
+    // fn test(arr: u64[10]) {
+    //   arr[2] = 42
+    // }
+    let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
+    let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
+    let value = const_u64(42);
+
+    builder.store_element(array_param, const_u64(2), value);
+    builder.terminate(IrTerminator::Ret { value: None });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        add x17, x0, #16
+        mov x16, #42
+        str x16, [x17]
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_load_element_const_index() {
+    // fn test(arr: u64[10]) -> u64 {
+    //   arr[3]
+    // }
+    let mut builder = IrFunctionBuilder::new("test".to_string(), u64_ty());
+    let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
+    let result = builder.new_temp(u64_ty());
+
+    builder.load_element(result, array_param, const_u64(3));
+    builder.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        add x17, x0, #24
+        ldr x1, [x17]
+        mov x0, x1
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_store_element_variable_index() {
+    // fn test(arr: u64[10], idx: u64) {
+    //   arr[idx] = 99
+    // }
+    let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
+    let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
+    let index_param = builder.new_param(1, "idx".to_string(), u64_ty());
+    let value = const_u64(99);
+
+    builder.store_element(array_param, temp_operand(index_param), value);
+    builder.terminate(IrTerminator::Ret { value: None });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        mov x16, #8
+        mul x17, x1, x16
+        add x17, x0, x17
+        mov x16, #99
+        str x16, [x17]
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_load_element_variable_index() {
+    // fn test(arr: u64[10], idx: u64) -> u64 {
+    //   arr[idx]
+    // }
+    let mut builder = IrFunctionBuilder::new("test".to_string(), u64_ty());
+    let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
+    let index_param = builder.new_param(1, "idx".to_string(), u64_ty());
+    let result = builder.new_temp(u64_ty());
+
+    builder.load_element(result, array_param, temp_operand(index_param));
+    builder.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        mov x16, #8
+        mul x17, x1, x16
+        add x17, x0, x17
+        ldr x2, [x17]
+        mov x0, x2
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_store_element_different_sizes() {
+    // Test u32 array (4-byte elements)
+    let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
+    let array_param = builder.new_param(0, "arr".to_string(), array_u32_ty(10));
+    builder.store_element(
+        array_param,
+        const_u64(1),
+        IrOperand::Const(IrConst::Int {
+            value: 123,
+            bits: 32,
+            signed: false,
+        }),
+    );
+    builder.terminate(IrTerminator::Ret { value: None });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        add x17, x0, #4
+        mov x16, #123
+        str w16, [x17]
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_load_element_halfword_array() {
+    // Test u16 array (2-byte elements)
+    let mut builder = IrFunctionBuilder::new(
+        "test".to_string(),
+        IrType::Int {
+            bits: 16,
+            signed: false,
+        },
+    );
+    let array_param = builder.new_param(0, "arr".to_string(), array_u16_ty(10));
+    let result = builder.new_temp(IrType::Int {
+        bits: 16,
+        signed: false,
+    });
+
+    builder.load_element(result, array_param, const_u64(3));
+    builder.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        add x17, x0, #6
+        ldrh w1, [x17]
+        mov x0, x1
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
+
+#[test]
+fn test_load_element_byte_array() {
+    // Test u8 array (1-byte elements)
+    let mut builder = IrFunctionBuilder::new(
+        "test".to_string(),
+        IrType::Int {
+            bits: 8,
+            signed: false,
+        },
+    );
+    let array_param = builder.new_param(0, "arr".to_string(), array_u8_ty(10));
+    let result = builder.new_temp(IrType::Int {
+        bits: 8,
+        signed: false,
+    });
+
+    builder.load_element(result, array_param, const_u64(5));
+    builder.terminate(IrTerminator::Ret {
+        value: Some(temp_operand(result)),
+    });
+
+    let func = builder.finish();
+    let constraints = analyze_constraints(&func);
+    let allocator = RegAlloc::new(&func, &constraints);
+    let alloc_result = allocator.alloc();
+
+    let mut codegen = FuncCodegen::new(&func, &alloc_result, 0);
+    let asm = codegen.generate().unwrap();
+
+    let expected = indoc! {"
+      .global _test
+      _test:
+        stp x29, x30, [sp, #-16]!
+        mov x29, sp
+        add x17, x0, #5
+        ldrb w1, [x17]
+        mov x0, x1
+        ldp x29, x30, [sp], #16
+        ret
+    "};
+    assert_eq!(asm, expected);
+}
