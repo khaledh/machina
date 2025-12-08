@@ -77,7 +77,8 @@ impl<'a> Lowerer<'a> {
         // clear the def_addr map for each function
         self.def_op.clear();
 
-        let mut fb = IrFunctionBuilder::new(func.name.clone(), lower_type(&func.return_type));
+        let ret_ty = lower_type(&func.return_type);
+        let mut fb = IrFunctionBuilder::new(func.name.clone(), ret_ty.clone());
 
         // lower params and store them in the def_temp map
         for (i, param) in func.params.iter().enumerate() {
@@ -95,11 +96,17 @@ impl<'a> Lowerer<'a> {
         let ret_temp = fb.ret_temp();
         let ret_op = self.lower_expr(&mut fb, &func.body, ret_temp)?;
 
-        match ret_temp {
-            // Indirect result (compound return type)
-            Some(_) => fb.terminate(IrTerminator::Ret { value: None }),
-            // Direct result
-            None => fb.terminate(IrTerminator::Ret {
+        match (ret_temp, ret_op) {
+            (Some(ret_temp), IrOperand::Temp(src_temp)) if ret_temp == src_temp => {
+                // Result already in the return temp, so no need to copy
+                fb.terminate(IrTerminator::Ret { value: None });
+            }
+            (Some(ret_temp), IrOperand::Temp(src_temp)) => {
+                // Result is in a different temp, so we need to copy it
+                fb.mem_copy(ret_temp, src_temp, ret_ty.size_of());
+                fb.terminate(IrTerminator::Ret { value: None });
+            }
+            _ => fb.terminate(IrTerminator::Ret {
                 value: Some(ret_op),
             }),
         }

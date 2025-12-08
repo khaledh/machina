@@ -256,6 +256,10 @@ impl IrFunctionBuilder {
         });
     }
 
+    pub fn mem_copy(&mut self, dest: IrTempId, src: IrTempId, size: usize) {
+        self.emit_inst(IrInst::MemCopy { dest, src, size });
+    }
+
     pub fn finish(self) -> IrFunction {
         // Check that we have at least one block
         assert!(!self.blocks.is_empty(), "No blocks in function");

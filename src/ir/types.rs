@@ -180,6 +180,16 @@ pub struct IrTempInfo {
     pub debug_name: Option<String>,
 }
 
+impl fmt::Display for IrTempInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.role {
+            IrTempRole::Local => write!(f, "local"),
+            IrTempRole::Param { index } => write!(f, "param.{}", index),
+            IrTempRole::Return => write!(f, "return"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum IrType {
@@ -356,6 +366,12 @@ pub enum IrInst {
         array: IrTempId,
         index: IrOperand,
     },
+
+    MemCopy {
+        dest: IrTempId,
+        src: IrTempId,
+        size: usize,
+    },
 }
 
 impl IrInst {
@@ -368,6 +384,7 @@ impl IrInst {
             IrInst::Phi { result, .. } => Some(*result),
             IrInst::StoreElement { .. } => None,
             IrInst::LoadElement { result, .. } => Some(*result),
+            IrInst::MemCopy { dest, .. } => Some(*dest),
         }
     }
 
@@ -390,6 +407,17 @@ impl IrInst {
             }
             IrInst::LoadElement { array, index, .. } => {
                 vec![IrOperand::Temp(*array), *index]
+            }
+            IrInst::MemCopy { dest, src, size } => {
+                vec![
+                    IrOperand::Temp(*dest),
+                    IrOperand::Temp(*src),
+                    IrOperand::Const(IrConst::Int {
+                        value: *size as i64,
+                        bits: 64,
+                        signed: false,
+                    }),
+                ]
             }
         }
     }
@@ -440,6 +468,11 @@ impl fmt::Display for IrFunction {
         }
         writeln!(f, "}}")?;
         writeln!(f, "---")?;
+        writeln!(f, "Temps:")?;
+        for (i, temp) in self.temps.iter().enumerate() {
+            writeln!(f, "  {}", format_temp(i as u32, temp))?;
+        }
+        writeln!(f, "---")?;
         writeln!(f, "CFG:")?;
         write!(f, "{}", self.cfg)?;
         Ok(())
@@ -461,9 +494,13 @@ fn format_type(ty: &IrType) -> String {
             format!("ptr {}", format_type(ty))
         }
         IrType::Array { elem_ty, len } => {
-            format!("array[{}, {}]", format_type(elem_ty), len)
+            format!("{}[{}]", format_type(elem_ty), len)
         }
     }
+}
+
+fn format_temp(id: u32, temp_info: &IrTempInfo) -> String {
+    format!("%t{}: {} : {}", id, temp_info, format_type(&temp_info.ty))
 }
 
 fn format_operand(operand: &IrOperand) -> String {
@@ -562,6 +599,9 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 array.id(),
                 format_operand(index)
             )?;
+        }
+        IrInst::MemCopy { dest, src, size } => {
+            write!(f, "memcpy %t{}, %t{}, {}", dest.id(), src.id(), size)?;
         }
     }
     Ok(())

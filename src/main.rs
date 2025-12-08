@@ -29,31 +29,14 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn inner_create_array(b: bool, x: u64) -> u64[5] {
-    if b {
-        [1, 2, x, 4, 5]
-    } else {
-        [6, 7, x, 9, 10]
-    }
-}
-
 fn create_array(b: bool) -> u64[5] {
-    let arr = if b {
-        [1, 2, 3, 4, 5]
-    } else {
-        [6, 7, 8, 9, 10]
-    }
-    inner_create_array(b, arr[2])
-}
-
-fn get_third_element(arr: u64[5]) -> u64 {
-    let x = arr[2];
-    x
+    let arr = [1, 2, 3, 4, 5];
+    arr
 }
 
 fn main() -> u64 {
     let arr = create_array(false);
-    get_third_element(arr)
+    arr[2]
 }
 "#;
 

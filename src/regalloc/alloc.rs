@@ -236,12 +236,11 @@ impl<'a> RegAlloc<'a> {
         for param_constraint in self.constraints.fn_param_constraints.iter() {
             let temp_id = param_constraint.temp;
             let reg = param_constraint.reg;
-            let interval = intervals.get(&temp_id).unwrap_or_else(|| panic!(
-                "Param temp {} not found in intervals",
-                temp_id.id()
-            ));
-            self.assign_reg(temp_id, *interval, reg);
-            free_regs.retain(|r| *r != reg);
+            // if the param doesn't appear in the intervals, that means it's unused
+            if let Some(interval) = intervals.get(&temp_id) {
+                self.assign_reg(temp_id, *interval, reg);
+                free_regs.retain(|r| *r != reg);
+            }
         }
     }
 

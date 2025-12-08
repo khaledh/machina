@@ -514,6 +514,9 @@ impl<'a> FuncCodegen<'a> {
             } => {
                 asm.push_str(&self.emit_load_element(*result, array, index)?);
             }
+            IrInst::MemCopy { dest, src, size } => {
+                asm.push_str(&self.emit_memcpy(*dest, *src, *size)?);
+            }
         }
         Ok(asm)
     }
@@ -713,6 +716,60 @@ impl<'a> FuncCodegen<'a> {
                 asm.push_str(&format!("  ldr {result_reg}, [x17]\n"));
             }
         }
+
+        Ok(asm)
+    }
+
+    pub fn emit_memcpy(
+        &mut self,
+        dest: IrTempId,
+        src: IrTempId,
+        size: usize,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+
+        // Resolve dest/src to pointer registers. We use x19/x20 as
+        // dedicated memcpy source/dest pointers so we don't interfere
+        // with the general-purpose scratch regs (x16/x17) used elsewhere.
+
+        // Load destination pointer into x19
+        match self.alloc_result.alloc_map.get(&dest) {
+            Some(MappedTemp::Reg(reg)) => {
+                asm.push_str(&format!("  mov x19, {}\n", reg));
+            }
+            Some(MappedTemp::StackAddr(slot)) => {
+                let offset = self.get_stack_offset(slot)?;
+                asm.push_str(&format!("  add x19, sp, #{}\n", offset));
+            }
+            _ => return Err(CodegenError::TempNotFound(dest.id())),
+        }
+
+        // Load source pointer into x20
+        match self.alloc_result.alloc_map.get(&src) {
+            Some(MappedTemp::Reg(reg)) => {
+                asm.push_str(&format!("  mov x20, {}\n", reg));
+            }
+            Some(MappedTemp::StackAddr(slot)) => {
+                let offset = self.get_stack_offset(slot)?;
+                asm.push_str(&format!("  add x20, sp, #{}\n", offset));
+            }
+            _ => return Err(CodegenError::TempNotFound(src.id())),
+        }
+
+        // Copy `size` bytes in 8-byte chunks. We assume `size` is a
+        // multiple of 8 (arrays of u64, etc.).
+        let loop_label = self.next_label();
+        let done_label = self.next_label();
+
+        let count = size / 8;
+        asm.push_str(&format!("  mov x21, #{count}\n"));
+        asm.push_str(&format!("  cbz x21, {done_label}\n"));
+        asm.push_str(&format!("{loop_label}:\n"));
+        asm.push_str("  ldr x22, [x20], #8\n");
+        asm.push_str("  str x22, [x19], #8\n");
+        asm.push_str("  subs x21, x21, #1\n");
+        asm.push_str(&format!("  b.ne {loop_label}\n"));
+        asm.push_str(&format!("{done_label}:\n"));
 
         Ok(asm)
     }
