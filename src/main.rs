@@ -33,12 +33,13 @@ use crate::type_check::type_check;
 const SOURCE: &str = r#"
 fn create_array() -> bool[3] {
     let arr = [true, false, true];
-    let x = arr[0];
     arr
 }
 
 fn main() -> bool {
-    let arr = create_array();
+    var arr = create_array();
+    var copy = arr;
+    copy[2] = false;
     arr[2]
 }
 "#;

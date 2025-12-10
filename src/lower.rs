@@ -242,13 +242,34 @@ impl<'a> Lowerer<'a> {
         Ok(fb.new_const_unit())
     }
 
-    fn lower_var_ref(&mut self, expr: &ast::Expr) -> Result<IrOperand, LowerError> {
-        match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def) => match self.def_op.get(&def.id) {
-                Some(op) => Ok(*op),
-                None => Err(LowerError::OperandNotFound(expr.id, def.id)),
-            },
-            None => Err(LowerError::VarDefNotFound(expr.id)),
+    fn lower_var_ref(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        dest_temp: Option<IrTempId>,
+    ) -> Result<IrOperand, LowerError> {
+        let var_def = self
+            .ctx
+            .def_map
+            .lookup_def(expr.id)
+            .ok_or(LowerError::VarDefNotFound(expr.id))?;
+
+        let var_op = *self
+            .def_op
+            .get(&var_def.id)
+            .ok_or(LowerError::OperandNotFound(expr.id, var_def.id))?;
+
+        match (dest_temp, var_op) {
+            (Some(dest_temp), IrOperand::Temp(var_temp)) if dest_temp != var_temp => {
+                let var_ty = lower_type(&self.get_node_type(expr)?);
+                if var_ty.is_compound() {
+                    fb.mem_copy(dest_temp, var_temp, var_ty.size_of());
+                } else {
+                    fb.move_to(dest_temp, var_op);
+                }
+                Ok(IrOperand::Temp(dest_temp))
+            }
+            _ => Ok(var_op),
         }
     }
 
@@ -311,7 +332,7 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::Assign {
                 value, assignee, ..
             } => self.lower_assign(fb, expr, assignee, value),
-            ast::ExprKind::VarRef(_) => self.lower_var_ref(expr),
+            ast::ExprKind::VarRef(_) => self.lower_var_ref(fb, expr, dest_temp),
             ast::ExprKind::If {
                 cond,
                 then_body,

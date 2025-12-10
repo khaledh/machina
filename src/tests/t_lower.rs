@@ -35,6 +35,57 @@ fn compile_and_lower(source: &str) -> Result<IrFunction, LowerError> {
 }
 
 #[test]
+fn test_array_value_semantics_on_copy_and_assign() {
+    let source = r#"
+        fn test() -> u64 {
+            let a = [1, 2, 3];
+            let b = a;
+            var c = a;
+            c[0] = 42;
+            a[0] + b[0] + c[0]
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // We expect exactly two MemCopy instructions:
+    // - one for `let b = a;`
+    // - one for `var c = a;`
+    let mut memcpy_pairs = Vec::new();
+
+    for inst in ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+    {
+        if let IrInst::MemCopy { dest, src, .. } = inst {
+            // Record (src, dest) temp ids
+            memcpy_pairs.push((src.id(), dest.id()));
+        }
+    }
+
+    assert_eq!(
+        memcpy_pairs.len(),
+        2,
+        "expected exactly two MemCopy instructions",
+    );
+
+    // The order of MemCopy instructions in the IR should correspond to:
+    // 1) let b = a;   => memcpy from a (t0) to b (t1)
+    // 2) var c = a;   => memcpy from a (t0) to c (t2)
+    assert_eq!(
+        memcpy_pairs[0],
+        (0, 1),
+        "expected first MemCopy to be from t0 (a) to t1 (b)",
+    );
+    assert_eq!(
+        memcpy_pairs[1],
+        (0, 2),
+        "expected second MemCopy to be from t0 (a) to t2 (c)",
+    );
+}
+
+#[test]
 fn test_lower_func() {
     let source = r#"
         fn test() -> u64 {
@@ -239,6 +290,7 @@ fn test_nrvo_eligible_array() {
     "#;
 
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+    println!("{}", ir_func);
 
     // With NRVO, the array should be allocated directly into the return temp (t0)
     // Output:
