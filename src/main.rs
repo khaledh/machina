@@ -11,6 +11,7 @@ mod ids;
 mod ir;
 mod lexer;
 mod lower;
+mod nrvo;
 mod parser;
 mod regalloc;
 mod resolver;
@@ -22,6 +23,7 @@ use crate::context::AstContext;
 use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::lower::lower;
+use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
 use crate::regalloc::alloc::{RegAlloc, TempAllocMapDisplay};
 use crate::regalloc::constraints::analyze_constraints;
@@ -31,6 +33,7 @@ use crate::type_check::type_check;
 const SOURCE: &str = r#"
 fn create_array() -> bool[3] {
     let arr = [true, false, true];
+    let x = arr[0];
     arr
 }
 
@@ -90,6 +93,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     let mut dump_ast = false;
     let mut dump_def_map = false;
     let mut dump_type_map = false;
+    let mut dump_nrvo = false;
     let mut dump_ir = false;
     let mut dump_liveness = false;
     let mut dump_regalloc = false;
@@ -102,6 +106,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
                 "ast" => dump_ast = true,
                 "defmap" => dump_def_map = true,
                 "typemap" => dump_type_map = true,
+                "nrvo" => dump_nrvo = true,
                 "ir" => dump_ir = true,
                 "liveness" => dump_liveness = true,
                 "regalloc" => dump_regalloc = true,
@@ -167,7 +172,18 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         println!("--------------------------------");
     }
 
-    let lowered_context = lower(type_checked_context.clone()).map_err(|e| vec![e.into()])?;
+    let analyzed_context = NrvoAnalyzer::new(type_checked_context).analyze();
+
+    if dump_nrvo {
+        println!("NRVO:");
+        println!("--------------------------------");
+        for def in analyzed_context.def_map.get_nrvo_eligible_defs() {
+            println!("{}", def);
+        }
+        println!("--------------------------------");
+    }
+
+    let lowered_context = lower(analyzed_context).map_err(|e| vec![e.into()])?;
     if dump_ir {
         println!("IR:");
         println!("--------------------------------");

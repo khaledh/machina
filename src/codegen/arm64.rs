@@ -595,7 +595,7 @@ impl<'a> FuncCodegen<'a> {
                         // Case A: Local array - add to sp + array_base
                         let array_base = self.get_stack_offset(slot)?;
                         asm.push_str(&format!("  add x17, {offset_reg}, #{array_base}\n"));
-                        asm.push_str(&format!("  add x17, sp, x17\n"));
+                        asm.push_str("  add x17, sp, x17\n");
                         Ok(AddressingMode::Register(R::X17))
                     }
                     Some(MappedTemp::Stack(slot)) => {

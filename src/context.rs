@@ -3,6 +3,9 @@ use crate::ast::Module;
 use crate::ir::types::IrFunction;
 use crate::regalloc::alloc::AllocationResult;
 
+// -----------------------------------------------------------------------------
+// AST Context
+// -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct AstContext {
     pub module: Module,
@@ -21,6 +24,9 @@ impl AstContext {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Resolved Context
+// -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct ResolvedContext {
     pub module: Module,
@@ -37,7 +43,9 @@ impl ResolvedContext {
     }
 }
 
-#[allow(unused)]
+// -----------------------------------------------------------------------------
+// Type Checked Context
+// -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct TypeCheckedContext {
     pub module: Module,
@@ -45,12 +53,24 @@ pub struct TypeCheckedContext {
     pub type_map: TypeMap,
 }
 
-impl TypeCheckedContext {
+// -----------------------------------------------------------------------------
+// Analyzed Context
+// -----------------------------------------------------------------------------
+pub struct AnalyzedContext {
+    pub module: Module,
+    pub def_map: DefMap,
+    pub type_map: TypeMap,
+}
+
+impl AnalyzedContext {
     pub fn with_ir_funcs(self, ir_funcs: Vec<IrFunction>) -> LoweredContext {
         LoweredContext { ir_funcs }
     }
 }
 
+// -----------------------------------------------------------------------------
+// Lowered Context
+// -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct LoweredContext {
     pub ir_funcs: Vec<IrFunction>,
@@ -68,6 +88,9 @@ impl LoweredContext {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Lowered & Reg Alloc Context
+// -----------------------------------------------------------------------------
 pub struct LoweredRegAllocContext {
     pub ir_funcs: Vec<IrFunction>,
     pub alloc_results: Vec<AllocationResult>,

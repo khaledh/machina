@@ -33,6 +33,10 @@ mod def_resolution {
         pub id: DefId,
         pub name: String,
         pub kind: DefKind,
+        // Whether it's safe to construct this def on the caller's stack directly
+        // without copying from the callee's stack (applicable only to compound
+        // return types).
+        pub nrvo_eligible: bool,
     }
 
     impl Hash for Def {
@@ -50,6 +54,16 @@ mod def_resolution {
     impl PartialOrd for Def {
         fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
             Some(self.id.cmp(&other.id))
+        }
+    }
+
+    impl fmt::Display for Def {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Def [{}] {}: {}", self.id, self.name, self.kind)?;
+            if self.nrvo_eligible {
+                write!(f, " (NRVO eligible)")?;
+            }
+            Ok(())
         }
     }
 
@@ -97,6 +111,16 @@ mod def_resolution {
             self.node_def
                 .get(&node)
                 .map(|def_id| &self.defs[def_id.0 as usize])
+        }
+
+        pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
+            if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id) {
+                def.nrvo_eligible = true;
+            }
+        }
+
+        pub fn get_nrvo_eligible_defs(&self) -> Vec<&Def> {
+            self.defs.iter().filter(|def| def.nrvo_eligible).collect()
         }
     }
 

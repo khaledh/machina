@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::ast;
-use crate::context::{LoweredContext, TypeCheckedContext};
+use crate::context::{AnalyzedContext, LoweredContext};
 use crate::ids::{DefId, NodeId};
 use crate::ir::builder::IrFunctionBuilder;
 use crate::ir::types::{IrFunction, IrOperand, IrTempId, IrTerminator, IrType};
@@ -61,12 +61,12 @@ fn lower_type(ty: &Type) -> IrType {
 }
 
 pub struct Lowerer<'a> {
-    ctx: &'a TypeCheckedContext,
+    ctx: &'a AnalyzedContext,
     def_op: HashMap<DefId, IrOperand>,
 }
 
 impl<'a> Lowerer<'a> {
-    pub fn new(ctx: &'a TypeCheckedContext) -> Self {
+    pub fn new(ctx: &'a AnalyzedContext) -> Self {
         Self {
             ctx,
             def_op: HashMap::new(),
@@ -125,7 +125,13 @@ impl<'a> Lowerer<'a> {
             Some(def) => {
                 let value_ty = lower_type(&self.get_node_type(value)?);
                 let dest_temp = if value_ty.is_compound() {
-                    Some(fb.new_temp(value_ty))
+                    // Check if this variable is NRVO-eligible
+                    if def.nrvo_eligible {
+                        // Use the return temp instead of allocating a new one
+                        fb.ret_temp()
+                    } else {
+                        Some(fb.new_temp(value_ty))
+                    }
                 } else {
                     None
                 };
@@ -152,7 +158,13 @@ impl<'a> Lowerer<'a> {
             Some(def) => {
                 let value_ty = lower_type(&self.get_node_type(value)?);
                 let dest_temp = if value_ty.is_compound() {
-                    Some(fb.new_temp(value_ty))
+                    // Check if this variable is NRVO-eligible
+                    if def.nrvo_eligible {
+                        // Use the return temp instead of allocating a new one
+                        fb.ret_temp()
+                    } else {
+                        Some(fb.new_temp(value_ty))
+                    }
                 } else {
                     None
                 };
@@ -506,7 +518,7 @@ impl<'a> Lowerer<'a> {
     }
 }
 
-pub fn lower(context: TypeCheckedContext) -> Result<LoweredContext, LowerError> {
+pub fn lower(context: AnalyzedContext) -> Result<LoweredContext, LowerError> {
     let mut lowerer = Lowerer::new(&context);
     let mut ir_funcs = Vec::new();
     for func in &context.module.funcs {

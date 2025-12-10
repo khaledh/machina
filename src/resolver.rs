@@ -125,6 +125,7 @@ impl SymbolResolver {
                 id: def_id,
                 name: func.name.clone(),
                 kind: DefKind::Func,
+                nrvo_eligible: false,
             };
             self.def_map_builder.record_def(def, func.id);
             self.insert_symbol(
@@ -167,6 +168,7 @@ impl SymbolResolver {
                     kind: DefKind::Param {
                         index: index as u32,
                     },
+                    nrvo_eligible: false,
                 };
                 checker.def_map_builder.record_def(def, param.id);
                 checker.insert_symbol(
@@ -268,6 +270,7 @@ impl SymbolResolver {
                         id: def_id,
                         name: name.to_string(),
                         kind: DefKind::LocalVar,
+                        nrvo_eligible: false,
                     };
                     self.def_map_builder.record_def(def, expr.id);
                     self.insert_symbol(
@@ -292,6 +295,7 @@ impl SymbolResolver {
                         id: def_id,
                         name: name.to_string(),
                         kind: DefKind::LocalVar,
+                        nrvo_eligible: false,
                     };
                     self.def_map_builder.record_def(def, expr.id);
                     self.insert_symbol(

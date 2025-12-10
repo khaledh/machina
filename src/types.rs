@@ -43,4 +43,8 @@ impl Type {
             Type::Unknown => panic!("Unknown type"),
         }
     }
+
+    pub fn is_compound(&self) -> bool {
+        matches!(self, Type::Array { .. })
+    }
 }

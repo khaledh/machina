@@ -3,6 +3,7 @@ use crate::ast::BinaryOp;
 use crate::context::AstContext;
 use crate::ir::types::{IrBlockId, IrConst, IrInst, IrOperand, IrTempId, IrTerminator};
 use crate::lexer::{LexError, Lexer, Token};
+use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
 use crate::resolver::resolve;
 use crate::type_check::type_check;
@@ -23,9 +24,11 @@ fn compile_and_lower(source: &str) -> Result<IrFunction, LowerError> {
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
 
-    let mut lowerer = Lowerer::new(&type_checked_context);
+    let analyzed_context = NrvoAnalyzer::new(type_checked_context).analyze();
+
+    let mut lowerer = Lowerer::new(&analyzed_context);
     let ir_func = lowerer
-        .lower_func(&type_checked_context.module.funcs[0])
+        .lower_func(&analyzed_context.module.funcs[0])
         .expect("Failed to lower function");
 
     Ok(ir_func)
@@ -224,6 +227,99 @@ fn test_lower_func_with_params() {
     // entry block
     assert_binary_op(&entry_insts[0], 2, BinaryOp::Add, temp(0), temp(1));
     assert_ret_with(&entry_block.term(), 2);
+}
+
+#[test]
+fn test_nrvo_eligible_array() {
+    let source = r#"
+        fn create_array() -> bool[3] {
+            let arr = [true, false, true];
+            arr
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // With NRVO, the array should be allocated directly into the return temp (t0)
+    // Output:
+    // fn create_array() -> bool[3] {
+    // entry:
+    //   store_element %t0[const.0] = const.true
+    //   store_element %t0[const.1] = const.false
+    //   store_element %t0[const.2] = const.true
+    //   ret
+    // }
+
+    assert_eq!(ir_func.blocks.len(), 1);
+
+    let entry_block = &ir_func.blocks[&IrBlockId(0)];
+    let entry_insts = entry_block.insts();
+    assert_eq!(entry_insts.len(), 3);
+
+    // Verify all stores use t0 (the return temp) and there's no MemCopy
+    for inst in entry_insts {
+        match inst {
+            IrInst::StoreElement { array, .. } => {
+                assert_eq!(
+                    array.id(),
+                    0,
+                    "NRVO-eligible array should use return temp t0"
+                );
+            }
+            other => panic!("Expected StoreElement, found {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_nrvo_array_with_element_read() {
+    let source = r#"
+        fn create_array() -> bool[3] {
+            let arr = [true, false, true];
+            let x = arr[0];
+            arr
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // Output:
+    // fn create_array() -> bool[3] {
+    // entry:
+    //   store_element %t0[const.0] = const.true
+    //   store_element %t0[const.1] = const.false
+    //   store_element %t0[const.2] = const.true
+    //   %t1 = load_element %t0[const.0]
+    //   ret
+    // }
+
+    assert_eq!(ir_func.blocks.len(), 1);
+
+    let entry_block = &ir_func.blocks[&IrBlockId(0)];
+    let entry_insts = entry_block.insts();
+    assert_eq!(entry_insts.len(), 4);
+
+    // Verify stores use t0 (the return temp)
+    for i in 0..3 {
+        match &entry_insts[i] {
+            IrInst::StoreElement { array, .. } => {
+                assert_eq!(
+                    array.id(),
+                    0,
+                    "NRVO-eligible array should use return temp t0"
+                );
+            }
+            other => panic!("Expected StoreElement, found {:?}", other),
+        }
+    }
+
+    // Verify load_element reads from t0 (the return temp)
+    match &entry_insts[3] {
+        IrInst::LoadElement { array, .. } => {
+            assert_eq!(array.id(), 0, "Load should be from return temp t0");
+        }
+        other => panic!("Expected LoadElement, found {:?}", other),
+    }
 }
 
 mod ir_assert {
