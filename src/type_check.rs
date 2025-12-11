@@ -44,6 +44,9 @@ pub enum TypeCheckError {
     #[error("Empty array literals are unsupported: {0}")]
     EmptyArrayLiteral(Span),
 
+    #[error("Too many indices for array: expected {0}, found {1}")]
+    TooManyIndices(usize, usize, Span),
+
     #[error("Array element type mismatch: expected {0}, found {1}")]
     ArrayElementTypeMismatch(Type, Type, Span),
 
@@ -70,6 +73,7 @@ impl TypeCheckError {
             TypeCheckError::ArgTypeMismatch(_, _, _, span) => *span,
             TypeCheckError::InvalidCallee(_, span) => *span,
             TypeCheckError::EmptyArrayLiteral(span) => *span,
+            TypeCheckError::TooManyIndices(_, _, span) => *span,
             TypeCheckError::ArrayElementTypeMismatch(_, _, span) => *span,
             TypeCheckError::IndexTypeNotInt(_, span) => *span,
             TypeCheckError::InvalidIndexTargetType(_, span) => *span,
@@ -211,17 +215,38 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         }
 
-        Ok(Type::Array {
-            elem_ty: Box::new(elem_ty),
-            len: elems.len(),
-        })
+        // Build dimensions vector
+        let array_ty = match elem_ty {
+            // If elements are arrays, prepend this dimension to their dimensions
+            Type::Array {
+                elem_ty: inner_elem_ty,
+                dims: inner_dims,
+            } => {
+                let mut new_dims = vec![elems.len()];
+                new_dims.extend(inner_dims);
+                Ok(Type::Array {
+                    elem_ty: inner_elem_ty,
+                    dims: new_dims,
+                })
+            }
+            _ => Ok(Type::Array {
+                elem_ty: Box::new(elem_ty),
+                dims: vec![elems.len()],
+            }),
+        }?;
+
+        Ok(array_ty)
     }
 
-    fn type_check_index(&mut self, target: &Expr, index: &Expr) -> Result<Type, TypeCheckError> {
+    fn type_check_index(
+        &mut self,
+        target: &Expr,
+        indices: &[Expr],
+    ) -> Result<Type, TypeCheckError> {
         // type check target
         let target_ty = self.type_check_expr(target)?;
-        let elem_ty = match target_ty {
-            Type::Array { elem_ty, .. } => elem_ty,
+        let (elem_ty, dims) = match target_ty {
+            Type::Array { elem_ty, dims } => (elem_ty, dims),
             _ => {
                 return Err(TypeCheckError::InvalidIndexTargetType(
                     target_ty,
@@ -230,13 +255,34 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         };
 
-        // type check index
-        let index_type = self.type_check_expr(index)?;
-        if index_type != Type::UInt64 {
-            return Err(TypeCheckError::IndexTypeNotInt(index_type, index.span));
+        // Check we don't have more indices than dimensions
+        if indices.len() > dims.len() {
+            return Err(TypeCheckError::TooManyIndices(
+                dims.len(),
+                indices.len(),
+                target.span,
+            ));
         }
 
-        Ok(*elem_ty)
+        // type check each index
+        for index in indices {
+            let index_type = self.type_check_expr(index)?;
+            if index_type != Type::UInt64 {
+                return Err(TypeCheckError::IndexTypeNotInt(index_type, index.span));
+            }
+        }
+
+        // Determine result type
+        if indices.len() == dims.len() {
+            // Fully indexed, return the element type
+            Ok(*elem_ty)
+        } else {
+            // Partially indexed, return array with the remaining dimensions
+            Ok(Type::Array {
+                elem_ty,
+                dims: dims[indices.len()..].to_vec(),
+            })
+        }
     }
 
     fn type_check_block(&mut self, body: &Vec<Expr>) -> Result<Type, TypeCheckError> {
@@ -433,7 +479,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),
 
-            ExprKind::Index { target, index } => self.type_check_index(target, index),
+            ExprKind::Index { target, indices } => self.type_check_index(target, indices),
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 
@@ -473,3 +519,7 @@ pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<Ty
     let type_checked_context = context.with_type_map(type_map);
     Ok(type_checked_context)
 }
+
+#[cfg(test)]
+#[path = "tests/t_type_check.rs"]
+mod tests;

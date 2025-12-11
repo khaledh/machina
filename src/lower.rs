@@ -34,6 +34,9 @@ pub enum LowerError {
     #[error("Array is not a temp: Node {0}, Operand {1:?}")]
     ArrayIsNotTemp(NodeId, IrOperand),
 
+    #[error("Index on non-array type: Node {0}, Type {1:?}")]
+    IndexOnNonArray(NodeId, IrType),
+
     #[error("Unsupported assignee: Node {0}, Kind {1:?}")]
     UnsupportedAssignee(NodeId, ast::ExprKind),
 
@@ -53,9 +56,9 @@ fn lower_type(ty: &Type) -> IrType {
             signed: false,
         },
         Type::Unknown => panic!("Unknown type"),
-        Type::Array { elem_ty, len } => IrType::Array {
+        Type::Array { elem_ty, dims } => IrType::Array {
             elem_ty: Box::new(lower_type(elem_ty)),
-            len: *len,
+            dims: dims.clone(),
         },
     }
 }
@@ -219,18 +222,29 @@ impl<'a> Lowerer<'a> {
                     None => return Err(LowerError::VarDefNotFound(expr.id)),
                 }
             }
-            ast::ExprKind::Index { target, index } => {
+            ast::ExprKind::Index { target, indices } => {
                 // Array element assignment
                 let array_op = self.lower_expr(fb, target, None)?;
-                let index_op = self.lower_expr(fb, index, None)?;
-                // TODO: Handle compound value as array element
-                let value_op = self.lower_expr(fb, value, None)?;
 
                 let array_temp = match array_op {
                     IrOperand::Temp(temp) => temp,
                     _ => return Err(LowerError::ArrayIsNotTemp(expr.id, array_op)),
                 };
-                fb.store_element(array_temp, index_op, value_op);
+
+                // Get array dimensions
+                let array_ty = lower_type(&self.get_node_type(target)?);
+                let dims = match array_ty {
+                    IrType::Array { dims, .. } => dims,
+                    _ => return Err(LowerError::IndexOnNonArray(expr.id, array_ty)),
+                };
+
+                // Calculate linear offset
+                let offset_op = self.calc_array_offset(fb, &dims, indices)?;
+
+                // Store the value at the calculated offset
+                // TODO: Handle compound value as array element
+                let value_op = self.lower_expr(fb, value, None)?;
+                fb.store_element(array_temp, offset_op, value_op);
             }
             _ => {
                 return Err(LowerError::UnsupportedAssignee(
@@ -279,14 +293,105 @@ impl<'a> Lowerer<'a> {
         elems: &[ast::Expr],
         dest_temp: IrTempId,
     ) -> Result<IrOperand, LowerError> {
-        // Store each element at its index
-        for (i, elem) in elems.iter().enumerate() {
-            let elem_op = self.lower_expr(fb, elem, None)?;
-            let index_op = fb.new_const_int(i as i64, 64, false);
-            fb.store_element(dest_temp, index_op, elem_op);
+        // Flatten and store all elements recursively
+        self.lower_array_lit_recursive(fb, elems, dest_temp, 0)?;
+        Ok(IrOperand::Temp(dest_temp))
+    }
+
+    fn lower_array_lit_recursive(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        elems: &[ast::Expr],
+        dest_temp: IrTempId,
+        base_offset: usize,
+    ) -> Result<usize, LowerError> {
+        let mut current_offset = base_offset;
+
+        for elem in elems {
+            match &elem.kind {
+                ast::ExprKind::ArrayLit(inner_elems) => {
+                    // Recursively flatten nested array
+                    current_offset =
+                        self.lower_array_lit_recursive(fb, inner_elems, dest_temp, current_offset)?;
+                }
+                _ => {
+                    // Store the scalar element at the current offset
+                    let elem_op = self.lower_expr(fb, elem, None)?;
+                    let index_op = fb.new_const_int(current_offset as i64, 64, false);
+                    fb.store_element(dest_temp, index_op, elem_op);
+                    current_offset += 1;
+                }
+            }
         }
 
-        Ok(IrOperand::Temp(dest_temp))
+        Ok(current_offset)
+    }
+
+    fn calc_array_offset(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        dims: &[usize],
+        indices: &[ast::Expr],
+    ) -> Result<IrOperand, LowerError> {
+        // Calculate linear offset from indices
+        // Formula: offset = i0 * (d1 * d2 * ... * dn) + i1 * (d2 * d3 * ... * dn) + ... + in
+
+        // Handle first index specially to avoid starting with const 0
+        let first_index_op = self.lower_expr(fb, &indices[0], None)?;
+        let first_stride: usize = dims[1..].iter().product();
+
+        let mut offset_op = if first_stride > 1 {
+            let stride_op = fb.new_const_int(first_stride as i64, 64, false);
+            let scaled_temp = fb.new_temp(IrType::Int {
+                bits: 64,
+                signed: false,
+            });
+            fb.binary_op(scaled_temp, ast::BinaryOp::Mul, first_index_op, stride_op);
+            IrOperand::Temp(scaled_temp)
+        } else {
+            first_index_op
+        };
+
+        // Add remaining indices
+        for i in 1..indices.len() {
+            let index_op = self.lower_expr(fb, &indices[i], None)?;
+
+            // Calculate stride: product of all remaining dimensions
+            let stride: usize = dims[i + 1..].iter().product();
+
+            if stride > 1 {
+                // Multiply index by stride
+                let stride_op = fb.new_const_int(stride as i64, 64, false);
+                let scaled_temp = fb.new_temp(IrType::Int {
+                    bits: 64,
+                    signed: false,
+                });
+                fb.binary_op(scaled_temp, ast::BinaryOp::Mul, index_op, stride_op);
+
+                // Add to accumulated offset
+                let new_offset_temp = fb.new_temp(IrType::Int {
+                    bits: 64,
+                    signed: false,
+                });
+                fb.binary_op(
+                    new_offset_temp,
+                    ast::BinaryOp::Add,
+                    offset_op,
+                    IrOperand::Temp(scaled_temp),
+                );
+                offset_op = IrOperand::Temp(new_offset_temp);
+            } else {
+                // Last dimension or stride = 1, just add directly
+                let new_offset_op = fb.new_temp(IrType::Int {
+                    bits: 64,
+                    signed: false,
+                });
+                fb.binary_op(new_offset_op, ast::BinaryOp::Add, offset_op, index_op);
+                offset_op = IrOperand::Temp(new_offset_op);
+            }
+        }
+
+        Ok(offset_op)
     }
 
     fn lower_index(
@@ -294,10 +399,9 @@ impl<'a> Lowerer<'a> {
         fb: &mut IrFunctionBuilder,
         expr: &ast::Expr,
         target: &ast::Expr,
-        index: &ast::Expr,
+        indices: &[ast::Expr],
     ) -> Result<IrOperand, LowerError> {
         let array_op = self.lower_expr(fb, target, None)?;
-        let index_op = self.lower_expr(fb, index, None)?;
 
         // Extract the array temp from the operand
         let array_temp = match array_op {
@@ -305,11 +409,20 @@ impl<'a> Lowerer<'a> {
             _ => return Err(LowerError::ArrayIsNotTemp(expr.id, array_op)),
         };
 
-        // Create a new temp for the result
+        // Get array dimensions from the target type
+        let array_ty = lower_type(&self.get_node_type(target)?);
+        let dims = match array_ty {
+            IrType::Array { dims, .. } => dims,
+            _ => return Err(LowerError::IndexOnNonArray(expr.id, array_ty)),
+        };
+
+        // Calculate linear offset
+        let offset_op = self.calc_array_offset(fb, &dims, indices)?;
+
+        // Load the element at the calculated offset
         let result_ty = lower_type(&self.get_node_type(expr)?);
         let result = fb.new_temp(result_ty);
-
-        fb.load_element(result, array_temp, index_op);
+        fb.load_element(result, array_temp, offset_op);
 
         Ok(IrOperand::Temp(result))
     }
@@ -352,7 +465,7 @@ impl<'a> Lowerer<'a> {
                     Err(LowerError::ArrayLitRequiresDestTemp(expr.id))
                 }
             }
-            ast::ExprKind::Index { target, index } => self.lower_index(fb, expr, target, index),
+            ast::ExprKind::Index { target, indices } => self.lower_index(fb, expr, target, indices),
         }
     }
 

@@ -12,7 +12,7 @@ FunctionParam      ::= Identifier ":" Type
 Type               ::= SimpleType | CompoundType
 SimpleType         ::= "()" | "u64" | "bool"
 CompoundType       ::= ArrayType
-ArrayType          ::= Type "[" Integer "]"
+ArrayType          ::= Type "[" Integer ("," Integer)* "]"
 
 # Blocks
 Block              ::= "{" (StmtOrExpr ";")* Expr? "}"
@@ -50,9 +50,8 @@ UnaryExpr          ::= ( "-" | "!" ) UnaryExpr
 
 PostfixExpr        ::= Primary ( Call | Index )*
 
-Call               ::= "(" ArgList? ")"
-Index              ::= "[" Expr "]"
-ArgList            ::= Expr ("," Expr)* ","?
+Call               ::= "(" Expr ("," Expr)* ","? ")"
+Index              ::= "[" Expr ("," Expr)* ","? "]"
 
 Primary            ::= Unit
                      | Integer

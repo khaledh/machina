@@ -198,11 +198,11 @@ impl<'a> Parser<'a> {
         // Check for array type
         if self.curr_token.kind == TK::LBracket {
             self.advance();
-            let len = self.parse_int_lit()?;
+            let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
             self.consume(&TK::RBracket)?;
             typ = Type::Array {
                 elem_ty: Box::new(typ),
-                len: len as usize,
+                dims: dims.into_iter().map(|d| d as usize).collect(),
             };
         }
 
@@ -357,13 +357,14 @@ impl<'a> Parser<'a> {
                 TK::LBracket => {
                     // Index expression
                     self.consume(&TK::LBracket)?;
-                    let index = self.parse_expr(0)?;
+                    let indices =
+                        self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
                     self.consume(&TK::RBracket)?;
                     expr = Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::Index {
                             target: Box::new(expr),
-                            index: Box::new(index),
+                            indices,
                         },
                         span: self.close(marker.clone()),
                     };
@@ -516,3 +517,7 @@ impl<'a> Parser<'a> {
         Ok(Module { funcs: functions })
     }
 }
+
+#[cfg(test)]
+#[path = "tests/t_parser.rs"]
+mod tests;

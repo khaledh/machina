@@ -8,7 +8,10 @@ pub enum Type {
     Bool,
 
     // Compound Types
-    Array { elem_ty: Box<Type>, len: usize },
+    Array {
+        elem_ty: Box<Type>,
+        dims: Vec<usize>,
+    },
 }
 
 impl fmt::Display for Type {
@@ -18,7 +21,10 @@ impl fmt::Display for Type {
             Type::Unit => write!(f, "unit"),
             Type::UInt64 => write!(f, "u64"),
             Type::Bool => write!(f, "bool"),
-            Type::Array { elem_ty, len } => write!(f, "{}[{}]", elem_ty, len),
+            Type::Array { elem_ty, dims } => {
+                let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+                write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
+            }
         }
     }
 }
@@ -29,7 +35,10 @@ impl Type {
             Type::Unit => 0,
             Type::UInt64 => 8,
             Type::Bool => 1,
-            Type::Array { elem_ty, len } => elem_ty.size_of() * len,
+            Type::Array { elem_ty, dims } => {
+                let total_elems: usize = dims.iter().product();
+                total_elems * elem_ty.size_of()
+            }
             Type::Unknown => panic!("Unknown type"),
         }
     }

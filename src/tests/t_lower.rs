@@ -513,3 +513,170 @@ mod ir_assert {
         })
     }
 }
+
+#[test]
+fn test_multidim_array_literal_lowering() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2, 3], [4, 5, 6]];
+            arr[0, 0]
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // Check that we have store.element instructions for all 6 elements
+    let store_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::StoreElement { .. }))
+        .count();
+
+    assert_eq!(
+        store_count, 6,
+        "Expected 6 store.element instructions for flattened 2D array"
+    );
+}
+
+#[test]
+fn test_multidim_array_index_offset_calculation() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2, 3], [4, 5, 6]];
+            arr[1, 2]
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // For arr[1, 2] with dims [2, 3]:
+    // offset = 1 * 3 + 2 = 5
+    // We should see: multiply by 3, then add 2
+
+    let mut found_mul_by_3 = false;
+    let mut found_add = false;
+
+    for inst in ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+    {
+        match inst {
+            IrInst::BinaryOp {
+                op: BinaryOp::Mul,
+                rhs,
+                ..
+            } => {
+                if let IrOperand::Const(IrConst::Int { value: 3, .. }) = rhs {
+                    found_mul_by_3 = true;
+                }
+            }
+            IrInst::BinaryOp {
+                op: BinaryOp::Add, ..
+            } => {
+                found_add = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(
+        found_mul_by_3,
+        "Expected multiplication by 3 for row stride"
+    );
+    assert!(found_add, "Expected addition for column offset");
+}
+
+#[test]
+fn test_3d_array_lowering() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+            arr[1, 1, 1]
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // Check that we have 8 store.element instructions (2x2x2 = 8 elements)
+    let store_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::StoreElement { .. }))
+        .count();
+
+    assert_eq!(
+        store_count, 8,
+        "Expected 8 store.element instructions for 3D array"
+    );
+
+    // For arr[1, 1, 1] with dims [2, 2, 2]:
+    // offset = 1 * (2*2) + 1 * 2 + 1 = 4 + 2 + 1 = 7
+    // We should see multiplications by 4 and 2
+    let mut found_mul_by_4 = false;
+    let mut found_mul_by_2 = false;
+
+    for inst in ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+    {
+        if let IrInst::BinaryOp {
+            op: BinaryOp::Mul,
+            rhs,
+            ..
+        } = inst
+        {
+            match rhs {
+                IrOperand::Const(IrConst::Int { value: 4, .. }) => found_mul_by_4 = true,
+                IrOperand::Const(IrConst::Int { value: 2, .. }) => found_mul_by_2 = true,
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        found_mul_by_4,
+        "Expected multiplication by 4 for first dimension stride"
+    );
+    assert!(
+        found_mul_by_2,
+        "Expected multiplication by 2 for second dimension stride"
+    );
+}
+
+#[test]
+fn test_multidim_array_assignment() {
+    let source = r#"
+        fn test() -> u64 {
+            var arr = [[1, 2], [3, 4]];
+            arr[0, 1] = 99;
+            arr[0, 1]
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // Should have both store.element for assignment and load.element for read
+    let store_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::StoreElement { .. }))
+        .count();
+
+    let load_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::LoadElement { .. }))
+        .count();
+
+    assert!(
+        store_count >= 5,
+        "Expected at least 5 store.element instructions (4 for init + 1 for assignment)"
+    );
+    assert_eq!(load_count, 1, "Expected 1 load.element instruction");
+}

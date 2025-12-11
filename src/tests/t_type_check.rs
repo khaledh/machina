@@ -1,0 +1,170 @@
+use super::*;
+use crate::context::AstContext;
+use crate::lexer::{LexError, Lexer, Token};
+use crate::parser::Parser;
+use crate::resolver::resolve;
+use crate::types::Type;
+
+fn type_check_source(source: &str) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("Failed to parse");
+
+    let ast_context = AstContext::new(module);
+    let resolved_context = resolve(ast_context).expect("Failed to resolve");
+    type_check(resolved_context)
+}
+
+#[test]
+fn test_multidim_array_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2], [3, 4]];
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+    // If it type checks successfully, the test passes
+}
+
+#[test]
+fn test_multidim_array_type_inference() {
+    let source = r#"
+        fn test() -> u64[2, 2] {
+            [[1, 2], [3, 4]]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+    // If it type checks, the inferred type matches the return type
+}
+
+#[test]
+fn test_multi_index_returns_element_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2, 3], [4, 5, 6]];
+            arr[1, 2]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+    // If it type checks with u64 return type, the index expr has type u64
+}
+
+#[test]
+fn test_3d_array_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+            arr[1, 1, 1]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_too_many_indices_error() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2], [3, 4]];
+            arr[0, 0, 0]
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::TooManyIndices(expected, got, _) => {
+                assert_eq!(*expected, 2);
+                assert_eq!(*got, 3);
+            }
+            e => panic!("Expected TooManyIndices error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_array_dimension_mismatch() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2, 3], [4, 5]];
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::ArrayElementTypeMismatch(_, _, _) => {
+                // Expected error
+            }
+            e => panic!("Expected ArrayElementTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_index_type_must_be_u64() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2], [3, 4]];
+            arr[true, 0]
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::IndexTypeNotInt(ty, _) => {
+                assert_eq!(*ty, Type::Bool);
+            }
+            e => panic!("Expected IndexTypeNotInt error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_partial_indexing_returns_subarray() {
+    let source = r#"
+        fn test() -> u64[3] {
+            let arr = [[1, 2, 3], [4, 5, 6]];
+            arr[1]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+    // If it type checks with u64[3] return type, partial indexing works
+}
+
+#[test]
+fn test_assignment_to_multidim_array_element() {
+    let source = r#"
+        fn test() -> u64 {
+            var arr = [[1, 2], [3, 4]];
+            arr[0, 1] = 99;
+            arr[0, 1]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}

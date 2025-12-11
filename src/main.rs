@@ -31,16 +31,15 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn create_array() -> bool[3] {
-    let arr = [true, false, true];
-    arr
+fn create_2d_array() -> u64[2, 3] {
+    [[1, 2, 3], [4, 5, 6]]
 }
 
-fn main() -> bool {
-    var arr = create_array();
+fn main() -> u64 {
+    let arr = create_2d_array();
     var copy = arr;
-    copy[2] = false;
-    arr[2]
+    copy[1, 2] = 99;
+    arr[1, 2]
 }
 "#;
 

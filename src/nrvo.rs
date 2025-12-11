@@ -151,12 +151,12 @@ impl<'a> NrvoSafetyChecker<'a> {
                 callee_ok && args_ok
             }
 
-            ExprKind::Index { target, index } => {
+            ExprKind::Index { target, indices } => {
                 let target_ok = match &target.kind {
                     ExprKind::VarRef(_) if self.is_target_var(target) => true,
                     _ => self.check_expr(target, false),
                 };
-                let index_ok = self.check_expr(index, false);
+                let index_ok = indices.iter().all(|index| self.check_expr(index, false));
                 target_ok && index_ok
             }
 

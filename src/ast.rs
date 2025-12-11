@@ -39,7 +39,7 @@ pub enum ExprKind {
     ArrayLit(Vec<Expr>),
     Index {
         target: Box<Expr>,
-        index: Box<Expr>,
+        indices: Vec<Expr>,
     },
     BinOp {
         left: Box<Expr>,
@@ -167,13 +167,15 @@ impl Expr {
                     elem.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::Index { target, index } => {
+            ExprKind::Index { target, indices } => {
                 writeln!(f, "{}Index [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;
                 target.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Index:", pad1)?;
-                index.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Indices:", pad1)?;
+                for index in indices {
+                    index.fmt_with_indent(f, level + 2)?;
+                }
             }
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);

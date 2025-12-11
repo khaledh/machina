@@ -194,17 +194,23 @@ impl fmt::Display for IrTempInfo {
 #[allow(dead_code)]
 pub enum IrType {
     Unit,
-    Int { bits: u8, signed: bool },
+    Int {
+        bits: u8,
+        signed: bool,
+    },
     Bool,
     Ptr(Box<IrType>),
     // Agg, Array, etc.
-    Array { elem_ty: Box<IrType>, len: usize },
+    Array {
+        elem_ty: Box<IrType>,
+        dims: Vec<usize>,
+    },
 }
 
 impl fmt::Display for IrType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IrType::Unit => write!(f, "unit"),
+            IrType::Unit => write!(f, "()"),
             IrType::Int { bits, signed } => {
                 if *signed {
                     write!(f, "i{}", bits)
@@ -214,7 +220,10 @@ impl fmt::Display for IrType {
             }
             IrType::Bool => write!(f, "bool"),
             IrType::Ptr(ty) => write!(f, "ptr {}", ty),
-            IrType::Array { elem_ty, len } => write!(f, "array[{}, {}]", elem_ty, len),
+            IrType::Array { elem_ty, dims } => {
+                let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+                write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
+            }
         }
     }
 }
@@ -235,7 +244,10 @@ impl IrType {
             IrType::Int { bits, .. } => (*bits as usize).div_ceil(8),
             IrType::Bool => 1,
             IrType::Ptr(ty) => ty.size_of(),
-            IrType::Array { elem_ty, len } => (*elem_ty).size_of() * *len,
+            IrType::Array { elem_ty, dims } => {
+                let total_elems: usize = dims.iter().product();
+                total_elems * elem_ty.size_of()
+            }
         }
     }
 
@@ -438,14 +450,14 @@ impl fmt::Display for IrFunction {
             .enumerate()
         {
             if let Some(name) = &temp.debug_name {
-                write!(f, "{}: {}", name, format_type(&temp.ty))?;
+                write!(f, "{}: {}", name, temp.ty)?;
             } else {
-                write!(f, "%t{}: {}", i, format_type(&temp.ty))?;
+                write!(f, "%t{}: {}", i, temp.ty)?;
             }
         }
 
         // Return type
-        writeln!(f, ") -> {} {{", format_type(&self.ret_ty))?;
+        writeln!(f, ") -> {} {{", self.ret_ty)?;
 
         // Blocks
         for (id, block) in self.blocks.iter() {
@@ -479,28 +491,8 @@ impl fmt::Display for IrFunction {
     }
 }
 
-fn format_type(ty: &IrType) -> String {
-    match ty {
-        IrType::Unit => "()".to_string(),
-        IrType::Bool => "bool".to_string(),
-        IrType::Int { bits, signed } => {
-            if *signed {
-                format!("i{}", bits)
-            } else {
-                format!("u{}", bits)
-            }
-        }
-        IrType::Ptr(ty) => {
-            format!("ptr {}", format_type(ty))
-        }
-        IrType::Array { elem_ty, len } => {
-            format!("{}[{}]", format_type(elem_ty), len)
-        }
-    }
-}
-
 fn format_temp(id: u32, temp_info: &IrTempInfo) -> String {
-    format!("%t{}: {} : {}", id, temp_info, format_type(&temp_info.ty))
+    format!("%t{}: {} : {}", id, temp_info, temp_info.ty)
 }
 
 fn format_operand(operand: &IrOperand) -> String {
@@ -528,7 +520,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 format_binary_op(op),
                 format_operand(lhs),
                 format_operand(rhs),
-                format_type(func.temp_type(*result))
+                func.temp_type(*result)
             )?;
         }
         IrInst::UnaryOp {
@@ -542,7 +534,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 result.id(),
                 format_unary_op(op),
                 format_operand(operand),
-                format_type(func.temp_type(*result))
+                func.temp_type(*result)
             )?;
         }
         IrInst::Call {
@@ -561,7 +553,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 }
                 write!(f, "{}", format_operand(arg))?;
             }
-            write!(f, ") : {}", format_type(ret_ty))?;
+            write!(f, ") : {}", ret_ty)?;
         }
         IrInst::Phi { result, incoming } => {
             write!(f, "%t{} = phi [", result.id())?;

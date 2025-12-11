@@ -263,7 +263,7 @@ fn test_function_call() {
 fn array_u64_ty(len: usize) -> IrType {
     IrType::Array {
         elem_ty: Box::new(u64_ty()),
-        len,
+        dims: vec![len],
     }
 }
 
@@ -273,7 +273,7 @@ fn array_u32_ty(len: usize) -> IrType {
             bits: 32,
             signed: false,
         }),
-        len,
+        dims: vec![len],
     }
 }
 
@@ -283,7 +283,7 @@ fn array_u16_ty(len: usize) -> IrType {
             bits: 16,
             signed: false,
         }),
-        len,
+        dims: vec![len],
     }
 }
 
@@ -293,7 +293,7 @@ fn array_u8_ty(len: usize) -> IrType {
             bits: 8,
             signed: false,
         }),
-        len,
+        dims: vec![len],
     }
 }
 

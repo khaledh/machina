@@ -213,10 +213,12 @@ impl SymbolResolver {
                     }
                 }
             }
-            ExprKind::Index { target, index } => {
+            ExprKind::Index { target, indices } => {
                 // Recursively check the target. If target is mutable, then target[index] is mutable.
                 self.check_lvalue_mutability(target);
-                self.check_expr(index);
+                for index in indices {
+                    self.check_expr(index);
+                }
             }
             _ => {
                 self.errors.push(ResolveError::InvalidAssignmentTarget(
@@ -237,9 +239,11 @@ impl SymbolResolver {
                 }
             }
 
-            ExprKind::Index { target, index } => {
+            ExprKind::Index { target, indices } => {
                 self.check_expr(target);
-                self.check_expr(index);
+                for index in indices {
+                    self.check_expr(index);
+                }
             }
 
             ExprKind::BinOp { left, right, .. } => {
