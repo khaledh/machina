@@ -382,7 +382,9 @@ pub enum IrInst {
     MemCopy {
         dest: IrTempId,
         src: IrTempId,
-        size: usize,
+        dest_offset: usize,
+        src_offset: usize,
+        length: usize,
     },
 }
 
@@ -420,12 +422,28 @@ impl IrInst {
             IrInst::LoadElement { array, index, .. } => {
                 vec![IrOperand::Temp(*array), *index]
             }
-            IrInst::MemCopy { dest, src, size } => {
+            IrInst::MemCopy {
+                dest,
+                src,
+                dest_offset,
+                src_offset,
+                length,
+            } => {
                 vec![
                     IrOperand::Temp(*dest),
                     IrOperand::Temp(*src),
                     IrOperand::Const(IrConst::Int {
-                        value: *size as i64,
+                        value: *dest_offset as i64,
+                        bits: 64,
+                        signed: false,
+                    }),
+                    IrOperand::Const(IrConst::Int {
+                        value: *src_offset as i64,
+                        bits: 64,
+                        signed: false,
+                    }),
+                    IrOperand::Const(IrConst::Int {
+                        value: *length as i64,
                         bits: 64,
                         signed: false,
                     }),
@@ -592,8 +610,22 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 format_operand(index)
             )?;
         }
-        IrInst::MemCopy { dest, src, size } => {
-            write!(f, "memcpy %t{}, %t{}, {}", dest.id(), src.id(), size)?;
+        IrInst::MemCopy {
+            dest,
+            src,
+            dest_offset,
+            src_offset,
+            length,
+        } => {
+            write!(
+                f,
+                "memcpy %t{}[offset={}] = %t{}[offset={}] : length={}",
+                dest.id(),
+                dest_offset,
+                src.id(),
+                src_offset,
+                length
+            )?;
         }
     }
     Ok(())

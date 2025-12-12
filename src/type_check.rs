@@ -1,5 +1,5 @@
 use crate::analysis::{TypeMap, TypeMapBuilder};
-use crate::ast::{BinaryOp, Expr, ExprKind, Function};
+use crate::ast::{BinaryOp, Expr, ExprKind, Function, Pattern};
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
@@ -58,6 +58,12 @@ pub enum TypeCheckError {
 
     #[error("Type cannot be inferred")]
     UnknownType(Span),
+
+    #[error("Pattern type mismatch: expected {0}, found {1}")]
+    PatternTypeMismatch(Pattern, Type, Span),
+
+    #[error("Array pattern length mismatch: expected {0}, found {1}")]
+    ArrayPatternLengthMismatch(usize, usize, Span),
 }
 
 impl TypeCheckError {
@@ -78,6 +84,8 @@ impl TypeCheckError {
             TypeCheckError::IndexTypeNotInt(_, span) => *span,
             TypeCheckError::InvalidIndexTargetType(_, span) => *span,
             TypeCheckError::UnknownType(span) => *span,
+            TypeCheckError::PatternTypeMismatch(_, _, span) => *span,
+            TypeCheckError::ArrayPatternLengthMismatch(_, _, span) => *span,
         }
     }
 }
@@ -293,26 +301,72 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(last_type)
     }
 
-    fn type_check_let(&mut self, let_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
-        match self.context.def_map.lookup_def(let_expr.id) {
-            Some(def) => {
-                let expr_type = self.type_check_expr(value)?;
-                self.builder.record_def_type(def.clone(), expr_type);
-                Ok(Type::Unit)
+    fn type_check_pattern(
+        &mut self,
+        pattern: &Pattern,
+        value_ty: &Type,
+    ) -> Result<(), TypeCheckError> {
+        match pattern {
+            Pattern::Ident { id, .. } => {
+                // Record this identifier's type
+                if let Some(def) = self.context.def_map.lookup_def(*id) {
+                    self.builder.record_def_type(def.clone(), value_ty.clone());
+                }
+                Ok(())
             }
-            None => Err(TypeCheckError::UnknownType(let_expr.span)),
+            Pattern::Array { patterns, span, .. } => {
+                // Value must be an array
+                match value_ty {
+                    Type::Array { elem_ty, dims } => {
+                        // Check the pattern has the right number of elements
+                        if patterns.len() != dims[0] {
+                            return Err(TypeCheckError::ArrayPatternLengthMismatch(
+                                dims[0],
+                                patterns.len(),
+                                *span,
+                            ));
+                        }
+
+                        // Determine the sub-type for each pattern element
+                        let sub_ty = if dims.len() == 1 {
+                            // 1D array: each element has the element type
+                            (**elem_ty).clone()
+                        } else {
+                            // Multi-dim array: each element is an array with the remaining dims
+                            Type::Array {
+                                elem_ty: elem_ty.clone(),
+                                dims: dims[1..].to_vec(),
+                            }
+                        };
+
+                        // Recursively type check each sub-pattern
+                        for pattern in patterns {
+                            self.type_check_pattern(pattern, &sub_ty)?;
+                        }
+                        Ok(())
+                    }
+                    _ => {
+                        return Err(TypeCheckError::PatternTypeMismatch(
+                            pattern.clone(),
+                            value_ty.clone(),
+                            *span,
+                        ));
+                    }
+                }
+            }
         }
     }
 
-    fn type_check_var(&mut self, var_expr: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
-        match self.context.def_map.lookup_def(var_expr.id) {
-            Some(def) => {
-                let expr_type = self.type_check_expr(value)?;
-                self.builder.record_def_type(def.clone(), expr_type);
-                Ok(Type::Unit)
-            }
-            None => Err(TypeCheckError::UnknownType(var_expr.span)),
-        }
+    fn type_check_let(&mut self, pattern: &Pattern, value: &Expr) -> Result<Type, TypeCheckError> {
+        let expr_type = self.type_check_expr(value)?;
+        self.type_check_pattern(pattern, &expr_type)?;
+        Ok(Type::Unit)
+    }
+
+    fn type_check_var(&mut self, pattern: &Pattern, value: &Expr) -> Result<Type, TypeCheckError> {
+        let expr_type = self.type_check_expr(value)?;
+        self.type_check_pattern(pattern, &expr_type)?;
+        Ok(Type::Unit)
     }
 
     fn type_check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
@@ -487,9 +541,9 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::Block(body) => self.type_check_block(body),
 
-            ExprKind::Let { value, .. } => self.type_check_let(expr, value),
+            ExprKind::Let { pattern, value } => self.type_check_let(pattern, value),
 
-            ExprKind::Var { value, .. } => self.type_check_var(expr, value),
+            ExprKind::Var { pattern, value } => self.type_check_var(pattern, value),
 
             ExprKind::Assign { value, assignee } => self.type_check_assign(assignee, value),
 

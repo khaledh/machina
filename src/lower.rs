@@ -117,76 +117,151 @@ impl<'a> Lowerer<'a> {
         Ok(fb.finish())
     }
 
-    fn lower_let(
+    fn lower_pattern(
         &mut self,
         fb: &mut IrFunctionBuilder,
-        expr: &ast::Expr,
-        name: String,
-        value: &ast::Expr,
-    ) -> Result<IrOperand, LowerError> {
-        match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def) => {
-                let value_ty = lower_type(&self.get_node_type(value)?);
-                let dest_temp = if value_ty.is_compound() {
-                    // Check if this variable is NRVO-eligible
-                    if def.nrvo_eligible {
-                        // Use the return temp instead of allocating a new one
-                        fb.ret_temp()
-                    } else {
-                        Some(fb.new_temp(value_ty))
-                    }
-                } else {
-                    None
-                };
-                let value_op = self.lower_expr(fb, value, dest_temp)?;
-                // let bindings are immutable; they can hold any operand.
-                if let IrOperand::Temp(temp) = value_op {
-                    fb.make_local(temp, name);
-                }
-                self.def_op.insert(def.id, value_op);
+        pattern: &ast::Pattern,
+        value_op: IrOperand,
+        value_ty: &Type,
+        is_mutable: bool,
+    ) -> Result<(), LowerError> {
+        match pattern {
+            ast::Pattern::Ident { id, name, .. } => {
+                self.lower_ident_pattern(fb, id, name.clone(), value_op, is_mutable)
             }
-            None => return Err(LowerError::VarDefNotFound(expr.id)),
+            ast::Pattern::Array { id, patterns, .. } => {
+                let base_array = self.get_array_temp(value_op, *id)?;
+                self.lower_array_pattern(fb, id, patterns, base_array, 0, value_ty, is_mutable)
+            }
         }
-        Ok(fb.new_const_unit())
     }
 
-    fn lower_var(
+    fn lower_ident_pattern(
         &mut self,
         fb: &mut IrFunctionBuilder,
-        expr: &ast::Expr,
+        id: &NodeId,
         name: String,
-        value: &ast::Expr,
-    ) -> Result<IrOperand, LowerError> {
-        match self.ctx.def_map.lookup_def(expr.id) {
-            Some(def) => {
-                let value_ty = lower_type(&self.get_node_type(value)?);
-                let dest_temp = if value_ty.is_compound() {
-                    // Check if this variable is NRVO-eligible
-                    if def.nrvo_eligible {
-                        // Use the return temp instead of allocating a new one
-                        fb.ret_temp()
-                    } else {
-                        Some(fb.new_temp(value_ty))
-                    }
-                } else {
-                    None
-                };
-                let value_op = self.lower_expr(fb, value, dest_temp)?;
-                // var bindings must always be temps so they can be reassigned.
-                let temp = match value_op {
-                    IrOperand::Temp(t) => t,
-                    other => {
-                        let ty = lower_type(&self.get_node_type(value)?);
-                        let t = fb.new_temp(ty);
-                        fb.move_to(t, other);
-                        t
-                    }
-                };
+        value_op: IrOperand,
+        is_mutable: bool,
+    ) -> Result<(), LowerError> {
+        let def = self
+            .ctx
+            .def_map
+            .lookup_def(*id)
+            .ok_or(LowerError::VarDefNotFound(*id))?;
+        let op = if is_mutable {
+            // must be a temp
+            let IrOperand::Temp(temp) = value_op else {
+                return Err(LowerError::DestIsNotTemp(*id, value_op));
+            };
+            fb.make_local(temp, name);
+            IrOperand::Temp(temp)
+        } else {
+            // any operand
+            if let IrOperand::Temp(temp) = value_op {
                 fb.make_local(temp, name);
-                self.def_op.insert(def.id, IrOperand::Temp(temp));
             }
-            None => return Err(LowerError::VarDefNotFound(expr.id)),
+            value_op
+        };
+        self.def_op.insert(def.id, op);
+        Ok(())
+    }
+
+    fn lower_array_pattern(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        id: &NodeId,
+        patterns: &[ast::Pattern],
+        base_array: IrTempId,
+        base_offset: usize,
+        value_ty: &Type,
+        is_mutable: bool,
+    ) -> Result<(), LowerError> {
+        // Get array type info
+        let (elem_ty, dims) = match value_ty {
+            Type::Array { elem_ty, dims } => (elem_ty, dims),
+            _ => return Err(LowerError::ArrayIsNotTemp(*id, IrOperand::Temp(base_array))),
+        };
+
+        // Determine the sub-type for each pattern element
+        let sub_ty = if dims.len() == 1 {
+            // 1D array: elements are scalars
+            (**elem_ty).clone()
+        } else {
+            // Multi-dim array: elements are sub-arrays
+            Type::Array {
+                elem_ty: elem_ty.clone(),
+                dims: dims[1..].to_vec(),
+            }
+        };
+
+        let ir_sub_ty = lower_type(&sub_ty);
+        let is_compound = ir_sub_ty.is_compound();
+        let elem_size = lower_type(&elem_ty).size_of();
+        let stride: usize = dims[1..].iter().product();
+
+        // Extract each element and recursively lower the sub-pattern
+        for (i, pattern) in patterns.iter().enumerate() {
+            let src_offset = base_offset + i * stride * elem_size;
+
+            match pattern {
+                ast::Pattern::Ident { id, name, .. } => {
+                    // Binding to a variable, need to create a temp
+                    let elem_op = if is_compound {
+                        // mem copy from base array at offset
+                        let sub_array_temp = fb.new_temp(ir_sub_ty.clone());
+                        let copy_length = stride * elem_size;
+                        fb.mem_copy_with_offset(
+                            sub_array_temp,
+                            base_array,
+                            0,
+                            src_offset,
+                            copy_length,
+                        );
+                        IrOperand::Temp(sub_array_temp)
+                    } else {
+                        // scalar element, just load it
+                        let elem_index = src_offset / elem_size;
+                        let offset_op = fb.new_const_int(elem_index as i64, 64, false);
+                        let elem_temp = fb.new_temp(ir_sub_ty.clone());
+                        fb.load_element(elem_temp, base_array, offset_op);
+                        IrOperand::Temp(elem_temp)
+                    };
+
+                    self.lower_ident_pattern(fb, id, name.clone(), elem_op, is_mutable)?;
+                }
+                ast::Pattern::Array { id, patterns, .. } => {
+                    // Nested array pattern, recurse with adjusted offset
+                    self.lower_array_pattern(
+                        fb, id, patterns, base_array, src_offset, &sub_ty, is_mutable,
+                    )?;
+                }
+            }
         }
+        Ok(())
+    }
+
+    fn lower_binding(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        pattern: &ast::Pattern,
+        value: &ast::Expr,
+        is_mutable: bool,
+    ) -> Result<IrOperand, LowerError> {
+        let value_ast_ty = self.get_node_type(value)?;
+        let value_ir_ty = lower_type(&value_ast_ty);
+
+        // Lower the value expression
+        let dest_temp = if value_ir_ty.is_compound() {
+            Some(fb.new_temp(value_ir_ty))
+        } else {
+            None
+        };
+        let value_op = self.lower_expr(fb, value, dest_temp)?;
+
+        // Lower the pattern
+        self.lower_pattern(fb, pattern, value_op, &value_ast_ty, is_mutable)?;
+
         Ok(fb.new_const_unit())
     }
 
@@ -225,18 +300,11 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::Index { target, indices } => {
                 // Array element assignment
                 let array_op = self.lower_expr(fb, target, None)?;
-
-                let array_temp = match array_op {
-                    IrOperand::Temp(temp) => temp,
-                    _ => return Err(LowerError::ArrayIsNotTemp(expr.id, array_op)),
-                };
+                let array_temp = self.get_array_temp(array_op, expr.id)?;
 
                 // Get array dimensions
                 let array_ty = lower_type(&self.get_node_type(target)?);
-                let dims = match array_ty {
-                    IrType::Array { dims, .. } => dims,
-                    _ => return Err(LowerError::IndexOnNonArray(expr.id, array_ty)),
-                };
+                let dims = self.get_array_dims(array_ty, expr.id)?;
 
                 // Calculate linear offset
                 let offset_op = self.calc_array_offset(fb, &dims, indices)?;
@@ -327,13 +395,58 @@ impl<'a> Lowerer<'a> {
         Ok(current_offset)
     }
 
+    // Helper to extract array temp from an operand
+    fn get_array_temp(&self, op: IrOperand, expr_id: NodeId) -> Result<IrTempId, LowerError> {
+        match op {
+            IrOperand::Temp(temp) => Ok(temp),
+            _ => Err(LowerError::ArrayIsNotTemp(expr_id, op)),
+        }
+    }
+
+    // Helper to extract array dimensions from a type
+    fn get_array_dims(&self, ty: IrType, expr_id: NodeId) -> Result<Vec<usize>, LowerError> {
+        match ty {
+            IrType::Array { dims, .. } => Ok(dims),
+            _ => Err(LowerError::IndexOnNonArray(expr_id, ty)),
+        }
+    }
+
+    // Try to constant fold the offset if all indices are constants
+    fn try_const_fold_offset(&self, dims: &[usize], indices: &[ast::Expr]) -> Option<usize> {
+        // Extract constant values from all indices
+        let const_indices: Vec<usize> = indices
+            .iter()
+            .map(|idx| {
+                if let ast::ExprKind::UInt64Lit(val) = idx.kind {
+                    Some(val as usize)
+                } else {
+                    None
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        // Compute offset: i0 * (d1 * d2 * ... * dn) + i1 * (d2 * d3 * ... * dn) + ... + in
+        let mut offset = 0;
+        for (i, &idx) in const_indices.iter().enumerate() {
+            let stride: usize = dims[i + 1..].iter().product();
+            offset += idx * stride;
+        }
+
+        Some(offset)
+    }
+
     fn calc_array_offset(
         &mut self,
         fb: &mut IrFunctionBuilder,
         dims: &[usize],
         indices: &[ast::Expr],
     ) -> Result<IrOperand, LowerError> {
-        // Calculate linear offset from indices
+        // Try constant folding first
+        if let Some(const_offset) = self.try_const_fold_offset(dims, indices) {
+            return Ok(fb.new_const_int(const_offset as i64, 64, false));
+        }
+
+        // Calculate linear offset from indices at runtime
         // Formula: offset = i0 * (d1 * d2 * ... * dn) + i1 * (d2 * d3 * ... * dn) + ... + in
 
         // Handle first index specially to avoid starting with const 0
@@ -359,36 +472,26 @@ impl<'a> Lowerer<'a> {
             // Calculate stride: product of all remaining dimensions
             let stride: usize = dims[i + 1..].iter().product();
 
-            if stride > 1 {
-                // Multiply index by stride
+            // Scale the index by stride if needed
+            let scaled_op = if stride > 1 {
                 let stride_op = fb.new_const_int(stride as i64, 64, false);
                 let scaled_temp = fb.new_temp(IrType::Int {
                     bits: 64,
                     signed: false,
                 });
                 fb.binary_op(scaled_temp, ast::BinaryOp::Mul, index_op, stride_op);
-
-                // Add to accumulated offset
-                let new_offset_temp = fb.new_temp(IrType::Int {
-                    bits: 64,
-                    signed: false,
-                });
-                fb.binary_op(
-                    new_offset_temp,
-                    ast::BinaryOp::Add,
-                    offset_op,
-                    IrOperand::Temp(scaled_temp),
-                );
-                offset_op = IrOperand::Temp(new_offset_temp);
+                IrOperand::Temp(scaled_temp)
             } else {
-                // Last dimension or stride = 1, just add directly
-                let new_offset_op = fb.new_temp(IrType::Int {
-                    bits: 64,
-                    signed: false,
-                });
-                fb.binary_op(new_offset_op, ast::BinaryOp::Add, offset_op, index_op);
-                offset_op = IrOperand::Temp(new_offset_op);
-            }
+                index_op
+            };
+
+            // Add to accumulated offset
+            let new_offset_temp = fb.new_temp(IrType::Int {
+                bits: 64,
+                signed: false,
+            });
+            fb.binary_op(new_offset_temp, ast::BinaryOp::Add, offset_op, scaled_op);
+            offset_op = IrOperand::Temp(new_offset_temp);
         }
 
         Ok(offset_op)
@@ -402,19 +505,11 @@ impl<'a> Lowerer<'a> {
         indices: &[ast::Expr],
     ) -> Result<IrOperand, LowerError> {
         let array_op = self.lower_expr(fb, target, None)?;
-
-        // Extract the array temp from the operand
-        let array_temp = match array_op {
-            IrOperand::Temp(temp) => temp,
-            _ => return Err(LowerError::ArrayIsNotTemp(expr.id, array_op)),
-        };
+        let array_temp = self.get_array_temp(array_op, expr.id)?;
 
         // Get array dimensions from the target type
         let array_ty = lower_type(&self.get_node_type(target)?);
-        let dims = match array_ty {
-            IrType::Array { dims, .. } => dims,
-            _ => return Err(LowerError::IndexOnNonArray(expr.id, array_ty)),
-        };
+        let dims = self.get_array_dims(array_ty, expr.id)?;
 
         // Calculate linear offset
         let offset_op = self.calc_array_offset(fb, &dims, indices)?;
@@ -440,8 +535,8 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::BinOp { left, op, right } => self.lower_binary_op(fb, op, left, right),
             ast::ExprKind::UnaryOp { op, expr } => self.lower_unary_op(fb, op, expr),
             ast::ExprKind::Block(body) => self.lower_block_into(fb, expr.id, body, dest_temp),
-            ast::ExprKind::Let { name, value } => self.lower_let(fb, expr, name.clone(), value),
-            ast::ExprKind::Var { name, value } => self.lower_var(fb, expr, name.clone(), value),
+            ast::ExprKind::Let { pattern, value } => self.lower_binding(fb, pattern, value, false),
+            ast::ExprKind::Var { pattern, value } => self.lower_binding(fb, pattern, value, true),
             ast::ExprKind::Assign {
                 value, assignee, ..
             } => self.lower_assign(fb, expr, assignee, value),

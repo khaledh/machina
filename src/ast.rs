@@ -25,6 +25,20 @@ pub struct FunctionParam {
 }
 
 #[derive(Clone, Debug)]
+pub enum Pattern {
+    Ident {
+        id: NodeId,
+        name: String,
+        span: Span,
+    },
+    Array {
+        id: NodeId,
+        patterns: Vec<Pattern>,
+        span: Span,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub struct Expr {
     pub id: NodeId,
     pub kind: ExprKind,
@@ -53,12 +67,12 @@ pub enum ExprKind {
     Block(Vec<Expr>),
     Let {
         // immutable binding
-        name: String,
+        pattern: Pattern,
         value: Box<Expr>,
     },
     Var {
         // mutable binding
-        name: String,
+        pattern: Pattern,
         value: Box<Expr>,
     },
     Assign {
@@ -148,6 +162,30 @@ impl fmt::Display for FunctionParam {
     }
 }
 
+impl fmt::Display for Pattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_with_indent(f, 0)
+    }
+}
+
+impl Pattern {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match self {
+            Pattern::Ident { name, .. } => {
+                writeln!(f, "{}Ident({})", pad, name)?;
+            }
+            Pattern::Array { patterns, .. } => {
+                writeln!(f, "{}Pattern::Array", pad)?;
+                for pattern in patterns {
+                    pattern.fmt_with_indent(f, level + 1)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Expr {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
@@ -199,17 +237,17 @@ impl Expr {
                     expr.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::Let { name, value } => {
+            ExprKind::Let { pattern, value } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Let [{}]", pad, self.id)?;
-                writeln!(f, "{}Name: {}", pad1, name)?;
+                pattern.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::Var { name, value } => {
+            ExprKind::Var { pattern, value } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Var [{}]", pad, self.id)?;
-                writeln!(f, "{}Name: {}", pad1, name)?;
+                pattern.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }

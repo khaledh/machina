@@ -522,8 +522,14 @@ impl<'a> FuncCodegen<'a> {
             } => {
                 asm.push_str(&self.emit_load_element(*result, array, index)?);
             }
-            IrInst::MemCopy { dest, src, size } => {
-                asm.push_str(&self.emit_memcpy(*dest, *src, *size)?);
+            IrInst::MemCopy {
+                dest,
+                src,
+                dest_offset,
+                src_offset,
+                length,
+            } => {
+                asm.push_str(&self.emit_memcpy(*dest, *src, *dest_offset, *src_offset, *length)?);
             }
         }
         Ok(asm)
@@ -742,7 +748,9 @@ impl<'a> FuncCodegen<'a> {
         &mut self,
         dest: IrTempId,
         src: IrTempId,
-        size: usize,
+        dest_offset: usize,
+        src_offset: usize,
+        length: usize,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
@@ -753,11 +761,11 @@ impl<'a> FuncCodegen<'a> {
         // Load destination pointer into x19
         match self.alloc_result.alloc_map.get(&dest) {
             Some(MappedTemp::Reg(reg)) => {
-                asm.push_str(&format!("  mov x19, {}\n", reg));
+                asm.push_str(&format!("  mov x19, {reg}\n"));
             }
             Some(MappedTemp::StackAddr(slot)) => {
                 let offset = self.get_stack_offset(slot)?;
-                asm.push_str(&format!("  add x19, sp, #{}\n", offset));
+                asm.push_str(&format!("  add x19, sp, #{offset}\n"));
             }
             _ => return Err(CodegenError::TempNotFound(dest.id())),
         }
@@ -765,13 +773,21 @@ impl<'a> FuncCodegen<'a> {
         // Load source pointer into x20
         match self.alloc_result.alloc_map.get(&src) {
             Some(MappedTemp::Reg(reg)) => {
-                asm.push_str(&format!("  mov x20, {}\n", reg));
+                asm.push_str(&format!("  mov x20, {reg}\n"));
             }
             Some(MappedTemp::StackAddr(slot)) => {
                 let offset = self.get_stack_offset(slot)?;
-                asm.push_str(&format!("  add x20, sp, #{}\n", offset));
+                asm.push_str(&format!("  add x20, sp, #{offset}\n"));
             }
             _ => return Err(CodegenError::TempNotFound(src.id())),
+        }
+
+        // Add offsets if non-zero
+        if dest_offset > 0 {
+            asm.push_str(&format!("  add x19, x19, #{dest_offset}\n"));
+        }
+        if src_offset > 0 {
+            asm.push_str(&format!("  add x20, x20, #{src_offset}\n"));
         }
 
         // Fast path: copy as many 8-byte chunks as possible.
@@ -780,7 +796,7 @@ impl<'a> FuncCodegen<'a> {
 
         asm.push_str("  ; memcpy\n");
 
-        let count = size / 8;
+        let count = length / 8;
         if count > 0 {
             asm.push_str(&format!("  mov x21, #{count}\n"));
             asm.push_str(&format!("  cbz x21, {done_label}\n"));
@@ -793,7 +809,7 @@ impl<'a> FuncCodegen<'a> {
         }
 
         // Tail handling for remaining bytes: 4, 2, 1.
-        let mut remaining = size % 8;
+        let mut remaining = length % 8;
         if remaining >= 4 {
             asm.push_str("  ldr w22, [x20], #4\n");
             asm.push_str("  str w22, [x19], #4\n");

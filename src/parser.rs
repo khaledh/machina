@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expr, ExprKind, Function, FunctionParam, Module, UnaryOp};
+use crate::ast::{BinaryOp, Expr, ExprKind, Function, FunctionParam, Module, Pattern, UnaryOp};
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
@@ -25,6 +25,9 @@ pub enum ParseError {
 
     #[error("Expected integer literal, found: {0}")]
     ExpectedIntLit(Token),
+
+    #[error("Expected pattern, found: {0}")]
+    ExpectedPattern(Token),
 }
 
 impl ParseError {
@@ -36,6 +39,7 @@ impl ParseError {
             ParseError::ExpectedType(token) => token.span,
             ParseError::ExpectedPrimary(token) => token.span,
             ParseError::ExpectedIntLit(token) => token.span,
+            ParseError::ExpectedPattern(token) => token.span,
         }
     }
 }
@@ -254,16 +258,47 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let marker = self.mark();
+
+        match &self.curr_token.kind {
+            TK::Ident(name) => {
+                // Identifier pattern
+                let name = name.clone();
+                let span = self.curr_token.span;
+                self.advance();
+                Ok(Pattern::Ident {
+                    id: self.id_gen.new_id(),
+                    name,
+                    span,
+                })
+            }
+            TK::LBracket => {
+                // Array pattern
+                self.advance();
+                let patterns =
+                    self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_pattern())?;
+                self.consume(&TK::RBracket)?;
+                Ok(Pattern::Array {
+                    id: self.id_gen.new_id(),
+                    patterns,
+                    span: self.close(marker),
+                })
+            }
+            _ => Err(ParseError::ExpectedPattern(self.curr_token.clone())),
+        }
+    }
+
     fn parse_let(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume_keyword("let")?;
-        let name = self.parse_ident()?;
+        let pattern = self.parse_pattern()?;
         self.consume(&TK::Equals)?;
         let value = self.parse_expr(0)?;
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Let {
-                name,
+                pattern,
                 value: Box::new(value),
             },
             span: self.close(marker),
@@ -273,13 +308,13 @@ impl<'a> Parser<'a> {
     fn parse_var(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.consume_keyword("var")?;
-        let name = self.parse_ident()?;
+        let pattern = self.parse_pattern()?;
         self.consume(&TK::Equals)?;
         let value = self.parse_expr(0)?;
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Var {
-                name,
+                pattern,
                 value: Box::new(value),
             },
             span: self.close(marker),

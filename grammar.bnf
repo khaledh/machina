@@ -22,9 +22,14 @@ StmtOrExpr         ::= Let
                      | Assign
                      | Expr
 
-Let                ::= "let" Identifier "=" Expr
-Var                ::= "var" Identifier ( ":" Type )? "=" Expr
+Let                ::= "let" Pattern "=" Expr
+Var                ::= "var" Pattern ( ":" Type )? "=" Expr
 Assign             ::= PostfixExpr "=" Expr
+
+# Patterns
+Pattern            ::= IdentPattern | ArrayPattern
+IdentPattern       ::= Identifier
+ArrayPattern       ::= "[" Pattern ( "," Pattern )* ","? "]"
 
 # Expressions
 Expr               ::= If | While | InfixExpr

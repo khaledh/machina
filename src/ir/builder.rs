@@ -256,8 +256,31 @@ impl IrFunctionBuilder {
         });
     }
 
-    pub fn mem_copy(&mut self, dest: IrTempId, src: IrTempId, size: usize) {
-        self.emit_inst(IrInst::MemCopy { dest, src, size });
+    pub fn mem_copy(&mut self, dest: IrTempId, src: IrTempId, length: usize) {
+        self.emit_inst(IrInst::MemCopy {
+            dest,
+            src,
+            dest_offset: 0,
+            src_offset: 0,
+            length,
+        });
+    }
+
+    pub fn mem_copy_with_offset(
+        &mut self,
+        dest: IrTempId,
+        src: IrTempId,
+        dest_offset: usize,
+        src_offset: usize,
+        length: usize,
+    ) {
+        self.emit_inst(IrInst::MemCopy {
+            dest,
+            src,
+            dest_offset,
+            src_offset,
+            length,
+        });
     }
 
     pub fn finish(self) -> IrFunction {

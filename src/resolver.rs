@@ -1,6 +1,6 @@
 use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
-use crate::ast::{ExprKind, Module};
+use crate::ast::{ExprKind, Module, Pattern};
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
 use crate::ids::{DefId, DefIdGen};
@@ -229,6 +229,40 @@ impl SymbolResolver {
         }
     }
 
+    fn check_pattern(&mut self, pattern: &ast::Pattern, is_mutable: bool) {
+        match pattern {
+            Pattern::Ident { id, name, span } => {
+                if self.lookup_symbol_direct(name).is_some() {
+                    self.errors
+                        .push(ResolveError::VarAlreadyDefined(name.to_string(), *span));
+                } else {
+                    let def_id = self.def_id_gen.new_id();
+                    let def = Def {
+                        id: def_id,
+                        name: name.to_string(),
+                        kind: DefKind::LocalVar,
+                        nrvo_eligible: false,
+                    };
+                    self.def_map_builder.record_def(def, *id);
+                    self.insert_symbol(
+                        name,
+                        Symbol {
+                            def_id,
+                            name: name.to_string(),
+                            kind: SymbolKind::Var { is_mutable },
+                        },
+                    );
+                }
+            }
+            Pattern::Array { patterns, .. } => {
+                // Recursively check each sub-pattern
+                for pattern in patterns {
+                    self.check_pattern(pattern, is_mutable);
+                }
+            }
+        }
+    }
+
     fn check_expr(&mut self, expr: &ast::Expr) {
         match &expr.kind {
             ExprKind::UInt64Lit(_) | ast::ExprKind::BoolLit(_) | ast::ExprKind::UnitLit => {}
@@ -263,54 +297,16 @@ impl SymbolResolver {
                 });
             }
 
-            ExprKind::Let { name, value } => {
-                if self.lookup_symbol_direct(name).is_some() {
-                    self.errors
-                        .push(ResolveError::VarAlreadyDefined(name.to_string(), expr.span));
-                } else {
-                    self.check_expr(value);
-                    let def_id = self.def_id_gen.new_id();
-                    let def = Def {
-                        id: def_id,
-                        name: name.to_string(),
-                        kind: DefKind::LocalVar,
-                        nrvo_eligible: false,
-                    };
-                    self.def_map_builder.record_def(def, expr.id);
-                    self.insert_symbol(
-                        name,
-                        Symbol {
-                            def_id,
-                            name: name.to_string(),
-                            kind: SymbolKind::Var { is_mutable: false },
-                        },
-                    );
-                }
+            ExprKind::Let { pattern, value } => {
+                // Check the value first before introducing the lhs symbol(s) into the scope.
+                self.check_expr(value);
+                self.check_pattern(pattern, false);
             }
 
-            ExprKind::Var { name, value, .. } => {
-                if self.lookup_symbol_direct(name).is_some() {
-                    self.errors
-                        .push(ResolveError::VarAlreadyDefined(name.to_string(), expr.span));
-                } else {
-                    self.check_expr(value);
-                    let def_id = self.def_id_gen.new_id();
-                    let def = Def {
-                        id: def_id,
-                        name: name.to_string(),
-                        kind: DefKind::LocalVar,
-                        nrvo_eligible: false,
-                    };
-                    self.def_map_builder.record_def(def, expr.id);
-                    self.insert_symbol(
-                        name,
-                        Symbol {
-                            def_id,
-                            name: name.to_string(),
-                            kind: SymbolKind::Var { is_mutable: true },
-                        },
-                    );
-                }
+            ExprKind::Var { pattern, value } => {
+                // Check the value first before introducing the lhs symbol(s) into the scope.
+                self.check_expr(value);
+                self.check_pattern(pattern, true);
             }
 
             ExprKind::VarRef(name) => match self.lookup_symbol(name) {
