@@ -205,6 +205,9 @@ pub enum IrType {
         elem_ty: Box<IrType>,
         dims: Vec<usize>,
     },
+    Tuple {
+        fields: Vec<IrType>,
+    },
 }
 
 impl fmt::Display for IrType {
@@ -223,6 +226,10 @@ impl fmt::Display for IrType {
             IrType::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
+            }
+            IrType::Tuple { fields } => {
+                let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+                write!(f, "({})", fields_str.join(", "))
             }
         }
     }
@@ -248,6 +255,10 @@ impl IrType {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
             }
+            IrType::Tuple { fields } => {
+                let total_size: usize = fields.iter().map(|f| f.size_of()).sum();
+                total_size
+            }
         }
     }
 
@@ -265,11 +276,12 @@ impl IrType {
             IrType::Bool => 1,
             IrType::Ptr(ty) => ty.align_of(),
             IrType::Array { elem_ty, .. } => (*elem_ty).align_of(),
+            IrType::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
         }
     }
 
     pub fn is_compound(&self) -> bool {
-        matches!(self, IrType::Array { .. })
+        matches!(self, IrType::Array { .. } | IrType::Tuple { .. })
     }
 }
 
@@ -300,6 +312,28 @@ impl IrConst {
                     0
                 }
             }
+            IrConst::Unit => 0,
+        }
+    }
+
+    pub fn to_type(&self) -> IrType {
+        match self {
+            IrConst::Int { bits, signed, .. } => IrType::Int {
+                bits: *bits,
+                signed: *signed,
+            },
+            IrConst::Bool(_) => IrType::Bool,
+            IrConst::Unit => IrType::Int {
+                bits: 1,
+                signed: false,
+            },
+        }
+    }
+
+    pub fn size_of(&self) -> usize {
+        match self {
+            IrConst::Int { bits, .. } => (*bits as usize).div_ceil(8),
+            IrConst::Bool(_) => 1,
             IrConst::Unit => 0,
         }
     }

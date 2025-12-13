@@ -42,6 +42,12 @@ pub enum LowerError {
 
     #[error("Array literal requires a destination temp: Node {0}")]
     ArrayLitRequiresDestTemp(NodeId),
+
+    #[error("Tuple literal requires a destination temp: Node {0}")]
+    TupleLitRequiresDestTemp(NodeId),
+
+    #[error("Tuple is not a temp: Node {0}, Operand {1:?}")]
+    TupleIsNotTemp(NodeId, IrOperand),
 }
 
 fn lower_type(ty: &Type) -> IrType {
@@ -59,6 +65,9 @@ fn lower_type(ty: &Type) -> IrType {
         Type::Array { elem_ty, dims } => IrType::Array {
             elem_ty: Box::new(lower_type(elem_ty)),
             dims: dims.clone(),
+        },
+        Type::Tuple { fields } => IrType::Tuple {
+            fields: fields.iter().map(|f| lower_type(f)).collect(),
         },
     }
 }
@@ -150,9 +159,16 @@ impl<'a> Lowerer<'a> {
             .lookup_def(*id)
             .ok_or(LowerError::VarDefNotFound(*id))?;
         let op = if is_mutable {
-            // must be a temp
-            let IrOperand::Temp(temp) = value_op else {
-                return Err(LowerError::DestIsNotTemp(*id, value_op));
+            // must use a temp - materialize constants if needed
+            let temp = match value_op {
+                IrOperand::Temp(temp) => temp,
+                IrOperand::Const(c) => {
+                    // Materialize constant into a temp
+                    let value_ty = c.to_type();
+                    let temp = fb.new_temp(value_ty);
+                    fb.move_to(temp, value_op);
+                    temp
+                }
             };
             fb.make_local(temp, name);
             IrOperand::Temp(temp)
@@ -251,9 +267,25 @@ impl<'a> Lowerer<'a> {
         let value_ast_ty = self.get_node_type(value)?;
         let value_ir_ty = lower_type(&value_ast_ty);
 
-        // Lower the value expression
+        // Check if this binding is NRVO-eligible
         let dest_temp = if value_ir_ty.is_compound() {
-            Some(fb.new_temp(value_ir_ty))
+            // Check if the pattern is an Ident and if it's NRVO-eligible
+            let is_nrvo_eligible = match pattern {
+                ast::Pattern::Ident { id, .. } => {
+                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                        def.nrvo_eligible
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if is_nrvo_eligible {
+                fb.ret_temp() // Use the return temp for NRVO-eligible variables
+            } else {
+                Some(fb.new_temp(value_ir_ty))
+            }
         } else {
             None
         };
@@ -358,11 +390,24 @@ impl<'a> Lowerer<'a> {
     fn lower_array_lit(
         &mut self,
         fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
         elems: &[ast::Expr],
         dest_temp: IrTempId,
     ) -> Result<IrOperand, LowerError> {
+        // Get element type from the array type
+        let array_ty = lower_type(&self.get_node_type(expr)?);
+        let elem_ir_ty = match &array_ty {
+            IrType::Array { elem_ty, .. } => elem_ty,
+            _ => {
+                return Err(LowerError::ArrayIsNotTemp(
+                    expr.id,
+                    IrOperand::Temp(dest_temp),
+                ));
+            }
+        };
+
         // Flatten and store all elements recursively
-        self.lower_array_lit_recursive(fb, elems, dest_temp, 0)?;
+        self.lower_array_lit_recursive(fb, elems, dest_temp, 0, elem_ir_ty)?;
         Ok(IrOperand::Temp(dest_temp))
     }
 
@@ -371,28 +416,55 @@ impl<'a> Lowerer<'a> {
         fb: &mut IrFunctionBuilder,
         elems: &[ast::Expr],
         dest_temp: IrTempId,
-        base_offset: usize,
+        base_byte_offset: usize,
+        elem_ir_ty: &IrType,
     ) -> Result<usize, LowerError> {
-        let mut current_offset = base_offset;
+        let mut current_byte_offset = base_byte_offset;
 
         for elem in elems {
             match &elem.kind {
                 ast::ExprKind::ArrayLit(inner_elems) => {
                     // Recursively flatten nested array
-                    current_offset =
-                        self.lower_array_lit_recursive(fb, inner_elems, dest_temp, current_offset)?;
+                    current_byte_offset = self.lower_array_lit_recursive(
+                        fb,
+                        inner_elems,
+                        dest_temp,
+                        current_byte_offset,
+                        elem_ir_ty,
+                    )?;
+                }
+                ast::ExprKind::TupleLit(inner_fields) => {
+                    // Recursively lower tuple directly into dest_temp at combined offset
+                    self.lower_tuple_lit(fb, elem, inner_fields, dest_temp, current_byte_offset)?;
+                    current_byte_offset += elem_ir_ty.size_of();
                 }
                 _ => {
-                    // Store the scalar element at the current offset
-                    let elem_op = self.lower_expr(fb, elem, None)?;
-                    let index_op = fb.new_const_int(current_offset as i64, 64, false);
-                    fb.store_element(dest_temp, index_op, elem_op);
-                    current_offset += 1;
+                    let elem_size = elem_ir_ty.size_of();
+
+                    if elem_ir_ty.is_compound() {
+                        // create temp, lower into it, then mem copy to dest_temp
+                        let elem_temp = fb.new_temp(elem_ir_ty.clone());
+                        self.lower_expr(fb, elem, Some(elem_temp))?;
+                        fb.mem_copy_with_offset(
+                            dest_temp,
+                            elem_temp,
+                            current_byte_offset,
+                            0,
+                            elem_size,
+                        );
+                    } else {
+                        // scalar element, store at current offset
+                        let elem_op = self.lower_expr(fb, elem, None)?;
+                        let index_op = fb.new_const_int(current_byte_offset as i64, 64, false);
+                        fb.store_element(dest_temp, index_op, elem_op);
+                    }
+
+                    current_byte_offset += elem_size;
                 }
             }
         }
 
-        Ok(current_offset)
+        Ok(current_byte_offset)
     }
 
     // Helper to extract array temp from an operand
@@ -504,6 +576,39 @@ impl<'a> Lowerer<'a> {
         target: &ast::Expr,
         indices: &[ast::Expr],
     ) -> Result<IrOperand, LowerError> {
+        // Load the element at the calculated offset
+        let result_ty = lower_type(&self.get_node_type(expr)?);
+
+        // Optimized path: if the target is a simple chain of tuple field accesses,
+        // and the result is not compound, we can load the field directly.
+        if !result_ty.is_compound()
+            && let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, target)?
+        {
+            // Get array info from target type
+            let target_ty = &self.get_node_type(target)?;
+            let target_ir_ty = lower_type(target_ty);
+
+            if let IrType::Array { elem_ty, dims } = target_ir_ty {
+                // Try to constant-fold the array offset
+                if let Some(const_offset) = self.try_const_fold_offset(&dims, indices) {
+                    // Get element size
+                    let elem_size = elem_ty.size_of();
+
+                    // Combine offsets: tuple_offset + array_elem_offset *
+                    // elem_size
+                    let combined_offset = offset + const_offset * elem_size;
+
+                    // Load scalar directly with combined offset
+                    let offset_op = fb.new_const_int(combined_offset as i64, 64, false);
+                    let result_temp = fb.new_temp(result_ty.clone());
+                    fb.load_element(result_temp, base_temp, offset_op);
+                    return Ok(IrOperand::Temp(result_temp));
+                }
+            }
+        }
+
+        // Normal path: lower the target, calculate array offset, and mem copy
+        // if the result is compound.
         let array_op = self.lower_expr(fb, target, None)?;
         let array_temp = self.get_array_temp(array_op, expr.id)?;
 
@@ -514,12 +619,196 @@ impl<'a> Lowerer<'a> {
         // Calculate linear offset
         let offset_op = self.calc_array_offset(fb, &dims, indices)?;
 
-        // Load the element at the calculated offset
-        let result_ty = lower_type(&self.get_node_type(expr)?);
         let result = fb.new_temp(result_ty);
         fb.load_element(result, array_temp, offset_op);
 
         Ok(IrOperand::Temp(result))
+    }
+
+    fn lower_tuple_lit(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        fields: &[ast::Expr],
+        dest_temp: IrTempId,
+        base_offset: usize,
+    ) -> Result<IrOperand, LowerError> {
+        let tuple_ty = &self.get_node_type(expr)?;
+
+        // Store each field at the corresponding offset
+        for (i, field) in fields.iter().enumerate() {
+            let field_ty = &self.get_node_type(field)?;
+            let field_ir_ty = lower_type(&field_ty);
+
+            let combined_offset = base_offset + tuple_ty.tuple_field_offset(i);
+
+            if field_ir_ty.is_compound() {
+                match &field.kind {
+                    ast::ExprKind::TupleLit(inner_fields) => {
+                        // Recursively lower tuple directly into dest_temp at combined offset
+                        self.lower_tuple_lit(fb, field, inner_fields, dest_temp, combined_offset)?;
+                    }
+                    ast::ExprKind::ArrayLit(inner_elems) => {
+                        // Lower array directly into dest_temp at combined offset
+                        let elem_ir_ty = match &field_ir_ty {
+                            IrType::Array { elem_ty, .. } => elem_ty,
+                            _ => {
+                                return Err(LowerError::ArrayIsNotTemp(
+                                    expr.id,
+                                    IrOperand::Temp(dest_temp),
+                                ));
+                            }
+                        };
+                        self.lower_array_lit_recursive(
+                            fb,
+                            inner_elems,
+                            dest_temp,
+                            combined_offset,
+                            elem_ir_ty,
+                        )?;
+                    }
+                    _ => {
+                        // Non-literal compound: create temp, lower, memcpy
+                        let field_temp = fb.new_temp(field_ir_ty.clone());
+                        self.lower_expr(fb, field, Some(field_temp))?;
+                        fb.mem_copy_with_offset(
+                            dest_temp,
+                            field_temp,
+                            combined_offset,
+                            0,
+                            field_ir_ty.size_of(),
+                        );
+                    }
+                }
+            } else {
+                // scalar field, lower and store at offset
+                let field_op = self.lower_expr(fb, field, None)?;
+                let offset_op = fb.new_const_int(combined_offset as i64, 64, false);
+                fb.store_element(dest_temp, offset_op, field_op);
+            }
+        }
+
+        Ok(IrOperand::Temp(dest_temp))
+    }
+
+    fn lower_tuple_field_access(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        target: &ast::Expr,
+        index: u32,
+    ) -> Result<IrOperand, LowerError> {
+        // Get result type
+        let result_ir_ty = lower_type(&self.get_node_type(expr)?);
+
+        // Optimized path: if the target is a simple chain of tuple field accesses,
+        // and the result is not compound, we can load the field directly.
+        if !result_ir_ty.is_compound()
+            && let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, target)?
+        {
+            let target_ty = &self.get_node_type(target)?;
+            let field_offset = target_ty.tuple_field_offset(index as usize);
+            let combined_offset = offset + field_offset;
+
+            // Load scalar directly with combined offset
+            let offset_op = fb.new_const_int(combined_offset as i64, 64, false);
+            let result_temp = fb.new_temp(result_ir_ty.clone());
+            fb.load_element(result_temp, base_temp, offset_op);
+            return Ok(IrOperand::Temp(result_temp));
+        }
+
+        // Normal path: lower the target, calculate field offset, and mem copy
+        // if the result is compound.
+        let tuple_op = self.lower_expr(fb, target, None)?;
+        let tuple_temp = match tuple_op {
+            IrOperand::Temp(temp) => temp,
+            _ => return Err(LowerError::TupleIsNotTemp(expr.id, tuple_op)),
+        };
+
+        // Get tuple type and calculate field offset
+        let tuple_ty = &self.get_node_type(target)?;
+        let field_offset = tuple_ty.tuple_field_offset(index as usize);
+
+        if result_ir_ty.is_compound() {
+            // create temp and mem copy from tuple at offset
+            let result_temp = fb.new_temp(result_ir_ty.clone());
+            fb.mem_copy_with_offset(
+                result_temp,
+                tuple_temp,
+                0,
+                field_offset,
+                result_ir_ty.size_of(),
+            );
+            Ok(IrOperand::Temp(result_temp))
+        } else {
+            // scalar field, load from tuple at offset
+            let offset_op = fb.new_const_int(field_offset as i64, 64, false);
+            let result_temp = fb.new_temp(result_ir_ty.clone());
+            fb.load_element(result_temp, tuple_temp, offset_op);
+            Ok(IrOperand::Temp(result_temp))
+        }
+    }
+
+    // Extract the base temp and offset from a chain of tuple field accesses.
+    // Returns (base_temp, accumulated_offset) if the expr is a simple chain,
+    // otherwise None (i.e. fallback to memcpy).
+    fn try_get_base_and_offset(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+    ) -> Result<Option<(IrTempId, usize)>, LowerError> {
+        match &expr.kind {
+            // Base case: VarRef
+            ast::ExprKind::VarRef(_) => {
+                let var_op = self.lower_expr(fb, expr, None)?;
+                match var_op {
+                    IrOperand::Temp(temp) => Ok(Some((temp, 0))),
+                    _ => Ok(None), // Constants don't have offsets
+                }
+            }
+
+            // Recursive case: TupleFieldAccess
+            ast::ExprKind::TupleFieldAccess { target, index } => {
+                // Try to get the base temp and offset from the target
+                if let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, target)? {
+                    // Get the target's type to compute this field's offset
+                    let target_ty = &self.get_node_type(target)?;
+                    let field_offset = target_ty.tuple_field_offset(*index as usize);
+
+                    // Combine the offsets
+                    Ok(Some((base_temp, offset + field_offset)))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            // Recursive case: Index
+            ast::ExprKind::Index { target, indices } => {
+                // Try to get the base temp and offset from the target
+                if let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, target)? {
+                    // Get the target's type (should be an array)
+                    let target_ir_ty = lower_type(&self.get_node_type(target)?);
+
+                    if let IrType::Array { elem_ty, dims } = &target_ir_ty {
+                        // Try to constant-fold the array offset
+                        if let Some(array_elem_offset) = self.try_const_fold_offset(&dims, indices)
+                        {
+                            // Get element size
+                            let elem_size = elem_ty.size_of();
+
+                            // Combine offsets: tuple_offset + array_elem_offset * elem_size
+                            let combined_offset = offset + array_elem_offset * elem_size;
+
+                            return Ok(Some((base_temp, combined_offset)));
+                        }
+                    }
+                }
+                Ok(None)
+            }
+
+            // Any other expression: fall back to memcpy
+            _ => Ok(None),
+        }
     }
 
     fn lower_expr(
@@ -555,12 +844,22 @@ impl<'a> Lowerer<'a> {
             },
             ast::ExprKind::ArrayLit(elems) => {
                 if let Some(dest_temp) = dest_temp {
-                    self.lower_array_lit(fb, elems, dest_temp)
+                    self.lower_array_lit(fb, expr, elems, dest_temp)
                 } else {
                     Err(LowerError::ArrayLitRequiresDestTemp(expr.id))
                 }
             }
             ast::ExprKind::Index { target, indices } => self.lower_index(fb, expr, target, indices),
+            ast::ExprKind::TupleLit(fields) => {
+                if let Some(dest_temp) = dest_temp {
+                    self.lower_tuple_lit(fb, expr, fields, dest_temp, 0)
+                } else {
+                    Err(LowerError::TupleLitRequiresDestTemp(expr.id))
+                }
+            }
+            ast::ExprKind::TupleFieldAccess { target, index } => {
+                self.lower_tuple_field_access(fb, expr, target, *index)
+            }
         }
     }
 

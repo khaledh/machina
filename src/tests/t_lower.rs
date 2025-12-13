@@ -542,17 +542,17 @@ fn test_multidim_array_literal_lowering() {
 #[test]
 fn test_multidim_array_index_offset_calculation() {
     let source = r#"
-        fn test() -> u64 {
+        fn test(i: u64, j: u64) -> u64 {
             let arr = [[1, 2, 3], [4, 5, 6]];
-            arr[1, 2]
+            arr[i, j]
         }
     "#;
 
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
-    // For arr[1, 2] with dims [2, 3]:
-    // offset = 1 * 3 + 2 = 5
-    // We should see: multiply by 3, then add 2
+    // For arr[i, j] with dims [2, 3]:
+    // offset = i * 3 + j
+    // We should see: multiply by 3, then add
 
     let mut found_mul_by_3 = false;
     let mut found_add = false;
@@ -591,9 +591,9 @@ fn test_multidim_array_index_offset_calculation() {
 #[test]
 fn test_3d_array_lowering() {
     let source = r#"
-        fn test() -> u64 {
+        fn test(i: u64, j: u64, k: u64) -> u64 {
             let arr = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
-            arr[1, 1, 1]
+            arr[i, j, k]
         }
     "#;
 
@@ -612,8 +612,8 @@ fn test_3d_array_lowering() {
         "Expected 8 store.element instructions for 3D array"
     );
 
-    // For arr[1, 1, 1] with dims [2, 2, 2]:
-    // offset = 1 * (2*2) + 1 * 2 + 1 = 4 + 2 + 1 = 7
+    // For arr[i, j, k] with dims [2, 2, 2]:
+    // offset = i * (2*2) + j * 2 + k = i * 4 + j * 2 + k
     // We should see multiplications by 4 and 2
     let mut found_mul_by_4 = false;
     let mut found_mul_by_2 = false;
@@ -679,4 +679,163 @@ fn test_multidim_array_assignment() {
         "Expected at least 5 store.element instructions (4 for init + 1 for assignment)"
     );
     assert_eq!(load_count, 1, "Expected 1 load.element instruction");
+}
+
+#[test]
+fn test_nested_tuple_field_access_optimization() {
+    // Tests that nested tuple field accesses like t.1.0 and t.1.1 are optimized
+    // to load directly from the base tuple at combined offsets, avoiding memcpy.
+    let source = r#"
+        fn test() -> u64 {
+            let t = (10, (20, 30));
+            t.1.0 + t.1.1
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // Count memcpy instructions - there should be none since nested tuple literals
+    // are now stored directly into the outer tuple at combined offsets
+    let memcpy_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::MemCopy { .. }))
+        .count();
+
+    // We expect 0 memcpy - nested tuple is stored directly into outer tuple
+    assert_eq!(
+        memcpy_count, 0,
+        "Expected 0 memcpy - nested compounds should be stored directly"
+    );
+
+    // Count load.element instructions - we should have 2 for t.1.0 and t.1.1
+    let load_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::LoadElement { .. }))
+        .count();
+
+    assert_eq!(
+        load_count, 2,
+        "Expected 2 load.element instructions for t.1.0 and t.1.1"
+    );
+
+    // Verify the loads are from the base tuple (t0) at correct offsets
+    let loads: Vec<_> = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter_map(|inst| {
+            if let IrInst::LoadElement { array, index, .. } = inst {
+                Some((array.id(), index))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Both loads should be from t0 (the base tuple)
+    assert!(
+        loads.iter().all(|(arr_id, _)| *arr_id == 0),
+        "All loads should be from base tuple t0"
+    );
+
+    // Check the offsets: t.1.0 should be at offset 8, t.1.1 at offset 16
+    let offsets: Vec<i64> = loads
+        .iter()
+        .filter_map(|(_, index)| {
+            if let IrOperand::Const(IrConst::Int { value, .. }) = index {
+                Some(*value)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        offsets.contains(&8) && offsets.contains(&16),
+        "Expected offsets 8 and 16 for t.1.0 and t.1.1, got {:?}",
+        offsets
+    );
+}
+
+#[test]
+fn test_array_in_tuple_index_optimization() {
+    // Tests that indexing into an array field of a tuple (t.2[0], t.2[1], etc.)
+    // is optimized to load directly from the base tuple at combined offsets.
+    let source = r#"
+        fn test() -> u64 {
+            let t = (10, [1, 2, 3]);
+            t.1[0] + t.1[1] + t.1[2]
+        }
+    "#;
+
+    let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
+
+    // Count memcpy instructions - should be 0 since array literals inside tuples
+    // are now stored directly at combined offsets
+    let memcpy_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::MemCopy { .. }))
+        .count();
+
+    assert_eq!(
+        memcpy_count, 0,
+        "Expected 0 memcpy - nested compounds should be stored directly"
+    );
+
+    // Count load.element instructions - we should have 3 for t.1[0], t.1[1], t.1[2]
+    let load_count = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter(|inst| matches!(inst, IrInst::LoadElement { .. }))
+        .count();
+
+    assert_eq!(
+        load_count, 3,
+        "Expected 3 load.element instructions for t.1[0], t.1[1], t.1[2]"
+    );
+
+    // Verify the loads are from the base tuple (t0) at correct offsets
+    let loads: Vec<_> = ir_func
+        .blocks
+        .values()
+        .flat_map(|block| block.insts().iter())
+        .filter_map(|inst| {
+            if let IrInst::LoadElement { array, index, .. } = inst {
+                Some((array.id(), index))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // All loads should be from t0 (the base tuple)
+    assert!(
+        loads.iter().all(|(arr_id, _)| *arr_id == 0),
+        "All loads should be from base tuple t0"
+    );
+
+    // Check the offsets: array starts at offset 8, elements at 8, 16, 24
+    let offsets: Vec<i64> = loads
+        .iter()
+        .filter_map(|(_, index)| {
+            if let IrOperand::Const(IrConst::Int { value, .. }) = index {
+                Some(*value)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        offsets.contains(&8) && offsets.contains(&16) && offsets.contains(&24),
+        "Expected offsets 8, 16, 24 for t.1[0], t.1[1], t.1[2], got {:?}",
+        offsets
+    );
 }

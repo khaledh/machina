@@ -7,7 +7,7 @@ development. The compiler currently targets only ARM64 assembly.
 
 - Expression oriented syntax
 - Basic types: `u64`, `bool`, `()`
-- Compound types: `u64[N]` (arrays), `u64[M, N, ...]` (multi-dimensional arrays)
+- Compound types: tuples `(u64, bool)`, arrays `u64[N]`, multi-dimensional arrays `u64[M, N]`
 - Variables: `let` (immutable), `var` (mutable) with lexical scoping
 - Arithmetic and comparison operators
 - Array destructuring: let [a, b, c] = [1, 2, 3]

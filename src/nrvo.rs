@@ -151,6 +151,8 @@ impl<'a> NrvoSafetyChecker<'a> {
                 callee_ok && args_ok
             }
 
+            ExprKind::ArrayLit(elems) => elems.iter().all(|e| self.check_expr(e, false)),
+
             ExprKind::Index { target, indices } => {
                 let target_ok = match &target.kind {
                     ExprKind::VarRef(_) if self.is_target_var(target) => true,
@@ -160,7 +162,12 @@ impl<'a> NrvoSafetyChecker<'a> {
                 target_ok && index_ok
             }
 
-            ExprKind::ArrayLit(elems) => elems.iter().all(|e| self.check_expr(e, false)),
+            ExprKind::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
+
+            ExprKind::TupleFieldAccess { target, .. } => match &target.kind {
+                ExprKind::VarRef(_) if self.is_target_var(target) => true,
+                _ => self.check_expr(target, false),
+            },
 
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
 

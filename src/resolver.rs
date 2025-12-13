@@ -280,6 +280,16 @@ impl SymbolResolver {
                 }
             }
 
+            ExprKind::TupleLit(fields) => {
+                for field in fields {
+                    self.check_expr(field);
+                }
+            }
+
+            ExprKind::TupleFieldAccess { target, .. } => {
+                self.check_expr(target);
+            }
+
             ExprKind::BinOp { left, right, .. } => {
                 self.check_expr(left);
                 self.check_expr(right);

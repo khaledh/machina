@@ -28,6 +28,9 @@ pub enum ParseError {
 
     #[error("Expected pattern, found: {0}")]
     ExpectedPattern(Token),
+
+    #[error("Single field tuple missing trailing comma: {0}")]
+    SingleFieldTupleMissingComma(Token),
 }
 
 impl ParseError {
@@ -40,6 +43,7 @@ impl ParseError {
             ParseError::ExpectedPrimary(token) => token.span,
             ParseError::ExpectedIntLit(token) => token.span,
             ParseError::ExpectedPattern(token) => token.span,
+            ParseError::SingleFieldTupleMissingComma(token) => token.span,
         }
     }
 }
@@ -139,7 +143,7 @@ impl<'a> Parser<'a> {
         end_token: TokenKind,
         mut parse_item: impl FnMut(&mut Self) -> Result<T, ParseError>,
     ) -> Result<Vec<T>, ParseError> {
-        let mut items = Vec::new();
+        let mut items = vec![];
         while self.curr_token.kind != end_token {
             items.push(parse_item(self)?);
             if self.curr_token.kind == sep_token {
@@ -196,18 +200,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
-        // Parse simple type
-        let mut typ = self.parse_simple_type()?;
+        // Parse base type (tuple or simple)
+        let mut typ = if self.curr_token.kind == TK::LParen
+            && self.peek().map(|t| &t.kind) != Some(&TK::RParen)
+        {
+            self.advance();
+            self.parse_tuple_type()?
+        } else {
+            self.parse_simple_type()?
+        };
 
         // Check for array type
         if self.curr_token.kind == TK::LBracket {
-            self.advance();
-            let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
-            self.consume(&TK::RBracket)?;
-            typ = Type::Array {
-                elem_ty: Box::new(typ),
-                dims: dims.into_iter().map(|d| d as usize).collect(),
-            };
+            typ = self.parse_array_type(typ)?;
         }
 
         Ok(typ)
@@ -224,6 +229,44 @@ impl<'a> Parser<'a> {
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
         };
         result.inspect(|_| self.advance())
+    }
+
+    fn parse_tuple_type(&mut self) -> Result<Type, ParseError> {
+        let mut fields = Vec::new();
+
+        // Parse at least one field
+        fields.push(self.parse_type()?);
+
+        // Parse remaining fields
+        while self.curr_token.kind == TK::Comma {
+            self.advance();
+            // After a comma, require another type, else trailing comma is not permitted
+            if self.curr_token.kind == TK::RParen {
+                break;
+            }
+            fields.push(self.parse_type()?);
+        }
+
+        self.consume(&TK::RParen)?;
+
+        // Forbid (T) syntax (single type, no trailing comma) to avoid ambiguity with parenthesized type
+        if fields.len() == 1 {
+            return Err(ParseError::SingleFieldTupleMissingComma(
+                self.curr_token.clone(),
+            ));
+        }
+
+        Ok(Type::Tuple { fields })
+    }
+
+    fn parse_array_type(&mut self, elem_ty: Type) -> Result<Type, ParseError> {
+        self.advance();
+        let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
+        self.consume(&TK::RBracket)?;
+        Ok(Type::Array {
+            elem_ty: Box::new(elem_ty),
+            dims: dims.into_iter().map(|d| d as usize).collect(),
+        })
     }
 
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
@@ -404,6 +447,19 @@ impl<'a> Parser<'a> {
                         span: self.close(marker.clone()),
                     };
                 }
+                TK::Dot => {
+                    // Field access expression
+                    self.consume(&TK::Dot)?;
+                    let index = self.parse_int_lit()? as u32;
+                    expr = Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::TupleFieldAccess {
+                            target: Box::new(expr),
+                            index,
+                        },
+                        span: self.close(marker.clone()),
+                    }
+                }
                 _ => break,
             }
         }
@@ -445,32 +501,7 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
-            TK::LParen
-                if matches!(
-                    self.peek(),
-                    Some(&Token {
-                        kind: TK::RParen,
-                        ..
-                    })
-                ) =>
-            {
-                let marker = self.mark();
-                self.advance(); // consume '('
-                let span = self.close(marker);
-                self.advance(); // consume ')'
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::UnitLit,
-                    span,
-                })
-            }
-            TK::LParen => {
-                // Parenthesized expression
-                self.advance();
-                let inner = self.parse_expr(0)?;
-                self.consume(&TK::RParen)?;
-                Ok(inner)
-            }
+            TK::LParen => self.parse_paren_or_tuple(),
             TK::LBrace => {
                 // Block expression
                 self.parse_block()
@@ -490,6 +521,49 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
+    }
+
+    fn parse_paren_or_tuple(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.advance();
+
+        // Case 1: Unit literal ()
+        if self.curr_token.kind == TK::RParen {
+            let span = self.close(marker);
+            self.advance();
+            return Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::UnitLit,
+                span,
+            });
+        }
+
+        // Parse first expression
+        let first_expr = self.parse_expr(0)?;
+
+        // Case 2: Tuple literal (has comma)
+        if self.curr_token.kind == TK::Comma {
+            let mut fields = vec![first_expr];
+            while self.curr_token.kind == TK::Comma {
+                self.advance();
+                // Allow trailing comma
+                if self.curr_token.kind == TK::RParen {
+                    break;
+                }
+                let field = self.parse_expr(0)?;
+                fields.push(field);
+            }
+            self.consume(&TK::RParen)?;
+            return Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::TupleLit(fields),
+                span: self.close(marker),
+            });
+        }
+
+        // Case 3: Parenthesized expression (no comma)
+        self.consume(&TK::RParen)?;
+        Ok(first_expr)
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {

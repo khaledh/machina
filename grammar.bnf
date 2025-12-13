@@ -11,8 +11,9 @@ FunctionParam      ::= Identifier ":" Type
 # Types
 Type               ::= SimpleType | CompoundType
 SimpleType         ::= "()" | "u64" | "bool"
-CompoundType       ::= ArrayType
+CompoundType       ::= ArrayType | TupleType
 ArrayType          ::= Type "[" Integer ("," Integer)* "]"
+TupleType          ::= "(" Type "," ( Type ( "," Type )* )? ","? ")"
 
 # Blocks
 Block              ::= "{" (StmtOrExpr ";")* Expr? "}"
@@ -53,20 +54,23 @@ MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
 UnaryExpr          ::= ( "-" | "!" ) UnaryExpr 
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | Index )*
+PostfixExpr        ::= Primary ( Call | Index | TupleFieldAccess )*
 
 Call               ::= "(" Expr ("," Expr)* ","? ")"
 Index              ::= "[" Expr ("," Expr)* ","? "]"
+TupleFieldAccess   ::= "." Integer
 
 Primary            ::= Unit
                      | Integer
                      | Boolean
                      | ArrayLit
+                     | TupleLit
                      | Identifier
                      | "(" Expr ")"
                      | Block
 
 ArrayLit           ::= "[" ( Expr ( "," Expr )* ","? )? "]"
+TupleLit           ::= "(" Expr "," ( Expr ( "," Expr )* )? ","? ")"
 
 # Terminals
 Unit               ::= "()"

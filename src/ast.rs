@@ -55,6 +55,11 @@ pub enum ExprKind {
         target: Box<Expr>,
         indices: Vec<Expr>,
     },
+    TupleLit(Vec<Expr>),
+    TupleFieldAccess {
+        target: Box<Expr>,
+        index: u32,
+    },
     BinOp {
         left: Box<Expr>,
         op: BinaryOp,
@@ -214,6 +219,19 @@ impl Expr {
                 for index in indices {
                     index.fmt_with_indent(f, level + 2)?;
                 }
+            }
+            ExprKind::TupleLit(elems) => {
+                writeln!(f, "{}TupleLit [{}]", pad, self.id)?;
+                for elem in elems {
+                    elem.fmt_with_indent(f, level + 1)?;
+                }
+            }
+            ExprKind::TupleFieldAccess { target, index } => {
+                writeln!(f, "{}TupleFieldAccess [{}]", pad, self.id)?;
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Index: {}", pad1, index)?;
             }
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);

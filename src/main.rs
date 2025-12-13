@@ -31,16 +31,17 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
+fn create_tuple() -> (u64, (u64, u64), (u64, u64)[2], u64[2, 2]) {
+    let t = (1, (2, 3), [(4, 5), (6, 7)], [[8, 9], [10, 11]]);
+    t
+}
+
 fn main() -> u64 {
-    let [x, [c, d], [[e, f], [g, h]]] =
-        [
-            [[1, 2], [3, 4]],
-            [[5, 6], [7, 8]],
-            [[9, 10], [11, 12]],
-        ];
-    x[0, 0] + x[0, 1] + x[1, 0] + x[1, 1] +
-    c[0] + c[1] + d[0] + d[1] +
-    e + f + g + h
+    let t = create_tuple();
+    t.0 +
+    t.1.0 + t.1.1 +
+    t.2[0].0 + t.2[0].1 + t.2[1].0 + t.2[1].1 +
+    t.3[0, 0] + t.3[0, 1] + t.3[1, 0] + t.3[1, 1]
 }
 "#;
 

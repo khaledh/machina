@@ -136,3 +136,218 @@ fn test_parse_nested_array_literal() {
         panic!("Expected Block");
     }
 }
+
+#[test]
+fn test_parse_tuple_type() {
+    let source = r#"
+        fn test() -> (u64, bool) {
+            (42, true)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    assert_eq!(func.name, "test");
+    match &func.return_type {
+        Type::Tuple { fields } => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0], Type::UInt64);
+            assert_eq!(fields[1], Type::Bool);
+        }
+        _ => panic!("Expected tuple type"),
+    }
+}
+
+#[test]
+fn test_parse_tuple_type_nested() {
+    let source = r#"
+        fn test() -> (u64, (bool, u64)) {
+            (42, (true, 10))
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.return_type {
+        Type::Tuple { fields } => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0], Type::UInt64);
+            match &fields[1] {
+                Type::Tuple { fields: inner } => {
+                    assert_eq!(inner.len(), 2);
+                    assert_eq!(inner[0], Type::Bool);
+                    assert_eq!(inner[1], Type::UInt64);
+                }
+                _ => panic!("Expected nested tuple type"),
+            }
+        }
+        _ => panic!("Expected tuple type"),
+    }
+}
+
+#[test]
+fn test_parse_tuple_literal() {
+    let source = r#"
+        fn test() -> (u64, bool) {
+            (42, true)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::TupleLit(fields) = &exprs[0].kind {
+            assert_eq!(fields.len(), 2);
+
+            match &fields[0].kind {
+                ExprKind::UInt64Lit(val) => assert_eq!(*val, 42),
+                _ => panic!("Expected UInt64Lit"),
+            }
+
+            match &fields[1].kind {
+                ExprKind::BoolLit(val) => assert_eq!(*val, true),
+                _ => panic!("Expected BoolLit"),
+            }
+        } else {
+            panic!("Expected TupleLit");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_tuple_literal_trailing_comma() {
+    let source = r#"
+        fn test() -> (u64, bool) {
+            (42, true,)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::TupleLit(fields) = &exprs[0].kind {
+            assert_eq!(fields.len(), 2);
+        } else {
+            panic!("Expected TupleLit");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_tuple_field_access() {
+    let source = r#"
+        fn test() -> u64 {
+            let t = (42, true);
+            t.0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        // Second expression is the field access
+        if let ExprKind::TupleFieldAccess { target, index } = &exprs[1].kind {
+            // Check target is VarRef
+            match &target.kind {
+                ExprKind::VarRef(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected VarRef"),
+            }
+
+            // Check index is 0
+            assert_eq!(*index, 0);
+        } else {
+            panic!("Expected TupleFieldAccess");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_tuple_field_access_chained() {
+    let source = r#"
+        fn test() -> bool {
+            let t = (42, (true, 10));
+            t.1.0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        // Second expression should be field access of field access
+        if let ExprKind::TupleFieldAccess { target, index } = &exprs[1].kind {
+            assert_eq!(*index, 0);
+
+            // Inner target should also be field access
+            if let ExprKind::TupleFieldAccess {
+                target: inner_target,
+                index: inner_index,
+            } = &target.kind
+            {
+                assert_eq!(*inner_index, 1);
+
+                match &inner_target.kind {
+                    ExprKind::VarRef(name) => assert_eq!(name, "t"),
+                    _ => panic!("Expected VarRef"),
+                }
+            } else {
+                panic!("Expected nested TupleFieldAccess");
+            }
+        } else {
+            panic!("Expected TupleFieldAccess");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_tuple_with_array_indexing() {
+    let source = r#"
+        fn test() -> u64 {
+            let t = ([1, 2, 3], 42);
+            t.0[2]
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        // Second expression should be index of field access
+        if let ExprKind::Index { target, indices } = &exprs[1].kind {
+            assert_eq!(indices.len(), 1);
+
+            // Target should be field access
+            if let ExprKind::TupleFieldAccess {
+                target: field_target,
+                index,
+            } = &target.kind
+            {
+                assert_eq!(*index, 0);
+
+                match &field_target.kind {
+                    ExprKind::VarRef(name) => assert_eq!(name, "t"),
+                    _ => panic!("Expected VarRef"),
+                }
+            } else {
+                panic!("Expected TupleFieldAccess");
+            }
+        } else {
+            panic!("Expected Index");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}

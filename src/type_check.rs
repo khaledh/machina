@@ -64,6 +64,15 @@ pub enum TypeCheckError {
 
     #[error("Array pattern length mismatch: expected {0}, found {1}")]
     ArrayPatternLengthMismatch(usize, usize, Span),
+
+    #[error("Empty tuple literals are unsupported: {0}")]
+    EmptyTupleLiteral(Span),
+
+    #[error("Tuple field out of bounds: tuple has {0} fields, index is {1}")]
+    TupleFieldOutOfBounds(usize, u32, Span),
+
+    #[error("Invalid tuple field access target: expected tuple, found {0}")]
+    InvalidTupleFieldAccessTarget(Type, Span),
 }
 
 impl TypeCheckError {
@@ -86,6 +95,9 @@ impl TypeCheckError {
             TypeCheckError::UnknownType(span) => *span,
             TypeCheckError::PatternTypeMismatch(_, _, span) => *span,
             TypeCheckError::ArrayPatternLengthMismatch(_, _, span) => *span,
+            TypeCheckError::EmptyTupleLiteral(span) => *span,
+            TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,
+            TypeCheckError::InvalidTupleFieldAccessTarget(_, span) => *span,
         }
     }
 }
@@ -290,6 +302,50 @@ impl<'c, 'b> Checker<'c, 'b> {
                 elem_ty,
                 dims: dims[indices.len()..].to_vec(),
             })
+        }
+    }
+
+    fn type_check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
+        if fields.is_empty() {
+            return Err(TypeCheckError::EmptyTupleLiteral(fields[0].span));
+        }
+
+        // Type check each field
+        let mut field_types = Vec::new();
+        for field in fields {
+            let field_ty = self.type_check_expr(field)?;
+            field_types.push(field_ty);
+        }
+
+        Ok(Type::Tuple {
+            fields: field_types,
+        })
+    }
+
+    fn type_check_tuple_field_access(
+        &mut self,
+        target: &Expr,
+        index: u32,
+    ) -> Result<Type, TypeCheckError> {
+        // Type check target
+        let target_ty = self.type_check_expr(target)?;
+        match target_ty {
+            Type::Tuple { fields } => {
+                let index_usize = index as usize;
+                if index_usize >= fields.len() {
+                    return Err(TypeCheckError::TupleFieldOutOfBounds(
+                        fields.len(),
+                        index,
+                        target.span,
+                    ));
+                }
+
+                Ok(fields[index_usize].clone())
+            }
+            _ => Err(TypeCheckError::InvalidTupleFieldAccessTarget(
+                target_ty,
+                target.span,
+            )),
         }
     }
 
@@ -534,6 +590,12 @@ impl<'c, 'b> Checker<'c, 'b> {
             ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),
 
             ExprKind::Index { target, indices } => self.type_check_index(target, indices),
+
+            ExprKind::TupleLit(fields) => self.type_check_tuple_lit(fields),
+
+            ExprKind::TupleFieldAccess { target, index } => {
+                self.type_check_tuple_field_access(target, *index)
+            }
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 
