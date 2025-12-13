@@ -31,17 +31,23 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn create_tuple() -> (u64, (u64, u64), (u64, u64)[2], u64[2, 2]) {
-    let t = (1, (2, 3), [(4, 5), (6, 7)], [[8, 9], [10, 11]]);
-    t
+fn main() -> u64 {
+    let t = {
+      let a = create_array(true);
+      let s = a[0] + a[1] + a[2];
+      (a, s)
+    };
+    let ([a, b, c], sum) = t;
+    let double = a + b + c + sum;
+    double
 }
 
-fn main() -> u64 {
-    let t = create_tuple();
-    t.0 +
-    t.1.0 + t.1.1 +
-    t.2[0].0 + t.2[0].1 + t.2[1].0 + t.2[1].1 +
-    t.3[0, 0] + t.3[0, 1] + t.3[1, 0] + t.3[1, 1]
+fn create_array(b: bool) -> u64[3] {
+    if b {
+        [1, 2, 3]
+    } else {
+        [4, 5, 6]
+    }
 }
 "#;
 

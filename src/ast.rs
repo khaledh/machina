@@ -36,6 +36,11 @@ pub enum Pattern {
         patterns: Vec<Pattern>,
         span: Span,
     },
+    Tuple {
+        id: NodeId,
+        patterns: Vec<Pattern>,
+        span: Span,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -182,6 +187,12 @@ impl Pattern {
             }
             Pattern::Array { patterns, .. } => {
                 writeln!(f, "{}Pattern::Array", pad)?;
+                for pattern in patterns {
+                    pattern.fmt_with_indent(f, level + 1)?;
+                }
+            }
+            Pattern::Tuple { patterns, .. } => {
+                writeln!(f, "{}Pattern::Tuple", pad)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }

@@ -328,6 +328,37 @@ impl<'a> Parser<'a> {
                     span: self.close(marker),
                 })
             }
+            TK::LParen => {
+                // Tuple pattern (or just a parenthesized pattern)
+                self.advance();
+
+                let first_pattern = self.parse_pattern()?;
+
+                if self.curr_token.kind != TK::Comma {
+                    // Just a parenthesized pattern
+                    self.consume(&TK::RParen)?;
+                    return Ok(first_pattern);
+                }
+
+                // It's a tuple pattern - collect remaining patterns
+                let mut patterns = vec![first_pattern];
+                while self.curr_token.kind == TK::Comma {
+                    self.advance();
+                    // Allow trailing comma
+                    if self.curr_token.kind == TK::RParen {
+                        break;
+                    }
+                    let pattern = self.parse_pattern()?;
+                    patterns.push(pattern);
+                }
+                self.consume(&TK::RParen)?;
+
+                Ok(Pattern::Tuple {
+                    id: self.id_gen.new_id(),
+                    patterns,
+                    span: self.close(marker),
+                })
+            }
             _ => Err(ParseError::ExpectedPattern(self.curr_token.clone())),
         }
     }

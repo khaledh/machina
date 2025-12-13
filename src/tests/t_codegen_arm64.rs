@@ -113,12 +113,13 @@ fn test_prologue_three_callee_saved() {
 
     let prologue = codegen.emit_prologue().unwrap();
 
+    // Frame size 24 is padded to 32 for 16-byte stack alignment
     let expected = indoc! {"
       .global _test
       _test:
         stp x29, x30, [sp, #-16]!
         mov x29, sp
-        sub sp, sp, #24
+        sub sp, sp, #32
         stp x19, x20, [sp, #8]
         str x21, [sp, #0]
     "};

@@ -104,8 +104,8 @@ impl<'a> FuncCodegen<'a> {
         let stack_alloc_size =
             alloc_result.frame_size - alloc_result.used_callee_saved.len() as u32 * 8;
         let mut stack_padding = 0;
-        if !stack_alloc_size.is_multiple_of(16) {
-            stack_padding = 16 - stack_alloc_size % 16;
+        if !alloc_result.frame_size.is_multiple_of(16) {
+            stack_padding = 16 - alloc_result.frame_size % 16;
         }
         Self {
             func,
@@ -522,6 +522,20 @@ impl<'a> FuncCodegen<'a> {
             } => {
                 asm.push_str(&self.emit_load_element(*result, array, index)?);
             }
+            IrInst::StoreAtByteOffset {
+                base,
+                byte_offset,
+                value,
+            } => {
+                asm.push_str(&self.emit_store_at_byte_offset(*base, byte_offset, value)?);
+            }
+            IrInst::LoadAtByteOffset {
+                base,
+                byte_offset,
+                result,
+            } => {
+                asm.push_str(&self.emit_load_at_byte_offset(*result, *base, byte_offset)?);
+            }
             IrInst::MemCopy {
                 dest,
                 src,
@@ -665,6 +679,32 @@ impl<'a> FuncCodegen<'a> {
         Ok(())
     }
 
+    fn emit_store_at_byte_offset(
+        &mut self,
+        base: IrTempId,
+        byte_offset: &IrOperand,
+        value: &IrOperand,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+
+        // Calculate the address using elem_size = 1 (byte offset, not scaled)
+        let addr = self.emit_element_address(base, &byte_offset, 1, &mut asm)?;
+
+        // Get the value into a register
+        let value_reg = self.materialize_operand(value, &mut asm)?;
+
+        // Determine the size of the value to store
+        let value_size = match value {
+            IrOperand::Temp(temp_id) => self.func.temp_type(*temp_id).size_of(),
+            IrOperand::Const(c) => c.size_of(),
+        };
+
+        // Store the value at the address
+        self.emit_store_at_address(addr, value_size, value_reg, &mut asm)?;
+
+        Ok(asm)
+    }
+
     fn emit_load_at_address(
         &mut self,
         addr: AddressingMode,
@@ -754,6 +794,27 @@ impl<'a> FuncCodegen<'a> {
 
         // Calculate the element address
         let addr = self.emit_element_address(*array, index, elem_size, &mut asm)?;
+
+        // Determine the size of the value to load (from the result type)
+        let value_size = self.func.temp_type(result).size_of();
+
+        // Load the value from the address into the result register
+        self.emit_load_at_address(addr, value_size, result_reg, &mut asm)?;
+
+        Ok(asm)
+    }
+
+    pub fn emit_load_at_byte_offset(
+        &mut self,
+        result: IrTempId,
+        base: IrTempId,
+        byte_offset: &IrOperand,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+        let result_reg = self.get_reg(&result)?;
+
+        // Calculate the address using elem_size = 1 (byte offset, not scaled)
+        let addr = self.emit_element_address(base, &byte_offset, 1, &mut asm)?;
 
         // Determine the size of the value to load (from the result type)
         let value_size = self.func.temp_type(result).size_of();

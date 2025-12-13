@@ -73,6 +73,9 @@ pub enum TypeCheckError {
 
     #[error("Invalid tuple field access target: expected tuple, found {0}")]
     InvalidTupleFieldAccessTarget(Type, Span),
+
+    #[error("Tuple pattern length mismatch: expected {0}, found {1}")]
+    TuplePatternLengthMismatch(usize, usize, Span),
 }
 
 impl TypeCheckError {
@@ -98,6 +101,7 @@ impl TypeCheckError {
             TypeCheckError::EmptyTupleLiteral(span) => *span,
             TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,
             TypeCheckError::InvalidTupleFieldAccessTarget(_, span) => *span,
+            TypeCheckError::TuplePatternLengthMismatch(_, _, span) => *span,
         }
     }
 }
@@ -408,6 +412,30 @@ impl<'c, 'b> Checker<'c, 'b> {
                             *span,
                         ));
                     }
+                }
+            }
+            Pattern::Tuple { patterns, span, .. } => {
+                match value_ty {
+                    Type::Tuple { fields } => {
+                        if patterns.len() != fields.len() {
+                            return Err(TypeCheckError::TuplePatternLengthMismatch(
+                                fields.len(),
+                                patterns.len(),
+                                *span,
+                            ));
+                        }
+
+                        // Recursively type check each sub-pattern
+                        for (pattern, field) in patterns.iter().zip(fields) {
+                            self.type_check_pattern(pattern, field)?;
+                        }
+                        Ok(())
+                    }
+                    _ => Err(TypeCheckError::PatternTypeMismatch(
+                        pattern.clone(),
+                        value_ty.clone(),
+                        *span,
+                    )),
                 }
             }
         }

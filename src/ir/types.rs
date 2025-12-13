@@ -413,6 +413,17 @@ pub enum IrInst {
         index: IrOperand,
     },
 
+    StoreAtByteOffset {
+        base: IrTempId,
+        byte_offset: IrOperand,
+        value: IrOperand,
+    },
+    LoadAtByteOffset {
+        base: IrTempId,
+        byte_offset: IrOperand,
+        result: IrTempId,
+    },
+
     MemCopy {
         dest: IrTempId,
         src: IrTempId,
@@ -432,6 +443,8 @@ impl IrInst {
             IrInst::Phi { result, .. } => Some(*result),
             IrInst::StoreElement { .. } => None,
             IrInst::LoadElement { result, .. } => Some(*result),
+            IrInst::StoreAtByteOffset { .. } => None,
+            IrInst::LoadAtByteOffset { result, .. } => Some(*result),
             IrInst::MemCopy { dest, .. } => Some(*dest),
         }
     }
@@ -455,6 +468,18 @@ impl IrInst {
             }
             IrInst::LoadElement { array, index, .. } => {
                 vec![IrOperand::Temp(*array), *index]
+            }
+            IrInst::StoreAtByteOffset {
+                base,
+                byte_offset,
+                value,
+            } => {
+                vec![IrOperand::Temp(*base), *byte_offset, *value]
+            }
+            IrInst::LoadAtByteOffset {
+                base, byte_offset, ..
+            } => {
+                vec![IrOperand::Temp(*base), *byte_offset]
             }
             IrInst::MemCopy {
                 dest,
@@ -642,6 +667,33 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 result.id(),
                 array.id(),
                 format_operand(index)
+            )?;
+        }
+        IrInst::StoreAtByteOffset {
+            base,
+            byte_offset,
+            value,
+        } => {
+            write!(
+                f,
+                "store.at.byte.offset %t{}[offset={}] = {}",
+                base.id(),
+                format_operand(byte_offset),
+                format_operand(value)
+            )?;
+        }
+        IrInst::LoadAtByteOffset {
+            base,
+            byte_offset,
+            result,
+        } => {
+            write!(
+                f,
+                "%t{} = load.at.byte.offset %t{}[offset={}] : {}",
+                result.id(),
+                base.id(),
+                format_operand(byte_offset),
+                func.temp_type(*result)
             )?;
         }
         IrInst::MemCopy {

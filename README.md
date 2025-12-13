@@ -6,11 +6,12 @@ development. The compiler currently targets only ARM64 assembly.
 ## Current features
 
 - Expression oriented syntax
-- Basic types: `u64`, `bool`, `()`
-- Compound types: tuples `(u64, bool)`, arrays `u64[N]`, multi-dimensional arrays `u64[M, N]`
 - Variables: `let` (immutable), `var` (mutable) with lexical scoping
 - Arithmetic and comparison operators
+- Basic types: `u64`, `bool`, `()`
+- Compound types: tuples `(u64, bool)`, arrays `u64[N]`, multi-dimensional arrays `u64[M, N]`
 - Array destructuring: let [a, b, c] = [1, 2, 3]
+- Tuple destructuring: let (x, y) = (1, true)
 - Blocks (last expression is the block value)
 - Control flow: `if`/`else`, `while`
 - Functions and function calls (recursion supported)
@@ -20,14 +21,17 @@ development. The compiler currently targets only ARM64 assembly.
 
 ```
 fn main() -> u64 {
-    let x = {
-      let value = create_array()[2];
-      value + 2
+    let t = {
+      let a = create_array(true);
+      let s = a[0] + a[1] + a[2];
+      (a, s)
     };
-    x
+    let ([a, b, c], sum) = t;
+    let double = a + b + c + sum;
+    double
 }
 
-fn create_array(b: bool) -> u64[5] {
+fn create_array(b: bool) -> u64[3] {
     if b {
         [1, 2, 3]
     } else {

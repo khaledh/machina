@@ -48,6 +48,9 @@ pub enum LowerError {
 
     #[error("Tuple is not a temp: Node {0}, Operand {1:?}")]
     TupleIsNotTemp(NodeId, IrOperand),
+
+    #[error("Compound field is not a temp: Node {0}, Operand {1:?}")]
+    CompoundFieldNotTemp(NodeId, IrOperand),
 }
 
 fn lower_type(ty: &Type) -> IrType {
@@ -141,6 +144,13 @@ impl<'a> Lowerer<'a> {
             ast::Pattern::Array { id, patterns, .. } => {
                 let base_array = self.get_array_temp(value_op, *id)?;
                 self.lower_array_pattern(fb, id, patterns, base_array, 0, value_ty, is_mutable)
+            }
+            ast::Pattern::Tuple { id, patterns, .. } => {
+                let base_tuple = match value_op {
+                    IrOperand::Temp(temp) => temp,
+                    _ => return Err(LowerError::TupleIsNotTemp(*id, value_op)),
+                };
+                self.lower_tuple_pattern(fb, id, patterns, base_tuple, 0, value_ty, is_mutable)
             }
         }
     }
@@ -237,10 +247,18 @@ impl<'a> Lowerer<'a> {
                         IrOperand::Temp(sub_array_temp)
                     } else {
                         // scalar element, just load it
-                        let elem_index = src_offset / elem_size;
-                        let offset_op = fb.new_const_int(elem_index as i64, 64, false);
+                        let offset_op = fb.new_const_int(src_offset as i64, 64, false);
                         let elem_temp = fb.new_temp(ir_sub_ty.clone());
-                        fb.load_element(elem_temp, base_array, offset_op);
+
+                        // Check if base is a tuple type - if so, use byte offset semantics
+                        let base_ir_ty = fb.temp_type(base_array);
+                        if let IrType::Tuple { .. } = base_ir_ty {
+                            fb.load_at_byte_offset(elem_temp, base_array, offset_op);
+                        } else {
+                            let elem_index = src_offset / elem_size;
+                            let offset_op = fb.new_const_int(elem_index as i64, 64, false);
+                            fb.load_element(elem_temp, base_array, offset_op);
+                        }
                         IrOperand::Temp(elem_temp)
                     };
 
@@ -250,6 +268,112 @@ impl<'a> Lowerer<'a> {
                     // Nested array pattern, recurse with adjusted offset
                     self.lower_array_pattern(
                         fb, id, patterns, base_array, src_offset, &sub_ty, is_mutable,
+                    )?;
+                }
+                ast::Pattern::Tuple {
+                    id,
+                    patterns: sub_patterns,
+                    ..
+                } => {
+                    // Nested tuple pattern within array
+                    self.lower_tuple_pattern(
+                        fb,
+                        id,
+                        sub_patterns,
+                        base_array,
+                        src_offset,
+                        &sub_ty,
+                        is_mutable,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_tuple_pattern(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        id: &NodeId,
+        patterns: &[ast::Pattern],
+        base_tuple: IrTempId,
+        base_offset: usize,
+        value_ty: &Type,
+        is_mutable: bool,
+    ) -> Result<(), LowerError> {
+        // Get tuple fields from type
+        let fields = match value_ty {
+            Type::Tuple { fields } => fields,
+            _ => return Err(LowerError::TupleIsNotTemp(*id, IrOperand::Temp(base_tuple))),
+        };
+
+        // Extract each field and recursively lower the sub-pattern
+        for (i, pattern) in patterns.iter().enumerate() {
+            let field_ty = &fields[i];
+            let field_ir_ty = lower_type(field_ty);
+            let field_offset = base_offset + value_ty.tuple_field_offset(i);
+
+            match pattern {
+                ast::Pattern::Ident { id, name, .. } => {
+                    // Binding to a variable, need to create a temp
+                    let field_op = if field_ir_ty.is_compound() {
+                        // mem copy from base tuple at offset
+                        let field_temp = fb.new_temp(field_ir_ty.clone());
+                        fb.mem_copy_with_offset(
+                            field_temp,
+                            base_tuple,
+                            0,
+                            field_offset,
+                            field_ir_ty.size_of(),
+                        );
+                        IrOperand::Temp(field_temp)
+                    } else {
+                        // scalar field, just load it
+                        let offset_op = fb.new_const_int(field_offset as i64, 64, false);
+                        let field_temp = fb.new_temp(field_ir_ty.clone());
+
+                        // Check if base is an array type - if so, use byte offset semantics
+                        let base_ir_ty = fb.temp_type(base_tuple);
+                        if let IrType::Array { .. } = base_ir_ty {
+                            fb.load_at_byte_offset(field_temp, base_tuple, offset_op);
+                        } else {
+                            fb.load_element(field_temp, base_tuple, offset_op);
+                        }
+                        IrOperand::Temp(field_temp)
+                    };
+
+                    self.lower_ident_pattern(fb, id, name.clone(), field_op, is_mutable)?;
+                }
+                ast::Pattern::Array {
+                    id,
+                    patterns: sub_patterns,
+                    ..
+                } => {
+                    // Nested array pattern within tuple
+                    self.lower_array_pattern(
+                        fb,
+                        id,
+                        sub_patterns,
+                        base_tuple,
+                        field_offset,
+                        field_ty,
+                        is_mutable,
+                    )?;
+                }
+                ast::Pattern::Tuple {
+                    id,
+                    patterns: sub_patterns,
+                    ..
+                } => {
+                    // Nested tuple pattern
+                    self.lower_tuple_pattern(
+                        fb,
+                        id,
+                        sub_patterns,
+                        base_tuple,
+                        field_offset,
+                        field_ty,
+                        is_mutable,
                     )?;
                 }
             }
@@ -267,8 +391,18 @@ impl<'a> Lowerer<'a> {
         let value_ast_ty = self.get_node_type(value)?;
         let value_ir_ty = lower_type(&value_ast_ty);
 
+        // For compound patterns (Tuple/Array) with a simple VarRef value,
+        // we can use the existing variable's temp directly without copying.
+        let can_use_value_directly = matches!(
+            (pattern, &value.kind),
+            (ast::Pattern::Tuple { .. } | ast::Pattern::Array { .. }, ast::ExprKind::VarRef(_))
+        ) && value_ir_ty.is_compound();
+
         // Check if this binding is NRVO-eligible
-        let dest_temp = if value_ir_ty.is_compound() {
+        let dest_temp = if can_use_value_directly {
+            // Don't create a dest_temp - we'll use the value's temp directly
+            None
+        } else if value_ir_ty.is_compound() {
             // Check if the pattern is an Ident and if it's NRVO-eligible
             let is_nrvo_eligible = match pattern {
                 ast::Pattern::Ident { id, .. } => {
@@ -453,10 +587,11 @@ impl<'a> Lowerer<'a> {
                             elem_size,
                         );
                     } else {
-                        // scalar element, store at current offset
+                        // scalar element, store at current byte offset
                         let elem_op = self.lower_expr(fb, elem, None)?;
-                        let index_op = fb.new_const_int(current_byte_offset as i64, 64, false);
-                        fb.store_element(dest_temp, index_op, elem_op);
+                        let offset_op = fb.new_const_int(current_byte_offset as i64, 64, false);
+                        // Use store_at_byte_offset since we're using byte offsets
+                        fb.store_at_byte_offset(dest_temp, offset_op, elem_op);
                     }
 
                     current_byte_offset += elem_size;
@@ -594,14 +729,14 @@ impl<'a> Lowerer<'a> {
                     // Get element size
                     let elem_size = elem_ty.size_of();
 
-                    // Combine offsets: tuple_offset + array_elem_offset *
-                    // elem_size
+                    // Combine offsets: tuple_offset + array_elem_offset * elem_size
                     let combined_offset = offset + const_offset * elem_size;
 
-                    // Load scalar directly with combined offset
+                    // Load scalar directly with combined byte offset
                     let offset_op = fb.new_const_int(combined_offset as i64, 64, false);
                     let result_temp = fb.new_temp(result_ty.clone());
-                    fb.load_element(result_temp, base_temp, offset_op);
+                    // Use load_at_byte_offset since combined_offset is a byte offset
+                    fb.load_at_byte_offset(result_temp, base_temp, offset_op);
                     return Ok(IrOperand::Temp(result_temp));
                 }
             }
@@ -668,23 +803,33 @@ impl<'a> Lowerer<'a> {
                         )?;
                     }
                     _ => {
-                        // Non-literal compound: create temp, lower, memcpy
-                        let field_temp = fb.new_temp(field_ir_ty.clone());
-                        self.lower_expr(fb, field, Some(field_temp))?;
-                        fb.mem_copy_with_offset(
-                            dest_temp,
-                            field_temp,
-                            combined_offset,
-                            0,
-                            field_ir_ty.size_of(),
-                        );
+                        // Non-literal compound: get source temp and memcpy directly
+                        let field_op = self.lower_expr(fb, field, None)?;
+                        if let IrOperand::Temp(field_temp) = field_op {
+                            fb.mem_copy_with_offset(
+                                dest_temp,
+                                field_temp,
+                                combined_offset,
+                                0,
+                                field_ir_ty.size_of(),
+                            );
+                        } else {
+                            return Err(LowerError::CompoundFieldNotTemp(expr.id, field_op));
+                        }
                     }
                 }
             } else {
                 // scalar field, lower and store at offset
                 let field_op = self.lower_expr(fb, field, None)?;
                 let offset_op = fb.new_const_int(combined_offset as i64, 64, false);
-                fb.store_element(dest_temp, offset_op, field_op);
+
+                // Check if base is an array type - if so, use byte offset semantics
+                let base_ir_ty = fb.temp_type(dest_temp);
+                if let IrType::Array { .. } = base_ir_ty {
+                    fb.store_at_byte_offset(dest_temp, offset_op, field_op);
+                } else {
+                    fb.store_element(dest_temp, offset_op, field_op);
+                }
             }
         }
 
@@ -710,10 +855,11 @@ impl<'a> Lowerer<'a> {
             let field_offset = target_ty.tuple_field_offset(index as usize);
             let combined_offset = offset + field_offset;
 
-            // Load scalar directly with combined offset
+            // Load scalar directly with combined byte offset
             let offset_op = fb.new_const_int(combined_offset as i64, 64, false);
             let result_temp = fb.new_temp(result_ir_ty.clone());
-            fb.load_element(result_temp, base_temp, offset_op);
+            // Use load_at_byte_offset since combined_offset is a byte offset
+            fb.load_at_byte_offset(result_temp, base_temp, offset_op);
             return Ok(IrOperand::Temp(result_temp));
         }
 

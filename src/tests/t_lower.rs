@@ -318,7 +318,14 @@ fn test_nrvo_eligible_array() {
                     "NRVO-eligible array should use return temp t0"
                 );
             }
-            other => panic!("Expected StoreElement, found {:?}", other),
+            IrInst::StoreAtByteOffset { base, .. } => {
+                assert_eq!(
+                    base.id(),
+                    0,
+                    "NRVO-eligible array should use return temp t0"
+                );
+            }
+            other => panic!("Expected StoreElement or StoreAtByteOffset, found {:?}", other),
         }
     }
 }
@@ -361,16 +368,26 @@ fn test_nrvo_array_with_element_read() {
                     "NRVO-eligible array should use return temp t0"
                 );
             }
-            other => panic!("Expected StoreElement, found {:?}", other),
+            IrInst::StoreAtByteOffset { base, .. } => {
+                assert_eq!(
+                    base.id(),
+                    0,
+                    "NRVO-eligible array should use return temp t0"
+                );
+            }
+            other => panic!("Expected StoreElement or StoreAtByteOffset, found {:?}", other),
         }
     }
 
-    // Verify load_element reads from t0 (the return temp)
+    // Verify load reads from t0 (the return temp)
     match &entry_insts[3] {
         IrInst::LoadElement { array, .. } => {
             assert_eq!(array.id(), 0, "Load should be from return temp t0");
         }
-        other => panic!("Expected LoadElement, found {:?}", other),
+        IrInst::LoadAtByteOffset { base, .. } => {
+            assert_eq!(base.id(), 0, "Load should be from return temp t0");
+        }
+        other => panic!("Expected LoadElement or LoadAtByteOffset, found {:?}", other),
     }
 }
 
@@ -525,12 +542,12 @@ fn test_multidim_array_literal_lowering() {
 
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
-    // Check that we have store.element instructions for all 6 elements
+    // Check that we have store instructions for all 6 elements
     let store_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::StoreElement { .. }))
+        .filter(|inst| matches!(inst, IrInst::StoreElement { .. } | IrInst::StoreAtByteOffset { .. }))
         .count();
 
     assert_eq!(
@@ -599,17 +616,17 @@ fn test_3d_array_lowering() {
 
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
-    // Check that we have 8 store.element instructions (2x2x2 = 8 elements)
+    // Check that we have 8 store instructions (2x2x2 = 8 elements)
     let store_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::StoreElement { .. }))
+        .filter(|inst| matches!(inst, IrInst::StoreElement { .. } | IrInst::StoreAtByteOffset { .. }))
         .count();
 
     assert_eq!(
         store_count, 8,
-        "Expected 8 store.element instructions for 3D array"
+        "Expected 8 store instructions for 3D array"
     );
 
     // For arr[i, j, k] with dims [2, 2, 2]:
@@ -659,26 +676,26 @@ fn test_multidim_array_assignment() {
 
     let ir_func = compile_and_lower(source).expect("Failed to compile and lower");
 
-    // Should have both store.element for assignment and load.element for read
+    // Should have both store for assignment and load for read
     let store_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::StoreElement { .. }))
+        .filter(|inst| matches!(inst, IrInst::StoreElement { .. } | IrInst::StoreAtByteOffset { .. }))
         .count();
 
     let load_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::LoadElement { .. }))
+        .filter(|inst| matches!(inst, IrInst::LoadElement { .. } | IrInst::LoadAtByteOffset { .. }))
         .count();
 
     assert!(
         store_count >= 5,
-        "Expected at least 5 store.element instructions (4 for init + 1 for assignment)"
+        "Expected at least 5 store instructions (4 for init + 1 for assignment)"
     );
-    assert_eq!(load_count, 1, "Expected 1 load.element instruction");
+    assert_eq!(load_count, 1, "Expected 1 load instruction");
 }
 
 #[test]
@@ -709,17 +726,17 @@ fn test_nested_tuple_field_access_optimization() {
         "Expected 0 memcpy - nested compounds should be stored directly"
     );
 
-    // Count load.element instructions - we should have 2 for t.1.0 and t.1.1
+    // Count load instructions - we should have 2 for t.1.0 and t.1.1
     let load_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::LoadElement { .. }))
+        .filter(|inst| matches!(inst, IrInst::LoadElement { .. } | IrInst::LoadAtByteOffset { .. }))
         .count();
 
     assert_eq!(
         load_count, 2,
-        "Expected 2 load.element instructions for t.1.0 and t.1.1"
+        "Expected 2 load instructions for t.1.0 and t.1.1"
     );
 
     // Verify the loads are from the base tuple (t0) at correct offsets
@@ -730,6 +747,8 @@ fn test_nested_tuple_field_access_optimization() {
         .filter_map(|inst| {
             if let IrInst::LoadElement { array, index, .. } = inst {
                 Some((array.id(), index))
+            } else if let IrInst::LoadAtByteOffset { base, byte_offset, .. } = inst {
+                Some((base.id(), byte_offset))
             } else {
                 None
             }
@@ -788,17 +807,17 @@ fn test_array_in_tuple_index_optimization() {
         "Expected 0 memcpy - nested compounds should be stored directly"
     );
 
-    // Count load.element instructions - we should have 3 for t.1[0], t.1[1], t.1[2]
+    // Count load instructions - we should have 3 for t.1[0], t.1[1], t.1[2]
     let load_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::LoadElement { .. }))
+        .filter(|inst| matches!(inst, IrInst::LoadElement { .. } | IrInst::LoadAtByteOffset { .. }))
         .count();
 
     assert_eq!(
         load_count, 3,
-        "Expected 3 load.element instructions for t.1[0], t.1[1], t.1[2]"
+        "Expected 3 load instructions for t.1[0], t.1[1], t.1[2]"
     );
 
     // Verify the loads are from the base tuple (t0) at correct offsets
@@ -809,6 +828,8 @@ fn test_array_in_tuple_index_optimization() {
         .filter_map(|inst| {
             if let IrInst::LoadElement { array, index, .. } = inst {
                 Some((array.id(), index))
+            } else if let IrInst::LoadAtByteOffset { base, byte_offset, .. } = inst {
+                Some((base.id(), byte_offset))
             } else {
                 None
             }

@@ -168,3 +168,102 @@ fn test_assignment_to_multidim_array_element() {
 
     let _ctx = type_check_source(source).expect("Failed to type check");
 }
+
+#[test]
+fn test_tuple_pattern_basic() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, b) = (42, true);
+            a
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_tuple_pattern_nested() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, (b, c)) = (1, (2, 3));
+            a + b + c
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_tuple_pattern_with_array() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, [b, c]) = (1, [2, 3]);
+            a + b + c
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_tuple_pattern_length_mismatch() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, b, c) = (1, 2);
+            a
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::TuplePatternLengthMismatch(expected, got, _) => {
+                assert_eq!(*expected, 2);
+                assert_eq!(*got, 3);
+            }
+            e => panic!("Expected TuplePatternLengthMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_tuple_pattern_type_mismatch() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, b) = 42;
+            a
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::PatternTypeMismatch(_, _, _) => {
+                // Expected error
+            }
+            e => panic!("Expected PatternTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_var_tuple_pattern() {
+    let source = r#"
+        fn test() -> u64 {
+            var (a, b) = (1, 2);
+            a = 10;
+            b = 20;
+            a + b
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}

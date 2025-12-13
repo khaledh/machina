@@ -351,3 +351,160 @@ fn test_parse_tuple_with_array_indexing() {
         panic!("Expected Block");
     }
 }
+
+#[test]
+fn test_parse_tuple_pattern() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, b) = (42, true);
+            a
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::Let { pattern, value } = &exprs[0].kind {
+            // Check pattern is a tuple pattern
+            match pattern {
+                crate::ast::Pattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 2);
+
+                    // First pattern should be identifier "a"
+                    match &patterns[0] {
+                        crate::ast::Pattern::Ident { name, .. } => assert_eq!(name, "a"),
+                        _ => panic!("Expected Ident pattern"),
+                    }
+
+                    // Second pattern should be identifier "b"
+                    match &patterns[1] {
+                        crate::ast::Pattern::Ident { name, .. } => assert_eq!(name, "b"),
+                        _ => panic!("Expected Ident pattern"),
+                    }
+                }
+                _ => panic!("Expected Tuple pattern"),
+            }
+
+            // Check value is a tuple literal
+            match &value.kind {
+                ExprKind::TupleLit(fields) => {
+                    assert_eq!(fields.len(), 2);
+                }
+                _ => panic!("Expected TupleLit"),
+            }
+        } else {
+            panic!("Expected Let");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_tuple_pattern_nested() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, (b, c)) = (1, (2, 3));
+            a
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::Let { pattern, .. } = &exprs[0].kind {
+            match pattern {
+                crate::ast::Pattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 2);
+
+                    // First pattern should be identifier "a"
+                    match &patterns[0] {
+                        crate::ast::Pattern::Ident { name, .. } => assert_eq!(name, "a"),
+                        _ => panic!("Expected Ident pattern"),
+                    }
+
+                    // Second pattern should be a nested tuple pattern
+                    match &patterns[1] {
+                        crate::ast::Pattern::Tuple {
+                            patterns: inner, ..
+                        } => {
+                            assert_eq!(inner.len(), 2);
+                            match &inner[0] {
+                                crate::ast::Pattern::Ident { name, .. } => assert_eq!(name, "b"),
+                                _ => panic!("Expected Ident pattern"),
+                            }
+                            match &inner[1] {
+                                crate::ast::Pattern::Ident { name, .. } => assert_eq!(name, "c"),
+                                _ => panic!("Expected Ident pattern"),
+                            }
+                        }
+                        _ => panic!("Expected nested Tuple pattern"),
+                    }
+                }
+                _ => panic!("Expected Tuple pattern"),
+            }
+        } else {
+            panic!("Expected Let");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_tuple_pattern_trailing_comma() {
+    let source = r#"
+        fn test() -> u64 {
+            let (a, b,) = (42, true);
+            a
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::Let { pattern, .. } = &exprs[0].kind {
+            match pattern {
+                crate::ast::Pattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 2);
+                }
+                _ => panic!("Expected Tuple pattern"),
+            }
+        } else {
+            panic!("Expected Let");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_parenthesized_pattern() {
+    // (a) should be parsed as just `a`, not a tuple pattern
+    let source = r#"
+        fn test() -> u64 {
+            let (a) = 42;
+            a
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::Let { pattern, .. } = &exprs[0].kind {
+            // Should be an Ident pattern, not a Tuple pattern
+            match pattern {
+                crate::ast::Pattern::Ident { name, .. } => assert_eq!(name, "a"),
+                _ => panic!("Expected Ident pattern (parenthesized), got {:?}", pattern),
+            }
+        } else {
+            panic!("Expected Let");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}

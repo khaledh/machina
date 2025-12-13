@@ -28,9 +28,10 @@ Var                ::= "var" Pattern ( ":" Type )? "=" Expr
 Assign             ::= PostfixExpr "=" Expr
 
 # Patterns
-Pattern            ::= IdentPattern | ArrayPattern
+Pattern            ::= IdentPattern | ArrayPattern | TuplePattern
 IdentPattern       ::= Identifier
 ArrayPattern       ::= "[" Pattern ( "," Pattern )* ","? "]"
+TuplePattern       ::= "(" Pattern "," ( Pattern ( "," Pattern )* )? ","? ")"
 
 # Expressions
 Expr               ::= If | While | InfixExpr

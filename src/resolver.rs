@@ -260,6 +260,12 @@ impl SymbolResolver {
                     self.check_pattern(pattern, is_mutable);
                 }
             }
+            Pattern::Tuple { patterns, .. } => {
+                // Recursively check each sub-pattern
+                for pattern in patterns {
+                    self.check_pattern(pattern, is_mutable);
+                }
+            }
         }
     }
 
