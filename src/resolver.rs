@@ -220,6 +220,9 @@ impl SymbolResolver {
                     self.check_expr(index);
                 }
             }
+            ExprKind::TupleFieldAccess { target, .. } => {
+                self.check_lvalue_mutability(target);
+            }
             _ => {
                 self.errors.push(ResolveError::InvalidAssignmentTarget(
                     expr.kind.clone(),

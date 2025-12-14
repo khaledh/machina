@@ -443,6 +443,34 @@ impl<'a> Lowerer<'a> {
                 let value_op = self.lower_expr(fb, value, None)?;
                 fb.store_at_byte_offset(array_place.base, byte_offset_op, value_op);
             }
+            ast::ExprKind::TupleFieldAccess { .. } => {
+                // Compute (base_temp, byte_offset) from the assignee lvalue
+                let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, assignee)? else {
+                    return Err(LowerError::UnsupportedAssignee(
+                        expr.id,
+                        assignee.kind.clone(),
+                    ));
+                };
+
+                // Type of the assigned location
+                let dest_ty = self.get_node_type(expr)?;
+                let dest_ir_ty = lower_type(&dest_ty);
+
+                if dest_ir_ty.is_compound() {
+                    let dest_place = Place {
+                        base: base_temp,
+                        byte_offset: offset,
+                        ty: dest_ty,
+                    };
+                    self.lower_expr_into_place(fb, value, &dest_place)?;
+                    return Ok(fb.new_const_unit());
+                }
+
+                // Scalar store
+                let value_op = self.lower_expr(fb, value, None)?;
+                let offset_op = fb.new_const_int(offset as i64, 64, false);
+                fb.store_at_byte_offset(base_temp, offset_op, value_op);
+            }
             _ => {
                 return Err(LowerError::UnsupportedAssignee(
                     expr.id,

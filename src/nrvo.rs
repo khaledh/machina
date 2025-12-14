@@ -199,6 +199,7 @@ impl<'a> NrvoSafetyChecker<'a> {
                 }
             }
             ExprKind::Index { target, .. } => self.is_lvalue_use(target),
+            ExprKind::TupleFieldAccess { target, .. } => self.is_lvalue_use(target),
             _ => false,
         }
     }
