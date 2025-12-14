@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::fmt;
 
 use crate::ast::{BinaryOp, UnaryOp};
-use crate::cfg::ControlFlowGraph;
+use crate::ir::cfg::ControlFlowGraph;
 
 /// IR for Machina
 ///

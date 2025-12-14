@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::ast::BinaryOp;
-use crate::dataflow::liveness::LivenessAnalysis;
+use crate::regalloc::liveness::LivenessAnalysis;
 
 include!("ir_test_utils.rs");
 

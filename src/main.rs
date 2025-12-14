@@ -2,10 +2,8 @@ use clap::Parser as ClapParser;
 
 mod analysis;
 mod ast;
-mod cfg;
 mod codegen;
 mod context;
-mod dataflow;
 mod diagnostics;
 mod ids;
 mod ir;
@@ -201,7 +199,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
 
     // Liveness analysis
     if dump_liveness {
-        use crate::dataflow::liveness::{LiveMapDisplay, LivenessAnalysis};
+        use regalloc::liveness::{LiveMapDisplay, LivenessAnalysis};
         for func in &lowered_context.ir_funcs {
             let live_map = LivenessAnalysis::new(func.clone()).analyze();
             println!("Live Map ({}):", func.name);

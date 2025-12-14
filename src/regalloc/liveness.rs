@@ -1,6 +1,7 @@
-use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator};
 
 /// A block's GenKillSet
 ///
@@ -312,5 +313,5 @@ pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveInterv
 }
 
 #[cfg(test)]
-#[path = "../tests/t_ir_liveness.rs"]
-mod tests;
+#[path = "../tests/t_regalloc_liveness.rs"]
+mod t_regalloc_liveness;

@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
-use crate::dataflow::liveness::{
-    LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
-};
 use crate::ir::pos::{InstPos, RelInstPos};
 use crate::ir::types::{IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrType};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
+use crate::regalloc::liveness::{
+    LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
+};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
 use crate::regalloc::stack::{StackAllocator, StackSlotId};

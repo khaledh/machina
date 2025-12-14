@@ -1,5 +1,6 @@
 pub mod alloc;
 pub mod constraints;
+pub mod liveness;
 pub mod moves;
 pub mod regs;
 pub mod stack;

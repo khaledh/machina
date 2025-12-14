@@ -174,5 +174,5 @@ impl fmt::Display for ControlFlowGraph {
 }
 
 #[cfg(test)]
-#[path = "../tests/t_cfg.rs"]
-mod tests;
+#[path = "../tests/t_ir_cfg.rs"]
+mod t_ir_cfg;

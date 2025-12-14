@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 
 use crate::ast::{BinaryOp, UnaryOp};
-use crate::cfg::ControlFlowGraph;
+use crate::ir::cfg::ControlFlowGraph;
 use crate::ir::types::*;
 
 pub struct IrFunctionBuilder {
