@@ -1211,7 +1211,7 @@ impl<'a> Lowerer<'a> {
 pub fn lower(context: AnalyzedContext) -> Result<LoweredContext, LowerError> {
     let mut lowerer = Lowerer::new(&context);
     let mut ir_funcs = Vec::new();
-    for func in &context.module.funcs {
+    for func in context.module.funcs() {
         let ir_func = lowerer.lower_func(func)?;
         ir_funcs.push(ir_func);
     }

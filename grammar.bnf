@@ -1,12 +1,15 @@
 # Machina programming language grammar
 
 # Top-level
-Module             ::= Function*
+Module             ::= Decl*
+
+Decl               ::= Function | TypeAlias
 
 Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )? Block
-
 FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
 FunctionParam      ::= Identifier ":" TypeExpr
+
+TypeAlias          ::= "type" Identifier "=" TypeExpr ";"
 
 # Type Expressions
 TypeExpr           ::= NamedType | ArrayType | TupleType

@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Expr, ExprKind, Function, FunctionParam, Module, Pattern, TypeExpr, TypeExprKind,
-    UnaryOp,
+    BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, TypeAlias, TypeExpr,
+    TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
@@ -11,6 +11,9 @@ use crate::lexer::{Token, TokenKind, TokenKind as TK};
 #[derive(Debug, Error)]
 #[allow(clippy::enum_variant_names)]
 pub enum ParseError {
+    #[error("Expected declaration, found: {0}")]
+    ExpectedDecl(Token),
+
     #[error("Expected {0}, found: {1}")]
     ExpectedToken(TokenKind, Token),
 
@@ -39,6 +42,7 @@ pub enum ParseError {
 impl ParseError {
     pub fn span(&self) -> Span {
         match self {
+            ParseError::ExpectedDecl(token) => token.span,
             ParseError::ExpectedToken(_, token) => token.span,
             ParseError::ExpectedKeyword(_, token) => token.span,
             ParseError::ExpectedIdent(token) => token.span,
@@ -156,6 +160,26 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
+    fn parse_type_decl(&mut self) -> Result<TypeAlias, ParseError> {
+        // Expect 'type'
+        self.consume_keyword("type")?;
+
+        // Expect type name
+        let name = self.parse_ident()?;
+        self.consume(&TK::Equals)?;
+
+        // Parse type expression
+        let typ = self.parse_type_expr()?;
+
+        self.consume(&TK::Semicolon)?;
+
+        Ok(TypeAlias {
+            id: self.id_gen.new_id(),
+            name,
+            aliased_ty: typ,
+        })
+    }
+
     fn parse_function(&mut self) -> Result<Function, ParseError> {
         // Expect 'fn'
         self.consume_keyword("fn")?;
@@ -172,7 +196,7 @@ impl<'a> Parser<'a> {
         let return_type = match self.curr_token.kind {
             TK::Arrow => {
                 self.advance();
-                self.parse_type()?
+                self.parse_type_expr()?
             }
             _ => TypeExpr {
                 id: self.id_gen.new_id(),
@@ -197,7 +221,7 @@ impl<'a> Parser<'a> {
         self.parse_list(TK::Comma, TK::RParen, |parser| {
             let name = parser.parse_ident()?;
             parser.consume(&TK::Colon)?;
-            let typ = parser.parse_type()?;
+            let typ = parser.parse_type_expr()?;
             Ok(FunctionParam {
                 id: parser.id_gen.new_id(),
                 name,
@@ -206,8 +230,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
-        // Parse base type (tuple or named)
+    fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
+        // Parse base type (named or tuple)
         let mut typ = if self.curr_token.kind == TK::LParen
             && self.peek().map(|t| &t.kind) != Some(&TK::RParen)
         {
@@ -255,7 +279,7 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
 
         // Parse at least one field
-        fields.push(self.parse_type()?);
+        fields.push(self.parse_type_expr()?);
 
         // Parse remaining fields
         while self.curr_token.kind == TK::Comma {
@@ -264,7 +288,7 @@ impl<'a> Parser<'a> {
             if self.curr_token.kind == TK::RParen {
                 break;
             }
-            fields.push(self.parse_type()?);
+            fields.push(self.parse_type_expr()?);
         }
 
         self.consume(&TK::RParen)?;
@@ -404,7 +428,7 @@ impl<'a> Parser<'a> {
         // Parse declaration type (optional)
         let decl_ty = if self.curr_token.kind == TK::Colon {
             self.advance();
-            Some(self.parse_type()?)
+            Some(self.parse_type_expr()?)
         } else {
             None
         };
@@ -438,7 +462,7 @@ impl<'a> Parser<'a> {
         // Parse declaration type (optional)
         let decl_ty = if self.curr_token.kind == TK::Colon {
             self.advance();
-            Some(self.parse_type()?)
+            Some(self.parse_type_expr()?)
         } else {
             None
         };
@@ -712,12 +736,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Module, ParseError> {
-        let mut functions = Vec::new();
-        while self.curr_token.kind != TK::Eof {
-            functions.push(self.parse_function()?);
+    fn parse_decl(&mut self) -> Result<Decl, ParseError> {
+        match &self.curr_token.kind {
+            TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeAlias),
+            TK::Ident(name) if name == "fn" => self.parse_function().map(Decl::Function),
+            _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }
-        Ok(Module { funcs: functions })
+    }
+
+    pub fn parse(&mut self) -> Result<Module, ParseError> {
+        let mut decls = Vec::new();
+        while self.curr_token.kind != TK::Eof {
+            decls.push(self.parse_decl()?);
+        }
+        Ok(Module { decls: decls })
     }
 }
 

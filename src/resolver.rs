@@ -4,17 +4,17 @@ use thiserror::Error;
 
 use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
-use crate::ast::{ExprKind, Module, Pattern};
+use crate::ast::{Decl, ExprKind, Function, Module, Pattern, TypeAlias, TypeExpr, TypeExprKind};
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
 use crate::ids::{DefId, DefIdGen, NodeId};
-use crate::types;
+use crate::types::BUILTIN_TYPES;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SymbolKind {
     Var { is_mutable: bool },
     Func,
-    Type,
+    Type { ty_expr: TypeExpr },
 }
 
 impl fmt::Display for SymbolKind {
@@ -22,7 +22,7 @@ impl fmt::Display for SymbolKind {
         match self {
             SymbolKind::Var { .. } => write!(f, "var"),
             SymbolKind::Func => write!(f, "func"),
-            SymbolKind::Type => write!(f, "type"),
+            SymbolKind::Type { ty_expr } => write!(f, "type[{}]", ty_expr),
         }
     }
 }
@@ -142,9 +142,9 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::Var { .. } => DefKind::LocalVar,
+            SymbolKind::Type { ty_expr } => DefKind::Type { ty_expr },
             SymbolKind::Func => DefKind::Func,
-            SymbolKind::Type => DefKind::Type,
+            SymbolKind::Var { .. } => DefKind::LocalVar,
         }
     }
 
@@ -167,8 +167,38 @@ impl SymbolResolver {
         );
     }
 
-    fn populate_funcs(&mut self, funcs: &Vec<ast::Function>) {
-        for func in funcs {
+    fn populate_decls(&mut self, module: &Module) {
+        self.populate_type_aliases(&module.type_aliases());
+        self.populate_funcs(&module.funcs());
+    }
+
+    fn populate_type_aliases(&mut self, type_aliases: &[&TypeAlias]) {
+        for &type_alias in type_aliases {
+            let def_id = self.def_id_gen.new_id();
+            let def = Def {
+                id: def_id,
+                name: type_alias.name.clone(),
+                kind: DefKind::Type {
+                    ty_expr: type_alias.aliased_ty.clone(),
+                },
+                nrvo_eligible: false,
+            };
+            self.def_map_builder.record_def(def, type_alias.id);
+            self.insert_symbol(
+                &type_alias.name,
+                Symbol {
+                    def_id,
+                    name: type_alias.name.clone(),
+                    kind: SymbolKind::Type {
+                        ty_expr: type_alias.aliased_ty.clone(),
+                    },
+                },
+            );
+        }
+    }
+
+    fn populate_funcs(&mut self, funcs: &[&Function]) {
+        for &func in funcs {
             let def_id = self.def_id_gen.new_id();
             let def = Def {
                 id: def_id,
@@ -192,12 +222,24 @@ impl SymbolResolver {
         self.with_scope(|checker| {
             // global scope
             // add built-in types
-            for ty in types::BUILTIN_TYPES {
-                checker.add_built_in_symbol(&ty.to_string(), SymbolKind::Type);
+            for ty in BUILTIN_TYPES {
+                checker.add_built_in_symbol(
+                    &ty.to_string(),
+                    SymbolKind::Type {
+                        ty_expr: TypeExpr {
+                            id: NodeId(0),
+                            kind: TypeExprKind::Named(ty.to_string()),
+                            span: Span::default(),
+                        },
+                    },
+                );
             }
-            checker.populate_funcs(&module.funcs);
-            for function in &module.funcs {
-                checker.check_function(function);
+            checker.populate_decls(module);
+            for decl in &module.decls {
+                match decl {
+                    Decl::TypeAlias(type_alias) => checker.check_type_alias(type_alias),
+                    Decl::Function(function) => checker.check_function(function),
+                }
             }
         });
 
@@ -208,6 +250,10 @@ impl SymbolResolver {
         } else {
             Err(self.errors.clone())
         }
+    }
+
+    fn check_type_alias(&mut self, type_alias: &TypeAlias) {
+        self.check_type_expr(&type_alias.aliased_ty);
     }
 
     fn check_function(&mut self, function: &ast::Function) {
@@ -334,7 +380,7 @@ impl SymbolResolver {
     fn check_type_expr(&mut self, type_expr: &ast::TypeExpr) {
         match &type_expr.kind {
             ast::TypeExprKind::Named(name) => match self.lookup_symbol(name) {
-                Some(symbol) if symbol.kind == SymbolKind::Type => {
+                Some(symbol) if matches!(symbol.kind, SymbolKind::Type { .. }) => {
                     self.def_map_builder.record_use(type_expr.id, symbol.def_id);
                 }
                 Some(symbol) => self.errors.push(ResolveError::ExpectedType(

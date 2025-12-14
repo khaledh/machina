@@ -30,22 +30,18 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn test_read(i: u64) -> (u64, u64) {
-  let a = [[1, 2], [3, 4]];
-  let b = a[i];
-  (b[0], b[1])
+type TwoDimArray = u64[2, 3];
+
+fn get_two_dim_array() -> TwoDimArray {
+  [
+    [1, 2, 3],
+    [4, 5, 6],
+  ]
 }
 
-fn test_write(i: u64) -> u64[2] {
-  var a = [[1, 2], [3, 4]];  
-  a[i] = [9, 9];
-  a[i]
-}  
-
 fn main() -> u64 {
-  let (x, y) = test_read(0);
-  let a = test_write(0);
-  x + y + a[0] + a[1]
+    let arr = get_two_dim_array();
+    arr[0, 1]
 }
 "#;
 

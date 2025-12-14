@@ -11,7 +11,7 @@ fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
 
     let mut parser = Parser::new(&tokens);
     let module = parser.parse()?;
-    Ok(module.funcs)
+    Ok(module.funcs().into_iter().cloned().collect())
 }
 
 #[test]

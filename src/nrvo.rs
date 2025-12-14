@@ -25,7 +25,7 @@ impl NrvoAnalyzer {
 
         let mut def_map = def_map;
 
-        for func in &module.funcs {
+        for func in module.funcs() {
             Self::analyze_function(&mut def_map, &type_map, func);
         }
 

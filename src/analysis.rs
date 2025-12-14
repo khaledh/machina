@@ -8,24 +8,25 @@ use std::collections::HashMap;
 
 mod def_resolution {
     use super::{DefId, HashMap, NodeId};
+    use crate::ast::TypeExpr;
     use std::fmt;
     use std::hash::{Hash, Hasher};
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum DefKind {
+        Type { ty_expr: TypeExpr },
         Func,
         LocalVar,
         Param { index: u32 },
-        Type,
     }
 
     impl fmt::Display for DefKind {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
+                DefKind::Type { ty_expr } => write!(f, "Type[{}]", ty_expr),
                 DefKind::Func => write!(f, "Func"),
                 DefKind::LocalVar => write!(f, "LocalVar"),
                 DefKind::Param { index } => write!(f, "Param[{}]", index),
-                DefKind::Type => write!(f, "Type"),
             }
         }
     }

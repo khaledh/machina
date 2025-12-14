@@ -1,4 +1,4 @@
-use crate::analysis::{DefMap, TypeMap, TypeMapBuilder};
+use crate::analysis::{DefKind, DefMap, TypeMap, TypeMapBuilder};
 use crate::ast::{BinaryOp, Expr, ExprKind, Function, Pattern, TypeExpr, TypeExprKind};
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diagnostics::Span;
@@ -113,7 +113,7 @@ impl TypeCheckError {
 fn resolve_type_expr(def_map: &DefMap, type_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
         TypeExprKind::Named(name) => {
-            let _ = def_map
+            let def = def_map
                 .lookup_def(type_expr.id)
                 .ok_or(TypeCheckError::UnknownType(type_expr.span))?;
 
@@ -122,7 +122,10 @@ fn resolve_type_expr(def_map: &DefMap, type_expr: &TypeExpr) -> Result<Type, Typ
                 "()" => Ok(Type::Unit),
                 "u64" => Ok(Type::UInt64),
                 "bool" => Ok(Type::Bool),
-                _ => Err(TypeCheckError::UnknownType(type_expr.span)),
+                _ => match &def.kind {
+                    DefKind::Type { ty_expr } => resolve_type_expr(def_map, ty_expr),
+                    _ => Err(TypeCheckError::UnknownType(type_expr.span)),
+                },
             }
         }
         TypeExprKind::Array { elem_ty, dims } => {
@@ -173,7 +176,7 @@ impl TypeChecker {
             errors: &mut self.errors,
         };
 
-        for function in &self.context.module.funcs {
+        for function in self.context.module.funcs() {
             if checker.type_check_function(function).is_err() {
                 break;
             }
@@ -189,7 +192,7 @@ impl TypeChecker {
     }
 
     fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for function in &self.context.module.funcs {
+        for function in self.context.module.funcs() {
             let params = function
                 .params
                 .iter()

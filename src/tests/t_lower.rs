@@ -28,7 +28,7 @@ fn compile_and_lower(source: &str) -> Result<IrFunction, LowerError> {
 
     let mut lowerer = Lowerer::new(&analyzed_context);
     let ir_func = lowerer
-        .lower_func(&analyzed_context.module.funcs[0])
+        .lower_func(&analyzed_context.module.funcs()[0])
         .expect("Failed to lower function");
 
     Ok(ir_func)

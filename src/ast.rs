@@ -4,7 +4,48 @@ use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct Module {
-    pub funcs: Vec<Function>,
+    pub decls: Vec<Decl>,
+}
+
+impl Module {
+    pub fn funcs(&self) -> Vec<&Function> {
+        self.decls
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Function(function) = decl {
+                    Some(function)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn type_aliases(&self) -> Vec<&TypeAlias> {
+        self.decls
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::TypeAlias(type_alias) = decl {
+                    Some(type_alias)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum Decl {
+    TypeAlias(TypeAlias),
+    Function(Function),
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeAlias {
+    pub id: NodeId,
+    pub name: String,
+    pub aliased_ty: TypeExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -42,14 +83,14 @@ pub enum Pattern {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeExpr {
     pub id: NodeId,
     pub kind: TypeExprKind,
     pub span: Span,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExprKind {
     Named(String),
     Array {
@@ -149,12 +190,26 @@ pub enum UnaryOp {
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, func) in self.funcs.iter().enumerate() {
-            func.fmt_with_indent(f, 0)?;
-            if i + 1 != self.funcs.len() {
+        for (i, decl) in self.decls.iter().enumerate() {
+            match decl {
+                Decl::TypeAlias(type_alias) => type_alias.fmt_with_indent(f, 0)?,
+                Decl::Function(func) => func.fmt_with_indent(f, 0)?,
+            }
+            if i + 1 != self.decls.len() {
                 writeln!(f, "--------------------------------")?;
             }
         }
+        Ok(())
+    }
+}
+
+impl TypeAlias {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}TypeAlias [{}]", pad, self.id)?;
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Name: {}", pad1, self.name)?;
+        writeln!(f, "{}Type: {}", pad1, self.aliased_ty)?;
         Ok(())
     }
 }
