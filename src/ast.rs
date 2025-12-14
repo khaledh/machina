@@ -315,7 +315,8 @@ impl Expr {
             }
             ExprKind::Call { callee: name, args } => {
                 let pad1 = indent(level + 1);
-                writeln!(f, "{}Call({}) [{}]", pad, name, self.id)?;
+                writeln!(f, "{}Call: [{}]", pad, self.id)?;
+                name.fmt_with_indent(f, level + 1)?;
                 writeln!(f, "{}Args:", pad1)?;
                 for arg in args {
                     arg.fmt_with_indent(f, level + 2)?;

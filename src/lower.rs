@@ -426,7 +426,18 @@ impl<'a> Lowerer<'a> {
                 let value_ir_ty = lower_type(&value_ty);
 
                 if value_ir_ty.is_compound() {
-                    todo!("runtime compound store not supported yet")
+                    let value_temp = fb.new_temp(value_ir_ty.clone());
+                    self.lower_expr(fb, value, Some(value_temp))?;
+
+                    let zero = fb.new_const_int(0, 64, false);
+                    fb.mem_copy_at(
+                        array_place.base,
+                        value_temp,
+                        byte_offset_op,
+                        zero,
+                        value_ir_ty.size_of(),
+                    );
+                    return Ok(fb.new_const_unit());
                 }
 
                 let value_op = self.lower_expr(fb, value, None)?;
@@ -617,7 +628,18 @@ impl<'a> Lowerer<'a> {
 
         let result_ir_ty = lower_type(&self.get_node_type(expr)?);
         if result_ir_ty.is_compound() {
-            todo!("runtime compound access not supported yet")
+            let dest = fb.new_temp(result_ir_ty.clone());
+
+            // Copy from array_place.base[byte_offset_op] to dest[0]
+            let zero = fb.new_const_int(0, 64, false);
+            fb.mem_copy_at(
+                dest,
+                array_place.base,
+                zero,
+                byte_offset_op,
+                result_ir_ty.size_of(),
+            );
+            return Ok(IrOperand::Temp(dest));
         }
 
         let result = fb.new_temp(result_ir_ty);

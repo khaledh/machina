@@ -75,13 +75,8 @@ impl Arm64Codegen {
             asm.push_str(&func_asm);
             asm.push('\n');
 
-            // Advance the global label counter by the number of non-entry blocks in this function.
-            let non_entry_blocks = ir_func
-                .blocks
-                .keys()
-                .filter(|bid| **bid != IrBlockId(0))
-                .count() as u32;
-            next_label_start += non_entry_blocks;
+            // Advance the global label counter by the number of labels in this function
+            next_label_start += func_codegen.label_counter;
         }
         Ok(asm)
     }
@@ -526,7 +521,7 @@ impl<'a> FuncCodegen<'a> {
                 src_offset,
                 length,
             } => {
-                asm.push_str(&self.emit_memcpy(*dest, *src, *dest_offset, *src_offset, *length)?);
+                asm.push_str(&self.emit_memcpy(*dest, *src, dest_offset, src_offset, *length)?);
             }
         }
         Ok(asm)
@@ -736,8 +731,8 @@ impl<'a> FuncCodegen<'a> {
         &mut self,
         dest: IrTempId,
         src: IrTempId,
-        dest_offset: usize,
-        src_offset: usize,
+        dest_offset: &IrOperand,
+        src_offset: &IrOperand,
         length: usize,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
@@ -770,12 +765,38 @@ impl<'a> FuncCodegen<'a> {
             _ => return Err(CodegenError::TempNotFound(src.id())),
         }
 
-        // Add offsets if non-zero
-        if dest_offset > 0 {
-            asm.push_str(&format!("  add x19, x19, #{dest_offset}\n"));
+        match dest_offset {
+            IrOperand::Const(IrConst::Int { value, .. }) if *value == 0 => {}
+            IrOperand::Const(IrConst::Int { value, .. }) => {
+                if Self::int_fits_add_sub_imm(*value) {
+                    asm.push_str(&format!("  add x19, x19, #{value}\n"));
+                } else {
+                    let offset_reg =
+                        self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0);
+                    asm.push_str(&format!("  add x19, x19, {offset_reg}\n"));
+                }
+            }
+            other => {
+                let offset_reg = self.materialize_operand(other, &mut asm)?;
+                asm.push_str(&format!("  add x19, x19, {offset_reg}\n"));
+            }
         }
-        if src_offset > 0 {
-            asm.push_str(&format!("  add x20, x20, #{src_offset}\n"));
+
+        match src_offset {
+            IrOperand::Const(IrConst::Int { value, .. }) if *value == 0 => {}
+            IrOperand::Const(IrConst::Int { value, .. }) => {
+                if Self::int_fits_add_sub_imm(*value) {
+                    asm.push_str(&format!("  add x20, x20, #{value}\n"));
+                } else {
+                    let offset_reg =
+                        self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0);
+                    asm.push_str(&format!("  add x20, x20, {offset_reg}\n"));
+                }
+            }
+            other => {
+                let offset_reg = self.materialize_operand(other, &mut asm)?;
+                asm.push_str(&format!("  add x20, x20, {offset_reg}\n"));
+            }
         }
 
         // Fast path: copy as many 8-byte chunks as possible.

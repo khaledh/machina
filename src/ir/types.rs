@@ -415,8 +415,8 @@ pub enum IrInst {
     MemCopy {
         dest: IrTempId,
         src: IrTempId,
-        dest_offset: usize,
-        src_offset: usize,
+        dest_offset: IrOperand,
+        src_offset: IrOperand,
         length: usize,
     },
 }
@@ -462,26 +462,13 @@ impl IrInst {
                 src,
                 dest_offset,
                 src_offset,
-                length,
+                ..
             } => {
                 vec![
                     IrOperand::Temp(*dest),
                     IrOperand::Temp(*src),
-                    IrOperand::Const(IrConst::Int {
-                        value: *dest_offset as i64,
-                        bits: 64,
-                        signed: false,
-                    }),
-                    IrOperand::Const(IrConst::Int {
-                        value: *src_offset as i64,
-                        bits: 64,
-                        signed: false,
-                    }),
-                    IrOperand::Const(IrConst::Int {
-                        value: *length as i64,
-                        bits: 64,
-                        signed: false,
-                    }),
+                    *dest_offset,
+                    *src_offset,
                 ]
             }
         }
@@ -657,9 +644,9 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 f,
                 "memcpy %t{}[offset={}] = %t{}[offset={}] : length={}",
                 dest.id(),
-                dest_offset,
+                format_operand(dest_offset),
                 src.id(),
-                src_offset,
+                format_operand(src_offset),
                 length
             )?;
         }

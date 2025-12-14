@@ -292,7 +292,30 @@ impl<'a> RegAlloc<'a> {
     }
 
     fn handle_call(&mut self, constr: &CallConstraint) {
-        // 1. Move args into their respective registers before call
+        let call_inst_idx = self.pos_map.pos_to_idx[&constr.pos];
+        let mut caller_saved_preserves: Vec<(StackSlotId, Arm64Reg)> = Vec::new();
+
+        // 1. Save caller-saved registers before the call
+        for active_temp in self.active_set.values() {
+            if CALLER_SAVED_REGS.contains(&active_temp.reg)
+                && active_temp.interval.start < call_inst_idx as u32
+                && (active_temp.interval.end - 1) > call_inst_idx as u32
+            {
+                let stack_slot = self.stack_alloc.alloc_slot();
+
+                // Save BEFORE the call (must happen before arg moves)
+                self.moves.add_inst_move(
+                    RelInstPos::Before(constr.pos),
+                    Location::Reg(active_temp.reg),
+                    Location::Stack(stack_slot),
+                );
+
+                // Record for restore AFTER the call
+                caller_saved_preserves.push((stack_slot, active_temp.reg));
+            }
+        }
+
+        // 2. Move args into their respective registers before call
         for arg_constr in &constr.args {
             match arg_constr.operand {
                 IrOperand::Temp(temp_id) => {
@@ -334,7 +357,7 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
-        // 2. Move result into the result register after call
+        // 3. Move result into the result register after call
         if let Some(result_constr) = &constr.result {
             let result_temp = result_constr.temp;
             if let Some(allocated_temp) = self.alloc_map.get(&result_temp) {
@@ -351,32 +374,14 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
-        // 3. Handle caller-saved register preservation
-        let call_inst_idx = self.pos_map.pos_to_idx[&constr.pos];
-        for active_temp in self.active_set.values() {
-            // Only preserve temps that are:
-            // - in a caller-saved reg
-            // - live *before* the call (start < call_inst_idx)
-            // - live *after* the call (end-1 > call_inst_idx)
-            if CALLER_SAVED_REGS.contains(&active_temp.reg)
-                && active_temp.interval.start < call_inst_idx as u32
-                && (active_temp.interval.end - 1) > call_inst_idx as u32
-            // end is exclusive
-            {
-                let stack_slot = self.stack_alloc.alloc_slot();
-                // Save the temp to the stack before the call
-                self.moves.add_inst_move(
-                    RelInstPos::Before(constr.pos),
-                    Location::Reg(active_temp.reg),
-                    Location::Stack(stack_slot),
-                );
-                // Load the temp from the stack after the call
-                self.moves.add_inst_move(
-                    RelInstPos::After(constr.pos),
-                    Location::Stack(stack_slot),
-                    Location::Reg(active_temp.reg),
-                );
-            }
+        // 4. Restore caller-saved registers after the call
+        for (stack_slot, reg) in caller_saved_preserves {
+            // Save the temp to the stack before the call
+            self.moves.add_inst_move(
+                RelInstPos::After(constr.pos),
+                Location::Stack(stack_slot),
+                Location::Reg(reg),
+            );
         }
     }
 

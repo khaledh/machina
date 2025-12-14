@@ -32,23 +32,20 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-fn main() -> u64 {
-    let t = {
-      let a = create_array(true);
-      let s = a[0] + a[1] + a[2];
-      (a, s)
-    };
-    let ([a, b, c], sum) = t;
-    let double = a + b + c + sum;
-    double
+fn test_read(i: u64) -> u64 {
+  let a = [[1, 2], [3, 4]];
+  let b = a[i];
+  b[0]
 }
 
-fn create_array(b: bool) -> u64[3] {
-    if b {
-        [1, 2, 3]
-    } else {
-        [4, 5, 6]
-    }
+fn test_write(i: u64) -> u64 {
+  var a = [[1, 2], [3, 4]];  
+  a[i] = [9, 9];
+  a[0, 0]
+}  
+
+fn main() -> u64 {
+  test_read(0) + test_read(1) + test_write(0) + test_write(1)
 }
 "#;
 
