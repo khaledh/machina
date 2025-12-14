@@ -17,7 +17,7 @@ pub struct NodeIdGen {
 
 impl NodeIdGen {
     pub fn new() -> Self {
-        Self { next_id: 0 }
+        Self { next_id: 1 } // NodeId 0 is reserved
     }
 
     pub fn new_id(&mut self) -> NodeId {

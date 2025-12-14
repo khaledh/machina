@@ -1,4 +1,4 @@
-use crate::analysis::DefMap;
+use crate::analysis::{DefMap, TypeMap};
 use crate::ast::{Expr, ExprKind, Function};
 use crate::context::{AnalyzedContext, TypeCheckedContext};
 use crate::ids::DefId;
@@ -26,7 +26,7 @@ impl NrvoAnalyzer {
         let mut def_map = def_map;
 
         for func in &module.funcs {
-            Self::analyze_function(&mut def_map, func);
+            Self::analyze_function(&mut def_map, &type_map, func);
         }
 
         AnalyzedContext {
@@ -36,29 +36,33 @@ impl NrvoAnalyzer {
         }
     }
 
-    fn analyze_function(def_map: &mut DefMap, func: &Function) {
+    fn analyze_function(def_map: &mut DefMap, type_map: &TypeMap, func: &Function) {
         // Step 1: Check if function return type is compound
-        if !func.return_type.is_compound() {
+        let ret_ty = type_map
+            .lookup_node_type(func.id)
+            .unwrap_or_else(|| panic!("Function {} not found in type_map", func.name));
+
+        if !ret_ty.is_compound() {
             return;
         }
 
         // Step 2: Find the returned variable def
-        let returned_var_def_id = Self::find_returned_var_def_id(def_map, &func.body);
+        let ret_var_def_id = Self::find_ret_var_def_id(def_map, &func.body);
 
         // Step 3: Check if the returned variable is only used as lvalue
-        if let Some(var_def_id) = returned_var_def_id
+        if let Some(var_def_id) = ret_var_def_id
             && Self::is_nrvo_safe(def_map, &func.body, var_def_id)
         {
             def_map.mark_nrvo_eligible(var_def_id);
         }
     }
 
-    fn find_returned_var_def_id(def_map: &DefMap, expr: &Expr) -> Option<DefId> {
+    fn find_ret_var_def_id(def_map: &DefMap, expr: &Expr) -> Option<DefId> {
         match &expr.kind {
             ExprKind::VarRef(_) => def_map.lookup_def(expr.id).map(|def| def.id),
             ExprKind::Block(exprs) => exprs
                 .last()
-                .and_then(|e| Self::find_returned_var_def_id(def_map, e)),
+                .and_then(|e| Self::find_ret_var_def_id(def_map, e)),
             _ => None,
         }
     }

@@ -1,7 +1,6 @@
 use super::*;
-use crate::ast::{ExprKind, Function};
+use crate::ast::{ExprKind, Function, TypeExprKind};
 use crate::lexer::{LexError, Lexer, Token};
-use crate::types::Type;
 
 fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
     let lexer = Lexer::new(source);
@@ -27,9 +26,12 @@ fn test_parse_multidim_array_type() {
     let func = &funcs[0];
 
     assert_eq!(func.name, "test");
-    match &func.return_type {
-        Type::Array { elem_ty, dims } => {
-            assert_eq!(**elem_ty, Type::UInt64);
+    match &func.return_type.kind {
+        TypeExprKind::Array { elem_ty, dims } => {
+            match &elem_ty.kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                _ => panic!("Expected named type"),
+            }
             assert_eq!(dims, &vec![2, 3]);
         }
         _ => panic!("Expected array type"),
@@ -47,9 +49,12 @@ fn test_parse_multidim_array_type_3d() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    match &func.return_type {
-        Type::Array { elem_ty, dims } => {
-            assert_eq!(**elem_ty, Type::UInt64);
+    match &func.return_type.kind {
+        TypeExprKind::Array { elem_ty, dims } => {
+            match &elem_ty.kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                _ => panic!("Expected named type"),
+            }
             assert_eq!(dims, &vec![2, 3, 4]);
         }
         _ => panic!("Expected array type"),
@@ -149,11 +154,17 @@ fn test_parse_tuple_type() {
     let func = &funcs[0];
 
     assert_eq!(func.name, "test");
-    match &func.return_type {
-        Type::Tuple { fields } => {
+    match &func.return_type.kind {
+        TypeExprKind::Tuple { fields } => {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0], Type::UInt64);
-            assert_eq!(fields[1], Type::Bool);
+            match &fields[0].kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                _ => panic!("Expected named type"),
+            }
+            match &fields[1].kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "bool"),
+                _ => panic!("Expected named type"),
+            }
         }
         _ => panic!("Expected tuple type"),
     }
@@ -170,15 +181,24 @@ fn test_parse_tuple_type_nested() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    match &func.return_type {
-        Type::Tuple { fields } => {
+    match &func.return_type.kind {
+        TypeExprKind::Tuple { fields } => {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0], Type::UInt64);
-            match &fields[1] {
-                Type::Tuple { fields: inner } => {
+            match &fields[0].kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                _ => panic!("Expected named type"),
+            }
+            match &fields[1].kind {
+                TypeExprKind::Tuple { fields: inner } => {
                     assert_eq!(inner.len(), 2);
-                    assert_eq!(inner[0], Type::Bool);
-                    assert_eq!(inner[1], Type::UInt64);
+                    match &inner[0].kind {
+                        TypeExprKind::Named(name) => assert_eq!(name, "bool"),
+                        _ => panic!("Expected named type"),
+                    }
+                    match &inner[1].kind {
+                        TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                        _ => panic!("Expected named type"),
+                    }
                 }
                 _ => panic!("Expected nested tuple type"),
             }

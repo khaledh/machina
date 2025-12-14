@@ -139,15 +139,29 @@ impl<'a> Lowerer<'a> {
         // clear the def_addr map for each function
         self.def_op.clear();
 
-        let ret_ty = lower_type(&func.return_type);
-        let mut fb = IrFunctionBuilder::new(func.name.clone(), ret_ty.clone());
+        let ret_ty = self
+            .ctx
+            .type_map
+            .lookup_node_type(func.id)
+            .unwrap_or_else(|| panic!("Function {} not found in type_map", func.name));
+
+        let mut fb = IrFunctionBuilder::new(func.name.clone(), lower_type(&ret_ty));
 
         // lower params and store them in the def_temp map
         for (i, param) in func.params.iter().enumerate() {
             match self.ctx.def_map.lookup_def(param.id) {
                 Some(def) => {
+                    let param_ty =
+                        self.ctx
+                            .type_map
+                            .lookup_node_type(param.id)
+                            .unwrap_or_else(|| {
+                                panic!("Parameter {} not found in type_map", param.name)
+                            });
+
                     let param_temp =
-                        fb.new_param(i as u32, param.name.clone(), lower_type(&param.typ));
+                        fb.new_param(i as u32, param.name.clone(), lower_type(&param_ty));
+
                     self.def_op.insert(def.id, IrOperand::Temp(param_temp));
                 }
                 None => return Err(LowerError::ParamDefNotFound(param.id)),

@@ -1,9 +1,12 @@
-use crate::ast::{BinaryOp, Expr, ExprKind, Function, FunctionParam, Module, Pattern, UnaryOp};
+use thiserror::Error;
+
+use crate::ast::{
+    BinaryOp, Expr, ExprKind, Function, FunctionParam, Module, Pattern, TypeExpr, TypeExprKind,
+    UnaryOp,
+};
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
-use crate::types::Type;
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[allow(clippy::enum_variant_names)]
@@ -171,7 +174,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_type()?
             }
-            _ => Type::Unit,
+            _ => TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Named("()".to_string()),
+                span: self.close(self.mark()),
+            },
         };
 
         // Parse function body
@@ -199,15 +206,15 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_type(&mut self) -> Result<Type, ParseError> {
-        // Parse base type (tuple or simple)
+    fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
+        // Parse base type (tuple or named)
         let mut typ = if self.curr_token.kind == TK::LParen
             && self.peek().map(|t| &t.kind) != Some(&TK::RParen)
         {
             self.advance();
             self.parse_tuple_type()?
         } else {
-            self.parse_simple_type()?
+            self.parse_named_type()?
         };
 
         // Check for array type
@@ -218,20 +225,33 @@ impl<'a> Parser<'a> {
         Ok(typ)
     }
 
-    fn parse_simple_type(&mut self) -> Result<Type, ParseError> {
+    fn parse_named_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+
         let result = match &self.curr_token.kind {
+            // Special case for unit type
             TK::LParen if self.peek().map(|t| &t.kind) == Some(&TK::RParen) => {
                 self.advance();
-                Ok(Type::Unit)
+                Ok(TypeExpr {
+                    id: self.id_gen.new_id(),
+                    kind: TypeExprKind::Named("()".to_string()),
+                    span: self.close(marker),
+                })
             }
-            TK::Ident(name) if name == "u64" => Ok(Type::UInt64),
-            TK::Ident(name) if name == "bool" => Ok(Type::Bool),
+            // General case for other types
+            TK::Ident(name) => Ok(TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Named(name.clone()),
+                span: self.close(marker),
+            }),
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
         };
         result.inspect(|_| self.advance())
     }
 
-    fn parse_tuple_type(&mut self) -> Result<Type, ParseError> {
+    fn parse_tuple_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+
         let mut fields = Vec::new();
 
         // Parse at least one field
@@ -256,16 +276,27 @@ impl<'a> Parser<'a> {
             ));
         }
 
-        Ok(Type::Tuple { fields })
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Tuple { fields },
+            span: self.close(marker),
+        })
     }
 
-    fn parse_array_type(&mut self, elem_ty: Type) -> Result<Type, ParseError> {
-        self.advance();
+    fn parse_array_type(&mut self, elem_ty: TypeExpr) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+
+        self.advance(); // consume '['
         let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
-        self.consume(&TK::RBracket)?;
-        Ok(Type::Array {
-            elem_ty: Box::new(elem_ty),
-            dims: dims.into_iter().map(|d| d as usize).collect(),
+        self.consume(&TK::RBracket)?; // consume ']'
+
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Array {
+                elem_ty: Box::new(elem_ty),
+                dims: dims.into_iter().map(|d| d as usize).collect(),
+            },
+            span: self.close(marker),
         })
     }
 

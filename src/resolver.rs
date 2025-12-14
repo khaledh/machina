@@ -1,16 +1,30 @@
+use std::collections::HashMap;
+use std::fmt;
+use thiserror::Error;
+
 use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
 use crate::ast::{ExprKind, Module, Pattern};
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
-use crate::ids::{DefId, DefIdGen};
-use std::collections::HashMap;
-use thiserror::Error;
+use crate::ids::{DefId, DefIdGen, NodeId};
+use crate::types;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum SymbolKind {
+pub enum SymbolKind {
     Var { is_mutable: bool },
     Func,
+    Type,
+}
+
+impl fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SymbolKind::Var { .. } => write!(f, "var"),
+            SymbolKind::Func => write!(f, "func"),
+            SymbolKind::Type => write!(f, "type"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,6 +58,12 @@ pub enum ResolveError {
 
     #[error("Invalid callee. Expected a function name, found: {0:?}")]
     InvalidCallee(ExprKind, Span),
+
+    #[error("Expected '{0}' to be a type, found {1}")]
+    ExpectedType(String, SymbolKind, Span),
+
+    #[error("Undefined type: {0}")]
+    TypeUndefined(String, Span),
 }
 
 impl ResolveError {
@@ -55,6 +75,8 @@ impl ResolveError {
             ResolveError::FuncUndefined(_, span) => *span,
             ResolveError::InvalidAssignmentTarget(_, span) => *span,
             ResolveError::InvalidCallee(_, span) => *span,
+            ResolveError::ExpectedType(_, _, span) => *span,
+            ResolveError::TypeUndefined(_, span) => *span,
         }
     }
 }
@@ -118,6 +140,33 @@ impl SymbolResolver {
         self.scopes.last().unwrap().defs.get(name)
     }
 
+    fn map_symbol_kind_to_def_kind(kind: SymbolKind) -> DefKind {
+        match kind {
+            SymbolKind::Var { .. } => DefKind::LocalVar,
+            SymbolKind::Func => DefKind::Func,
+            SymbolKind::Type => DefKind::Type,
+        }
+    }
+
+    fn add_built_in_symbol(&mut self, name: &str, kind: SymbolKind) {
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: name.to_string(),
+            kind: Self::map_symbol_kind_to_def_kind(kind.clone()),
+            nrvo_eligible: false,
+        };
+        self.def_map_builder.record_def(def, NodeId(0));
+        self.insert_symbol(
+            name,
+            Symbol {
+                def_id,
+                name: name.to_string(),
+                kind,
+            },
+        );
+    }
+
     fn populate_funcs(&mut self, funcs: &Vec<ast::Function>) {
         for func in funcs {
             let def_id = self.def_id_gen.new_id();
@@ -142,6 +191,10 @@ impl SymbolResolver {
     pub fn resolve(&mut self, module: &Module) -> Result<DefMap, Vec<ResolveError>> {
         self.with_scope(|checker| {
             // global scope
+            // add built-in types
+            for ty in types::BUILTIN_TYPES {
+                checker.add_built_in_symbol(&ty.to_string(), SymbolKind::Type);
+            }
             checker.populate_funcs(&module.funcs);
             for function in &module.funcs {
                 checker.check_function(function);
@@ -158,9 +211,15 @@ impl SymbolResolver {
     }
 
     fn check_function(&mut self, function: &ast::Function) {
+        // resolve return type
+        self.check_type_expr(&function.return_type);
+
         self.with_scope(|checker| {
             // add parameters to scope
             for (index, param) in function.params.iter().enumerate() {
+                // resolve param type
+                checker.check_type_expr(&param.typ);
+
                 let def_id = checker.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -267,6 +326,32 @@ impl SymbolResolver {
                 // Recursively check each sub-pattern
                 for pattern in patterns {
                     self.check_pattern(pattern, is_mutable);
+                }
+            }
+        }
+    }
+
+    fn check_type_expr(&mut self, type_expr: &ast::TypeExpr) {
+        match &type_expr.kind {
+            ast::TypeExprKind::Named(name) => match self.lookup_symbol(name) {
+                Some(symbol) if symbol.kind == SymbolKind::Type => {
+                    self.def_map_builder.record_use(type_expr.id, symbol.def_id);
+                }
+                Some(symbol) => self.errors.push(ResolveError::ExpectedType(
+                    name.clone(),
+                    symbol.kind.clone(),
+                    type_expr.span,
+                )),
+                None => self
+                    .errors
+                    .push(ResolveError::TypeUndefined(name.clone(), type_expr.span)),
+            },
+            ast::TypeExprKind::Array { elem_ty, .. } => {
+                self.check_type_expr(elem_ty);
+            }
+            ast::TypeExprKind::Tuple { fields } => {
+                for field in fields {
+                    self.check_type_expr(field);
                 }
             }
         }

@@ -1,5 +1,5 @@
-use crate::analysis::{TypeMap, TypeMapBuilder};
-use crate::ast::{BinaryOp, Expr, ExprKind, Function, Pattern};
+use crate::analysis::{DefMap, TypeMap, TypeMapBuilder};
+use crate::ast::{BinaryOp, Expr, ExprKind, Function, Pattern, TypeExpr, TypeExprKind};
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
@@ -106,23 +106,45 @@ impl TypeCheckError {
     }
 }
 
+fn resolve_type_expr(def_map: &DefMap, type_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+    match &type_expr.kind {
+        TypeExprKind::Named(name) => {
+            let _ = def_map
+                .lookup_def(type_expr.id)
+                .ok_or(TypeCheckError::UnknownType(type_expr.span))?;
+
+            // Map built-in type names to Type values
+            match name.as_str() {
+                "()" => Ok(Type::Unit),
+                "u64" => Ok(Type::UInt64),
+                "bool" => Ok(Type::Bool),
+                _ => Err(TypeCheckError::UnknownType(type_expr.span)),
+            }
+        }
+        TypeExprKind::Array { elem_ty, dims } => {
+            let elem_ty = resolve_type_expr(def_map, elem_ty)?;
+            Ok(Type::Array {
+                elem_ty: Box::new(elem_ty),
+                dims: dims.clone(),
+            })
+        }
+        TypeExprKind::Tuple { fields } => {
+            let field_types = fields
+                .iter()
+                .map(|f| resolve_type_expr(def_map, f))
+                .collect::<Result<Vec<Type>, _>>()?;
+            Ok(Type::Tuple {
+                fields: field_types,
+            })
+        }
+    }
+}
+
 pub struct TypeChecker {
     context: ResolvedContext,
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, FuncSig>,
     errors: Vec<TypeCheckError>,
-}
-
-// Internal helper used during checking to avoid self-borrow conflicts. It holds
-// split borrows into the owning TypeChecker fields so we can iterate over
-// functions (&context.module.funcs) while still mutably updating the builder
-// and error vec. This removes the need for moving the functions Vec out of the
-// context (previous mem::take workaround) and keeps borrow scopes minimal.
-struct Checker<'c, 'b> {
-    context: &'c ResolvedContext,
-    func_sigs: &'c HashMap<String, FuncSig>,
-    builder: &'b mut TypeMapBuilder,
-    errors: &'b mut Vec<TypeCheckError>,
 }
 
 impl TypeChecker {
@@ -136,7 +158,7 @@ impl TypeChecker {
     }
 
     pub fn check(&mut self) -> Result<TypeMap, Vec<TypeCheckError>> {
-        self.populate_function_symbols();
+        self.populate_function_symbols()?;
 
         // Create split borrows so we can iterate immutably over functions while
         // mutably updating the builder & errors.
@@ -162,17 +184,40 @@ impl TypeChecker {
         }
     }
 
-    fn populate_function_symbols(&mut self) {
+    fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
         for function in &self.context.module.funcs {
+            let params = function
+                .params
+                .iter()
+                .map(|p| resolve_type_expr(&self.context.def_map, &p.typ))
+                .collect::<Result<Vec<Type>, _>>()
+                .map_err(|e| vec![e])?;
+
+            let return_type = resolve_type_expr(&self.context.def_map, &function.return_type)
+                .map_err(|e| vec![e])?;
+
             self.func_sigs.insert(
                 function.name.clone(),
                 FuncSig {
-                    params: function.params.iter().map(|p| p.typ.clone()).collect(),
-                    return_type: function.return_type.clone(),
+                    params,
+                    return_type,
                 },
             );
         }
+        Ok(())
     }
+}
+
+// Internal helper used during checking to avoid self-borrow conflicts. It holds
+// split borrows into the owning TypeChecker fields so we can iterate over
+// functions (&context.module.funcs) while still mutably updating the builder
+// and error vec. This removes the need for moving the functions Vec out of the
+// context (previous mem::take workaround) and keeps borrow scopes minimal.
+struct Checker<'c, 'b> {
+    context: &'c ResolvedContext,
+    func_sigs: &'c HashMap<String, FuncSig>,
+    builder: &'b mut TypeMapBuilder,
+    errors: &'b mut Vec<TypeCheckError>,
 }
 
 impl<'c, 'b> Checker<'c, 'b> {
@@ -184,10 +229,20 @@ impl<'c, 'b> Checker<'c, 'b> {
     }
 
     fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
-        // record param types
-        for param in &function.params {
-            if let Some(def) = self.context.def_map.lookup_def(param.id) {
-                self.builder.record_def_type(def.clone(), param.typ.clone());
+        // Get the resolved function signature
+        let func_sig = self
+            .func_sigs
+            .get(&function.name)
+            .expect("Function not found in func_sigs");
+
+        // Record param types
+        for (param, param_ty) in function.params.iter().zip(func_sig.params.iter()) {
+            match self.context.def_map.lookup_def(param.id) {
+                Some(def) => {
+                    self.builder.record_def_type(def.clone(), param_ty.clone());
+                    self.builder.record_node_type(param.id, param_ty.clone());
+                }
+                None => panic!("Parameter {} not found in def_map", param.name),
             }
         }
 
@@ -201,14 +256,14 @@ impl<'c, 'b> Checker<'c, 'b> {
         };
 
         // check return type
-        if ret_ty != Type::Unknown && ret_ty != function.return_type {
+        if ret_ty != func_sig.return_type {
             // get the span of the last expression in the body
             let span = match &function.body.kind {
                 ExprKind::Block(body) => body.last().unwrap().span,
                 _ => function.body.span,
             };
             self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
-                function.return_type.clone(),
+                func_sig.return_type.clone(),
                 ret_ty.clone(),
                 span,
             ));

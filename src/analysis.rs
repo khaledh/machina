@@ -16,6 +16,7 @@ mod def_resolution {
         Func,
         LocalVar,
         Param { index: u32 },
+        Type,
     }
 
     impl fmt::Display for DefKind {
@@ -24,6 +25,7 @@ mod def_resolution {
                 DefKind::Func => write!(f, "Func"),
                 DefKind::LocalVar => write!(f, "LocalVar"),
                 DefKind::Param { index } => write!(f, "Param[{}]", index),
+                DefKind::Type => write!(f, "Type"),
             }
         }
     }

@@ -1,6 +1,5 @@
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
-use crate::types::Type;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -12,7 +11,7 @@ pub struct Module {
 pub struct Function {
     pub id: NodeId,
     pub name: String,
-    pub return_type: Type,
+    pub return_type: TypeExpr,
     pub params: Vec<FunctionParam>,
     pub body: Expr,
 }
@@ -21,7 +20,7 @@ pub struct Function {
 pub struct FunctionParam {
     pub id: NodeId,
     pub name: String,
-    pub typ: Type,
+    pub typ: TypeExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +39,25 @@ pub enum Pattern {
         id: NodeId,
         patterns: Vec<Pattern>,
         span: Span,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeExpr {
+    pub id: NodeId,
+    pub kind: TypeExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeExprKind {
+    Named(String),
+    Array {
+        elem_ty: Box<TypeExpr>,
+        dims: Vec<usize>,
+    },
+    Tuple {
+        fields: Vec<TypeExpr>,
     },
 }
 
@@ -175,6 +193,32 @@ impl fmt::Display for FunctionParam {
 impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_indent(f, 0)
+    }
+}
+
+impl fmt::Display for TypeExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "TypeExpr::{} [{}]", self.kind, self.id)?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for TypeExprKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeExprKind::Named(name) => {
+                write!(f, "Named({})", name)?;
+            }
+            TypeExprKind::Array { elem_ty, dims } => {
+                let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+                write!(f, "Array({}, dims=[{}])", elem_ty, dims_str.join(", "))?;
+            }
+            TypeExprKind::Tuple { fields } => {
+                let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+                write!(f, "Tuple([{}])", fields_str.join(", "))?;
+            }
+        }
+        Ok(())
     }
 }
 

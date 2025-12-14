@@ -17,11 +17,13 @@ pub enum Type {
     },
 }
 
+pub const BUILTIN_TYPES: &[Type] = &[Type::Unit, Type::UInt64, Type::Bool];
+
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Unknown => write!(f, "unknown"),
-            Type::Unit => write!(f, "unit"),
+            Type::Unit => write!(f, "()"),
             Type::UInt64 => write!(f, "u64"),
             Type::Bool => write!(f, "bool"),
             Type::Array { elem_ty, dims } => {
