@@ -396,14 +396,30 @@ impl<'a> Parser<'a> {
 
     fn parse_let(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
+
+        // Expect 'let'
         self.consume_keyword("let")?;
         let pattern = self.parse_pattern()?;
+
+        // Parse declaration type (optional)
+        let decl_ty = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // Expect '='
         self.consume(&TK::Equals)?;
+
+        // Parse value
         let value = self.parse_expr(0)?;
+
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Let {
                 pattern,
+                decl_ty,
                 value: Box::new(value),
             },
             span: self.close(marker),
@@ -412,14 +428,30 @@ impl<'a> Parser<'a> {
 
     fn parse_var(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
+
+        // Expect 'var'
         self.consume_keyword("var")?;
+
+        // Parse pattern
         let pattern = self.parse_pattern()?;
+
+        // Parse declaration type (optional)
+        let decl_ty = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
         self.consume(&TK::Equals)?;
+
+        // Parse value
         let value = self.parse_expr(0)?;
+
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Var {
                 pattern,
+                decl_ty,
                 value: Box::new(value),
             },
             span: self.close(marker),

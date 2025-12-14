@@ -96,11 +96,13 @@ pub enum ExprKind {
     Let {
         // immutable binding
         pattern: Pattern,
+        decl_ty: Option<TypeExpr>,
         value: Box<Expr>,
     },
     Var {
         // mutable binding
         pattern: Pattern,
+        decl_ty: Option<TypeExpr>,
         value: Box<Expr>,
     },
     Assign {
@@ -310,17 +312,31 @@ impl Expr {
                     expr.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::Let { pattern, value } => {
+            ExprKind::Let {
+                pattern,
+                decl_ty,
+                value,
+            } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Let [{}]", pad, self.id)?;
                 pattern.fmt_with_indent(f, level + 2)?;
+                if let Some(decl_ty) = decl_ty {
+                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+                }
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::Var { pattern, value } => {
+            ExprKind::Var {
+                pattern,
+                decl_ty,
+                value,
+            } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Var [{}]", pad, self.id)?;
                 pattern.fmt_with_indent(f, level + 2)?;
+                if let Some(decl_ty) = decl_ty {
+                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+                }
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }

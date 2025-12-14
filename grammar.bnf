@@ -26,7 +26,7 @@ Expr               ::= Let
                      | InfixExpr
 
 # Binding
-Let                ::= "let" Pattern "=" Expr
+Let                ::= "let" Pattern ( ":" TypeExpr )? "=" Expr
 Var                ::= "var" Pattern ( ":" TypeExpr )? "=" Expr
 
 # Patterns

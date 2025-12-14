@@ -401,15 +401,29 @@ impl SymbolResolver {
                 });
             }
 
-            ExprKind::Let { pattern, value } => {
+            ExprKind::Let {
+                pattern,
+                decl_ty,
+                value,
+            } => {
                 // Check the value first before introducing the lhs symbol(s) into the scope.
                 self.check_expr(value);
+                if let Some(decl_ty) = decl_ty {
+                    self.check_type_expr(&decl_ty);
+                }
                 self.check_pattern(pattern, false);
             }
 
-            ExprKind::Var { pattern, value } => {
+            ExprKind::Var {
+                pattern,
+                decl_ty,
+                value,
+            } => {
                 // Check the value first before introducing the lhs symbol(s) into the scope.
                 self.check_expr(value);
+                if let Some(decl_ty) = decl_ty {
+                    self.check_type_expr(&decl_ty);
+                }
                 self.check_pattern(pattern, true);
             }
 

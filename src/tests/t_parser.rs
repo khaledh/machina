@@ -385,7 +385,7 @@ fn test_parse_tuple_pattern() {
     let func = &funcs[0];
 
     if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::Let { pattern, value } = &exprs[0].kind {
+        if let ExprKind::Let { pattern, value, .. } = &exprs[0].kind {
             // Check pattern is a tuple pattern
             match pattern {
                 crate::ast::Pattern::Tuple { patterns, .. } => {

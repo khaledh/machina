@@ -62,6 +62,9 @@ pub enum TypeCheckError {
     #[error("Pattern type mismatch: expected {0}, found {1}")]
     PatternTypeMismatch(Pattern, Type, Span),
 
+    #[error("Declaration type mismatch: declared type {0}, found type {1}")]
+    DeclTypeMismatch(Type, Type, Span),
+
     #[error("Array pattern length mismatch: expected {0}, found {1}")]
     ArrayPatternLengthMismatch(usize, usize, Span),
 
@@ -97,6 +100,7 @@ impl TypeCheckError {
             TypeCheckError::InvalidIndexTargetType(_, span) => *span,
             TypeCheckError::UnknownType(span) => *span,
             TypeCheckError::PatternTypeMismatch(_, _, span) => *span,
+            TypeCheckError::DeclTypeMismatch(_, _, span) => *span,
             TypeCheckError::ArrayPatternLengthMismatch(_, _, span) => *span,
             TypeCheckError::EmptyTupleLiteral(span) => *span,
             TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,
@@ -494,15 +498,53 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_let(&mut self, pattern: &Pattern, value: &Expr) -> Result<Type, TypeCheckError> {
+    fn type_check_let(
+        &mut self,
+        pattern: &Pattern,
+        decl_ty: &Option<TypeExpr>,
+        value: &Expr,
+    ) -> Result<Type, TypeCheckError> {
+        // type check value
         let expr_type = self.type_check_expr(value)?;
+
+        // check declaration type (if present)
+        if let Some(decl_ty) = decl_ty {
+            let decl_ty = resolve_type_expr(&self.context.def_map, decl_ty)?;
+            if expr_type != decl_ty {
+                return Err(TypeCheckError::DeclTypeMismatch(
+                    decl_ty, expr_type, value.span,
+                ));
+            }
+        }
+
+        // type check pattern
         self.type_check_pattern(pattern, &expr_type)?;
+
         Ok(Type::Unit)
     }
 
-    fn type_check_var(&mut self, pattern: &Pattern, value: &Expr) -> Result<Type, TypeCheckError> {
+    fn type_check_var(
+        &mut self,
+        pattern: &Pattern,
+        decl_ty: &Option<TypeExpr>,
+        value: &Expr,
+    ) -> Result<Type, TypeCheckError> {
+        // type check value
         let expr_type = self.type_check_expr(value)?;
+
+        // check declaration type (if present)
+        if let Some(decl_ty) = decl_ty {
+            let decl_ty = resolve_type_expr(&self.context.def_map, decl_ty)?;
+            if expr_type != decl_ty {
+                return Err(TypeCheckError::DeclTypeMismatch(
+                    decl_ty, expr_type, value.span,
+                ));
+            }
+        }
+
+        // type check pattern
         self.type_check_pattern(pattern, &expr_type)?;
+
         Ok(Type::Unit)
     }
 
@@ -510,18 +552,15 @@ impl<'c, 'b> Checker<'c, 'b> {
         let lhs_type = self.type_check_expr(assignee)?;
         let rhs_type = self.type_check_expr(value)?;
 
-        // lhs_type or rhs_type are never Unknown now because type_check_expr returns Err instead
-        // or propagates Err.
-
         if lhs_type != rhs_type {
-            Err(TypeCheckError::AssignTypeMismatch(
+            return Err(TypeCheckError::AssignTypeMismatch(
                 lhs_type,
                 rhs_type,
                 assignee.span,
-            ))
-        } else {
-            Ok(Type::Unit)
+            ));
         }
+
+        Ok(Type::Unit)
     }
 
     fn type_check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
@@ -684,9 +723,17 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::Block(body) => self.type_check_block(body),
 
-            ExprKind::Let { pattern, value } => self.type_check_let(pattern, value),
+            ExprKind::Let {
+                pattern,
+                decl_ty,
+                value,
+            } => self.type_check_let(pattern, decl_ty, value),
 
-            ExprKind::Var { pattern, value } => self.type_check_var(pattern, value),
+            ExprKind::Var {
+                pattern,
+                decl_ty,
+                value,
+            } => self.type_check_var(pattern, decl_ty, value),
 
             ExprKind::Assign { value, assignee } => self.type_check_assign(assignee, value),
 

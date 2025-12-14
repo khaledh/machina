@@ -957,8 +957,12 @@ impl<'a> Lowerer<'a> {
             ast::ExprKind::BinOp { left, op, right } => self.lower_binary_op(fb, op, left, right),
             ast::ExprKind::UnaryOp { op, expr } => self.lower_unary_op(fb, op, expr),
             ast::ExprKind::Block(body) => self.lower_block_into(fb, expr.id, body, dest_temp),
-            ast::ExprKind::Let { pattern, value } => self.lower_binding(fb, pattern, value, false),
-            ast::ExprKind::Var { pattern, value } => self.lower_binding(fb, pattern, value, true),
+            ast::ExprKind::Let { pattern, value, .. } => {
+                self.lower_binding(fb, pattern, value, false)
+            }
+            ast::ExprKind::Var { pattern, value, .. } => {
+                self.lower_binding(fb, pattern, value, true)
+            }
             ast::ExprKind::Assign {
                 value, assignee, ..
             } => self.lower_assign(fb, expr, assignee, value),
