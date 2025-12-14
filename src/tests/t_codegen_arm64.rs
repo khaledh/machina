@@ -299,15 +299,15 @@ fn array_u8_ty(len: usize) -> IrType {
 }
 
 #[test]
-fn test_store_element_const_index() {
+fn test_store_at_byte_offset_const_index() {
     // fn test(arr: u64[10]) {
-    //   arr[2] = 42
+    //   *(arr + 16) = 42
     // }
     let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
     let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
     let value = const_u64(42);
 
-    builder.store_element(array_param, const_u64(2), value);
+    builder.store_at_byte_offset(array_param, const_u64(16), value);
     builder.terminate(IrTerminator::Ret { value: None });
 
     let func = builder.finish();
@@ -333,15 +333,15 @@ fn test_store_element_const_index() {
 }
 
 #[test]
-fn test_load_element_const_index() {
+fn test_load_at_byte_offset_const_index() {
     // fn test(arr: u64[10]) -> u64 {
-    //   arr[3]
+    //   *(arr + 24)
     // }
     let mut builder = IrFunctionBuilder::new("test".to_string(), u64_ty());
     let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
     let result = builder.new_temp(u64_ty());
 
-    builder.load_element(result, array_param, const_u64(3));
+    builder.load_at_byte_offset(result, array_param, const_u64(24));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
@@ -369,16 +369,16 @@ fn test_load_element_const_index() {
 }
 
 #[test]
-fn test_store_element_variable_index() {
-    // fn test(arr: u64[10], idx: u64) {
-    //   arr[idx] = 99
+fn test_store_at_byte_offset_variable_index() {
+    // fn test(arr: u64[10], byte_off: u64) {
+    //   *(arr + byte_off) = 99
     // }
     let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
     let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
-    let index_param = builder.new_param(1, "idx".to_string(), u64_ty());
+    let index_param = builder.new_param(1, "byte_off".to_string(), u64_ty());
     let value = const_u64(99);
 
-    builder.store_element(array_param, temp_operand(index_param), value);
+    builder.store_at_byte_offset(array_param, temp_operand(index_param), value);
     builder.terminate(IrTerminator::Ret { value: None });
 
     let func = builder.finish();
@@ -394,9 +394,7 @@ fn test_store_element_variable_index() {
       _test:
         stp x29, x30, [sp, #-16]!
         mov x29, sp
-        mov x16, #8
-        mul x17, x1, x16
-        add x17, x0, x17
+        add x17, x0, x1
         mov x16, #99
         str x16, [x17]
         ldp x29, x30, [sp], #16
@@ -406,16 +404,16 @@ fn test_store_element_variable_index() {
 }
 
 #[test]
-fn test_load_element_variable_index() {
-    // fn test(arr: u64[10], idx: u64) -> u64 {
-    //   arr[idx]
+fn test_load_at_byte_offset_variable_index() {
+    // fn test(arr: u64[10], byte_off: u64) -> u64 {
+    //   *(arr + byte_off)
     // }
     let mut builder = IrFunctionBuilder::new("test".to_string(), u64_ty());
     let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
-    let index_param = builder.new_param(1, "idx".to_string(), u64_ty());
+    let index_param = builder.new_param(1, "byte_off".to_string(), u64_ty());
     let result = builder.new_temp(u64_ty());
 
-    builder.load_element(result, array_param, temp_operand(index_param));
+    builder.load_at_byte_offset(result, array_param, temp_operand(index_param));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
@@ -433,9 +431,7 @@ fn test_load_element_variable_index() {
       _test:
         stp x29, x30, [sp, #-16]!
         mov x29, sp
-        mov x16, #8
-        mul x17, x1, x16
-        add x17, x0, x17
+        add x17, x0, x1
         ldr x2, [x17]
         mov x0, x2
         ldp x29, x30, [sp], #16
@@ -445,13 +441,13 @@ fn test_load_element_variable_index() {
 }
 
 #[test]
-fn test_store_element_different_sizes() {
+fn test_store_at_byte_offset_different_sizes() {
     // Test u32 array (4-byte elements)
     let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
     let array_param = builder.new_param(0, "arr".to_string(), array_u32_ty(10));
-    builder.store_element(
+    builder.store_at_byte_offset(
         array_param,
-        const_u64(1),
+        const_u64(4),
         IrOperand::Const(IrConst::Int {
             value: 123,
             bits: 32,
@@ -483,7 +479,7 @@ fn test_store_element_different_sizes() {
 }
 
 #[test]
-fn test_load_element_halfword_array() {
+fn test_load_at_byte_offset_halfword_array() {
     // Test u16 array (2-byte elements)
     let mut builder = IrFunctionBuilder::new(
         "test".to_string(),
@@ -498,7 +494,7 @@ fn test_load_element_halfword_array() {
         signed: false,
     });
 
-    builder.load_element(result, array_param, const_u64(3));
+    builder.load_at_byte_offset(result, array_param, const_u64(6));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
@@ -526,7 +522,7 @@ fn test_load_element_halfword_array() {
 }
 
 #[test]
-fn test_load_element_byte_array() {
+fn test_load_at_byte_offset_byte_array() {
     // Test u8 array (1-byte elements)
     let mut builder = IrFunctionBuilder::new(
         "test".to_string(),
@@ -541,7 +537,7 @@ fn test_load_element_byte_array() {
         signed: false,
     });
 
-    builder.load_element(result, array_param, const_u64(5));
+    builder.load_at_byte_offset(result, array_param, const_u64(5));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });

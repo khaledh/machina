@@ -405,13 +405,11 @@ impl<'c, 'b> Checker<'c, 'b> {
                         }
                         Ok(())
                     }
-                    _ => {
-                        return Err(TypeCheckError::PatternTypeMismatch(
-                            pattern.clone(),
-                            value_ty.clone(),
-                            *span,
-                        ));
-                    }
+                    _ => Err(TypeCheckError::PatternTypeMismatch(
+                        pattern.clone(),
+                        value_ty.clone(),
+                        *span,
+                    )),
                 }
             }
             Pattern::Tuple { patterns, span, .. } => {

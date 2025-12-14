@@ -5,7 +5,7 @@ use crate::ast::{BinaryOp as BOp, UnaryOp as UOp};
 use crate::context::LoweredRegAllocContext;
 use crate::ir::pos::InstPos;
 use crate::ir::types::{
-    IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator, IrType,
+    IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator,
 };
 use crate::regalloc::moves::{Location, Move};
 use crate::regalloc::regs::{Arm64Reg as R, to_w_reg};
@@ -30,9 +30,6 @@ pub enum CodegenError {
 
     #[error("Unsupported move: {0} -> {1}")]
     UnsupportedMove(Location, Location),
-
-    #[error("Expected temp {0} to be a compound type (array or tuple), found {1}")]
-    TempIsNotCompound(IrTempId, IrType),
 
     #[error("Unsupported size {0} for store/load operation")]
     UnsupportedSize(usize),
@@ -508,20 +505,6 @@ impl<'a> FuncCodegen<'a> {
                 // Phi nodes are handled by register allocator moves
                 // No code needs to be emitted here
             }
-            IrInst::StoreElement {
-                array,
-                index,
-                value,
-            } => {
-                asm.push_str(&self.emit_store_element(*array, index, value)?);
-            }
-            IrInst::LoadElement {
-                array,
-                index,
-                result,
-            } => {
-                asm.push_str(&self.emit_load_element(*result, array, index)?);
-            }
             IrInst::StoreAtByteOffset {
                 base,
                 byte_offset,
@@ -688,7 +671,7 @@ impl<'a> FuncCodegen<'a> {
         let mut asm = String::new();
 
         // Calculate the address using elem_size = 1 (byte offset, not scaled)
-        let addr = self.emit_element_address(base, &byte_offset, 1, &mut asm)?;
+        let addr = self.emit_element_address(base, byte_offset, 1, &mut asm)?;
 
         // Get the value into a register
         let value_reg = self.materialize_operand(value, &mut asm)?;
@@ -728,82 +711,6 @@ impl<'a> FuncCodegen<'a> {
         Ok(())
     }
 
-    pub fn emit_store_element(
-        &mut self,
-        array: IrTempId,
-        index: &IrOperand,
-        value: &IrOperand,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-
-        // Get the element size
-        // For arrays: use the element type from the array
-        // For tuples: use elem_size = 1 (index is already a byte offset)
-        let compound_ty = self.func.temp_type(array);
-        let elem_size = match compound_ty {
-            IrType::Array { elem_ty, .. } => elem_ty.size_of(),
-            IrType::Tuple { .. } => 1, // index is byte offset, no scaling needed
-            _ => return Err(CodegenError::TempIsNotCompound(array, compound_ty.clone())),
-        };
-
-        // Calculate the element address
-        let addr = self.emit_element_address(array, index, elem_size, &mut asm)?;
-
-        // Materialize the value into a register
-        let value_reg = self.materialize_operand(value, &mut asm)?;
-
-        // Determine the size of the value to store
-        let value_size = match compound_ty {
-            IrType::Array { elem_ty, .. } => elem_ty.size_of(),
-            IrType::Tuple { .. } => {
-                // For tuples, get the size from the value operand's type
-                match value {
-                    IrOperand::Temp(temp_id) => self.func.temp_type(*temp_id).size_of(),
-                    IrOperand::Const(c) => c.size_of(),
-                }
-            }
-            _ => unreachable!(),
-        };
-
-        // Store the value at the address
-        self.emit_store_at_address(addr, value_size, value_reg, &mut asm)?;
-
-        Ok(asm)
-    }
-
-    pub fn emit_load_element(
-        &mut self,
-        result: IrTempId,
-        array: &IrTempId,
-        index: &IrOperand,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-
-        // Get the result register
-        let result_reg = self.get_reg(&result)?;
-
-        // Get the element size for address calculation
-        // For arrays: use the element type from the array
-        // For tuples: use elem_size = 1 (index is already a byte offset)
-        let compound_ty = self.func.temp_type(*array);
-        let elem_size = match compound_ty {
-            IrType::Array { elem_ty, .. } => elem_ty.size_of(),
-            IrType::Tuple { .. } => 1, // index is byte offset, no scaling needed
-            _ => return Err(CodegenError::TempIsNotCompound(*array, compound_ty.clone())),
-        };
-
-        // Calculate the element address
-        let addr = self.emit_element_address(*array, index, elem_size, &mut asm)?;
-
-        // Determine the size of the value to load (from the result type)
-        let value_size = self.func.temp_type(result).size_of();
-
-        // Load the value from the address into the result register
-        self.emit_load_at_address(addr, value_size, result_reg, &mut asm)?;
-
-        Ok(asm)
-    }
-
     pub fn emit_load_at_byte_offset(
         &mut self,
         result: IrTempId,
@@ -814,7 +721,7 @@ impl<'a> FuncCodegen<'a> {
         let result_reg = self.get_reg(&result)?;
 
         // Calculate the address using elem_size = 1 (byte offset, not scaled)
-        let addr = self.emit_element_address(base, &byte_offset, 1, &mut asm)?;
+        let addr = self.emit_element_address(base, byte_offset, 1, &mut asm)?;
 
         // Determine the size of the value to load (from the result type)
         let value_size = self.func.temp_type(result).size_of();

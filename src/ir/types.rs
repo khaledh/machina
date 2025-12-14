@@ -316,7 +316,7 @@ impl IrConst {
         }
     }
 
-    pub fn to_type(&self) -> IrType {
+    pub fn type_of(&self) -> IrType {
         match self {
             IrConst::Int { bits, signed, .. } => IrType::Int {
                 bits: *bits,
@@ -401,18 +401,6 @@ pub enum IrInst {
         incoming: Vec<(IrBlockId, IrTempId)>,
     },
 
-    // Array element access
-    StoreElement {
-        array: IrTempId,
-        index: IrOperand,
-        value: IrOperand,
-    },
-    LoadElement {
-        result: IrTempId,
-        array: IrTempId,
-        index: IrOperand,
-    },
-
     StoreAtByteOffset {
         base: IrTempId,
         byte_offset: IrOperand,
@@ -441,8 +429,6 @@ impl IrInst {
             IrInst::UnaryOp { result, .. } => Some(*result),
             IrInst::Call { result, .. } => *result,
             IrInst::Phi { result, .. } => Some(*result),
-            IrInst::StoreElement { .. } => None,
-            IrInst::LoadElement { result, .. } => Some(*result),
             IrInst::StoreAtByteOffset { .. } => None,
             IrInst::LoadAtByteOffset { result, .. } => Some(*result),
             IrInst::MemCopy { dest, .. } => Some(*dest),
@@ -459,16 +445,6 @@ impl IrInst {
                 .iter()
                 .map(|(_, temp)| IrOperand::Temp(*temp))
                 .collect(),
-            IrInst::StoreElement {
-                array,
-                index,
-                value,
-            } => {
-                vec![IrOperand::Temp(*array), *index, *value]
-            }
-            IrInst::LoadElement { array, index, .. } => {
-                vec![IrOperand::Temp(*array), *index]
-            }
             IrInst::StoreAtByteOffset {
                 base,
                 byte_offset,
@@ -642,32 +618,6 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 write!(f, "({} -> %t{})", block_name, value.id())?;
             }
             write!(f, "]")?;
-        }
-        IrInst::StoreElement {
-            array,
-            index,
-            value,
-        } => {
-            write!(
-                f,
-                "store.element %t{}, {}, {}",
-                array.id(),
-                format_operand(index),
-                format_operand(value)
-            )?;
-        }
-        IrInst::LoadElement {
-            result,
-            array,
-            index,
-        } => {
-            write!(
-                f,
-                "%t{} = load.element %t{}, {}",
-                result.id(),
-                array.id(),
-                format_operand(index)
-            )?;
         }
         IrInst::StoreAtByteOffset {
             base,

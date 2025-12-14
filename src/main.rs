@@ -9,6 +9,7 @@ mod dataflow;
 mod diagnostics;
 mod ids;
 mod ir;
+mod layout;
 mod lexer;
 mod lower;
 mod nrvo;

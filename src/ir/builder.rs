@@ -47,10 +47,6 @@ impl IrFunctionBuilder {
         self.ret_temp
     }
 
-    pub fn temp_type(&self, id: IrTempId) -> &IrType {
-        &self.temps[id.id() as usize].ty
-    }
-
     pub fn new_param(&mut self, index: u32, name: String, ty: IrType) -> IrTempId {
         let id = IrTempId(self.temps.len() as u32);
         self.temps.push(IrTempInfo {
@@ -242,22 +238,6 @@ impl IrFunctionBuilder {
         //         .all(|(_, o)| o.get_type() == expected)
         // );
         self.emit_inst(IrInst::Phi { result, incoming });
-    }
-
-    pub fn store_element(&mut self, array: IrTempId, index: IrOperand, value: IrOperand) {
-        self.emit_inst(IrInst::StoreElement {
-            array,
-            index,
-            value,
-        });
-    }
-
-    pub fn load_element(&mut self, result: IrTempId, array: IrTempId, index: IrOperand) {
-        self.emit_inst(IrInst::LoadElement {
-            result,
-            array,
-            index,
-        });
     }
 
     pub fn store_at_byte_offset(
