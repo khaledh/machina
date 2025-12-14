@@ -3,29 +3,31 @@
 # Top-level
 Module             ::= Function*
 
-Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" Type )? Block
+Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )? Block
 
 FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
-FunctionParam      ::= Identifier ":" Type
+FunctionParam      ::= Identifier ":" TypeExpr
 
-# Types
-Type               ::= SimpleType | CompoundType
-SimpleType         ::= "()" | "u64" | "bool"
-CompoundType       ::= ArrayType | TupleType
-ArrayType          ::= Type "[" Integer ("," Integer)* "]"
-TupleType          ::= "(" Type "," ( Type ( "," Type )* )? ","? ")"
+# Type Expressions
+TypeExpr           ::= NamedType | ArrayType | TupleType
+NamedType          ::= "()" | Identifier
+ArrayType          ::= TypeExpr "[" Integer ("," Integer)* "]"
+TupleType          ::= "(" TypeExpr "," ( TypeExpr ( "," TypeExpr )* )? ","? ")"
 
 # Blocks
-Block              ::= "{" (StmtOrExpr ";")* Expr? "}"
+Block              ::= "{" (Expr ";")* Expr? "}"
 
-StmtOrExpr         ::= Let
+# Expressions
+Expr               ::= Let
                      | Var
                      | Assign
-                     | Expr
+                     | If
+                     | While
+                     | InfixExpr
 
+# Binding
 Let                ::= "let" Pattern "=" Expr
-Var                ::= "var" Pattern ( ":" Type )? "=" Expr
-Assign             ::= PostfixExpr "=" Expr
+Var                ::= "var" Pattern ( ":" TypeExpr )? "=" Expr
 
 # Patterns
 Pattern            ::= IdentPattern | ArrayPattern | TuplePattern
@@ -33,9 +35,10 @@ IdentPattern       ::= Identifier
 ArrayPattern       ::= "[" Pattern ( "," Pattern )* ","? "]"
 TuplePattern       ::= "(" Pattern "," ( Pattern ( "," Pattern )* )? ","? ")"
 
-# Expressions
-Expr               ::= If | While | InfixExpr
+# Assignment
+Assign             ::= PostfixExpr "=" Expr
 
+# Control flow
 If                 ::= "if" Expr Block ( "else" Block )?
 While              ::= "while" Expr Block
 
