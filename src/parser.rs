@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, TypeAlias, TypeExpr,
-    TypeExprKind, UnaryOp,
+    BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, StructField,
+    StructLitField, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
@@ -37,6 +37,9 @@ pub enum ParseError {
 
     #[error("Single field tuple missing trailing comma: {0}")]
     SingleFieldTupleMissingComma(Token),
+
+    #[error("Expected field access, found: {0}")]
+    ExpectedFieldAccess(Token),
 }
 
 impl ParseError {
@@ -51,6 +54,7 @@ impl ParseError {
             ParseError::ExpectedIntLit(token) => token.span,
             ParseError::ExpectedPattern(token) => token.span,
             ParseError::SingleFieldTupleMissingComma(token) => token.span,
+            ParseError::ExpectedFieldAccess(token) => token.span,
         }
     }
 }
@@ -160,7 +164,7 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn parse_type_decl(&mut self) -> Result<TypeAlias, ParseError> {
+    fn parse_type_decl(&mut self) -> Result<TypeDecl, ParseError> {
         // Expect 'type'
         self.consume_keyword("type")?;
 
@@ -168,15 +172,45 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
         self.consume(&TK::Equals)?;
 
-        // Parse type expression
-        let typ = self.parse_type_expr()?;
+        // Branch based on the next token
+        let kind = if self.curr_token.kind == TK::LBrace {
+            // Struct definition: type Foo = { ... }
+            self.advance(); // consume '{'
+            let fields = self.parse_struct_fields()?;
+            self.consume(&TK::RBrace)?; // consume '}'
+            TypeDeclKind::Struct { fields }
+        } else {
+            // Type alias: type Foo = Bar;
+            let ty = self.parse_type_expr()?;
+            self.consume(&TK::Semicolon)?;
+            TypeDeclKind::Alias { aliased_ty: ty }
+        };
 
-        self.consume(&TK::Semicolon)?;
-
-        Ok(TypeAlias {
+        Ok(TypeDecl {
             id: self.id_gen.new_id(),
             name,
-            aliased_ty: typ,
+            kind,
+        })
+    }
+
+    fn parse_struct_fields(&mut self) -> Result<Vec<StructField>, ParseError> {
+        self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            let marker = parser.mark();
+            // Parse field name
+            let name = parser.parse_ident()?;
+
+            // Expect ':'
+            parser.consume(&TK::Colon)?;
+
+            // Parse field type
+            let ty = parser.parse_type_expr()?;
+
+            Ok(StructField {
+                id: parser.id_gen.new_id(),
+                name,
+                ty,
+                span: parser.close(marker),
+            })
         })
     }
 
@@ -552,10 +586,13 @@ impl<'a> Parser<'a> {
                 }
                 TK::LBracket => {
                     // Index expression
-                    self.consume(&TK::LBracket)?;
+                    self.advance(); // consume '['
+
                     let indices =
                         self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
-                    self.consume(&TK::RBracket)?;
+
+                    self.consume(&TK::RBracket)?; // consume ']'
+
                     expr = Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::Index {
@@ -568,14 +605,33 @@ impl<'a> Parser<'a> {
                 TK::Dot => {
                     // Field access expression
                     self.consume(&TK::Dot)?;
-                    let index = self.parse_int_lit()? as u32;
-                    expr = Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::TupleFieldAccess {
-                            target: Box::new(expr),
-                            index,
-                        },
-                        span: self.close(marker.clone()),
+
+                    match &self.curr_token.kind {
+                        TK::IntLit(index) => {
+                            // Tuple field access: .0, .1, etc.
+                            self.advance();
+                            expr = Expr {
+                                id: self.id_gen.new_id(),
+                                kind: ExprKind::TupleFieldAccess {
+                                    target: Box::new(expr),
+                                    index: *index as u32,
+                                },
+                                span: self.close(marker.clone()),
+                            };
+                        }
+                        TK::Ident(name) => {
+                            // Struct field access: .name
+                            self.advance();
+                            expr = Expr {
+                                id: self.id_gen.new_id(),
+                                kind: ExprKind::FieldAccess {
+                                    target: Box::new(expr),
+                                    field: name.clone(),
+                                },
+                                span: self.close(marker.clone()),
+                            };
+                        }
+                        _ => return Err(ParseError::ExpectedFieldAccess(self.curr_token.clone())),
                     }
                 }
                 _ => break,
@@ -590,24 +646,34 @@ impl<'a> Parser<'a> {
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
             TK::Ident(name) => {
-                let span = self.curr_token.span;
+                let marker = self.mark();
+                let name = name.clone();
                 self.advance();
+
                 match name.as_str() {
                     "true" => Ok(Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::BoolLit(true),
-                        span,
+                        span: self.close(marker),
                     }),
                     "false" => Ok(Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::BoolLit(false),
-                        span,
+                        span: self.close(marker),
                     }),
-                    _ => Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::VarRef(name.clone()),
-                        span,
-                    }),
+                    _ => {
+                        // Check for struct literal: Ident { ....}
+                        if self.curr_token.kind == TK::LBrace {
+                            self.parse_struct_lit(marker, name)
+                        } else {
+                            // Regular variable reference
+                            Ok(Expr {
+                                id: self.id_gen.new_id(),
+                                kind: ExprKind::VarRef(name.clone()),
+                                span: self.close(marker),
+                            })
+                        }
+                    }
                 }
             }
             TK::IntLit(value) => {
@@ -639,6 +705,38 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
+    }
+
+    fn parse_struct_lit(&mut self, marker: Marker, name: String) -> Result<Expr, ParseError> {
+        self.consume(&TK::LBrace)?; // consume '{'
+
+        // Parse struct literal fields
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            let field_marker = parser.mark();
+            // Parse field name
+            let name = parser.parse_ident()?;
+
+            // Expect ':'
+            parser.consume(&TK::Colon)?;
+
+            // Parse field value
+            let value = parser.parse_expr(0)?;
+
+            Ok(StructLitField {
+                id: parser.id_gen.new_id(),
+                name,
+                value,
+                span: parser.close(field_marker),
+            })
+        })?;
+
+        self.consume(&TK::RBrace)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::StructLit { name, fields },
+            span: self.close(marker),
+        })
     }
 
     fn parse_paren_or_tuple(&mut self) -> Result<Expr, ParseError> {
@@ -738,7 +836,7 @@ impl<'a> Parser<'a> {
 
     fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match &self.curr_token.kind {
-            TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeAlias),
+            TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeDecl),
             TK::Ident(name) if name == "fn" => self.parse_function().map(Decl::Function),
             _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }

@@ -15,6 +15,16 @@ pub enum Type {
     Tuple {
         fields: Vec<Type>,
     },
+    Struct {
+        name: String,
+        fields: Vec<StructField>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
 }
 
 pub const BUILTIN_TYPES: &[Type] = &[Type::Unit, Type::UInt64, Type::Bool];
@@ -34,6 +44,13 @@ impl fmt::Display for Type {
                 let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "({})", fields_str.join(", "))
             }
+            Type::Struct { name, fields } => {
+                let fields_str = fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name, f.ty))
+                    .collect::<Vec<_>>();
+                write!(f, "{} {{ {} }}", name, fields_str.join(", "))
+            }
         }
     }
 }
@@ -52,6 +69,10 @@ impl Type {
                 let total_size: usize = fields.iter().map(|f| f.size_of()).sum();
                 total_size
             }
+            Type::Struct { fields, .. } => {
+                let total_size: usize = fields.iter().map(|f| f.ty.size_of()).sum();
+                total_size
+            }
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -63,12 +84,18 @@ impl Type {
             Type::Bool => 1,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
+            Type::Struct { fields, .. } => {
+                fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
+            }
             Type::Unknown => panic!("Unknown type"),
         }
     }
 
     pub fn is_compound(&self) -> bool {
-        matches!(self, Type::Array { .. } | Type::Tuple { .. })
+        matches!(
+            self,
+            Type::Array { .. } | Type::Tuple { .. } | Type::Struct { .. }
+        )
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
@@ -78,6 +105,40 @@ impl Type {
                 fields.iter().take(index).map(|f| f.size_of()).sum()
             }
             _ => panic!("Expected tuple type"),
+        }
+    }
+
+    pub fn struct_field_offset(&self, field_name: &str) -> usize {
+        match self {
+            Type::Struct { fields, .. } => {
+                let mut offset = 0;
+                for field in fields {
+                    if field.name == field_name {
+                        return offset;
+                    }
+                    offset += field.ty.size_of();
+                }
+                panic!("Field not found in struct");
+            }
+            _ => panic!("Expected struct type"),
+        }
+    }
+
+    pub fn struct_field_type(&self, field_name: &str) -> Type {
+        match self {
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .find(|f| f.name == field_name)
+                .map(|f| f.ty.clone())
+                .unwrap_or_else(|| panic!("Field not found in struct")),
+            _ => panic!("Expected struct type"),
+        }
+    }
+
+    pub fn has_field(&self, field_name: &str) -> bool {
+        match self {
+            Type::Struct { fields, .. } => fields.iter().any(|f| f.name == field_name),
+            _ => false,
         }
     }
 }

@@ -11,6 +11,10 @@ pub fn tuple_field_byte_offset(ty: &Type, field_index: usize) -> ByteOffset {
     ByteOffset(ty.tuple_field_offset(field_index))
 }
 
+pub fn struct_field_byte_offset(ty: &Type, field_name: &str) -> ByteOffset {
+    ByteOffset(ty.struct_field_offset(field_name))
+}
+
 pub fn try_const_fold_array_linear_index(dims: &[usize], indices: &[Expr]) -> Option<LinearIndex> {
     let const_indices: Vec<usize> = indices
         .iter()

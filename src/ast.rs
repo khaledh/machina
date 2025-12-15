@@ -21,12 +21,12 @@ impl Module {
             .collect()
     }
 
-    pub fn type_aliases(&self) -> Vec<&TypeAlias> {
+    pub fn type_decls(&self) -> Vec<&TypeDecl> {
         self.decls
             .iter()
             .filter_map(|decl| {
-                if let Decl::TypeAlias(type_alias) = decl {
-                    Some(type_alias)
+                if let Decl::TypeDecl(type_decl) = decl {
+                    Some(type_decl)
                 } else {
                     None
                 }
@@ -37,15 +37,37 @@ impl Module {
 
 #[derive(Clone, Debug)]
 pub enum Decl {
-    TypeAlias(TypeAlias),
+    TypeDecl(TypeDecl),
     Function(Function),
 }
 
 #[derive(Clone, Debug)]
-pub struct TypeAlias {
+pub struct TypeDecl {
     pub id: NodeId,
     pub name: String,
-    pub aliased_ty: TypeExpr,
+    pub kind: TypeDeclKind,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeDeclKind {
+    Alias { aliased_ty: TypeExpr },
+    Struct { fields: Vec<StructField> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructField {
+    pub id: NodeId,
+    pub name: String,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructLitField {
+    pub id: NodeId,
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -124,6 +146,14 @@ pub enum ExprKind {
         target: Box<Expr>,
         index: u32,
     },
+    StructLit {
+        name: String,
+        fields: Vec<StructLitField>,
+    },
+    FieldAccess {
+        target: Box<Expr>,
+        field: String,
+    },
     BinOp {
         left: Box<Expr>,
         op: BinaryOp,
@@ -192,7 +222,7 @@ impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, decl) in self.decls.iter().enumerate() {
             match decl {
-                Decl::TypeAlias(type_alias) => type_alias.fmt_with_indent(f, 0)?,
+                Decl::TypeDecl(type_decl) => type_decl.fmt_with_indent(f, 0)?,
                 Decl::Function(func) => func.fmt_with_indent(f, 0)?,
             }
             if i + 1 != self.decls.len() {
@@ -203,13 +233,48 @@ impl fmt::Display for Module {
     }
 }
 
-impl TypeAlias {
+impl TypeDecl {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        writeln!(f, "{}TypeAlias [{}]", pad, self.id)?;
+        writeln!(f, "{}TypeDecl [{}]", pad, self.id)?;
         let pad1 = indent(level + 1);
         writeln!(f, "{}Name: {}", pad1, self.name)?;
-        writeln!(f, "{}Type: {}", pad1, self.aliased_ty)?;
+        writeln!(f, "{}Kind:", pad1)?;
+        self.kind.fmt_with_indent(f, level + 2)?;
+        Ok(())
+    }
+}
+
+impl TypeDeclKind {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match self {
+            TypeDeclKind::Alias { aliased_ty } => {
+                writeln!(f, "{}Alias: {} [{}]", pad, aliased_ty, aliased_ty.id)?;
+            }
+            TypeDeclKind::Struct { fields } => {
+                writeln!(f, "{}Struct:", pad)?;
+                for field in fields {
+                    field.fmt_with_indent(f, level + 2)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl StructField {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.ty, self.id)?;
+        Ok(())
+    }
+}
+
+impl StructLitField {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.value, self.id)?;
         Ok(())
     }
 }
@@ -344,6 +409,21 @@ impl Expr {
                 writeln!(f, "{}Target:", pad1)?;
                 target.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Index: {}", pad1, index)?;
+            }
+            ExprKind::StructLit { name, fields } => {
+                writeln!(f, "{}StructLit [{}]", pad, self.id)?;
+                writeln!(f, "{}Name: {}", pad, name)?;
+                writeln!(f, "{}Fields:", pad)?;
+                for field in fields {
+                    field.fmt_with_indent(f, level + 1)?;
+                }
+            }
+            ExprKind::FieldAccess { target, field } => {
+                writeln!(f, "{}FieldAccess [{}]", pad, self.id)?;
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Field: {}", pad1, field)?;
             }
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);

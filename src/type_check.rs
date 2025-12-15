@@ -1,11 +1,15 @@
+use std::collections::{HashMap, HashSet};
+use thiserror::Error;
+
 use crate::analysis::{DefKind, DefMap, TypeMap, TypeMapBuilder};
-use crate::ast::{BinaryOp, Expr, ExprKind, Function, Pattern, TypeExpr, TypeExprKind};
+use crate::ast::{
+    BinaryOp, Expr, ExprKind, Function, Pattern, StructLitField, TypeDeclKind, TypeExpr,
+    TypeExprKind,
+};
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diagnostics::Span;
 use crate::ids::NodeId;
-use crate::types::Type;
-use std::collections::HashMap;
-use thiserror::Error;
+use crate::types::{StructField, Type};
 
 struct FuncSig {
     params: Vec<Type>,
@@ -79,6 +83,24 @@ pub enum TypeCheckError {
 
     #[error("Tuple pattern length mismatch: expected {0}, found {1}")]
     TuplePatternLengthMismatch(usize, usize, Span),
+
+    #[error("Uknown struct type: {0}")]
+    UnknownStructType(String, Span),
+
+    #[error("Duplicate struct field: {0}")]
+    DuplicateStructField(String, Span),
+
+    #[error("Struct field type mismatch: field {0} expected {1}, found {2}")]
+    StructFieldTypeMismatch(String, Type, Type, Span),
+
+    #[error("Unknown struct field: {0}")]
+    UnknownStructField(String, Span),
+
+    #[error("Struct fields missing: {0}")]
+    StructFieldsMissing(String, Span),
+
+    #[error("Invalid field access target: expected struct, found {0}")]
+    InvalidFieldAccessTarget(Type, Span),
 }
 
 impl TypeCheckError {
@@ -106,6 +128,12 @@ impl TypeCheckError {
             TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,
             TypeCheckError::InvalidTupleFieldAccessTarget(_, span) => *span,
             TypeCheckError::TuplePatternLengthMismatch(_, _, span) => *span,
+            TypeCheckError::UnknownStructType(_, span) => *span,
+            TypeCheckError::DuplicateStructField(_, span) => *span,
+            TypeCheckError::StructFieldTypeMismatch(_, _, _, span) => *span,
+            TypeCheckError::UnknownStructField(_, span) => *span,
+            TypeCheckError::StructFieldsMissing(_, span) => *span,
+            TypeCheckError::InvalidFieldAccessTarget(_, span) => *span,
         }
     }
 }
@@ -123,7 +151,24 @@ fn resolve_type_expr(def_map: &DefMap, type_expr: &TypeExpr) -> Result<Type, Typ
                 "u64" => Ok(Type::UInt64),
                 "bool" => Ok(Type::Bool),
                 _ => match &def.kind {
-                    DefKind::Type { ty_expr } => resolve_type_expr(def_map, ty_expr),
+                    DefKind::TypeAlias { ty_expr } => resolve_type_expr(def_map, ty_expr),
+                    DefKind::StructDef { fields } => {
+                        // Convert AST struct fields to Type struct fields
+                        let struct_fields = fields
+                            .iter()
+                            .map(|f| {
+                                let field_ty = resolve_type_expr(def_map, &f.ty)?;
+                                Ok(StructField {
+                                    name: f.name.clone(),
+                                    ty: field_ty,
+                                })
+                            })
+                            .collect::<Result<Vec<StructField>, _>>()?;
+                        Ok(Type::Struct {
+                            name: def.name.clone(),
+                            fields: struct_fields,
+                        })
+                    }
                     _ => Err(TypeCheckError::UnknownType(type_expr.span)),
                 },
             }
@@ -151,6 +196,7 @@ pub struct TypeChecker {
     context: ResolvedContext,
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, FuncSig>,
+    type_decls: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
 }
 
@@ -160,18 +206,21 @@ impl TypeChecker {
             context,
             type_map_builder: TypeMapBuilder::new(),
             func_sigs: HashMap::new(),
+            type_decls: HashMap::new(),
             errors: Vec::new(),
         }
     }
 
     pub fn check(&mut self) -> Result<TypeMap, Vec<TypeCheckError>> {
         self.populate_function_symbols()?;
+        self.populate_type_symbols()?;
 
         // Create split borrows so we can iterate immutably over functions while
         // mutably updating the builder & errors.
         let mut checker = Checker {
             context: &self.context,
             func_sigs: &self.func_sigs,
+            type_decls: &self.type_decls,
             builder: &mut self.type_map_builder,
             errors: &mut self.errors,
         };
@@ -213,6 +262,44 @@ impl TypeChecker {
         }
         Ok(())
     }
+
+    fn populate_type_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
+        for type_decl in self.context.module.type_decls() {
+            match &type_decl.kind {
+                TypeDeclKind::Alias { aliased_ty } => {
+                    // Resolve the aliased type
+                    let ty = resolve_type_expr(&self.context.def_map, aliased_ty)
+                        .map_err(|e| vec![e])?;
+
+                    self.type_decls.insert(type_decl.name.clone(), ty);
+                }
+
+                TypeDeclKind::Struct { fields } => {
+                    // Resolve each struct field type
+                    let struct_fields = fields
+                        .iter()
+                        .map(|f| {
+                            let field_ty = resolve_type_expr(&self.context.def_map, &f.ty)
+                                .map_err(|e| vec![e])?;
+                            Ok(StructField {
+                                name: f.name.clone(),
+                                ty: field_ty,
+                            })
+                        })
+                        .collect::<Result<_, Vec<TypeCheckError>>>()?;
+
+                    // Create the struct type
+                    let ty = Type::Struct {
+                        name: type_decl.name.clone(),
+                        fields: struct_fields,
+                    };
+
+                    self.type_decls.insert(type_decl.name.clone(), ty);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 // Internal helper used during checking to avoid self-borrow conflicts. It holds
@@ -223,6 +310,7 @@ impl TypeChecker {
 struct Checker<'c, 'b> {
     context: &'c ResolvedContext,
     func_sigs: &'c HashMap<String, FuncSig>,
+    type_decls: &'c HashMap<String, Type>,
     builder: &'b mut TypeMapBuilder,
     errors: &'b mut Vec<TypeCheckError>,
 }
@@ -409,6 +497,96 @@ impl<'c, 'b> Checker<'c, 'b> {
                 Ok(fields[index_usize].clone())
             }
             _ => Err(TypeCheckError::InvalidTupleFieldAccessTarget(
+                target_ty,
+                target.span,
+            )),
+        }
+    }
+
+    fn type_check_struct_lit(
+        &mut self,
+        expr: &Expr,
+        name: &String,
+        fields: &[StructLitField],
+    ) -> Result<Type, TypeCheckError> {
+        // Lookup the struct type
+        let struct_ty = self
+            .type_decls
+            .get(name)
+            .ok_or_else(|| TypeCheckError::UnknownStructType(name.clone(), expr.span))?;
+
+        let mut seen_fields = HashSet::new();
+
+        // Type check each field
+        for field in fields {
+            // Check that the field is defined in the struct
+            if !struct_ty.has_field(&field.name) {
+                return Err(TypeCheckError::UnknownStructField(
+                    field.name.clone(),
+                    expr.span,
+                ));
+            }
+
+            // Check for duplicate fields
+            if !seen_fields.insert(&field.name) {
+                return Err(TypeCheckError::DuplicateStructField(
+                    field.name.clone(),
+                    expr.span,
+                ));
+            }
+
+            // Type check the field
+            let expected_ty = struct_ty.struct_field_type(&field.name);
+            let actual_ty = self.type_check_expr(&field.value)?;
+
+            if actual_ty != expected_ty {
+                return Err(TypeCheckError::StructFieldTypeMismatch(
+                    field.name.clone(),
+                    expected_ty,
+                    actual_ty,
+                    field.span,
+                ));
+            }
+        }
+
+        // Check for missing fields
+        let mut missing_fields = Vec::new();
+        match struct_ty {
+            Type::Struct { fields, .. } => {
+                for field in fields {
+                    if !seen_fields.contains(&field.name) {
+                        missing_fields.push(field.name.clone());
+                    }
+                }
+            }
+            _ => panic!("Expected struct type"),
+        }
+        if !missing_fields.is_empty() {
+            return Err(TypeCheckError::StructFieldsMissing(
+                missing_fields.join(", "),
+                expr.span,
+            ));
+        }
+
+        Ok(struct_ty.clone())
+    }
+
+    fn type_check_field_access(
+        &mut self,
+        target: &Expr,
+        field: &str,
+    ) -> Result<Type, TypeCheckError> {
+        // Type check target
+        let target_ty = self.type_check_expr(target)?;
+        match target_ty {
+            Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
+                Some(field) => Ok(field.ty.clone()),
+                None => Err(TypeCheckError::UnknownStructField(
+                    field.to_string(),
+                    target.span,
+                )),
+            },
+            _ => Err(TypeCheckError::InvalidFieldAccessTarget(
                 target_ty,
                 target.span,
             )),
@@ -719,6 +897,10 @@ impl<'c, 'b> Checker<'c, 'b> {
             ExprKind::TupleFieldAccess { target, index } => {
                 self.type_check_tuple_field_access(target, *index)
             }
+
+            ExprKind::StructLit { name, fields } => self.type_check_struct_lit(expr, name, fields),
+
+            ExprKind::FieldAccess { target, field } => self.type_check_field_access(target, field),
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 

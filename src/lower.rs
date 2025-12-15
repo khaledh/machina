@@ -7,7 +7,9 @@ use crate::context::{AnalyzedContext, LoweredContext};
 use crate::ids::{DefId, NodeId};
 use crate::ir::builder::IrFunctionBuilder;
 use crate::ir::types::{IrFunction, IrOperand, IrTempId, IrTerminator, IrType};
-use crate::layout::{try_const_fold_array_linear_index, tuple_field_byte_offset};
+use crate::layout::{
+    struct_field_byte_offset, try_const_fold_array_linear_index, tuple_field_byte_offset,
+};
 use crate::types::Type;
 
 #[derive(Debug, Error)]
@@ -50,6 +52,9 @@ pub enum LowerError {
 
     #[error("Tuple is not a temp: Node {0}, Operand {1:?}")]
     TupleIsNotTemp(NodeId, IrOperand),
+
+    #[error("Struct literal requires a destination temp: Node {0}")]
+    StructLitRequiresDestTemp(NodeId),
 }
 
 fn lower_type(ty: &Type) -> IrType {
@@ -70,6 +75,10 @@ fn lower_type(ty: &Type) -> IrType {
         },
         Type::Tuple { fields } => IrType::Tuple {
             fields: fields.iter().map(lower_type).collect(),
+        },
+        Type::Struct { fields, .. } => IrType::Tuple {
+            // structs are lowered as tuples of their fields
+            fields: fields.iter().map(|f| lower_type(&f.ty)).collect(),
         },
     }
 }
@@ -102,6 +111,15 @@ impl Place {
 
     fn tuple_field(p: &Place, field_index: usize, field_ty: Type) -> Place {
         let field_offset = tuple_field_byte_offset(&p.ty, field_index).0;
+        Place {
+            base: p.base,
+            byte_offset: p.byte_offset + field_offset,
+            ty: field_ty,
+        }
+    }
+
+    fn struct_field(p: &Place, field_name: &str, field_ty: Type) -> Place {
+        let field_offset = struct_field_byte_offset(&p.ty, field_name).0;
         Place {
             base: p.base,
             byte_offset: p.byte_offset + field_offset,
@@ -485,6 +503,35 @@ impl<'a> Lowerer<'a> {
                 let offset_op = fb.new_const_int(offset as i64, 64, false);
                 fb.store_at_byte_offset(base_temp, offset_op, value_op);
             }
+            ast::ExprKind::FieldAccess { .. } => {
+                // Compute (base_temp, byte_offset) from the assignee lvalue
+                let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, assignee)? else {
+                    return Err(LowerError::UnsupportedAssignee(
+                        expr.id,
+                        assignee.kind.clone(),
+                    ));
+                };
+
+                // Type of the assigned location
+                let dest_ty = self.get_node_type(expr)?;
+                let dest_ir_ty = lower_type(&dest_ty);
+
+                if dest_ir_ty.is_compound() {
+                    // Compound type assignment: lower value into place
+                    let dest_place = Place::with_offset(
+                        &Place::root(base_temp, dest_ty.clone()),
+                        offset,
+                        dest_ty,
+                    );
+                    self.lower_expr_into_place(fb, value, &dest_place)?;
+                    return Ok(fb.new_const_unit());
+                }
+
+                // Scalar store
+                let value_op = self.lower_expr(fb, value, None)?;
+                let offset_op = fb.new_const_int(offset as i64, 64, false);
+                fb.store_at_byte_offset(base_temp, offset_op, value_op);
+            }
             _ => {
                 return Err(LowerError::UnsupportedAssignee(
                     expr.id,
@@ -705,6 +752,21 @@ impl<'a> Lowerer<'a> {
         Ok(IrOperand::Temp(dest_temp))
     }
 
+    fn lower_struct_lit(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        expr: &ast::Expr,
+        fields: &[ast::StructLitField],
+        dest_temp: IrTempId,
+        base_offset: usize,
+    ) -> Result<IrOperand, LowerError> {
+        let struct_ty = &self.get_node_type(expr)?;
+        let base_place = Place::root(dest_temp, struct_ty.clone());
+        let dest_place = Place::with_offset(&base_place, base_offset, struct_ty.clone());
+        self.lower_struct_lit_into_place(fb, fields, &dest_place)?;
+        Ok(IrOperand::Temp(dest_temp))
+    }
+
     // Get the place of an expression, either from a base and offset or by materializing into a temp
     fn place_of_expr(
         &mut self,
@@ -779,6 +841,28 @@ impl<'a> Lowerer<'a> {
         Ok(Self::read_place(fb, &field_place))
     }
 
+    fn lower_struct_field_access(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        target: &ast::Expr,
+        field: &str,
+    ) -> Result<IrOperand, LowerError> {
+        let target_place = self.place_of_expr(fb, target)?;
+
+        let target_ty = &target_place.ty;
+        let field_ty = match target_ty {
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .find(|f| f.name == field)
+                .map(|f| f.ty.clone())
+                .expect("Field not found in struct"),
+            _ => unreachable!(),
+        };
+
+        let field_place = Place::struct_field(&target_place, field, field_ty);
+        Ok(Self::read_place(fb, &field_place))
+    }
+
     // Extract the base temp and offset from a chain of tuple field accesses.
     // Returns (base_temp, accumulated_offset) if the expr is a simple chain,
     // otherwise None (i.e. fallback to memcpy).
@@ -837,6 +921,21 @@ impl<'a> Lowerer<'a> {
                 Ok(None)
             }
 
+            // Recursive case: FieldAccess
+            ast::ExprKind::FieldAccess { target, field } => {
+                // Try to get the base temp and offset from the target
+                if let Some((base_temp, offset)) = self.try_get_base_and_offset(fb, target)? {
+                    // Get the target's type (should be a struct)
+                    let target_ty = &self.get_node_type(target)?;
+                    let field_offset = struct_field_byte_offset(target_ty, field).0;
+
+                    // Combine offsets
+                    Ok(Some((base_temp, offset + field_offset)))
+                } else {
+                    Ok(None)
+                }
+            }
+
             // Any other expression: fall back to memcpy
             _ => Ok(None),
         }
@@ -853,6 +952,9 @@ impl<'a> Lowerer<'a> {
         match &expr.kind {
             ast::ExprKind::TupleLit(fields) => self.lower_tuple_lit_into_place(fb, fields, dest),
             ast::ExprKind::ArrayLit(elems) => self.lower_array_lit_into_place(fb, elems, dest),
+            ast::ExprKind::StructLit { fields, .. } => {
+                self.lower_struct_lit_into_place(fb, fields, dest)
+            }
             _ => {
                 if dest_ir_ty.is_compound() {
                     // Best case: expression is already a const-addressable sub-place
@@ -903,6 +1005,20 @@ impl<'a> Lowerer<'a> {
             let field_ty = &self.get_node_type(field)?;
             let field_place = Place::tuple_field(dest, i, field_ty.clone());
             self.lower_expr_into_place(fb, field, &field_place)?;
+        }
+        Ok(())
+    }
+
+    fn lower_struct_lit_into_place(
+        &mut self,
+        fb: &mut IrFunctionBuilder,
+        fields: &[ast::StructLitField],
+        dest: &Place,
+    ) -> Result<(), LowerError> {
+        for field in fields {
+            let field_ty = &self.get_node_type(&field.value)?;
+            let field_place = Place::struct_field(dest, &field.name, field_ty.clone());
+            self.lower_expr_into_place(fb, &field.value, &field_place)?;
         }
         Ok(())
     }
@@ -996,6 +1112,16 @@ impl<'a> Lowerer<'a> {
             }
             ast::ExprKind::TupleFieldAccess { target, index } => {
                 self.lower_tuple_field_access(fb, target, *index)
+            }
+            ast::ExprKind::StructLit { fields, .. } => {
+                if let Some(dest_temp) = dest_temp {
+                    self.lower_struct_lit(fb, expr, fields, dest_temp, 0)
+                } else {
+                    Err(LowerError::StructLitRequiresDestTemp(expr.id))
+                }
+            }
+            ast::ExprKind::FieldAccess { target, field } => {
+                self.lower_struct_field_access(fb, target, field)
             }
         }
     }

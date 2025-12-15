@@ -173,6 +173,15 @@ impl<'a> NrvoSafetyChecker<'a> {
                 _ => self.check_expr(target, false),
             },
 
+            ExprKind::StructLit { fields, .. } => fields
+                .iter()
+                .all(|field| self.check_expr(&field.value, false)),
+
+            ExprKind::FieldAccess { target, .. } => match &target.kind {
+                ExprKind::VarRef(_) if self.is_target_var(target) => true,
+                _ => self.check_expr(target, false),
+            },
+
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
 
             ExprKind::BinOp { left, right, .. } => {

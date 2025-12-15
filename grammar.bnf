@@ -3,13 +3,20 @@
 # Top-level
 Module             ::= Decl*
 
-Decl               ::= Function | TypeAlias
+Decl               ::= Function | TypeDecl
 
 Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )? Block
 FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
 FunctionParam      ::= Identifier ":" TypeExpr
 
-TypeAlias          ::= "type" Identifier "=" TypeExpr ";"
+# Type Declarations
+TypeDecl           ::= "type" Identifier "=" TypeDeclBody
+TypeDeclBody       ::= TypeExpr ";"     # Type alias
+                     | StructDef
+
+StructDef          ::= "{" StructFieldList? "}"
+StructFieldList    ::= StructField ("," StructField)* ","?
+StructField        ::= Identifier ":" TypeExpr
 
 # Type Expressions
 TypeExpr           ::= NamedType | ArrayType | TupleType
@@ -61,23 +68,29 @@ MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
 UnaryExpr          ::= ( "-" | "!" ) UnaryExpr 
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | Index | TupleFieldAccess )*
+PostfixExpr        ::= Primary ( Call | Index | TupleFieldAccess | FieldAccess )*
 
 Call               ::= "(" Expr ("," Expr)* ","? ")"
 Index              ::= "[" Expr ("," Expr)* ","? "]"
 TupleFieldAccess   ::= "." Integer
+FieldAccess        ::= "." Identifier
 
 Primary            ::= Unit
                      | Integer
                      | Boolean
                      | ArrayLit
                      | TupleLit
+                     | StructLit
                      | Identifier
                      | "(" Expr ")"
                      | Block
 
 ArrayLit           ::= "[" ( Expr ( "," Expr )* ","? )? "]"
 TupleLit           ::= "(" Expr "," ( Expr ( "," Expr )* )? ","? ")"
+
+StructLit          ::= Identifier "{" StructLitFieldList? "}"
+StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
+StructLitField     ::= Identifier ":" Expr
 
 # Terminals
 Unit               ::= "()"

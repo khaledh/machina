@@ -30,18 +30,32 @@ use crate::resolver::resolve;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
-type TwoDimArray = u64[2, 3];
+type Point = {
+  x: u64,
+  y: u64,
+}
 
-fn get_two_dim_array() -> TwoDimArray {
-  [
-    [1, 2, 3],
-    [4, 5, 6],
-  ]
+type Line = {
+  start: Point,
+  end: Point,
+}
+
+fn add_points(a: Point, b: Point) -> Point {
+    Point {
+        x: a.x + b.x,
+        y: a.y + b.y,
+    }
 }
 
 fn main() -> u64 {
-    let arr = get_two_dim_array();
-    arr[0, 1]
+    let arr = [
+        Point { x: 10, y: 20 },
+        Point { x: 30, y: 40 },
+        Point { x: 50, y: 60 },
+    ];
+    let sum1 = add_points(arr[0], arr[1]);
+    let sum2 = add_points(sum1, arr[2]);
+    sum2.x + sum2.y
 }
 "#;
 

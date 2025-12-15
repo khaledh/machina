@@ -4,7 +4,10 @@ use thiserror::Error;
 
 use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
-use crate::ast::{Decl, ExprKind, Function, Module, Pattern, TypeAlias, TypeExpr, TypeExprKind};
+use crate::ast::{
+    Decl, ExprKind, Function, Module, Pattern, StructField, TypeDecl, TypeDeclKind, TypeExpr,
+    TypeExprKind,
+};
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
 use crate::ids::{DefId, DefIdGen, NodeId};
@@ -14,7 +17,8 @@ use crate::types::BUILTIN_TYPES;
 pub enum SymbolKind {
     Var { is_mutable: bool },
     Func,
-    Type { ty_expr: TypeExpr },
+    TypeAlias { ty_expr: TypeExpr },
+    StructDef { fields: Vec<StructField> },
 }
 
 impl fmt::Display for SymbolKind {
@@ -22,7 +26,14 @@ impl fmt::Display for SymbolKind {
         match self {
             SymbolKind::Var { .. } => write!(f, "var"),
             SymbolKind::Func => write!(f, "func"),
-            SymbolKind::Type { ty_expr } => write!(f, "type[{}]", ty_expr),
+            SymbolKind::TypeAlias { ty_expr } => write!(f, "type_alias[{}]", ty_expr),
+            SymbolKind::StructDef { fields } => {
+                let field_names = fields
+                    .iter()
+                    .map(|field| field.name.as_str())
+                    .collect::<Vec<_>>();
+                write!(f, "struct_def[{}]", field_names.join(", "))
+            }
         }
     }
 }
@@ -64,6 +75,9 @@ pub enum ResolveError {
 
     #[error("Undefined type: {0}")]
     TypeUndefined(String, Span),
+
+    #[error("Undefined struct: {0}")]
+    StructUndefined(String, Span),
 }
 
 impl ResolveError {
@@ -77,6 +91,7 @@ impl ResolveError {
             ResolveError::InvalidCallee(_, span) => *span,
             ResolveError::ExpectedType(_, _, span) => *span,
             ResolveError::TypeUndefined(_, span) => *span,
+            ResolveError::StructUndefined(_, span) => *span,
         }
     }
 }
@@ -142,7 +157,8 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::Type { ty_expr } => DefKind::Type { ty_expr },
+            SymbolKind::TypeAlias { ty_expr } => DefKind::TypeAlias { ty_expr },
+            SymbolKind::StructDef { fields } => DefKind::StructDef { fields },
             SymbolKind::Func => DefKind::Func,
             SymbolKind::Var { .. } => DefKind::LocalVar,
         }
@@ -168,30 +184,52 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
-        self.populate_type_aliases(&module.type_aliases());
+        self.populate_type_decls(&module.type_decls());
         self.populate_funcs(&module.funcs());
     }
 
-    fn populate_type_aliases(&mut self, type_aliases: &[&TypeAlias]) {
-        for &type_alias in type_aliases {
+    fn populate_type_decls(&mut self, type_decls: &[&TypeDecl]) {
+        for &type_decl in type_decls {
             let def_id = self.def_id_gen.new_id();
+
+            // Map type decl kind to a (def kind, symbol kind) pair
+            let (def_kind, symbol_kind) = match &type_decl.kind {
+                TypeDeclKind::Alias { aliased_ty } => (
+                    DefKind::TypeAlias {
+                        ty_expr: aliased_ty.clone(),
+                    },
+                    SymbolKind::TypeAlias {
+                        ty_expr: aliased_ty.clone(),
+                    },
+                ),
+                TypeDeclKind::Struct { fields } => (
+                    DefKind::StructDef {
+                        fields: fields.clone(),
+                    },
+                    SymbolKind::StructDef {
+                        fields: fields.clone(),
+                    },
+                ),
+            };
+
+            // Create a new Def
             let def = Def {
                 id: def_id,
-                name: type_alias.name.clone(),
-                kind: DefKind::Type {
-                    ty_expr: type_alias.aliased_ty.clone(),
-                },
+                name: type_decl.name.clone(),
+                kind: def_kind,
                 nrvo_eligible: false,
             };
-            self.def_map_builder.record_def(def, type_alias.id);
+
+            // Record the def
+            self.def_map_builder.record_def(def, type_decl.id);
+
+            // Insert the symbol
             self.insert_symbol(
-                &type_alias.name,
+                &type_decl.name,
                 Symbol {
                     def_id,
-                    name: type_alias.name.clone(),
-                    kind: SymbolKind::Type {
-                        ty_expr: type_alias.aliased_ty.clone(),
-                    },
+                    name: type_decl.name.clone(),
+                    kind: symbol_kind,
                 },
             );
         }
@@ -225,7 +263,7 @@ impl SymbolResolver {
             for ty in BUILTIN_TYPES {
                 checker.add_built_in_symbol(
                     &ty.to_string(),
-                    SymbolKind::Type {
+                    SymbolKind::TypeAlias {
                         ty_expr: TypeExpr {
                             id: NodeId(0),
                             kind: TypeExprKind::Named(ty.to_string()),
@@ -237,7 +275,7 @@ impl SymbolResolver {
             checker.populate_decls(module);
             for decl in &module.decls {
                 match decl {
-                    Decl::TypeAlias(type_alias) => checker.check_type_alias(type_alias),
+                    Decl::TypeDecl(type_decl) => checker.check_type_decl(type_decl),
                     Decl::Function(function) => checker.check_function(function),
                 }
             }
@@ -252,8 +290,19 @@ impl SymbolResolver {
         }
     }
 
-    fn check_type_alias(&mut self, type_alias: &TypeAlias) {
-        self.check_type_expr(&type_alias.aliased_ty);
+    fn check_type_decl(&mut self, type_decl: &TypeDecl) {
+        match &type_decl.kind {
+            TypeDeclKind::Alias { aliased_ty } => {
+                // resolve the aliased type expr
+                self.check_type_expr(aliased_ty);
+            }
+            TypeDeclKind::Struct { fields } => {
+                // resolve each struct field type expr
+                for field in fields {
+                    self.check_type_expr(&field.ty);
+                }
+            }
+        }
     }
 
     fn check_function(&mut self, function: &ast::Function) {
@@ -328,6 +377,9 @@ impl SymbolResolver {
             ExprKind::TupleFieldAccess { target, .. } => {
                 self.check_lvalue_mutability(target);
             }
+            ExprKind::FieldAccess { target, .. } => {
+                self.check_lvalue_mutability(target);
+            }
             _ => {
                 self.errors.push(ResolveError::InvalidAssignmentTarget(
                     expr.kind.clone(),
@@ -380,14 +432,27 @@ impl SymbolResolver {
     fn check_type_expr(&mut self, type_expr: &ast::TypeExpr) {
         match &type_expr.kind {
             ast::TypeExprKind::Named(name) => match self.lookup_symbol(name) {
-                Some(symbol) if matches!(symbol.kind, SymbolKind::Type { .. }) => {
-                    self.def_map_builder.record_use(type_expr.id, symbol.def_id);
+                Some(Symbol {
+                    def_id,
+                    kind: SymbolKind::TypeAlias { .. },
+                    ..
+                }) => {
+                    self.def_map_builder.record_use(type_expr.id, *def_id);
                 }
-                Some(symbol) => self.errors.push(ResolveError::ExpectedType(
-                    name.clone(),
-                    symbol.kind.clone(),
-                    type_expr.span,
-                )),
+                Some(Symbol {
+                    def_id,
+                    kind: SymbolKind::StructDef { .. },
+                    ..
+                }) => {
+                    self.def_map_builder.record_use(type_expr.id, *def_id);
+                }
+                Some(Symbol { kind, .. }) => {
+                    self.errors.push(ResolveError::ExpectedType(
+                        name.clone(),
+                        kind.clone(),
+                        type_expr.span,
+                    ));
+                }
                 None => self
                     .errors
                     .push(ResolveError::TypeUndefined(name.clone(), type_expr.span)),
@@ -427,6 +492,31 @@ impl SymbolResolver {
             }
 
             ExprKind::TupleFieldAccess { target, .. } => {
+                self.check_expr(target);
+            }
+
+            ExprKind::StructLit { name, fields } => {
+                // Resolve the struct name
+                match self.lookup_symbol(name) {
+                    Some(Symbol {
+                        def_id,
+                        kind: SymbolKind::StructDef { .. },
+                        ..
+                    }) => {
+                        self.def_map_builder.record_use(expr.id, *def_id);
+                    }
+                    _ => self
+                        .errors
+                        .push(ResolveError::StructUndefined(name.clone(), expr.span)),
+                }
+
+                // Resolve each field value
+                for field in fields {
+                    self.check_expr(&field.value);
+                }
+            }
+
+            ExprKind::FieldAccess { target, .. } => {
                 self.check_expr(target);
             }
 
