@@ -388,7 +388,6 @@ pub enum IrInst {
         operand: IrOperand,
     },
 
-    // Calls (all args passed by value; no aggregates yet)
     Call {
         result: Option<IrTempId>,
         name: String,
@@ -401,12 +400,12 @@ pub enum IrInst {
         incoming: Vec<(IrBlockId, IrTempId)>,
     },
 
-    StoreAtByteOffset {
+    Store {
         base: IrTempId,
         byte_offset: IrOperand,
         value: IrOperand,
     },
-    LoadAtByteOffset {
+    Load {
         base: IrTempId,
         byte_offset: IrOperand,
         result: IrTempId,
@@ -429,8 +428,8 @@ impl IrInst {
             IrInst::UnaryOp { result, .. } => Some(*result),
             IrInst::Call { result, .. } => *result,
             IrInst::Phi { result, .. } => Some(*result),
-            IrInst::StoreAtByteOffset { .. } => None,
-            IrInst::LoadAtByteOffset { result, .. } => Some(*result),
+            IrInst::Store { .. } => None,
+            IrInst::Load { result, .. } => Some(*result),
             IrInst::MemCopy { dest, .. } => Some(*dest),
         }
     }
@@ -445,14 +444,14 @@ impl IrInst {
                 .iter()
                 .map(|(_, temp)| IrOperand::Temp(*temp))
                 .collect(),
-            IrInst::StoreAtByteOffset {
+            IrInst::Store {
                 base,
                 byte_offset,
                 value,
             } => {
                 vec![IrOperand::Temp(*base), *byte_offset, *value]
             }
-            IrInst::LoadAtByteOffset {
+            IrInst::Load {
                 base, byte_offset, ..
             } => {
                 vec![IrOperand::Temp(*base), *byte_offset]
@@ -606,27 +605,27 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             }
             write!(f, "]")?;
         }
-        IrInst::StoreAtByteOffset {
+        IrInst::Store {
             base,
             byte_offset,
             value,
         } => {
             write!(
                 f,
-                "store.at.byte.offset %t{}[offset={}] = {}",
+                "store %t{}[offset={}] = {}",
                 base.id(),
                 format_operand(byte_offset),
                 format_operand(value)
             )?;
         }
-        IrInst::LoadAtByteOffset {
+        IrInst::Load {
             base,
             byte_offset,
             result,
         } => {
             write!(
                 f,
-                "%t{} = load.at.byte.offset %t{}[offset={}] : {}",
+                "%t{} = load %t{}[offset={}] : {}",
                 result.id(),
                 base.id(),
                 format_operand(byte_offset),

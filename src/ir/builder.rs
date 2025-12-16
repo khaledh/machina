@@ -240,26 +240,16 @@ impl IrFunctionBuilder {
         self.emit_inst(IrInst::Phi { result, incoming });
     }
 
-    pub fn store_at_byte_offset(
-        &mut self,
-        base: IrTempId,
-        byte_offset: IrOperand,
-        value: IrOperand,
-    ) {
-        self.emit_inst(IrInst::StoreAtByteOffset {
+    pub fn store(&mut self, base: IrTempId, byte_offset: IrOperand, value: IrOperand) {
+        self.emit_inst(IrInst::Store {
             base,
             byte_offset,
             value,
         });
     }
 
-    pub fn load_at_byte_offset(
-        &mut self,
-        result: IrTempId,
-        base: IrTempId,
-        byte_offset: IrOperand,
-    ) {
-        self.emit_inst(IrInst::LoadAtByteOffset {
+    pub fn load(&mut self, result: IrTempId, base: IrTempId, byte_offset: IrOperand) {
+        self.emit_inst(IrInst::Load {
             result,
             base,
             byte_offset,

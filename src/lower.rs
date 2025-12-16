@@ -473,7 +473,7 @@ impl<'a> Lowerer<'a> {
                 }
 
                 let value_op = self.lower_expr(fb, value, None)?;
-                fb.store_at_byte_offset(array_place.base, byte_offset_op, value_op);
+                fb.store(array_place.base, byte_offset_op, value_op);
             }
             ast::ExprKind::TupleFieldAccess { .. } => {
                 // Compute (base_temp, byte_offset) from the assignee lvalue
@@ -501,7 +501,7 @@ impl<'a> Lowerer<'a> {
                 // Scalar store
                 let value_op = self.lower_expr(fb, value, None)?;
                 let offset_op = fb.new_const_int(offset as i64, 64, false);
-                fb.store_at_byte_offset(base_temp, offset_op, value_op);
+                fb.store(base_temp, offset_op, value_op);
             }
             ast::ExprKind::FieldAccess { .. } => {
                 // Compute (base_temp, byte_offset) from the assignee lvalue
@@ -530,7 +530,7 @@ impl<'a> Lowerer<'a> {
                 // Scalar store
                 let value_op = self.lower_expr(fb, value, None)?;
                 let offset_op = fb.new_const_int(offset as i64, 64, false);
-                fb.store_at_byte_offset(base_temp, offset_op, value_op);
+                fb.store(base_temp, offset_op, value_op);
             }
             _ => {
                 return Err(LowerError::UnsupportedAssignee(
@@ -732,7 +732,7 @@ impl<'a> Lowerer<'a> {
         }
 
         let result = fb.new_temp(result_ir_ty);
-        fb.load_at_byte_offset(result, array_place.base, byte_offset_op);
+        fb.load(result, array_place.base, byte_offset_op);
 
         Ok(IrOperand::Temp(result))
     }
@@ -988,7 +988,7 @@ impl<'a> Lowerer<'a> {
                     // Scalar: compute value and store at dest byte offset
                     let value_op = self.lower_expr(fb, expr, None)?;
                     let offset_op = fb.new_const_int(dest.byte_offset as i64, 64, false);
-                    fb.store_at_byte_offset(dest.base, offset_op, value_op);
+                    fb.store(dest.base, offset_op, value_op);
                     Ok(())
                 }
             }
@@ -1311,7 +1311,7 @@ impl<'a> Lowerer<'a> {
     fn emit_load_scalar(fb: &mut IrFunctionBuilder, place: &Place, ir_ty: &IrType) -> IrOperand {
         let offset_op = fb.new_const_int(place.byte_offset as i64, 64, false);
         let result_temp = fb.new_temp(ir_ty.clone());
-        fb.load_at_byte_offset(result_temp, place.base, offset_op);
+        fb.load(result_temp, place.base, offset_op);
         IrOperand::Temp(result_temp)
     }
 

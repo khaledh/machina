@@ -304,7 +304,7 @@ fn test_nrvo_eligible_array() {
     // Verify all stores use t0 (the return temp) and there's no MemCopy
     for inst in entry_insts {
         match inst {
-            IrInst::StoreAtByteOffset { base, .. } => {
+            IrInst::Store { base, .. } => {
                 assert_eq!(
                     base.id(),
                     0,
@@ -339,7 +339,7 @@ fn test_nrvo_array_with_element_read() {
     // Verify stores use t0 (the return temp)
     for i in 0..3 {
         match &entry_insts[i] {
-            IrInst::StoreAtByteOffset { base, .. } => {
+            IrInst::Store { base, .. } => {
                 assert_eq!(
                     base.id(),
                     0,
@@ -352,7 +352,7 @@ fn test_nrvo_array_with_element_read() {
 
     // Verify load reads from t0 (the return temp)
     match &entry_insts[3] {
-        IrInst::LoadAtByteOffset { base, .. } => {
+        IrInst::Load { base, .. } => {
             assert_eq!(base.id(), 0, "Load should be from return temp t0");
         }
         other => panic!("Expected LoadAtByteOffset, found {:?}", other),
@@ -515,7 +515,7 @@ fn test_multidim_array_literal_lowering() {
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::StoreAtByteOffset { .. }))
+        .filter(|inst| matches!(inst, IrInst::Store { .. }))
         .count();
 
     assert_eq!(store_count, 6, "Expected 6 stores for flattened 2D array");
@@ -586,7 +586,7 @@ fn test_3d_array_lowering() {
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::StoreAtByteOffset { .. }))
+        .filter(|inst| matches!(inst, IrInst::Store { .. }))
         .count();
 
     assert_eq!(store_count, 8, "Expected 8 store instructions for 3D array");
@@ -643,14 +643,14 @@ fn test_multidim_array_assignment() {
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::StoreAtByteOffset { .. }))
+        .filter(|inst| matches!(inst, IrInst::Store { .. }))
         .count();
 
     let load_count = ir_func
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::LoadAtByteOffset { .. }))
+        .filter(|inst| matches!(inst, IrInst::Load { .. }))
         .count();
 
     assert!(
@@ -693,7 +693,7 @@ fn test_nested_tuple_field_access_optimization() {
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::LoadAtByteOffset { .. }))
+        .filter(|inst| matches!(inst, IrInst::Load { .. }))
         .count();
 
     assert_eq!(
@@ -707,7 +707,7 @@ fn test_nested_tuple_field_access_optimization() {
         .values()
         .flat_map(|block| block.insts().iter())
         .filter_map(|inst| {
-            if let IrInst::LoadAtByteOffset {
+            if let IrInst::Load {
                 base, byte_offset, ..
             } = inst
             {
@@ -775,7 +775,7 @@ fn test_array_in_tuple_index_optimization() {
         .blocks
         .values()
         .flat_map(|block| block.insts().iter())
-        .filter(|inst| matches!(inst, IrInst::LoadAtByteOffset { .. }))
+        .filter(|inst| matches!(inst, IrInst::Load { .. }))
         .count();
 
     assert_eq!(
@@ -789,7 +789,7 @@ fn test_array_in_tuple_index_optimization() {
         .values()
         .flat_map(|block| block.insts().iter())
         .filter_map(|inst| {
-            if let IrInst::LoadAtByteOffset {
+            if let IrInst::Load {
                 base, byte_offset, ..
             } = inst
             {

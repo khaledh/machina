@@ -500,19 +500,19 @@ impl<'a> FuncCodegen<'a> {
                 // Phi nodes are handled by register allocator moves
                 // No code needs to be emitted here
             }
-            IrInst::StoreAtByteOffset {
+            IrInst::Store {
                 base,
                 byte_offset,
                 value,
             } => {
-                asm.push_str(&self.emit_store_at_byte_offset(*base, byte_offset, value)?);
+                asm.push_str(&self.emit_store(*base, byte_offset, value)?);
             }
-            IrInst::LoadAtByteOffset {
+            IrInst::Load {
                 base,
                 byte_offset,
                 result,
             } => {
-                asm.push_str(&self.emit_load_at_byte_offset(*result, *base, byte_offset)?);
+                asm.push_str(&self.emit_load(*result, *base, byte_offset)?);
             }
             IrInst::MemCopy {
                 dest,
@@ -657,7 +657,7 @@ impl<'a> FuncCodegen<'a> {
         Ok(())
     }
 
-    fn emit_store_at_byte_offset(
+    fn emit_store(
         &mut self,
         base: IrTempId,
         byte_offset: &IrOperand,
@@ -706,7 +706,7 @@ impl<'a> FuncCodegen<'a> {
         Ok(())
     }
 
-    pub fn emit_load_at_byte_offset(
+    pub fn emit_load(
         &mut self,
         result: IrTempId,
         base: IrTempId,

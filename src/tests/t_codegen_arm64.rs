@@ -299,7 +299,7 @@ fn array_u8_ty(len: usize) -> IrType {
 }
 
 #[test]
-fn test_store_at_byte_offset_const_index() {
+fn test_store_const_index() {
     // fn test(arr: u64[10]) {
     //   *(arr + 16) = 42
     // }
@@ -307,7 +307,7 @@ fn test_store_at_byte_offset_const_index() {
     let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
     let value = const_u64(42);
 
-    builder.store_at_byte_offset(array_param, const_u64(16), value);
+    builder.store(array_param, const_u64(16), value);
     builder.terminate(IrTerminator::Ret { value: None });
 
     let func = builder.finish();
@@ -333,7 +333,7 @@ fn test_store_at_byte_offset_const_index() {
 }
 
 #[test]
-fn test_load_at_byte_offset_const_index() {
+fn test_load_const_index() {
     // fn test(arr: u64[10]) -> u64 {
     //   *(arr + 24)
     // }
@@ -341,7 +341,7 @@ fn test_load_at_byte_offset_const_index() {
     let array_param = builder.new_param(0, "arr".to_string(), array_u64_ty(10));
     let result = builder.new_temp(u64_ty());
 
-    builder.load_at_byte_offset(result, array_param, const_u64(24));
+    builder.load(result, array_param, const_u64(24));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
@@ -369,7 +369,7 @@ fn test_load_at_byte_offset_const_index() {
 }
 
 #[test]
-fn test_store_at_byte_offset_variable_index() {
+fn test_store_variable_index() {
     // fn test(arr: u64[10], byte_off: u64) {
     //   *(arr + byte_off) = 99
     // }
@@ -378,7 +378,7 @@ fn test_store_at_byte_offset_variable_index() {
     let index_param = builder.new_param(1, "byte_off".to_string(), u64_ty());
     let value = const_u64(99);
 
-    builder.store_at_byte_offset(array_param, temp_operand(index_param), value);
+    builder.store(array_param, temp_operand(index_param), value);
     builder.terminate(IrTerminator::Ret { value: None });
 
     let func = builder.finish();
@@ -404,7 +404,7 @@ fn test_store_at_byte_offset_variable_index() {
 }
 
 #[test]
-fn test_load_at_byte_offset_variable_index() {
+fn test_load_variable_index() {
     // fn test(arr: u64[10], byte_off: u64) -> u64 {
     //   *(arr + byte_off)
     // }
@@ -413,7 +413,7 @@ fn test_load_at_byte_offset_variable_index() {
     let index_param = builder.new_param(1, "byte_off".to_string(), u64_ty());
     let result = builder.new_temp(u64_ty());
 
-    builder.load_at_byte_offset(result, array_param, temp_operand(index_param));
+    builder.load(result, array_param, temp_operand(index_param));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
@@ -441,11 +441,11 @@ fn test_load_at_byte_offset_variable_index() {
 }
 
 #[test]
-fn test_store_at_byte_offset_different_sizes() {
+fn test_store_different_sizes() {
     // Test u32 array (4-byte elements)
     let mut builder = IrFunctionBuilder::new("test".to_string(), unit_ty());
     let array_param = builder.new_param(0, "arr".to_string(), array_u32_ty(10));
-    builder.store_at_byte_offset(
+    builder.store(
         array_param,
         const_u64(4),
         IrOperand::Const(IrConst::Int {
@@ -479,7 +479,7 @@ fn test_store_at_byte_offset_different_sizes() {
 }
 
 #[test]
-fn test_load_at_byte_offset_halfword_array() {
+fn test_load_halfword_array() {
     // Test u16 array (2-byte elements)
     let mut builder = IrFunctionBuilder::new(
         "test".to_string(),
@@ -494,7 +494,7 @@ fn test_load_at_byte_offset_halfword_array() {
         signed: false,
     });
 
-    builder.load_at_byte_offset(result, array_param, const_u64(6));
+    builder.load(result, array_param, const_u64(6));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
@@ -537,7 +537,7 @@ fn test_load_at_byte_offset_byte_array() {
         signed: false,
     });
 
-    builder.load_at_byte_offset(result, array_param, const_u64(5));
+    builder.load(result, array_param, const_u64(5));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
     });
