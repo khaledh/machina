@@ -191,16 +191,16 @@ impl fmt::Display for IrTempInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum IrType {
+    // Scalar types
     Unit,
     Int {
         bits: u8,
         signed: bool,
     },
     Bool,
-    Ptr(Box<IrType>),
-    // Agg, Array, etc.
+
+    // Aggregate types
     Array {
         elem_ty: Box<IrType>,
         dims: Vec<usize>,
@@ -222,7 +222,6 @@ impl fmt::Display for IrType {
                 }
             }
             IrType::Bool => write!(f, "bool"),
-            IrType::Ptr(ty) => write!(f, "ptr {}", ty),
             IrType::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
@@ -250,7 +249,6 @@ impl IrType {
             IrType::Unit => 0,
             IrType::Int { bits, .. } => (*bits as usize).div_ceil(8),
             IrType::Bool => 1,
-            IrType::Ptr(ty) => ty.size_of(),
             IrType::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
@@ -274,7 +272,6 @@ impl IrType {
                 }
             }
             IrType::Bool => 1,
-            IrType::Ptr(ty) => ty.align_of(),
             IrType::Array { elem_ty, .. } => (*elem_ty).align_of(),
             IrType::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
         }
