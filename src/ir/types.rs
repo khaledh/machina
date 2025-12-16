@@ -4,41 +4,6 @@ use std::fmt;
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::ir::cfg::ControlFlowGraph;
 
-// ----------- Operand -----------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IrOperand {
-    Temp(IrTempId),
-    Const(IrConst),
-}
-
-// ----------- Temp -----------
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct IrTempId(pub(crate) u32);
-
-impl IrTempId {
-    #[inline]
-    pub fn id(&self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IrTempInfo {
-    pub ty: IrType,
-    pub role: IrTempRole,
-    pub debug_name: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IrTempRole {
-    None,
-    Local,
-    Param { index: u32 },
-    Return,
-}
-
 // ----------- Const -----------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +49,41 @@ impl IrConst {
             IrConst::Unit => 0,
         }
     }
+}
+
+// ----------- Temp -----------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct IrTempId(pub(crate) u32);
+
+impl IrTempId {
+    #[inline]
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IrTemp {
+    pub kind: IrTempKind,
+    pub ty: IrType,
+    pub debug_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IrTempKind {
+    None,
+    Local,
+    Param { index: u32 },
+    Return,
+}
+
+// ----------- Operand -----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrOperand {
+    Temp(IrTempId),
+    Const(IrConst),
 }
 
 // ----------- Type -----------
@@ -163,7 +163,7 @@ pub struct IrFunction {
     pub name: String,
     pub ret_ty: IrType,
     pub ret_temp: Option<IrTempId>,
-    pub temps: Vec<IrTempInfo>,
+    pub temps: Vec<IrTemp>,
     pub blocks: IndexMap<IrBlockId, IrBlock>,
     pub cfg: ControlFlowGraph,
 }
@@ -351,14 +351,14 @@ impl fmt::Display for IrTempId {
     }
 }
 
-impl fmt::Display for IrTempInfo {
+impl fmt::Display for IrTemp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.ty)?;
-        match self.role {
-            IrTempRole::None => {}
-            IrTempRole::Local => write!(f, " local")?,
-            IrTempRole::Param { index } => write!(f, " param.{}", index)?,
-            IrTempRole::Return => write!(f, " return")?,
+        match self.kind {
+            IrTempKind::None => {}
+            IrTempKind::Local => write!(f, " local")?,
+            IrTempKind::Param { index } => write!(f, " param.{}", index)?,
+            IrTempKind::Return => write!(f, " return")?,
         }
         if let Some(name) = &self.debug_name {
             write!(f, " (name: {})", name)?;
@@ -409,7 +409,7 @@ impl fmt::Display for IrFunction {
         // Parameters
         let mut param_pos = 0;
         for (i, temp) in self.temps.iter().enumerate() {
-            if matches!(temp.role, IrTempRole::Param { .. }) {
+            if matches!(temp.kind, IrTempKind::Param { .. }) {
                 if param_pos > 0 {
                     write!(f, ", ")?;
                 }
@@ -451,8 +451,8 @@ impl fmt::Display for IrFunction {
         writeln!(f, "}}")?;
         writeln!(f, "---")?;
         writeln!(f, "Temps:")?;
-        for (i, temp_info) in self.temps.iter().enumerate() {
-            writeln!(f, "  %t{}: {}", i, temp_info)?;
+        for (i, temp) in self.temps.iter().enumerate() {
+            writeln!(f, "  %t{}: {}", i, temp)?;
         }
         writeln!(f, "---")?;
         writeln!(f, "CFG:")?;
@@ -531,7 +531,12 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
                 IrOperand::Temp(temp) => func.temp_type(*temp),
                 IrOperand::Const(c) => &c.type_of(),
             };
-            write!(f, "store %t{}[off={byte_offset}] = {value} : {}", base.id(), value_ty)?;
+            write!(
+                f,
+                "store %t{}[off={byte_offset}] = {value} : {}",
+                base.id(),
+                value_ty
+            )?;
         }
         IrInst::Load {
             base,

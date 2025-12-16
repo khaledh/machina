@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::ir::pos::InstPos;
 use crate::ir::types::{
-    IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTempRole, IrTerminator, IrType,
+    IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTempKind, IrTerminator, IrType,
 };
 use crate::regalloc::regs::{self, Arm64Reg};
 
@@ -48,7 +48,7 @@ pub struct ConstraintMap {
 pub fn analyze_fn_params(func: &IrFunction) -> Vec<FnParamConstraint> {
     let mut constraints = Vec::new();
     for (i, temp) in func.temps.iter().enumerate() {
-        if let IrTempRole::Param { index } = temp.role {
+        if let IrTempKind::Param { index } = temp.kind {
             let reg = regs::get_param_reg(index);
             constraints.push(FnParamConstraint {
                 temp: IrTempId(i as u32),

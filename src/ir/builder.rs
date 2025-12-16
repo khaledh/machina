@@ -8,7 +8,7 @@ pub struct IrFunctionBuilder {
     name: String,
     ret_ty: IrType,
     ret_temp: Option<IrTempId>,
-    temps: Vec<IrTempInfo>,
+    temps: Vec<IrTemp>,
     blocks: IndexMap<IrBlockId, IrBlock>,
     curr_block: IrBlockId,
 }
@@ -26,9 +26,9 @@ impl IrFunctionBuilder {
         let mut temps = vec![];
         if ret_ty.is_compound() {
             ret_temp = Some(IrTempId(0));
-            temps.push(IrTempInfo {
+            temps.push(IrTemp {
                 ty: ret_ty.clone(),
-                role: IrTempRole::Return,
+                kind: IrTempKind::Return,
                 debug_name: None,
             });
         }
@@ -49,9 +49,9 @@ impl IrFunctionBuilder {
 
     pub fn new_param(&mut self, index: u32, name: String, ty: IrType) -> IrTempId {
         let id = IrTempId(self.temps.len() as u32);
-        self.temps.push(IrTempInfo {
+        self.temps.push(IrTemp {
             ty,
-            role: IrTempRole::Param { index },
+            kind: IrTempKind::Param { index },
             debug_name: Some(name),
         });
         id
@@ -60,7 +60,7 @@ impl IrFunctionBuilder {
     pub fn make_local(&mut self, temp: IrTempId, name: String) {
         match self.temps.get_mut(temp.id() as usize) {
             Some(temp) => {
-                temp.role = IrTempRole::Local;
+                temp.kind = IrTempKind::Local;
                 temp.debug_name = Some(name);
             }
             None => panic!("Temp not found: {}", temp.id()),
@@ -69,9 +69,9 @@ impl IrFunctionBuilder {
 
     pub fn new_temp(&mut self, ty: IrType) -> IrTempId {
         let id = IrTempId(self.temps.len() as u32);
-        self.temps.push(IrTempInfo {
+        self.temps.push(IrTemp {
             ty,
-            role: IrTempRole::None,
+            kind: IrTempKind::None,
             debug_name: None,
         });
         id
