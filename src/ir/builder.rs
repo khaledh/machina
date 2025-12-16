@@ -71,7 +71,7 @@ impl IrFunctionBuilder {
         let id = IrTempId(self.temps.len() as u32);
         self.temps.push(IrTempInfo {
             ty,
-            role: IrTempRole::Local,
+            role: IrTempRole::None,
             debug_name: None,
         });
         id

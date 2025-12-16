@@ -33,6 +33,7 @@ pub struct IrTempInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IrTempRole {
+    None,
     Local,
     Param { index: u32 },
     Return,
@@ -339,7 +340,7 @@ impl fmt::Display for IrOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IrOperand::Temp(temp) => write!(f, "%t{}", temp.id()),
-            IrOperand::Const(c) => write!(f, "const.{}", c),
+            IrOperand::Const(c) => write!(f, "{c}"),
         }
     }
 }
@@ -352,12 +353,13 @@ impl fmt::Display for IrTempId {
 
 impl fmt::Display for IrTempInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.ty)?;
         match self.role {
-            IrTempRole::Local => write!(f, "local")?,
-            IrTempRole::Param { index } => write!(f, "param.{}", index)?,
-            IrTempRole::Return => write!(f, "return")?,
+            IrTempRole::None => {}
+            IrTempRole::Local => write!(f, " local")?,
+            IrTempRole::Param { index } => write!(f, " param.{}", index)?,
+            IrTempRole::Return => write!(f, " return")?,
         }
-        write!(f, ": {}", self.ty)?;
         if let Some(name) = &self.debug_name {
             write!(f, " (name: {})", name)?;
         }
@@ -369,8 +371,8 @@ impl fmt::Display for IrConst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IrConst::Int { value, .. } => write!(f, "{}", value),
-            IrConst::Bool(value) => write!(f, "const.bool {}", value),
-            IrConst::Unit => write!(f, "const.unit"),
+            IrConst::Bool(value) => write!(f, "bool {}", value),
+            IrConst::Unit => write!(f, "unit"),
         }
     }
 }
@@ -405,21 +407,27 @@ impl fmt::Display for IrFunction {
         write!(f, "fn {}(", self.name)?;
 
         // Parameters
-        for (i, temp) in self
-            .temps
-            .iter()
-            .filter(|temp| matches!(temp.role, IrTempRole::Param { .. }))
-            .enumerate()
-        {
-            if let Some(name) = &temp.debug_name {
-                write!(f, "{}: {}", name, temp.ty)?;
-            } else {
-                write!(f, "%t{}: {}", i, temp.ty)?;
+        let mut param_pos = 0;
+        for (i, temp) in self.temps.iter().enumerate() {
+            if matches!(temp.role, IrTempRole::Param { .. }) {
+                if param_pos > 0 {
+                    write!(f, ", ")?;
+                }
+                if let Some(name) = &temp.debug_name {
+                    write!(f, "{name} [%t{}]: {}", i, temp.ty)?;
+                } else {
+                    write!(f, "%t{}: {}", i, temp.ty)?;
+                }
+                param_pos += 1;
             }
         }
 
         // Return type
-        writeln!(f, ") -> {} {{", self.ret_ty)?;
+        write!(f, ") -> ")?;
+        if self.ret_temp.is_some() {
+            write!(f, "[%t0] ")?;
+        }
+        writeln!(f, "{} {{", self.ret_ty)?;
 
         // Blocks
         for (id, block) in self.blocks.iter() {
@@ -519,7 +527,11 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
             byte_offset,
             value,
         } => {
-            write!(f, "store %t{}[offset={byte_offset}] = {value}", base.id(),)?;
+            let value_ty = match value {
+                IrOperand::Temp(temp) => func.temp_type(*temp),
+                IrOperand::Const(c) => &c.type_of(),
+            };
+            write!(f, "store %t{}[off={byte_offset}] = {value} : {}", base.id(), value_ty)?;
         }
         IrInst::Load {
             base,
@@ -528,7 +540,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
         } => {
             write!(
                 f,
-                "%t{} = load %t{}[offset={byte_offset}] : {}",
+                "%t{} = load %t{}[off={byte_offset}] : {}",
                 result.id(),
                 base.id(),
                 func.temp_type(*result)
@@ -543,7 +555,7 @@ fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> 
         } => {
             write!(
                 f,
-                "memcpy %t{}[offset={dest_offset}] = %t{}[offset={src_offset}] : length={length}",
+                "memcpy %t{}[off={dest_offset}] <- %t{}[off={src_offset}] : len={length}",
                 dest.id(),
                 src.id(),
             )?;
