@@ -614,7 +614,7 @@ impl<'a> Parser<'a> {
                                 id: self.id_gen.new_id(),
                                 kind: ExprKind::TupleField {
                                     target: Box::new(expr),
-                                    index: *index as u32,
+                                    index: *index as usize,
                                 },
                                 span: self.close(marker.clone()),
                             };

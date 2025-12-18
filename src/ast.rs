@@ -182,7 +182,7 @@ pub enum ExprKind {
     },
     TupleField {
         target: Box<Expr>,
-        index: u32,
+        index: usize,
     },
     StructField {
         target: Box<Expr>,

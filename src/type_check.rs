@@ -76,7 +76,7 @@ pub enum TypeCheckError {
     EmptyTupleLiteral(Span),
 
     #[error("Tuple field out of bounds: tuple has {0} fields, index is {1}")]
-    TupleFieldOutOfBounds(usize, u32, Span),
+    TupleFieldOutOfBounds(usize, usize, Span),
 
     #[error("Invalid tuple field access target: expected tuple, found {0}")]
     InvalidTupleFieldAccessTarget(Type, Span),
@@ -479,7 +479,7 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_tuple_field_access(
         &mut self,
         target: &Expr,
-        index: u32,
+        index: usize,
     ) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.type_check_expr(target)?;

@@ -881,17 +881,17 @@ impl<'a> FuncLowerer<'a> {
     fn lower_tuple_field_access(
         &mut self,
         target: &Expr,
-        index: u32,
+        index: usize,
     ) -> Result<IrOperand, LowerError> {
         let target_place = self.place_of_expr(target)?;
 
         let target_ty = &target_place.ty;
         let field_ty = match target_ty {
-            Type::Tuple { fields } => fields[index as usize].clone(),
+            Type::Tuple { fields } => fields[index].clone(),
             _ => unreachable!(),
         };
 
-        let field_place = Place::tuple_field(&target_place, index as usize, field_ty);
+        let field_place = Place::tuple_field(&target_place, index, field_ty);
         Ok(self.read_place(&field_place))
     }
 
@@ -939,7 +939,7 @@ impl<'a> FuncLowerer<'a> {
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
                     // Get the target's type to compute this field's offset
                     let target_ty = &self.get_node_type(target)?;
-                    let field_offset = tuple_field_byte_offset(target_ty, *index as usize).0;
+                    let field_offset = tuple_field_byte_offset(target_ty, *index).0;
 
                     // Combine the offsets
                     Ok(Some((base_temp, offset + field_offset)))
