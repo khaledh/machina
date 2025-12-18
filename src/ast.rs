@@ -133,27 +133,22 @@ pub struct Expr {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
+    Block(Vec<Expr>),
+
+    // Literals (scalar)
     UInt64Lit(u64),
     BoolLit(bool),
     UnitLit,
+
+    // Literals (compound)
     ArrayLit(Vec<Expr>),
-    Index {
-        target: Box<Expr>,
-        indices: Vec<Expr>,
-    },
     TupleLit(Vec<Expr>),
-    TupleFieldAccess {
-        target: Box<Expr>,
-        index: u32,
-    },
     StructLit {
         name: String,
         fields: Vec<StructLitField>,
     },
-    FieldAccess {
-        target: Box<Expr>,
-        field: String,
-    },
+
+    // Operators
     BinOp {
         left: Box<Expr>,
         op: BinaryOp,
@@ -163,7 +158,8 @@ pub enum ExprKind {
         op: UnaryOp,
         expr: Box<Expr>,
     },
-    Block(Vec<Expr>),
+
+    // Bindings
     Let {
         // immutable binding
         pattern: Pattern,
@@ -176,11 +172,29 @@ pub enum ExprKind {
         decl_ty: Option<TypeExpr>,
         value: Box<Expr>,
     },
+
+    // Assignment
     Assign {
         assignee: Box<Expr>,
         value: Box<Expr>,
     },
+
+    // Var, array index, tuple/struct field
     VarRef(String),
+    ArrayIndex {
+        target: Box<Expr>,
+        indices: Vec<Expr>,
+    },
+    TupleField {
+        target: Box<Expr>,
+        index: u32,
+    },
+    StructField {
+        target: Box<Expr>,
+        field: String,
+    },
+
+    // Control flow
     If {
         cond: Box<Expr>,
         then_body: Box<Expr>,
@@ -190,6 +204,8 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Box<Expr>,
     },
+
+    // Function call
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
@@ -387,7 +403,7 @@ impl Expr {
                     elem.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::Index { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 writeln!(f, "{}Index [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;
@@ -403,7 +419,7 @@ impl Expr {
                     elem.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::TupleFieldAccess { target, index } => {
+            ExprKind::TupleField { target, index } => {
                 writeln!(f, "{}TupleFieldAccess [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;
@@ -418,7 +434,7 @@ impl Expr {
                     field.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::FieldAccess { target, field } => {
+            ExprKind::StructField { target, field } => {
                 writeln!(f, "{}FieldAccess [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;

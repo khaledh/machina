@@ -44,17 +44,11 @@ pub enum LowerError {
     #[error("Unsupported assignee: Node {0}, Kind {1:?}")]
     UnsupportedAssignee(NodeId, ExprKind),
 
-    #[error("Array literal requires a destination temp: Node {0}")]
-    ArrayLitRequiresDestTemp(NodeId),
-
-    #[error("Tuple literal requires a destination temp: Node {0}")]
-    TupleLitRequiresDestTemp(NodeId),
+    #[error("Compound literal requires a destination temp: Node {0}")]
+    CompoundLitRequiresDestTemp(NodeId),
 
     #[error("Tuple is not a temp: Node {0}, Operand {1:?}")]
     TupleIsNotTemp(NodeId, IrOperand),
-
-    #[error("Struct literal requires a destination temp: Node {0}")]
-    StructLitRequiresDestTemp(NodeId),
 }
 
 fn lower_type(ty: &Type) -> IrType {
@@ -211,6 +205,134 @@ impl<'a> FuncLowerer<'a> {
         Ok(ir_func)
     }
 
+    fn lower_expr(
+        &mut self,
+        expr: &Expr,
+        dest_temp: Option<IrTempId>,
+    ) -> Result<IrOperand, LowerError> {
+        match &expr.kind {
+            // Block
+            ExprKind::Block(body) => self.lower_block_into(expr.id, body, dest_temp),
+
+            // Literals (scalars)
+            ExprKind::UInt64Lit(value) => Ok(self.fb.new_const_int(*value as i64, 64, false)),
+            ExprKind::BoolLit(value) => Ok(self.fb.new_const_bool(*value)),
+            ExprKind::UnitLit => Ok(self.fb.new_const_unit()),
+
+            // Literals (compound)
+            ExprKind::ArrayLit(elems) => {
+                if let Some(dest_temp) = dest_temp {
+                    self.lower_array_lit(expr, elems, dest_temp)
+                } else {
+                    Err(LowerError::CompoundLitRequiresDestTemp(expr.id))
+                }
+            }
+            ExprKind::TupleLit(fields) => {
+                if let Some(dest_temp) = dest_temp {
+                    self.lower_tuple_lit(expr, fields, dest_temp, 0)
+                } else {
+                    Err(LowerError::CompoundLitRequiresDestTemp(expr.id))
+                }
+            }
+            ExprKind::StructLit { fields, .. } => {
+                if let Some(dest_temp) = dest_temp {
+                    self.lower_struct_lit(expr, fields, dest_temp, 0)
+                } else {
+                    Err(LowerError::CompoundLitRequiresDestTemp(expr.id))
+                }
+            }
+
+            // Operators
+            ExprKind::BinOp { left, op, right } => self.lower_binary_op(op, left, right),
+            ExprKind::UnaryOp { op, expr } => self.lower_unary_op(op, expr),
+
+            // Bindings
+            ExprKind::Let { pattern, value, .. } => self.lower_binding(pattern, value, false),
+            ExprKind::Var { pattern, value, .. } => self.lower_binding(pattern, value, true),
+
+            // Assignment
+            ExprKind::Assign {
+                value, assignee, ..
+            } => self.lower_assign(expr, assignee, value),
+
+            // Variable
+            ExprKind::VarRef(_) => self.lower_var_ref(expr, dest_temp),
+
+            // Control flow
+            ExprKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => self.lower_if(cond, then_body, else_body, dest_temp),
+            ExprKind::While { cond, body } => self.lower_while(cond, body),
+
+            // Function call
+            ExprKind::Call { callee, args } => match &callee.kind {
+                ExprKind::VarRef(name) => self.lower_call(expr, name.clone(), args, dest_temp),
+                _ => panic!("Unsupported callee: {:?}", callee.kind),
+            },
+
+            // Array indexing, tuple field access, struct field access
+            ExprKind::ArrayIndex { target, indices } => self.lower_index(expr, target, indices),
+            ExprKind::TupleField { target, index } => self.lower_tuple_field_access(target, *index),
+            ExprKind::StructField { target, field } => {
+                self.lower_struct_field_access(target, field)
+            }
+        }
+    }
+
+    fn lower_binding(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expr,
+        is_mutable: bool,
+    ) -> Result<IrOperand, LowerError> {
+        let value_ast_ty = self.get_node_type(value)?;
+        let value_ir_ty = lower_type(&value_ast_ty);
+
+        // For compound patterns (Tuple/Array) with a simple VarRef value,
+        // we can use the existing variable's temp directly without copying.
+        let can_use_value_directly = matches!(
+            (pattern, &value.kind),
+            (
+                Pattern::Tuple { .. } | Pattern::Array { .. },
+                ExprKind::VarRef(_)
+            )
+        ) && value_ir_ty.is_compound();
+
+        // Check if this binding is NRVO-eligible
+        let dest_temp = if can_use_value_directly {
+            // Don't create a dest_temp - we'll use the value's temp directly
+            None
+        } else if value_ir_ty.is_compound() {
+            // Check if the pattern is an Ident and if it's NRVO-eligible
+            let is_nrvo_eligible = match pattern {
+                Pattern::Ident { id, .. } => {
+                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                        def.nrvo_eligible
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if is_nrvo_eligible {
+                self.fb.ret_temp() // Use the return temp for NRVO-eligible variables
+            } else {
+                Some(self.fb.new_temp(value_ir_ty))
+            }
+        } else {
+            None
+        };
+        let value_op = self.lower_expr(value, dest_temp)?;
+
+        // Lower the pattern
+        self.lower_pattern(pattern, value_op, &value_ast_ty, is_mutable)?;
+
+        Ok(self.fb.new_const_unit())
+    }
+
     fn lower_pattern(
         &mut self,
         pattern: &Pattern,
@@ -331,58 +453,6 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn lower_binding(
-        &mut self,
-        pattern: &Pattern,
-        value: &Expr,
-        is_mutable: bool,
-    ) -> Result<IrOperand, LowerError> {
-        let value_ast_ty = self.get_node_type(value)?;
-        let value_ir_ty = lower_type(&value_ast_ty);
-
-        // For compound patterns (Tuple/Array) with a simple VarRef value,
-        // we can use the existing variable's temp directly without copying.
-        let can_use_value_directly = matches!(
-            (pattern, &value.kind),
-            (
-                Pattern::Tuple { .. } | Pattern::Array { .. },
-                ExprKind::VarRef(_)
-            )
-        ) && value_ir_ty.is_compound();
-
-        // Check if this binding is NRVO-eligible
-        let dest_temp = if can_use_value_directly {
-            // Don't create a dest_temp - we'll use the value's temp directly
-            None
-        } else if value_ir_ty.is_compound() {
-            // Check if the pattern is an Ident and if it's NRVO-eligible
-            let is_nrvo_eligible = match pattern {
-                Pattern::Ident { id, .. } => {
-                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
-                        def.nrvo_eligible
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            };
-
-            if is_nrvo_eligible {
-                self.fb.ret_temp() // Use the return temp for NRVO-eligible variables
-            } else {
-                Some(self.fb.new_temp(value_ir_ty))
-            }
-        } else {
-            None
-        };
-        let value_op = self.lower_expr(value, dest_temp)?;
-
-        // Lower the pattern
-        self.lower_pattern(pattern, value_op, &value_ast_ty, is_mutable)?;
-
-        Ok(self.fb.new_const_unit())
-    }
-
     fn lower_assign(
         &mut self,
         expr: &Expr,
@@ -414,7 +484,7 @@ impl<'a> FuncLowerer<'a> {
                     None => return Err(LowerError::VarDefNotFound(expr.id)),
                 }
             }
-            ExprKind::Index { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 // Array element assignment
                 let array_place = self.place_of_expr(target)?;
 
@@ -469,7 +539,7 @@ impl<'a> FuncLowerer<'a> {
                 let value_op = self.lower_expr(value, None)?;
                 self.fb.store(array_place.base, byte_offset_op, value_op);
             }
-            ExprKind::TupleFieldAccess { .. } => {
+            ExprKind::TupleField { .. } => {
                 // Compute (base_temp, byte_offset) from the assignee lvalue
                 let Some((base_temp, offset)) = self.try_get_base_and_offset(assignee)? else {
                     return Err(LowerError::UnsupportedAssignee(
@@ -497,7 +567,7 @@ impl<'a> FuncLowerer<'a> {
                 let offset_op = self.fb.new_const_int(offset as i64, 64, false);
                 self.fb.store(base_temp, offset_op, value_op);
             }
-            ExprKind::FieldAccess { .. } => {
+            ExprKind::StructField { .. } => {
                 // Compute (base_temp, byte_offset) from the assignee lvalue
                 let Some((base_temp, offset)) = self.try_get_base_and_offset(assignee)? else {
                     return Err(LowerError::UnsupportedAssignee(
@@ -862,7 +932,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Recursive case: TupleFieldAccess
-            ExprKind::TupleFieldAccess { target, index } => {
+            ExprKind::TupleField { target, index } => {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
                     // Get the target's type to compute this field's offset
@@ -877,7 +947,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Recursive case: Index
-            ExprKind::Index { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
                     // Get the target's type (should be an array)
@@ -902,7 +972,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Recursive case: FieldAccess
-            ExprKind::FieldAccess { target, field } => {
+            ExprKind::StructField { target, field } => {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
                     // Get the target's type (should be a struct)
@@ -1028,65 +1098,6 @@ impl<'a> FuncLowerer<'a> {
             self.lower_expr_into_place(elem_expr, &elem_place)?;
         }
         Ok(())
-    }
-
-    fn lower_expr(
-        &mut self,
-        expr: &Expr,
-        dest_temp: Option<IrTempId>,
-    ) -> Result<IrOperand, LowerError> {
-        match &expr.kind {
-            ExprKind::UInt64Lit(value) => Ok(self.fb.new_const_int(*value as i64, 64, false)),
-            ExprKind::BoolLit(value) => Ok(self.fb.new_const_bool(*value)),
-            ExprKind::UnitLit => Ok(self.fb.new_const_unit()),
-            ExprKind::BinOp { left, op, right } => self.lower_binary_op(op, left, right),
-            ExprKind::UnaryOp { op, expr } => self.lower_unary_op(op, expr),
-            ExprKind::Block(body) => self.lower_block_into(expr.id, body, dest_temp),
-            ExprKind::Let { pattern, value, .. } => self.lower_binding(pattern, value, false),
-            ExprKind::Var { pattern, value, .. } => self.lower_binding(pattern, value, true),
-            ExprKind::Assign {
-                value, assignee, ..
-            } => self.lower_assign(expr, assignee, value),
-            ExprKind::VarRef(_) => self.lower_var_ref(expr, dest_temp),
-            ExprKind::If {
-                cond,
-                then_body,
-                else_body,
-            } => self.lower_if(cond, then_body, else_body, dest_temp),
-            ExprKind::While { cond, body } => self.lower_while(cond, body),
-            ExprKind::Call { callee, args } => match &callee.kind {
-                ExprKind::VarRef(name) => self.lower_call(expr, name.clone(), args, dest_temp),
-                _ => panic!("Unsupported callee: {:?}", callee.kind),
-            },
-            ExprKind::ArrayLit(elems) => {
-                if let Some(dest_temp) = dest_temp {
-                    self.lower_array_lit(expr, elems, dest_temp)
-                } else {
-                    Err(LowerError::ArrayLitRequiresDestTemp(expr.id))
-                }
-            }
-            ExprKind::Index { target, indices } => self.lower_index(expr, target, indices),
-            ExprKind::TupleLit(fields) => {
-                if let Some(dest_temp) = dest_temp {
-                    self.lower_tuple_lit(expr, fields, dest_temp, 0)
-                } else {
-                    Err(LowerError::TupleLitRequiresDestTemp(expr.id))
-                }
-            }
-            ExprKind::TupleFieldAccess { target, index } => {
-                self.lower_tuple_field_access(target, *index)
-            }
-            ExprKind::StructLit { fields, .. } => {
-                if let Some(dest_temp) = dest_temp {
-                    self.lower_struct_lit(expr, fields, dest_temp, 0)
-                } else {
-                    Err(LowerError::StructLitRequiresDestTemp(expr.id))
-                }
-            }
-            ExprKind::FieldAccess { target, field } => {
-                self.lower_struct_field_access(target, field)
-            }
-        }
     }
 
     fn lower_binary_op(

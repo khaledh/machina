@@ -367,17 +367,17 @@ impl SymbolResolver {
                     }
                 }
             }
-            ExprKind::Index { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 // Recursively check the target. If target is mutable, then target[index] is mutable.
                 self.check_lvalue_mutability(target);
                 for index in indices {
                     self.check_expr(index);
                 }
             }
-            ExprKind::TupleFieldAccess { target, .. } => {
+            ExprKind::TupleField { target, .. } => {
                 self.check_lvalue_mutability(target);
             }
-            ExprKind::FieldAccess { target, .. } => {
+            ExprKind::StructField { target, .. } => {
                 self.check_lvalue_mutability(target);
             }
             _ => {
@@ -478,7 +478,7 @@ impl SymbolResolver {
                 }
             }
 
-            ExprKind::Index { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 self.check_expr(target);
                 for index in indices {
                     self.check_expr(index);
@@ -491,7 +491,7 @@ impl SymbolResolver {
                 }
             }
 
-            ExprKind::TupleFieldAccess { target, .. } => {
+            ExprKind::TupleField { target, .. } => {
                 self.check_expr(target);
             }
 
@@ -516,7 +516,7 @@ impl SymbolResolver {
                 }
             }
 
-            ExprKind::FieldAccess { target, .. } => {
+            ExprKind::StructField { target, .. } => {
                 self.check_expr(target);
             }
 

@@ -157,7 +157,7 @@ impl<'a> NrvoSafetyChecker<'a> {
 
             ExprKind::ArrayLit(elems) => elems.iter().all(|e| self.check_expr(e, false)),
 
-            ExprKind::Index { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 let target_ok = match &target.kind {
                     ExprKind::VarRef(_) if self.is_target_var(target) => true,
                     _ => self.check_expr(target, false),
@@ -168,7 +168,7 @@ impl<'a> NrvoSafetyChecker<'a> {
 
             ExprKind::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
-            ExprKind::TupleFieldAccess { target, .. } => match &target.kind {
+            ExprKind::TupleField { target, .. } => match &target.kind {
                 ExprKind::VarRef(_) if self.is_target_var(target) => true,
                 _ => self.check_expr(target, false),
             },
@@ -177,7 +177,7 @@ impl<'a> NrvoSafetyChecker<'a> {
                 .iter()
                 .all(|field| self.check_expr(&field.value, false)),
 
-            ExprKind::FieldAccess { target, .. } => match &target.kind {
+            ExprKind::StructField { target, .. } => match &target.kind {
                 ExprKind::VarRef(_) if self.is_target_var(target) => true,
                 _ => self.check_expr(target, false),
             },
@@ -211,8 +211,8 @@ impl<'a> NrvoSafetyChecker<'a> {
                     false
                 }
             }
-            ExprKind::Index { target, .. } => self.is_lvalue_use(target),
-            ExprKind::TupleFieldAccess { target, .. } => self.is_lvalue_use(target),
+            ExprKind::ArrayIndex { target, .. } => self.is_lvalue_use(target),
+            ExprKind::TupleField { target, .. } => self.is_lvalue_use(target),
             _ => false,
         }
     }

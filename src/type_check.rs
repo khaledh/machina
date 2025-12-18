@@ -890,17 +890,17 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),
 
-            ExprKind::Index { target, indices } => self.type_check_index(target, indices),
+            ExprKind::ArrayIndex { target, indices } => self.type_check_index(target, indices),
 
             ExprKind::TupleLit(fields) => self.type_check_tuple_lit(fields),
 
-            ExprKind::TupleFieldAccess { target, index } => {
+            ExprKind::TupleField { target, index } => {
                 self.type_check_tuple_field_access(target, *index)
             }
 
             ExprKind::StructLit { name, fields } => self.type_check_struct_lit(expr, name, fields),
 
-            ExprKind::FieldAccess { target, field } => self.type_check_field_access(target, field),
+            ExprKind::StructField { target, field } => self.type_check_field_access(target, field),
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 

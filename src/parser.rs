@@ -595,7 +595,7 @@ impl<'a> Parser<'a> {
 
                     expr = Expr {
                         id: self.id_gen.new_id(),
-                        kind: ExprKind::Index {
+                        kind: ExprKind::ArrayIndex {
                             target: Box::new(expr),
                             indices,
                         },
@@ -612,7 +612,7 @@ impl<'a> Parser<'a> {
                             self.advance();
                             expr = Expr {
                                 id: self.id_gen.new_id(),
-                                kind: ExprKind::TupleFieldAccess {
+                                kind: ExprKind::TupleField {
                                     target: Box::new(expr),
                                     index: *index as u32,
                                 },
@@ -624,7 +624,7 @@ impl<'a> Parser<'a> {
                             self.advance();
                             expr = Expr {
                                 id: self.id_gen.new_id(),
-                                kind: ExprKind::FieldAccess {
+                                kind: ExprKind::StructField {
                                     target: Box::new(expr),
                                     field: name.clone(),
                                 },

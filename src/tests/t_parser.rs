@@ -76,7 +76,7 @@ fn test_parse_multi_index_expr() {
     // Body is a block
     if let ExprKind::Block(exprs) = &func.body.kind {
         // Second expression is the index
-        if let ExprKind::Index { target, indices } = &exprs[1].kind {
+        if let ExprKind::ArrayIndex { target, indices } = &exprs[1].kind {
             // Check target is VarRef
             match &target.kind {
                 ExprKind::VarRef(name) => assert_eq!(name, "arr"),
@@ -275,7 +275,7 @@ fn test_parse_tuple_field_access() {
 
     if let ExprKind::Block(exprs) = &func.body.kind {
         // Second expression is the field access
-        if let ExprKind::TupleFieldAccess { target, index } = &exprs[1].kind {
+        if let ExprKind::TupleField { target, index } = &exprs[1].kind {
             // Check target is VarRef
             match &target.kind {
                 ExprKind::VarRef(name) => assert_eq!(name, "t"),
@@ -306,11 +306,11 @@ fn test_parse_tuple_field_access_chained() {
 
     if let ExprKind::Block(exprs) = &func.body.kind {
         // Second expression should be field access of field access
-        if let ExprKind::TupleFieldAccess { target, index } = &exprs[1].kind {
+        if let ExprKind::TupleField { target, index } = &exprs[1].kind {
             assert_eq!(*index, 0);
 
             // Inner target should also be field access
-            if let ExprKind::TupleFieldAccess {
+            if let ExprKind::TupleField {
                 target: inner_target,
                 index: inner_index,
             } = &target.kind
@@ -346,11 +346,11 @@ fn test_parse_tuple_with_array_indexing() {
 
     if let ExprKind::Block(exprs) = &func.body.kind {
         // Second expression should be index of field access
-        if let ExprKind::Index { target, indices } = &exprs[1].kind {
+        if let ExprKind::ArrayIndex { target, indices } = &exprs[1].kind {
             assert_eq!(indices.len(), 1);
 
             // Target should be field access
-            if let ExprKind::TupleFieldAccess {
+            if let ExprKind::TupleField {
                 target: field_target,
                 index,
             } = &target.kind
