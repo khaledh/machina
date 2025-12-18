@@ -3,8 +3,8 @@ use thiserror::Error;
 
 use crate::analysis::{DefKind, DefMap, TypeMap, TypeMapBuilder};
 use crate::ast::{
-    BinaryOp, Expr, ExprKind, Function, Pattern, StructLitField, TypeDeclKind, TypeExpr,
-    TypeExprKind,
+    BinaryOp, Expr, ExprKind, Function, Pattern, PatternKind, StructLitField, TypeDeclKind,
+    TypeExpr, TypeExprKind,
 };
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diagnostics::Span;
@@ -606,15 +606,15 @@ impl<'c, 'b> Checker<'c, 'b> {
         pattern: &Pattern,
         value_ty: &Type,
     ) -> Result<(), TypeCheckError> {
-        match pattern {
-            Pattern::Ident { id, .. } => {
+        match &pattern.kind {
+            PatternKind::Ident { .. } => {
                 // Record this identifier's type
-                if let Some(def) = self.context.def_map.lookup_def(*id) {
+                if let Some(def) = self.context.def_map.lookup_def(pattern.id) {
                     self.builder.record_def_type(def.clone(), value_ty.clone());
                 }
                 Ok(())
             }
-            Pattern::Array { patterns, span, .. } => {
+            PatternKind::Array { patterns } => {
                 // Value must be an array
                 match value_ty {
                     Type::Array { elem_ty, dims } => {
@@ -623,7 +623,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                             return Err(TypeCheckError::ArrayPatternLengthMismatch(
                                 dims[0],
                                 patterns.len(),
-                                *span,
+                                pattern.span,
                             ));
                         }
 
@@ -648,18 +648,18 @@ impl<'c, 'b> Checker<'c, 'b> {
                     _ => Err(TypeCheckError::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
-                        *span,
+                        pattern.span,
                     )),
                 }
             }
-            Pattern::Tuple { patterns, span, .. } => {
+            PatternKind::Tuple { patterns } => {
                 match value_ty {
                     Type::Tuple { fields } => {
                         if patterns.len() != fields.len() {
                             return Err(TypeCheckError::TuplePatternLengthMismatch(
                                 fields.len(),
                                 patterns.len(),
-                                *span,
+                                pattern.span,
                             ));
                         }
 
@@ -672,7 +672,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                     _ => Err(TypeCheckError::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
-                        *span,
+                        pattern.span,
                     )),
                 }
             }

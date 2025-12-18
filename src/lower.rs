@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::fmt;
 use thiserror::Error;
 
-use crate::ast::{BinaryOp, Expr, ExprKind, Function, Pattern, StructLitField, UnaryOp};
+use crate::ast::{
+    BinaryOp, Expr, ExprKind, Function, Pattern, PatternKind, StructLitField, UnaryOp,
+};
 use crate::context::{AnalyzedContext, LoweredContext};
 use crate::ids::{DefId, NodeId};
 use crate::ir::builder::IrFunctionBuilder;
@@ -293,9 +295,9 @@ impl<'a> FuncLowerer<'a> {
         // For compound patterns (Tuple/Array) with a simple VarRef value,
         // we can use the existing variable's temp directly without copying.
         let can_use_value_directly = matches!(
-            (pattern, &value.kind),
+            (&pattern.kind, &value.kind),
             (
-                Pattern::Tuple { .. } | Pattern::Array { .. },
+                PatternKind::Tuple { .. } | PatternKind::Array { .. },
                 ExprKind::VarRef(_)
             )
         ) && value_ir_ty.is_compound();
@@ -306,9 +308,9 @@ impl<'a> FuncLowerer<'a> {
             None
         } else if value_ir_ty.is_compound() {
             // Check if the pattern is an Ident and if it's NRVO-eligible
-            let is_nrvo_eligible = match pattern {
-                Pattern::Ident { id, .. } => {
-                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+            let is_nrvo_eligible = match &pattern.kind {
+                PatternKind::Ident { .. } => {
+                    if let Some(def) = self.ctx.def_map.lookup_def(pattern.id) {
                         def.nrvo_eligible
                     } else {
                         false
@@ -340,22 +342,22 @@ impl<'a> FuncLowerer<'a> {
         value_ty: &Type,
         is_mutable: bool,
     ) -> Result<(), LowerError> {
-        match pattern {
-            Pattern::Ident { id, name, .. } => {
-                self.lower_ident_pattern(id, name.clone(), value_op, is_mutable)
+        match &pattern.kind {
+            PatternKind::Ident { name } => {
+                self.lower_ident_pattern(&pattern.id, name.clone(), value_op, is_mutable)
             }
-            Pattern::Array { id, .. } => {
+            PatternKind::Array { .. } => {
                 let base_temp = match value_op {
                     IrOperand::Temp(temp) => temp,
-                    _ => return Err(LowerError::ArrayIsNotTemp(*id, value_op)),
+                    _ => return Err(LowerError::ArrayIsNotTemp(pattern.id, value_op)),
                 };
                 let base_place = Place::root(base_temp, value_ty.clone());
                 self.lower_pattern_place(pattern, &base_place, is_mutable)
             }
-            Pattern::Tuple { id, .. } => {
+            PatternKind::Tuple { .. } => {
                 let base_temp = match value_op {
                     IrOperand::Temp(temp) => temp,
-                    _ => return Err(LowerError::TupleIsNotTemp(*id, value_op)),
+                    _ => return Err(LowerError::TupleIsNotTemp(pattern.id, value_op)),
                 };
                 let base_place = Place::root(base_temp, value_ty.clone());
                 self.lower_pattern_place(pattern, &base_place, is_mutable)
@@ -369,13 +371,13 @@ impl<'a> FuncLowerer<'a> {
         place: &Place,
         is_mutable: bool,
     ) -> Result<(), LowerError> {
-        match pattern {
-            Pattern::Ident { id, name, .. } => {
+        match &pattern.kind {
+            PatternKind::Ident { name } => {
                 let value_op = self.read_place(place);
-                self.lower_ident_pattern(id, name.clone(), value_op, is_mutable)
+                self.lower_ident_pattern(&pattern.id, name.clone(), value_op, is_mutable)
             }
 
-            Pattern::Tuple { patterns, .. } => {
+            PatternKind::Tuple { patterns } => {
                 let Type::Tuple { fields } = &place.ty else {
                     unreachable!()
                 };
@@ -388,7 +390,7 @@ impl<'a> FuncLowerer<'a> {
                 Ok(())
             }
 
-            Pattern::Array { patterns, .. } => {
+            PatternKind::Array { patterns } => {
                 let Type::Array { elem_ty, dims } = &place.ty else {
                     unreachable!()
                 };

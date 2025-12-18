@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
 use crate::ast::{
-    Decl, ExprKind, Function, Module, Pattern, StructField, TypeDecl, TypeDeclKind, TypeExpr,
+    Decl, ExprKind, Function, Module, PatternKind, StructField, TypeDecl, TypeDeclKind, TypeExpr,
     TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
@@ -390,11 +390,13 @@ impl SymbolResolver {
     }
 
     fn check_pattern(&mut self, pattern: &ast::Pattern, is_mutable: bool) {
-        match pattern {
-            Pattern::Ident { id, name, span } => {
+        match &pattern.kind {
+            PatternKind::Ident { name } => {
                 if self.lookup_symbol_direct(name).is_some() {
-                    self.errors
-                        .push(ResolveError::VarAlreadyDefined(name.to_string(), *span));
+                    self.errors.push(ResolveError::VarAlreadyDefined(
+                        name.to_string(),
+                        pattern.span,
+                    ));
                 } else {
                     let def_id = self.def_id_gen.new_id();
                     let def = Def {
@@ -403,7 +405,7 @@ impl SymbolResolver {
                         kind: DefKind::LocalVar,
                         nrvo_eligible: false,
                     };
-                    self.def_map_builder.record_def(def, *id);
+                    self.def_map_builder.record_def(def, pattern.id);
                     self.insert_symbol(
                         name,
                         Symbol {
@@ -414,13 +416,13 @@ impl SymbolResolver {
                     );
                 }
             }
-            Pattern::Array { patterns, .. } => {
+            PatternKind::Array { patterns } => {
                 // Recursively check each sub-pattern
                 for pattern in patterns {
                     self.check_pattern(pattern, is_mutable);
                 }
             }
-            Pattern::Tuple { patterns, .. } => {
+            PatternKind::Tuple { patterns } => {
                 // Recursively check each sub-pattern
                 for pattern in patterns {
                     self.check_pattern(pattern, is_mutable);

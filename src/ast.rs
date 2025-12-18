@@ -87,22 +87,17 @@ pub struct FunctionParam {
 }
 
 #[derive(Clone, Debug)]
-pub enum Pattern {
-    Ident {
-        id: NodeId,
-        name: String,
-        span: Span,
-    },
-    Array {
-        id: NodeId,
-        patterns: Vec<Pattern>,
-        span: Span,
-    },
-    Tuple {
-        id: NodeId,
-        patterns: Vec<Pattern>,
-        span: Span,
-    },
+pub struct Pattern {
+    pub id: NodeId,
+    pub kind: PatternKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum PatternKind {
+    Ident { name: String },
+    Array { patterns: Vec<Pattern> },
+    Tuple { patterns: Vec<Pattern> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -363,17 +358,17 @@ impl fmt::Display for TypeExprKind {
 impl Pattern {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        match self {
-            Pattern::Ident { name, .. } => {
+        match &self.kind {
+            PatternKind::Ident { name } => {
                 writeln!(f, "{}Ident({})", pad, name)?;
             }
-            Pattern::Array { patterns, .. } => {
+            PatternKind::Array { patterns } => {
                 writeln!(f, "{}Pattern::Array", pad)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
-            Pattern::Tuple { patterns, .. } => {
+            PatternKind::Tuple { patterns } => {
                 writeln!(f, "{}Pattern::Tuple", pad)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;

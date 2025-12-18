@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, StructField,
-    StructLitField, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
+    BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, PatternKind,
+    StructField, StructLitField, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
 use crate::ids::NodeIdGen;
@@ -399,9 +399,9 @@ impl<'a> Parser<'a> {
                 let name = name.clone();
                 let span = self.curr_token.span;
                 self.advance();
-                Ok(Pattern::Ident {
+                Ok(Pattern {
                     id: self.id_gen.new_id(),
-                    name,
+                    kind: PatternKind::Ident { name },
                     span,
                 })
             }
@@ -411,9 +411,9 @@ impl<'a> Parser<'a> {
                 let patterns =
                     self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_pattern())?;
                 self.consume(&TK::RBracket)?;
-                Ok(Pattern::Array {
+                Ok(Pattern {
                     id: self.id_gen.new_id(),
-                    patterns,
+                    kind: PatternKind::Array { patterns },
                     span: self.close(marker),
                 })
             }
@@ -442,9 +442,9 @@ impl<'a> Parser<'a> {
                 }
                 self.consume(&TK::RParen)?;
 
-                Ok(Pattern::Tuple {
+                Ok(Pattern {
                     id: self.id_gen.new_id(),
-                    patterns,
+                    kind: PatternKind::Tuple { patterns },
                     span: self.close(marker),
                 })
             }
