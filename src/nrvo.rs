@@ -59,7 +59,7 @@ impl NrvoAnalyzer {
 
     fn find_ret_var_def_id(def_map: &DefMap, expr: &Expr) -> Option<DefId> {
         match &expr.kind {
-            ExprKind::VarRef(_) => def_map.lookup_def(expr.id).map(|def| def.id),
+            ExprKind::Var(_) => def_map.lookup_def(expr.id).map(|def| def.id),
             ExprKind::Block(exprs) => exprs
                 .last()
                 .and_then(|e| Self::find_ret_var_def_id(def_map, e)),
@@ -88,7 +88,7 @@ impl<'a> NrvoSafetyChecker<'a> {
 
     fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
         match &expr.kind {
-            ExprKind::VarRef(_) => {
+            ExprKind::Var(_) => {
                 if let Some(def) = self.def_map.lookup_def(expr.id)
                     && def.id == self.var_def_id
                 {
@@ -125,7 +125,7 @@ impl<'a> NrvoSafetyChecker<'a> {
                 earlier_ok && last_ok
             }
 
-            ExprKind::Let { value, .. } | ExprKind::Var { value, .. } => {
+            ExprKind::LetBind { value, .. } | ExprKind::VarBind { value, .. } => {
                 self.check_expr(value, false)
             }
 
@@ -149,7 +149,7 @@ impl<'a> NrvoSafetyChecker<'a> {
             ExprKind::Call { callee, args } => {
                 let callee_ok = self.check_expr(callee, false);
                 let args_ok = args.iter().all(|arg| match &arg.kind {
-                    ExprKind::VarRef(_) if self.is_target_var(arg) => true,
+                    ExprKind::Var(_) if self.is_target_var(arg) => true,
                     _ => self.check_expr(arg, false),
                 });
                 callee_ok && args_ok
@@ -159,7 +159,7 @@ impl<'a> NrvoSafetyChecker<'a> {
 
             ExprKind::ArrayIndex { target, indices } => {
                 let target_ok = match &target.kind {
-                    ExprKind::VarRef(_) if self.is_target_var(target) => true,
+                    ExprKind::Var(_) if self.is_target_var(target) => true,
                     _ => self.check_expr(target, false),
                 };
                 let index_ok = indices.iter().all(|index| self.check_expr(index, false));
@@ -169,7 +169,7 @@ impl<'a> NrvoSafetyChecker<'a> {
             ExprKind::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
             ExprKind::TupleField { target, .. } => match &target.kind {
-                ExprKind::VarRef(_) if self.is_target_var(target) => true,
+                ExprKind::Var(_) if self.is_target_var(target) => true,
                 _ => self.check_expr(target, false),
             },
 
@@ -178,7 +178,7 @@ impl<'a> NrvoSafetyChecker<'a> {
                 .all(|field| self.check_expr(&field.value, false)),
 
             ExprKind::StructField { target, .. } => match &target.kind {
-                ExprKind::VarRef(_) if self.is_target_var(target) => true,
+                ExprKind::Var(_) if self.is_target_var(target) => true,
                 _ => self.check_expr(target, false),
             },
 
@@ -203,8 +203,8 @@ impl<'a> NrvoSafetyChecker<'a> {
 
     fn is_lvalue_use(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::VarRef(_) => {
-                // Check if this VarRef refers to our target definition
+            ExprKind::Var(_) => {
+                // Check if this Var refers to our target definition
                 if let Some(def) = self.def_map.lookup_def(expr.id) {
                     def.id == self.var_def_id
                 } else {

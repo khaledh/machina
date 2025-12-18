@@ -79,7 +79,7 @@ pub enum TypeCheckError {
     TupleFieldOutOfBounds(usize, usize, Span),
 
     #[error("Invalid tuple field access target: expected tuple, found {0}")]
-    InvalidTupleFieldAccessTarget(Type, Span),
+    InvalidTupleFieldTarget(Type, Span),
 
     #[error("Tuple pattern length mismatch: expected {0}, found {1}")]
     TuplePatternLengthMismatch(usize, usize, Span),
@@ -99,8 +99,8 @@ pub enum TypeCheckError {
     #[error("Struct fields missing: {0}")]
     StructFieldsMissing(String, Span),
 
-    #[error("Invalid field access target: expected struct, found {0}")]
-    InvalidFieldAccessTarget(Type, Span),
+    #[error("Invalid struct field target: expected struct, found {0}")]
+    InvalidStructFieldTarget(Type, Span),
 }
 
 impl TypeCheckError {
@@ -126,14 +126,14 @@ impl TypeCheckError {
             TypeCheckError::ArrayPatternLengthMismatch(_, _, span) => *span,
             TypeCheckError::EmptyTupleLiteral(span) => *span,
             TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,
-            TypeCheckError::InvalidTupleFieldAccessTarget(_, span) => *span,
+            TypeCheckError::InvalidTupleFieldTarget(_, span) => *span,
             TypeCheckError::TuplePatternLengthMismatch(_, _, span) => *span,
             TypeCheckError::UnknownStructType(_, span) => *span,
             TypeCheckError::DuplicateStructField(_, span) => *span,
             TypeCheckError::StructFieldTypeMismatch(_, _, _, span) => *span,
             TypeCheckError::UnknownStructField(_, span) => *span,
             TypeCheckError::StructFieldsMissing(_, span) => *span,
-            TypeCheckError::InvalidFieldAccessTarget(_, span) => *span,
+            TypeCheckError::InvalidStructFieldTarget(_, span) => *span,
         }
     }
 }
@@ -496,7 +496,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
                 Ok(fields[index_usize].clone())
             }
-            _ => Err(TypeCheckError::InvalidTupleFieldAccessTarget(
+            _ => Err(TypeCheckError::InvalidTupleFieldTarget(
                 target_ty,
                 target.span,
             )),
@@ -586,7 +586,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                     target.span,
                 )),
             },
-            _ => Err(TypeCheckError::InvalidFieldAccessTarget(
+            _ => Err(TypeCheckError::InvalidStructFieldTarget(
                 target_ty,
                 target.span,
             )),
@@ -758,7 +758,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         args: &[Expr],
     ) -> Result<Type, TypeCheckError> {
         let name = match &callee.kind {
-            ExprKind::VarRef(name) => name,
+            ExprKind::Var(name) => name,
             _ => {
                 return Err(TypeCheckError::InvalidCallee(
                     callee.kind.clone(),
@@ -908,13 +908,13 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::Block(body) => self.type_check_block(body),
 
-            ExprKind::Let {
+            ExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
             } => self.type_check_let(pattern, decl_ty, value),
 
-            ExprKind::Var {
+            ExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
@@ -922,7 +922,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::Assign { value, assignee } => self.type_check_assign(assignee, value),
 
-            ExprKind::VarRef(_) => self.type_check_var_ref(expr),
+            ExprKind::Var(_) => self.type_check_var_ref(expr),
 
             ExprKind::Call { callee, args } => self.type_check_call(expr, callee, args),
 

@@ -155,13 +155,13 @@ pub enum ExprKind {
     },
 
     // Bindings
-    Let {
+    LetBind {
         // immutable binding
         pattern: Pattern,
         decl_ty: Option<TypeExpr>,
         value: Box<Expr>,
     },
-    Var {
+    VarBind {
         // mutable binding
         pattern: Pattern,
         decl_ty: Option<TypeExpr>,
@@ -174,8 +174,8 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
 
-    // Var, array index, tuple/struct field
-    VarRef(String),
+    // Var, array index, tuple field, struct field
+    Var(String),
     ArrayIndex {
         target: Box<Expr>,
         indices: Vec<Expr>,
@@ -399,7 +399,7 @@ impl Expr {
                 }
             }
             ExprKind::ArrayIndex { target, indices } => {
-                writeln!(f, "{}Index [{}]", pad, self.id)?;
+                writeln!(f, "{}ArrayIndex [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;
                 target.fmt_with_indent(f, level + 2)?;
@@ -415,11 +415,11 @@ impl Expr {
                 }
             }
             ExprKind::TupleField { target, index } => {
-                writeln!(f, "{}TupleFieldAccess [{}]", pad, self.id)?;
+                writeln!(f, "{}TupleField [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;
                 target.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Index: {}", pad1, index)?;
+                writeln!(f, "{}ArrayIndex: {}", pad1, index)?;
             }
             ExprKind::StructLit { name, fields } => {
                 writeln!(f, "{}StructLit [{}]", pad, self.id)?;
@@ -430,7 +430,7 @@ impl Expr {
                 }
             }
             ExprKind::StructField { target, field } => {
-                writeln!(f, "{}FieldAccess [{}]", pad, self.id)?;
+                writeln!(f, "{}StructField [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Target:", pad1)?;
                 target.fmt_with_indent(f, level + 2)?;
@@ -458,7 +458,7 @@ impl Expr {
                     expr.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::Let {
+            ExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
@@ -472,7 +472,7 @@ impl Expr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::Var {
+            ExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
@@ -494,8 +494,8 @@ impl Expr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::VarRef(name) => {
-                writeln!(f, "{}VarRef({}) [{}]", pad, name, self.id)?;
+            ExprKind::Var(name) => {
+                writeln!(f, "{}Var({}) [{}]", pad, name, self.id)?;
             }
             ExprKind::If {
                 cond,

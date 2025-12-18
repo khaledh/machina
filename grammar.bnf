@@ -21,7 +21,7 @@ StructField        ::= Identifier ":" TypeExpr
 # Type Expressions
 TypeExpr           ::= NamedType | ArrayType | TupleType
 NamedType          ::= "()" | Identifier
-ArrayType          ::= TypeExpr "[" Integer ("," Integer)* "]"
+ArrayType          ::= TypeExpr "[" Integer ("," Integer)* ","? "]"
 TupleType          ::= "(" TypeExpr "," ( TypeExpr ( "," TypeExpr )* )? ","? ")"
 
 # Blocks
@@ -36,14 +36,16 @@ Expr               ::= Let
                      | InfixExpr
 
 # Binding
-Let                ::= "let" Pattern ( ":" TypeExpr )? "=" Expr
-Var                ::= "var" Pattern ( ":" TypeExpr )? "=" Expr
+LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr
+VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr
 
 # Patterns
 Pattern            ::= IdentPattern | ArrayPattern | TuplePattern
 IdentPattern       ::= Identifier
-ArrayPattern       ::= "[" Pattern ( "," Pattern )* ","? "]"
-TuplePattern       ::= "(" Pattern "," ( Pattern ( "," Pattern )* )? ","? ")"
+ArrayPattern       ::= "[" PatternList "]"
+TuplePattern       ::= "(" Pattern "," PatternList? ")"
+
+PatternList        ::= Pattern ( "," Pattern )* ","?
 
 # Assignment
 Assign             ::= PostfixExpr "=" Expr
@@ -57,7 +59,7 @@ While              ::= "while" Expr Block
 # 2. Additive (+, -)
 # 3. Multiplicative (*, /)
 # 4. Unary (-, !)
-# 5. Postfix (Call, Index)
+# 5. Postfix (Call, ArrayIndex, TupleField, StructField)
 
 InfixExpr          ::= CompareExpr
 
@@ -68,25 +70,24 @@ MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
 UnaryExpr          ::= ( "-" | "!" ) UnaryExpr 
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | Index | TupleFieldAccess | FieldAccess )*
+PostfixExpr        ::= Primary ( Call | ArrayIndex | TupleField | StructField )*
 
-Call               ::= "(" Expr ("," Expr)* ","? ")"
-Index              ::= "[" Expr ("," Expr)* ","? "]"
-TupleFieldAccess   ::= "." Integer
-FieldAccess        ::= "." Identifier
+Call               ::= "(" ExprList? ")"
+ArrayIndex         ::= "[" ExprList? "]"
+TupleField         ::= "." Integer
+StructField        ::= "." Identifier
 
-Primary            ::= Unit
-                     | Integer
-                     | Boolean
-                     | ArrayLit
-                     | TupleLit
-                     | StructLit
+Primary            ::= Literal
                      | Identifier
                      | "(" Expr ")"
                      | Block
 
-ArrayLit           ::= "[" ( Expr ( "," Expr )* ","? )? "]"
-TupleLit           ::= "(" Expr "," ( Expr ( "," Expr )* )? ","? ")"
+Literal            ::= Unit | Integer | Boolean | ArrayLit | TupleLit | StructLit
+
+ArrayLit           ::= "[" ExprList "]"
+TupleLit           ::= "(" Expr "," ExprList? ")"
+
+ExprList           ::= Expr ( "," Expr )* ","?
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?

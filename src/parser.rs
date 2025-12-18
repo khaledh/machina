@@ -38,8 +38,8 @@ pub enum ParseError {
     #[error("Single field tuple missing trailing comma: {0}")]
     SingleFieldTupleMissingComma(Token),
 
-    #[error("Expected field access, found: {0}")]
-    ExpectedFieldAccess(Token),
+    #[error("Expected struct field, found: {0}")]
+    ExpectedStructField(Token),
 }
 
 impl ParseError {
@@ -54,7 +54,7 @@ impl ParseError {
             ParseError::ExpectedIntLit(token) => token.span,
             ParseError::ExpectedPattern(token) => token.span,
             ParseError::SingleFieldTupleMissingComma(token) => token.span,
-            ParseError::ExpectedFieldAccess(token) => token.span,
+            ParseError::ExpectedStructField(token) => token.span,
         }
     }
 }
@@ -475,7 +475,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::Let {
+            kind: ExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value: Box::new(value),
@@ -507,7 +507,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::Var {
+            kind: ExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value: Box::new(value),
@@ -585,7 +585,7 @@ impl<'a> Parser<'a> {
                     };
                 }
                 TK::LBracket => {
-                    // Index expression
+                    // ArrayIndex expression
                     self.advance(); // consume '['
 
                     let indices =
@@ -631,7 +631,7 @@ impl<'a> Parser<'a> {
                                 span: self.close(marker.clone()),
                             };
                         }
-                        _ => return Err(ParseError::ExpectedFieldAccess(self.curr_token.clone())),
+                        _ => return Err(ParseError::ExpectedStructField(self.curr_token.clone())),
                     }
                 }
                 _ => break,
@@ -669,7 +669,7 @@ impl<'a> Parser<'a> {
                             // Regular variable reference
                             Ok(Expr {
                                 id: self.id_gen.new_id(),
-                                kind: ExprKind::VarRef(name.clone()),
+                                kind: ExprKind::Var(name.clone()),
                                 span: self.close(marker),
                             })
                         }

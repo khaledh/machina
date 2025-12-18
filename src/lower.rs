@@ -249,8 +249,8 @@ impl<'a> FuncLowerer<'a> {
             ExprKind::UnaryOp { op, expr } => self.lower_unary_op(op, expr),
 
             // Bindings
-            ExprKind::Let { pattern, value, .. } => self.lower_binding(pattern, value, false),
-            ExprKind::Var { pattern, value, .. } => self.lower_binding(pattern, value, true),
+            ExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value, false),
+            ExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value, true),
 
             // Assignment
             ExprKind::Assign {
@@ -258,7 +258,7 @@ impl<'a> FuncLowerer<'a> {
             } => self.lower_assign(expr, assignee, value),
 
             // Variable
-            ExprKind::VarRef(_) => self.lower_var_ref(expr, dest_temp),
+            ExprKind::Var(_) => self.lower_var_ref(expr, dest_temp),
 
             // Control flow
             ExprKind::If {
@@ -270,7 +270,7 @@ impl<'a> FuncLowerer<'a> {
 
             // Function call
             ExprKind::Call { callee, args } => match &callee.kind {
-                ExprKind::VarRef(name) => self.lower_call(expr, name.clone(), args, dest_temp),
+                ExprKind::Var(name) => self.lower_call(expr, name.clone(), args, dest_temp),
                 _ => panic!("Unsupported callee: {:?}", callee.kind),
             },
 
@@ -292,13 +292,13 @@ impl<'a> FuncLowerer<'a> {
         let value_ast_ty = self.get_node_type(value)?;
         let value_ir_ty = lower_type(&value_ast_ty);
 
-        // For compound patterns (Tuple/Array) with a simple VarRef value,
+        // For compound patterns (Tuple/Array) with a simple Var value,
         // we can use the existing variable's temp directly without copying.
         let can_use_value_directly = matches!(
             (&pattern.kind, &value.kind),
             (
                 PatternKind::Tuple { .. } | PatternKind::Array { .. },
-                ExprKind::VarRef(_)
+                ExprKind::Var(_)
             )
         ) && value_ir_ty.is_compound();
 
@@ -462,7 +462,7 @@ impl<'a> FuncLowerer<'a> {
         value: &Expr,
     ) -> Result<IrOperand, LowerError> {
         match &assignee.kind {
-            ExprKind::VarRef(_) => {
+            ExprKind::Var(_) => {
                 // Variable assignment
                 match self.ctx.def_map.lookup_def(assignee.id) {
                     Some(def) => {
@@ -924,8 +924,8 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
     ) -> Result<Option<(IrTempId, usize)>, LowerError> {
         match &expr.kind {
-            // Base case: VarRef
-            ExprKind::VarRef(_) => {
+            // Base case: Var
+            ExprKind::Var(_) => {
                 let var_op = self.lower_expr(expr, None)?;
                 match var_op {
                     IrOperand::Temp(temp) => Ok(Some((temp, 0))),
@@ -933,7 +933,7 @@ impl<'a> FuncLowerer<'a> {
                 }
             }
 
-            // Recursive case: TupleFieldAccess
+            // Recursive case: TupleField
             ExprKind::TupleField { target, index } => {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
@@ -948,7 +948,7 @@ impl<'a> FuncLowerer<'a> {
                 }
             }
 
-            // Recursive case: Index
+            // Recursive case: ArrayIndex
             ExprKind::ArrayIndex { target, indices } => {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
@@ -973,7 +973,7 @@ impl<'a> FuncLowerer<'a> {
                 Ok(None)
             }
 
-            // Recursive case: FieldAccess
+            // Recursive case: StructField
             ExprKind::StructField { target, field } => {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {

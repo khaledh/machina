@@ -77,10 +77,10 @@ fn test_parse_multi_index_expr() {
     if let ExprKind::Block(exprs) = &func.body.kind {
         // Second expression is the index
         if let ExprKind::ArrayIndex { target, indices } = &exprs[1].kind {
-            // Check target is VarRef
+            // Check target is Var
             match &target.kind {
-                ExprKind::VarRef(name) => assert_eq!(name, "arr"),
-                _ => panic!("Expected VarRef"),
+                ExprKind::Var(name) => assert_eq!(name, "arr"),
+                _ => panic!("Expected Var"),
             }
 
             // Check we have 2 indices
@@ -96,7 +96,7 @@ fn test_parse_multi_index_expr() {
                 _ => panic!("Expected UInt64Lit"),
             }
         } else {
-            panic!("Expected Index expression");
+            panic!("Expected ArrayIndex expression");
         }
     } else {
         panic!("Expected Block");
@@ -117,7 +117,7 @@ fn test_parse_nested_array_literal() {
 
     if let ExprKind::Block(exprs) = &func.body.kind {
         // First expression is the let binding
-        if let ExprKind::Let { value, .. } = &exprs[0].kind {
+        if let ExprKind::LetBind { value, .. } = &exprs[0].kind {
             // Value should be an ArrayLit
             if let ExprKind::ArrayLit(outer_elems) = &value.kind {
                 assert_eq!(outer_elems.len(), 2);
@@ -276,16 +276,16 @@ fn test_parse_tuple_field_access() {
     if let ExprKind::Block(exprs) = &func.body.kind {
         // Second expression is the field access
         if let ExprKind::TupleField { target, index } = &exprs[1].kind {
-            // Check target is VarRef
+            // Check target is Var
             match &target.kind {
-                ExprKind::VarRef(name) => assert_eq!(name, "t"),
-                _ => panic!("Expected VarRef"),
+                ExprKind::Var(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected Var"),
             }
 
             // Check index is 0
             assert_eq!(*index, 0);
         } else {
-            panic!("Expected TupleFieldAccess");
+            panic!("Expected TupleField");
         }
     } else {
         panic!("Expected Block");
@@ -318,14 +318,14 @@ fn test_parse_tuple_field_access_chained() {
                 assert_eq!(*inner_index, 1);
 
                 match &inner_target.kind {
-                    ExprKind::VarRef(name) => assert_eq!(name, "t"),
-                    _ => panic!("Expected VarRef"),
+                    ExprKind::Var(name) => assert_eq!(name, "t"),
+                    _ => panic!("Expected Var"),
                 }
             } else {
-                panic!("Expected nested TupleFieldAccess");
+                panic!("Expected nested TupleField");
             }
         } else {
-            panic!("Expected TupleFieldAccess");
+            panic!("Expected TupleField");
         }
     } else {
         panic!("Expected Block");
@@ -358,14 +358,14 @@ fn test_parse_tuple_with_array_indexing() {
                 assert_eq!(*index, 0);
 
                 match &field_target.kind {
-                    ExprKind::VarRef(name) => assert_eq!(name, "t"),
-                    _ => panic!("Expected VarRef"),
+                    ExprKind::Var(name) => assert_eq!(name, "t"),
+                    _ => panic!("Expected Var"),
                 }
             } else {
-                panic!("Expected TupleFieldAccess");
+                panic!("Expected TupleField");
             }
         } else {
-            panic!("Expected Index");
+            panic!("Expected ArrayIndex");
         }
     } else {
         panic!("Expected Block");
@@ -385,7 +385,7 @@ fn test_parse_tuple_pattern() {
     let func = &funcs[0];
 
     if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::Let { pattern, value, .. } = &exprs[0].kind {
+        if let ExprKind::LetBind { pattern, value, .. } = &exprs[0].kind {
             // Check pattern is a tuple pattern
             match &pattern.kind {
                 PatternKind::Tuple { patterns } => {
@@ -434,7 +434,7 @@ fn test_parse_tuple_pattern_nested() {
     let func = &funcs[0];
 
     if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::Let { pattern, .. } = &exprs[0].kind {
+        if let ExprKind::LetBind { pattern, .. } = &exprs[0].kind {
             match &pattern.kind {
                 PatternKind::Tuple { patterns } => {
                     assert_eq!(patterns.len(), 2);
@@ -484,7 +484,7 @@ fn test_parse_tuple_pattern_trailing_comma() {
     let func = &funcs[0];
 
     if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::Let { pattern, .. } = &exprs[0].kind {
+        if let ExprKind::LetBind { pattern, .. } = &exprs[0].kind {
             match &pattern.kind {
                 PatternKind::Tuple { patterns } => {
                     assert_eq!(patterns.len(), 2);
@@ -513,7 +513,7 @@ fn test_parse_parenthesized_pattern() {
     let func = &funcs[0];
 
     if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::Let { pattern, .. } = &exprs[0].kind {
+        if let ExprKind::LetBind { pattern, .. } = &exprs[0].kind {
             // Should be an Ident pattern, not a Tuple pattern
             match &pattern.kind {
                 PatternKind::Ident { name } => assert_eq!(name, "a"),

@@ -341,7 +341,7 @@ impl SymbolResolver {
 
     fn check_lvalue_mutability(&mut self, expr: &ast::Expr) {
         match &expr.kind {
-            ExprKind::VarRef(name) => {
+            ExprKind::Var(name) => {
                 match self.lookup_symbol(name) {
                     Some(symbol) => {
                         match symbol.kind {
@@ -539,7 +539,7 @@ impl SymbolResolver {
                 });
             }
 
-            ExprKind::Let {
+            ExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
@@ -552,7 +552,7 @@ impl SymbolResolver {
                 self.check_pattern(pattern, false);
             }
 
-            ExprKind::Var {
+            ExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
@@ -565,7 +565,7 @@ impl SymbolResolver {
                 self.check_pattern(pattern, true);
             }
 
-            ExprKind::VarRef(name) => match self.lookup_symbol(name) {
+            ExprKind::Var(name) => match self.lookup_symbol(name) {
                 Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id),
                 None => self
                     .errors
@@ -593,10 +593,10 @@ impl SymbolResolver {
             }
 
             ExprKind::Call { callee, args } => {
-                // For now, callee must be a VarRef to a function.
+                // For now, callee must be a Var to a function.
                 // In the future, this can be generalized.
                 match &callee.kind {
-                    ExprKind::VarRef(name) => match self.lookup_symbol(name) {
+                    ExprKind::Var(name) => match self.lookup_symbol(name) {
                         Some(symbol) if symbol.kind == SymbolKind::Func => {
                             self.def_map_builder.record_use(callee.id, symbol.def_id);
                             for arg in args {
