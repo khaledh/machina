@@ -26,10 +26,8 @@ fn compile_and_lower(source: &str) -> Result<IrFunction, LowerError> {
 
     let analyzed_context = NrvoAnalyzer::new(type_checked_context).analyze();
 
-    let mut lowerer = Lowerer::new(&analyzed_context);
-    let ir_func = lowerer
-        .lower_func(&analyzed_context.module.funcs()[0])
-        .expect("Failed to lower function");
+    let lowerer = FuncLowerer::new(&analyzed_context, &analyzed_context.module.funcs()[0]);
+    let ir_func = lowerer.lower().expect("Failed to lower function");
 
     Ok(ir_func)
 }

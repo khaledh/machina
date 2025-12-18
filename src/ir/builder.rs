@@ -47,6 +47,10 @@ impl IrFunctionBuilder {
         self.ret_temp
     }
 
+    pub fn ret_type(&self) -> &IrType {
+        &self.ret_ty
+    }
+
     pub fn new_param(&mut self, index: u32, name: String, ty: IrType) -> IrTempId {
         let id = IrTempId(self.temps.len() as u32);
         self.temps.push(IrTemp {
