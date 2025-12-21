@@ -247,12 +247,28 @@ impl<'a> FuncCodegen<'a> {
         if dst.projections().is_empty() {
             let value_reg = self.emit_rvalue(src, &mut asm)?;
             self.store_scalar(dst, value_reg, &mut asm)?;
+        } else if let Some(offset) = self.const_projection_offset(dst.base(), dst.projections()) {
+            if let Some(MappedLocal::StackAddr(slot)) = self.alloc.alloc_map.get(&dst.base()) {
+                let base_offset = self.get_stack_offset(slot)? as usize;
+                let total = base_offset + offset;
+                if let Ok(total) = u32::try_from(total) {
+                    let value_reg = self.emit_rvalue(src, &mut asm)?;
+                    self.emit_store_to_sp(total, dst.ty(), value_reg, &mut asm)?;
+                    return Ok(asm);
+                }
+            } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base()) {
+                if self.can_use_imm_offset(dst.ty(), offset) {
+                    let value_reg = self.emit_rvalue(src, &mut asm)?;
+                    self.emit_store_at_addr_reg_imm(*reg, offset, dst.ty(), value_reg, &mut asm)?;
+                    return Ok(asm);
+                }
+            }
         } else {
             // Compute address first, then value; preserve addr across rvalue evaluation.
             let _ = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
-            asm.push_str("  mov x15, x17\n");
+            asm.push_str("  mov x14, x17\n");
             let value_reg = self.emit_rvalue(src, &mut asm)?;
-            self.emit_store_at_addr_reg(R::X15, dst.ty(), value_reg, &mut asm)?;
+            self.emit_store_at_addr_reg(R::X14, dst.ty(), value_reg, &mut asm)?;
         }
         Ok(asm)
     }
@@ -499,6 +515,29 @@ impl<'a> FuncCodegen<'a> {
                 }
                 None => Err(CodegenError::LocalNotFound(place.base().0)),
             }
+        } else if let Some(offset) =
+            self.const_projection_offset(place.base(), place.projections())
+        {
+            match self.alloc.alloc_map.get(&place.base()) {
+                Some(MappedLocal::StackAddr(slot)) => {
+                    let base_offset = self.get_stack_offset(slot)? as usize;
+                    let total = base_offset + offset;
+                    if let Ok(total) = u32::try_from(total) {
+                        self.emit_load_from_sp(total, ty, scratch, asm)?;
+                        return Ok(scratch);
+                    }
+                }
+                Some(MappedLocal::Reg(reg)) => {
+                    if self.can_use_imm_offset(ty, offset) {
+                        self.emit_load_at_addr_reg_imm(*reg, offset, ty, scratch, asm)?;
+                        return Ok(scratch);
+                    }
+                }
+                _ => {}
+            }
+            let addr_reg = self.emit_place_addr(place.base(), place.projections(), asm)?;
+            self.load_at_addr(addr_reg, 0, ty, scratch, asm)?;
+            Ok(scratch)
         } else {
             let addr_reg = self.emit_place_addr(place.base(), place.projections(), asm)?;
             self.load_at_addr(addr_reg, 0, ty, scratch, asm)?;
@@ -559,17 +598,27 @@ impl<'a> FuncCodegen<'a> {
                         1
                     };
                     let stride = (stride_elems * elem_size) as i64;
-                    let index_reg = self.materialize_operand(index, asm, R::X16)?;
-                    if stride == 1 {
-                        asm.push_str(&format!("  add x17, x17, {}\n", index_reg));
-                    } else if index_reg == R::X16 {
-                        asm.push_str(&format!("  mov x15, #{stride}\n"));
-                        asm.push_str("  mul x16, x16, x15\n");
-                        asm.push_str("  add x17, x17, x16\n");
+                    if let Operand::Const(Const::Int { value, .. }) = index {
+                        let offset = (*value as i64) * stride;
+                        if offset != 0 {
+                            self.add_to_reg(offset, asm)?;
+                        }
                     } else {
-                        asm.push_str(&format!("  mov x16, #{stride}\n"));
-                        asm.push_str(&format!("  mul x16, {}, x16\n", index_reg));
-                        asm.push_str("  add x17, x17, x16\n");
+                        let index_reg = self.materialize_operand(index, asm, R::X16)?;
+                        if stride == 1 {
+                            asm.push_str(&format!("  add x17, x17, {}\n", index_reg));
+                        } else if let Some(shift) = Self::pow2_shift(stride) {
+                            asm.push_str(&format!(
+                                "  add x17, x17, {}, lsl #{shift}\n",
+                                index_reg
+                            ));
+                        } else if index_reg == R::X16 {
+                            asm.push_str(&format!("  mov x15, #{stride}\n"));
+                            asm.push_str("  madd x17, x16, x15, x17\n");
+                        } else {
+                            asm.push_str(&format!("  mov x16, #{stride}\n"));
+                            asm.push_str(&format!("  madd x17, {}, x16, x17\n", index_reg));
+                        }
                     }
 
                     cur_kind = if dims.len() == 1 {
@@ -585,6 +634,18 @@ impl<'a> FuncCodegen<'a> {
         }
 
         Ok(R::X17)
+    }
+
+    fn pow2_shift(stride: i64) -> Option<u32> {
+        if stride <= 0 {
+            return None;
+        }
+        let stride_u = stride as u64;
+        if stride_u.is_power_of_two() {
+            Some(stride_u.trailing_zeros())
+        } else {
+            None
+        }
     }
 
     fn materialize_base_addr(&mut self, base: LocalId, asm: &mut String) -> Result<(), CodegenError> {
@@ -784,6 +845,40 @@ impl<'a> FuncCodegen<'a> {
         Ok(())
     }
 
+    fn emit_load_at_addr_reg_imm(
+        &mut self,
+        addr_reg: R,
+        offset: usize,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!(
+                "  ldrb {}, [{}, #{}]\n",
+                to_w_reg(dest_reg),
+                addr_reg,
+                offset
+            )),
+            2 => asm.push_str(&format!(
+                "  ldrh {}, [{}, #{}]\n",
+                to_w_reg(dest_reg),
+                addr_reg,
+                offset
+            )),
+            4 => asm.push_str(&format!(
+                "  ldr {}, [{}, #{}]\n",
+                to_w_reg(dest_reg),
+                addr_reg,
+                offset
+            )),
+            8 => asm.push_str(&format!("  ldr {}, [{}, #{}]\n", dest_reg, addr_reg, offset)),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
     fn emit_store_at_addr_reg(
         &mut self,
         addr_reg: R,
@@ -814,6 +909,49 @@ impl<'a> FuncCodegen<'a> {
         Ok(())
     }
 
+    fn emit_store_at_addr_reg_imm(
+        &mut self,
+        addr_reg: R,
+        offset: usize,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!(
+                "  strb {}, [{}, #{}]\n",
+                to_w_reg(src_reg),
+                addr_reg,
+                offset
+            )),
+            2 => asm.push_str(&format!(
+                "  strh {}, [{}, #{}]\n",
+                to_w_reg(src_reg),
+                addr_reg,
+                offset
+            )),
+            4 => asm.push_str(&format!(
+                "  str {}, [{}, #{}]\n",
+                to_w_reg(src_reg),
+                addr_reg,
+                offset
+            )),
+            8 => asm.push_str(&format!("  str {}, [{}, #{}]\n", src_reg, addr_reg, offset)),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
+    fn can_use_imm_offset(&self, ty: TyId, offset: usize) -> bool {
+        let size = size_of_ty(&self.body.types, ty);
+        if size == 0 || offset % size != 0 {
+            return false;
+        }
+        let scaled = offset / size;
+        scaled <= 4095
+    }
+
     fn emit_memcpy(
         &mut self,
         dest_addr: R,
@@ -821,6 +959,7 @@ impl<'a> FuncCodegen<'a> {
         length: usize,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        asm.push_str("  // -- memcpy -- (start)\n");
         asm.push_str(&format!("  mov x19, {}\n", dest_addr));
         asm.push_str(&format!("  mov x20, {}\n", src_addr));
 
@@ -853,6 +992,7 @@ impl<'a> FuncCodegen<'a> {
             asm.push_str("  strb w22, [x19], #1\n");
         }
 
+        asm.push_str("  // -- memcpy -- (end)\n");
         Ok(())
     }
 
@@ -863,18 +1003,15 @@ impl<'a> FuncCodegen<'a> {
     fn emit_move(&mut self, mov: &Move) -> Result<String, CodegenError> {
         let mut asm = String::new();
         let inst = match (&mov.from, &mov.to) {
-            (src, Location::Reg(to_reg)) => match src {
-                Location::Imm(value) => format!("  mov {to_reg}, #{value}\n"),
-                Location::Reg(from_reg) => format!("  mov {to_reg}, {from_reg}\n"),
-                Location::Stack(from_slot) => format!(
-                    "  ldr {to_reg}, [sp, #{}]\n",
-                    self.get_stack_offset(from_slot)?
-                ),
-                Location::StackAddr(from_slot) => format!(
-                    "  add {to_reg}, sp, #{}\n",
-                    self.get_stack_offset(from_slot)?
-                ),
-            },
+            (Location::PlaceAddr(place), Location::Reg(to_reg)) => {
+                let _ = self.emit_place_addr_any(place, &mut asm)?;
+                asm.push_str(&format!("  mov {to_reg}, x17\n"));
+                return Ok(asm);
+            }
+            (Location::PlaceValue(place), Location::Reg(to_reg)) => {
+                let _ = self.load_place_value(place, &mut asm, *to_reg)?;
+                return Ok(asm);
+            }
             (Location::Reg(from_reg), Location::Stack(to_slot)) => format!(
                 "  str {from_reg}, [sp, #{}]\n",
                 self.get_stack_offset(to_slot)?
@@ -891,7 +1028,22 @@ impl<'a> FuncCodegen<'a> {
                     self.get_stack_offset(to_slot)?
                 )
             }
-            _ => return Err(CodegenError::UnsupportedMove(mov.from, mov.to)),
+            (src, Location::Reg(to_reg)) => match src {
+                Location::Imm(value) => format!("  mov {to_reg}, #{value}\n"),
+                Location::Reg(from_reg) => format!("  mov {to_reg}, {from_reg}\n"),
+                Location::Stack(from_slot) => format!(
+                    "  ldr {to_reg}, [sp, #{}]\n",
+                    self.get_stack_offset(from_slot)?
+                ),
+                Location::StackAddr(from_slot) => format!(
+                    "  add {to_reg}, sp, #{}\n",
+                    self.get_stack_offset(from_slot)?
+                ),
+                Location::PlaceAddr(_) | Location::PlaceValue(_) => {
+                    return Err(CodegenError::UnsupportedMove(mov.from.clone(), mov.to.clone()));
+                }
+            },
+            _ => return Err(CodegenError::UnsupportedMove(mov.from.clone(), mov.to.clone())),
         };
         asm.push_str(&inst);
         Ok(asm)
@@ -937,6 +1089,70 @@ impl<'a> FuncCodegen<'a> {
             .take(index)
             .map(|field| size_of_ty(&self.body.types, field.ty))
             .sum()
+    }
+
+    fn const_projection_offset(
+        &self,
+        base: LocalId,
+        projections: &[Projection],
+    ) -> Option<usize> {
+        let mut offset: usize = 0;
+        let mut cur_kind = self.kind_for_local(base);
+
+        for proj in projections {
+            match proj {
+                Projection::Field { index } => {
+                    let (field_offset, next_kind) = match cur_kind {
+                        TyKind::Tuple { ref field_tys } => {
+                            let off = self.field_offset(field_tys, *index);
+                            let next = self.body.types.kind(field_tys[*index]).clone();
+                            (off, next)
+                        }
+                        TyKind::Struct { ref fields } => {
+                            let off = self.struct_field_offset(fields, *index);
+                            let next = self.body.types.kind(fields[*index].ty).clone();
+                            (off, next)
+                        }
+                        _ => return None,
+                    };
+                    offset = offset.checked_add(field_offset)?;
+                    cur_kind = next_kind;
+                }
+                Projection::Index { index } => {
+                    let (elem_ty, dims) = match cur_kind {
+                        TyKind::Array { elem_ty, ref dims } => (elem_ty, dims.clone()),
+                        _ => return None,
+                    };
+                    let idx = match index {
+                        Operand::Const(Const::Int { value, .. }) => *value,
+                        _ => return None,
+                    };
+                    if idx < 0 {
+                        return None;
+                    }
+                    let idx = idx as usize;
+                    let elem_size = size_of_ty(&self.body.types, elem_ty);
+                    let stride_elems: usize = if dims.len() > 1 {
+                        dims[1..].iter().product()
+                    } else {
+                        1
+                    };
+                    let stride = stride_elems * elem_size;
+                    offset = offset.checked_add(idx.checked_mul(stride)?)?;
+
+                    cur_kind = if dims.len() == 1 {
+                        self.body.types.kind(elem_ty).clone()
+                    } else {
+                        TyKind::Array {
+                            elem_ty,
+                            dims: dims[1..].to_vec(),
+                        }
+                    };
+                }
+            }
+        }
+
+        Some(offset)
     }
 
     fn operand_for_int_with_policy(

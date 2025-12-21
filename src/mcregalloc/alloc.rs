@@ -348,13 +348,33 @@ impl<'a> RegAlloc<'a> {
 
         // 2. Move arguments to their target locations
         for arg_constr in &constr.args {
-            let local = match &arg_constr.place {
-                PlaceAny::Scalar(p) => p.base(),
-                PlaceAny::Aggregate(p) => p.base(),
-            };
             let current_loc = match arg_constr.kind {
-                crate::mcregalloc::constraints::CallArgKind::Value => self.loc_for_value(local),
-                crate::mcregalloc::constraints::CallArgKind::Addr => self.loc_for_addr(local),
+                crate::mcregalloc::constraints::CallArgKind::Value => match &arg_constr.place {
+                    PlaceAny::Scalar(place) => {
+                        if place.projections().is_empty() {
+                            let loc = self.loc_for_value(place.base());
+                            match loc {
+                                Location::StackAddr(_) => Location::PlaceValue(place.clone()),
+                                _ => loc,
+                            }
+                        } else {
+                            Location::PlaceValue(place.clone())
+                        }
+                    }
+                    PlaceAny::Aggregate(place) => self.loc_for_value(place.base()),
+                },
+                crate::mcregalloc::constraints::CallArgKind::Addr => match &arg_constr.place {
+                    PlaceAny::Aggregate(place) => {
+                        if place.projections().is_empty() {
+                            self.loc_for_addr(place.base())
+                        } else {
+                            Location::PlaceAddr(PlaceAny::Aggregate(place.clone()))
+                        }
+                    }
+                    PlaceAny::Scalar(place) => {
+                        Location::PlaceAddr(PlaceAny::Scalar(place.clone()))
+                    }
+                },
             };
             let target_loc = Location::Reg(arg_constr.reg);
             if current_loc != target_loc {

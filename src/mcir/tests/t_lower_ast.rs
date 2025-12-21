@@ -86,11 +86,11 @@ fn test_lower_call_emits_arg_temp() {
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
-    assert_eq!(entry_block.stmts.len(), 3);
+    assert_eq!(entry_block.stmts.len(), 2);
 
     match &entry_block.stmts[0] {
         Statement::AssignScalar { dst, src } => {
-            assert_eq!(dst.base(), LocalId(1));
+            assert_eq!(dst.base(), LocalId(0));
             match src {
                 Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
                     assert_eq!(*value, 1);
@@ -166,7 +166,7 @@ fn test_lower_tuple_return_literal() {
 
     match &entry_block.stmts[0] {
         Statement::AssignScalar { dst, src } => {
-            assert_eq!(dst.base(), LocalId(1));
+            assert_eq!(dst.base(), LocalId(0));
             assert_eq!(dst.projections(), &[Projection::Field { index: 0 }]);
             match src {
                 Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
@@ -192,14 +192,51 @@ fn test_lower_tuple_return_literal() {
         _ => panic!("unexpected stmt[1]"),
     }
 
-    match &entry_block.stmts[2] {
-        Statement::CopyAggregate { dst, src } => {
-            assert_eq!(dst.base(), LocalId(0));
-            assert!(dst.projections().is_empty());
-            assert_eq!(src.base(), LocalId(1));
-            assert!(src.projections().is_empty());
+    assert!(matches!(entry_block.terminator, Terminator::Return));
+}
+
+#[test]
+fn test_lower_nrvo_binding_elides_copy() {
+    let source = r#"
+        fn main() -> (u64, bool) {
+            let x = (42, true);
+            x
         }
-        _ => panic!("unexpected stmt[2]"),
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let mut lowerer = FuncLowerer::new(&analyzed, func);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+
+    println!("Lowered body:\n{}", body);
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+
+    assert_eq!(entry_block.stmts.len(), 2);
+    assert!(
+        !entry_block
+            .stmts
+            .iter()
+            .any(|stmt| matches!(stmt, Statement::CopyAggregate { .. }))
+    );
+
+    match &entry_block.stmts[0] {
+        Statement::AssignScalar { dst, .. } => {
+            assert_eq!(dst.base(), LocalId(0));
+            assert_eq!(dst.projections(), &[Projection::Field { index: 0 }]);
+        }
+        _ => panic!("unexpected stmt[0]"),
+    }
+
+    match &entry_block.stmts[1] {
+        Statement::AssignScalar { dst, .. } => {
+            assert_eq!(dst.base(), LocalId(0));
+            assert_eq!(dst.projections(), &[Projection::Field { index: 1 }]);
+        }
+        _ => panic!("unexpected stmt[1]"),
     }
 
     assert!(matches!(entry_block.terminator, Terminator::Return));

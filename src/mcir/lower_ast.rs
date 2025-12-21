@@ -1,3 +1,22 @@
+//! Lowering from AST to MCIR.
+//!
+//! Design notes:
+//! - The lowering is place-based: aggregate values are modeled as places (locations),
+//!   while scalars are modeled as operands.
+//! - Lowering distinguishes value position from block-item position. Expressions that
+//!   only make sense for side effects (let/var/assign/while) are rejected in value
+//!   context.
+//! - Aggregate construction is done in-place via projections whenever possible to
+//!   avoid extra temporaries and copies (NRVO/RVO-style behavior).
+//! - Control-flow expressions (if/block) are lowered by emitting side effects in
+//!   each branch and joining with a destination place or a temp.
+//!
+//! Implementation notes:
+//! - `lower_agg_value_into` is the central entry for writing aggregate values into
+//!   a destination place.
+//! - `emit_call_into` centralizes call emission so call sites can reuse it for both
+//!   scalar and aggregate destinations.
+
 use std::collections::HashMap;
 
 use thiserror::Error;
@@ -15,17 +34,21 @@ use crate::types::*;
 pub enum LowerError {
     #[error("expression def not found for node {0:?}")]
     ExprDefNotFound(NodeId),
+   
     #[error("expression type not found for node {0:?}")]
     ExprTypeNotFound(NodeId),
+
     #[error("expression is not a place for node {0:?}")]
     ExprIsNotPlace(NodeId),
+
     #[error("expression is not an aggregate for node {0:?}")]
     ExprIsNotAggregate(NodeId),
 
-    #[error("place is not scalar for node {0:?}")]
-    PlaceIsNotScalar(NodeId),
-    #[error("place is not aggregate for node {0:?}")]
-    PlaceIsNotAggregate(NodeId),
+    #[error("expression not allowed in value context for node {0:?}")]
+    ExprNotAllowedInValueContext(NodeId),
+
+    #[error("place is not {expected:?} for node {node_id:?}")]
+    PlaceKindMismatch { node_id: NodeId, expected: PlaceKind },
 
     #[error("variable local not found for node {0:?} (def {1:?})")]
     VarLocalNotFound(NodeId, DefId),
@@ -33,18 +56,22 @@ pub enum LowerError {
     #[error("unsupported operand expression for node {0:?}")]
     UnsupportedOperandExpr(NodeId),
 
-    #[error("pattern value type mismatch for node {0:?}")]
-    PatternValueTypeMismatch(NodeId),
+    #[error("pattern does not match expected shape for node {0:?}")]
+    PatternMismatch(NodeId),
+
     #[error("unsupported aggregate rhs for node {0:?}")]
     UnsupportedAggregateRhs(NodeId),
-
-    #[error("expression not allowed in value context for node {0:?}")]
-    ExprNotAllowedInValueContext(NodeId),
 }
 
 enum ExprValue {
     Scalar(Operand),
     Aggregate(Place<Aggregate>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PlaceKind {
+    Scalar,
+    Aggregate,
 }
 
 #[derive(Debug)]
@@ -58,6 +85,7 @@ pub struct FuncLowerer<'a> {
 }
 
 impl<'a> FuncLowerer<'a> {
+    /// Create a lowering context for one function.
     pub fn new(ctx: &'a AnalyzedContext, func: &'a Function) -> Self {
         let mut ty_lowerer = TyLowerer::new();
 
@@ -82,8 +110,9 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Lower the function AST into MCIR.
     pub fn lower(&mut self) -> Result<Body, LowerError> {
-        // Create locals for params
+        // Create locals for params.
         for (i, param) in self.func.params.iter().enumerate() {
             let ty = self.ty_for_node(param.id)?;
             let ty_id = self.ty_lowerer.lower_ty(&ty);
@@ -96,28 +125,15 @@ impl<'a> FuncLowerer<'a> {
             self.locals.insert(def_id, local_id);
         }
 
-        // Lower body expression
-        let body_value = self.lower_expr_value(&self.func.body)?;
-
-        // Store the result in return local
+        // Lower the body into the return local (scalar vs aggregate).
         let ret_id = self.fb.body.ret_local;
         let ret_ty = self.fb.body.locals[ret_id.0 as usize].ty;
-        let ret_place = Place::new(ret_id, ret_ty, vec![]);
 
-        // Fast path: lower aggregate literal directly into return place
-        if matches!(
-            &self.func.body.kind,
-            EK::ArrayLit(..) | EK::TupleLit(..) | EK::StructLit { .. }
-        ) {
-            self.lower_agg_into(ret_place, &self.func.body)?;
-            self.fb.set_terminator(self.curr_block, Terminator::Return);
-            return Ok(self.fb.body.clone());
-        }
-
-        // Fallback: lower normally
-        match body_value {
-            ExprValue::Scalar(op) => {
-                let ret_place = Place::new(ret_id, ret_ty, vec![]);
+        let body_ty = self.ty_for_node(self.func.body.id)?;
+        if body_ty.is_scalar() {
+            let ret_place = Place::<Scalar>::new(ret_id, ret_ty, vec![]);
+            let body_value = self.lower_expr_value(&self.func.body)?;
+            if let ExprValue::Scalar(op) = body_value {
                 self.fb.push_stmt(
                     self.curr_block,
                     Statement::AssignScalar {
@@ -126,16 +142,9 @@ impl<'a> FuncLowerer<'a> {
                     },
                 );
             }
-            ExprValue::Aggregate(place) => {
-                let ret_place = Place::new(ret_id, ret_ty, vec![]);
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyAggregate {
-                        dst: ret_place,
-                        src: place,
-                    },
-                );
-            }
+        } else {
+            let ret_place = Place::<Aggregate>::new(ret_id, ret_ty, vec![]);
+            self.lower_agg_value_into(ret_place, &self.func.body)?;
         }
 
         // Terminate the entry block
@@ -146,8 +155,10 @@ impl<'a> FuncLowerer<'a> {
         Ok(self.fb.body.clone())
     }
 
+    /// Lower an expression in value position into a scalar operand or aggregate place.
     fn lower_expr_value(&mut self, expr: &Expr) -> Result<ExprValue, LowerError> {
         match &expr.kind {
+            // These are only allowed as block items.
             EK::LetBind { .. } | EK::VarBind { .. } | EK::Assign { .. } | EK::While { .. } => {
                 return Err(LowerError::ExprNotAllowedInValueContext(expr.id));
             }
@@ -180,10 +191,10 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Expression (Block) ---
 
+    /// Lower a block used as an expression.
     fn lower_block_expr(&mut self, exprs: &[Expr]) -> Result<ExprValue, LowerError> {
-        for e in exprs.iter().take(exprs.len().saturating_sub(1)) {
-            self.lower_block_item(e)?;
-        }
+        // Evaluate all but the last expression for side effects.
+        self.lower_block_prefix(exprs)?;
 
         match exprs.last() {
             None => {
@@ -195,8 +206,19 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Lower all but the last expression in a block (side effects only).
+    fn lower_block_prefix(&mut self, exprs: &[Expr]) -> Result<(), LowerError> {
+        // Block prefix: execute in order, discard results.
+        for e in exprs.iter().take(exprs.len().saturating_sub(1)) {
+            self.lower_block_item(e)?;
+        }
+        Ok(())
+    }
+
+    /// Lower a block item (stmt-like expression) for side effects.
     fn lower_block_item(&mut self, expr: &Expr) -> Result<(), LowerError> {
         match &expr.kind {
+            // Block-item-only forms.
             EK::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
             EK::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
             EK::Assign { assignee, value } => self.lower_assign(assignee, value),
@@ -215,7 +237,7 @@ impl<'a> FuncLowerer<'a> {
                 Ok(())
             }
             _ => {
-                // regular expression used for side effects only
+                // Regular expression used for side effects only.
                 let _ = self.lower_expr_value(expr)?;
                 Ok(())
             }
@@ -224,6 +246,7 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Expression (Scalar) ---
 
+    /// Lower an expression expected to produce a scalar operand.
     fn lower_scalar_expr(&mut self, expr: &Expr) -> Result<Operand, LowerError> {
         match &expr.kind {
             // Literals
@@ -295,8 +318,9 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Emit a scalar rvalue into a temp and return it as an operand.
     fn emit_scalar_rvalue(&mut self, ty_id: TyId, rvalue: Rvalue) -> Operand {
-        // Create a temp to hold the result
+        // Materialize into a temp so later uses can be a place.
         let temp_local_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
         let temp_place = Place::new(temp_local_id, ty_id, vec![]);
 
@@ -315,6 +339,7 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Expression (Aggregate) ---
 
+    /// Lower an aggregate expression into a fresh temp place.
     fn lower_agg_expr(&mut self, expr: &Expr) -> Result<Place<Aggregate>, LowerError> {
         let aggr_ty = self.ty_for_node(expr.id)?;
         let aggr_ty_id = self.ty_lowerer.lower_ty(&aggr_ty);
@@ -322,7 +347,7 @@ impl<'a> FuncLowerer<'a> {
             return Err(LowerError::ExprIsNotAggregate(expr.id));
         }
 
-        // Create a temp to hold the result
+        // Create a temp to hold the result.
         let temp_local_id = self.fb.new_local(aggr_ty_id, LocalKind::Temp, None);
         let temp_place = Place::new(temp_local_id, aggr_ty_id, vec![]);
 
@@ -331,9 +356,11 @@ impl<'a> FuncLowerer<'a> {
         Ok(temp_place)
     }
 
+    /// Lower an aggregate literal directly into a destination place.
     fn lower_agg_into(&mut self, dst: Place<Aggregate>, expr: &Expr) -> Result<(), LowerError> {
         match &expr.kind {
             EK::TupleLit(fields) => {
+                // Lower each tuple field into its slot.
                 for (i, field_expr) in fields.iter().enumerate() {
                     let field_ty = self.ty_for_node(field_expr.id)?;
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
@@ -349,6 +376,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             EK::StructLit { fields, .. } => {
+                // Lower each struct field by name.
                 for StructLitField {
                     name: field_name,
                     value: field_expr,
@@ -374,6 +402,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             EK::ArrayLit(elem_exprs) => {
+                // Lower each element into its index.
                 let elem_ty = {
                     let dst_ty = self.ty_for_node(expr.id)?;
                     match dst_ty {
@@ -401,6 +430,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Emit a write into a projected field/element of an aggregate.
     fn emit_agg_projection(
         &mut self,
         dst: &Place<Aggregate>,
@@ -408,6 +438,7 @@ impl<'a> FuncLowerer<'a> {
         field_expr: &Expr,
         extra_proj: Projection,
     ) -> Result<(), LowerError> {
+        // Extend the projection and write into the selected field/element.
         let mut projs = dst.projections().to_vec();
         projs.push(extra_proj);
 
@@ -424,27 +455,13 @@ impl<'a> FuncLowerer<'a> {
             Ok(())
         } else {
             let field_place = Place::new(dst.base(), field_ty_id, projs);
-            match &field_expr.kind {
-                EK::ArrayLit(_) | EK::TupleLit(_) | EK::StructLit { .. } => {
-                    self.lower_agg_into(field_place, field_expr)
-                }
-                _ => {
-                    let src = self.lower_place_agg(field_expr)?;
-                    self.fb.push_stmt(
-                        self.curr_block,
-                        Statement::CopyAggregate {
-                            dst: field_place,
-                            src,
-                        },
-                    );
-                    Ok(())
-                }
-            }
+            self.lower_agg_value_into(field_place, field_expr)
         }
     }
 
     // --- Place (Lvalue) ---
 
+    /// Lower an lvalue expression into a place.
     fn lower_place(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
         match &expr.kind {
             EK::Var(_) => self.lower_var(expr),
@@ -455,20 +472,29 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Lower an lvalue expression expected to be scalar.
     fn lower_place_scalar(&mut self, expr: &Expr) -> Result<Place<Scalar>, LowerError> {
         match self.lower_place(expr)? {
             PlaceAny::Scalar(p) => Ok(p),
-            PlaceAny::Aggregate(_) => Err(LowerError::PlaceIsNotScalar(expr.id)),
+            PlaceAny::Aggregate(_) => Err(LowerError::PlaceKindMismatch {
+                node_id: expr.id,
+                expected: PlaceKind::Scalar,
+            }),
         }
     }
 
+    /// Lower an lvalue expression expected to be aggregate.
     fn lower_place_agg(&mut self, expr: &Expr) -> Result<Place<Aggregate>, LowerError> {
         match self.lower_place(expr)? {
-            PlaceAny::Scalar(_) => Err(LowerError::PlaceIsNotAggregate(expr.id)),
+            PlaceAny::Scalar(_) => Err(LowerError::PlaceKindMismatch {
+                node_id: expr.id,
+                expected: PlaceKind::Aggregate,
+            }),
             PlaceAny::Aggregate(p) => Ok(p),
         }
     }
 
+    /// Resolve a variable reference into its local place.
     fn lower_var(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
         let def = self.def_for_node(expr.id)?;
         let local_id = *self
@@ -483,6 +509,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(place)
     }
 
+    /// Lower array indexing into a projected place.
     fn lower_array_index(
         &mut self,
         expr: &Expr,
@@ -491,6 +518,7 @@ impl<'a> FuncLowerer<'a> {
     ) -> Result<PlaceAny, LowerError> {
         let target_place = self.lower_place_agg(target)?;
 
+        // Lower each index expression to an operand.
         let mut index_operands = Vec::new();
         for idx in indices {
             let idx_op = self.lower_scalar_expr(idx)?;
@@ -512,6 +540,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(place)
     }
 
+    /// Lower tuple field access into a projected place.
     fn lower_tuple_field(&mut self, target: &Expr, index: usize) -> Result<PlaceAny, LowerError> {
         let target_place = self.lower_place_agg(target)?;
         let target_ty = self.ty_for_node(target.id)?;
@@ -527,6 +556,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(place)
     }
 
+    /// Lower struct field access into a projected place.
     fn lower_struct_field(
         &mut self,
         target: &Expr,
@@ -548,6 +578,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(place)
     }
 
+    /// Construct a typed place from a base local and projections.
     fn place_from_ty(&self, base: LocalId, ty: TyId, proj: Vec<Projection>) -> PlaceAny {
         if self.is_scalar(ty) {
             PlaceAny::Scalar(Place::new(base, ty, proj))
@@ -558,29 +589,45 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Bindings / Patterns ---
 
+    /// Lower a let/var binding.
     fn lower_binding(&mut self, pattern: &Pattern, value: &Expr) -> Result<(), LowerError> {
         let value_ty = self.ty_for_node(value.id)?;
 
         if value_ty.is_scalar() {
+            // Scalar binding: compute operand and assign.
             let PK::Ident { name } = &pattern.kind else {
-                return Err(LowerError::PatternValueTypeMismatch(pattern.id));
+                return Err(LowerError::PatternMismatch(pattern.id));
             };
             let op = self.lower_scalar_expr(value)?;
             let ty_id = self.ty_lowerer.lower_ty(&value_ty);
             let def_id = self.def_for_node(pattern.id)?.id;
-            let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name.clone()));
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::AssignScalar {
-                    dst: Place::new(local_id, ty_id, vec![]),
-                    src: Rvalue::Use(op),
-                },
-            );
+            self.bind_ident_operand(def_id, name.clone(), ty_id, op)?;
         } else {
+            if let PK::Ident { name } = &pattern.kind {
+                // Aggregate ident binding: prefer NRVO when eligible.
+                let (def_id, nrvo_eligible) = {
+                    let def = self.def_for_node(pattern.id)?;
+                    (def.id, def.nrvo_eligible)
+                };
+                if nrvo_eligible {
+                    let ret_id = self.fb.body.ret_local;
+                    let ret_ty = self.fb.body.locals[ret_id.0 as usize].ty;
+                    self.locals.insert(def_id, ret_id);
+                    let dst = Place::new(ret_id, ret_ty, vec![]);
+                    self.lower_agg_value_into(dst, value)?;
+                    return Ok(());
+                }
+                let ty_id = self.ty_lowerer.lower_ty(&value_ty);
+                let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name.clone()));
+                let dst = Place::new(local_id, ty_id, vec![]);
+                self.lower_agg_value_into(dst, value)?;
+                return Ok(());
+            }
+            // Aggregate destructuring via patterns.
             let src_place = match self.lower_expr_value(value)? {
                 ExprValue::Aggregate(place) => PlaceAny::Aggregate(place),
                 ExprValue::Scalar(_) => {
-                    return Err(LowerError::PatternValueTypeMismatch(pattern.id));
+                    return Err(LowerError::PatternMismatch(pattern.id));
                 }
             };
             self.bind_pattern_with_type(pattern, src_place, &value_ty)?;
@@ -589,6 +636,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
+    /// Bind a pattern to a value place with a known AST type.
     fn bind_pattern_with_type(
         &mut self,
         pattern: &Pattern,
@@ -597,39 +645,17 @@ impl<'a> FuncLowerer<'a> {
     ) -> Result<(), LowerError> {
         match &pattern.kind {
             PK::Ident { name } => {
-                // Create a local for the binding
+                // Bind a single identifier to a place.
                 let src_ty_id = self.ty_lowerer.lower_ty(src_ty);
                 let def_id = self.def_for_node(pattern.id)?.id;
-                let local_id = self.ensure_local_for_def(def_id, src_ty_id, Some(name.clone()));
-
-                // Assign the value to the local
-                match src_place {
-                    PlaceAny::Scalar(place) => {
-                        self.fb.push_stmt(
-                            self.curr_block,
-                            Statement::AssignScalar {
-                                dst: Place::new(local_id, src_ty_id, vec![]),
-                                src: Rvalue::Use(Operand::Copy(place)),
-                            },
-                        );
-                    }
-                    PlaceAny::Aggregate(place) => {
-                        self.fb.push_stmt(
-                            self.curr_block,
-                            Statement::CopyAggregate {
-                                dst: Place::new(local_id, src_ty_id, vec![]),
-                                src: place,
-                            },
-                        );
-                    }
-                }
-                Ok(())
+                self.bind_ident(def_id, name.clone(), src_ty_id, src_place)
             }
 
             PK::Tuple { patterns } => {
+                // Destructure tuple by projecting each field.
                 let src_place = match src_place {
                     PlaceAny::Aggregate(place) => place,
-                    _ => return Err(LowerError::PatternValueTypeMismatch(pattern.id)),
+                    _ => return Err(LowerError::PatternMismatch(pattern.id)),
                 };
 
                 let Type::Tuple { fields } = src_ty else {
@@ -651,9 +677,10 @@ impl<'a> FuncLowerer<'a> {
             }
 
             PK::Array { patterns } => {
+                // Destructure array by index.
                 let src_place = match src_place {
                     PlaceAny::Aggregate(place) => place,
-                    _ => return Err(LowerError::PatternValueTypeMismatch(pattern.id)),
+                    _ => return Err(LowerError::PatternMismatch(pattern.id)),
                 };
 
                 let Type::Array { elem_ty, dims } = src_ty else {
@@ -689,6 +716,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Create or reuse a local for a definition id.
     fn ensure_local_for_def(
         &mut self,
         def_id: DefId,
@@ -703,18 +731,72 @@ impl<'a> FuncLowerer<'a> {
         id
     }
 
+    /// Bind an identifier to a place, emitting the appropriate assignment.
+    fn bind_ident(
+        &mut self,
+        def_id: DefId,
+        name: String,
+        ty_id: TyId,
+        src_place: PlaceAny,
+    ) -> Result<(), LowerError> {
+        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name));
+        match src_place {
+            PlaceAny::Scalar(place) => {
+                self.fb.push_stmt(
+                    self.curr_block,
+                    Statement::AssignScalar {
+                        dst: Place::new(local_id, ty_id, vec![]),
+                        src: Rvalue::Use(Operand::Copy(place)),
+                    },
+                );
+            }
+            PlaceAny::Aggregate(place) => {
+                self.fb.push_stmt(
+                    self.curr_block,
+                    Statement::CopyAggregate {
+                        dst: Place::new(local_id, ty_id, vec![]),
+                        src: place,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Bind an identifier to a scalar operand.
+    fn bind_ident_operand(
+        &mut self,
+        def_id: DefId,
+        name: String,
+        ty_id: TyId,
+        op: Operand,
+    ) -> Result<(), LowerError> {
+        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name));
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::AssignScalar {
+                dst: Place::new(local_id, ty_id, vec![]),
+                src: Rvalue::Use(op),
+            },
+        );
+        Ok(())
+    }
+
+    /// Create a projected place from an aggregate base.
     fn project_place(&self, src: &Place<Aggregate>, proj: Projection, ty_id: TyId) -> PlaceAny {
         let mut projs = src.projections().to_vec();
         projs.push(proj);
         self.place_from_ty(src.base(), ty_id, projs)
     }
 
-    // --- Assignent ---
+    // --- Assignment ---
 
+    /// Lower an assignment expression.
     fn lower_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<(), LowerError> {
         let value_ty = self.ty_for_node(value.id)?;
 
         if value_ty.is_scalar() {
+            // Scalar assignment.
             let assignee_place = self.lower_place_scalar(assignee)?;
             let value_operand = self.lower_scalar_expr(value)?;
 
@@ -726,41 +808,9 @@ impl<'a> FuncLowerer<'a> {
                 },
             );
         } else {
+            // Aggregate assignment (value written directly into place).
             let assignee_place = self.lower_place_agg(assignee)?;
-
-            if let Ok(value_place) = self.lower_place_agg(value) {
-                // value is a place, do a copy
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyAggregate {
-                        dst: assignee_place,
-                        src: value_place,
-                    },
-                );
-            } else {
-                // If it's an aggregate literal, build a temp and fill it
-                match &value.kind {
-                    EK::ArrayLit(..) | EK::TupleLit(..) | EK::StructLit { .. } => {
-                        self.lower_agg_into(assignee_place, value)?;
-                    }
-                    _ => {
-                        match self.lower_expr_value(value)? {
-                            ExprValue::Aggregate(place) => {
-                                self.fb.push_stmt(
-                                    self.curr_block,
-                                    Statement::CopyAggregate {
-                                        dst: assignee_place,
-                                        src: place,
-                                    },
-                                );
-                            }
-                            ExprValue::Scalar(_) => {
-                                return Err(LowerError::UnsupportedAggregateRhs(value.id));
-                            }
-                        }
-                    }
-                }
-            }
+            self.lower_agg_value_into(assignee_place, value)?;
         }
 
         Ok(())
@@ -768,6 +818,7 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Control Flow ---
 
+    /// Lower an if expression in value position.
     fn lower_if_expr(
         &mut self,
         cond: &Expr,
@@ -776,6 +827,7 @@ impl<'a> FuncLowerer<'a> {
     ) -> Result<ExprValue, LowerError> {
         let cond_op = self.lower_scalar_expr(cond)?;
 
+        // Split control flow into then/else with a join block.
         let then_bb = self.fb.new_block();
         let else_bb = self.fb.new_block();
         let join_bb = self.fb.new_block();
@@ -793,6 +845,7 @@ impl<'a> FuncLowerer<'a> {
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
         if result_ty.is_scalar() {
+            // Scalar if-expr: write both branches into the same temp.
             let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
             let temp_place = Place::new(temp_id, result_ty_id, vec![]);
 
@@ -827,34 +880,19 @@ impl<'a> FuncLowerer<'a> {
             self.curr_block = join_bb;
             Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
         } else {
+            // Aggregate if-expr: lower both branches into a temp place.
             let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
             let temp_place = Place::new(temp_id, result_ty_id, vec![]);
 
             // then
             self.curr_block = then_bb;
-            if let ExprValue::Aggregate(place) = self.lower_expr_value(then_body)? {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyAggregate {
-                        dst: temp_place.clone(),
-                        src: place,
-                    },
-                );
-            }
+            self.lower_agg_value_into(temp_place.clone(), then_body)?;
             self.fb
                 .set_terminator(self.curr_block, Terminator::Goto(join_bb));
 
             // else
             self.curr_block = else_bb;
-            if let ExprValue::Aggregate(place) = self.lower_expr_value(else_body)? {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyAggregate {
-                        dst: temp_place.clone(),
-                        src: place,
-                    },
-                );
-            }
+            self.lower_agg_value_into(temp_place.clone(), else_body)?;
             self.fb
                 .set_terminator(self.curr_block, Terminator::Goto(join_bb));
 
@@ -863,6 +901,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Lower a while expression (returns unit).
     fn lower_while_expr(&mut self, cond: &Expr, body: &Expr) -> Result<ExprValue, LowerError> {
         let loop_cond_bb = self.fb.new_block();
         let loop_body_bb = self.fb.new_block();
@@ -898,14 +937,144 @@ impl<'a> FuncLowerer<'a> {
         Ok(ExprValue::Scalar(Operand::Const(c)))
     }
 
+    /// Lower an aggregate expression directly into a destination place.
+    fn lower_agg_value_into(
+        &mut self,
+        dst: Place<Aggregate>,
+        expr: &Expr,
+    ) -> Result<(), LowerError> {
+        match &expr.kind {
+            EK::ArrayLit(..) | EK::TupleLit(..) | EK::StructLit { .. } => {
+                // Aggregate literal: build in place.
+                self.lower_agg_into(dst, expr)
+            }
+            EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
+                // Aggregate place: copy unless it's already the destination.
+                let src = self.lower_place_agg(expr)?;
+                if src.base() == dst.base() && src.projections() == dst.projections() {
+                    return Ok(());
+                }
+                self.fb.push_stmt(
+                    self.curr_block,
+                    Statement::CopyAggregate { dst, src },
+                );
+                Ok(())
+            }
+            EK::Call { callee, args } => {
+                // Aggregate call result: direct into destination.
+                self.emit_call_into(PlaceAny::Aggregate(dst), callee, args)?;
+                Ok(())
+            }
+            EK::Block(exprs) => self.lower_block_into(dst, exprs, expr.id),
+            EK::If {
+                cond,
+                then_body,
+                else_body,
+            } => self.lower_if_expr_into(dst, cond, then_body, else_body),
+            _ => match self.lower_expr_value(expr)? {
+                ExprValue::Aggregate(place) => {
+                    self.fb.push_stmt(
+                        self.curr_block,
+                        Statement::CopyAggregate {
+                            dst,
+                            src: place,
+                        },
+                    );
+                    Ok(())
+                }
+                ExprValue::Scalar(_) => Err(LowerError::UnsupportedAggregateRhs(expr.id)),
+            },
+        }
+    }
+
+    /// Lower a block and write its final aggregate value into dst.
+    fn lower_block_into(
+        &mut self,
+        dst: Place<Aggregate>,
+        exprs: &[Expr],
+        block_id: NodeId,
+    ) -> Result<(), LowerError> {
+        // Evaluate prefix, then write the tail into dst.
+        self.lower_block_prefix(exprs)?;
+
+        match exprs.last() {
+            Some(last_expr) => self.lower_agg_value_into(dst, last_expr),
+            None => Err(LowerError::UnsupportedAggregateRhs(block_id)),
+        }
+    }
+
+    /// Lower an if-expression into a destination aggregate place.
+    fn lower_if_expr_into(
+        &mut self,
+        dst: Place<Aggregate>,
+        cond: &Expr,
+        then_body: &Expr,
+        else_body: &Expr,
+    ) -> Result<(), LowerError> {
+        let cond_op = self.lower_scalar_expr(cond)?;
+
+        // Lower both branches into dst, then join.
+        let then_bb = self.fb.new_block();
+        let else_bb = self.fb.new_block();
+        let join_bb = self.fb.new_block();
+
+        self.fb.set_terminator(
+            self.curr_block,
+            Terminator::If {
+                cond: cond_op,
+                then_bb,
+                else_bb,
+            },
+        );
+
+        self.curr_block = then_bb;
+        self.lower_agg_value_into(dst.clone(), then_body)?;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+
+        self.curr_block = else_bb;
+        self.lower_agg_value_into(dst.clone(), else_body)?;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+
+        self.curr_block = join_bb;
+        Ok(())
+    }
+
     // --- Call ---
 
+    /// Lower a call expression and return the produced value.
     fn lower_call_expr(
         &mut self,
         call: &Expr,
         callee: &Expr,
         args: &[Expr],
     ) -> Result<ExprValue, LowerError> {
+        let result_ty = self.ty_for_node(call.id)?;
+        let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
+
+        if result_ty.is_scalar() {
+            // Scalar call: capture result into a temp.
+            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
+            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
+            self.emit_call_into(PlaceAny::Scalar(temp_place.clone()), callee, args)?;
+            Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
+        } else {
+            // Aggregate call: capture result into a temp place.
+            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
+            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
+            self.emit_call_into(PlaceAny::Aggregate(temp_place.clone()), callee, args)?;
+            Ok(ExprValue::Aggregate(temp_place))
+        }
+    }
+
+    /// Emit a call statement that writes into the given destination place.
+    fn emit_call_into(
+        &mut self,
+        dst: PlaceAny,
+        callee: &Expr,
+        args: &[Expr],
+    ) -> Result<(), LowerError> {
         let callee_def = self.def_for_node(callee.id)?;
         let callee_id = callee_def.id;
 
@@ -914,46 +1083,24 @@ impl<'a> FuncLowerer<'a> {
             .map(|a| self.lower_call_arg(a))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let result_ty = self.ty_for_node(call.id)?;
-        let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
-
-        if result_ty.is_scalar() {
-            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
-
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::Call {
-                    dst: PlaceAny::Scalar(temp_place.clone()),
-                    callee: Callee::Def(callee_id),
-                    args: arg_vals,
-                },
-            );
-
-            Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
-        } else {
-            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
-
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::Call {
-                    dst: PlaceAny::Aggregate(temp_place.clone()),
-                    callee: Callee::Def(callee_id),
-                    args: arg_vals,
-                },
-            );
-
-            Ok(ExprValue::Aggregate(temp_place))
-        }
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst,
+                callee: Callee::Def(callee_id),
+                args: arg_vals,
+            },
+        );
+        Ok(())
     }
 
+    /// Lower a call argument into a place (or temp if needed).
     fn lower_call_arg(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
         let ty = self.ty_for_node(arg.id)?;
         let ty_id = self.ty_lowerer.lower_ty(&ty);
 
         if ty.is_scalar() {
-            // If it's already a place, use it.
+            // Scalar arg: prefer a place, otherwise spill to temp.
             if let Ok(place) = self.lower_place_scalar(arg) {
                 return Ok(PlaceAny::Scalar(place));
             }
@@ -971,21 +1118,9 @@ impl<'a> FuncLowerer<'a> {
             );
             Ok(PlaceAny::Scalar(temp_place))
         } else {
+            // Aggregate arg: prefer a place, otherwise lower into a temp.
             if let Ok(place) = self.lower_place_agg(arg) {
-                if place.projections().is_empty() {
-                    Ok(PlaceAny::Aggregate(place))
-                } else {
-                    let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
-                    let temp_place = Place::new(temp_id, ty_id, vec![]);
-                    self.fb.push_stmt(
-                        self.curr_block,
-                        Statement::CopyAggregate {
-                            dst: temp_place.clone(),
-                            src: place,
-                        },
-                    );
-                    Ok(PlaceAny::Aggregate(temp_place))
-                }
+                Ok(PlaceAny::Aggregate(place))
             } else {
                 Ok(PlaceAny::Aggregate(self.lower_agg_expr(arg)?))
             }
@@ -994,6 +1129,7 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Operator Mapping ---
 
+    /// Map AST binary op to MCIR binary op.
     fn map_binop(op: ast::BinaryOp) -> BinOp {
         match op {
             ast::BinaryOp::Add => BinOp::Add,
@@ -1009,6 +1145,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Map AST unary op to MCIR unary op.
     fn map_unop(op: ast::UnaryOp) -> UnOp {
         match op {
             ast::UnaryOp::Neg => UnOp::Neg,
@@ -1017,6 +1154,7 @@ impl<'a> FuncLowerer<'a> {
 
     // --- Helpers ---
 
+    /// Lookup a definition for an AST node id.
     fn def_for_node(&self, node_id: NodeId) -> Result<&Def, LowerError> {
         self.ctx
             .def_map
@@ -1024,6 +1162,7 @@ impl<'a> FuncLowerer<'a> {
             .ok_or(LowerError::ExprDefNotFound(node_id))
     }
 
+    /// Lookup the AST type for a node id.
     fn ty_for_node(&self, node_id: NodeId) -> Result<Type, LowerError> {
         self.ctx
             .type_map
@@ -1031,15 +1170,18 @@ impl<'a> FuncLowerer<'a> {
             .ok_or(LowerError::ExprTypeNotFound(node_id))
     }
 
+    /// Check whether a lowered type is scalar.
     fn is_scalar(&self, ty_id: TyId) -> bool {
         self.ty_lowerer.table.get(ty_id).is_scalar()
     }
 
+    /// Check whether a lowered type is aggregate.
     fn is_aggregate(&self, ty_id: TyId) -> bool {
         self.ty_lowerer.table.get(ty_id).is_aggregate()
     }
 }
 
+/// Lower all functions in a module into MCIR bodies.
 pub fn lower_ast(ctx: AnalyzedContext) -> Result<Vec<Body>, LowerError> {
     let mut bodies = Vec::new();
     for func in ctx.module.funcs() {
