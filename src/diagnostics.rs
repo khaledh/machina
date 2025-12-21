@@ -1,6 +1,8 @@
 use crate::codegen::arm64::CodegenError;
 use crate::lexer::LexError;
 use crate::lower::LowerError;
+use crate::mccodegen::arm64::CodegenError as McCodegenError;
+use crate::mcir::lower_ast::LowerError as McLowerError;
 use crate::parser::ParseError;
 use crate::resolver::ResolveError;
 use crate::type_check::TypeCheckError;
@@ -26,6 +28,12 @@ pub enum CompileError {
 
     #[error(transparent)]
     Codegen(#[from] CodegenError),
+
+    #[error(transparent)]
+    McLower(#[from] McLowerError),
+
+    #[error(transparent)]
+    McCodegen(#[from] McCodegenError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

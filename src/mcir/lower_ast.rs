@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use thiserror::Error;
+
 use crate::analysis::Def;
 use crate::ast::{self, ExprKind as EK, PatternKind as PK, *};
 use crate::context::AnalyzedContext;
@@ -9,23 +11,34 @@ use crate::mcir::lower_ty::TyLowerer;
 use crate::mcir::types::*;
 use crate::types::*;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum LowerError {
+    #[error("expression def not found for node {0:?}")]
     ExprDefNotFound(NodeId),
+    #[error("expression type not found for node {0:?}")]
     ExprTypeNotFound(NodeId),
+    #[error("expression is not a place for node {0:?}")]
     ExprIsNotPlace(NodeId),
+    #[error("expression is not an aggregate for node {0:?}")]
     ExprIsNotAggregate(NodeId),
 
+    #[error("place is not scalar for node {0:?}")]
     PlaceIsNotScalar(NodeId),
+    #[error("place is not aggregate for node {0:?}")]
     PlaceIsNotAggregate(NodeId),
 
+    #[error("variable local not found for node {0:?} (def {1:?})")]
     VarLocalNotFound(NodeId, DefId),
 
+    #[error("unsupported operand expression for node {0:?}")]
     UnsupportedOperandExpr(NodeId),
 
+    #[error("pattern value type mismatch for node {0:?}")]
     PatternValueTypeMismatch(NodeId),
+    #[error("unsupported aggregate rhs for node {0:?}")]
     UnsupportedAggregateRhs(NodeId),
 
+    #[error("expression not allowed in value context for node {0:?}")]
     ExprNotAllowedInValueContext(NodeId),
 }
 
@@ -564,20 +577,12 @@ impl<'a> FuncLowerer<'a> {
                 },
             );
         } else {
-            let src_place = if let Ok(place) = self.lower_place_agg(value) {
-                // First: if it's already a place (var, field, index), use it
-                Ok(place)
-            } else {
-                // Second: if it's an aggregate literal, build a temp and fill it
-                match &value.kind {
-                    EK::ArrayLit(..) | EK::TupleLit(..) | EK::StructLit { .. } => {
-                        self.lower_agg_expr(value)
-                    }
-                    _ => Err(LowerError::UnsupportedAggregateRhs(value.id)),
+            let src_place = match self.lower_expr_value(value)? {
+                ExprValue::Aggregate(place) => PlaceAny::Aggregate(place),
+                ExprValue::Scalar(_) => {
+                    return Err(LowerError::PatternValueTypeMismatch(pattern.id));
                 }
-            }?;
-
-            let src_place = PlaceAny::Aggregate(src_place);
+            };
             self.bind_pattern_with_type(pattern, src_place, &value_ty)?;
         }
 
@@ -738,7 +743,22 @@ impl<'a> FuncLowerer<'a> {
                     EK::ArrayLit(..) | EK::TupleLit(..) | EK::StructLit { .. } => {
                         self.lower_agg_into(assignee_place, value)?;
                     }
-                    _ => return Err(LowerError::UnsupportedAggregateRhs(value.id)),
+                    _ => {
+                        match self.lower_expr_value(value)? {
+                            ExprValue::Aggregate(place) => {
+                                self.fb.push_stmt(
+                                    self.curr_block,
+                                    Statement::CopyAggregate {
+                                        dst: assignee_place,
+                                        src: place,
+                                    },
+                                );
+                            }
+                            ExprValue::Scalar(_) => {
+                                return Err(LowerError::UnsupportedAggregateRhs(value.id));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -952,7 +972,20 @@ impl<'a> FuncLowerer<'a> {
             Ok(PlaceAny::Scalar(temp_place))
         } else {
             if let Ok(place) = self.lower_place_agg(arg) {
-                Ok(PlaceAny::Aggregate(place))
+                if place.projections().is_empty() {
+                    Ok(PlaceAny::Aggregate(place))
+                } else {
+                    let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
+                    let temp_place = Place::new(temp_id, ty_id, vec![]);
+                    self.fb.push_stmt(
+                        self.curr_block,
+                        Statement::CopyAggregate {
+                            dst: temp_place.clone(),
+                            src: place,
+                        },
+                    );
+                    Ok(PlaceAny::Aggregate(temp_place))
+                }
             } else {
                 Ok(PlaceAny::Aggregate(self.lower_agg_expr(arg)?))
             }

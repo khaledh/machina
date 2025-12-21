@@ -11,6 +11,8 @@ mod layout;
 mod lexer;
 mod lower;
 mod mcir;
+mod mccodegen;
+mod mcregalloc;
 mod nrvo;
 mod parser;
 mod regalloc;
@@ -18,17 +20,18 @@ mod resolver;
 mod type_check;
 mod types;
 
-use crate::codegen::arm64::Arm64Codegen;
 use crate::context::AstContext;
 use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
-use crate::lower::lower;
+use crate::mccodegen::arm64::{Arm64Codegen as McArm64Codegen, McFunction};
+use crate::mcregalloc::alloc::RegAlloc as McRegAlloc;
+use crate::mcregalloc::constraints::analyze_constraints as analyze_mcir_constraints;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
-use crate::regalloc::alloc::{RegAlloc, TempAllocMapDisplay};
-use crate::regalloc::constraints::analyze_constraints;
 use crate::resolver::resolve;
 use crate::type_check::type_check;
+use crate::analysis::DefKind;
+use std::collections::HashMap;
 
 const SOURCE: &str = r#"
 type Point = {
@@ -49,7 +52,6 @@ fn add_points(a: Point, b: Point) -> Point {
 }
 
 fn main() -> u64 {
-    let z = {};
     let arr = [
         Point { x: 10, y: 20 },
         Point { x: 30, y: 40 },
@@ -61,13 +63,13 @@ fn main() -> u64 {
 }
 "#;
 
-const SOURCE2: &str = r#"
-fn main() -> u64 {
-    var x = 20;
-    x = 42;
-    x
-}
-"#;
+// const SOURCE2: &str = r#"
+// fn main() -> u64 {
+//     var x = 20;
+//     x = 42;
+//     x
+// }
+// "#;
 
 #[derive(ClapParser)]
 #[command(author, version, about, long_about = None)]
@@ -105,6 +107,12 @@ fn main() {
                         println!("{}", format_error(SOURCE, Span::default(), e));
                     }
                     CompileError::Codegen(e) => {
+                        println!("{}", format_error(SOURCE, Span::default(), e));
+                    }
+                    CompileError::McLower(e) => {
+                        println!("{}", format_error(SOURCE, Span::default(), e));
+                    }
+                    CompileError::McCodegen(e) => {
                         println!("{}", format_error(SOURCE, Span::default(), e));
                     }
                 }
@@ -209,39 +217,68 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         println!("--------------------------------");
     }
 
-    let lowered_context = lower(analyzed_context).map_err(|e| vec![e.into()])?;
+    let func_names: Vec<String> = analyzed_context
+        .module
+        .funcs()
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+
+    let def_names: HashMap<_, _> = analyzed_context
+        .def_map
+        .clone()
+        .into_iter()
+        .filter(|def| matches!(def.kind, DefKind::Func))
+        .map(|def| (def.id, def.name))
+        .collect();
+
+    let bodies = mcir::lower_ast::lower_ast(analyzed_context).map_err(|e| vec![e.into()])?;
     if dump_ir {
-        println!("IR:");
+        println!("MCIR:");
         println!("--------------------------------");
-        for func in &lowered_context.ir_funcs {
-            println!("{}", func);
+        for body in &bodies {
+            println!("{}", body);
             println!("--------------------------------");
         }
     }
 
-    // Liveness analysis
     if dump_liveness {
-        use regalloc::liveness::{LiveMapDisplay, LivenessAnalysis};
-        for func in &lowered_context.ir_funcs {
-            let live_map = LivenessAnalysis::new(func.clone()).analyze();
-            println!("Live Map ({}):", func.name);
+        use mcregalloc::liveness::LivenessAnalysis;
+        for (i, body) in bodies.iter().enumerate() {
+            let live_map = LivenessAnalysis::new(body).analyze();
+            println!("Live Map ({}):", func_names[i]);
             println!("--------------------------------");
-            println!(
-                "{}",
-                LiveMapDisplay {
-                    func,
-                    live_map: &live_map
+            for (bb_idx, live) in live_map.iter().enumerate() {
+                println!("  bb{}:", bb_idx);
+                print!("    live_in: [");
+                let mut live_in: Vec<_> = live.live_in.iter().map(|l| l.0).collect();
+                live_in.sort();
+                for (idx, id) in live_in.iter().enumerate() {
+                    if idx > 0 {
+                        print!(", ");
+                    }
+                    print!("%t{}", id);
                 }
-            );
+                println!("]");
+                print!("    live_out: [");
+                let mut live_out: Vec<_> = live.live_out.iter().map(|l| l.0).collect();
+                live_out.sort();
+                for (idx, id) in live_out.iter().enumerate() {
+                    if idx > 0 {
+                        print!(", ");
+                    }
+                    print!("%t{}", id);
+                }
+                println!("]");
+            }
             println!("--------------------------------");
         }
     }
 
-    // register allocation
     let mut alloc_results = Vec::new();
-    for func in &lowered_context.ir_funcs {
-        let constraints = analyze_constraints(func);
-        let alloc_result = RegAlloc::new(func, &constraints).alloc();
+    for body in &bodies {
+        let constraints = analyze_mcir_constraints(body);
+        let alloc_result = McRegAlloc::new(body, &constraints).alloc();
         alloc_results.push(alloc_result);
     }
 
@@ -249,13 +286,37 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         for alloc_result in &alloc_results {
             println!("Reg Alloc Map:");
             println!("--------------------------------");
-            println!("{}", TempAllocMapDisplay(&alloc_result.alloc_map));
+            let mut locals: Vec<_> = alloc_result.alloc_map.iter().collect();
+            locals.sort_by_key(|(id, _)| id.0);
+            for (id, mapped) in locals {
+                match mapped {
+                    mcregalloc::MappedLocal::Reg(reg) => {
+                        println!("%t{} -> {}", id.0, reg);
+                    }
+                    mcregalloc::MappedLocal::Stack(slot) => {
+                        println!("%t{} -> stack[{}]", id.0, slot.0);
+                    }
+                    mcregalloc::MappedLocal::StackAddr(slot) => {
+                        println!("%t{} -> stack_addr[{}]", id.0, slot.0);
+                    }
+                }
+            }
             println!("--------------------------------");
         }
     }
 
-    let lowered_regalloc_context = lowered_context.with_alloc_results(alloc_results);
-    let mut codegen = Arm64Codegen::new(lowered_regalloc_context);
+    let mc_funcs: Vec<McFunction> = bodies
+        .iter()
+        .zip(func_names.iter())
+        .zip(alloc_results.iter())
+        .map(|((body, name), alloc)| McFunction {
+            name: name.clone(),
+            body,
+            alloc,
+        })
+        .collect();
+
+    let mut codegen = McArm64Codegen::new(mc_funcs, &def_names);
     let asm = codegen.generate().map_err(|e| vec![e.into()])?;
 
     if dump_asm {

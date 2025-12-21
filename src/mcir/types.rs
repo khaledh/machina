@@ -132,6 +132,13 @@ impl TyTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalId(pub u32);
 
+impl LocalId {
+    #[inline]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
 
@@ -447,7 +454,7 @@ impl fmt::Display for PlaceAny {
 impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Operand::Copy(place) => write!(f, "copy {}", place),
+            Operand::Copy(place) => write!(f, "{}", place),
             Operand::Move(place) => write!(f, "move {}", place),
             Operand::Const(value) => write!(f, "{}", value),
         }
