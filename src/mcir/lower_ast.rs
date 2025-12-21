@@ -27,8 +27,7 @@ use crate::context::{AnalyzedContext, LoweredMcirContext};
 use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::lower_ty::TyLowerer;
 use crate::mcir::types::*;
-use crate::resolve::def_map::Def;
-use crate::resolve::def_map::DefId;
+use crate::resolve::def_map::{Def, DefId, DefKind};
 use crate::types::*;
 
 #[derive(Debug, Error)]
@@ -611,7 +610,13 @@ impl<'a> FuncLowerer<'a> {
                 // Aggregate ident binding: prefer NRVO when eligible.
                 let (def_id, nrvo_eligible) = {
                     let def = self.def_for_node(pattern.id)?;
-                    (def.id, def.nrvo_eligible)
+                    let eligible = matches!(
+                        def.kind,
+                        DefKind::LocalVar {
+                            nrvo_eligible: true
+                        }
+                    );
+                    (def.id, eligible)
                 };
                 if nrvo_eligible {
                     let ret_id = self.fb.body.ret_local;

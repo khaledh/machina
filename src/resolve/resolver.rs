@@ -76,7 +76,9 @@ impl SymbolResolver {
             SymbolKind::TypeAlias { ty_expr } => DefKind::TypeAlias { ty_expr },
             SymbolKind::StructDef { fields } => DefKind::StructDef { fields },
             SymbolKind::Func => DefKind::Func,
-            SymbolKind::Var { .. } => DefKind::LocalVar,
+            SymbolKind::Var { .. } => DefKind::LocalVar {
+                nrvo_eligible: false,
+            },
         }
     }
 
@@ -86,7 +88,6 @@ impl SymbolResolver {
             id: def_id,
             name: name.to_string(),
             kind: Self::map_symbol_kind_to_def_kind(kind.clone()),
-            nrvo_eligible: false,
         };
         self.def_map_builder.record_def(def, NodeId(0));
         self.insert_symbol(
@@ -133,7 +134,6 @@ impl SymbolResolver {
                 id: def_id,
                 name: type_decl.name.clone(),
                 kind: def_kind,
-                nrvo_eligible: false,
             };
 
             // Record the def
@@ -158,7 +158,6 @@ impl SymbolResolver {
                 id: def_id,
                 name: func.name.clone(),
                 kind: DefKind::Func,
-                nrvo_eligible: false,
             };
             self.def_map_builder.record_def(def, func.id);
             self.insert_symbol(
@@ -238,7 +237,6 @@ impl SymbolResolver {
                     kind: DefKind::Param {
                         index: index as u32,
                     },
-                    nrvo_eligible: false,
                 };
                 checker.def_map_builder.record_def(def, param.id);
                 checker.insert_symbol(
@@ -316,8 +314,9 @@ impl SymbolResolver {
                     let def = Def {
                         id: def_id,
                         name: name.to_string(),
-                        kind: DefKind::LocalVar,
-                        nrvo_eligible: false,
+                        kind: DefKind::LocalVar {
+                            nrvo_eligible: false,
+                        },
                     };
                     self.def_map_builder.record_def(def, pattern.id);
                     self.insert_symbol(

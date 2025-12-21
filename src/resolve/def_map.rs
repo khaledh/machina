@@ -37,7 +37,9 @@ pub enum DefKind {
         fields: Vec<crate::ast::StructField>,
     },
     Func,
-    LocalVar,
+    LocalVar {
+        nrvo_eligible: bool,
+    },
     Param {
         index: u32,
     },
@@ -55,7 +57,13 @@ impl fmt::Display for DefKind {
                 write!(f, "StructDef[{}]", field_names.join(", "))
             }
             DefKind::Func => write!(f, "Func"),
-            DefKind::LocalVar => write!(f, "LocalVar"),
+            DefKind::LocalVar { nrvo_eligible } => {
+                if *nrvo_eligible {
+                    write!(f, "LocalVar (NRVO eligible)")
+                } else {
+                    write!(f, "LocalVar")
+                }
+            }
             DefKind::Param { index } => write!(f, "Param[{}]", index),
         }
     }
@@ -66,10 +74,6 @@ pub struct Def {
     pub id: DefId,
     pub name: String,
     pub kind: DefKind,
-    // Whether it's safe to construct this def on the caller's stack directly
-    // without copying from the callee's stack (applicable only to compound
-    // return types).
-    pub nrvo_eligible: bool,
 }
 
 impl Hash for Def {
@@ -92,11 +96,7 @@ impl PartialOrd for Def {
 
 impl fmt::Display for Def {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Def [{}] {}: {}", self.id, self.name, self.kind)?;
-        if self.nrvo_eligible {
-            write!(f, " (NRVO eligible)")?;
-        }
-        Ok(())
+        write!(f, "Def [{}] {}: {}", self.id, self.name, self.kind)
     }
 }
 
@@ -148,12 +148,24 @@ impl DefMap {
 
     pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
         if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id) {
-            def.nrvo_eligible = true;
+            if let DefKind::LocalVar { nrvo_eligible } = &mut def.kind {
+                *nrvo_eligible = true;
+            }
         }
     }
 
     pub fn get_nrvo_eligible_defs(&self) -> Vec<&Def> {
-        self.defs.iter().filter(|def| def.nrvo_eligible).collect()
+        self.defs
+            .iter()
+            .filter(|def| {
+                matches!(
+                    def.kind,
+                    DefKind::LocalVar {
+                        nrvo_eligible: true
+                    }
+                )
+            })
+            .collect()
     }
 }
 
