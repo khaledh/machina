@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::analysis::{DefKind, DefMap};
 use crate::ast::Module;
-use crate::ids::DefId;
+use crate::resolve::def_map::DefId;
+use crate::resolve::def_map::{DefKind, DefMap};
 
 #[derive(Debug, Clone)]
 pub struct SymbolTable {

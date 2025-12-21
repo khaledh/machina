@@ -3,13 +3,13 @@ use indoc::indoc;
 use std::collections::HashMap;
 
 use super::{FuncCodegen, McFunction};
-use crate::ids::DefId;
 use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place,
     Rvalue, Statement, Terminator, TyId, TyKind, TyTable,
 };
 use crate::regalloc::moves::FnMoveList;
 use crate::regalloc::{AllocationResult, MappedLocal};
+use crate::resolve::def_map::DefId;
 use crate::targets::arm64::regs::{self, Arm64Reg as R};
 
 fn u64_ty(types: &mut TyTable) -> TyId {

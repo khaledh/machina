@@ -4,7 +4,6 @@ use thiserror::Error;
 
 use super::regs::{self, Arm64Reg as R, to_w_reg};
 use crate::context::RegAllocatedContext;
-use crate::ids::DefId;
 use crate::mcir::types::{
     BasicBlock, BinOp, BlockId, Callee, Const, FuncBody, LocalId, Operand, Place, PlaceAny,
     Projection, Rvalue, Statement, Terminator, TyId, TyKind, TyTable, UnOp,
@@ -14,6 +13,7 @@ use crate::regalloc::pos::InstPos;
 use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
 use crate::regalloc::{AllocationResult, MappedLocal};
+use crate::resolve::def_map::DefId;
 
 #[derive(Debug, Error)]
 pub enum CodegenError {

@@ -1,9 +1,9 @@
 use crate::lexer::LexError;
 use crate::mcir::lower_ast::LowerError;
 use crate::parser::ParseError;
-use crate::resolver::ResolveError;
+use crate::resolve::ResolveError;
 use crate::targets::CodegenError;
-use crate::type_check::TypeCheckError;
+use crate::typeck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;
 

@@ -1,7 +1,8 @@
-use crate::analysis::{DefMap, TypeMap};
 use crate::ast::{Expr, ExprKind, Function};
 use crate::context::{AnalyzedContext, TypeCheckedContext};
-use crate::ids::DefId;
+use crate::resolve::def_map::DefId;
+use crate::resolve::def_map::DefMap;
+use crate::typeck::type_map::TypeMap;
 
 /// NRVO (Named Return Value Optimization) analyzer.
 ///

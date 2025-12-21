@@ -1,11 +1,11 @@
 use thiserror::Error;
 
+use crate::ast::NodeIdGen;
 use crate::ast::{
     BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, PatternKind,
     StructField, StructLitField, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
-use crate::ids::NodeIdGen;
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 
 #[derive(Debug, Error)]

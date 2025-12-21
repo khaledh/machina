@@ -1,4 +1,3 @@
-use crate::ids::DefId;
 use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place,
     PlaceAny, Rvalue, Statement, Terminator, TyKind, TyTable,
@@ -7,6 +6,7 @@ use crate::regalloc::MappedLocal;
 use crate::regalloc::alloc::RegAlloc;
 use crate::regalloc::constraints::{CallArgKind, analyze_constraints};
 use crate::regalloc::target::TargetSpec;
+use crate::resolve::def_map::DefId;
 use crate::targets::arm64::regs::Arm64Target;
 
 fn u64_ty(types: &mut TyTable) -> crate::mcir::types::TyId {

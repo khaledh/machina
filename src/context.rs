@@ -1,8 +1,9 @@
-use crate::analysis::{DefMap, TypeMap};
 use crate::ast::Module;
 use crate::mcir::FuncBody;
 use crate::regalloc::AllocationResult;
+use crate::resolve::def_map::DefMap;
 use crate::symtab::SymbolTable;
+use crate::typeck::type_map::TypeMap;
 
 // -----------------------------------------------------------------------------
 // AST Context

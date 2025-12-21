@@ -2,7 +2,7 @@ use std::fmt;
 use std::fmt::Write as _;
 use std::marker::PhantomData;
 
-use crate::ids::DefId;
+use crate::resolve::def_map::DefId;
 
 // --- IR Type System ---
 

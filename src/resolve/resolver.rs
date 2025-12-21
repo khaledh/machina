@@ -1,100 +1,16 @@
 use std::collections::HashMap;
-use std::fmt;
-use thiserror::Error;
 
-use crate::analysis::{Def, DefKind, DefMap, DefMapBuilder};
 use crate::ast;
+use crate::ast::NodeId;
 use crate::ast::{
-    Decl, ExprKind, Function, Module, PatternKind, StructField, TypeDecl, TypeDeclKind, TypeExpr,
-    TypeExprKind,
+    Decl, ExprKind, Function, Module, PatternKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
-use crate::ids::{DefId, DefIdGen, NodeId};
+use crate::resolve::def_map::{Def, DefIdGen, DefKind, DefMap, DefMapBuilder};
+use crate::resolve::errors::{ResolveError, SymbolKind};
+use crate::resolve::symbols::{Scope, Symbol};
 use crate::types::BUILTIN_TYPES;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SymbolKind {
-    Var { is_mutable: bool },
-    Func,
-    TypeAlias { ty_expr: TypeExpr },
-    StructDef { fields: Vec<StructField> },
-}
-
-impl fmt::Display for SymbolKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SymbolKind::Var { .. } => write!(f, "var"),
-            SymbolKind::Func => write!(f, "func"),
-            SymbolKind::TypeAlias { ty_expr } => write!(f, "type_alias[{}]", ty_expr),
-            SymbolKind::StructDef { fields } => {
-                let field_names = fields
-                    .iter()
-                    .map(|field| field.name.as_str())
-                    .collect::<Vec<_>>();
-                write!(f, "struct_def[{}]", field_names.join(", "))
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Symbol {
-    def_id: DefId,
-    name: String,
-    kind: SymbolKind,
-}
-
-#[derive(Clone, Debug)]
-pub struct Scope {
-    defs: HashMap<String, Symbol>,
-}
-
-#[derive(Clone, Debug, Error)]
-pub enum ResolveError {
-    #[error("Variable already defined in current scope: {0}")]
-    VarAlreadyDefined(String, Span),
-
-    #[error("Undefined variable: {0}")]
-    VarUndefined(String, Span),
-
-    #[error("Cannot assign to immutable variable: {0}")]
-    VarImmutable(String, Span),
-
-    #[error("Undefined function: {0}")]
-    FuncUndefined(String, Span),
-
-    #[error("Invalid assignment target. Expected an l-value, found: {0:?}")]
-    InvalidAssignmentTarget(ExprKind, Span),
-
-    #[error("Invalid callee. Expected a function name, found: {0:?}")]
-    InvalidCallee(ExprKind, Span),
-
-    #[error("Expected '{0}' to be a type, found {1}")]
-    ExpectedType(String, SymbolKind, Span),
-
-    #[error("Undefined type: {0}")]
-    TypeUndefined(String, Span),
-
-    #[error("Undefined struct: {0}")]
-    StructUndefined(String, Span),
-}
-
-impl ResolveError {
-    pub fn span(&self) -> Span {
-        match self {
-            ResolveError::VarAlreadyDefined(_, span) => *span,
-            ResolveError::VarUndefined(_, span) => *span,
-            ResolveError::VarImmutable(_, span) => *span,
-            ResolveError::FuncUndefined(_, span) => *span,
-            ResolveError::InvalidAssignmentTarget(_, span) => *span,
-            ResolveError::InvalidCallee(_, span) => *span,
-            ResolveError::ExpectedType(_, _, span) => *span,
-            ResolveError::TypeUndefined(_, span) => *span,
-            ResolveError::StructUndefined(_, span) => *span,
-        }
-    }
-}
 
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
@@ -343,24 +259,22 @@ impl SymbolResolver {
         match &expr.kind {
             ExprKind::Var(name) => {
                 match self.lookup_symbol(name) {
-                    Some(symbol) => {
-                        match symbol.kind {
-                            SymbolKind::Var { is_mutable: true } => {
-                                // Mutable: ok
-                                self.def_map_builder.record_use(expr.id, symbol.def_id);
-                            }
-                            SymbolKind::Var { is_mutable: false } => {
-                                // Immutable: error
-                                self.def_map_builder.record_use(expr.id, symbol.def_id);
-                                self.errors
-                                    .push(ResolveError::VarImmutable(name.clone(), expr.span));
-                            }
-                            _ => {
-                                self.errors
-                                    .push(ResolveError::VarUndefined(name.clone(), expr.span));
-                            }
+                    Some(symbol) => match symbol.kind {
+                        SymbolKind::Var { is_mutable: true } => {
+                            // Mutable: ok
+                            self.def_map_builder.record_use(expr.id, symbol.def_id);
                         }
-                    }
+                        SymbolKind::Var { is_mutable: false } => {
+                            // Immutable: error
+                            self.def_map_builder.record_use(expr.id, symbol.def_id);
+                            self.errors
+                                .push(ResolveError::VarImmutable(name.clone(), expr.span));
+                        }
+                        _ => {
+                            self.errors
+                                .push(ResolveError::VarUndefined(name.clone(), expr.span));
+                        }
+                    },
                     None => {
                         self.errors
                             .push(ResolveError::VarUndefined(name.clone(), expr.span));
@@ -431,38 +345,27 @@ impl SymbolResolver {
         }
     }
 
-    fn check_type_expr(&mut self, type_expr: &ast::TypeExpr) {
+    fn check_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
-            ast::TypeExprKind::Named(name) => match self.lookup_symbol(name) {
-                Some(Symbol {
-                    def_id,
-                    kind: SymbolKind::TypeAlias { .. },
-                    ..
-                }) => {
-                    self.def_map_builder.record_use(type_expr.id, *def_id);
-                }
-                Some(Symbol {
-                    def_id,
-                    kind: SymbolKind::StructDef { .. },
-                    ..
-                }) => {
-                    self.def_map_builder.record_use(type_expr.id, *def_id);
-                }
-                Some(Symbol { kind, .. }) => {
-                    self.errors.push(ResolveError::ExpectedType(
+            TypeExprKind::Named(name) => match self.lookup_symbol(name) {
+                Some(symbol) => match &symbol.kind {
+                    SymbolKind::TypeAlias { .. } | SymbolKind::StructDef { .. } => {
+                        self.def_map_builder.record_use(type_expr.id, symbol.def_id);
+                    }
+                    other => self.errors.push(ResolveError::ExpectedType(
                         name.clone(),
-                        kind.clone(),
+                        other.clone(),
                         type_expr.span,
-                    ));
-                }
+                    )),
+                },
                 None => self
                     .errors
                     .push(ResolveError::TypeUndefined(name.clone(), type_expr.span)),
             },
-            ast::TypeExprKind::Array { elem_ty, .. } => {
+            TypeExprKind::Array { elem_ty, .. } => {
                 self.check_type_expr(elem_ty);
             }
-            ast::TypeExprKind::Tuple { fields } => {
+            TypeExprKind::Tuple { fields } => {
                 for field in fields {
                     self.check_type_expr(field);
                 }
@@ -472,7 +375,7 @@ impl SymbolResolver {
 
     fn check_expr(&mut self, expr: &ast::Expr) {
         match &expr.kind {
-            ExprKind::UInt64Lit(_) | ast::ExprKind::BoolLit(_) | ast::ExprKind::UnitLit => {}
+            ExprKind::UInt64Lit(_) | ExprKind::BoolLit(_) | ExprKind::UnitLit => {}
 
             ExprKind::ArrayLit(elems) => {
                 for elem in elems {

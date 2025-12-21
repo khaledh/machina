@@ -1,19 +1,17 @@
 use clap::Parser as ClapParser;
 
-mod analysis;
 mod ast;
 mod context;
 mod diagnostics;
-mod ids;
 mod lexer;
 mod mcir;
 mod nrvo;
 mod parser;
 mod regalloc;
-mod resolver;
+mod resolve;
 mod symtab;
 mod targets;
-mod type_check;
+mod typeck;
 mod types;
 
 use crate::context::AstContext;
@@ -21,9 +19,9 @@ use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
-use crate::resolver::resolve;
+use crate::resolve::resolve;
 use crate::targets::TargetKind;
-use crate::type_check::type_check;
+use crate::typeck::type_check;
 
 const SOURCE: &str = r#"
 type Point = {

@@ -21,13 +21,14 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::analysis::Def;
+use crate::ast::NodeId;
 use crate::ast::{self, ExprKind as EK, PatternKind as PK, *};
 use crate::context::{AnalyzedContext, LoweredMcirContext};
-use crate::ids::{DefId, NodeId};
 use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::lower_ty::TyLowerer;
 use crate::mcir::types::*;
+use crate::resolve::def_map::Def;
+use crate::resolve::def_map::DefId;
 use crate::types::*;
 
 #[derive(Debug, Error)]

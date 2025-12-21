@@ -3,8 +3,8 @@ use crate::context::AstContext;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
-use crate::resolver::resolve;
-use crate::type_check::type_check;
+use crate::resolve::resolve;
+use crate::typeck::type_check;
 
 fn analyze(source: &str) -> AnalyzedContext {
     let lexer = Lexer::new(source);

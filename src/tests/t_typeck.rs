@@ -2,7 +2,7 @@ use super::*;
 use crate::context::AstContext;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parser::Parser;
-use crate::resolver::resolve;
+use crate::resolve::resolve;
 use crate::types::Type;
 
 fn type_check_source(source: &str) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
