@@ -27,7 +27,7 @@ fn test_regalloc_simple_function() {
     let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t0)),
@@ -54,10 +54,10 @@ fn test_regalloc_simple_function_with_two_temps() {
     let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let t1 = b.new_temp(u64_ty());
-    b.move_to(t1, const_u64(2));
+    b.copy(t1, const_u64(2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t1)),
@@ -85,7 +85,7 @@ fn test_regalloc_overlapping_temps_use_different_regs() {
     let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let t1 = b.new_temp(u64_ty());
     // This ensures t0 is still live when t1 is defined.
@@ -122,13 +122,13 @@ fn test_regalloc_reuses_single_register_without_spilling() {
     let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let t1 = b.new_temp(u64_ty());
-    b.move_to(t1, const_u64(2));
+    b.copy(t1, const_u64(2));
 
     let t2 = b.new_temp(u64_ty());
-    b.move_to(t2, const_u64(3));
+    b.copy(t2, const_u64(3));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t2)),
@@ -153,10 +153,10 @@ fn test_regalloc_default_reg_set_is_used() {
     let mut b = IrFunctionBuilder::new("test".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let t1 = b.new_temp(u64_ty());
-    b.move_to(t1, const_u64(2));
+    b.copy(t1, const_u64(2));
 
     b.terminate(IrTerminator::Ret {
         value: Some(IrOperand::Temp(t1)),
@@ -188,13 +188,13 @@ fn test_regalloc_spills_multiple_temps_with_one_reg() {
     let mut b = IrFunctionBuilder::new("spill_many".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let t1 = b.new_temp(u64_ty());
-    b.move_to(t1, const_u64(2));
+    b.copy(t1, const_u64(2));
 
     let t2 = b.new_temp(u64_ty());
-    b.move_to(t2, const_u64(3));
+    b.copy(t2, const_u64(3));
 
     let t3 = b.new_temp(u64_ty());
     b.binary_op(t3, BinaryOp::Add, IrOperand::Temp(t0), IrOperand::Temp(t1));
@@ -248,10 +248,10 @@ fn test_regalloc_spills_victim_when_new_interval_ends_earlier() {
     let mut b = IrFunctionBuilder::new("spill_victim".to_string(), u64_ty());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let t1 = b.new_temp(u64_ty());
-    b.move_to(t1, const_u64(2));
+    b.copy(t1, const_u64(2));
 
     let t2 = b.new_temp(u64_ty());
     b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t1), IrOperand::Temp(t1));
@@ -294,7 +294,7 @@ fn test_regalloc_if_expression_shape() {
     // as:
     //
     // entry:
-    //   %t0 = const.bool true
+    //   %t0 = true
     //   condbr %t0, then, else
     //
     // then:
@@ -312,7 +312,7 @@ fn test_regalloc_if_expression_shape() {
 
     // entry
     let cond = b.new_temp(bool_ty());
-    b.move_to(
+    b.copy(
         cond,
         IrOperand::Const(crate::ir::types::IrConst::Bool(true)),
     );
@@ -330,13 +330,13 @@ fn test_regalloc_if_expression_shape() {
     // then block
     b.select_block(then_id);
     let t_then = b.new_temp(u64_ty());
-    b.move_to(t_then, const_u64(1));
+    b.copy(t_then, const_u64(1));
     b.terminate(IrTerminator::Br { target: join_id });
 
     // else block
     b.select_block(else_id);
     let t_else = b.new_temp(u64_ty());
-    b.move_to(t_else, const_u64(2));
+    b.copy(t_else, const_u64(2));
     b.terminate(IrTerminator::Br { target: join_id });
 
     // join block
@@ -405,7 +405,7 @@ fn test_regalloc_while_expression_shape() {
 
     // entry
     let i0 = b.new_temp(u64_ty());
-    b.move_to(i0, const_u64(0));
+    b.copy(i0, const_u64(0));
     let loop_header = b.new_block("loop_header".to_string());
     b.terminate(IrTerminator::Br {
         target: loop_header,
@@ -424,7 +424,7 @@ fn test_regalloc_while_expression_shape() {
     b.phi(i, vec![(IrBlockId(0), i0), (loop_body, i_next)]);
 
     let three = b.new_temp(u64_ty());
-    b.move_to(three, const_u64(3));
+    b.copy(three, const_u64(3));
 
     let cond = b.new_temp(bool_ty());
     b.binary_op(
@@ -443,7 +443,7 @@ fn test_regalloc_while_expression_shape() {
     // loop_body
     b.select_block(loop_body);
     let one = b.new_temp(u64_ty());
-    b.move_to(one, const_u64(1));
+    b.copy(one, const_u64(1));
 
     b.binary_op(
         i_next,
@@ -701,7 +701,7 @@ fn test_call_with_9_args() {
 fn test_caller_saved_preservation() {
     // fn test() -> () {
     // 0:entry:
-    //   %t0 = move const.42
+    //   %t0 = copy const.42
     //   %t1 = foo(%t0) : u32
     //   %t2 = binop.add %t0, %t1 : u32
     //   ret
@@ -710,7 +710,7 @@ fn test_caller_saved_preservation() {
 
     // Create and use t0 which will be live across a call
     let t0 = fb.new_temp(u64_ty()); // X0
-    fb.move_to(t0, const_u64(42));
+    fb.copy(t0, const_u64(42));
 
     // Make a call (t0 should be preserved across it)
     let t1 = fb.new_temp(u64_ty()); // X1

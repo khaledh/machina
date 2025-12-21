@@ -40,7 +40,7 @@ pub fn test_if_expr() {
         signed: false,
     });
     let then_const = fb.new_const_int(42, 32, false);
-    fb.move_to(then_result, then_const);
+    fb.copy(then_result, then_const);
     fb.terminate(IrTerminator::Br { target: merge_b });
 
     // Else block
@@ -50,7 +50,7 @@ pub fn test_if_expr() {
         signed: false,
     });
     let else_const = fb.new_const_int(99, 32, false);
-    fb.move_to(else_result, else_const);
+    fb.copy(else_result, else_const);
     fb.terminate(IrTerminator::Br { target: merge_b });
 
     // Merge block

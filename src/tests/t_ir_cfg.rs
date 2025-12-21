@@ -45,7 +45,7 @@ fn simple_linear_cfg() {
     // Build:
     //
     // entry:
-    //   %t0 = move const.u32 1
+    //   %t0 = copy const.u32 1
     //   ret %t0
     //
     // Expected CFG:
@@ -55,7 +55,7 @@ fn simple_linear_cfg() {
     let mut b = mk_builder();
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
     b.terminate(IrTerminator::Ret {
         value: Some(temp(0)),
     });
@@ -78,7 +78,7 @@ fn cfg_with_unconditional_branch() {
     // Build:
     //
     // entry:
-    //   %t0 = move const.u32 1
+    //   %t0 = copy const.u32 1
     //   br then
     //
     // then:
@@ -91,7 +91,7 @@ fn cfg_with_unconditional_branch() {
     let mut b = mk_builder();
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let then_id = b.new_block("then".to_string());
     b.terminate(IrTerminator::Br { target: then_id });
@@ -124,7 +124,7 @@ fn cfg_with_conditional_branch() {
     // Build:
     //
     // entry:
-    //   %t0 = move const.u32 1
+    //   %t0 = copy const.u32 1
     //   %t1 = binop.lt %t0, const.u32 2
     //   condbr %t1, then, else
     //
@@ -144,7 +144,7 @@ fn cfg_with_conditional_branch() {
     let else_id = b.new_block("else".to_string());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
     let t1 = b.new_temp(bool_ty());
     b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(2));
     b.terminate(IrTerminator::CondBr {
@@ -188,7 +188,7 @@ fn cfg_with_join_block() {
     // Build:
     //
     // entry:
-    //   %t0 = move const.u32 1
+    //   %t0 = copy const.u32 1
     //   %t1 = binop.lt %t0, const.u32 2
     //   condbr %t1, then, else
     //
@@ -212,7 +212,7 @@ fn cfg_with_join_block() {
     let join_id = b.new_block("join".to_string());
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
     let t1 = b.new_temp(bool_ty());
     b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(2));
     b.terminate(IrTerminator::CondBr {
@@ -284,7 +284,7 @@ fn cfg_rpo_ordering() {
     let join_id = b.new_block("join".to_string());
 
     let t0 = b.new_temp(bool_ty());
-    b.move_to(t0, IrOperand::Const(IrConst::Bool(true)));
+    b.copy(t0, IrOperand::Const(IrConst::Bool(true)));
     b.terminate(IrTerminator::CondBr {
         cond: temp(0),
         then_b: then_id,
@@ -325,7 +325,7 @@ fn cfg_with_loop() {
     //   br loop_header
     //
     // loop_header:
-    //   %t0 = move const.u32 0
+    //   %t0 = copy const.u32 0
     //   %t1 = binop.lt %t0, const.u32 10
     //   condbr %t1, loop_body, exit
     //
@@ -354,7 +354,7 @@ fn cfg_with_loop() {
     // Loop header
     b.select_block(loop_header_id);
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(0));
+    b.copy(t0, const_u64(0));
     let t1 = b.new_temp(bool_ty());
     b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(10));
     b.terminate(IrTerminator::CondBr {
@@ -433,7 +433,7 @@ fn cfg_rpo_with_loop() {
 
     b.select_block(loop_header_id);
     let t0 = b.new_temp(bool_ty());
-    b.move_to(t0, IrOperand::Const(IrConst::Bool(true)));
+    b.copy(t0, IrOperand::Const(IrConst::Bool(true)));
     b.terminate(IrTerminator::CondBr {
         cond: temp(0),
         then_b: loop_body_id,

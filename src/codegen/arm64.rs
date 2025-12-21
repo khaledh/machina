@@ -311,7 +311,7 @@ impl<'a> FuncCodegen<'a> {
     pub fn emit_inst(&mut self, inst: &IrInst) -> Result<String, CodegenError> {
         let mut asm = String::new();
         match inst {
-            IrInst::Move { dest, src } => {
+            IrInst::Copy { dest, src } => {
                 let dest_reg = self.get_reg(dest)?;
                 match src {
                     IrOperand::Temp(temp) => {

@@ -10,6 +10,7 @@ mod ir;
 mod layout;
 mod lexer;
 mod lower;
+mod mcir;
 mod nrvo;
 mod parser;
 mod regalloc;
@@ -48,6 +49,7 @@ fn add_points(a: Point, b: Point) -> Point {
 }
 
 fn main() -> u64 {
+    let z = {};
     let arr = [
         Point { x: 10, y: 20 },
         Point { x: 30, y: 40 },
@@ -56,6 +58,14 @@ fn main() -> u64 {
     let sum1 = add_points(arr[0], arr[1]);
     let sum2 = add_points(sum1, arr[2]);
     sum2.x + sum2.y
+}
+"#;
+
+const SOURCE2: &str = r#"
+fn main() -> u64 {
+    var x = 20;
+    x = 42;
+    x
 }
 "#;
 

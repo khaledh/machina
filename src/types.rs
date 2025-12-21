@@ -1,6 +1,7 @@
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub enum Type {
     Unknown,
     Unit,
@@ -19,6 +20,63 @@ pub enum Type {
         name: String,
         fields: Vec<StructField>,
     },
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Type::Unknown, Type::Unknown) => true,
+            (Type::Unit, Type::Unit) => true,
+            (Type::UInt64, Type::UInt64) => true,
+            (Type::Bool, Type::Bool) => true,
+            (
+                Type::Array {
+                    elem_ty: e1,
+                    dims: d1,
+                },
+                Type::Array {
+                    elem_ty: e2,
+                    dims: d2,
+                },
+            ) => e1 == e2 && d1 == d2,
+            (Type::Tuple { fields: f1 }, Type::Tuple { fields: f2 }) => f1 == f2,
+            (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
+            _ => false,
+        }
+    }
+}
+
+impl Hash for Type {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Type::Unknown => {
+                0u8.hash(state);
+            }
+            Type::Unit => {
+                1u8.hash(state);
+            }
+            Type::UInt64 => {
+                2u8.hash(state);
+            }
+            Type::Bool => {
+                3u8.hash(state);
+            }
+            Type::Array { elem_ty, dims } => {
+                4u8.hash(state);
+                elem_ty.hash(state);
+                dims.hash(state);
+            }
+            Type::Tuple { fields } => {
+                5u8.hash(state);
+                fields.hash(state);
+            }
+            Type::Struct { name, .. } => {
+                // Nominal type: only hash the name
+                6u8.hash(state);
+                name.hash(state);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,12 +156,23 @@ impl Type {
         )
     }
 
+    pub fn is_scalar(&self) -> bool {
+        matches!(self, Type::Unit | Type::UInt64 | Type::Bool)
+    }
+
     pub fn tuple_field_offset(&self, index: usize) -> usize {
         match self {
             Type::Tuple { fields } => {
                 assert!(index < fields.len(), "Tuple field index out of bounds");
                 fields.iter().take(index).map(|f| f.size_of()).sum()
             }
+            _ => panic!("Expected tuple type"),
+        }
+    }
+
+    pub fn tuple_field_type(&self, index: usize) -> Type {
+        match self {
+            Type::Tuple { fields } => fields[index].clone(),
             _ => panic!("Expected tuple type"),
         }
     }
@@ -120,6 +189,16 @@ impl Type {
                 }
                 panic!("Field not found in struct");
             }
+            _ => panic!("Expected struct type"),
+        }
+    }
+
+    pub fn struct_field_index(&self, field_name: &str) -> usize {
+        match self {
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .position(|f| f.name == field_name)
+                .expect("Field not found in struct"),
             _ => panic!("Expected struct type"),
         }
     }

@@ -99,30 +99,29 @@ fn test_lower_func() {
     // Output:
     // fn test() -> u64 {
     // entry:
-    //   %t0 = move const.20
-    //   %t1 = binop.mul %t0, const.2 : u32
-    //   %t0 = move %t1
-    //   condbr const.bool true, then, else
+    //   %t0 = copy const.20
+    //   %t0 = binop.mul %t0, const.2 : u32
+    //   condbr true, then, else
 
     // then:
-    //   %t2 = move const.2
+    //   %t1 = copy const.2
     //   br merge
 
     // else:
-    //   %t3 = move const.3
+    //   %t2 = copy const.3
     //   br merge
 
     // merge:
-    //   %t4 = phi [(then -> t2), (else -> t3)]
-    //   %t5 = binop.add %t0, %t4 : u32
-    //   ret %t5
+    //   %t3 = phi [(then -> %t1), (else -> %t2)]
+    //   %t4 = binop.add %t0, %t3 : u32
+    //   ret %t4
     // }
 
     assert_eq!(ir_func.blocks.len(), 4);
 
     let entry_block = &ir_func.blocks[&IrBlockId(0)];
     let entry_insts = entry_block.insts();
-    assert_eq!(entry_insts.len(), 3);
+    assert_eq!(entry_insts.len(), 2);
 
     let then_block = &ir_func.blocks[&IrBlockId(1)];
     let then_insts = then_block.insts();
@@ -137,9 +136,8 @@ fn test_lower_func() {
     assert_eq!(merge_insts.len(), 2);
 
     // entry block
-    assert_move(&entry_insts[0], 0, const_u64(20));
-    assert_binary_op(&entry_insts[1], 1, BinaryOp::Mul, temp(0), const_u64(2));
-    assert_move(&entry_insts[2], 0, IrOperand::Temp(IrTempId(1)));
+    assert_copy(&entry_insts[0], 0, const_u64(20));
+    assert_binary_op(&entry_insts[1], 0, BinaryOp::Mul, temp(0), const_u64(2));
 
     // condbr in entry: constant condition, so just assert the targets
     match entry_block.term() {
@@ -151,24 +149,24 @@ fn test_lower_func() {
     }
 
     // then block
-    assert_move(&then_block.insts()[0], 2, const_u64(2));
+    assert_copy(&then_block.insts()[0], 1, const_u64(2));
     assert_br_to(&then_block.term(), merge_block.id());
 
     // else block
-    assert_move(&else_block.insts()[0], 3, const_u64(3));
+    assert_copy(&else_block.insts()[0], 2, const_u64(3));
     assert_br_to(&else_block.term(), merge_block.id());
 
     // merge block
     assert_phi(
         &merge_block.insts()[0],
-        4,
+        3,
         vec![
-            (then_block.id(), IrTempId(2)),
-            (else_block.id(), IrTempId(3)),
+            (then_block.id(), IrTempId(1)),
+            (else_block.id(), IrTempId(2)),
         ],
     );
-    assert_binary_op(&merge_block.insts()[1], 5, BinaryOp::Add, temp(0), temp(4));
-    assert_ret_with(&merge_block.term(), 5);
+    assert_binary_op(&merge_block.insts()[1], 4, BinaryOp::Add, temp(0), temp(3));
+    assert_ret_with(&merge_block.term(), 4);
 }
 
 #[test]
@@ -188,7 +186,7 @@ fn test_lower_while() {
     // Output:
     // fn test() -> u64 {
     // entry:
-    //   %t0 = move const.0
+    //   %t0 = copy const.0
     //   br loop_header
     //
     // loop_header:
@@ -196,8 +194,7 @@ fn test_lower_while() {
     //   condbr %t1, loop_body, loop_after
     //
     // loop_body:
-    //   %t2 = binop.add %t0, const.1 : u32
-    //   %t0 = move %t2
+    //   %t0 = binop.add %t0, const.1 : u32
     //   br loop_header
     //
     // loop_after:
@@ -216,14 +213,14 @@ fn test_lower_while() {
 
     let loop_body_block = &ir_func.blocks[&IrBlockId(2)];
     let loop_body_insts = loop_body_block.insts();
-    assert_eq!(loop_body_insts.len(), 2);
+    assert_eq!(loop_body_insts.len(), 1);
 
     let loop_after_block = &ir_func.blocks[&IrBlockId(3)];
     let loop_after_insts = loop_after_block.insts();
     assert_eq!(loop_after_insts.len(), 0);
 
     // entry block
-    assert_move(&entry_insts[0], 0, const_u64(0));
+    assert_copy(&entry_insts[0], 0, const_u64(0));
     assert_br_to(&entry_block.term(), loop_header_block.id());
 
     // loop header block
@@ -242,8 +239,7 @@ fn test_lower_while() {
     );
 
     // loop body block
-    assert_binary_op(&loop_body_insts[0], 2, BinaryOp::Add, temp(0), const_u64(1));
-    assert_move(&loop_body_insts[1], 0, IrOperand::Temp(IrTempId(2)));
+    assert_binary_op(&loop_body_insts[0], 0, BinaryOp::Add, temp(0), const_u64(1));
     assert_br_to(&loop_body_block.term(), loop_header_block.id());
 
     // loop after block
@@ -435,13 +431,13 @@ mod ir_assert {
                 if operand_temp_id(result) == Some(result_id)));
     }
 
-    pub fn assert_move(inst: &IrInst, dest_id: u32, src_op: IrOperand) {
+    pub fn assert_copy(inst: &IrInst, dest_id: u32, src_op: IrOperand) {
         match inst {
-            IrInst::Move { dest, src } => {
-                assert_eq!(dest.id(), dest_id, "move dest id mismatch");
+            IrInst::Copy { dest, src } => {
+                assert_eq!(dest.id(), dest_id, "copy dest id mismatch");
                 assert_operands_equal(src, &src_op);
             }
-            other => panic!("Expected Move, found {:?}", other),
+            other => panic!("Expected Copy, found {:?}", other),
         }
     }
 

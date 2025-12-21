@@ -56,6 +56,7 @@ pub struct TypeCheckedContext {
 // -----------------------------------------------------------------------------
 // Analyzed Context
 // -----------------------------------------------------------------------------
+#[derive(Debug, Clone)]
 pub struct AnalyzedContext {
     pub module: Module,
     pub def_map: DefMap,

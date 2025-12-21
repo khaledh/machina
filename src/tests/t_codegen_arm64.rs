@@ -174,8 +174,8 @@ fn test_simple_addition() {
     let ten = builder.new_temp(u64_ty());
     let result = builder.new_temp(u64_ty());
 
-    builder.move_to(five, const_u64(5));
-    builder.move_to(ten, const_u64(10));
+    builder.copy(five, const_u64(5));
+    builder.copy(ten, const_u64(10));
     builder.binary_op(result, BinaryOp::Add, temp_operand(five), temp_operand(ten));
     builder.terminate(IrTerminator::Ret {
         value: Some(temp_operand(result)),
@@ -219,8 +219,8 @@ fn test_function_call() {
     let arg2 = builder.new_temp(u64_ty());
     let result = builder.new_temp(u64_ty());
 
-    builder.move_to(arg1, const_u64(5));
-    builder.move_to(arg2, const_u64(10));
+    builder.copy(arg1, const_u64(5));
+    builder.copy(arg2, const_u64(10));
     builder.call(
         Some(result),
         "callee".to_string(),

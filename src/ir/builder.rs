@@ -162,8 +162,8 @@ impl IrFunctionBuilder {
         self.curr_block_mut().insts.push(inst);
     }
 
-    pub fn move_to(&mut self, dest: IrTempId, src: IrOperand) {
-        self.emit_inst(IrInst::Move { dest, src });
+    pub fn copy(&mut self, dest: IrTempId, src: IrOperand) {
+        self.emit_inst(IrInst::Copy { dest, src });
     }
 
     pub fn binary_op(&mut self, result: IrTempId, op: BinaryOp, lhs: IrOperand, rhs: IrOperand) {

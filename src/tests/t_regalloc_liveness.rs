@@ -54,7 +54,7 @@ fn liveness_across_branch() {
     let mut b = mk_builder();
 
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
 
     let then_id = b.new_block("then".to_string());
 
@@ -63,7 +63,7 @@ fn liveness_across_branch() {
     // then block
     b.select_block(then_id);
     let t1 = b.new_temp(u64_ty());
-    b.move_to(t1, const_u64(2));
+    b.copy(t1, const_u64(2));
     let t2 = b.new_temp(u64_ty());
     b.binary_op(t2, BinaryOp::Add, IrOperand::Temp(t0), const_u64(2));
     b.terminate(IrTerminator::Ret {
@@ -107,7 +107,7 @@ fn liveness_with_phi() {
     // IR:
     //
     // entry:
-    //   %t0 = move const.u32 1
+    //   %t0 = copy const.u32 1
     //   %t1 = binop.lt %t0, const.u32 2
     //   condbr %t1, then, else
     //
@@ -135,7 +135,7 @@ fn liveness_with_phi() {
 
     // entry block
     let t0 = b.new_temp(u64_ty());
-    b.move_to(t0, const_u64(1));
+    b.copy(t0, const_u64(1));
     let t1 = b.new_temp(bool_ty());
     b.binary_op(t1, BinaryOp::Lt, temp(0), const_u64(2));
     b.terminate(IrTerminator::CondBr {

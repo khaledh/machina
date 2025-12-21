@@ -8,9 +8,10 @@ use crate::ast::{
 use crate::context::{AnalyzedContext, LoweredContext};
 use crate::ids::{DefId, NodeId};
 use crate::ir::builder::IrFunctionBuilder;
-use crate::ir::types::{IrFunction, IrOperand, IrTempId, IrTerminator, IrType};
+use crate::ir::types::{IrAddr, IrFunction, IrOperand, IrTempId, IrTerminator, IrType};
 use crate::layout::{
-    struct_field_byte_offset, try_const_fold_array_linear_index, tuple_field_byte_offset,
+    lower_type, struct_field_byte_offset, try_const_fold_array_linear_index,
+    tuple_field_byte_offset,
 };
 use crate::types::Type;
 
@@ -21,9 +22,6 @@ pub enum LowerError {
 
     #[error("Node type not found: Node {0}")]
     NodeTypeNotFound(NodeId),
-
-    #[error("Block is empty: Node {0}")]
-    BlockEmpty(NodeId),
 
     #[error("Variable definition not found: Node {0}")]
     VarDefNotFound(NodeId),
@@ -53,43 +51,17 @@ pub enum LowerError {
     TupleIsNotTemp(NodeId, IrOperand),
 }
 
-fn lower_type(ty: &Type) -> IrType {
-    match ty {
-        Type::UInt64 => IrType::Int {
-            bits: 64,
-            signed: false,
-        },
-        Type::Bool => IrType::Bool,
-        Type::Unit => IrType::Int {
-            bits: 1,
-            signed: false,
-        },
-        Type::Unknown => panic!("Unknown type"),
-        Type::Array { elem_ty, dims } => IrType::Array {
-            elem_ty: Box::new(lower_type(elem_ty)),
-            dims: dims.clone(),
-        },
-        Type::Tuple { fields } => IrType::Tuple {
-            fields: fields.iter().map(lower_type).collect(),
-        },
-        Type::Struct { fields, .. } => IrType::Tuple {
-            // structs are lowered as tuples of their fields
-            fields: fields.iter().map(|f| lower_type(&f.ty)).collect(),
-        },
-    }
-}
-
 //---------------- Place ----------------
 
 #[derive(Debug)]
 struct Place {
     base: IrTempId,
     byte_offset: usize,
-    ty: Type,
+    ty: IrType,
 }
 
 impl Place {
-    fn root(base: IrTempId, ty: Type) -> Place {
+    fn root(base: IrTempId, ty: IrType) -> Place {
         Place {
             base,
             byte_offset: 0,
@@ -97,30 +69,22 @@ impl Place {
         }
     }
 
-    fn with_offset(p: &Place, add: usize, ty: Type) -> Place {
+    fn with_offset(p: &Place, offset: usize, ty: IrType) -> Place {
         Place {
             base: p.base,
-            byte_offset: p.byte_offset + add,
+            byte_offset: p.byte_offset + offset,
             ty,
         }
     }
 
-    fn tuple_field(p: &Place, field_index: usize, field_ty: Type) -> Place {
+    fn tuple_field(p: &Place, field_index: usize, field_ty: IrType) -> Place {
         let field_offset = tuple_field_byte_offset(&p.ty, field_index).0;
-        Place {
-            base: p.base,
-            byte_offset: p.byte_offset + field_offset,
-            ty: field_ty,
-        }
+        Place::with_offset(p, field_offset, p.ty.tuple_field_type(field_index))
     }
 
-    fn struct_field(p: &Place, field_name: &str, field_ty: Type) -> Place {
+    fn struct_field(p: &Place, field_name: &str, field_ty: IrType) -> Place {
         let field_offset = struct_field_byte_offset(&p.ty, field_name).0;
-        Place {
-            base: p.base,
-            byte_offset: p.byte_offset + field_offset,
-            ty: field_ty,
-        }
+        Place::with_offset(p, field_offset, field_ty)
     }
 }
 
@@ -214,12 +178,30 @@ impl<'a> FuncLowerer<'a> {
     ) -> Result<IrOperand, LowerError> {
         match &expr.kind {
             // Block
-            ExprKind::Block(body) => self.lower_block_into(expr.id, body, dest_temp),
+            ExprKind::Block(body) => self.lower_block(body, dest_temp),
 
             // Literals (scalars)
-            ExprKind::UInt64Lit(value) => Ok(self.fb.new_const_int(*value as i64, 64, false)),
-            ExprKind::BoolLit(value) => Ok(self.fb.new_const_bool(*value)),
-            ExprKind::UnitLit => Ok(self.fb.new_const_unit()),
+            ExprKind::UInt64Lit(value) => {
+                let const_op = self.fb.new_const_int(*value as i64, 64, false);
+                if let Some(dest_temp) = dest_temp {
+                    self.fb.copy(dest_temp, const_op);
+                }
+                Ok(const_op)
+            }
+            ExprKind::BoolLit(value) => {
+                let const_op = self.fb.new_const_bool(*value);
+                if let Some(dest_temp) = dest_temp {
+                    self.fb.copy(dest_temp, const_op);
+                }
+                Ok(const_op)
+            }
+            ExprKind::UnitLit => {
+                let const_op = self.fb.new_const_unit();
+                if let Some(dest_temp) = dest_temp {
+                    self.fb.copy(dest_temp, const_op);
+                }
+                Ok(const_op)
+            }
 
             // Literals (compound)
             ExprKind::ArrayLit(elems) => {
@@ -245,20 +227,34 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Operators
-            ExprKind::BinOp { left, op, right } => self.lower_binary_op(op, left, right),
-            ExprKind::UnaryOp { op, expr } => self.lower_unary_op(op, expr),
+            ExprKind::BinOp { left, op, right } => self.lower_binary_op(op, left, right, dest_temp),
+            ExprKind::UnaryOp { op, expr } => self.lower_unary_op(op, expr, dest_temp),
 
             // Bindings
-            ExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value, false),
-            ExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value, true),
+            ExprKind::LetBind { pattern, value, .. } => {
+                debug_assert!(dest_temp.is_none()); // let bindings should not have a dest_temp
+                self.lower_binding(pattern, value, false)
+            }
+            ExprKind::VarBind { pattern, value, .. } => {
+                debug_assert!(dest_temp.is_none()); // var bindings should not have a dest_temp
+                self.lower_binding(pattern, value, true)
+            }
 
             // Assignment
             ExprKind::Assign {
                 value, assignee, ..
-            } => self.lower_assign(expr, assignee, value),
+            } => {
+                debug_assert!(dest_temp.is_none()); // assignments should not have a dest_temp
+                self.lower_assign(expr, assignee, value)
+            }
 
-            // Variable
-            ExprKind::Var(_) => self.lower_var_ref(expr, dest_temp),
+            // Variable, array index, tuple field, struct field
+            ExprKind::Var(_) => self.lower_var(expr, dest_temp),
+            ExprKind::ArrayIndex { target, indices } => {
+                self.lower_array_index(expr, target, indices)
+            }
+            ExprKind::TupleField { target, index } => self.lower_tuple_field(target, *index),
+            ExprKind::StructField { target, field } => self.lower_struct_field(target, field),
 
             // Control flow
             ExprKind::If {
@@ -266,20 +262,35 @@ impl<'a> FuncLowerer<'a> {
                 then_body,
                 else_body,
             } => self.lower_if(cond, then_body, else_body, dest_temp),
-            ExprKind::While { cond, body } => self.lower_while(cond, body),
+            ExprKind::While { cond, body } => {
+                debug_assert!(dest_temp.is_none()); // while should not have a dest_temp
+                self.lower_while(cond, body)
+            }
 
             // Function call
             ExprKind::Call { callee, args } => match &callee.kind {
                 ExprKind::Var(name) => self.lower_call(expr, name.clone(), args, dest_temp),
                 _ => panic!("Unsupported callee: {:?}", callee.kind),
             },
+        }
+    }
 
-            // Array indexing, tuple field access, struct field access
-            ExprKind::ArrayIndex { target, indices } => self.lower_index(expr, target, indices),
-            ExprKind::TupleField { target, index } => self.lower_tuple_field_access(target, *index),
-            ExprKind::StructField { target, field } => {
-                self.lower_struct_field_access(target, field)
-            }
+    fn lower_block(
+        &mut self,
+        body: &[Expr],
+        dest_temp: Option<IrTempId>,
+    ) -> Result<IrOperand, LowerError> {
+        // Note: dest_temp is used only for the last expression.
+
+        // lower all but the last expression
+        for expr in body.iter().take(body.len().saturating_sub(1)) {
+            self.lower_expr(expr, None)?;
+        }
+
+        // lower the last expression
+        match body.last() {
+            Some(expr) => Ok(self.lower_expr(expr, dest_temp)?),
+            None => Ok(self.fb.new_const_unit()),
         }
     }
 
@@ -351,7 +362,7 @@ impl<'a> FuncLowerer<'a> {
                     IrOperand::Temp(temp) => temp,
                     _ => return Err(LowerError::ArrayIsNotTemp(pattern.id, value_op)),
                 };
-                let base_place = Place::root(base_temp, value_ty.clone());
+                let base_place = Place::root(base_temp, lower_type(value_ty));
                 self.lower_pattern_place(pattern, &base_place, is_mutable)
             }
             PatternKind::Tuple { .. } => {
@@ -359,7 +370,7 @@ impl<'a> FuncLowerer<'a> {
                     IrOperand::Temp(temp) => temp,
                     _ => return Err(LowerError::TupleIsNotTemp(pattern.id, value_op)),
                 };
-                let base_place = Place::root(base_temp, value_ty.clone());
+                let base_place = Place::root(base_temp, lower_type(value_ty));
                 self.lower_pattern_place(pattern, &base_place, is_mutable)
             }
         }
@@ -378,7 +389,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             PatternKind::Tuple { patterns } => {
-                let Type::Tuple { fields } = &place.ty else {
+                let IrType::Tuple { fields } = &place.ty else {
                     unreachable!()
                 };
 
@@ -391,7 +402,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             PatternKind::Array { patterns } => {
-                let Type::Array { elem_ty, dims } = &place.ty else {
+                let IrType::Array { elem_ty, dims } = &place.ty else {
                     unreachable!()
                 };
 
@@ -399,7 +410,7 @@ impl<'a> FuncLowerer<'a> {
                 let sub_ty = if dims.len() == 1 {
                     (**elem_ty).clone()
                 } else {
-                    Type::Array {
+                    IrType::Array {
                         elem_ty: elem_ty.clone(),
                         dims: dims[1..].to_vec(),
                     }
@@ -438,7 +449,7 @@ impl<'a> FuncLowerer<'a> {
                     // Materialize constant into a temp
                     let value_ty = c.type_of();
                     let temp = self.fb.new_temp(value_ty);
-                    self.fb.move_to(temp, value_op);
+                    self.fb.copy(temp, value_op);
                     temp
                 }
             };
@@ -464,51 +475,32 @@ impl<'a> FuncLowerer<'a> {
         match &assignee.kind {
             ExprKind::Var(_) => {
                 // Variable assignment
-                match self.ctx.def_map.lookup_def(assignee.id) {
-                    Some(def) => {
-                        let temp = match self.def_op.get(&def.id) {
-                            Some(IrOperand::Temp(temp)) => *temp,
-                            Some(op) => return Err(LowerError::DestIsNotTemp(expr.id, *op)),
-                            None => return Err(LowerError::VarDefNotFound(expr.id)),
-                        };
-                        let value_ty = lower_type(&self.get_node_type(value)?);
-                        let dest_temp = if value_ty.is_compound() {
-                            Some(temp)
-                        } else {
-                            None
-                        };
-                        let value_op = self.lower_expr(value, dest_temp)?;
-                        // Only move if the value is scalar (compound already constructed in place)
-                        if !value_ty.is_compound() {
-                            self.fb.move_to(temp, value_op);
-                        }
-                    }
-                    None => return Err(LowerError::VarDefNotFound(expr.id)),
-                }
+                let assignee_op = self.get_var_op(assignee)?;
+                let IrOperand::Temp(dest_temp) = assignee_op else {
+                    return Err(LowerError::DestIsNotTemp(assignee.id, assignee_op));
+                };
+                self.lower_expr(value, Some(dest_temp))?;
             }
             ExprKind::ArrayIndex { target, indices } => {
                 // Array element assignment
                 let array_place = self.place_of_expr(target)?;
 
                 let (elem_ty, dims) = match &array_place.ty {
-                    Type::Array { elem_ty, dims } => (elem_ty.as_ref().clone(), dims.clone()),
+                    IrType::Array { elem_ty, dims } => (elem_ty.as_ref().clone(), dims.clone()),
                     _ => {
-                        return Err(LowerError::IndexOnNonArray(
-                            expr.id,
-                            lower_type(&array_place.ty),
-                        ));
+                        return Err(LowerError::IndexOnNonArray(expr.id, array_place.ty.clone()));
                     }
                 };
 
-                // If indices are all const, we can form a Place and use
-                // lower_expr_into_place
+                // If indices are all const, we can form a Place and use lower_expr_into_place
                 if let Some(linear_index) = try_const_fold_array_linear_index(&dims, indices) {
                     let base_elem_size = elem_ty.size_of();
                     let byte_offset = linear_index.0 * base_elem_size;
 
                     // Type of the assigned location (supports partial indexing)
                     let result_ty = self.get_node_type(expr)?;
-                    let elem_place = Place::with_offset(&array_place, byte_offset, result_ty);
+                    let elem_place =
+                        Place::with_offset(&array_place, byte_offset, lower_type(&result_ty));
 
                     self.lower_expr_into_place(value, &elem_place)?;
                     return Ok(self.fb.new_const_unit());
@@ -558,7 +550,7 @@ impl<'a> FuncLowerer<'a> {
                     let dest_place = Place {
                         base: base_temp,
                         byte_offset: offset,
-                        ty: dest_ty,
+                        ty: lower_type(&dest_ty),
                     };
                     self.lower_expr_into_place(value, &dest_place)?;
                     return Ok(self.fb.new_const_unit());
@@ -585,9 +577,9 @@ impl<'a> FuncLowerer<'a> {
                 if dest_ir_ty.is_compound() {
                     // Compound type assignment: lower value into place
                     let dest_place = Place::with_offset(
-                        &Place::root(base_temp, dest_ty.clone()),
+                        &Place::root(base_temp, dest_ir_ty.clone()),
                         offset,
-                        dest_ty,
+                        dest_ir_ty,
                     );
                     self.lower_expr_into_place(value, &dest_place)?;
                     return Ok(self.fb.new_const_unit());
@@ -608,47 +600,32 @@ impl<'a> FuncLowerer<'a> {
         Ok(self.fb.new_const_unit())
     }
 
-    fn lower_var_ref(
+    fn lower_var(
         &mut self,
         expr: &Expr,
         dest_temp: Option<IrTempId>,
     ) -> Result<IrOperand, LowerError> {
-        let var_def = self
-            .ctx
-            .def_map
-            .lookup_def(expr.id)
-            .ok_or(LowerError::VarDefNotFound(expr.id))?;
+        let var_op = self.get_var_op(expr)?;
 
-        let var_op = *self
-            .def_op
-            .get(&var_def.id)
-            .ok_or(LowerError::OperandNotFound(expr.id, var_def.id))?;
-
-        match (dest_temp, var_op) {
-            (Some(dest_temp), IrOperand::Temp(var_temp)) if dest_temp != var_temp => {
-                let var_ty = lower_type(&self.get_node_type(expr)?);
-                if var_ty.is_compound() {
-                    self.fb.mem_copy(dest_temp, var_temp, var_ty.size_of());
-                } else {
-                    self.fb.move_to(dest_temp, var_op);
+        // if dest_temp provided, copy the var to it
+        if let Some(dest_temp) = dest_temp {
+            match var_op {
+                IrOperand::Temp(var_temp) if dest_temp == var_temp => {}
+                IrOperand::Temp(var_temp) => {
+                    let var_ty = lower_type(&self.get_node_type(expr)?);
+                    if var_ty.is_compound() {
+                        self.fb.mem_copy(dest_temp, var_temp, var_ty.size_of());
+                    } else {
+                        self.fb.copy(dest_temp, var_op);
+                    }
                 }
-                Ok(IrOperand::Temp(dest_temp))
+                IrOperand::Const(_) => {
+                    self.fb.copy(dest_temp, var_op);
+                }
             }
-            _ => Ok(var_op),
         }
-    }
 
-    fn lower_array_lit(
-        &mut self,
-        expr: &Expr,
-        elems: &[Expr],
-        dest_temp: IrTempId,
-    ) -> Result<IrOperand, LowerError> {
-        // Get element type from the array type
-        let array_ty = self.get_node_type(expr)?;
-        let dest_place = Place::root(dest_temp, array_ty);
-        self.lower_array_lit_into_place(elems, &dest_place)?;
-        Ok(IrOperand::Temp(dest_temp))
+        Ok(var_op)
     }
 
     fn calc_array_offset(
@@ -748,7 +725,7 @@ impl<'a> FuncLowerer<'a> {
         offset
     }
 
-    fn lower_index(
+    fn lower_array_index(
         &mut self,
         expr: &Expr,
         target: &Expr,
@@ -756,20 +733,18 @@ impl<'a> FuncLowerer<'a> {
     ) -> Result<IrOperand, LowerError> {
         let array_place = self.place_of_expr(target)?;
         let (elem_ty, dims) = match &array_place.ty {
-            Type::Array { elem_ty, dims } => (elem_ty.as_ref().clone(), dims.clone()),
+            IrType::Array { elem_ty, dims } => (elem_ty.as_ref().clone(), dims.clone()),
             _ => {
-                return Err(LowerError::IndexOnNonArray(
-                    expr.id,
-                    lower_type(&array_place.ty),
-                ));
+                return Err(LowerError::IndexOnNonArray(expr.id, array_place.ty.clone()));
             }
         };
 
+        let result_ty = self.get_node_type(expr)?;
+
         if let Some(linear_index) = try_const_fold_array_linear_index(&dims, indices) {
-            let result_ty = self.get_node_type(expr)?;
             let base_elem_size = elem_ty.size_of();
             let byte_offset = linear_index.0 * base_elem_size;
-            let elem_place = Place::with_offset(&array_place, byte_offset, result_ty);
+            let elem_place = Place::with_offset(&array_place, byte_offset, lower_type(&result_ty));
             return Ok(self.read_place(&elem_place));
         }
 
@@ -780,26 +755,37 @@ impl<'a> FuncLowerer<'a> {
         let byte_offset_op =
             self.byte_offset_from_index(array_place.byte_offset, linear_op, elem_size);
 
-        let result_ir_ty = lower_type(&self.get_node_type(expr)?);
-        if result_ir_ty.is_compound() {
-            let dest = self.fb.new_temp(result_ir_ty.clone());
+        let result_ir_ty = lower_type(&result_ty);
+        let dest_temp = self.fb.new_temp(result_ir_ty.clone());
 
+        if result_ir_ty.is_compound() {
             // Copy from array_place.base[byte_offset_op] to dest[0]
             let zero = self.fb.new_const_int(0, 64, false);
             self.fb.mem_copy_at(
-                dest,
+                dest_temp,
                 array_place.base,
                 zero,
                 byte_offset_op,
                 result_ir_ty.size_of(),
             );
-            return Ok(IrOperand::Temp(dest));
+        } else {
+            self.fb.load(dest_temp, array_place.base, byte_offset_op);
         }
 
-        let result = self.fb.new_temp(result_ir_ty);
-        self.fb.load(result, array_place.base, byte_offset_op);
+        Ok(IrOperand::Temp(dest_temp))
+    }
 
-        Ok(IrOperand::Temp(result))
+    fn lower_array_lit(
+        &mut self,
+        expr: &Expr,
+        elems: &[Expr],
+        dest_temp: IrTempId,
+    ) -> Result<IrOperand, LowerError> {
+        // Get element type from the array type
+        let array_ty = self.get_node_type(expr)?;
+        let dest_place = Place::root(dest_temp, lower_type(&array_ty));
+        self.lower_array_lit_into_place(elems, &dest_place)?;
+        Ok(IrOperand::Temp(dest_temp))
     }
 
     fn lower_tuple_lit(
@@ -807,11 +793,11 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
         fields: &[Expr],
         dest_temp: IrTempId,
-        base_offset: usize,
+        dest_offset: usize,
     ) -> Result<IrOperand, LowerError> {
-        let tuple_ty = &self.get_node_type(expr)?;
-        let base_place = Place::root(dest_temp, tuple_ty.clone());
-        let dest_place = Place::with_offset(&base_place, base_offset, tuple_ty.clone());
+        let tuple_ir_ty = lower_type(&self.get_node_type(expr)?);
+        let base_place = Place::root(dest_temp, tuple_ir_ty.clone());
+        let dest_place = Place::with_offset(&base_place, dest_offset, tuple_ir_ty);
         self.lower_tuple_lit_into_place(fields, &dest_place)?;
         Ok(IrOperand::Temp(dest_temp))
     }
@@ -821,35 +807,34 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
         fields: &[StructLitField],
         dest_temp: IrTempId,
-        base_offset: usize,
+        dest_offset: usize,
     ) -> Result<IrOperand, LowerError> {
-        let struct_ty = &self.get_node_type(expr)?;
-        let base_place = Place::root(dest_temp, struct_ty.clone());
-        let dest_place = Place::with_offset(&base_place, base_offset, struct_ty.clone());
+        let struct_ir_ty = lower_type(&self.get_node_type(expr)?);
+        let base_place = Place::root(dest_temp, struct_ir_ty.clone());
+        let dest_place = Place::with_offset(&base_place, dest_offset, struct_ir_ty);
         self.lower_struct_lit_into_place(fields, &dest_place)?;
         Ok(IrOperand::Temp(dest_temp))
     }
 
     // Get the place of an expression, either from a base and offset or by materializing into a temp
     fn place_of_expr(&mut self, expr: &Expr) -> Result<Place, LowerError> {
-        let ty = self.get_node_type(expr)?;
+        let ir_ty = lower_type(&self.get_node_type(expr)?);
         if let Some((base, offset)) = self.try_get_base_and_offset(expr)? {
             return Ok(Place::with_offset(
-                &Place::root(base, ty.clone()),
+                &Place::root(base, ir_ty.clone()),
                 offset,
-                ty,
+                ir_ty.clone(),
             ));
         }
 
         // materialize into a temp if needed
-        let ir_ty = lower_type(&ty);
-        let dest = ir_ty.is_compound().then(|| self.fb.new_temp(ir_ty));
+        let dest = ir_ty.is_compound().then(|| self.fb.new_temp(ir_ty.clone()));
         let op = self.lower_expr(expr, dest)?;
         let temp = match op {
             IrOperand::Temp(temp) => temp,
             _ => return Err(LowerError::DestIsNotTemp(expr.id, op)),
         };
-        Ok(Place::root(temp, ty))
+        Ok(Place::root(temp, ir_ty))
     }
 
     fn try_place_of_expr(&mut self, expr: &Expr) -> Result<Option<Place>, LowerError> {
@@ -857,37 +842,34 @@ impl<'a> FuncLowerer<'a> {
             return Ok(None);
         };
 
-        let ty = self.get_node_type(expr)?;
+        let ir_ty = lower_type(&self.get_node_type(expr)?);
         Ok(Some(Place {
             base,
             byte_offset: offset,
-            ty,
+            ty: ir_ty,
         }))
     }
 
     // Read the value from a place, either by copying from a compound temp or by
     // loading from a scalar temp.
     fn read_place(&mut self, place: &Place) -> IrOperand {
-        let ir_ty = lower_type(&place.ty);
+        let ir_ty = &place.ty;
         if ir_ty.is_compound() {
             let temp = self.fb.new_temp(ir_ty.clone());
-            self.emit_copy_compound_from(place, temp, ir_ty.size_of());
+            self.fb
+                .mem_copy_with_offset(temp, place.base, 0, place.byte_offset, ir_ty.size_of());
             IrOperand::Temp(temp)
         } else {
             self.emit_load_scalar(place, &ir_ty)
         }
     }
 
-    fn lower_tuple_field_access(
-        &mut self,
-        target: &Expr,
-        index: usize,
-    ) -> Result<IrOperand, LowerError> {
+    fn lower_tuple_field(&mut self, target: &Expr, index: usize) -> Result<IrOperand, LowerError> {
         let target_place = self.place_of_expr(target)?;
 
-        let target_ty = &target_place.ty;
-        let field_ty = match target_ty {
-            Type::Tuple { fields } => fields[index].clone(),
+        let target_ir_ty = &target_place.ty;
+        let field_ty = match target_ir_ty {
+            IrType::Tuple { fields } => fields[index].clone(),
             _ => unreachable!(),
         };
 
@@ -895,16 +877,12 @@ impl<'a> FuncLowerer<'a> {
         Ok(self.read_place(&field_place))
     }
 
-    fn lower_struct_field_access(
-        &mut self,
-        target: &Expr,
-        field: &str,
-    ) -> Result<IrOperand, LowerError> {
+    fn lower_struct_field(&mut self, target: &Expr, field: &str) -> Result<IrOperand, LowerError> {
         let target_place = self.place_of_expr(target)?;
 
         let target_ty = &target_place.ty;
         let field_ty = match target_ty {
-            Type::Struct { fields, .. } => fields
+            IrType::Struct { fields, .. } => fields
                 .iter()
                 .find(|f| f.name == field)
                 .map(|f| f.ty.clone())
@@ -938,8 +916,8 @@ impl<'a> FuncLowerer<'a> {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
                     // Get the target's type to compute this field's offset
-                    let target_ty = &self.get_node_type(target)?;
-                    let field_offset = tuple_field_byte_offset(target_ty, *index).0;
+                    let target_ir_ty = lower_type(&self.get_node_type(target)?);
+                    let field_offset = tuple_field_byte_offset(&target_ir_ty, *index).0;
 
                     // Combine the offsets
                     Ok(Some((base_temp, offset + field_offset)))
@@ -978,8 +956,8 @@ impl<'a> FuncLowerer<'a> {
                 // Try to get the base temp and offset from the target
                 if let Some((base_temp, offset)) = self.try_get_base_and_offset(target)? {
                     // Get the target's type (should be a struct)
-                    let target_ty = &self.get_node_type(target)?;
-                    let field_offset = struct_field_byte_offset(target_ty, field).0;
+                    let target_ir_ty = lower_type(&self.get_node_type(target)?);
+                    let field_offset = struct_field_byte_offset(&target_ir_ty, field).0;
 
                     // Combine offsets
                     Ok(Some((base_temp, offset + field_offset)))
@@ -993,32 +971,32 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn lower_expr_into_place(&mut self, expr: &Expr, dest: &Place) -> Result<(), LowerError> {
-        let dest_ir_ty = lower_type(&dest.ty);
+    fn lower_expr_into_place(&mut self, expr: &Expr, dest_place: &Place) -> Result<(), LowerError> {
+        let dest_ir_ty = &dest_place.ty;
 
         match &expr.kind {
-            ExprKind::TupleLit(fields) => self.lower_tuple_lit_into_place(fields, dest),
-            ExprKind::ArrayLit(elems) => self.lower_array_lit_into_place(elems, dest),
-            ExprKind::StructLit { fields, .. } => self.lower_struct_lit_into_place(fields, dest),
+            ExprKind::ArrayLit(elems) => self.lower_array_lit_into_place(elems, dest_place),
+            ExprKind::TupleLit(fields) => self.lower_tuple_lit_into_place(fields, dest_place),
+            ExprKind::StructLit { fields, .. } => {
+                self.lower_struct_lit_into_place(fields, dest_place)
+            }
             _ => {
                 if dest_ir_ty.is_compound() {
                     // Best case: expression is already a const-addressable sub-place
                     if let Some(src_place) = self.try_place_of_expr(expr)? {
-                        debug_assert!(lower_type(&src_place.ty).is_compound());
+                        debug_assert!(src_place.ty.is_compound());
 
-                        if src_place.base == dest.base && src_place.byte_offset == dest.byte_offset
+                        if src_place.base != dest_place.base
+                            || src_place.byte_offset != dest_place.byte_offset
                         {
-                            // no-op
-                            return Ok(());
+                            self.fb.mem_copy_with_offset(
+                                dest_place.base,
+                                src_place.base,
+                                dest_place.byte_offset,
+                                src_place.byte_offset,
+                                dest_ir_ty.size_of(),
+                            );
                         }
-
-                        self.fb.mem_copy_with_offset(
-                            dest.base,
-                            src_place.base,
-                            dest.byte_offset,
-                            src_place.byte_offset,
-                            dest_ir_ty.size_of(),
-                        );
                         return Ok(());
                     }
 
@@ -1027,51 +1005,33 @@ impl<'a> FuncLowerer<'a> {
                     let IrOperand::Temp(src_temp) = src_op else {
                         return Err(LowerError::DestIsNotTemp(expr.id, src_op));
                     };
-                    self.emit_copy_compound_to(dest, src_temp, dest_ir_ty.size_of());
+                    self.fb.mem_copy_with_offset(
+                        dest_place.base,
+                        src_temp,
+                        dest_place.byte_offset,
+                        0,
+                        dest_ir_ty.size_of(),
+                    );
                     Ok(())
                 } else {
                     // Scalar: compute value and store at dest byte offset
                     let value_op = self.lower_expr(expr, None)?;
-                    let offset_op = self.fb.new_const_int(dest.byte_offset as i64, 64, false);
-                    self.fb.store(dest.base, offset_op, value_op);
+                    let offset_op = self
+                        .fb
+                        .new_const_int(dest_place.byte_offset as i64, 64, false);
+                    self.fb.store(dest_place.base, offset_op, value_op);
                     Ok(())
                 }
             }
         }
     }
 
-    fn lower_tuple_lit_into_place(
-        &mut self,
-        fields: &[Expr],
-        dest: &Place,
-    ) -> Result<(), LowerError> {
-        for (i, field) in fields.iter().enumerate() {
-            let field_ty = &self.get_node_type(field)?;
-            let field_place = Place::tuple_field(dest, i, field_ty.clone());
-            self.lower_expr_into_place(field, &field_place)?;
-        }
-        Ok(())
-    }
-
-    fn lower_struct_lit_into_place(
-        &mut self,
-        fields: &[StructLitField],
-        dest: &Place,
-    ) -> Result<(), LowerError> {
-        for field in fields {
-            let field_ty = &self.get_node_type(&field.value)?;
-            let field_place = Place::struct_field(dest, &field.name, field_ty.clone());
-            self.lower_expr_into_place(&field.value, &field_place)?;
-        }
-        Ok(())
-    }
-
     fn lower_array_lit_into_place(
         &mut self,
         elems: &[Expr],
-        dest: &Place,
+        dest_place: &Place,
     ) -> Result<(), LowerError> {
-        let Type::Array { elem_ty, dims } = &dest.ty else {
+        let IrType::Array { elem_ty, dims } = &dest_place.ty else {
             unreachable!()
         };
 
@@ -1082,24 +1042,66 @@ impl<'a> FuncLowerer<'a> {
         // Type of one element at this dimension:
         // 1D: element is elem_ty (scalar/tuple/...)
         // nD: element is a sub-array with dims[1..]
-        let sub_ty = if dims.len() == 1 {
+        let sub_ir_ty = if dims.len() == 1 {
             (**elem_ty).clone()
         } else {
-            Type::Array {
+            IrType::Array {
                 elem_ty: elem_ty.clone(),
                 dims: dims[1..].to_vec(),
             }
         };
 
         // Byte size of one element at this dimension (scalar or compound)
-        let sub_size = sub_ty.size_of();
+        let sub_size = sub_ir_ty.size_of();
 
         for (i, elem_expr) in elems.iter().enumerate() {
             let elem_offset = i * sub_size;
-            let elem_place = Place::with_offset(dest, elem_offset, sub_ty.clone());
+            let elem_place = Place::with_offset(dest_place, elem_offset, sub_ir_ty.clone());
             self.lower_expr_into_place(elem_expr, &elem_place)?;
         }
         Ok(())
+    }
+
+    fn lower_tuple_lit_into_place(
+        &mut self,
+        fields: &[Expr],
+        dest_place: &Place,
+    ) -> Result<(), LowerError> {
+        for (i, field) in fields.iter().enumerate() {
+            let field_ir_ty = lower_type(&self.get_node_type(field)?);
+            let field_place = Place::tuple_field(dest_place, i, field_ir_ty);
+            self.lower_expr_into_place(field, &field_place)?;
+        }
+        Ok(())
+    }
+
+    fn lower_struct_lit_into_place(
+        &mut self,
+        fields: &[StructLitField],
+        dest_place: &Place,
+    ) -> Result<(), LowerError> {
+        for field in fields {
+            let field_ir_ty = lower_type(&self.get_node_type(&field.value)?);
+            let field_place = Place::struct_field(dest_place, &field.name, field_ir_ty);
+            self.lower_expr_into_place(&field.value, &field_place)?;
+        }
+        Ok(())
+    }
+
+    fn lower_tuple_lit_at_addr(
+        &mut self,
+        fields: &[Expr],
+        addr: &IrAddr,
+    ) -> Result<(), LowerError> {
+        for (i, field) in fields.iter().enumerate() {
+            let field_addr = IrAddr::tuple_field(addr, i);
+            self.lower_expr_at_addr(field, &field_addr)?;
+        }
+        Ok(())
+    }
+
+    fn lower_expr_at_addr(&mut self, expr: &Expr, addr: &IrAddr) -> Result<(), LowerError> {
+        todo!()
     }
 
     fn lower_binary_op(
@@ -1107,18 +1109,36 @@ impl<'a> FuncLowerer<'a> {
         op: &BinaryOp,
         left: &Expr,
         right: &Expr,
+        dest_temp: Option<IrTempId>,
     ) -> Result<IrOperand, LowerError> {
-        let result = self.fb.new_temp(lower_type(&self.get_node_type(left)?));
+        // create the result temp (if not provided)
+        let result_ty = self.get_node_type(left)?;
+        let result = dest_temp.unwrap_or_else(|| self.fb.new_temp(lower_type(&result_ty)));
+
+        // lower the left and right operands
         let left_op = self.lower_expr(left, None)?;
         let right_op = self.lower_expr(right, None)?;
+
         self.fb.binary_op(result, *op, left_op, right_op);
+
         Ok(IrOperand::Temp(result))
     }
 
-    fn lower_unary_op(&mut self, op: &UnaryOp, expr: &Expr) -> Result<IrOperand, LowerError> {
-        let result = self.fb.new_temp(lower_type(&self.get_node_type(expr)?));
+    fn lower_unary_op(
+        &mut self,
+        op: &UnaryOp,
+        expr: &Expr,
+        dest_temp: Option<IrTempId>,
+    ) -> Result<IrOperand, LowerError> {
+        // create the result temp (if not provided)
+        let result_ty = self.get_node_type(expr)?;
+        let result = dest_temp.unwrap_or_else(|| self.fb.new_temp(lower_type(&result_ty)));
+
+        // lower the operand
         let expr_op = self.lower_expr(expr, None)?;
+
         self.fb.unary_op(result, *op, expr_op);
+
         Ok(IrOperand::Temp(result))
     }
 
@@ -1130,16 +1150,12 @@ impl<'a> FuncLowerer<'a> {
         dest_temp: Option<IrTempId>,
     ) -> Result<IrOperand, LowerError> {
         // Validate that the then and else bodies have the same type
-        let then_type = self.get_node_type(then_body)?;
-        let else_type = self.get_node_type(else_body)?;
-        if then_type != else_type {
-            return Err(LowerError::MismatchedBranchTypes(
-                then_body.id,
-                then_type,
-                else_body.id,
-                else_type,
-            ));
-        }
+        let then_ty = self.get_node_type(then_body)?;
+        let else_ty = self.get_node_type(else_body)?;
+        debug_assert_eq!(
+            then_ty, else_ty,
+            "then and else bodies have different types"
+        );
 
         // Create the required blocks
         let then_b = self.fb.new_block("then".to_string());
@@ -1160,10 +1176,8 @@ impl<'a> FuncLowerer<'a> {
             IrOperand::Temp(temp) => temp,
             other => {
                 // Materialize the constant to a temp (so that phi can use it)
-                let temp = self
-                    .fb
-                    .new_temp(lower_type(&self.get_node_type(then_body)?));
-                self.fb.move_to(temp, other);
+                let temp = self.fb.new_temp(lower_type(&then_ty));
+                self.fb.copy(temp, other);
                 temp
             }
         };
@@ -1175,10 +1189,8 @@ impl<'a> FuncLowerer<'a> {
             IrOperand::Temp(temp) => temp,
             other => {
                 // Materialize the constant to a temp (so that phi can use it)
-                let temp = self
-                    .fb
-                    .new_temp(lower_type(&self.get_node_type(else_body)?));
-                self.fb.move_to(temp, other);
+                let temp = self.fb.new_temp(lower_type(&else_ty));
+                self.fb.copy(temp, other);
                 temp
             }
         };
@@ -1186,15 +1198,17 @@ impl<'a> FuncLowerer<'a> {
 
         // Merge block
         self.fb.select_block(merge_b);
-        if let Some(dest_temp) = dest_temp {
-            Ok(IrOperand::Temp(dest_temp))
-        } else {
-            let merge_type = self.get_node_type(then_body)?;
-            let merge_op = self.fb.new_temp(lower_type(&merge_type));
+
+        // dest_temp present -> branches already lowered into dest_temp
+        // dest_temp not present -> create a phi node to merge the branches
+        let dest_temp = dest_temp.unwrap_or_else(|| {
+            let merge_temp = self.fb.new_temp(lower_type(&then_ty));
             self.fb
-                .phi(merge_op, vec![(then_b, then_op), (else_b, else_op)]);
-            Ok(IrOperand::Temp(merge_op))
-        }
+                .phi(merge_temp, vec![(then_b, then_op), (else_b, else_op)]);
+            merge_temp
+        });
+
+        Ok(IrOperand::Temp(dest_temp))
     }
 
     fn lower_while(&mut self, cond: &Expr, body: &Expr) -> Result<IrOperand, LowerError> {
@@ -1253,21 +1267,6 @@ impl<'a> FuncLowerer<'a> {
         Ok(IrOperand::Temp(result))
     }
 
-    fn lower_block_into(
-        &mut self,
-        id: NodeId,
-        body: &[Expr],
-        dest_temp: Option<IrTempId>,
-    ) -> Result<IrOperand, LowerError> {
-        for expr in body.iter().take(body.len().saturating_sub(1)) {
-            self.lower_expr(expr, dest_temp)?;
-        }
-        match body.last() {
-            Some(expr) => Ok(self.lower_expr(expr, dest_temp)?),
-            None => Err(LowerError::BlockEmpty(id)),
-        }
-    }
-
     fn get_node_type(&self, expr: &Expr) -> Result<Type, LowerError> {
         self.ctx
             .type_map
@@ -1275,21 +1274,29 @@ impl<'a> FuncLowerer<'a> {
             .ok_or(LowerError::NodeTypeNotFound(expr.id))
     }
 
+    fn get_var_op(&self, expr: &Expr) -> Result<IrOperand, LowerError> {
+        debug_assert!(matches!(expr.kind, ExprKind::Var(_)));
+
+        let var_def_id = self
+            .ctx
+            .def_map
+            .lookup_def(expr.id)
+            .ok_or(LowerError::VarDefNotFound(expr.id))?
+            .id;
+
+        let var_op = *self
+            .def_op
+            .get(&var_def_id)
+            .ok_or(LowerError::OperandNotFound(expr.id, var_def_id))?;
+
+        Ok(var_op)
+    }
+
     fn emit_load_scalar(&mut self, place: &Place, ir_ty: &IrType) -> IrOperand {
         let offset_op = self.fb.new_const_int(place.byte_offset as i64, 64, false);
         let result_temp = self.fb.new_temp(ir_ty.clone());
         self.fb.load(result_temp, place.base, offset_op);
         IrOperand::Temp(result_temp)
-    }
-
-    fn emit_copy_compound_from(&mut self, place: &Place, dest: IrTempId, bytes: usize) {
-        self.fb
-            .mem_copy_with_offset(dest, place.base, 0, place.byte_offset, bytes);
-    }
-
-    fn emit_copy_compound_to(&mut self, place: &Place, src: IrTempId, bytes: usize) {
-        self.fb
-            .mem_copy_with_offset(place.base, src, place.byte_offset, 0, bytes);
     }
 }
 

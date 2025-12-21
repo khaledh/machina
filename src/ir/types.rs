@@ -86,6 +86,22 @@ pub enum IrOperand {
     Const(IrConst),
 }
 
+// ----------- Address -----------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrBaseAddr {
+    IrTemp(IrTempId),
+    // GlobalSymbol(String),
+    // Pointer(IrTempId),
+}
+
+#[derive(Debug, Clone)]
+pub struct IrAddr {
+    pub base: IrBaseAddr,
+    pub offset: usize,
+    pub ty: IrType,
+}
+
 // ----------- Type -----------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +122,15 @@ pub enum IrType {
     Tuple {
         fields: Vec<IrType>,
     },
+    Struct {
+        fields: Vec<StructField>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: IrType,
 }
 
 #[allow(dead_code)]
@@ -131,6 +156,10 @@ impl IrType {
                 let total_size: usize = fields.iter().map(|f| f.size_of()).sum();
                 total_size
             }
+            IrType::Struct { fields } => {
+                let total_size: usize = fields.iter().map(|f| f.ty.size_of()).sum();
+                total_size
+            }
         }
     }
 
@@ -148,11 +177,63 @@ impl IrType {
             IrType::Bool => 1,
             IrType::Array { elem_ty, .. } => (*elem_ty).align_of(),
             IrType::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
+            IrType::Struct { fields } => fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1),
         }
     }
 
     pub fn is_compound(&self) -> bool {
         matches!(self, IrType::Array { .. } | IrType::Tuple { .. })
+    }
+
+    pub fn tuple_field_offset(&self, index: usize) -> usize {
+        match self {
+            IrType::Tuple { fields } => {
+                assert!(index < fields.len(), "Tuple field index out of bounds");
+                fields.iter().take(index).map(|f| f.size_of()).sum()
+            }
+            _ => panic!("Expected tuple type"),
+        }
+    }
+
+    pub fn tuple_field_type(&self, index: usize) -> IrType {
+        match self {
+            IrType::Tuple { fields } => fields[index].clone(),
+            _ => panic!("Expected tuple type"),
+        }
+    }
+
+    pub fn struct_field_offset(&self, field_name: &str) -> usize {
+        match self {
+            IrType::Struct { fields, .. } => {
+                let mut offset = 0;
+                for field in fields {
+                    if field.name == field_name {
+                        return offset;
+                    }
+                    offset += field.ty.size_of();
+                }
+                panic!("Field not found in struct");
+            }
+            _ => panic!("Expected struct type"),
+        }
+    }
+
+    pub fn struct_field_type(&self, field_name: &str) -> IrType {
+        match self {
+            IrType::Struct { fields, .. } => fields
+                .iter()
+                .find(|f| f.name == field_name)
+                .map(|f| f.ty.clone())
+                .unwrap_or_else(|| panic!("Field not found in struct")),
+            _ => panic!("Expected struct type"),
+        }
+    }
+
+    pub fn has_field(&self, field_name: &str) -> bool {
+        match self {
+            IrType::Struct { fields, .. } => fields.iter().any(|f| f.name == field_name),
+            _ => false,
+        }
     }
 }
 
@@ -213,7 +294,7 @@ impl IrBlock {
 
 #[derive(Debug, Clone)]
 pub enum IrInst {
-    Move {
+    Copy {
         dest: IrTempId,
         src: IrOperand,
     },
@@ -264,7 +345,7 @@ pub enum IrInst {
 impl IrInst {
     pub fn get_dest(&self) -> Option<IrTempId> {
         match self {
-            IrInst::Move { dest, .. } => Some(*dest),
+            IrInst::Copy { dest, .. } => Some(*dest),
             IrInst::BinaryOp { result, .. } => Some(*result),
             IrInst::UnaryOp { result, .. } => Some(*result),
             IrInst::Call { result, .. } => *result,
@@ -277,7 +358,7 @@ impl IrInst {
 
     pub fn get_sources(&self) -> Vec<IrOperand> {
         match self {
-            IrInst::Move { src, .. } => vec![*src],
+            IrInst::Copy { src, .. } => vec![*src],
             IrInst::BinaryOp { lhs, rhs, .. } => vec![*lhs, *rhs],
             IrInst::UnaryOp { operand, .. } => vec![*operand],
             IrInst::Call { args, .. } => args.clone(),
@@ -397,6 +478,10 @@ impl fmt::Display for IrType {
                 let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "({})", fields_str.join(", "))
             }
+            IrType::Struct { fields } => {
+                let fields_str = fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+                write!(f, "{{{}}}", fields_str.join(", "))
+            }
         }
     }
 }
@@ -463,8 +548,8 @@ impl fmt::Display for IrFunction {
 
 fn format_inst(f: &mut fmt::Formatter<'_>, inst: &IrInst, func: &IrFunction) -> fmt::Result {
     match inst {
-        IrInst::Move { dest, src } => {
-            write!(f, "%t{} = move {src}", dest.id())?;
+        IrInst::Copy { dest, src } => {
+            write!(f, "%t{} = copy {src}", dest.id())?;
         }
         IrInst::BinaryOp {
             result,

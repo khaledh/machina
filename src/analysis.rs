@@ -111,7 +111,7 @@ mod def_resolution {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct DefMap {
         defs: Vec<Def>,
         node_def: HashMap<NodeId, DefId>,
@@ -206,7 +206,7 @@ mod type_resolution {
     }
 
     #[allow(unused)]
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct TypeMap {
         def_type: HashMap<Def, Type>,
         node_type: HashMap<NodeId, Type>,
