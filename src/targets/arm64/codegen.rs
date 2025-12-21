@@ -283,19 +283,13 @@ impl<'a> FuncCodegen<'a> {
                     self.emit_store_to_sp(total, dst.ty(), value_reg, &mut asm)?;
                     return Ok(asm);
                 }
-            } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base()) {
-                if self.can_use_imm_offset(dst.ty(), offset) {
-                    let value_reg = self.emit_rvalue(src, &mut asm)?;
-                    let base_reg = self.reg(*reg);
-                    self.emit_store_at_addr_reg_imm(
-                        base_reg,
-                        offset,
-                        dst.ty(),
-                        value_reg,
-                        &mut asm,
-                    )?;
-                    return Ok(asm);
-                }
+            } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base())
+                && self.can_use_imm_offset(dst.ty(), offset)
+            {
+                let value_reg = self.emit_rvalue(src, &mut asm)?;
+                let base_reg = self.reg(*reg);
+                self.emit_store_at_addr_reg_imm(base_reg, offset, dst.ty(), value_reg, &mut asm)?;
+                return Ok(asm);
             }
         } else {
             // Compute address first, then value; preserve addr across rvalue evaluation.
@@ -1013,7 +1007,7 @@ impl<'a> FuncCodegen<'a> {
 
     fn can_use_imm_offset(&self, ty: TyId, offset: usize) -> bool {
         let size = size_of_ty(&self.body.types, ty);
-        if size == 0 || offset % size != 0 {
+        if size == 0 || !offset.is_multiple_of(size) {
             return false;
         }
         let scaled = offset / size;
@@ -1270,7 +1264,7 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
     match types.kind(ty) {
         TyKind::Unit => 0,
         TyKind::Bool => 1,
-        TyKind::Int { bits, .. } => (*bits as usize + 7) / 8,
+        TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
         TyKind::Array { elem_ty, dims } => {
             let elems: usize = dims.iter().product();
             elems * size_of_ty(types, *elem_ty)

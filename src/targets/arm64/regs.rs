@@ -249,8 +249,9 @@ impl TargetSpec for Arm64Target {
         match from_phys(reg) {
             Arm64Reg::SP => "sp",
             Arm64Reg::Xzr => "xzr",
-            other => match other as u8 {
-                n => match n {
+            other => {
+                let n = other as u8;
+                match n {
                     0..=30 => {
                         const NAMES: [&str; 31] = [
                             "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
@@ -260,8 +261,8 @@ impl TargetSpec for Arm64Target {
                         NAMES[n as usize]
                     }
                     _ => "x?",
-                },
-            },
+                }
+            }
         }
     }
 }

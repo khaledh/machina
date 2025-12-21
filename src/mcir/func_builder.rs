@@ -48,10 +48,10 @@ impl FuncBuilder {
     }
 
     pub fn push_stmt(&mut self, bb: BlockId, stmt: Statement) {
-        self.body.blocks[bb.index() as usize].stmts.push(stmt);
+        self.body.blocks[bb.index()].stmts.push(stmt);
     }
 
     pub fn set_terminator(&mut self, bb: BlockId, term: Terminator) {
-        self.body.blocks[bb.index() as usize].terminator = term;
+        self.body.blocks[bb.index()].terminator = term;
     }
 }

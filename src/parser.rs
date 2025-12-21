@@ -847,7 +847,7 @@ impl<'a> Parser<'a> {
         while self.curr_token.kind != TK::Eof {
             decls.push(self.parse_decl()?);
         }
-        Ok(Module { decls: decls })
+        Ok(Module { decls })
     }
 }
 

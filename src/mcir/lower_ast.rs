@@ -163,7 +163,7 @@ impl<'a> FuncLowerer<'a> {
         match &expr.kind {
             // These are only allowed as block items.
             EK::LetBind { .. } | EK::VarBind { .. } | EK::Assign { .. } | EK::While { .. } => {
-                return Err(LowerError::ExprNotAllowedInValueContext(expr.id));
+                Err(LowerError::ExprNotAllowedInValueContext(expr.id))
             }
 
             EK::Block(exprs) => self.lower_block_expr(exprs),

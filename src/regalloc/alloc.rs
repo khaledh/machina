@@ -27,10 +27,12 @@ fn scan_address_taken(body: &FuncBody) -> HashSet<LocalId> {
     let mut out = HashSet::new();
     for block in &body.blocks {
         for stmt in &block.stmts {
-            if let Statement::CopyScalar { src, .. } = stmt {
-                if let Rvalue::AddrOf(place) = src {
-                    record_addr_of(place, &mut out);
-                }
+            if let Statement::CopyScalar {
+                src: Rvalue::AddrOf(place),
+                ..
+            } = stmt
+            {
+                record_addr_of(place, &mut out);
             }
         }
     }
@@ -65,7 +67,7 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
     match types.kind(ty) {
         TyKind::Unit => 0,
         TyKind::Bool => 1,
-        TyKind::Int { bits, .. } => (*bits as usize + 7) / 8,
+        TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
         TyKind::Array { elem_ty, dims } => {
             let elems: usize = dims.iter().product();
             elems * size_of_ty(types, *elem_ty)
@@ -77,7 +79,7 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
 
 fn slots_for_ty(types: &TyTable, ty: TyId) -> u32 {
     let size = size_of_ty(types, ty);
-    let slots = (size + 7) / 8;
+    let slots = size.div_ceil(8);
     (slots.max(1)) as u32
 }
 

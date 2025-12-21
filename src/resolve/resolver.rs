@@ -449,7 +449,7 @@ impl SymbolResolver {
                 // Check the value first before introducing the lhs symbol(s) into the scope.
                 self.check_expr(value);
                 if let Some(decl_ty) = decl_ty {
-                    self.check_type_expr(&decl_ty);
+                    self.check_type_expr(decl_ty);
                 }
                 self.check_pattern(pattern, false);
             }
@@ -462,7 +462,7 @@ impl SymbolResolver {
                 // Check the value first before introducing the lhs symbol(s) into the scope.
                 self.check_expr(value);
                 if let Some(decl_ty) = decl_ty {
-                    self.check_type_expr(&decl_ty);
+                    self.check_type_expr(decl_ty);
                 }
                 self.check_pattern(pattern, true);
             }

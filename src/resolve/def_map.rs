@@ -147,10 +147,10 @@ impl DefMap {
     }
 
     pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
-        if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id) {
-            if let DefKind::LocalVar { nrvo_eligible } = &mut def.kind {
-                *nrvo_eligible = true;
-            }
+        if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id)
+            && let DefKind::LocalVar { nrvo_eligible } = &mut def.kind
+        {
+            *nrvo_eligible = true;
         }
     }
 

@@ -309,7 +309,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         let target_ty = self.type_check_expr(target)?;
         match target_ty {
             Type::Tuple { fields } => {
-                let index_usize = index as usize;
+                let index_usize = index;
                 if index_usize >= fields.len() {
                     return Err(TypeCheckError::TupleFieldOutOfBounds(
                         fields.len(),
