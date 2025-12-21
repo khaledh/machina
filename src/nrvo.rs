@@ -21,6 +21,7 @@ impl NrvoAnalyzer {
             module,
             def_map,
             type_map,
+            symbols,
         } = self.ctx;
 
         let mut def_map = def_map;
@@ -33,6 +34,7 @@ impl NrvoAnalyzer {
             module,
             def_map,
             type_map,
+            symbols,
         }
     }
 

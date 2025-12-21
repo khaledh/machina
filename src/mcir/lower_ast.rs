@@ -23,7 +23,7 @@ use thiserror::Error;
 
 use crate::analysis::Def;
 use crate::ast::{self, ExprKind as EK, PatternKind as PK, *};
-use crate::context::AnalyzedContext;
+use crate::context::{AnalyzedContext, LoweredMcirContext};
 use crate::ids::{DefId, NodeId};
 use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::lower_ty::TyLowerer;
@@ -34,7 +34,7 @@ use crate::types::*;
 pub enum LowerError {
     #[error("expression def not found for node {0:?}")]
     ExprDefNotFound(NodeId),
-   
+
     #[error("expression type not found for node {0:?}")]
     ExprTypeNotFound(NodeId),
 
@@ -48,7 +48,10 @@ pub enum LowerError {
     ExprNotAllowedInValueContext(NodeId),
 
     #[error("place is not {expected:?} for node {node_id:?}")]
-    PlaceKindMismatch { node_id: NodeId, expected: PlaceKind },
+    PlaceKindMismatch {
+        node_id: NodeId,
+        expected: PlaceKind,
+    },
 
     #[error("variable local not found for node {0:?} (def {1:?})")]
     VarLocalNotFound(NodeId, DefId),
@@ -111,7 +114,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Lower the function AST into MCIR.
-    pub fn lower(&mut self) -> Result<Body, LowerError> {
+    pub fn lower(&mut self) -> Result<FuncBody, LowerError> {
         // Create locals for params.
         for (i, param) in self.func.params.iter().enumerate() {
             let ty = self.ty_for_node(param.id)?;
@@ -954,10 +957,8 @@ impl<'a> FuncLowerer<'a> {
                 if src.base() == dst.base() && src.projections() == dst.projections() {
                     return Ok(());
                 }
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyAggregate { dst, src },
-                );
+                self.fb
+                    .push_stmt(self.curr_block, Statement::CopyAggregate { dst, src });
                 Ok(())
             }
             EK::Call { callee, args } => {
@@ -975,10 +976,7 @@ impl<'a> FuncLowerer<'a> {
                 ExprValue::Aggregate(place) => {
                     self.fb.push_stmt(
                         self.curr_block,
-                        Statement::CopyAggregate {
-                            dst,
-                            src: place,
-                        },
+                        Statement::CopyAggregate { dst, src: place },
                     );
                     Ok(())
                 }
@@ -1182,15 +1180,15 @@ impl<'a> FuncLowerer<'a> {
 }
 
 /// Lower all functions in a module into MCIR bodies.
-pub fn lower_ast(ctx: AnalyzedContext) -> Result<Vec<Body>, LowerError> {
+pub fn lower_ast(ctx: AnalyzedContext) -> Result<LoweredMcirContext, LowerError> {
     let mut bodies = Vec::new();
     for func in ctx.module.funcs() {
         let body = FuncLowerer::new(&ctx, func).lower()?;
         bodies.push(body);
     }
-    Ok(bodies)
+    Ok(ctx.with_func_bodies(bodies))
 }
 
 #[cfg(test)]
-#[path = "tests/t_lower_ast.rs"]
+#[path = "../tests/t_lower_ast.rs"]
 mod tests;

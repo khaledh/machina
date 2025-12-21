@@ -86,11 +86,11 @@ fn test_lower_call_emits_arg_temp() {
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
-    assert_eq!(entry_block.stmts.len(), 2);
+    assert_eq!(entry_block.stmts.len(), 3);
 
     match &entry_block.stmts[0] {
         Statement::AssignScalar { dst, src } => {
-            assert_eq!(dst.base(), LocalId(0));
+            assert_eq!(dst.base(), LocalId(2));
             match src {
                 Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
                     assert_eq!(*value, 1);
@@ -104,12 +104,12 @@ fn test_lower_call_emits_arg_temp() {
     match &entry_block.stmts[1] {
         Statement::Call { dst, args, .. } => {
             match dst {
-                PlaceAny::Scalar(place) => assert_eq!(place.base(), LocalId(2)),
+                PlaceAny::Scalar(place) => assert_eq!(place.base(), LocalId(1)),
                 _ => panic!("unexpected call dst"),
             }
             assert_eq!(args.len(), 1);
             match &args[0] {
-                PlaceAny::Scalar(place) => assert_eq!(place.base(), LocalId(1)),
+                PlaceAny::Scalar(place) => assert_eq!(place.base(), LocalId(2)),
                 _ => panic!("unexpected call arg"),
             }
         }
@@ -121,7 +121,7 @@ fn test_lower_call_emits_arg_temp() {
             assert_eq!(dst.base(), LocalId(0));
             match src {
                 Rvalue::Use(Operand::Copy(place)) => {
-                    assert_eq!(place.base(), LocalId(2));
+                    assert_eq!(place.base(), LocalId(1));
                 }
                 _ => panic!("unexpected return src"),
             }
@@ -162,7 +162,7 @@ fn test_lower_tuple_return_literal() {
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
-    assert_eq!(entry_block.stmts.len(), 3);
+    assert_eq!(entry_block.stmts.len(), 2);
 
     match &entry_block.stmts[0] {
         Statement::AssignScalar { dst, src } => {
@@ -180,7 +180,7 @@ fn test_lower_tuple_return_literal() {
 
     match &entry_block.stmts[1] {
         Statement::AssignScalar { dst, src } => {
-            assert_eq!(dst.base(), LocalId(1));
+            assert_eq!(dst.base(), LocalId(0));
             assert_eq!(dst.projections(), &[Projection::Field { index: 1 }]);
             match src {
                 Rvalue::Use(Operand::Const(Const::Bool(value))) => {

@@ -228,22 +228,6 @@ impl<K> Place<K> {
         &self.proj
     }
 
-    pub fn with_scalar_projection(self, proj: Projection, ty: TyId) -> Place<Scalar> {
-        Place::new(self.base, ty, {
-            let mut p = self.proj;
-            p.push(proj);
-            p
-        })
-    }
-
-    pub fn with_agg_projection(self, proj: Projection, ty: TyId) -> Place<Aggregate> {
-        Place::new(self.base, ty, {
-            let mut p = self.proj;
-            p.push(proj);
-            p
-        })
-    }
-
     pub fn ty(&self) -> TyId {
         self.ty
     }
@@ -279,6 +263,7 @@ impl PlaceAny {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operand {
     Copy(Place<Scalar>),
+    #[allow(dead_code)]
     Move(Place<Scalar>),
     Const(Const),
 }
@@ -295,6 +280,7 @@ pub enum Rvalue {
         op: UnOp,
         arg: Operand,
     },
+    #[allow(dead_code)]
     AddrOf(PlaceAny),
 }
 
@@ -304,6 +290,7 @@ pub enum Statement {
         dst: Place<Scalar>,
         src: Rvalue,
     },
+    #[allow(dead_code)]
     InitAggregate {
         dst: Place<Aggregate>,
         fields: Vec<Operand>,
@@ -343,7 +330,7 @@ pub struct BasicBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Body {
+pub struct FuncBody {
     pub locals: Vec<Local>,
     pub blocks: Vec<BasicBlock>,
     pub entry: BlockId,
@@ -385,13 +372,7 @@ impl fmt::Display for Const {
         match self {
             Const::Unit => write!(f, "()"),
             Const::Bool(value) => write!(f, "{}", value),
-            Const::Int {
-                value,
-                signed,
-                bits,
-            } => {
-                write!(f, "{}", value)
-            }
+            Const::Int { value, .. } => write!(f, "{}", value),
         }
     }
 }
@@ -524,7 +505,7 @@ impl fmt::Display for Terminator {
     }
 }
 
-impl fmt::Display for Body {
+impl fmt::Display for FuncBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "body {{")?;
         writeln!(f, "  entry: {}", self.entry)?;
