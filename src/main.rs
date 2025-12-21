@@ -34,10 +34,16 @@ type Line = {
   end: Point,
 }
 
+fn unpack_point(p: Point) -> (u64, u64) {
+    (p.x, p.y)
+}
+
 fn add_points(a: Point, b: Point) -> Point {
+    let (x1, y1) = unpack_point(a);
+    let (x2, y2) = unpack_point(b);
     Point {
-        x: a.x + b.x,
-        y: a.y + b.y,
+        x: x1 + x2,
+        y: y1 + y2,
     }
 }
 
@@ -56,7 +62,7 @@ fn main() -> u64 {
 #[derive(ClapParser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Comma-separated list of things to dump: ast,defmap,typemap,ir,liveness,regalloc,asm
+    /// Comma-separated list of things to dump: ast,defmap,typemap,ir,liveness,intervals,regalloc,asm
     #[clap(long)]
     dump: Option<String>,
 
@@ -110,6 +116,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     let mut dump_nrvo = false;
     let mut dump_ir = false;
     let mut dump_liveness = false;
+    let mut dump_intervals = false;
     let mut dump_regalloc = false;
     let mut dump_asm = false;
 
@@ -123,6 +130,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
                 "nrvo" => dump_nrvo = true,
                 "ir" => dump_ir = true,
                 "liveness" => dump_liveness = true,
+                "intervals" => dump_intervals = true,
                 "regalloc" => dump_regalloc = true,
                 "asm" => dump_asm = true,
                 "" => {}
@@ -221,13 +229,21 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
             }
         }
 
-        if dump_liveness {
+        if dump_liveness || dump_intervals {
             // --- Dump Liveness Analysis ---
-            use regalloc::liveness::{LivenessAnalysis, format_liveness_map};
+            use regalloc::liveness::{
+                build_live_intervals, format_live_intervals, format_liveness_map, LivenessAnalysis,
+            };
             for (i, body) in bodies.iter().enumerate() {
                 let live_map = LivenessAnalysis::new(body).analyze();
                 let func_name = lowered_context.symbols.func_name(i).unwrap_or("<unknown>");
-                print!("{}", format_liveness_map(&live_map, func_name));
+                if dump_liveness {
+                    print!("{}", format_liveness_map(&live_map, func_name));
+                }
+                if dump_intervals {
+                    let intervals = build_live_intervals(body, &live_map);
+                    print!("{}", format_live_intervals(&intervals, func_name));
+                }
             }
         }
     }

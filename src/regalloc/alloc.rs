@@ -337,11 +337,19 @@ impl<'a> RegAlloc<'a> {
     fn handle_call(&mut self, constr: &CallConstraint) {
         let call_inst_idx = self.pos_map.pos_to_idx[&constr.pos];
         let mut caller_saved_preserves: Vec<(StackSlotId, PhysReg)> = Vec::new();
+        let ret_local = self.body.ret_local;
+        let ret_ty = self.body.locals[ret_local.index()].ty;
+        let ret_is_agg = self.body.types.get(ret_ty).is_aggregate();
 
         // 1. Save caller-saved registers that are live across the call
         for active in self.active_set.values() {
+            let kind = self.body.locals[active.local.index()].kind;
+            let is_param_like = matches!(kind, LocalKind::Param { .. })
+                || (ret_is_agg && active.local == ret_local);
+            let live_before_call = active.interval.start < call_inst_idx as u32
+                || (is_param_like && active.interval.start == call_inst_idx as u32);
             if self.target.caller_saved().contains(&active.reg)
-                && active.interval.start < call_inst_idx as u32
+                && live_before_call
                 && (active.interval.end - 1) > call_inst_idx as u32
             {
                 let stack_slot = self.stack_alloc.alloc_slot();

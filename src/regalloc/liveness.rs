@@ -252,6 +252,24 @@ pub fn format_liveness_map(live_map: &LiveMap, func_name: &str) -> String {
     out
 }
 
+/// Format live intervals for human-readable output.
+pub fn format_live_intervals(intervals: &LiveIntervalMap, func_name: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Live Intervals ({}):\n", func_name));
+    out.push_str("--------------------------------\n");
+    let mut ids: Vec<_> = intervals.keys().collect();
+    ids.sort_by_key(|id| id.0);
+    for id in ids {
+        let interval = intervals.get(id).unwrap();
+        out.push_str(&format!(
+            "  %t{}: [{}; {})\n",
+            id.0, interval.start, interval.end
+        ));
+    }
+    out.push_str("--------------------------------\n");
+    out
+}
+
 fn format_live_set(set: &HashSet<LocalId>) -> String {
     let mut ids: Vec<_> = set.iter().map(|l| l.0).collect();
     ids.sort();
@@ -334,6 +352,21 @@ pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveI
                     start: block_last_inst_idx[i],
                     end: block_last_inst_idx[i] + 1,
                 });
+        }
+    }
+
+    // Ensure params (and aggregate return pointers) are live from entry.
+    let ret_local = body.ret_local;
+    let ret_ty = body.locals[ret_local.index()].ty;
+    let ret_is_agg = body.types.get(ret_ty).is_aggregate();
+    for (i, local) in body.locals.iter().enumerate() {
+        let local_id = LocalId(i as u32);
+        let is_param = matches!(local.kind, crate::mcir::types::LocalKind::Param { .. })
+            || (ret_is_agg && local_id == ret_local);
+        if is_param {
+            if let Some(iv) = map.get_mut(&local_id) {
+                iv.start = 0;
+            }
         }
     }
 
