@@ -1,7 +1,8 @@
 use crate::analysis::{DefMap, TypeMap};
 use crate::ast::Module;
-use crate::ir::types::IrFunction;
-use crate::regalloc::alloc::AllocationResult;
+use crate::mcir::FuncBody;
+use crate::regalloc::AllocationResult;
+use crate::symtab::SymbolTable;
 
 // -----------------------------------------------------------------------------
 // AST Context
@@ -17,9 +18,11 @@ impl AstContext {
     }
 
     pub fn with_def_map(self, def_map: DefMap) -> ResolvedContext {
+        let symbols = SymbolTable::new(&self.module, &def_map);
         ResolvedContext {
             module: self.module,
             def_map,
+            symbols,
         }
     }
 }
@@ -31,6 +34,7 @@ impl AstContext {
 pub struct ResolvedContext {
     pub module: Module,
     pub def_map: DefMap,
+    pub symbols: SymbolTable,
 }
 
 impl ResolvedContext {
@@ -39,6 +43,7 @@ impl ResolvedContext {
             module: self.module,
             def_map: self.def_map,
             type_map,
+            symbols: self.symbols,
         }
     }
 }
@@ -51,6 +56,7 @@ pub struct TypeCheckedContext {
     pub module: Module,
     pub def_map: DefMap,
     pub type_map: TypeMap,
+    pub symbols: SymbolTable,
 }
 
 // -----------------------------------------------------------------------------
@@ -61,38 +67,42 @@ pub struct AnalyzedContext {
     pub module: Module,
     pub def_map: DefMap,
     pub type_map: TypeMap,
+    pub symbols: SymbolTable,
 }
 
 impl AnalyzedContext {
-    pub fn with_ir_funcs(self, ir_funcs: Vec<IrFunction>) -> LoweredContext {
-        LoweredContext { ir_funcs }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Lowered Context
-// -----------------------------------------------------------------------------
-#[derive(Clone)]
-pub struct LoweredContext {
-    pub ir_funcs: Vec<IrFunction>,
-}
-
-impl LoweredContext {
-    pub fn with_alloc_results(
-        self,
-        alloc_results: Vec<AllocationResult>,
-    ) -> LoweredRegAllocContext {
-        LoweredRegAllocContext {
-            ir_funcs: self.ir_funcs,
-            alloc_results,
+    pub fn with_func_bodies(self, func_bodies: Vec<FuncBody>) -> LoweredMcirContext {
+        LoweredMcirContext {
+            func_bodies,
+            symbols: self.symbols,
         }
     }
 }
 
 // -----------------------------------------------------------------------------
-// Lowered & Reg Alloc Context
+// Lowered MCIR Context
 // -----------------------------------------------------------------------------
-pub struct LoweredRegAllocContext {
-    pub ir_funcs: Vec<IrFunction>,
+#[derive(Clone)]
+pub struct LoweredMcirContext {
+    pub func_bodies: Vec<FuncBody>,
+    pub symbols: SymbolTable,
+}
+
+impl LoweredMcirContext {
+    pub fn with_alloc_results(self, alloc_results: Vec<AllocationResult>) -> RegAllocatedContext {
+        RegAllocatedContext {
+            func_bodies: self.func_bodies,
+            alloc_results,
+            symbols: self.symbols,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Lowered MCIR & Reg Alloc Context
+// -----------------------------------------------------------------------------
+pub struct RegAllocatedContext {
+    pub func_bodies: Vec<FuncBody>,
     pub alloc_results: Vec<AllocationResult>,
+    pub symbols: SymbolTable,
 }

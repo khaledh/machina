@@ -2,15 +2,15 @@ use indoc::indoc;
 
 use std::collections::HashMap;
 
+use crate::codegen::arm64::{FuncCodegen, McFunction};
 use crate::ids::DefId;
 use crate::mcir::types::{
-    BasicBlock, BlockId, Body, Callee, Const, Local, LocalId, LocalKind, Operand, Place, Rvalue,
-    Statement, Terminator, TyId, TyKind, TyTable,
+    BasicBlock, BlockId, Callee, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place,
+    Rvalue, Statement, Terminator, TyId, TyKind, TyTable,
 };
-use crate::mccodegen::arm64::{FuncCodegen, McFunction};
-use crate::mcregalloc::moves::FnMoveList;
-use crate::mcregalloc::{AllocationResult, MappedLocal};
+use crate::regalloc::moves::FnMoveList;
 use crate::regalloc::regs::Arm64Reg as R;
+use crate::regalloc::{AllocationResult, MappedLocal};
 
 fn u64_ty(types: &mut TyTable) -> TyId {
     types.add(TyKind::Int {
@@ -19,8 +19,8 @@ fn u64_ty(types: &mut TyTable) -> TyId {
     })
 }
 
-fn mk_body(types: TyTable, locals: Vec<Local>, blocks: Vec<BasicBlock>, ret: LocalId) -> Body {
-    Body {
+fn mk_body(types: TyTable, locals: Vec<Local>, blocks: Vec<BasicBlock>, ret: LocalId) -> FuncBody {
+    FuncBody {
         locals,
         blocks,
         entry: BlockId(0),
@@ -114,7 +114,7 @@ fn test_assign_const_to_return_reg() {
     let ret = LocalId(0);
     let ret_place = Place::new(ret, u64_ty, vec![]);
     let blocks = vec![BasicBlock {
-        stmts: vec![Statement::AssignScalar {
+        stmts: vec![Statement::CopyScalar {
             dst: ret_place,
             src: Rvalue::Use(Operand::Const(Const::Int {
                 value: 42,

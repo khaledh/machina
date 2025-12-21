@@ -2,7 +2,7 @@ use crate::mcir::types::*;
 
 #[derive(Debug)]
 pub struct FuncBuilder {
-    pub body: Body,
+    pub body: FuncBody,
 }
 
 impl FuncBuilder {
@@ -22,7 +22,7 @@ impl FuncBuilder {
         }];
 
         Self {
-            body: Body {
+            body: FuncBody {
                 locals,
                 blocks,
                 entry,

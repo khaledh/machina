@@ -1,29 +1,26 @@
 use std::collections::HashMap;
+
 use thiserror::Error;
 
-use crate::ast::{BinaryOp as BOp, UnaryOp as UOp};
-use crate::context::LoweredRegAllocContext;
-use crate::ir::pos::InstPos;
-use crate::ir::types::{
-    IrBlock, IrBlockId, IrConst, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator,
+use crate::context::RegAllocatedContext;
+use crate::ids::DefId;
+use crate::mcir::types::{
+    BasicBlock, BinOp, BlockId, Callee, Const, FuncBody, LocalId, Operand, Place, PlaceAny,
+    Projection, Rvalue, Statement, Terminator, TyId, TyKind, TyTable, UnOp,
 };
 use crate::regalloc::moves::{Location, Move};
+use crate::regalloc::pos::InstPos;
 use crate::regalloc::regs::{Arm64Reg as R, to_w_reg};
-use crate::regalloc::{AllocationResult, MappedTemp, StackSlotId};
+use crate::regalloc::stack::StackSlotId;
+use crate::regalloc::{AllocationResult, MappedLocal};
 
 #[derive(Debug, Error)]
 pub enum CodegenError {
-    #[error("Temp {0} should be in a register, not stack or stack address")]
-    TempIsNotInRegister(u32),
-
-    #[error("Temp {0} not found in allocation map")]
-    TempNotFound(u32),
+    #[error("Local {0} not found in allocation map")]
+    LocalNotFound(u32),
 
     #[error("Stack slot is out of bounds: offset {0} > {1}")]
     StackSlotOutOfBounds(u32, u32),
-
-    #[error("Constant condition value must be boolean, found {0}")]
-    CondTypeNotBoolean(IrConst),
 
     #[error("Unterminated block: {0}")]
     UnterminatedBlock(String),
@@ -33,185 +30,145 @@ pub enum CodegenError {
 
     #[error("Unsupported size {0} for store/load operation")]
     UnsupportedSize(usize),
+
+    #[error("Invalid projection on non-aggregate type")]
+    InvalidProjectionType,
+
+    #[error("Callee name not found for def {0}")]
+    CalleeNameNotFound(DefId),
 }
 
 // Controls how integer constants are encoded for a given instruction.
-// Some instructions (e.g. add/sub/cmp) support limited immediates, others
-// (e.g. mul, neg, udiv) require register operands.
 enum ImmPolicy {
-    /// Use add/sub style immediates when they fit; otherwise materialize into a register.
     AddSubImm,
-    /// Always materialize the value into a register (no immediate encoding allowed).
     RegOnly,
 }
 
-enum AddressingMode {
-    SpOffset(u32), // [sp, #offset]
-    Register(R),   // [xN]
+pub struct McFunction<'a> {
+    pub name: String,
+    pub body: &'a FuncBody,
+    pub alloc: &'a AllocationResult,
 }
 
-pub struct Arm64Codegen {
-    context: LoweredRegAllocContext,
+pub struct Arm64Codegen<'a> {
+    funcs: Vec<McFunction<'a>>,
+    def_names: &'a HashMap<DefId, String>,
+    label_counter: u32,
 }
 
-impl Arm64Codegen {
-    pub fn new(context: LoweredRegAllocContext) -> Self {
-        Self { context }
+impl<'a> Arm64Codegen<'a> {
+    pub fn new(funcs: Vec<McFunction<'a>>, def_names: &'a HashMap<DefId, String>) -> Self {
+        Self {
+            funcs,
+            def_names,
+            label_counter: 0,
+        }
+    }
+
+    pub fn from_regalloc_context(ctx: &'a RegAllocatedContext) -> Self {
+        let funcs: Vec<_> = ctx
+            .func_bodies
+            .iter()
+            .zip(ctx.symbols.func_ids.iter())
+            .zip(ctx.alloc_results.iter())
+            .map(|((body, def_id), alloc)| {
+                let name = ctx
+                    .symbols
+                    .def_names
+                    .get(def_id)
+                    .unwrap_or_else(|| {
+                        panic!("Function def {:?} missing from symbol table", def_id);
+                    })
+                    .clone();
+                McFunction { name, body, alloc }
+            })
+            .collect();
+        Self::new(funcs, &ctx.symbols.def_names)
     }
 
     pub fn generate(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
-
-        let mut next_label_start: u32 = 0;
-
-        for (ir_func, alloc_result) in self
-            .context
-            .ir_funcs
-            .iter()
-            .zip(self.context.alloc_results.iter())
-        {
-            let mut func_codegen = FuncCodegen::new(ir_func, alloc_result, next_label_start);
-            let func_asm = func_codegen.generate()?;
-            asm.push_str(&func_asm);
+        for func in &self.funcs {
+            let mut codegen = FuncCodegen::new(func, self.def_names, self.label_counter)?;
+            asm.push_str(&codegen.generate()?);
             asm.push('\n');
-
-            // Advance the global label counter by the number of labels in this function
-            next_label_start += func_codegen.label_counter;
+            self.label_counter = codegen.label_counter;
         }
         Ok(asm)
     }
 }
 
 struct FuncCodegen<'a> {
-    func: &'a IrFunction,
-    alloc_result: &'a AllocationResult,
+    name: &'a str,
+    body: &'a FuncBody,
+    alloc: &'a AllocationResult,
+    def_names: &'a HashMap<DefId, String>,
     stack_alloc_size: u32,
     stack_padding: u32,
     label_counter: u32,
-    block_labels: HashMap<IrBlockId, String>,
+    block_labels: HashMap<BlockId, String>,
 }
 
 impl<'a> FuncCodegen<'a> {
-    pub fn new(func: &'a IrFunction, alloc_result: &'a AllocationResult, label_start: u32) -> Self {
+    pub fn new(
+        func: &'a McFunction<'a>,
+        def_names: &'a HashMap<DefId, String>,
+        label_start: u32,
+    ) -> Result<Self, CodegenError> {
         let stack_alloc_size =
-            alloc_result.frame_size - alloc_result.used_callee_saved.len() as u32 * 8;
+            func.alloc.frame_size - func.alloc.used_callee_saved.len() as u32 * 8;
         let mut stack_padding = 0;
-        if !alloc_result.frame_size.is_multiple_of(16) {
-            stack_padding = 16 - alloc_result.frame_size % 16;
+        if !func.alloc.frame_size.is_multiple_of(16) {
+            stack_padding = 16 - func.alloc.frame_size % 16;
         }
-        Self {
-            func,
-            alloc_result,
+        Ok(Self {
+            name: &func.name,
+            body: func.body,
+            alloc: func.alloc,
+            def_names,
             stack_alloc_size,
             stack_padding,
             label_counter: label_start,
             block_labels: HashMap::new(),
-        }
+        })
     }
 
     pub fn generate(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
-        // Pre-generate block labels
-        for block in self.func.blocks.values() {
-            if block.id() != IrBlockId(0) {
+        for (idx, _) in self.body.blocks.iter().enumerate() {
+            let block_id = BlockId(idx as u32);
+            if block_id != self.body.entry {
                 let label = self.next_label();
-                let block_label = format!("{}_{}", label, block.name());
-                self.block_labels.insert(block.id(), block_label);
+                self.block_labels
+                    .insert(block_id, format!("{}_bb{}", label, block_id.0));
             }
         }
 
-        // Prologue
         asm.push_str(&self.emit_prologue()?);
 
-        // Function body
-        for block in self.func.blocks.values() {
-            asm.push_str(&self.emit_block(block)?);
+        for (idx, block) in self.body.blocks.iter().enumerate() {
+            let block_id = BlockId(idx as u32);
+            asm.push_str(&self.emit_block(block_id, block)?);
         }
 
-        // Note: Epilogue will be emitted at each Ret terminator
         Ok(asm)
     }
 
-    // Epilogue / Prologue
-
-    pub fn emit_prologue(&mut self) -> Result<String, CodegenError> {
+    fn emit_prologue(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
-
-        // Function label
-        asm.push_str(&format!(".global _{}\n", self.func.name));
-        asm.push_str(&format!("_{}:\n", self.func.name));
-
-        // AAPCS 64-bit ABI:
-        // 6.4.6 The Frame Pointer
-        //     Conforming code shall construct a linked list of stack-frames. Each frame shall link
-        //     to the frame of its caller by means of a frame record of two 64-bit values on the
-        //     stack (independent of the data model). The frame record for the innermost frame
-        //     (belonging to the most recent routine invocation) shall be pointed to by the frame
-        //     pointer register (FP). The lowest addressed double-word shall point to the previous
-        //     frame record and the highest addressed double-word shall contain the value passed in
-        //     LR on entry to the current function. [...] The end of the frame record chain is
-        //     indicated by the address zero in the address for the previous frame. The location of
-        //     the frame record within a stack frame is not specified.
-
-        // Higher addresses
-        // │
-        // │   ┌─────────────────────────────────┐
-        // │   │  Caller's stack frame           │
-        // │   │  (aligned to 16 bytes)          │
-        // │   └─────────────────────────────────┘
-        // │         ▲
-        // │         │ old SP (before call)
-        // │         │
-        // │   << CALL instruction >>
-        // │         │
-        // │         ▼
-        // │   ┌─────────────────────────────────┐
-        // │   │  [LR = X30]                     │
-        // │   ├─────────────────────────────────┤
-        // │   │  [FP = X29]                     │ ← SP after "stp x29, x30, [sp,#-16]!"
-        // │   └─────────────────────────────────┘    (SP was decremented by 16)
-        // │         ▲
-        // │         │ FP points here after "mov x29, sp"
-        // │         ▼
-        // │   ┌─────────────────────────────────┐
-        // │   │  [callee-saved X19]             │ ← SP + frame_size - 8
-        // │   ├─────────────────────────────────┤
-        // │   │  [callee-saved X20]             │ ← SP + frame_size - 16
-        // │   ├─────────────────────────────────┤
-        // │   │  [callee-saved X21]             │ ← SP + frame_size - 24
-        // │   ├─────────────────────────────────┤
-        // │   │         ...                     │
-        // │   ├─────────────────────────────────┤
-        // │   │  [callee-saved XN]              │ ← SP + frame_size - (callee_saved_size - 8)
-        // │   ├─────────────────────────────────┤ ─┐
-        // │   │  [spilled temp slot 0]          │  │ ← SP + (spilled size - 8)
-        // │   ├─────────────────────────────────┤  │
-        // │   │  [spilled temp slot 1]          │  │ ← SP + (spilled size - 16)
-        // │   ├─────────────────────────────────┤  │
-        // │   │         ...                     │  │
-        // │   ├─────────────────────────────────┤  │
-        // │   │  [spilled temp slot N]          │  │ ← SP + 0
-        // ▼   └─────────────────────────────────┘ ─┘
-        //          ▲
-        //          │ new SP (current stack pointer during function execution)
-        //          │
-        // Lower addresses
-
-        // Create a new stack frame (FP + LR). This instruction decrements SP by 16 bytes.
+        asm.push_str(&format!(".global _{}\n", self.name));
+        asm.push_str(&format!("_{}:\n", self.name));
         asm.push_str("  stp x29, x30, [sp, #-16]!\n");
-        asm.push_str("  mov x29, sp\n"); // Update frame pointer to the new frame
+        asm.push_str("  mov x29, sp\n");
 
-        // Allocate stack space (includes callee-saved regs and spilled temps)
-        let frame_size = self.alloc_result.frame_size;
+        let frame_size = self.alloc.frame_size;
         if frame_size > 0 {
             let padded_frame_size = frame_size + self.stack_padding;
             asm.push_str(&format!("  sub sp, sp, #{padded_frame_size}\n"));
         }
 
-        // Save callee-saved registers (in pairs using stp) at the start of the stack frame
-        // (spilled/alloc'ed temps come after callee-saved registers from sp -> sp + spilled size)
-        let used_callee = &self.alloc_result.used_callee_saved;
+        let used_callee = &self.alloc.used_callee_saved;
         let mut offset = frame_size as i32;
         if !used_callee.is_empty() {
             for pair in used_callee.chunks(2) {
@@ -222,7 +179,6 @@ impl<'a> FuncCodegen<'a> {
                         pair[0], pair[1], offset
                     ));
                 } else {
-                    // Last register is unpaired
                     offset -= 8;
                     asm.push_str(&format!("  str {}, [sp, #{}]\n", pair[0], offset));
                 }
@@ -232,14 +188,11 @@ impl<'a> FuncCodegen<'a> {
         Ok(asm)
     }
 
-    pub fn emit_epilogue(&mut self) -> Result<String, CodegenError> {
+    fn emit_epilogue(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
-        let frame_size = self.alloc_result.frame_size;
-
-        // Restore callee-saved registers
-        let used_callee = &self.alloc_result.used_callee_saved;
-        let mut offset = frame_size as i32;
+        let used_callee = &self.alloc.used_callee_saved;
+        let mut offset = self.alloc.frame_size as i32;
         if !used_callee.is_empty() {
             for pair in used_callee.chunks(2) {
                 if pair.len() == 2 {
@@ -249,561 +202,822 @@ impl<'a> FuncCodegen<'a> {
                         pair[0], pair[1], offset
                     ));
                 } else {
-                    // Last register is unpaired
                     offset -= 8;
                     asm.push_str(&format!("  ldr {}, [sp, #{}]\n", pair[0], offset));
                 }
             }
         }
 
-        // Deallocate stack space
-        if frame_size > 0 {
-            let padded_frame_size = frame_size + self.stack_padding;
+        if self.alloc.frame_size > 0 {
+            let padded_frame_size = self.alloc.frame_size + self.stack_padding;
             asm.push_str(&format!("  add sp, sp, #{padded_frame_size}\n"));
         }
 
-        // Pop frame pointer and return address
         asm.push_str("  ldp x29, x30, [sp], #16\n");
         asm.push_str("  ret\n");
-
         Ok(asm)
     }
 
-    // Blocks, instructions, terminators
-
-    pub fn emit_block(&mut self, block: &IrBlock) -> Result<String, CodegenError> {
+    fn emit_block(
+        &mut self,
+        block_id: BlockId,
+        block: &BasicBlock,
+    ) -> Result<String, CodegenError> {
         let mut asm = String::new();
-
-        // Block label (skip entry block, it uses function label from prologue)
-        if block.id() != IrBlockId(0) {
-            asm.push_str(&format!("{}:\n", self.block_labels[&block.id()]));
+        if block_id != self.body.entry {
+            asm.push_str(&format!("{}:\n", self.block_labels[&block_id]));
         }
 
-        // Block instructions
-        for (idx, inst) in block.insts().iter().enumerate() {
-            let pos = InstPos::new(block.id(), idx);
-
-            // Emit before moves
-            if let Some(moves) = self.alloc_result.moves.get_inst_moves(pos) {
+        for (idx, stmt) in block.stmts.iter().enumerate() {
+            let pos = InstPos::new(block_id, idx);
+            if let Some(moves) = self.alloc.moves.get_inst_moves(pos) {
                 asm.push_str(&self.emit_moves(&moves.before_moves)?);
             }
 
-            // Emit instruction
-            asm.push_str(&self.emit_inst(inst)?);
+            asm.push_str(&format!("  // {}\n", stmt));
+            asm.push_str(&self.emit_stmt(stmt)?);
 
-            // Emit after moves
-            if let Some(moves) = self.alloc_result.moves.get_inst_moves(pos) {
+            if let Some(moves) = self.alloc.moves.get_inst_moves(pos) {
                 asm.push_str(&self.emit_moves(&moves.after_moves)?);
             }
         }
 
-        // Emit return moves
-        if let Some(ret_move) = self.alloc_result.moves.get_return_move(block.id()) {
+        if let Some(ret_move) = self.alloc.moves.get_return_move(block_id) {
             asm.push_str(&self.emit_move(ret_move)?);
         }
 
-        // Block terminator
-        asm.push_str(&self.emit_terminator(block.term(), block.id())?);
+        asm.push_str(&format!("  // {}\n", block.terminator));
+        asm.push_str(&self.emit_terminator(block_id, &block.terminator)?);
+        Ok(asm)
+    }
+
+    fn emit_stmt(&mut self, stmt: &Statement) -> Result<String, CodegenError> {
+        match stmt {
+            Statement::CopyScalar { dst, src } => self.emit_copy_scalar(dst, src),
+            Statement::InitAggregate { dst, fields } => self.emit_init_aggregate(dst, fields),
+            Statement::CopyAggregate { dst, src } => self.emit_copy_aggregate(dst, src),
+            Statement::Call { callee, .. } => self.emit_call(callee),
+        }
+    }
+
+    fn emit_copy_scalar(
+        &mut self,
+        dst: &Place<crate::mcir::types::Scalar>,
+        src: &Rvalue,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+        if dst.projections().is_empty() {
+            let value_reg = self.emit_rvalue(src, &mut asm)?;
+            self.store_scalar(dst, value_reg, &mut asm)?;
+        } else if let Some(offset) = self.const_projection_offset(dst.base(), dst.projections()) {
+            if let Some(MappedLocal::StackAddr(slot)) = self.alloc.alloc_map.get(&dst.base()) {
+                let base_offset = self.get_stack_offset(slot)? as usize;
+                let total = base_offset + offset;
+                if let Ok(total) = u32::try_from(total) {
+                    let value_reg = self.emit_rvalue(src, &mut asm)?;
+                    self.emit_store_to_sp(total, dst.ty(), value_reg, &mut asm)?;
+                    return Ok(asm);
+                }
+            } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base()) {
+                if self.can_use_imm_offset(dst.ty(), offset) {
+                    let value_reg = self.emit_rvalue(src, &mut asm)?;
+                    self.emit_store_at_addr_reg_imm(*reg, offset, dst.ty(), value_reg, &mut asm)?;
+                    return Ok(asm);
+                }
+            }
+        } else {
+            // Compute address first, then value; preserve addr across rvalue evaluation.
+            let _ = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
+            asm.push_str("  mov x14, x17\n");
+            let value_reg = self.emit_rvalue(src, &mut asm)?;
+            self.emit_store_at_addr_reg(R::X14, dst.ty(), value_reg, &mut asm)?;
+        }
+        Ok(asm)
+    }
+
+    fn emit_init_aggregate(
+        &mut self,
+        dst: &Place<crate::mcir::types::Aggregate>,
+        fields: &[Operand],
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+        let base_addr = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
+        let mut cur_kind = self.kind_for_local(dst.base());
+
+        match &mut cur_kind {
+            TyKind::Tuple { field_tys } => {
+                for (i, field) in fields.iter().enumerate() {
+                    let offset = self.field_offset(field_tys, i);
+                    let value_reg = self.materialize_operand(field, &mut asm, R::X16)?;
+                    self.store_at_addr(base_addr, offset, field_tys[i], value_reg, &mut asm)?;
+                }
+            }
+            TyKind::Struct {
+                fields: struct_fields,
+            } => {
+                for (i, field) in fields.iter().enumerate() {
+                    let offset = self.struct_field_offset(struct_fields, i);
+                    let value_reg = self.materialize_operand(field, &mut asm, R::X16)?;
+                    self.store_at_addr(
+                        base_addr,
+                        offset,
+                        struct_fields[i].ty,
+                        value_reg,
+                        &mut asm,
+                    )?;
+                }
+            }
+            TyKind::Array { elem_ty, .. } => {
+                let elem_size = size_of_ty(&self.body.types, *elem_ty);
+                for (i, field) in fields.iter().enumerate() {
+                    let offset = (i * elem_size) as i64;
+                    let value_reg = self.materialize_operand(field, &mut asm, R::X16)?;
+                    self.store_at_addr(base_addr, offset as usize, *elem_ty, value_reg, &mut asm)?;
+                }
+            }
+            _ => return Err(CodegenError::InvalidProjectionType),
+        }
 
         Ok(asm)
     }
 
-    pub fn emit_inst(&mut self, inst: &IrInst) -> Result<String, CodegenError> {
+    fn emit_copy_aggregate(
+        &mut self,
+        dst: &Place<crate::mcir::types::Aggregate>,
+        src: &Place<crate::mcir::types::Aggregate>,
+    ) -> Result<String, CodegenError> {
         let mut asm = String::new();
-        match inst {
-            IrInst::Copy { dest, src } => {
-                let dest_reg = self.get_reg(dest)?;
-                match src {
-                    IrOperand::Temp(temp) => {
-                        let src_reg = self.get_reg(temp)?;
-                        asm.push_str(&format!("  mov {}, {}\n", dest_reg, src_reg));
-                    }
-                    IrOperand::Const(c) => {
-                        asm.push_str(&format!("  mov {}, #{}\n", dest_reg, c));
-                    }
+        let _ = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
+        asm.push_str("  mov x14, x17\n");
+        let _ = self.emit_place_addr(src.base(), src.projections(), &mut asm)?;
+        let size = size_of_ty(&self.body.types, dst.ty());
+        self.emit_memcpy(R::X14, R::X17, size, &mut asm)?;
+        Ok(asm)
+    }
+
+    fn emit_call(&mut self, callee: &Callee) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+        let name = match callee {
+            Callee::Def(def_id) => self
+                .def_names
+                .get(def_id)
+                .cloned()
+                .ok_or(*def_id)
+                .map_err(CodegenError::CalleeNameNotFound)?,
+        };
+        asm.push_str(&format!("  bl _{}\n", name));
+        Ok(asm)
+    }
+
+    fn emit_terminator(
+        &mut self,
+        block_id: BlockId,
+        term: &Terminator,
+    ) -> Result<String, CodegenError> {
+        let mut asm = String::new();
+        match term {
+            Terminator::Return => {
+                asm.push_str(&self.emit_epilogue()?);
+            }
+            Terminator::Goto(target) => {
+                asm.push_str(&format!("  b {}\n", self.block_labels[target]));
+            }
+            Terminator::If {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
+                if let Operand::Const(Const::Bool(value)) = cond {
+                    let target = if *value { then_bb } else { else_bb };
+                    asm.push_str(&format!("  b {}\n", self.block_labels[target]));
+                } else {
+                    let cond_reg = self.materialize_operand(cond, &mut asm, R::X16)?;
+                    asm.push_str(&format!("  cmp {}, #0\n", cond_reg));
+                    asm.push_str(&format!("  b.ne {}\n", self.block_labels[then_bb]));
+                    asm.push_str(&format!("  b {}\n", self.block_labels[else_bb]));
                 }
             }
-            IrInst::BinaryOp {
-                result,
-                op,
-                lhs,
-                rhs,
-            } => {
-                let result_reg = self.get_reg(result)?;
-                match op {
-                    // Division needs both operands in registers: UDIV Xd, Xn, Xm
-                    BOp::Div => {
-                        let scratch = "x16";
-                        match (lhs, rhs) {
-                            // temp / temp
-                            (IrOperand::Temp(lhs_temp), IrOperand::Temp(rhs_temp)) => {
-                                let lhs_reg = self.get_reg(lhs_temp)?;
-                                let rhs_reg = self.get_reg(rhs_temp)?;
-                                asm.push_str(&format!(
-                                    "  udiv {}, {}, {}\n",
-                                    result_reg, lhs_reg, rhs_reg
-                                ));
-                            }
-                            // temp / const
-                            (
-                                IrOperand::Temp(lhs_temp),
-                                IrOperand::Const(IrConst::Int { value: rhs_val, .. }),
-                            ) => {
-                                let lhs_reg = self.get_reg(lhs_temp)?;
-                                asm.push_str(&format!("  mov {}, #{}\n", scratch, rhs_val));
-                                asm.push_str(&format!(
-                                    "  udiv {}, {}, {}\n",
-                                    result_reg, lhs_reg, scratch
-                                ));
-                            }
-                            // const / temp  — reuse result_reg for the lhs constant
-                            (
-                                IrOperand::Const(IrConst::Int { value: lhs_val, .. }),
-                                IrOperand::Temp(rhs_temp),
-                            ) => {
-                                let rhs_reg = self.get_reg(rhs_temp)?;
-                                asm.push_str(&format!("  mov {}, #{}\n", result_reg, lhs_val));
-                                asm.push_str(&format!(
-                                    "  udiv {}, {}, {}\n",
-                                    result_reg, result_reg, rhs_reg
-                                ));
-                            }
-                            // const / const — lhs in result_reg, rhs in scratch
-                            (
-                                IrOperand::Const(IrConst::Int { value: lhs_val, .. }),
-                                IrOperand::Const(IrConst::Int { value: rhs_val, .. }),
-                            ) => {
-                                asm.push_str(&format!("  mov {}, #{}\n", result_reg, lhs_val));
-                                asm.push_str(&format!("  mov {}, #{}\n", scratch, rhs_val));
-                                asm.push_str(&format!(
-                                    "  udiv {}, {}, {}\n",
-                                    result_reg, result_reg, scratch
-                                ));
-                            }
-                            // Any other constant kinds are not yet supported
-                            _ => todo!("handle other constant operands for division"),
-                        }
-                    }
-                    // Other arithmetic operators
-                    BOp::Add | BOp::Sub => {
-                        let lhs_operand = match lhs {
-                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                            IrOperand::Const(IrConst::Int { value, .. }) => self
-                                .operand_for_int_with_policy(
-                                    *value,
-                                    ImmPolicy::AddSubImm,
-                                    &mut asm,
-                                    0,
-                                ),
-                            _ => todo!("handle other constant operands"),
-                        };
-                        let rhs_operand = match rhs {
-                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                            IrOperand::Const(IrConst::Int { value, .. }) => self
-                                .operand_for_int_with_policy(
-                                    *value,
-                                    ImmPolicy::AddSubImm,
-                                    &mut asm,
-                                    1,
-                                ),
-                            _ => todo!("handle other constant operands"),
-                        };
-                        let op_str = self.get_op_str(op);
-                        asm.push_str(&format!(
-                            "  {} {}, {}, {}\n",
-                            op_str, result_reg, lhs_operand, rhs_operand
-                        ));
-                    }
-                    BOp::Mul => {
-                        let lhs_operand = match lhs {
-                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                            IrOperand::Const(IrConst::Int { value, .. }) => self
-                                .operand_for_int_with_policy(
-                                    *value,
-                                    ImmPolicy::RegOnly,
-                                    &mut asm,
-                                    0,
-                                ),
-                            _ => todo!("handle other constant operands"),
-                        };
-                        let rhs_operand = match rhs {
-                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                            IrOperand::Const(IrConst::Int { value, .. }) => self
-                                .operand_for_int_with_policy(
-                                    *value,
-                                    ImmPolicy::RegOnly,
-                                    &mut asm,
-                                    1,
-                                ),
-                            _ => todo!("handle other constant operands"),
-                        };
-                        let op_str = self.get_op_str(op);
-                        asm.push_str(&format!(
-                            "  {} {}, {}, {}\n",
-                            op_str, result_reg, lhs_operand, rhs_operand
-                        ));
-                    }
-                    // Comparison operators
-                    BOp::Eq | BOp::Ne | BOp::Lt | BOp::Gt | BOp::LtEq | BOp::GtEq => {
-                        let lhs_operand = match lhs {
-                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                            IrOperand::Const(IrConst::Int { value, .. }) => self
-                                .operand_for_int_with_policy(
-                                    *value,
-                                    ImmPolicy::AddSubImm,
-                                    &mut asm,
-                                    0,
-                                ),
-                            _ => todo!("handle other constant operands"),
-                        };
-                        let rhs_operand = match rhs {
-                            IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                            IrOperand::Const(IrConst::Int { value, .. }) => self
-                                .operand_for_int_with_policy(
-                                    *value,
-                                    ImmPolicy::AddSubImm,
-                                    &mut asm,
-                                    1,
-                                ),
-                            _ => todo!("handle other constant operands"),
-                        };
-                        let op_str = self.get_op_str(op);
-                        asm.push_str(&format!("  cmp {}, {}\n", lhs_operand, rhs_operand));
-                        asm.push_str(&format!("  cset {}, {}\n", result_reg, op_str));
-                    }
-                }
-            }
-            IrInst::UnaryOp {
-                result,
-                op,
-                operand,
-            } => {
-                let result_reg = self.get_reg(result)?;
-                let operand_str = match operand {
-                    IrOperand::Temp(temp) => format!("{}", self.get_reg(temp)?),
-                    IrOperand::Const(IrConst::Int { value, .. }) => {
-                        // NEG uses a register operand; materialize consts into a register.
-                        self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0)
-                    }
-                    IrOperand::Const(c) => format!("#{}", c),
-                };
-                match op {
-                    UOp::Neg => {
-                        asm.push_str(&format!("  neg {}, {}\n", result_reg, operand_str));
-                    }
-                }
-            }
-            IrInst::Call { name, .. } => {
-                asm.push_str(&format!("  bl _{}\n", name));
-            }
-            IrInst::Phi { .. } => {
-                // Phi nodes are handled by register allocator moves
-                // No code needs to be emitted here
-            }
-            IrInst::Store {
-                base,
-                byte_offset,
-                value,
-            } => {
-                asm.push_str(&self.emit_store(*base, byte_offset, value)?);
-            }
-            IrInst::Load {
-                base,
-                byte_offset,
-                result,
-            } => {
-                asm.push_str(&self.emit_load(*result, *base, byte_offset)?);
-            }
-            IrInst::MemCopy {
-                dest,
-                src,
-                dest_offset,
-                src_offset,
-                length,
-            } => {
-                asm.push_str(&self.emit_memcpy(*dest, *src, dest_offset, src_offset, *length)?);
+            Terminator::Unterminated => {
+                let label = self
+                    .block_labels
+                    .get(&block_id)
+                    .cloned()
+                    .unwrap_or_default();
+                return Err(CodegenError::UnterminatedBlock(label));
             }
         }
         Ok(asm)
     }
 
-    fn emit_element_address(
-        &mut self,
-        array: IrTempId,
-        index: &IrOperand,
-        elem_size: usize,
-        asm: &mut String,
-    ) -> Result<AddressingMode, CodegenError> {
-        match index {
-            IrOperand::Const(IrConst::Int { value: idx, .. }) => {
-                let elem_offset = (*idx as usize) * elem_size;
-
-                match self.alloc_result.alloc_map.get(&array) {
-                    Some(MappedTemp::StackAddr(slot)) => {
-                        // Case A: Local array - compute final offset from sp
-                        let array_base = self.get_stack_offset(slot)?;
-                        let final_offset = array_base + elem_offset as u32;
-                        Ok(AddressingMode::SpOffset(final_offset))
+    fn emit_rvalue(&mut self, rv: &Rvalue, asm: &mut String) -> Result<R, CodegenError> {
+        match rv {
+            Rvalue::Use(op) => self.materialize_operand(op, asm, R::X16),
+            Rvalue::UnOp { op, arg } => {
+                let operand_reg = self.materialize_operand(arg, asm, R::X16)?;
+                match op {
+                    UnOp::Neg => {
+                        asm.push_str(&format!("  neg x16, {}\n", operand_reg));
+                        Ok(R::X16)
                     }
-                    Some(MappedTemp::Stack(_)) | Some(MappedTemp::Reg(_)) => {
-                        // Case B/C: Param  or allocated array - load base then add offset
-                        let base_reg = match self.alloc_result.alloc_map.get(&array) {
-                            Some(MappedTemp::Stack(slot)) => {
-                                let offset = self.get_stack_offset(slot)?;
-                                asm.push_str(&format!("  ldr x16, [sp, #{}]\n", offset));
-                                "x16".to_string()
-                            }
-                            Some(MappedTemp::Reg(reg)) => format!("{}", reg),
+                }
+            }
+            Rvalue::BinOp { op, lhs, rhs } => {
+                match op {
+                    BinOp::Add => {
+                        if let Operand::Const(Const::Int { value, .. }) = rhs {
+                            let lhs_reg = self.materialize_operand(lhs, asm, R::X16)?;
+                            let scratch_index = if lhs_reg == R::X16 { 1 } else { 0 };
+                            let rhs_op = self.operand_for_int_with_policy(
+                                *value as i64,
+                                ImmPolicy::AddSubImm,
+                                asm,
+                                scratch_index,
+                            );
+                            asm.push_str(&format!("  add x16, {}, {}\n", lhs_reg, rhs_op));
+                            return Ok(R::X16);
+                        }
+                        if let Operand::Const(Const::Int { value, .. }) = lhs {
+                            let rhs_reg = self.materialize_operand(rhs, asm, R::X16)?;
+                            let scratch_index = if rhs_reg == R::X16 { 1 } else { 0 };
+                            let lhs_op = self.operand_for_int_with_policy(
+                                *value as i64,
+                                ImmPolicy::AddSubImm,
+                                asm,
+                                scratch_index,
+                            );
+                            asm.push_str(&format!("  add x16, {}, {}\n", rhs_reg, lhs_op));
+                            return Ok(R::X16);
+                        }
+                    }
+                    BinOp::Sub => {
+                        if let Operand::Const(Const::Int { value, .. }) = rhs {
+                            let lhs_reg = self.materialize_operand(lhs, asm, R::X16)?;
+                            let scratch_index = if lhs_reg == R::X16 { 1 } else { 0 };
+                            let rhs_op = self.operand_for_int_with_policy(
+                                *value as i64,
+                                ImmPolicy::AddSubImm,
+                                asm,
+                                scratch_index,
+                            );
+                            asm.push_str(&format!("  sub x16, {}, {}\n", lhs_reg, rhs_op));
+                            return Ok(R::X16);
+                        }
+                    }
+                    _ => {}
+                }
+
+                let lhs_reg = self.materialize_operand(lhs, asm, R::X16)?;
+                let rhs_reg = self.materialize_operand(rhs, asm, R::X17)?;
+                match op {
+                    BinOp::Add => {
+                        asm.push_str(&format!("  add x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::Sub => {
+                        asm.push_str(&format!("  sub x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::Mul => {
+                        asm.push_str(&format!("  mul x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::Div => {
+                        asm.push_str(&format!("  udiv x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+                        let cond = match op {
+                            BinOp::Eq => "eq",
+                            BinOp::Ne => "ne",
+                            BinOp::Lt => "lt",
+                            BinOp::Gt => "gt",
+                            BinOp::LtEq => "le",
+                            BinOp::GtEq => "ge",
                             _ => unreachable!(),
                         };
-
-                        // Common immediate offset logic
-                        if elem_offset == 0 {
-                            asm.push_str(&format!("  mov x17, {base_reg}\n"));
-                        } else if elem_offset < 4096 {
-                            asm.push_str(&format!("  add x17, {base_reg}, #{elem_offset}\n"));
+                        if let Operand::Const(Const::Int { value, .. }) = rhs {
+                            let scratch_index = if lhs_reg == R::X16 { 1 } else { 0 };
+                            let rhs_op = self.operand_for_int_with_policy(
+                                *value as i64,
+                                ImmPolicy::AddSubImm,
+                                asm,
+                                scratch_index,
+                            );
+                            asm.push_str(&format!("  cmp {}, {}\n", lhs_reg, rhs_op));
                         } else {
-                            asm.push_str(&format!("  mov x17, #{elem_offset}\n"));
-                            asm.push_str(&format!("  add x17, {base_reg}, x17\n"));
+                            asm.push_str(&format!("  cmp {}, {}\n", lhs_reg, rhs_reg));
                         }
-                        Ok(AddressingMode::Register(R::X17))
+                        asm.push_str(&format!("  cset w16, {}\n", cond));
                     }
-                    None => Err(CodegenError::TempNotFound(array.id())),
                 }
+                Ok(R::X16)
             }
-            IrOperand::Temp(temp) => {
-                let index_reg = self.get_reg(temp)?;
-
-                // Calculate element offset: index * elem_size
-                let offset_reg = if elem_size == 1 {
-                    index_reg.to_string()
-                } else {
-                    let size_reg = self.operand_for_int_with_policy(
-                        elem_size as i64,
-                        ImmPolicy::RegOnly,
-                        asm,
-                        0,
-                    );
-                    asm.push_str(&format!("  mul x17, {index_reg}, {size_reg}\n"));
-                    "x17".to_string()
-                };
-
-                match self.alloc_result.alloc_map.get(&array) {
-                    Some(MappedTemp::StackAddr(slot)) => {
-                        // Case A: Local array - add to sp + array_base
-                        let array_base = self.get_stack_offset(slot)?;
-                        asm.push_str(&format!("  add x17, {offset_reg}, #{array_base}\n"));
-                        asm.push_str("  add x17, sp, x17\n");
-                        Ok(AddressingMode::Register(R::X17))
-                    }
-                    Some(MappedTemp::Stack(slot)) => {
-                        // Case B: Spilled array - load base then add offset
-                        let array_base = self.get_stack_offset(slot)?;
-                        asm.push_str(&format!("  ldr x16, [sp, #{}]\n", array_base));
-                        asm.push_str(&format!("  add x17, x16, {offset_reg}\n"));
-                        Ok(AddressingMode::Register(R::X17))
-                    }
-                    Some(MappedTemp::Reg(base_reg)) => {
-                        // Case C: Param array - add offset to base register
-                        asm.push_str(&format!("  add x17, {base_reg}, {offset_reg}\n"));
-                        Ok(AddressingMode::Register(R::X17))
-                    }
-                    None => Err(CodegenError::TempNotFound(array.id())),
-                }
-            }
-            _ => todo!("handle other index operand types"),
-        }
-    }
-
-    fn materialize_operand(
-        &mut self,
-        operand: &IrOperand,
-        asm: &mut String,
-    ) -> Result<R, CodegenError> {
-        match operand {
-            IrOperand::Temp(temp) => {
-                let reg = self.get_reg(temp)?;
-                Ok(reg)
-            }
-            IrOperand::Const(c) => {
-                asm.push_str(&format!("  mov x16, #{}\n", c.int_value()));
+            Rvalue::AddrOf(place) => {
+                let _ = self.emit_place_addr_any(place, asm)?;
+                asm.push_str("  mov x16, x17\n");
                 Ok(R::X16)
             }
         }
     }
 
-    fn emit_store_at_address(
+    fn store_scalar(
         &mut self,
-        addr: AddressingMode,
-        size: usize,
+        dst: &Place<crate::mcir::types::Scalar>,
         value_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
-        // Format the addressing mode into instruction syntax
-        let addr_str = match addr {
-            AddressingMode::SpOffset(offset) => format!("[sp, #{}]", offset),
-            AddressingMode::Register(reg) => format!("[{}]", reg),
-        };
-
-        // Emit the store instruction based on size
-        let w_reg = to_w_reg(value_reg);
-        match size {
-            1 => asm.push_str(&format!("  strb {w_reg}, {addr_str}\n")),
-            2 => asm.push_str(&format!("  strh {w_reg}, {addr_str}\n")),
-            4 => asm.push_str(&format!("  str {w_reg}, {addr_str}\n")),
-            8 => asm.push_str(&format!("  str {value_reg}, {addr_str}\n")),
-            _ => return Err(CodegenError::UnsupportedSize(size)),
+        let dst_ty = dst.ty();
+        if dst.projections().is_empty() {
+            match self.alloc.alloc_map.get(&dst.base()) {
+                Some(MappedLocal::Reg(reg)) => {
+                    if *reg != value_reg {
+                        asm.push_str(&format!("  mov {}, {}\n", reg, value_reg));
+                    }
+                }
+                Some(MappedLocal::Stack(slot)) => {
+                    self.store_stack(*slot, dst_ty, value_reg, asm)?;
+                }
+                Some(MappedLocal::StackAddr(slot)) => {
+                    self.store_at_stack_addr(*slot, dst_ty, value_reg, asm)?;
+                }
+                None => return Err(CodegenError::LocalNotFound(dst.base().0)),
+            }
+        } else {
+            let addr_reg = self.emit_place_addr(dst.base(), dst.projections(), asm)?;
+            self.store_at_addr(addr_reg, 0, dst_ty, value_reg, asm)?;
         }
         Ok(())
     }
 
-    fn emit_store(
+    fn materialize_operand(
         &mut self,
-        base: IrTempId,
-        byte_offset: &IrOperand,
-        value: &IrOperand,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-
-        // Calculate the address using elem_size = 1 (byte offset, not scaled)
-        let addr = self.emit_element_address(base, byte_offset, 1, &mut asm)?;
-
-        // Get the value into a register
-        let value_reg = self.materialize_operand(value, &mut asm)?;
-
-        // Determine the size of the value to store
-        let value_size = match value {
-            IrOperand::Temp(temp_id) => self.func.temp_type(*temp_id).size_of(),
-            IrOperand::Const(c) => c.size_of(),
-        };
-
-        // Store the value at the address
-        self.emit_store_at_address(addr, value_size, value_reg, &mut asm)?;
-
-        Ok(asm)
+        op: &Operand,
+        asm: &mut String,
+        scratch: R,
+    ) -> Result<R, CodegenError> {
+        match op {
+            Operand::Copy(place) | Operand::Move(place) => {
+                self.load_place_value(place, asm, scratch)
+            }
+            Operand::Const(c) => {
+                let val = match c {
+                    Const::Unit => 0,
+                    Const::Bool(v) => {
+                        if *v {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Const::Int { value, .. } => *value as i64,
+                };
+                asm.push_str(&format!("  mov {}, #{}\n", scratch, val));
+                Ok(scratch)
+            }
+        }
     }
 
-    fn emit_load_at_address(
+    fn load_place_value(
         &mut self,
-        addr: AddressingMode,
-        size: usize,
-        result_reg: R,
+        place: &Place<crate::mcir::types::Scalar>,
+        asm: &mut String,
+        scratch: R,
+    ) -> Result<R, CodegenError> {
+        let ty = place.ty();
+        if place.projections().is_empty() {
+            match self.alloc.alloc_map.get(&place.base()) {
+                Some(MappedLocal::Reg(reg)) => Ok(*reg),
+                Some(MappedLocal::Stack(slot)) => {
+                    self.load_stack(*slot, ty, scratch, asm)?;
+                    Ok(scratch)
+                }
+                Some(MappedLocal::StackAddr(slot)) => {
+                    self.load_from_stack_addr(*slot, ty, scratch, asm)?;
+                    Ok(scratch)
+                }
+                None => Err(CodegenError::LocalNotFound(place.base().0)),
+            }
+        } else if let Some(offset) = self.const_projection_offset(place.base(), place.projections())
+        {
+            match self.alloc.alloc_map.get(&place.base()) {
+                Some(MappedLocal::StackAddr(slot)) => {
+                    let base_offset = self.get_stack_offset(slot)? as usize;
+                    let total = base_offset + offset;
+                    if let Ok(total) = u32::try_from(total) {
+                        self.emit_load_from_sp(total, ty, scratch, asm)?;
+                        return Ok(scratch);
+                    }
+                }
+                Some(MappedLocal::Reg(reg)) => {
+                    if self.can_use_imm_offset(ty, offset) {
+                        self.emit_load_at_addr_reg_imm(*reg, offset, ty, scratch, asm)?;
+                        return Ok(scratch);
+                    }
+                }
+                _ => {}
+            }
+            let addr_reg = self.emit_place_addr(place.base(), place.projections(), asm)?;
+            self.load_at_addr(addr_reg, 0, ty, scratch, asm)?;
+            Ok(scratch)
+        } else {
+            let addr_reg = self.emit_place_addr(place.base(), place.projections(), asm)?;
+            self.load_at_addr(addr_reg, 0, ty, scratch, asm)?;
+            Ok(scratch)
+        }
+    }
+
+    fn emit_place_addr_any(
+        &mut self,
+        place: &PlaceAny,
+        asm: &mut String,
+    ) -> Result<R, CodegenError> {
+        match place {
+            PlaceAny::Scalar(p) => self.emit_place_addr(p.base(), p.projections(), asm),
+            PlaceAny::Aggregate(p) => self.emit_place_addr(p.base(), p.projections(), asm),
+        }
+    }
+
+    fn emit_place_addr(
+        &mut self,
+        base: LocalId,
+        projections: &[Projection],
+        asm: &mut String,
+    ) -> Result<R, CodegenError> {
+        self.materialize_base_addr(base, asm)?;
+        let mut cur_kind = self.kind_for_local(base);
+
+        for proj in projections {
+            match proj {
+                Projection::Field { index } => {
+                    let (offset, next_kind) = match cur_kind {
+                        TyKind::Tuple { ref field_tys } => {
+                            let off = self.field_offset(field_tys, *index);
+                            let next = self.body.types.kind(field_tys[*index]).clone();
+                            (off, next)
+                        }
+                        TyKind::Struct { ref fields } => {
+                            let off = self.struct_field_offset(fields, *index);
+                            let next = self.body.types.kind(fields[*index].ty).clone();
+                            (off, next)
+                        }
+                        _ => return Err(CodegenError::InvalidProjectionType),
+                    };
+                    if offset != 0 {
+                        self.add_to_reg(offset as i64, asm)?;
+                    }
+                    cur_kind = next_kind;
+                }
+                Projection::Index { index } => {
+                    let (elem_ty, dims) = match cur_kind {
+                        TyKind::Array { elem_ty, ref dims } => (elem_ty, dims.clone()),
+                        _ => return Err(CodegenError::InvalidProjectionType),
+                    };
+                    let elem_size = size_of_ty(&self.body.types, elem_ty);
+                    let stride_elems: usize = if dims.len() > 1 {
+                        dims[1..].iter().product()
+                    } else {
+                        1
+                    };
+                    let stride = (stride_elems * elem_size) as i64;
+                    if let Operand::Const(Const::Int { value, .. }) = index {
+                        let offset = (*value as i64) * stride;
+                        if offset != 0 {
+                            self.add_to_reg(offset, asm)?;
+                        }
+                    } else {
+                        let index_reg = self.materialize_operand(index, asm, R::X16)?;
+                        if stride == 1 {
+                            asm.push_str(&format!("  add x17, x17, {}\n", index_reg));
+                        } else if let Some(shift) = Self::pow2_shift(stride) {
+                            asm.push_str(&format!("  add x17, x17, {}, lsl #{shift}\n", index_reg));
+                        } else if index_reg == R::X16 {
+                            asm.push_str(&format!("  mov x15, #{stride}\n"));
+                            asm.push_str("  madd x17, x16, x15, x17\n");
+                        } else {
+                            asm.push_str(&format!("  mov x16, #{stride}\n"));
+                            asm.push_str(&format!("  madd x17, {}, x16, x17\n", index_reg));
+                        }
+                    }
+
+                    cur_kind = if dims.len() == 1 {
+                        self.body.types.kind(elem_ty).clone()
+                    } else {
+                        TyKind::Array {
+                            elem_ty,
+                            dims: dims[1..].to_vec(),
+                        }
+                    };
+                }
+            }
+        }
+
+        Ok(R::X17)
+    }
+
+    fn pow2_shift(stride: i64) -> Option<u32> {
+        if stride <= 0 {
+            return None;
+        }
+        let stride_u = stride as u64;
+        if stride_u.is_power_of_two() {
+            Some(stride_u.trailing_zeros())
+        } else {
+            None
+        }
+    }
+
+    fn materialize_base_addr(
+        &mut self,
+        base: LocalId,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
-        let addr_str = match addr {
-            AddressingMode::SpOffset(offset) => format!("[sp, #{}]", offset),
-            AddressingMode::Register(reg) => format!("[{}]", reg),
-        };
+        match self.alloc.alloc_map.get(&base) {
+            Some(MappedLocal::Reg(reg)) => {
+                asm.push_str(&format!("  mov x17, {}\n", reg));
+            }
+            Some(MappedLocal::StackAddr(slot)) => {
+                let offset = self.get_stack_offset(slot)?;
+                asm.push_str(&format!("  add x17, sp, #{offset}\n"));
+            }
+            Some(MappedLocal::Stack(slot)) => {
+                let offset = self.get_stack_offset(slot)?;
+                asm.push_str(&format!("  ldr x17, [sp, #{offset}]\n"));
+            }
+            None => return Err(CodegenError::LocalNotFound(base.0)),
+        }
+        Ok(())
+    }
 
-        let w_reg = to_w_reg(result_reg);
+    fn add_to_reg(&mut self, offset: i64, asm: &mut String) -> Result<(), CodegenError> {
+        if offset == 0 {
+            return Ok(());
+        }
+        if Self::int_fits_add_sub_imm(offset) {
+            asm.push_str(&format!("  add x17, x17, #{offset}\n"));
+        } else {
+            asm.push_str(&format!("  mov x16, #{offset}\n"));
+            asm.push_str("  add x17, x17, x16\n");
+        }
+        Ok(())
+    }
+
+    fn load_stack(
+        &mut self,
+        slot: StackSlotId,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let offset = self.get_stack_offset(&slot)?;
+        self.emit_load_from_sp(offset, ty, dest_reg, asm)?;
+        Ok(())
+    }
+
+    fn load_from_stack_addr(
+        &mut self,
+        slot: StackSlotId,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let offset = self.get_stack_offset(&slot)?;
+        asm.push_str(&format!("  add x17, sp, #{offset}\n"));
+        self.emit_load_at_addr_reg(R::X17, ty, dest_reg, asm)?;
+        Ok(())
+    }
+
+    fn store_stack(
+        &mut self,
+        slot: StackSlotId,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let offset = self.get_stack_offset(&slot)?;
+        self.emit_store_to_sp(offset, ty, src_reg, asm)
+    }
+
+    fn store_at_stack_addr(
+        &mut self,
+        slot: StackSlotId,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let offset = self.get_stack_offset(&slot)?;
+        asm.push_str(&format!("  add x17, sp, #{offset}\n"));
+        self.emit_store_at_addr_reg(R::X17, ty, src_reg, asm)
+    }
+
+    fn load_at_addr(
+        &mut self,
+        addr_reg: R,
+        offset: usize,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        if offset != 0 {
+            self.add_to_reg(offset as i64, asm)?;
+        }
+        self.emit_load_at_addr_reg(addr_reg, ty, dest_reg, asm)
+    }
+
+    fn store_at_addr(
+        &mut self,
+        addr_reg: R,
+        offset: usize,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        if offset != 0 {
+            self.add_to_reg(offset as i64, asm)?;
+        }
+        self.emit_store_at_addr_reg(addr_reg, ty, src_reg, asm)
+    }
+
+    fn emit_load_from_sp(
+        &mut self,
+        offset: u32,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
         match size {
-            1 => asm.push_str(&format!("  ldrb {w_reg}, {addr_str}\n")),
-            2 => asm.push_str(&format!("  ldrh {w_reg}, {addr_str}\n")),
-            4 => asm.push_str(&format!("  ldr {w_reg}, {addr_str}\n")),
-            8 => asm.push_str(&format!("  ldr {result_reg}, {addr_str}\n")),
+            1 => asm.push_str(&format!(
+                "  ldrb {}, [sp, #{}]\n",
+                to_w_reg(dest_reg),
+                offset
+            )),
+            2 => asm.push_str(&format!(
+                "  ldrh {}, [sp, #{}]\n",
+                to_w_reg(dest_reg),
+                offset
+            )),
+            4 => asm.push_str(&format!(
+                "  ldr {}, [sp, #{}]\n",
+                to_w_reg(dest_reg),
+                offset
+            )),
+            8 => asm.push_str(&format!("  ldr {}, [sp, #{}]\n", dest_reg, offset)),
             _ => return Err(CodegenError::UnsupportedSize(size)),
         }
         Ok(())
     }
 
-    pub fn emit_load(
+    fn emit_store_to_sp(
         &mut self,
-        result: IrTempId,
-        base: IrTempId,
-        byte_offset: &IrOperand,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-        let result_reg = self.get_reg(&result)?;
-
-        // Calculate the address using elem_size = 1 (byte offset, not scaled)
-        let addr = self.emit_element_address(base, byte_offset, 1, &mut asm)?;
-
-        // Determine the size of the value to load (from the result type)
-        let value_size = self.func.temp_type(result).size_of();
-
-        // Load the value from the address into the result register
-        self.emit_load_at_address(addr, value_size, result_reg, &mut asm)?;
-
-        Ok(asm)
+        offset: u32,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!(
+                "  strb {}, [sp, #{}]\n",
+                to_w_reg(src_reg),
+                offset
+            )),
+            2 => asm.push_str(&format!(
+                "  strh {}, [sp, #{}]\n",
+                to_w_reg(src_reg),
+                offset
+            )),
+            4 => asm.push_str(&format!("  str {}, [sp, #{}]\n", to_w_reg(src_reg), offset)),
+            8 => asm.push_str(&format!("  str {}, [sp, #{}]\n", src_reg, offset)),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
     }
 
-    pub fn emit_memcpy(
+    fn emit_load_at_addr_reg(
         &mut self,
-        dest: IrTempId,
-        src: IrTempId,
-        dest_offset: &IrOperand,
-        src_offset: &IrOperand,
+        addr_reg: R,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!("  ldrb {}, [{}]\n", to_w_reg(dest_reg), addr_reg)),
+            2 => asm.push_str(&format!("  ldrh {}, [{}]\n", to_w_reg(dest_reg), addr_reg)),
+            4 => asm.push_str(&format!("  ldr {}, [{}]\n", to_w_reg(dest_reg), addr_reg)),
+            8 => asm.push_str(&format!("  ldr {}, [{}]\n", dest_reg, addr_reg)),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
+    fn emit_load_at_addr_reg_imm(
+        &mut self,
+        addr_reg: R,
+        offset: usize,
+        ty: TyId,
+        dest_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!(
+                "  ldrb {}, [{}, #{}]\n",
+                to_w_reg(dest_reg),
+                addr_reg,
+                offset
+            )),
+            2 => asm.push_str(&format!(
+                "  ldrh {}, [{}, #{}]\n",
+                to_w_reg(dest_reg),
+                addr_reg,
+                offset
+            )),
+            4 => asm.push_str(&format!(
+                "  ldr {}, [{}, #{}]\n",
+                to_w_reg(dest_reg),
+                addr_reg,
+                offset
+            )),
+            8 => asm.push_str(&format!(
+                "  ldr {}, [{}, #{}]\n",
+                dest_reg, addr_reg, offset
+            )),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
+    fn emit_store_at_addr_reg(
+        &mut self,
+        addr_reg: R,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!("  strb {}, [{}]\n", to_w_reg(src_reg), addr_reg)),
+            2 => asm.push_str(&format!("  strh {}, [{}]\n", to_w_reg(src_reg), addr_reg)),
+            4 => asm.push_str(&format!("  str {}, [{}]\n", to_w_reg(src_reg), addr_reg)),
+            8 => asm.push_str(&format!("  str {}, [{}]\n", src_reg, addr_reg)),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
+    fn emit_store_at_addr_reg_imm(
+        &mut self,
+        addr_reg: R,
+        offset: usize,
+        ty: TyId,
+        src_reg: R,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        let size = size_of_ty(&self.body.types, ty);
+        match size {
+            1 => asm.push_str(&format!(
+                "  strb {}, [{}, #{}]\n",
+                to_w_reg(src_reg),
+                addr_reg,
+                offset
+            )),
+            2 => asm.push_str(&format!(
+                "  strh {}, [{}, #{}]\n",
+                to_w_reg(src_reg),
+                addr_reg,
+                offset
+            )),
+            4 => asm.push_str(&format!(
+                "  str {}, [{}, #{}]\n",
+                to_w_reg(src_reg),
+                addr_reg,
+                offset
+            )),
+            8 => asm.push_str(&format!("  str {}, [{}, #{}]\n", src_reg, addr_reg, offset)),
+            _ => return Err(CodegenError::UnsupportedSize(size)),
+        }
+        Ok(())
+    }
+
+    fn can_use_imm_offset(&self, ty: TyId, offset: usize) -> bool {
+        let size = size_of_ty(&self.body.types, ty);
+        if size == 0 || offset % size != 0 {
+            return false;
+        }
+        let scaled = offset / size;
+        scaled <= 4095
+    }
+
+    fn emit_memcpy(
+        &mut self,
+        dest_addr: R,
+        src_addr: R,
         length: usize,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        asm.push_str("  // -- memcpy -- (start)\n");
+        asm.push_str(&format!("  mov x19, {}\n", dest_addr));
+        asm.push_str(&format!("  mov x20, {}\n", src_addr));
 
-        // Resolve dest/src to pointer registers. We use x19/x20 as
-        // dedicated memcpy source/dest pointers so we don't interfere
-        // with the general-purpose scratch regs (x16/x17) used elsewhere.
-
-        // Load destination pointer into x19
-        match self.alloc_result.alloc_map.get(&dest) {
-            Some(MappedTemp::Reg(reg)) => {
-                asm.push_str(&format!("  mov x19, {reg}\n"));
-            }
-            Some(MappedTemp::StackAddr(slot)) => {
-                let offset = self.get_stack_offset(slot)?;
-                asm.push_str(&format!("  add x19, sp, #{offset}\n"));
-            }
-            _ => return Err(CodegenError::TempNotFound(dest.id())),
-        }
-
-        // Load source pointer into x20
-        match self.alloc_result.alloc_map.get(&src) {
-            Some(MappedTemp::Reg(reg)) => {
-                asm.push_str(&format!("  mov x20, {reg}\n"));
-            }
-            Some(MappedTemp::StackAddr(slot)) => {
-                let offset = self.get_stack_offset(slot)?;
-                asm.push_str(&format!("  add x20, sp, #{offset}\n"));
-            }
-            _ => return Err(CodegenError::TempNotFound(src.id())),
-        }
-
-        match dest_offset {
-            IrOperand::Const(IrConst::Int { value, .. }) if *value == 0 => {}
-            IrOperand::Const(IrConst::Int { value, .. }) => {
-                if Self::int_fits_add_sub_imm(*value) {
-                    asm.push_str(&format!("  add x19, x19, #{value}\n"));
-                } else {
-                    let offset_reg =
-                        self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0);
-                    asm.push_str(&format!("  add x19, x19, {offset_reg}\n"));
-                }
-            }
-            other => {
-                let offset_reg = self.materialize_operand(other, &mut asm)?;
-                asm.push_str(&format!("  add x19, x19, {offset_reg}\n"));
-            }
-        }
-
-        match src_offset {
-            IrOperand::Const(IrConst::Int { value, .. }) if *value == 0 => {}
-            IrOperand::Const(IrConst::Int { value, .. }) => {
-                if Self::int_fits_add_sub_imm(*value) {
-                    asm.push_str(&format!("  add x20, x20, #{value}\n"));
-                } else {
-                    let offset_reg =
-                        self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0);
-                    asm.push_str(&format!("  add x20, x20, {offset_reg}\n"));
-                }
-            }
-            other => {
-                let offset_reg = self.materialize_operand(other, &mut asm)?;
-                asm.push_str(&format!("  add x20, x20, {offset_reg}\n"));
-            }
-        }
-
-        // Fast path: copy as many 8-byte chunks as possible.
         let loop_label = self.next_label();
         let done_label = self.next_label();
-
-        asm.push_str("  ; memcpy\n");
 
         let count = length / 8;
         if count > 0 {
@@ -817,159 +1031,183 @@ impl<'a> FuncCodegen<'a> {
             asm.push_str(&format!("{done_label}:\n"));
         }
 
-        // Tail handling for remaining bytes: 4, 2, 1.
-        let mut remaining = length % 8;
-        if remaining >= 4 {
+        let rem = length % 8;
+        if rem >= 4 {
             asm.push_str("  ldr w22, [x20], #4\n");
             asm.push_str("  str w22, [x19], #4\n");
-            remaining -= 4;
         }
-        if remaining >= 2 {
+        if rem >= 2 {
             asm.push_str("  ldrh w22, [x20], #2\n");
             asm.push_str("  strh w22, [x19], #2\n");
-            remaining -= 2;
         }
-        if remaining >= 1 {
+        if rem >= 1 {
             asm.push_str("  ldrb w22, [x20], #1\n");
             asm.push_str("  strb w22, [x19], #1\n");
         }
 
-        asm.push_str("  ; end memcpy\n");
-
-        Ok(asm)
+        asm.push_str("  // -- memcpy -- (end)\n");
+        Ok(())
     }
 
-    pub fn emit_terminator(
-        &mut self,
-        terminator: &IrTerminator,
-        block_id: IrBlockId,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-        match terminator {
-            IrTerminator::Ret { .. } => {
-                asm.push_str(&self.emit_epilogue()?);
-            }
-            IrTerminator::Br { target } => {
-                // Emit edge moves if any
-                if let Some(edge_moves) = self.alloc_result.moves.get_edge_moves(block_id) {
-                    asm.push_str(&self.emit_moves(edge_moves)?);
-                }
-                asm.push_str(&format!("  b {}\n", self.block_labels[target]));
-            }
-            IrTerminator::CondBr {
-                cond,
-                then_b,
-                else_b,
-            } => {
-                // Emit edge moves if any
-                if let Some(edge_moves) = self.alloc_result.moves.get_edge_moves(block_id) {
-                    asm.push_str(&self.emit_moves(edge_moves)?);
-                }
-                match cond {
-                    IrOperand::Temp(temp) => {
-                        // cond expr already evaluated (cmp, cset)
-                        let cond_reg = self.get_reg(temp)?;
-                        // branch to then_b if cond is true, else_b if false
-                        asm.push_str(&format!(
-                            "  cbnz {}, {}\n",
-                            cond_reg, self.block_labels[then_b]
-                        ));
-                        asm.push_str(&format!("  b {}\n", self.block_labels[else_b]));
-                    }
-                    IrOperand::Const(IrConst::Bool(value)) => {
-                        // cond is a constant, emit either then or else block (but not both)
-                        let target_block = if *value { then_b } else { else_b };
-                        asm.push_str(&format!("  b {}\n", self.block_labels[target_block]));
-                    }
-                    IrOperand::Const(c) => {
-                        return Err(CodegenError::CondTypeNotBoolean(*c));
-                    }
-                }
-            }
-            IrTerminator::_Unterminated => {
-                let block_label = self.block_labels[&block_id].clone();
-                return Err(CodegenError::UnterminatedBlock(block_label));
-            }
-        }
-        Ok(asm)
+    fn emit_moves(&mut self, moves: &[Move]) -> Result<String, CodegenError> {
+        moves.iter().map(|m| self.emit_move(m)).collect()
     }
 
-    // Moves
-
-    pub fn emit_moves(&mut self, moves: &[Move]) -> Result<String, CodegenError> {
-        moves.iter().map(|mov| self.emit_move(mov)).collect()
-    }
-
-    pub fn emit_move(&mut self, mov: &Move) -> Result<String, CodegenError> {
-        use crate::regalloc::moves::Location;
-
+    fn emit_move(&mut self, mov: &Move) -> Result<String, CodegenError> {
         let mut asm = String::new();
         let inst = match (&mov.from, &mov.to) {
-            (src, Location::Reg(to_reg)) => {
-                // 1. Value -> Register
-                match src {
-                    Location::Imm(from_imm) => format!("  mov {to_reg}, #{from_imm}\n"),
-                    Location::Reg(from_reg) => format!("  mov {to_reg}, {from_reg}\n"),
-                    Location::Stack(from_slot) => format!(
-                        "  ldr {to_reg}, [sp, #{}]\n",
-                        self.get_stack_offset(from_slot)?
-                    ),
-                    Location::StackAddr(from_slot) => {
-                        format!(
-                            "  add {to_reg}, sp, #{}\n",
-                            self.get_stack_offset(from_slot)?
-                        )
-                    }
-                }
+            (Location::PlaceAddr(place), Location::Reg(to_reg)) => {
+                let _ = self.emit_place_addr_any(place, &mut asm)?;
+                asm.push_str(&format!("  mov {to_reg}, x17\n"));
+                return Ok(asm);
             }
-
-            // 2. Register -> Stack (Store)
-            (Location::Reg(from_reg), Location::Stack(to_slot)) => {
-                format!(
-                    "  str {from_reg}, [sp, #{}]\n",
-                    self.get_stack_offset(to_slot)?
-                )
+            (Location::PlaceValue(place), Location::Reg(to_reg)) => {
+                let _ = self.load_place_value(place, &mut asm, *to_reg)?;
+                return Ok(asm);
             }
-
-            // 3. Imm -> Stack (Store)
-            (Location::Imm(from_imm), Location::Stack(to_slot)) => {
-                // Materialize the immediate into a scratch register
+            (Location::Reg(from_reg), Location::Stack(to_slot)) => format!(
+                "  str {from_reg}, [sp, #{}]\n",
+                self.get_stack_offset(to_slot)?
+            ),
+            (Location::Imm(value), Location::Stack(to_slot)) => {
                 let scratch =
-                    self.operand_for_int_with_policy(*from_imm, ImmPolicy::RegOnly, &mut asm, 0);
+                    self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0);
                 format!(
                     "  str {scratch}, [sp, #{}]\n",
                     self.get_stack_offset(to_slot)?
                 )
             }
-
-            // 4. Invalid / Impossible Moves
-            // - Stack -> Stack (Memory-to-memory move not supported natively)
-            // - Imm -> Imm, Reg -> Imm (Dest cannot be Imm)
-            // - StackAddr -> Stack (Can't store address directly without scratch reg)
-            // - Anything -> StackAddr (You can't "write" to an address calculation)
+            (src, Location::Reg(to_reg)) => match src {
+                Location::Imm(value) => format!("  mov {to_reg}, #{value}\n"),
+                Location::Reg(from_reg) => format!("  mov {to_reg}, {from_reg}\n"),
+                Location::Stack(from_slot) => format!(
+                    "  ldr {to_reg}, [sp, #{}]\n",
+                    self.get_stack_offset(from_slot)?
+                ),
+                Location::StackAddr(from_slot) => format!(
+                    "  add {to_reg}, sp, #{}\n",
+                    self.get_stack_offset(from_slot)?
+                ),
+                Location::PlaceAddr(_) | Location::PlaceValue(_) => {
+                    return Err(CodegenError::UnsupportedMove(
+                        mov.from.clone(),
+                        mov.to.clone(),
+                    ));
+                }
+            },
             _ => {
-                return Err(CodegenError::UnsupportedMove(mov.from, mov.to));
+                return Err(CodegenError::UnsupportedMove(
+                    mov.from.clone(),
+                    mov.to.clone(),
+                ));
             }
         };
         asm.push_str(&inst);
         Ok(asm)
     }
 
-    // Helpers
-
-    /// Check whether an integer fits the AArch64 add/sub immediate encoding:
-    /// imm12 optionally shifted left by 12 bits (i.e. imm = u12 << {0,12}).
-    fn int_fits_add_sub_imm(value: i64) -> bool {
-        if value < 0 {
-            return false;
+    fn get_stack_offset(&self, slot: &StackSlotId) -> Result<u32, CodegenError> {
+        if slot.0 >= self.alloc.stack_slot_count {
+            return Err(CodegenError::StackSlotOutOfBounds(
+                slot.0,
+                self.alloc.stack_slot_count,
+            ));
         }
-        let v = value as u64;
-        v < (1 << 12) || (v < (1 << 24) && (v & ((1 << 12) - 1)) == 0)
+        let offset = self.stack_padding + self.stack_alloc_size - slot.offset_bytes();
+        Ok(offset)
     }
 
-    /// Decide how to encode an integer operand based on the provided policy:
-    /// either as an immediate (`#imm`) when it fits, or by materializing it
-    /// into a scratch register (`x16` or `x17`) and returning that register.
+    fn next_label(&mut self) -> String {
+        let label = format!(".L{}", self.label_counter);
+        self.label_counter += 1;
+        label
+    }
+
+    fn kind_for_local(&self, local: LocalId) -> TyKind {
+        let ty = self.body.locals[local.index()].ty;
+        self.body.types.kind(ty).clone()
+    }
+
+    fn field_offset(&self, field_tys: &[TyId], index: usize) -> usize {
+        field_tys
+            .iter()
+            .take(index)
+            .map(|ty| size_of_ty(&self.body.types, *ty))
+            .sum()
+    }
+
+    fn struct_field_offset(
+        &self,
+        fields: &[crate::mcir::types::StructField],
+        index: usize,
+    ) -> usize {
+        fields
+            .iter()
+            .take(index)
+            .map(|field| size_of_ty(&self.body.types, field.ty))
+            .sum()
+    }
+
+    fn const_projection_offset(&self, base: LocalId, projections: &[Projection]) -> Option<usize> {
+        let mut offset: usize = 0;
+        let mut cur_kind = self.kind_for_local(base);
+
+        for proj in projections {
+            match proj {
+                Projection::Field { index } => {
+                    let (field_offset, next_kind) = match cur_kind {
+                        TyKind::Tuple { ref field_tys } => {
+                            let off = self.field_offset(field_tys, *index);
+                            let next = self.body.types.kind(field_tys[*index]).clone();
+                            (off, next)
+                        }
+                        TyKind::Struct { ref fields } => {
+                            let off = self.struct_field_offset(fields, *index);
+                            let next = self.body.types.kind(fields[*index].ty).clone();
+                            (off, next)
+                        }
+                        _ => return None,
+                    };
+                    offset = offset.checked_add(field_offset)?;
+                    cur_kind = next_kind;
+                }
+                Projection::Index { index } => {
+                    let (elem_ty, dims) = match cur_kind {
+                        TyKind::Array { elem_ty, ref dims } => (elem_ty, dims.clone()),
+                        _ => return None,
+                    };
+                    let idx = match index {
+                        Operand::Const(Const::Int { value, .. }) => *value,
+                        _ => return None,
+                    };
+                    if idx < 0 {
+                        return None;
+                    }
+                    let idx = idx as usize;
+                    let elem_size = size_of_ty(&self.body.types, elem_ty);
+                    let stride_elems: usize = if dims.len() > 1 {
+                        dims[1..].iter().product()
+                    } else {
+                        1
+                    };
+                    let stride = stride_elems * elem_size;
+                    offset = offset.checked_add(idx.checked_mul(stride)?)?;
+
+                    cur_kind = if dims.len() == 1 {
+                        self.body.types.kind(elem_ty).clone()
+                    } else {
+                        TyKind::Array {
+                            elem_ty,
+                            dims: dims[1..].to_vec(),
+                        }
+                    };
+                }
+            }
+        }
+
+        Some(offset)
+    }
+
     fn operand_for_int_with_policy(
         &mut self,
         value: i64,
@@ -993,48 +1231,29 @@ impl<'a> FuncCodegen<'a> {
         }
     }
 
-    fn get_reg(&self, temp: &IrTempId) -> Result<R, CodegenError> {
-        match self.alloc_result.alloc_map.get(temp) {
-            Some(MappedTemp::Reg(reg)) => Ok(*reg),
-            Some(_) => Err(CodegenError::TempIsNotInRegister(temp.id())),
-            None => Err(CodegenError::TempNotFound(temp.id())),
+    fn int_fits_add_sub_imm(value: i64) -> bool {
+        if value < 0 {
+            return false;
         }
+        let v = value as u64;
+        v < (1 << 12) || (v < (1 << 24) && (v & ((1 << 12) - 1)) == 0)
     }
+}
 
-    // Get stack offset for a stack slot
-    fn get_stack_offset(&self, slot: &StackSlotId) -> Result<u32, CodegenError> {
-        if slot.0 >= self.alloc_result.stack_slot_count {
-            return Err(CodegenError::StackSlotOutOfBounds(
-                slot.0,
-                self.alloc_result.stack_slot_count,
-            ));
+fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
+    match types.kind(ty) {
+        TyKind::Unit => 0,
+        TyKind::Bool => 1,
+        TyKind::Int { bits, .. } => (*bits as usize + 7) / 8,
+        TyKind::Array { elem_ty, dims } => {
+            let elems: usize = dims.iter().product();
+            elems * size_of_ty(types, *elem_ty)
         }
-        let offset = self.stack_padding + self.stack_alloc_size - slot.offset_bytes();
-        Ok(offset)
-    }
-
-    fn next_label(&mut self) -> String {
-        let label = format!(".L{}", self.label_counter);
-        self.label_counter += 1;
-        label
-    }
-
-    fn get_op_str(&self, op: &BOp) -> &str {
-        match op {
-            BOp::Add => "add",
-            BOp::Sub => "sub",
-            BOp::Mul => "mul",
-            BOp::Div => "udiv",
-            BOp::Eq => "eq",
-            BOp::Ne => "ne",
-            BOp::Lt => "lt",
-            BOp::Gt => "gt",
-            BOp::LtEq => "le",
-            BOp::GtEq => "ge",
-        }
+        TyKind::Tuple { field_tys } => field_tys.iter().map(|ty| size_of_ty(types, *ty)).sum(),
+        TyKind::Struct { fields } => fields.iter().map(|field| size_of_ty(types, field.ty)).sum(),
     }
 }
 
 #[cfg(test)]
-#[path = "../tests/t_codegen_arm64.rs"]
+#[path = "../tests/t_arm64.rs"]
 mod tests;

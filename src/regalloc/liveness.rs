@@ -1,89 +1,160 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 
-use crate::ir::types::{IrBlock, IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTerminator};
+use crate::mcir::types::{
+    BasicBlock, BlockId, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue,
+    Statement, Terminator,
+};
 
-/// A block's GenKillSet
-///
-/// gen[B]
-/// - The set of variables that are used in B before being defined in B.
-/// - These are variables whose liveness is _generated_ by the block itself, regardless of what was
-///   live on entry.
-///
-/// kill[B]
-/// - The set of variables that are assigned a value (i.e., defined) anywhere in B.
-/// - These definitions _kill_ any previous value of those variables coming into the block.
-struct GenKillSet {
-    gen_set: HashSet<IrTempId>,
-    kill_set: HashSet<IrTempId>,
+// --- Def/use extraction ---
+
+fn collect_operand_uses(op: &Operand, out: &mut HashSet<LocalId>) {
+    match op {
+        Operand::Copy(p) | Operand::Move(p) => collect_place_uses(p, out),
+        Operand::Const(_) => {}
+    }
 }
 
-impl GenKillSet {
-    pub fn new() -> Self {
-        Self {
-            gen_set: HashSet::new(),
-            kill_set: HashSet::new(),
+fn collect_place_uses<K>(place: &Place<K>, out: &mut HashSet<LocalId>) {
+    out.insert(place.base());
+    for proj in place.projections() {
+        if let Projection::Index { index } = proj {
+            collect_operand_uses(index, out);
         }
     }
 }
 
-type GenKillMap = HashMap<IrBlockId, GenKillSet>;
-
-impl GenKillSet {
-    pub fn from(block: &IrBlock) -> Self {
-        let mut gen_kill_set = GenKillSet::new();
-
-        for inst in block.insts() {
-            // Phi sources are treated as used at the end of each predecessor block, not as uses
-            // in the current block. The Phi destination is defined at the start of the block,
-            // so it belongs in Kill but not Gen.
-            if let IrInst::Phi { .. } = inst {
-                if let Some(dest) = inst.get_dest() {
-                    gen_kill_set.kill_set.insert(dest);
-                }
-                continue;
-            }
-
-            for source in inst.get_sources() {
-                if let IrOperand::Temp(temp_id) = source
-                    && !gen_kill_set.kill_set.contains(&temp_id)
-                {
-                    gen_kill_set.gen_set.insert(temp_id);
-                }
-            }
-            if let Some(dest) = inst.get_dest() {
-                gen_kill_set.kill_set.insert(dest);
-            }
+// For LHS: only use base if there are projections.
+fn collect_place_lhs_uses<K>(place: &Place<K>, out: &mut HashSet<LocalId>) {
+    if !place.projections().is_empty() {
+        out.insert(place.base());
+    }
+    for proj in place.projections() {
+        if let Projection::Index { index } = proj {
+            collect_operand_uses(index, out);
         }
-
-        match block.term() {
-            IrTerminator::CondBr { cond, .. } => {
-                if let IrOperand::Temp(temp_id) = cond
-                    && !gen_kill_set.kill_set.contains(temp_id)
-                {
-                    gen_kill_set.gen_set.insert(*temp_id);
-                }
-            }
-            IrTerminator::Ret { value } => {
-                if let Some(IrOperand::Temp(temp_id)) = value
-                    && !gen_kill_set.kill_set.contains(temp_id)
-                {
-                    gen_kill_set.gen_set.insert(*temp_id);
-                }
-            }
-            IrTerminator::Br { .. } | IrTerminator::_Unterminated => {}
-        }
-
-        gen_kill_set
     }
 }
 
-/// A Live Set for a block
-/// - live_in: set of variables live at block entry
-/// - live_out: set of variables live at block exit
+fn collect_place_any_uses(place: &PlaceAny, out: &mut HashSet<LocalId>) {
+    match place {
+        PlaceAny::Scalar(p) => collect_place_uses(p, out),
+        PlaceAny::Aggregate(p) => collect_place_uses(p, out),
+    }
+}
+
+fn collect_place_any_lhs_uses(place: &PlaceAny, out: &mut HashSet<LocalId>) {
+    match place {
+        PlaceAny::Scalar(p) => collect_place_lhs_uses(p, out),
+        PlaceAny::Aggregate(p) => collect_place_lhs_uses(p, out),
+    }
+}
+
+fn collect_rvalue_uses(rv: &Rvalue, out: &mut HashSet<LocalId>) {
+    match rv {
+        Rvalue::Use(op) => collect_operand_uses(op, out),
+        Rvalue::BinOp { lhs, rhs, .. } => {
+            collect_operand_uses(lhs, out);
+            collect_operand_uses(rhs, out);
+        }
+        Rvalue::UnOp { arg, .. } => collect_operand_uses(arg, out),
+        Rvalue::AddrOf(place) => collect_place_any_uses(place, out),
+    }
+}
+
+fn stmt_defs(stmt: &Statement, out: &mut HashSet<LocalId>) {
+    match stmt {
+        Statement::CopyScalar { dst, .. } => {
+            out.insert(dst.base());
+        }
+        Statement::InitAggregate { dst, .. } => {
+            out.insert(dst.base());
+        }
+        Statement::CopyAggregate { dst, .. } => {
+            out.insert(dst.base());
+        }
+        Statement::Call { dst, .. } => {
+            out.insert(match dst {
+                PlaceAny::Scalar(p) => p.base(),
+                PlaceAny::Aggregate(p) => p.base(),
+            });
+        }
+    }
+}
+
+fn stmt_uses(stmt: &Statement, out: &mut HashSet<LocalId>) {
+    match stmt {
+        Statement::CopyScalar { dst, src } => {
+            collect_place_lhs_uses(dst, out);
+            collect_rvalue_uses(src, out);
+        }
+        Statement::InitAggregate { dst, fields } => {
+            collect_place_lhs_uses(dst, out);
+            for field in fields {
+                collect_operand_uses(field, out);
+            }
+        }
+        Statement::CopyAggregate { dst, src } => {
+            collect_place_lhs_uses(dst, out);
+            collect_place_uses(src, out);
+        }
+        Statement::Call { dst, args, .. } => {
+            collect_place_any_lhs_uses(dst, out);
+            for arg in args {
+                collect_place_any_uses(arg, out);
+            }
+        }
+    }
+}
+
+// -- Gen/Kill sets computation ---
+
+pub struct GenKillSet {
+    pub gen_set: HashSet<LocalId>,
+    pub kill_set: HashSet<LocalId>,
+}
+
+pub fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
+    let mut gen_set = HashSet::new();
+    let mut kill_set = HashSet::new();
+
+    for stmt in &block.stmts {
+        let mut uses = HashSet::new();
+        stmt_uses(stmt, &mut uses);
+        for u in uses {
+            if !kill_set.contains(&u) {
+                gen_set.insert(u);
+            }
+        }
+
+        let mut defs = HashSet::new();
+        stmt_defs(stmt, &mut defs);
+        for d in defs {
+            kill_set.insert(d);
+        }
+    }
+
+    match &block.terminator {
+        Terminator::If { cond, .. } => {
+            let mut uses = HashSet::new();
+            collect_operand_uses(cond, &mut uses);
+            for u in uses {
+                if !kill_set.contains(&u) {
+                    gen_set.insert(u);
+                }
+            }
+        }
+        Terminator::Return | Terminator::Goto(_) | Terminator::Unterminated => {}
+    }
+
+    GenKillSet { gen_set, kill_set }
+}
+
+// -- Liveness analysis ---
+
+#[derive(Debug, Clone)]
 pub struct LiveSet {
-    live_in: HashSet<IrTempId>,
-    live_out: HashSet<IrTempId>,
+    pub live_in: HashSet<LocalId>,
+    pub live_out: HashSet<LocalId>,
 }
 
 impl LiveSet {
@@ -95,132 +166,108 @@ impl LiveSet {
     }
 }
 
-pub type LiveMap = HashMap<IrBlockId, LiveSet>;
+pub type LiveMap = Vec<LiveSet>;
 
-/// Helper wrapper to pretty-print a `LiveMap` in block order.
-pub struct LiveMapDisplay<'a> {
-    pub func: &'a IrFunction,
-    pub live_map: &'a LiveMap,
-}
-
-impl<'a> fmt::Display for LiveMapDisplay<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "LiveMap:")?;
-        for block_id in &self.func.cfg.block_ids {
-            let block = &self.func.blocks[block_id];
-            let live = &self.live_map[block_id];
-            writeln!(f, "{}:{}", block_id.id(), block.name)?;
-
-            write!(f, "  live_in: [")?;
-            let mut temps: Vec<_> = live.live_in.iter().cloned().collect();
-            temps.sort_by_key(|t| t.id());
-            for (i, t) in temps.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "%t{}", t.id())?;
+fn compute_succs(body: &FuncBody) -> Vec<Vec<BlockId>> {
+    let mut succs: Vec<Vec<BlockId>> = vec![vec![]; body.blocks.len()];
+    for (i, block) in body.blocks.iter().enumerate() {
+        let v = &mut succs[i];
+        match &block.terminator {
+            Terminator::Goto(target) => v.push(*target),
+            Terminator::If {
+                then_bb, else_bb, ..
+            } => {
+                v.push(*then_bb);
+                v.push(*else_bb);
             }
-            writeln!(f, "]")?;
-
-            write!(f, "  live_out: [")?;
-            let mut temps: Vec<_> = live.live_out.iter().cloned().collect();
-            temps.sort_by_key(|t| t.id());
-            for (i, t) in temps.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "%t{}", t.id())?;
-            }
-            writeln!(f, "]")?;
+            Terminator::Return | Terminator::Unterminated => {}
         }
-        Ok(())
     }
+    succs
 }
 
-pub struct LivenessAnalysis {
-    func: IrFunction,
+pub struct LivenessAnalysis<'a> {
+    pub body: &'a FuncBody,
 }
 
-impl LivenessAnalysis {
-    pub fn new(func: IrFunction) -> Self {
-        Self { func }
+impl<'a> LivenessAnalysis<'a> {
+    pub fn new(body: &'a FuncBody) -> Self {
+        Self { body }
     }
 
-    // Input: A Control Flow Graph (CFG) where each node is a Basic Block (B)
-    // Output: A Live Map where each block has a LiveSet (live_in and live_out)
-    //
-    // Data Structures:
-    //
-    // global LiveIn[B] = set of variables live at block entry
-    // global LiveOut[B] = set of variables live at block exit
-    // local Gen[B] = set of variables used before definition in B
-    // local Kill[B] = set of variables defined in B
     pub fn analyze(&self) -> LiveMap {
-        // Compute the local liveness for each block
-        let mut gen_kill_map = GenKillMap::new();
-        for block_id in &self.func.cfg.block_ids {
-            let block = &self.func.blocks[block_id];
-            gen_kill_map.insert(*block_id, GenKillSet::from(block));
+        let mut gen_kill = Vec::with_capacity(self.body.blocks.len());
+        for block in &self.body.blocks {
+            gen_kill.push(gen_kill_for_block(block));
         }
 
-        // Initialize the live map with empty live sets for each block
-        let mut live_map = LiveMap::new();
-        for block_id in self.func.cfg.block_ids.iter() {
-            live_map.insert(*block_id, LiveSet::new());
-        }
+        let mut live_map = vec![LiveSet::new(); self.body.blocks.len()];
+        let succs = compute_succs(self.body);
 
-        // Iterate to a fixed point (backward dataflow analysis)
         let mut changed = true;
         while changed {
             changed = false;
-            for block_id in self.func.cfg.block_ids.iter() {
-                // 1. Calculate new LiveOut based on successors' LiveIn
+            for i in 0..self.body.blocks.len() {
                 let mut new_live_out = HashSet::new();
-                for succ_id in self.func.cfg.succ[block_id].iter() {
-                    let succ_live_in = &live_map[succ_id].live_in;
-                    new_live_out.extend(succ_live_in);
+                for succ in &succs[i] {
+                    new_live_out.extend(live_map[succ.index()].live_in.iter().cloned());
                 }
 
-                // For each phi in a successor block, add its incoming operand form this block to
-                // the new live-out set.
-                for succ_id in self.func.cfg.succ[block_id].iter() {
-                    let succ_block = &self.func.blocks[succ_id];
-                    for inst in succ_block.insts().iter() {
-                        if let IrInst::Phi { incoming, .. } = inst {
-                            for (pred_id, source) in incoming.iter() {
-                                if *pred_id == *block_id {
-                                    new_live_out.insert(*source);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Check if LiveOut changed
-                if live_map[block_id].live_out != new_live_out {
-                    live_map.get_mut(block_id).unwrap().live_out = new_live_out;
+                if live_map[i].live_out != new_live_out {
+                    live_map[i].live_out = new_live_out;
                     changed = true;
                 }
 
-                // 2. Calculate new LiveIn based on local sets and new LiveOut
-                //    LiveIn(B) = Gen(B) U (LiveOut(B) - Kill(B))
-                // The (LiveOut[B] - Kill[B]) ensures variables defined in B don't "look through" the definition
-                let gen_set = &gen_kill_map[block_id].gen_set;
-                let kill_set = &gen_kill_map[block_id].kill_set;
-                let live_out = &live_map[block_id].live_out;
-                let diff = live_out.difference(kill_set).cloned().collect();
+                let gen_set = &gen_kill[i].gen_set;
+                let kill_set = &gen_kill[i].kill_set;
+                let diff = live_map[i].live_out.difference(kill_set).cloned().collect();
                 let new_live_in = gen_set.union(&diff).cloned().collect();
 
-                // Check if LiveIn changed
-                if live_map[block_id].live_in != new_live_in {
-                    live_map.get_mut(block_id).unwrap().live_in = new_live_in;
+                if live_map[i].live_in != new_live_in {
+                    live_map[i].live_in = new_live_in;
                     changed = true;
                 }
             }
         }
+
         live_map
     }
 }
+
+/// Format a liveness map for human-readable output.
+pub fn format_liveness_map(live_map: &LiveMap, func_name: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Live Map ({}):\n", func_name));
+    out.push_str("--------------------------------\n");
+    for (bb_idx, live) in live_map.iter().enumerate() {
+        out.push_str(&format!("  bb{}:\n", bb_idx));
+        out.push_str("    live_in: ");
+        out.push_str(&format_live_set(&live.live_in));
+        out.push('\n');
+        out.push_str("    live_out: ");
+        out.push_str(&format_live_set(&live.live_out));
+        out.push('\n');
+    }
+    out.push_str("--------------------------------\n");
+    out
+}
+
+fn format_live_set(set: &HashSet<LocalId>) -> String {
+    let mut ids: Vec<_> = set.iter().map(|l| l.0).collect();
+    ids.sort();
+    let mut out = String::new();
+    out.push('[');
+    for (idx, id) in ids.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format!("%t{}", id));
+    }
+    out.push(']');
+    out
+}
+
+// -- Live intervals computation ---
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveInterval {
@@ -228,90 +275,67 @@ pub struct LiveInterval {
     pub end: u32,
 }
 
-pub type LiveIntervalMap = HashMap<IrTempId, LiveInterval>;
+pub type LiveIntervalMap = HashMap<LocalId, LiveInterval>;
 
-pub fn build_live_intervals(func: &IrFunction, live_map: &LiveMap) -> LiveIntervalMap {
+pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveIntervalMap {
     let mut map = LiveIntervalMap::new();
+    let mut block_last_inst_idx = vec![0u32; body.blocks.len()];
+    let mut inst_idx: u32 = 0;
 
-    let mut block_last_inst_idx = HashMap::new();
-
-    // 1. For each instruction, assign a start and end position
-    let mut inst_idx = 0;
-    for block in func.blocks.values() {
-        // process block instructions
-        for inst in block.insts().iter() {
-            for operand in inst.get_sources() {
-                if let IrOperand::Temp(temp_id) = operand {
-                    map.entry(temp_id)
-                        .and_modify(|interval| interval.end = inst_idx + 1)
-                        .or_insert(LiveInterval {
-                            start: inst_idx,
-                            end: inst_idx + 1,
-                        });
-                }
-            }
-            if let Some(temp_id) = inst.get_dest() {
-                map.entry(temp_id)
-                    .and_modify(|interval| interval.end = inst_idx + 1)
+    for (i, block) in body.blocks.iter().enumerate() {
+        for stmt in &block.stmts {
+            let mut uses = HashSet::new();
+            stmt_uses(stmt, &mut uses);
+            for u in uses {
+                map.entry(u)
+                    .and_modify(|iv| iv.end = inst_idx + 1)
                     .or_insert(LiveInterval {
                         start: inst_idx,
                         end: inst_idx + 1,
                     });
             }
+
+            let mut defs = HashSet::new();
+            stmt_defs(stmt, &mut defs);
+            for d in defs {
+                map.entry(d)
+                    .and_modify(|iv| iv.end = inst_idx + 1)
+                    .or_insert(LiveInterval {
+                        start: inst_idx,
+                        end: inst_idx + 1,
+                    });
+            }
+
             inst_idx += 1;
         }
 
-        // process block terminator
-        match block.term() {
-            IrTerminator::Br { .. } => {}
-            IrTerminator::CondBr { cond, .. } => {
-                // cond is a source
-                if let IrOperand::Temp(temp_id) = cond {
-                    map.entry(*temp_id)
-                        .and_modify(|interval| interval.end = inst_idx + 1)
-                        .or_insert(LiveInterval {
-                            start: inst_idx,
-                            end: inst_idx + 1,
-                        });
-                }
-            }
-            IrTerminator::Ret { value } => {
-                // value is a source
-                if let Some(IrOperand::Temp(temp_id)) = value {
-                    map.entry(*temp_id)
-                        .and_modify(|interval| interval.end = inst_idx + 1)
-                        .or_insert(LiveInterval {
-                            start: inst_idx,
-                            end: inst_idx + 1,
-                        });
-                }
-            }
-            IrTerminator::_Unterminated => {
-                panic!("Block is not terminated");
+        if let Terminator::If { cond, .. } = &block.terminator {
+            let mut uses = HashSet::new();
+            collect_operand_uses(cond, &mut uses);
+            for u in uses {
+                map.entry(u)
+                    .and_modify(|iv| iv.end = inst_idx + 1)
+                    .or_insert(LiveInterval {
+                        start: inst_idx,
+                        end: inst_idx + 1,
+                    });
             }
         }
-        inst_idx += 1;
-        block_last_inst_idx.insert(block.id(), inst_idx);
+
+        inst_idx += 1; // terminator slot
+        block_last_inst_idx[i] = inst_idx;
     }
 
-    // 2. Extend intervals across block boundaries using live_out
-    for block_id in func.blocks.keys() {
-        let live_out = &live_map[block_id].live_out;
-        for temp_id in live_out.iter() {
-            map.entry(*temp_id)
-                .and_modify(|interval| {
-                    interval.end = std::cmp::max(interval.end, block_last_inst_idx[block_id] + 1)
-                })
+    for (i, live) in live_map.iter().enumerate() {
+        for local in &live.live_out {
+            map.entry(*local)
+                .and_modify(|iv| iv.end = iv.end.max(block_last_inst_idx[i] + 1))
                 .or_insert(LiveInterval {
-                    start: block_last_inst_idx[block_id],
-                    end: block_last_inst_idx[block_id] + 1,
+                    start: block_last_inst_idx[i],
+                    end: block_last_inst_idx[i] + 1,
                 });
         }
     }
 
     map
 }
-
-#[cfg(test)]
-#[path = "../tests/t_regalloc_liveness.rs"]
-mod t_regalloc_liveness;

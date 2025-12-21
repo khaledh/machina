@@ -1,34 +1,38 @@
 use std::collections::HashMap;
-use std::fmt;
 
-use crate::ir::pos::InstPos;
-use crate::ir::types::{
-    IrBlockId, IrFunction, IrInst, IrOperand, IrTempId, IrTempKind, IrTerminator, IrType,
-};
+use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Statement, Terminator};
+use crate::regalloc::pos::InstPos;
 use crate::regalloc::regs::{self, Arm64Reg};
 
 #[derive(Debug)]
 pub struct FnParamConstraint {
-    pub temp: IrTempId,
-    pub reg: Arm64Reg, // param arrives in this register on function entry
+    pub local: LocalId,
+    pub reg: Arm64Reg,
 }
 
 #[derive(Debug)]
 pub struct FnReturnConstraint {
-    pub operand: IrOperand,
-    pub reg: Arm64Reg, // return value is returned in this register after the function returns
+    pub local: LocalId,
+    pub reg: Arm64Reg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallArgKind {
+    Value,
+    Addr,
 }
 
 #[derive(Debug)]
 pub struct CallArgConstraint {
-    pub operand: IrOperand,
-    pub reg: Arm64Reg, // call arg must be in this reg before the call is made
+    pub place: PlaceAny,
+    pub reg: Arm64Reg,
+    pub kind: CallArgKind,
 }
 
 #[derive(Debug)]
 pub struct CallResultConstraint {
-    pub temp: IrTempId,
-    pub reg: Arm64Reg, // call result is returned in this reg after the call returns
+    pub local: LocalId,
+    pub reg: Arm64Reg,
 }
 
 #[derive(Debug)]
@@ -42,179 +46,117 @@ pub struct CallConstraint {
 pub struct ConstraintMap {
     pub call_constraints: Vec<CallConstraint>,
     pub fn_param_constraints: Vec<FnParamConstraint>,
-    pub fn_return_constraints: HashMap<IrBlockId, FnReturnConstraint>,
+    pub fn_return_constraints: HashMap<BlockId, FnReturnConstraint>,
 }
 
-pub fn analyze_fn_params(func: &IrFunction) -> Vec<FnParamConstraint> {
-    let mut constraints = Vec::new();
-    for (i, temp) in func.temps.iter().enumerate() {
-        if let IrTempKind::Param { index } = temp.kind {
-            let reg = regs::get_param_reg(index);
-            constraints.push(FnParamConstraint {
-                temp: IrTempId(i as u32),
-                reg,
+pub fn analyze_fn_params(body: &FuncBody) -> Vec<FnParamConstraint> {
+    let mut out = Vec::new();
+    for (i, local) in body.locals.iter().enumerate() {
+        if let LocalKind::Param { index } = local.kind {
+            // move local to param register
+            out.push(FnParamConstraint {
+                local: LocalId(i as u32),
+                reg: regs::get_param_reg(index),
             });
         }
     }
 
-    // add indirect result constraint if the return type is compound
-    if let Some(ret_temp) = func.ret_temp {
-        constraints.push(FnParamConstraint {
-            temp: ret_temp,
+    // Indirect result for aggregate returns.
+    let ret_local = body.ret_local;
+    let ret_ty = body.locals[ret_local.index()].ty;
+    if body.types.get(ret_ty).is_aggregate() {
+        out.push(FnParamConstraint {
+            local: ret_local,
             reg: regs::get_indirect_result_reg(),
         });
     }
-
-    constraints
+    out
 }
 
-pub fn analyze_fn_return(func: &IrFunction) -> HashMap<IrBlockId, FnReturnConstraint> {
-    if func.ret_ty == IrType::Unit || func.ret_ty.is_compound() {
+pub fn analyze_fn_return(body: &FuncBody) -> HashMap<BlockId, FnReturnConstraint> {
+    let ret_local = body.ret_local;
+    let ret_ty = body.locals[ret_local.index()].ty;
+    if body.types.get(ret_ty).is_aggregate() {
+        // for aggregates, return constraints are empty (sret handled via call constraints)
         return HashMap::new();
     }
 
-    let mut constraints = HashMap::new();
-    for block in func.blocks.values() {
-        if let IrTerminator::Ret {
-            value: Some(operand),
-        } = block.term
-        {
-            constraints.insert(
-                block.id(),
+    let mut map = HashMap::new();
+    for (i, block) in body.blocks.iter().enumerate() {
+        if matches!(block.terminator, Terminator::Return) {
+            // move ret_local to result register
+            map.insert(
+                BlockId(i as u32),
                 FnReturnConstraint {
-                    operand,
+                    local: ret_local,
                     reg: regs::get_result_reg(),
                 },
             );
         }
     }
-    constraints
+    map
 }
 
-pub fn analyze_call(func: &IrFunction) -> Vec<CallConstraint> {
+pub fn analyze_calls(body: &FuncBody) -> Vec<CallConstraint> {
     let mut constraints = Vec::new();
-    for block in func.blocks.values() {
-        for (inst_idx, inst) in block.insts.iter().enumerate() {
-            if let IrInst::Call {
-                result,
-                args,
-                ret_ty,
-                ..
-            } = inst
-            {
-                let pos = InstPos::new(block.id(), inst_idx);
+    for (b_idx, block) in body.blocks.iter().enumerate() {
+        for (i_idx, stmt) in block.stmts.iter().enumerate() {
+            let Statement::Call { dst, args, .. } = stmt else {
+                continue;
+            };
 
-                // Create the argument constraints
-                let mut arg_constraints = Vec::new();
-                for (arg_idx, arg) in args.iter().enumerate() {
-                    arg_constraints.push(CallArgConstraint {
-                        operand: *arg,
-                        reg: regs::get_param_reg(arg_idx as u32),
-                    });
-                }
-
-                // Add indirect result constraint if the return type is compound
-                if ret_ty.is_compound() {
-                    arg_constraints.push(CallArgConstraint {
-                        operand: IrOperand::Temp(result.unwrap()),
-                        reg: regs::get_indirect_result_reg(),
-                    });
-                }
-
-                // Create the result constraint (if there's a result and it's not a compound type)
-                let result_constraint = if !ret_ty.is_compound() {
-                    result.map(|temp| CallResultConstraint {
-                        temp,
-                        reg: regs::get_result_reg(),
-                    })
+            let mut arg_constraints = Vec::new();
+            for (arg_idx, arg) in args.iter().enumerate() {
+                let arg_ty = arg.ty();
+                let kind = if body.types.get(arg_ty).is_aggregate() {
+                    // aggregates: pass by address
+                    CallArgKind::Addr
                 } else {
-                    None
+                    // scalar: pass by value
+                    CallArgKind::Value
                 };
-
-                // Create the call constraint
-                constraints.push(CallConstraint {
-                    pos,
-                    args: arg_constraints,
-                    result: result_constraint,
+                arg_constraints.push(CallArgConstraint {
+                    place: arg.clone(),
+                    reg: regs::get_param_reg(arg_idx as u32),
+                    kind,
                 });
             }
+
+            let dst_ty = dst.ty();
+            let result = if body.types.get(dst_ty).is_aggregate() {
+                // aggregate result: add implicit indirect result arg constraint
+                arg_constraints.push(CallArgConstraint {
+                    place: dst.clone(),
+                    reg: regs::get_indirect_result_reg(),
+                    kind: CallArgKind::Addr,
+                });
+                None
+            } else {
+                // scalar result: add explicit result constraint
+                let local = match dst {
+                    PlaceAny::Scalar(p) => p.base(),
+                    PlaceAny::Aggregate(p) => p.base(),
+                };
+                Some(CallResultConstraint {
+                    local,
+                    reg: regs::get_result_reg(),
+                })
+            };
+
+            constraints.push(CallConstraint {
+                pos: InstPos::new(BlockId(b_idx as u32), i_idx),
+                args: arg_constraints,
+                result,
+            });
         }
     }
     constraints
 }
 
-pub fn analyze_constraints(func: &IrFunction) -> ConstraintMap {
+pub fn analyze_constraints(body: &FuncBody) -> ConstraintMap {
     ConstraintMap {
-        fn_param_constraints: analyze_fn_params(func),
-        call_constraints: analyze_call(func),
-        fn_return_constraints: analyze_fn_return(func),
+        fn_param_constraints: analyze_fn_params(body),
+        call_constraints: analyze_calls(body),
+        fn_return_constraints: analyze_fn_return(body),
     }
 }
-
-impl fmt::Display for ConstraintMap {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "ConstraintMap {{")?;
-        writeln!(f, "  fn_param_constraints:")?;
-        for constraint in &self.fn_param_constraints {
-            writeln!(f, "{}", constraint)?;
-        }
-        writeln!(f, "  call_constraints:")?;
-        for constraint in &self.call_constraints {
-            writeln!(f, "{}", constraint)?;
-        }
-        writeln!(f, "  fn_return_constraints:")?;
-        for (block_id, constraint) in &self.fn_return_constraints {
-            writeln!(f, "    block.{}:", block_id.id())?;
-            write!(f, "{}", constraint)?;
-        }
-        writeln!(f, "}}")?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for FnParamConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "    temp: {} -> {}", self.temp, self.reg)?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for FnReturnConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "      {} -> {}", self.operand, self.reg)?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for CallArgConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "      {} -> {}", self.operand, self.reg)?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for CallResultConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "      {} -> {}", self.reg, self.temp)?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for CallConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "    pos: {}", self.pos)?;
-        writeln!(f, "    args:")?;
-        for constraint in &self.args {
-            write!(f, "{}", constraint)?;
-        }
-        writeln!(f, "    result:")?;
-        if let Some(constraint) = &self.result {
-            write!(f, "{}", constraint)?;
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-#[path = "../tests/t_regalloc_constraints.rs"]
-mod tests;
