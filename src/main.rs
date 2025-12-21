@@ -2,7 +2,6 @@ use clap::Parser as ClapParser;
 
 mod analysis;
 mod ast;
-mod codegen;
 mod context;
 mod diagnostics;
 mod ids;
@@ -13,16 +12,17 @@ mod parser;
 mod regalloc;
 mod resolver;
 mod symtab;
+mod targets;
 mod type_check;
 mod types;
 
-use crate::codegen::arm64::Arm64Codegen;
 use crate::context::AstContext;
 use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
 use crate::resolver::resolve;
+use crate::targets::TargetKind;
 use crate::type_check::type_check;
 
 const SOURCE: &str = r#"
@@ -61,6 +61,10 @@ struct Args {
     /// Comma-separated list of things to dump: ast,defmap,typemap,ir,liveness,regalloc,asm
     #[clap(long)]
     dump: Option<String>,
+
+    /// Target architecture (e.g. arm64)
+    #[clap(long, value_enum, default_value_t = TargetKind::Arm64)]
+    target: TargetKind,
 }
 
 fn main() {
@@ -231,19 +235,29 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     }
 
     // --- Register Allocation ---
-    let regalloc_context = regalloc::regalloc(lowered_context);
+    let target = match args.target {
+        TargetKind::Arm64 => targets::arm64::regs::Arm64Target::new(),
+    };
+    let regalloc_context = regalloc::regalloc(lowered_context, &target);
 
     if dump_regalloc {
         for (i, alloc_result) in regalloc_context.alloc_results.iter().enumerate() {
             let func_name = regalloc_context.symbols.func_name(i).unwrap_or("<unknown>");
-            print!("{}", alloc_result.format_alloc_map(func_name));
+            print!("{}", alloc_result.format_alloc_map(func_name, &target));
         }
     }
 
     // --- Codegen (Assembly) ---
 
-    let mut codegen = Arm64Codegen::from_regalloc_context(&regalloc_context);
-    let asm = codegen.generate().map_err(|e| vec![e.into()])?;
+    let asm = match args.target {
+        TargetKind::Arm64 => {
+            let mut codegen =
+                targets::arm64::Arm64Codegen::from_regalloc_context(&regalloc_context);
+            codegen
+                .generate()
+                .map_err(|e| vec![targets::CodegenError::from(e).into()])?
+        }
+    };
 
     if dump_asm {
         println!("ASM:");

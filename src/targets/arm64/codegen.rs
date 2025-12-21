@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
+use super::regs::{self, Arm64Reg as R, to_w_reg};
 use crate::context::RegAllocatedContext;
 use crate::ids::DefId;
 use crate::mcir::types::{
@@ -10,8 +11,8 @@ use crate::mcir::types::{
 };
 use crate::regalloc::moves::{Location, Move};
 use crate::regalloc::pos::InstPos;
-use crate::regalloc::regs::{Arm64Reg as R, to_w_reg};
 use crate::regalloc::stack::StackSlotId;
+use crate::regalloc::target::PhysReg;
 use crate::regalloc::{AllocationResult, MappedLocal};
 
 #[derive(Debug, Error)]
@@ -155,6 +156,10 @@ impl<'a> FuncCodegen<'a> {
         Ok(asm)
     }
 
+    fn reg(&self, reg: PhysReg) -> R {
+        regs::from_phys(reg)
+    }
+
     fn emit_prologue(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
         asm.push_str(&format!(".global _{}\n", self.name));
@@ -174,13 +179,13 @@ impl<'a> FuncCodegen<'a> {
             for pair in used_callee.chunks(2) {
                 if pair.len() == 2 {
                     offset -= 16;
-                    asm.push_str(&format!(
-                        "  stp {}, {}, [sp, #{}]\n",
-                        pair[0], pair[1], offset
-                    ));
+                    let r0 = self.reg(pair[0]);
+                    let r1 = self.reg(pair[1]);
+                    asm.push_str(&format!("  stp {}, {}, [sp, #{}]\n", r0, r1, offset));
                 } else {
                     offset -= 8;
-                    asm.push_str(&format!("  str {}, [sp, #{}]\n", pair[0], offset));
+                    let r0 = self.reg(pair[0]);
+                    asm.push_str(&format!("  str {}, [sp, #{}]\n", r0, offset));
                 }
             }
         }
@@ -197,13 +202,13 @@ impl<'a> FuncCodegen<'a> {
             for pair in used_callee.chunks(2) {
                 if pair.len() == 2 {
                     offset -= 16;
-                    asm.push_str(&format!(
-                        "  ldp {}, {}, [sp, #{}]\n",
-                        pair[0], pair[1], offset
-                    ));
+                    let r0 = self.reg(pair[0]);
+                    let r1 = self.reg(pair[1]);
+                    asm.push_str(&format!("  ldp {}, {}, [sp, #{}]\n", r0, r1, offset));
                 } else {
                     offset -= 8;
-                    asm.push_str(&format!("  ldr {}, [sp, #{}]\n", pair[0], offset));
+                    let r0 = self.reg(pair[0]);
+                    asm.push_str(&format!("  ldr {}, [sp, #{}]\n", r0, offset));
                 }
             }
         }
@@ -281,7 +286,14 @@ impl<'a> FuncCodegen<'a> {
             } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base()) {
                 if self.can_use_imm_offset(dst.ty(), offset) {
                     let value_reg = self.emit_rvalue(src, &mut asm)?;
-                    self.emit_store_at_addr_reg_imm(*reg, offset, dst.ty(), value_reg, &mut asm)?;
+                    let base_reg = self.reg(*reg);
+                    self.emit_store_at_addr_reg_imm(
+                        base_reg,
+                        offset,
+                        dst.ty(),
+                        value_reg,
+                        &mut asm,
+                    )?;
                     return Ok(asm);
                 }
             }
@@ -526,7 +538,8 @@ impl<'a> FuncCodegen<'a> {
         if dst.projections().is_empty() {
             match self.alloc.alloc_map.get(&dst.base()) {
                 Some(MappedLocal::Reg(reg)) => {
-                    if *reg != value_reg {
+                    let reg = self.reg(*reg);
+                    if reg != value_reg {
                         asm.push_str(&format!("  mov {}, {}\n", reg, value_reg));
                     }
                 }
@@ -582,7 +595,7 @@ impl<'a> FuncCodegen<'a> {
         let ty = place.ty();
         if place.projections().is_empty() {
             match self.alloc.alloc_map.get(&place.base()) {
-                Some(MappedLocal::Reg(reg)) => Ok(*reg),
+                Some(MappedLocal::Reg(reg)) => Ok(self.reg(*reg)),
                 Some(MappedLocal::Stack(slot)) => {
                     self.load_stack(*slot, ty, scratch, asm)?;
                     Ok(scratch)
@@ -606,7 +619,8 @@ impl<'a> FuncCodegen<'a> {
                 }
                 Some(MappedLocal::Reg(reg)) => {
                     if self.can_use_imm_offset(ty, offset) {
-                        self.emit_load_at_addr_reg_imm(*reg, offset, ty, scratch, asm)?;
+                        let base_reg = self.reg(*reg);
+                        self.emit_load_at_addr_reg_imm(base_reg, offset, ty, scratch, asm)?;
                         return Ok(scratch);
                     }
                 }
@@ -729,6 +743,7 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<(), CodegenError> {
         match self.alloc.alloc_map.get(&base) {
             Some(MappedLocal::Reg(reg)) => {
+                let reg = self.reg(*reg);
                 asm.push_str(&format!("  mov x17, {}\n", reg));
             }
             Some(MappedLocal::StackAddr(slot)) => {
@@ -1058,15 +1073,18 @@ impl<'a> FuncCodegen<'a> {
         let inst = match (&mov.from, &mov.to) {
             (Location::PlaceAddr(place), Location::Reg(to_reg)) => {
                 let _ = self.emit_place_addr_any(place, &mut asm)?;
+                let to_reg = self.reg(*to_reg);
                 asm.push_str(&format!("  mov {to_reg}, x17\n"));
                 return Ok(asm);
             }
             (Location::PlaceValue(place), Location::Reg(to_reg)) => {
-                let _ = self.load_place_value(place, &mut asm, *to_reg)?;
+                let to_reg = self.reg(*to_reg);
+                let _ = self.load_place_value(place, &mut asm, to_reg)?;
                 return Ok(asm);
             }
             (Location::Reg(from_reg), Location::Stack(to_slot)) => format!(
-                "  str {from_reg}, [sp, #{}]\n",
+                "  str {}, [sp, #{}]\n",
+                self.reg(*from_reg),
                 self.get_stack_offset(to_slot)?
             ),
             (Location::Imm(value), Location::Stack(to_slot)) => {
@@ -1078,14 +1096,22 @@ impl<'a> FuncCodegen<'a> {
                 )
             }
             (src, Location::Reg(to_reg)) => match src {
-                Location::Imm(value) => format!("  mov {to_reg}, #{value}\n"),
-                Location::Reg(from_reg) => format!("  mov {to_reg}, {from_reg}\n"),
+                Location::Imm(value) => {
+                    let to_reg = self.reg(*to_reg);
+                    format!("  mov {to_reg}, #{value}\n")
+                }
+                Location::Reg(from_reg) => {
+                    let to_reg = self.reg(*to_reg);
+                    format!("  mov {to_reg}, {}\n", self.reg(*from_reg))
+                }
                 Location::Stack(from_slot) => format!(
-                    "  ldr {to_reg}, [sp, #{}]\n",
+                    "  ldr {}, [sp, #{}]\n",
+                    self.reg(*to_reg),
                     self.get_stack_offset(from_slot)?
                 ),
                 Location::StackAddr(from_slot) => format!(
-                    "  add {to_reg}, sp, #{}\n",
+                    "  add {}, sp, #{}\n",
+                    self.reg(*to_reg),
                     self.get_stack_offset(from_slot)?
                 ),
                 Location::PlaceAddr(_) | Location::PlaceValue(_) => {
@@ -1255,5 +1281,5 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
 }
 
 #[cfg(test)]
-#[path = "../tests/t_arm64.rs"]
+#[path = "../../tests/t_arm64.rs"]
 mod tests;

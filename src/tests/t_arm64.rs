@@ -2,15 +2,15 @@ use indoc::indoc;
 
 use std::collections::HashMap;
 
-use crate::codegen::arm64::{FuncCodegen, McFunction};
+use super::{FuncCodegen, McFunction};
 use crate::ids::DefId;
 use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place,
     Rvalue, Statement, Terminator, TyId, TyKind, TyTable,
 };
 use crate::regalloc::moves::FnMoveList;
-use crate::regalloc::regs::Arm64Reg as R;
 use crate::regalloc::{AllocationResult, MappedLocal};
+use crate::targets::arm64::regs::{self, Arm64Reg as R};
 
 fn u64_ty(types: &mut TyTable) -> TyId {
     types.add(TyKind::Int {
@@ -125,7 +125,7 @@ fn test_assign_const_to_return_reg() {
         terminator: Terminator::Return,
     }];
     let body = mk_body(types, locals, blocks, ret);
-    let alloc = mk_alloc(vec![(ret, MappedLocal::Reg(R::X0))]);
+    let alloc = mk_alloc(vec![(ret, MappedLocal::Reg(regs::phys(R::X0)))]);
     let func = McFunction {
         name: "test".to_string(),
         body: &body,
@@ -159,7 +159,7 @@ fn test_call_emits_bl() {
         terminator: Terminator::Return,
     }];
     let body = mk_body(types, locals, blocks, ret);
-    let alloc = mk_alloc(vec![(ret, MappedLocal::Reg(R::X0))]);
+    let alloc = mk_alloc(vec![(ret, MappedLocal::Reg(regs::phys(R::X0)))]);
     let func = McFunction {
         name: "test".to_string(),
         body: &body,

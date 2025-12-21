@@ -2,18 +2,18 @@ use std::collections::HashMap;
 
 use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Statement, Terminator};
 use crate::regalloc::pos::InstPos;
-use crate::regalloc::regs::{self, Arm64Reg};
+use crate::regalloc::target::{PhysReg, TargetSpec};
 
 #[derive(Debug)]
 pub struct FnParamConstraint {
     pub local: LocalId,
-    pub reg: Arm64Reg,
+    pub reg: PhysReg,
 }
 
 #[derive(Debug)]
 pub struct FnReturnConstraint {
     pub local: LocalId,
-    pub reg: Arm64Reg,
+    pub reg: PhysReg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,14 +25,14 @@ pub enum CallArgKind {
 #[derive(Debug)]
 pub struct CallArgConstraint {
     pub place: PlaceAny,
-    pub reg: Arm64Reg,
+    pub reg: PhysReg,
     pub kind: CallArgKind,
 }
 
 #[derive(Debug)]
 pub struct CallResultConstraint {
     pub local: LocalId,
-    pub reg: Arm64Reg,
+    pub reg: PhysReg,
 }
 
 #[derive(Debug)]
@@ -49,14 +49,16 @@ pub struct ConstraintMap {
     pub fn_return_constraints: HashMap<BlockId, FnReturnConstraint>,
 }
 
-pub fn analyze_fn_params(body: &FuncBody) -> Vec<FnParamConstraint> {
+pub fn analyze_fn_params(body: &FuncBody, target: &dyn TargetSpec) -> Vec<FnParamConstraint> {
     let mut out = Vec::new();
     for (i, local) in body.locals.iter().enumerate() {
         if let LocalKind::Param { index } = local.kind {
             // move local to param register
             out.push(FnParamConstraint {
                 local: LocalId(i as u32),
-                reg: regs::get_param_reg(index),
+                reg: target
+                    .param_reg(index)
+                    .unwrap_or_else(|| panic!("Invalid param index {}", index)),
             });
         }
     }
@@ -67,13 +69,18 @@ pub fn analyze_fn_params(body: &FuncBody) -> Vec<FnParamConstraint> {
     if body.types.get(ret_ty).is_aggregate() {
         out.push(FnParamConstraint {
             local: ret_local,
-            reg: regs::get_indirect_result_reg(),
+            reg: target
+                .indirect_result_reg()
+                .unwrap_or_else(|| panic!("Missing indirect result register")),
         });
     }
     out
 }
 
-pub fn analyze_fn_return(body: &FuncBody) -> HashMap<BlockId, FnReturnConstraint> {
+pub fn analyze_fn_return(
+    body: &FuncBody,
+    target: &dyn TargetSpec,
+) -> HashMap<BlockId, FnReturnConstraint> {
     let ret_local = body.ret_local;
     let ret_ty = body.locals[ret_local.index()].ty;
     if body.types.get(ret_ty).is_aggregate() {
@@ -89,7 +96,7 @@ pub fn analyze_fn_return(body: &FuncBody) -> HashMap<BlockId, FnReturnConstraint
                 BlockId(i as u32),
                 FnReturnConstraint {
                     local: ret_local,
-                    reg: regs::get_result_reg(),
+                    reg: target.result_reg(),
                 },
             );
         }
@@ -97,7 +104,7 @@ pub fn analyze_fn_return(body: &FuncBody) -> HashMap<BlockId, FnReturnConstraint
     map
 }
 
-pub fn analyze_calls(body: &FuncBody) -> Vec<CallConstraint> {
+pub fn analyze_calls(body: &FuncBody, target: &dyn TargetSpec) -> Vec<CallConstraint> {
     let mut constraints = Vec::new();
     for (b_idx, block) in body.blocks.iter().enumerate() {
         for (i_idx, stmt) in block.stmts.iter().enumerate() {
@@ -117,7 +124,9 @@ pub fn analyze_calls(body: &FuncBody) -> Vec<CallConstraint> {
                 };
                 arg_constraints.push(CallArgConstraint {
                     place: arg.clone(),
-                    reg: regs::get_param_reg(arg_idx as u32),
+                    reg: target
+                        .param_reg(arg_idx as u32)
+                        .unwrap_or_else(|| panic!("Invalid arg index {}", arg_idx)),
                     kind,
                 });
             }
@@ -127,7 +136,9 @@ pub fn analyze_calls(body: &FuncBody) -> Vec<CallConstraint> {
                 // aggregate result: add implicit indirect result arg constraint
                 arg_constraints.push(CallArgConstraint {
                     place: dst.clone(),
-                    reg: regs::get_indirect_result_reg(),
+                    reg: target
+                        .indirect_result_reg()
+                        .unwrap_or_else(|| panic!("Missing indirect result register")),
                     kind: CallArgKind::Addr,
                 });
                 None
@@ -139,7 +150,7 @@ pub fn analyze_calls(body: &FuncBody) -> Vec<CallConstraint> {
                 };
                 Some(CallResultConstraint {
                     local,
-                    reg: regs::get_result_reg(),
+                    reg: target.result_reg(),
                 })
             };
 
@@ -153,10 +164,10 @@ pub fn analyze_calls(body: &FuncBody) -> Vec<CallConstraint> {
     constraints
 }
 
-pub fn analyze_constraints(body: &FuncBody) -> ConstraintMap {
+pub fn analyze_constraints(body: &FuncBody, target: &dyn TargetSpec) -> ConstraintMap {
     ConstraintMap {
-        fn_param_constraints: analyze_fn_params(body),
-        call_constraints: analyze_calls(body),
-        fn_return_constraints: analyze_fn_return(body),
+        fn_param_constraints: analyze_fn_params(body, target),
+        call_constraints: analyze_calls(body, target),
+        fn_return_constraints: analyze_fn_return(body, target),
     }
 }

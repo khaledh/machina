@@ -6,7 +6,8 @@ use crate::mcir::types::{
 use crate::regalloc::MappedLocal;
 use crate::regalloc::alloc::RegAlloc;
 use crate::regalloc::constraints::{CallArgKind, analyze_constraints};
-use crate::regalloc::regs;
+use crate::regalloc::target::TargetSpec;
+use crate::targets::arm64::regs::Arm64Target;
 
 fn u64_ty(types: &mut TyTable) -> crate::mcir::types::TyId {
     types.add(TyKind::Int {
@@ -38,6 +39,10 @@ fn mk_body(
         ret_local,
         types,
     }
+}
+
+fn arm64_target() -> Arm64Target {
+    Arm64Target::new()
 }
 
 #[test]
@@ -95,8 +100,9 @@ fn test_alloc_stack_addr_for_aggregate() {
     }];
 
     let body = mk_body(types, locals, blocks, l0);
-    let constraints = analyze_constraints(&body);
-    let alloc = RegAlloc::new(&body, &constraints).alloc();
+    let target = arm64_target();
+    let constraints = analyze_constraints(&body, &target);
+    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l1),
@@ -140,12 +146,13 @@ fn test_param_aggregate_is_address_value() {
     }];
 
     let body = mk_body(types, locals, blocks, l0);
-    let constraints = analyze_constraints(&body);
-    let alloc = RegAlloc::new(&body, &constraints).alloc();
+    let target = arm64_target();
+    let constraints = analyze_constraints(&body, &target);
+    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l1),
-        Some(MappedLocal::Reg(reg)) if *reg == regs::get_param_reg(0)
+        Some(MappedLocal::Reg(reg)) if *reg == target.param_reg(0).unwrap()
     ));
 }
 
@@ -183,12 +190,13 @@ fn test_aggregate_return_uses_indirect_reg() {
     }];
 
     let body = mk_body(types, locals, blocks, l0);
-    let constraints = analyze_constraints(&body);
-    let alloc = RegAlloc::new(&body, &constraints).alloc();
+    let target = arm64_target();
+    let constraints = analyze_constraints(&body, &target);
+    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l0),
-        Some(MappedLocal::Reg(reg)) if *reg == regs::get_indirect_result_reg()
+        Some(MappedLocal::Reg(reg)) if *reg == target.indirect_result_reg().unwrap()
     ));
 }
 
@@ -240,8 +248,9 @@ fn test_alloc_stack_addr_for_address_taken() {
     }];
 
     let body = mk_body(types, locals, blocks, l0);
-    let constraints = analyze_constraints(&body);
-    let alloc = RegAlloc::new(&body, &constraints).alloc();
+    let target = arm64_target();
+    let constraints = analyze_constraints(&body, &target);
+    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l1),
@@ -309,7 +318,8 @@ fn test_call_constraints_scalar_and_aggregate_args() {
     }];
 
     let body = mk_body(types, locals, blocks, l0);
-    let constraints = analyze_constraints(&body);
+    let target = arm64_target();
+    let constraints = analyze_constraints(&body, &target);
     assert_eq!(constraints.call_constraints.len(), 1);
 
     let call = &constraints.call_constraints[0];
@@ -317,7 +327,7 @@ fn test_call_constraints_scalar_and_aggregate_args() {
     assert_eq!(call.args[0].kind, CallArgKind::Value);
     assert_eq!(call.args[1].kind, CallArgKind::Addr);
     assert!(call.result.is_some());
-    assert_eq!(call.result.as_ref().unwrap().reg, regs::get_result_reg());
+    assert_eq!(call.result.as_ref().unwrap().reg, target.result_reg());
 }
 
 #[test]
@@ -363,13 +373,14 @@ fn test_call_constraints_sret() {
     }];
 
     let body = mk_body(types, locals, blocks, l0);
-    let constraints = analyze_constraints(&body);
+    let target = arm64_target();
+    let constraints = analyze_constraints(&body, &target);
     assert_eq!(constraints.call_constraints.len(), 1);
 
     let call = &constraints.call_constraints[0];
     assert_eq!(call.args.len(), 2);
     assert_eq!(call.args[0].kind, CallArgKind::Value);
     assert_eq!(call.args[1].kind, CallArgKind::Addr);
-    assert_eq!(call.args[1].reg, regs::get_indirect_result_reg());
+    assert_eq!(call.args[1].reg, target.indirect_result_reg().unwrap());
     assert!(call.result.is_none());
 }

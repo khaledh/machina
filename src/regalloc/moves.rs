@@ -3,14 +3,14 @@ use std::fmt;
 
 use crate::mcir::types::{BlockId, Place, PlaceAny, Scalar};
 use crate::regalloc::pos::{InstPos, RelInstPos};
-use crate::regalloc::regs::Arm64Reg;
 use crate::regalloc::stack::StackSlotId;
+use crate::regalloc::target::PhysReg;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
     #[allow(dead_code)]
     Imm(i64),
-    Reg(Arm64Reg),
+    Reg(PhysReg),
     Stack(StackSlotId),
     StackAddr(StackSlotId),
     PlaceAddr(PlaceAny),
@@ -21,7 +21,7 @@ impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Location::Imm(value) => write!(f, "Imm({})", value),
-            Location::Reg(reg) => write!(f, "Reg({})", reg),
+            Location::Reg(reg) => write!(f, "Reg(r{})", reg.0),
             Location::Stack(slot) => write!(f, "Stack({})", slot.0),
             Location::StackAddr(slot) => write!(f, "StackAddr({})", slot.0),
             Location::PlaceAddr(place) => write!(f, "PlaceAddr({})", place),

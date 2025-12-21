@@ -9,8 +9,8 @@ use crate::regalloc::liveness::{
 };
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::pos::{InstPos, RelInstPos};
-use crate::regalloc::regs::{Arm64Reg, CALLEE_SAVED_REGS, CALLER_SAVED_REGS};
 use crate::regalloc::stack::{StackAllocator, StackSlotId};
+use crate::regalloc::target::{PhysReg, TargetSpec};
 use crate::regalloc::{AllocationResult, LocalAllocMap, LocalClass, MappedLocal};
 
 // --- Local classification ---
@@ -87,7 +87,7 @@ fn slots_for_ty(types: &TyTable, ty: TyId) -> u32 {
 struct ActiveLocal {
     local: LocalId,
     interval: LiveInterval,
-    reg: Arm64Reg,
+    reg: PhysReg,
 }
 
 type ActiveSet = HashMap<LocalId, ActiveLocal>;
@@ -159,20 +159,26 @@ impl PartialOrd for PosEvent {
 pub struct RegAlloc<'a> {
     body: &'a FuncBody,
     constraints: &'a ConstraintMap,
+    target: &'a dyn TargetSpec,
     local_classes: Vec<LocalClass>,
     pos_map: PosIndexMap,
     active_set: ActiveSet,
     alloc_map: LocalAllocMap,
     stack_alloc: StackAllocator,
     moves: FnMoveList,
-    used_callee_saved: HashSet<Arm64Reg>,
+    used_callee_saved: HashSet<PhysReg>,
 }
 
 impl<'a> RegAlloc<'a> {
-    pub fn new(body: &'a FuncBody, constraints: &'a ConstraintMap) -> Self {
+    pub fn new(
+        body: &'a FuncBody,
+        constraints: &'a ConstraintMap,
+        target: &'a dyn TargetSpec,
+    ) -> Self {
         Self {
             body,
             constraints,
+            target,
             local_classes: classify_locals(body),
             pos_map: Self::build_pos_map(body),
             active_set: ActiveSet::new(),
@@ -198,10 +204,10 @@ impl<'a> RegAlloc<'a> {
         PosIndexMap { pos_to_idx }
     }
 
-    fn initial_free_regs(&self) -> Vec<Arm64Reg> {
-        let mut regs = [CALLER_SAVED_REGS.to_vec(), CALLEE_SAVED_REGS.to_vec()].concat();
-        // Reserve x14/x15 for codegen scratch usage.
-        regs.retain(|r| *r != Arm64Reg::X14 && *r != Arm64Reg::X15);
+    fn initial_free_regs(&self) -> Vec<PhysReg> {
+        let mut regs = self.target.allocatable_regs().to_vec();
+        let scratch = self.target.scratch_regs();
+        regs.retain(|r| !scratch.contains(r));
         regs
     }
 
@@ -209,7 +215,7 @@ impl<'a> RegAlloc<'a> {
         self.local_classes[local.index()]
     }
 
-    fn assign_reg(&mut self, local: LocalId, interval: LiveInterval, reg: Arm64Reg) {
+    fn assign_reg(&mut self, local: LocalId, interval: LiveInterval, reg: PhysReg) {
         self.alloc_map.insert(local, MappedLocal::Reg(reg));
         self.active_set.insert(
             local,
@@ -220,7 +226,7 @@ impl<'a> RegAlloc<'a> {
             },
         );
 
-        if CALLEE_SAVED_REGS.contains(&reg) {
+        if self.target.callee_saved().contains(&reg) {
             self.used_callee_saved.insert(reg);
         }
     }
@@ -240,7 +246,7 @@ impl<'a> RegAlloc<'a> {
 
     fn alloc_param_regs(
         &mut self,
-        free_regs: &mut VecDeque<Arm64Reg>,
+        free_regs: &mut VecDeque<PhysReg>,
         intervals: &LiveIntervalMap,
         param_constraints: &[FnParamConstraint],
     ) {
@@ -296,7 +302,7 @@ impl<'a> RegAlloc<'a> {
         events
     }
 
-    fn handle_interval_end(&mut self, free_regs: &mut VecDeque<Arm64Reg>, local: LocalId) {
+    fn handle_interval_end(&mut self, free_regs: &mut VecDeque<PhysReg>, local: LocalId) {
         if let Some(expired) = self.active_set.remove(&local) {
             free_regs.push_front(expired.reg);
         }
@@ -328,11 +334,11 @@ impl<'a> RegAlloc<'a> {
 
     fn handle_call(&mut self, constr: &CallConstraint) {
         let call_inst_idx = self.pos_map.pos_to_idx[&constr.pos];
-        let mut caller_saved_preserves: Vec<(StackSlotId, Arm64Reg)> = Vec::new();
+        let mut caller_saved_preserves: Vec<(StackSlotId, PhysReg)> = Vec::new();
 
         // 1. Save caller-saved registers that are live across the call
         for active in self.active_set.values() {
-            if CALLER_SAVED_REGS.contains(&active.reg)
+            if self.target.caller_saved().contains(&active.reg)
                 && active.interval.start < call_inst_idx as u32
                 && (active.interval.end - 1) > call_inst_idx as u32
             {
@@ -403,7 +409,7 @@ impl<'a> RegAlloc<'a> {
 
     fn handle_interval_start(
         &mut self,
-        free_regs: &mut VecDeque<Arm64Reg>,
+        free_regs: &mut VecDeque<PhysReg>,
         local: LocalId,
         interval: LiveInterval,
     ) {
@@ -420,7 +426,7 @@ impl<'a> RegAlloc<'a> {
 
     fn alloc_reg(
         &mut self,
-        free_regs: &mut VecDeque<Arm64Reg>,
+        free_regs: &mut VecDeque<PhysReg>,
         local: LocalId,
         interval: LiveInterval,
     ) {
@@ -450,7 +456,7 @@ impl<'a> RegAlloc<'a> {
         self.active_set.remove(&active.local);
     }
 
-    fn process_pos_events(&mut self, pos_events: &[PosEvent], free_regs: &mut VecDeque<Arm64Reg>) {
+    fn process_pos_events(&mut self, pos_events: &[PosEvent], free_regs: &mut VecDeque<PhysReg>) {
         for event in pos_events {
             match event.kind {
                 PosEventKind::IntervalEnd { local, .. } => {
@@ -485,7 +491,7 @@ impl<'a> RegAlloc<'a> {
         self.alloc_into(free_regs)
     }
 
-    pub fn alloc_into(mut self, free_regs: Vec<Arm64Reg>) -> AllocationResult {
+    pub fn alloc_into(mut self, free_regs: Vec<PhysReg>) -> AllocationResult {
         assert!(
             !free_regs.is_empty(),
             "RegAlloc::alloc_into called with an empty register list"
@@ -507,8 +513,8 @@ impl<'a> RegAlloc<'a> {
 
         self.add_return_moves();
 
-        let mut used_callee_saved: Vec<Arm64Reg> = self.used_callee_saved.into_iter().collect();
-        used_callee_saved.sort_by_key(|r| *r as u8);
+        let mut used_callee_saved: Vec<PhysReg> = self.used_callee_saved.into_iter().collect();
+        used_callee_saved.sort_by_key(|r| r.0);
 
         let callee_saved_size = used_callee_saved.len() * 8;
         let stack_alloc_size = self.stack_alloc.frame_size_bytes();
