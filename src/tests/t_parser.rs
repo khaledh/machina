@@ -264,6 +264,46 @@ fn test_parse_enum_variant_expr() {
 }
 
 #[test]
+fn test_parse_struct_update_expr() {
+    let source = r#"
+        type Color = Red | Green
+        type Point = { x: u64, y: u64, color: Color }
+
+        fn main() -> Point {
+            let p = Point { x: 1, y: 2, color: Color::Red };
+            { p | color: Color::Green }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        let last = exprs.last().expect("Expected block to have a tail expr");
+        match &last.kind {
+            ExprKind::StructUpdate { target, fields } => {
+                match &target.kind {
+                    ExprKind::Var(name) => assert_eq!(name, "p"),
+                    _ => panic!("Expected StructUpdate target to be Var"),
+                }
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "color");
+                match &fields[0].value.kind {
+                    ExprKind::EnumVariant { enum_name, variant } => {
+                        assert_eq!(enum_name, "Color");
+                        assert_eq!(variant, "Green");
+                    }
+                    _ => panic!("Expected enum variant value"),
+                }
+            }
+            _ => panic!("Expected StructUpdate expression"),
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
 fn test_parse_tuple_literal() {
     let source = r#"
         fn test() -> (u64, bool) {

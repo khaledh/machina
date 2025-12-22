@@ -60,11 +60,13 @@ fn main() -> u64 {
 fn scale(p: Point, dx: u64, dy: u64) -> Point {
     // Struct destructuring
     let Point { x, y, color } = p;
-    Point { x: x * dx, y: y * dy, color: color }
+
+    // Struct update (creates a new struct value)
+    { p | x: x * dx, y: y * dy }
 }
 
 fn change_color(p: Point, color: Color) -> Point {
-    Point { x: p.x, y: p.y, color: color }
+    { p | color: color }
 }
 
 fn same_color(p1: Point, p2: Point) -> bool {

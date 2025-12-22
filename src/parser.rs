@@ -3,8 +3,8 @@ use thiserror::Error;
 use crate::ast::NodeIdGen;
 use crate::ast::{
     BinaryOp, Decl, EnumVariant, Expr, ExprKind, Function, FunctionParam, Module, Pattern,
-    PatternKind, StructField, StructLitField, StructPatternField, TypeDecl, TypeDeclKind, TypeExpr,
-    TypeExprKind, UnaryOp,
+    PatternKind, StructField, StructLitField, StructPatternField, StructUpdateField, TypeDecl,
+    TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
@@ -799,8 +799,12 @@ impl<'a> Parser<'a> {
             }
             TK::LParen => self.parse_paren_or_tuple(),
             TK::LBrace => {
-                // Block expression
-                self.parse_block()
+                // Peek ahead for a pipe to determine if this is a struct update
+                if self.looks_like_struct_update() {
+                    self.parse_struct_update()
+                } else {
+                    self.parse_block()
+                }
             }
             TK::LBracket => {
                 // Array literal
@@ -847,6 +851,46 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::StructLit { name, fields },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_struct_update(&mut self) -> Result<Expr, ParseError> {
+        // "{ base | field: expr, ... }"
+        let marker = self.mark();
+
+        // Consume opening brace
+        self.consume(&TK::LBrace)?;
+
+        // Parse base expression
+        let base = self.parse_expr(0)?;
+
+        // Expect pipe
+        self.consume(&TK::Pipe)?;
+
+        // Parse field updates
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            let field_marker = parser.mark();
+            let name = parser.parse_ident()?;
+            parser.consume(&TK::Colon)?;
+            let value = parser.parse_expr(0)?;
+            Ok(StructUpdateField {
+                id: parser.id_gen.new_id(),
+                name,
+                value,
+                span: parser.close(field_marker),
+            })
+        })?;
+
+        // Consume closing brace
+        self.consume(&TK::RBrace)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::StructUpdate {
+                target: Box::new(base),
+                fields,
+            },
             span: self.close(marker),
         })
     }
@@ -944,6 +988,44 @@ impl<'a> Parser<'a> {
             TK::GreaterThanEq => Some((BinaryOp::GtEq, 3)),
             _ => None,
         }
+    }
+
+    fn looks_like_struct_update(&self) -> bool {
+        if self.curr_token.kind != TK::LBrace {
+            return false;
+        }
+
+        // Lookahead to find a struct update pipe token at the current level of nesting
+
+        let mut brace_level = 0usize;
+        let mut paren_level = 0usize;
+        let mut bracket_level = 0usize;
+
+        let mut idx = self.pos;
+        while idx < self.tokens.len() {
+            match self.tokens[idx].kind {
+                TK::LBrace => brace_level += 1,
+                TK::RBrace => {
+                    brace_level = brace_level.saturating_sub(1);
+                    if brace_level == 0 {
+                        return false;
+                    }
+                }
+                TK::LParen => paren_level += 1,
+                TK::RParen => paren_level = paren_level.saturating_sub(1),
+                TK::LBracket => bracket_level += 1,
+                TK::RBracket => bracket_level = bracket_level.saturating_sub(1),
+                TK::Pipe => {
+                    if brace_level == 1 && paren_level == 0 && bracket_level == 0 {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+            idx += 1;
+        }
+
+        false
     }
 
     fn parse_decl(&mut self) -> Result<Decl, ParseError> {

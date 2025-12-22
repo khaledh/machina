@@ -101,6 +101,14 @@ pub struct StructLitField {
     pub span: Span,
 }
 
+#[derive(Clone, Debug)]
+pub struct StructUpdateField {
+    pub id: NodeId,
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnumVariant {
     pub id: NodeId,
@@ -208,6 +216,12 @@ pub enum ExprKind {
     EnumVariant {
         enum_name: String,
         variant: String,
+    },
+
+    // Struct update
+    StructUpdate {
+        target: Box<Expr>,
+        fields: Vec<StructUpdateField>,
     },
 
     // Operators
@@ -360,6 +374,14 @@ impl StructField {
 }
 
 impl StructLitField {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.value, self.id)?;
+        Ok(())
+    }
+}
+
+impl StructUpdateField {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
         writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.value, self.id)?;
@@ -533,6 +555,16 @@ impl Expr {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Type: {}", pad1, enum_name)?;
                 writeln!(f, "{}Variant: {}", pad1, variant)?;
+            }
+            ExprKind::StructUpdate { target, fields } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}StructUpdate [{}]", pad, self.id)?;
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Fields:", pad1)?;
+                for field in fields {
+                    field.fmt_with_indent(f, level + 2)?;
+                }
             }
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);

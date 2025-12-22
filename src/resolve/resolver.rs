@@ -466,6 +466,15 @@ impl SymbolResolver {
                 self.check_expr(target);
             }
 
+            ExprKind::StructUpdate { target, fields } => {
+                // Resolve the target
+                self.check_expr(target);
+                // Resolve each field value
+                for field in fields {
+                    self.check_expr(&field.value);
+                }
+            }
+
             ExprKind::EnumVariant { enum_name, variant } => {
                 // Resolve the enum name
                 let Some(Symbol {

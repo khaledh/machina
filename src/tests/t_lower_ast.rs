@@ -343,3 +343,60 @@ fn test_lower_enum_variant_literal() {
 
     assert!(matches!(entry_block.terminator, Terminator::Return));
 }
+
+#[test]
+fn test_lower_struct_update() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn main() -> Point {
+            let p = Point { x: 1, y: 2 };
+            { p | y: 9 }
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let mut lowerer = FuncLowerer::new(&analyzed, func);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+
+    let p_local = body
+        .locals
+        .iter()
+        .enumerate()
+        .find(|(_, local)| local.name.as_deref() == Some("p"))
+        .map(|(idx, _)| LocalId(idx as u32))
+        .expect("p local not found");
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+    let mut saw_copy = false;
+    let mut saw_update = false;
+
+    for stmt in &entry_block.stmts {
+        match stmt {
+            Statement::CopyAggregate { dst, src } => {
+                if dst.base() == LocalId(0) && src.base() == p_local {
+                    saw_copy = true;
+                }
+            }
+            Statement::CopyScalar { dst, src } => {
+                if dst.base() == LocalId(0)
+                    && dst.projections() == &[Projection::Field { index: 1 }]
+                {
+                    if let Rvalue::Use(Operand::Const(Const::Int { value, .. })) = src {
+                        if *value == 9 {
+                            saw_update = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert!(saw_copy, "expected base aggregate to be copied");
+    assert!(saw_update, "expected updated field write to be emitted");
+    assert!(matches!(entry_block.terminator, Terminator::Return));
+}

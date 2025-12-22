@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    BinaryOp, Expr, ExprKind, Function, NodeId, Pattern, PatternKind, StructLitField, TypeDeclKind,
-    TypeExpr,
+    BinaryOp, Expr, ExprKind, Function, NodeId, Pattern, PatternKind, StructLitField,
+    StructUpdateField, TypeDeclKind, TypeExpr,
 };
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
@@ -459,6 +459,52 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(enum_ty.clone())
     }
 
+    fn type_check_struct_update(
+        &mut self,
+        target: &Expr,
+        fields: &[StructUpdateField],
+    ) -> Result<Type, TypeCheckError> {
+        // Type check target
+        let target_ty = self.type_check_expr(target)?;
+        let struct_ty = match &target_ty {
+            Type::Struct { .. } => target_ty.clone(),
+            _ => {
+                return Err(TypeCheckError::InvalidStructUpdateTarget(
+                    target_ty,
+                    target.span,
+                ));
+            }
+        };
+
+        let mut seen_fields = HashSet::new();
+        for field in fields {
+            if !struct_ty.has_field(&field.name) {
+                return Err(TypeCheckError::UnknownStructField(
+                    field.name.clone(),
+                    field.span,
+                ));
+            }
+            if !seen_fields.insert(&field.name) {
+                return Err(TypeCheckError::DuplicateStructField(
+                    field.name.clone(),
+                    field.span,
+                ));
+            }
+            let expected_ty = struct_ty.struct_field_type(&field.name);
+            let actual_ty = self.type_check_expr(&field.value)?;
+            if actual_ty != expected_ty {
+                return Err(TypeCheckError::StructFieldTypeMismatch(
+                    field.name.clone(),
+                    expected_ty,
+                    actual_ty,
+                    field.span,
+                ));
+            }
+        }
+
+        Ok(struct_ty)
+    }
+
     fn type_check_block(&mut self, body: &Vec<Expr>) -> Result<Type, TypeCheckError> {
         let mut last_type = Type::Unit;
         for expr in body {
@@ -830,6 +876,10 @@ impl<'c, 'b> Checker<'c, 'b> {
             ExprKind::StructLit { name, fields } => self.type_check_struct_lit(expr, name, fields),
 
             ExprKind::StructField { target, field } => self.type_check_field_access(target, field),
+
+            ExprKind::StructUpdate { target, fields } => {
+                self.type_check_struct_update(target, fields)
+            }
 
             ExprKind::EnumVariant { enum_name, variant } => {
                 self.type_check_enum_variant(enum_name, variant, expr.span)

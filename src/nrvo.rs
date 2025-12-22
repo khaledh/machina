@@ -185,6 +185,17 @@ impl<'a> NrvoSafetyChecker<'a> {
                 _ => self.check_expr(target, false),
             },
 
+            ExprKind::StructUpdate { target, fields } => {
+                let target_ok = match &target.kind {
+                    ExprKind::Var(_) if self.is_target_var(target) => true,
+                    _ => self.check_expr(target, false),
+                };
+                let fields_ok = fields
+                    .iter()
+                    .all(|field| self.check_expr(&field.value, false));
+                target_ok && fields_ok
+            }
+
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
 
             ExprKind::BinOp { left, right, .. } => {

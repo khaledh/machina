@@ -386,3 +386,123 @@ fn test_struct_pattern_duplicate_field() {
         }
     }
 }
+
+#[test]
+fn test_struct_update_basic() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            let q = { p | x: 3 };
+            q.x
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_struct_update_unknown_field() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            let _q = { p | z: 3 };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::UnknownStructField(_, _) => {
+                // Expected error
+            }
+            e => panic!("Expected UnknownStructField error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_struct_update_duplicate_field() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            let _q = { p | x: 3, x: 4 };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::DuplicateStructField(_, _) => {
+                // Expected error
+            }
+            e => panic!("Expected DuplicateStructField error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_struct_update_field_type_mismatch() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            let _q = { p | x: true };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::StructFieldTypeMismatch(_, _, _, _) => {
+                // Expected error
+            }
+            e => panic!("Expected StructFieldTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_struct_update_invalid_target() {
+    let source = r#"
+        fn test() -> u64 {
+            let _q = { 1 | x: 2 };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::InvalidStructUpdateTarget(_, _) => {
+                // Expected error
+            }
+            e => panic!("Expected InvalidStructUpdateTarget error, got {:?}", e),
+        }
+    }
+}

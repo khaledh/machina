@@ -6,18 +6,37 @@ development. The compiler currently targets only ARM64 assembly.
 ## Current features
 
 - Expression oriented syntax
-- Variables: `let` (immutable), `var` (mutable) with lexical scoping
+- Bindings: `let` (immutable), `var` (mutable)
 - Arithmetic and comparison operators
+- Blocks (last expression is the block value)
+- Lexical scoping
+
+### Types
+
 - Basic types: `u64`, `bool`, `()`
-- Compound types: tuples `(u64, bool)`, arrays `u64[N]`, multi-dimensional arrays `u64[M, N]`
-- Type aliases: `type Size = u64`
-- Enums: `type Color = Red | Green | Blue`
+- Arrays: `u64[N]`, multi-dimensional arrays: `u64[M, N]`, `let a = [1, 2, 3]`
+- Tuples: `(u64, bool)`, `let t = (10, true)`
+- Structs: `type Point = { x: u64, y: u64 }`, `let p = Point { x: 10, y: 20 }`
+- Enums: `type Color = Red | Green | Blue`, `let c = Color::Green`
+- Type aliases: `type Size = u64`, `let s: Size = 10`
 - Array destructuring: `let [a, b, c] = [1, 2, 3]`
 - Tuple destructuring: `let (x, y) = (1, true)`
 - Struct destructuring: `let Point { x, y } = p`
-- Blocks (last expression is the block value)
-- Control flow: `if`/`else`, `while`
-- Functions and function calls (recursion supported)
+- Struct update: `{ base | x: 10 }`
+
+### Control flow
+
+- `if`/`else`
+- `while`
+
+### Functions
+
+- `fn foo(arg: arg_type, ...) -> return_type { body }`
+- Recursion
+- Pass-by-value and return-by-value (optimized)
+
+### Code generation
+
 - Code generation to ARM64 assembly
 
 ## Example
@@ -59,11 +78,13 @@ fn main() -> u64 {
 fn scale(p: Point, dx: u64, dy: u64) -> Point {
     // Struct destructuring
     let Point { x, y, color } = p;
-    Point { x: x * dx, y: y * dy, color: color }
+
+    // Struct update (creates a new struct value)
+    { p | x: x * dx, y: y * dy }
 }
 
 fn change_color(p: Point, color: Color) -> Point {
-    Point { x: p.x, y: p.y, color: color }
+    { p | color: color }
 }
 
 fn same_color(p1: Point, p2: Point) -> bool {

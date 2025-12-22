@@ -416,6 +416,43 @@ impl<'a> FuncLowerer<'a> {
                 Ok(())
             }
 
+            EK::StructUpdate { target, fields } => {
+                // Evaluate the base expression first
+                let base_place = match self.lower_expr_value(target)? {
+                    ExprValue::Aggregate(place) => place,
+                    ExprValue::Scalar(_) => return Err(LowerError::ExprIsNotAggregate(target.id)),
+                };
+
+                // Copy base into dst unless it's already the same place
+                if base_place.base() != dst.base() || base_place.projections() != dst.projections()
+                {
+                    self.fb.push_stmt(
+                        self.curr_block,
+                        Statement::CopyAggregate {
+                            dst: dst.clone(),
+                            src: base_place,
+                        },
+                    );
+                }
+
+                // Overwrite updated fields
+                let struct_ty = self.ty_for_node(expr.id)?;
+                for field in fields {
+                    let field_ty = struct_ty.struct_field_type(&field.name);
+                    let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
+                    let field_index = struct_ty.struct_field_index(&field.name);
+
+                    self.emit_agg_projection(
+                        &dst,
+                        field_ty_id,
+                        &field.value,
+                        Projection::Field { index: field_index },
+                    )?;
+                }
+
+                Ok(())
+            }
+
             EK::ArrayLit(elem_exprs) => {
                 // Lower each element into its index.
                 let elem_ty = {
@@ -993,7 +1030,10 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
-            EK::ArrayLit(..) | EK::TupleLit(..) | EK::StructLit { .. } => {
+            EK::ArrayLit(..)
+            | EK::TupleLit(..)
+            | EK::StructLit { .. }
+            | EK::StructUpdate { .. } => {
                 // Aggregate literal: build in place.
                 self.lower_agg_into(dst, expr)
             }
