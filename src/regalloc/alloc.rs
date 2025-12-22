@@ -169,6 +169,7 @@ pub struct RegAlloc<'a> {
     stack_alloc: StackAllocator,
     moves: FnMoveList,
     used_callee_saved: HashSet<PhysReg>,
+    ret_interval_start: Option<u32>,
 }
 
 impl<'a> RegAlloc<'a> {
@@ -188,6 +189,7 @@ impl<'a> RegAlloc<'a> {
             stack_alloc: StackAllocator::new(),
             moves: FnMoveList::new(),
             used_callee_saved: HashSet::new(),
+            ret_interval_start: None,
         }
     }
 
@@ -427,6 +429,16 @@ impl<'a> RegAlloc<'a> {
             return;
         }
 
+        // Prefer the return register for the return local when possible.
+        if local == self.body.ret_local && self.local_class(local) == LocalClass::Reg {
+            let ret_reg = self.target.result_reg();
+            if free_regs.contains(&ret_reg) {
+                free_regs.retain(|r| *r != ret_reg);
+                self.assign_reg(local, interval, ret_reg);
+                return;
+            }
+        }
+
         if self.local_class(local) == LocalClass::StackAddr {
             self.alloc_stack_addr(local);
         } else {
@@ -440,6 +452,30 @@ impl<'a> RegAlloc<'a> {
         local: LocalId,
         interval: LiveInterval,
     ) {
+        // Optimization: If possible, prevent non-return locals from using the
+        // return register if they overlap with the return value interval.
+        if local != self.body.ret_local {
+            if let Some(ret_start) = self.ret_interval_start {
+                // We only care if this local interval overlaps with the ret value interval.
+                if interval.end > ret_start {
+                    let ret_reg = self.target.result_reg();
+                    if free_regs.contains(&ret_reg) {
+                        // Prefer non‑return regs if possible.
+                        if let Some((idx, reg)) = free_regs
+                            .iter()
+                            .enumerate()
+                            .find(|(_, r)| **r != ret_reg)
+                            .map(|(idx, r)| (idx, *r))
+                        {
+                            free_regs.remove(idx);
+                            self.assign_reg(local, interval, reg);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         match free_regs.pop_front() {
             Some(reg) => {
                 self.assign_reg(local, interval, reg);
@@ -509,6 +545,13 @@ impl<'a> RegAlloc<'a> {
 
         let live_map = LivenessAnalysis::new(self.body).analyze();
         let intervals = build_live_intervals(self.body, &live_map);
+        let ret_local = self.body.ret_local;
+        let ret_ty = self.body.locals[ret_local.index()].ty;
+        if self.body.types.get(ret_ty).is_scalar() {
+            // Track when the return value becomes live to optimize for assigning it
+            // the return register.
+            self.ret_interval_start = intervals.get(&ret_local).map(|iv| iv.start);
+        }
 
         let mut free_regs = VecDeque::from(free_regs);
 

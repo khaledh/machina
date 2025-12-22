@@ -292,6 +292,7 @@ impl<'a> FuncCodegen<'a> {
         src: &Rvalue,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
+        let is_zero = Self::is_zero_rvalue(src);
         if dst.projections().is_empty() {
             // Fast-path: direct register assignment for simple rvalues.
             if let Some(MappedLocal::Reg(dst_reg)) = self.alloc.alloc_map.get(&dst.base())
@@ -315,27 +316,54 @@ impl<'a> FuncCodegen<'a> {
                 let base_offset = self.get_stack_offset(slot)? as usize;
                 let total = base_offset + offset;
                 if let Ok(total) = u32::try_from(total) {
-                    let value_reg = self.emit_rvalue(src, &mut asm)?;
-                    self.emit_store_to_sp(total, dst.ty(), value_reg, &mut asm)?;
+                    if is_zero {
+                        self.emit_store_to_sp(total, dst.ty(), R::Xzr, &mut asm)?;
+                    } else {
+                        let value_reg = self.emit_rvalue(src, &mut asm)?;
+                        self.emit_store_to_sp(total, dst.ty(), value_reg, &mut asm)?;
+                    }
                     return Ok(asm);
                 }
             } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base())
                 && self.can_use_imm_offset(dst.ty(), offset)
             {
                 // Base register with constant offset.
-                let value_reg = self.emit_rvalue(src, &mut asm)?;
                 let base_reg = self.reg(*reg);
-                self.emit_store_at_addr_reg_imm(base_reg, offset, dst.ty(), value_reg, &mut asm)?;
+                if is_zero {
+                    self.emit_store_at_addr_reg_imm(base_reg, offset, dst.ty(), R::Xzr, &mut asm)?;
+                } else {
+                    let value_reg = self.emit_rvalue(src, &mut asm)?;
+                    self.emit_store_at_addr_reg_imm(
+                        base_reg,
+                        offset,
+                        dst.ty(),
+                        value_reg,
+                        &mut asm,
+                    )?;
+                }
                 return Ok(asm);
             }
         } else {
             // Compute address first, then value; preserve addr across rvalue evaluation.
             let _ = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
             asm.push_str("  mov x14, x17\n");
-            let value_reg = self.emit_rvalue(src, &mut asm)?;
-            self.emit_store_at_addr_reg(R::X14, dst.ty(), value_reg, &mut asm)?;
+            if is_zero {
+                self.emit_store_at_addr_reg(R::X14, dst.ty(), R::Xzr, &mut asm)?;
+            } else {
+                let value_reg = self.emit_rvalue(src, &mut asm)?;
+                self.emit_store_at_addr_reg(R::X14, dst.ty(), value_reg, &mut asm)?;
+            }
         }
         Ok(asm)
+    }
+
+    fn is_zero_rvalue(src: &Rvalue) -> bool {
+        matches!(
+            src,
+            Rvalue::Use(Operand::Const(Const::Unit))
+                | Rvalue::Use(Operand::Const(Const::Bool(false)))
+                | Rvalue::Use(Operand::Const(Const::Int { value: 0, .. }))
+        )
     }
 
     fn emit_init_aggregate(
