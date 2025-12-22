@@ -34,13 +34,9 @@ type Line = {
   end: Point,
 }
 
-fn unpack_point(p: Point) -> (u64, u64) {
-    (p.x, p.y)
-}
-
 fn add_points(a: Point, b: Point) -> Point {
-    let (x1, y1) = unpack_point(a);
-    let (x2, y2) = unpack_point(b);
+    let Point { x: x1, y: y1 } = a;
+    let Point { x: x2, y: y2 } = b;
     Point {
         x: x1 + x2,
         y: y1 + y2,

@@ -267,3 +267,95 @@ fn test_var_tuple_pattern() {
 
     let _ctx = type_check_source(source).expect("Failed to type check");
 }
+
+#[test]
+fn test_struct_pattern_shorthand() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let Point { x, y } = Point { x: 1, y: 2 };
+            x + y
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_struct_pattern_missing_field() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let Point { x } = Point { x: 1, y: 2 };
+            x
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::StructFieldsMissing(_, _) => {
+                // Expected error
+            }
+            e => panic!("Expected StructFieldsMissing error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_struct_pattern_unknown_field() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let Point { z } = Point { x: 1, y: 2 };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::UnknownStructField(_, _) => {
+                // Expected error
+            }
+            e => panic!("Expected UnknownStructField error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_struct_pattern_duplicate_field() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let Point { x: a, x: b } = Point { x: 1, y: 2 };
+            a + b
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::DuplicateStructField(_, _) => {
+                // Expected error
+            }
+            e => panic!("Expected DuplicateStructField error, got {:?}", e),
+        }
+    }
+}

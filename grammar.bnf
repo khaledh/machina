@@ -40,10 +40,14 @@ LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr
 VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr
 
 # Patterns
-Pattern            ::= IdentPattern | ArrayPattern | TuplePattern
+Pattern            ::= IdentPattern | ArrayPattern | TuplePattern | StructPattern
 IdentPattern       ::= Identifier
 ArrayPattern       ::= "[" PatternList "]"
 TuplePattern       ::= "(" Pattern "," PatternList? ")"
+StructPattern      ::= Identifier "{" StructPatternFieldList? "}"
+
+StructPatternFieldList ::= StructPatternField ("," StructPatternField)* ","?
+StructPatternField ::= Identifier ( ":" Pattern )?
 
 PatternList        ::= Pattern ( "," Pattern )* ","?
 

@@ -3,7 +3,8 @@ use thiserror::Error;
 use crate::ast::NodeIdGen;
 use crate::ast::{
     BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, PatternKind,
-    StructField, StructLitField, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
+    StructField, StructLitField, StructPatternField, TypeDecl, TypeDeclKind, TypeExpr,
+    TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
@@ -394,6 +395,12 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         match &self.curr_token.kind {
+            TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::LBrace) => {
+                // Struct pattern: Ident { ... }
+                self.advance();
+                let name = name.clone();
+                self.parse_struct_pattern(marker, name)
+            }
             TK::Ident(name) => {
                 // Identifier pattern
                 let name = name.clone();
@@ -450,6 +457,52 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::ExpectedPattern(self.curr_token.clone())),
         }
+    }
+
+    fn parse_struct_pattern(
+        &mut self,
+        marker: Marker,
+        name: String,
+    ) -> Result<Pattern, ParseError> {
+        // Struct pattern fields are parsed as either:
+        // `name: <pattern>` (explicit) or
+        // `name` (shorthand)
+
+        self.consume(&TK::LBrace)?; // consume '{'
+
+        // Parse fields
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            let field_marker = parser.mark();
+
+            // Parse field name
+            let name = parser.parse_ident()?;
+
+            let pattern = if parser.curr_token.kind == TK::Colon {
+                // Explicit field pattern
+                parser.advance();
+                parser.parse_pattern()?
+            } else {
+                // Shorthand field pattern (expand to `Ident { name }` pattern)
+                Pattern {
+                    id: parser.id_gen.new_id(),
+                    kind: PatternKind::Ident { name: name.clone() },
+                    span: parser.close(field_marker.clone()),
+                }
+            };
+            Ok(StructPatternField {
+                name,
+                pattern,
+                span: parser.close(field_marker),
+            })
+        })?;
+
+        self.consume(&TK::RBrace)?; // consume '}'
+
+        Ok(Pattern {
+            id: self.id_gen.new_id(),
+            kind: PatternKind::Struct { name, fields },
+            span: self.close(marker),
+        })
     }
 
     fn parse_let(&mut self) -> Result<Expr, ParseError> {

@@ -722,6 +722,34 @@ impl<'a> FuncLowerer<'a> {
 
                 Ok(())
             }
+
+            PK::Struct { fields, .. } => {
+                // Destructure struct by projecting each field.
+                let src_place = match src_place {
+                    PlaceAny::Aggregate(place) => place,
+                    _ => return Err(LowerError::PatternMismatch(pattern.id)),
+                };
+
+                let Type::Struct { .. } = src_ty else {
+                    unreachable!("compiler bug: non-struct pattern");
+                };
+
+                for field in fields {
+                    let field_ty = src_ty.struct_field_type(&field.name);
+                    let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
+                    let field_index = src_ty.struct_field_index(&field.name);
+
+                    let field_place = self.project_place(
+                        &src_place,
+                        Projection::Field { index: field_index },
+                        field_ty_id,
+                    );
+
+                    self.bind_pattern_with_type(&field.pattern, field_place, &field_ty)?;
+                }
+
+                Ok(())
+            }
         }
     }
 

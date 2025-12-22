@@ -500,6 +500,69 @@ impl<'c, 'b> Checker<'c, 'b> {
                     )),
                 }
             }
+            PatternKind::Struct { name, fields } => {
+                let Type::Struct {
+                    name: ty_name,
+                    fields: struct_fields,
+                } = value_ty
+                else {
+                    return Err(TypeCheckError::PatternTypeMismatch(
+                        pattern.clone(),
+                        value_ty.clone(),
+                        pattern.span,
+                    ));
+                };
+
+                // Check that the struct type name matches
+                if ty_name != name {
+                    return Err(TypeCheckError::PatternTypeMismatch(
+                        pattern.clone(),
+                        value_ty.clone(),
+                        pattern.span,
+                    ));
+                }
+
+                let mut seen_fields = HashSet::new();
+
+                // Check each field pattern
+                for field in fields {
+                    // Check that the field is defined in the struct
+                    if !value_ty.has_field(&field.name) {
+                        return Err(TypeCheckError::UnknownStructField(
+                            field.name.clone(),
+                            field.span,
+                        ));
+                    }
+
+                    // Check for duplicate fields
+                    if !seen_fields.insert(&field.name) {
+                        return Err(TypeCheckError::DuplicateStructField(
+                            field.name.clone(),
+                            field.span,
+                        ));
+                    }
+
+                    // Type check the field
+                    let expected_ty = value_ty.struct_field_type(&field.name);
+                    self.type_check_pattern(&field.pattern, &expected_ty)?;
+                }
+
+                // Check for missing fields
+                let mut missing_fields = Vec::new();
+                for field in struct_fields {
+                    if !seen_fields.contains(&field.name) {
+                        missing_fields.push(field.name.clone());
+                    }
+                }
+                if !missing_fields.is_empty() {
+                    return Err(TypeCheckError::StructFieldsMissing(
+                        missing_fields.join(", "),
+                        pattern.span,
+                    ));
+                }
+
+                Ok(())
+            }
         }
     }
 

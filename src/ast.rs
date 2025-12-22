@@ -118,9 +118,26 @@ pub struct Pattern {
 
 #[derive(Clone, Debug)]
 pub enum PatternKind {
-    Ident { name: String },
-    Array { patterns: Vec<Pattern> },
-    Tuple { patterns: Vec<Pattern> },
+    Ident {
+        name: String,
+    },
+    Array {
+        patterns: Vec<Pattern>,
+    },
+    Tuple {
+        patterns: Vec<Pattern>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<StructPatternField>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct StructPatternField {
+    pub name: String,
+    pub pattern: Pattern,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -397,7 +414,22 @@ impl Pattern {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
+            PatternKind::Struct { name, fields } => {
+                writeln!(f, "{}Struct({})", pad, name)?;
+                for field in fields {
+                    field.fmt_with_indent(f, level + 1)?;
+                }
+            }
         }
+        Ok(())
+    }
+}
+
+impl StructPatternField {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}{}:", pad1, self.name)?;
+        self.pattern.fmt_with_indent(f, level + 2)?;
         Ok(())
     }
 }

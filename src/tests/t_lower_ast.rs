@@ -241,3 +241,69 @@ fn test_lower_nrvo_binding_elides_copy() {
 
     assert!(matches!(entry_block.terminator, Terminator::Return));
 }
+
+#[test]
+fn test_lower_struct_pattern_binding() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn main() -> u64 {
+            let Point { x, y } = Point { x: 1, y: 2 };
+            x + y
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed
+        .module
+        .funcs()
+        .iter()
+        .find(|f| f.name == "main")
+        .copied()
+        .expect("main not found");
+    let mut lowerer = FuncLowerer::new(&analyzed, func);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+
+    let x_local = body
+        .locals
+        .iter()
+        .enumerate()
+        .find(|(_, local)| local.name.as_deref() == Some("x"))
+        .map(|(idx, _)| LocalId(idx as u32))
+        .expect("x local not found");
+    let y_local = body
+        .locals
+        .iter()
+        .enumerate()
+        .find(|(_, local)| local.name.as_deref() == Some("y"))
+        .map(|(idx, _)| LocalId(idx as u32))
+        .expect("y local not found");
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+    let mut x_bound = false;
+    let mut y_bound = false;
+
+    for stmt in &entry_block.stmts {
+        let Statement::CopyScalar { dst, src } = stmt else {
+            continue;
+        };
+        let Rvalue::Use(Operand::Copy(place)) = src else {
+            continue;
+        };
+        if dst.base() == x_local && dst.projections().is_empty() {
+            if place.projections() == &[Projection::Field { index: 0 }] {
+                x_bound = true;
+            }
+        }
+        if dst.base() == y_local && dst.projections().is_empty() {
+            if place.projections() == &[Projection::Field { index: 1 }] {
+                y_bound = true;
+            }
+        }
+    }
+
+    assert!(x_bound, "expected struct field x to be bound");
+    assert!(y_bound, "expected struct field y to be bound");
+}

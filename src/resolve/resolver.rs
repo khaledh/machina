@@ -341,6 +341,33 @@ impl SymbolResolver {
                     self.check_pattern(pattern, is_mutable);
                 }
             }
+            PatternKind::Struct { name, fields } => {
+                // Resolve struct type name
+                match self.lookup_symbol(name) {
+                    Some(Symbol {
+                        def_id,
+                        kind: SymbolKind::StructDef { .. },
+                        ..
+                    }) => {
+                        self.def_map_builder.record_use(pattern.id, *def_id);
+                    }
+                    Some(symbol) => {
+                        self.errors.push(ResolveError::ExpectedType(
+                            name.clone(),
+                            symbol.kind.clone(),
+                            pattern.span,
+                        ));
+                    }
+                    None => self
+                        .errors
+                        .push(ResolveError::StructUndefined(name.clone(), pattern.span)),
+                }
+
+                // Bind each field's sub-pattern
+                for field in fields {
+                    self.check_pattern(&field.pattern, is_mutable);
+                }
+            }
         }
     }
 

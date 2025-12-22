@@ -11,8 +11,9 @@ development. The compiler currently targets only ARM64 assembly.
 - Basic types: `u64`, `bool`, `()`
 - Compound types: tuples `(u64, bool)`, arrays `u64[N]`, multi-dimensional arrays `u64[M, N]`
 - Type aliases: `type Size = u64`
-- Array destructuring: let [a, b, c] = [1, 2, 3]
-- Tuple destructuring: let (x, y) = (1, true)
+- Array destructuring: `let [a, b, c] = [1, 2, 3]`
+- Tuple destructuring: `let (x, y) = (1, true)`
+- Struct destructuring: `let Point { x, y } = p`
 - Blocks (last expression is the block value)
 - Control flow: `if`/`else`, `while`
 - Functions and function calls (recursion supported)
