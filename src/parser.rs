@@ -180,12 +180,17 @@ impl<'a> Parser<'a> {
         } else if matches!(self.curr_token.kind, TK::Ident(_))
             && self.peek().map(|t| &t.kind) == Some(&TK::Pipe)
         {
-            // Enum definition: type Foo = Bar | Baz;
+            // Enum definition: type Foo = Bar | Baz
             self.parse_enum_def()?
         } else {
-            // Type alias: type Foo = Bar;
+            // Type alias: type Foo = Bar
             let ty = self.parse_type_expr()?;
-            self.consume(&TK::Semicolon)?;
+
+            // Consume optional ';'
+            if self.curr_token.kind == TK::Semicolon {
+                self.advance();
+            }
+
             TypeDeclKind::Alias { aliased_ty: ty }
         };
 

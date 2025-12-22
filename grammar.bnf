@@ -11,9 +11,11 @@ FunctionParam      ::= Identifier ":" TypeExpr
 
 # Type Declarations
 TypeDecl           ::= "type" Identifier "=" TypeDeclBody
-TypeDeclBody       ::= TypeExpr ";"     # Type alias
+TypeDeclBody       ::= TypeAliasDef
                      | StructDef
                      | EnumDef
+
+TypeAliasDef       ::=  TypeExpr ";"?
 
 StructDef          ::= "{" StructFieldList? "}"
 StructFieldList    ::= StructField ("," StructField)* ","?
