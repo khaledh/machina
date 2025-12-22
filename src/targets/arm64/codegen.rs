@@ -137,6 +137,7 @@ impl<'a> FuncCodegen<'a> {
     pub fn generate(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
+        // Pre-assign labels for non-entry blocks so branches can reference them.
         for (idx, _) in self.body.blocks.iter().enumerate() {
             let block_id = BlockId(idx as u32);
             if block_id != self.body.entry {
@@ -162,17 +163,23 @@ impl<'a> FuncCodegen<'a> {
 
     fn emit_prologue(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
+        // Function label
         asm.push_str(&format!(".global _{}\n", self.name));
         asm.push_str(&format!("_{}:\n", self.name));
+
+        // Push frame pointer and link register.
         asm.push_str("  stp x29, x30, [sp, #-16]!\n");
         asm.push_str("  mov x29, sp\n");
 
+        // Allocate the stack frame (including alignment padding).
         let frame_size = self.alloc.frame_size;
         if frame_size > 0 {
             let padded_frame_size = frame_size + self.stack_padding;
             asm.push_str(&format!("  sub sp, sp, #{padded_frame_size}\n"));
         }
 
+        // Save any callee-saved registers used by this function.
         let used_callee = &self.alloc.used_callee_saved;
         let mut offset = frame_size as i32;
         if !used_callee.is_empty() {
@@ -196,6 +203,7 @@ impl<'a> FuncCodegen<'a> {
     fn emit_epilogue(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
 
+        // Restore callee-saved registers in reverse order.
         let used_callee = &self.alloc.used_callee_saved;
         let mut offset = self.alloc.frame_size as i32;
         if !used_callee.is_empty() {
@@ -213,13 +221,16 @@ impl<'a> FuncCodegen<'a> {
             }
         }
 
+        // Pop the stack frame.
         if self.alloc.frame_size > 0 {
             let padded_frame_size = self.alloc.frame_size + self.stack_padding;
             asm.push_str(&format!("  add sp, sp, #{padded_frame_size}\n"));
         }
 
+        // Restore frame pointer and link register.
         asm.push_str("  ldp x29, x30, [sp], #16\n");
         asm.push_str("  ret\n");
+
         Ok(asm)
     }
 
@@ -229,30 +240,40 @@ impl<'a> FuncCodegen<'a> {
         block: &BasicBlock,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
+        // Emit block label (skip for entry block)
         if block_id != self.body.entry {
             asm.push_str(&format!("{}:\n", self.block_labels[&block_id]));
         }
 
+        // Emit statements, including any scheduled before/after moves.
         for (idx, stmt) in block.stmts.iter().enumerate() {
             let pos = InstPos::new(block_id, idx);
+
+            // Apply scheduled moves before the instruction.
             if let Some(moves) = self.alloc.moves.get_inst_moves(pos) {
                 asm.push_str(&self.emit_moves(&moves.before_moves)?);
             }
 
+            // Emit the instruction (preceded by comment for debugging).
             asm.push_str(&format!("  // {}\n", stmt));
             asm.push_str(&self.emit_stmt(stmt)?);
 
+            // Apply scheduled moves after the instruction.
             if let Some(moves) = self.alloc.moves.get_inst_moves(pos) {
                 asm.push_str(&self.emit_moves(&moves.after_moves)?);
             }
         }
 
+        // Final return move for this block if needed.
         if let Some(ret_move) = self.alloc.moves.get_return_move(block_id) {
             asm.push_str(&self.emit_move(ret_move)?);
         }
 
+        // Emit terminator.
         asm.push_str(&format!("  // {}\n", block.terminator));
         asm.push_str(&self.emit_terminator(block_id, &block.terminator)?);
+
         Ok(asm)
     }
 
@@ -272,10 +293,25 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
         if dst.projections().is_empty() {
+            // Fast-path: direct register assignment for simple rvalues.
+            if let Some(MappedLocal::Reg(dst_reg)) = self.alloc.alloc_map.get(&dst.base())
+                && matches!(src, Rvalue::Use(_))
+            {
+                let dst_reg = self.reg(*dst_reg);
+                if let Rvalue::Use(op) = src {
+                    let value_reg = self.materialize_operand(op, &mut asm, dst_reg)?;
+                    if value_reg != dst_reg {
+                        asm.push_str(&format!("  mov {}, {}\n", dst_reg, value_reg));
+                    }
+                    return Ok(asm);
+                }
+            }
             let value_reg = self.emit_rvalue(src, &mut asm)?;
             self.store_scalar(dst, value_reg, &mut asm)?;
         } else if let Some(offset) = self.const_projection_offset(dst.base(), dst.projections()) {
+            // Store to computed address with constant offset.
             if let Some(MappedLocal::StackAddr(slot)) = self.alloc.alloc_map.get(&dst.base()) {
+                // Stack slot with constant offset.
                 let base_offset = self.get_stack_offset(slot)? as usize;
                 let total = base_offset + offset;
                 if let Ok(total) = u32::try_from(total) {
@@ -286,6 +322,7 @@ impl<'a> FuncCodegen<'a> {
             } else if let Some(MappedLocal::Reg(reg)) = self.alloc.alloc_map.get(&dst.base())
                 && self.can_use_imm_offset(dst.ty(), offset)
             {
+                // Base register with constant offset.
                 let value_reg = self.emit_rvalue(src, &mut asm)?;
                 let base_reg = self.reg(*reg);
                 self.emit_store_at_addr_reg_imm(base_reg, offset, dst.ty(), value_reg, &mut asm)?;
@@ -307,9 +344,12 @@ impl<'a> FuncCodegen<'a> {
         fields: &[Operand],
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
+        // Compute base address of the aggregate.
         let base_addr = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
         let mut cur_kind = self.kind_for_local(dst.base());
 
+        // Write each aggregate field in-place at its computed offset.
         match &mut cur_kind {
             TyKind::Tuple { field_tys } => {
                 for (i, field) in fields.iter().enumerate() {
@@ -353,16 +393,25 @@ impl<'a> FuncCodegen<'a> {
         src: &Place<crate::mcir::types::Aggregate>,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
+        // Destination address
         let _ = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
         asm.push_str("  mov x14, x17\n");
+
+        // Source address
         let _ = self.emit_place_addr(src.base(), src.projections(), &mut asm)?;
+
+        // Copy aggregate using memcpy for now.
         let size = size_of_ty(&self.body.types, dst.ty());
         self.emit_memcpy(R::X14, R::X17, size, &mut asm)?;
+
         Ok(asm)
     }
 
     fn emit_call(&mut self, callee: &Callee) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
+        // Lookup callee name.
         let name = match callee {
             Callee::Def(def_id) => self
                 .def_names
@@ -371,7 +420,10 @@ impl<'a> FuncCodegen<'a> {
                 .ok_or(*def_id)
                 .map_err(CodegenError::CalleeNameNotFound)?,
         };
+
+        // Emit branch to callee.
         asm.push_str(&format!("  bl _{}\n", name));
+
         Ok(asm)
     }
 
@@ -381,6 +433,7 @@ impl<'a> FuncCodegen<'a> {
         term: &Terminator,
     ) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
         match term {
             Terminator::Return => {
                 asm.push_str(&self.emit_epilogue()?);
@@ -394,9 +447,11 @@ impl<'a> FuncCodegen<'a> {
                 else_bb,
             } => {
                 if let Operand::Const(Const::Bool(value)) = cond {
+                    // Constant condition: branch directly to the appropriate block.
                     let target = if *value { then_bb } else { else_bb };
                     asm.push_str(&format!("  b {}\n", self.block_labels[target]));
                 } else {
+                    // Evaluate condition and branch accordingly.
                     let cond_reg = self.materialize_operand(cond, &mut asm, R::X16)?;
                     asm.push_str(&format!("  cmp {}, #0\n", cond_reg));
                     asm.push_str(&format!("  b.ne {}\n", self.block_labels[then_bb]));
@@ -404,6 +459,7 @@ impl<'a> FuncCodegen<'a> {
                 }
             }
             Terminator::Unterminated => {
+                // Should not happen in well-formed IR.
                 let label = self
                     .block_labels
                     .get(&block_id)
@@ -419,6 +475,7 @@ impl<'a> FuncCodegen<'a> {
         match rv {
             Rvalue::Use(op) => self.materialize_operand(op, asm, R::X16),
             Rvalue::UnOp { op, arg } => {
+                // Unary ops reuse a scratch register for the result.
                 let operand_reg = self.materialize_operand(arg, asm, R::X16)?;
                 match op {
                     UnOp::Neg => {
@@ -430,6 +487,7 @@ impl<'a> FuncCodegen<'a> {
             Rvalue::BinOp { op, lhs, rhs } => {
                 match op {
                     BinOp::Add => {
+                        // Prefer immediate forms when one operand is a constant.
                         if let Operand::Const(Const::Int { value, .. }) = rhs {
                             let lhs_reg = self.materialize_operand(lhs, asm, R::X16)?;
                             let scratch_index = if lhs_reg == R::X16 { 1 } else { 0 };
@@ -456,6 +514,7 @@ impl<'a> FuncCodegen<'a> {
                         }
                     }
                     BinOp::Sub => {
+                        // Prefer immediate forms when subtracting a constant.
                         if let Operand::Const(Const::Int { value, .. }) = rhs {
                             let lhs_reg = self.materialize_operand(lhs, asm, R::X16)?;
                             let scratch_index = if lhs_reg == R::X16 { 1 } else { 0 };
@@ -530,6 +589,7 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<(), CodegenError> {
         let dst_ty = dst.ty();
         if dst.projections().is_empty() {
+            // Store directly to the base location.
             match self.alloc.alloc_map.get(&dst.base()) {
                 Some(MappedLocal::Reg(reg)) => {
                     let reg = self.reg(*reg);
@@ -546,6 +606,7 @@ impl<'a> FuncCodegen<'a> {
                 None => return Err(CodegenError::LocalNotFound(dst.base().0)),
             }
         } else {
+            // For projected stores, compute the address first.
             let addr_reg = self.emit_place_addr(dst.base(), dst.projections(), asm)?;
             self.store_at_addr(addr_reg, 0, dst_ty, value_reg, asm)?;
         }
@@ -558,6 +619,7 @@ impl<'a> FuncCodegen<'a> {
         asm: &mut String,
         scratch: R,
     ) -> Result<R, CodegenError> {
+        // Load/copy an operand into a register.
         match op {
             Operand::Copy(place) | Operand::Move(place) => {
                 self.load_place_value(place, asm, scratch)
@@ -588,6 +650,7 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<R, CodegenError> {
         let ty = place.ty();
         if place.projections().is_empty() {
+            // Base local: load directly from its assigned location.
             match self.alloc.alloc_map.get(&place.base()) {
                 Some(MappedLocal::Reg(reg)) => Ok(self.reg(*reg)),
                 Some(MappedLocal::Stack(slot)) => {
@@ -602,6 +665,7 @@ impl<'a> FuncCodegen<'a> {
             }
         } else if let Some(offset) = self.const_projection_offset(place.base(), place.projections())
         {
+            // Static projection offsets let us load directly.
             match self.alloc.alloc_map.get(&place.base()) {
                 Some(MappedLocal::StackAddr(slot)) => {
                     let base_offset = self.get_stack_offset(slot)? as usize;
@@ -620,10 +684,12 @@ impl<'a> FuncCodegen<'a> {
                 }
                 _ => {}
             }
+            // Fallback: compute the address dynamically.
             let addr_reg = self.emit_place_addr(place.base(), place.projections(), asm)?;
             self.load_at_addr(addr_reg, 0, ty, scratch, asm)?;
             Ok(scratch)
         } else {
+            // Dynamic projections always compute the address first.
             let addr_reg = self.emit_place_addr(place.base(), place.projections(), asm)?;
             self.load_at_addr(addr_reg, 0, ty, scratch, asm)?;
             Ok(scratch)
@@ -647,6 +713,7 @@ impl<'a> FuncCodegen<'a> {
         projections: &[Projection],
         asm: &mut String,
     ) -> Result<R, CodegenError> {
+        // Compute base address in x17, then walk projections.
         self.materialize_base_addr(base, asm)?;
         let mut cur_kind = self.kind_for_local(base);
 
@@ -735,6 +802,7 @@ impl<'a> FuncCodegen<'a> {
         base: LocalId,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Resolve a base local into an address in x17.
         match self.alloc.alloc_map.get(&base) {
             Some(MappedLocal::Reg(reg)) => {
                 let reg = self.reg(*reg);
@@ -757,6 +825,7 @@ impl<'a> FuncCodegen<'a> {
         if offset == 0 {
             return Ok(());
         }
+        // Prefer immediate offsets when possible.
         if Self::int_fits_add_sub_imm(offset) {
             asm.push_str(&format!("  add x17, x17, #{offset}\n"));
         } else {
@@ -773,6 +842,7 @@ impl<'a> FuncCodegen<'a> {
         dest_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Load a scalar from a stack slot.
         let offset = self.get_stack_offset(&slot)?;
         self.emit_load_from_sp(offset, ty, dest_reg, asm)?;
         Ok(())
@@ -785,6 +855,7 @@ impl<'a> FuncCodegen<'a> {
         dest_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // StackAddr holds an address; load through it.
         let offset = self.get_stack_offset(&slot)?;
         asm.push_str(&format!("  add x17, sp, #{offset}\n"));
         self.emit_load_at_addr_reg(R::X17, ty, dest_reg, asm)?;
@@ -798,6 +869,7 @@ impl<'a> FuncCodegen<'a> {
         src_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Store a scalar directly to a stack slot.
         let offset = self.get_stack_offset(&slot)?;
         self.emit_store_to_sp(offset, ty, src_reg, asm)
     }
@@ -809,6 +881,7 @@ impl<'a> FuncCodegen<'a> {
         src_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // StackAddr holds an address; store through it.
         let offset = self.get_stack_offset(&slot)?;
         asm.push_str(&format!("  add x17, sp, #{offset}\n"));
         self.emit_store_at_addr_reg(R::X17, ty, src_reg, asm)
@@ -822,6 +895,7 @@ impl<'a> FuncCodegen<'a> {
         dest_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Load from an address plus optional offset.
         if offset != 0 {
             self.add_to_reg(offset as i64, asm)?;
         }
@@ -836,6 +910,7 @@ impl<'a> FuncCodegen<'a> {
         src_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Store to an address plus optional offset.
         if offset != 0 {
             self.add_to_reg(offset as i64, asm)?;
         }
@@ -849,6 +924,7 @@ impl<'a> FuncCodegen<'a> {
         dest_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Load a scalar from [sp + offset] based on size.
         let size = size_of_ty(&self.body.types, ty);
         match size {
             1 => asm.push_str(&format!(
@@ -879,6 +955,7 @@ impl<'a> FuncCodegen<'a> {
         src_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Store a scalar to [sp + offset] based on size.
         let size = size_of_ty(&self.body.types, ty);
         match size {
             1 => asm.push_str(&format!(
@@ -905,6 +982,7 @@ impl<'a> FuncCodegen<'a> {
         dest_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Load from [addr_reg] based on size.
         let size = size_of_ty(&self.body.types, ty);
         match size {
             1 => asm.push_str(&format!("  ldrb {}, [{}]\n", to_w_reg(dest_reg), addr_reg)),
@@ -924,6 +1002,7 @@ impl<'a> FuncCodegen<'a> {
         dest_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Load from [addr_reg + imm] based on size.
         let size = size_of_ty(&self.body.types, ty);
         match size {
             1 => asm.push_str(&format!(
@@ -960,6 +1039,7 @@ impl<'a> FuncCodegen<'a> {
         src_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Store to [addr_reg] based on size.
         let size = size_of_ty(&self.body.types, ty);
         match size {
             1 => asm.push_str(&format!("  strb {}, [{}]\n", to_w_reg(src_reg), addr_reg)),
@@ -979,6 +1059,7 @@ impl<'a> FuncCodegen<'a> {
         src_reg: R,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Store to [addr_reg + imm] based on size.
         let size = size_of_ty(&self.body.types, ty);
         match size {
             1 => asm.push_str(&format!(
@@ -1006,6 +1087,7 @@ impl<'a> FuncCodegen<'a> {
     }
 
     fn can_use_imm_offset(&self, ty: TyId, offset: usize) -> bool {
+        // AArch64 scaled offsets are in units of the access size.
         let size = size_of_ty(&self.body.types, ty);
         if size == 0 || !offset.is_multiple_of(size) {
             return false;
@@ -1021,6 +1103,7 @@ impl<'a> FuncCodegen<'a> {
         length: usize,
         asm: &mut String,
     ) -> Result<(), CodegenError> {
+        // Simple byte-copy loop for aggregates.
         asm.push_str("  // -- memcpy -- (start)\n");
         asm.push_str(&format!("  mov x19, {}\n", dest_addr));
         asm.push_str(&format!("  mov x20, {}\n", src_addr));
@@ -1064,6 +1147,7 @@ impl<'a> FuncCodegen<'a> {
 
     fn emit_move(&mut self, mov: &Move) -> Result<String, CodegenError> {
         let mut asm = String::new();
+        // Emit a single move between abstract locations.
         let inst = match (&mov.from, &mov.to) {
             (Location::PlaceAddr(place), Location::Reg(to_reg)) => {
                 let _ = self.emit_place_addr_any(place, &mut asm)?;
@@ -1127,6 +1211,7 @@ impl<'a> FuncCodegen<'a> {
     }
 
     fn get_stack_offset(&self, slot: &StackSlotId) -> Result<u32, CodegenError> {
+        // Stack slots grow down; compute offset from SP.
         if slot.0 >= self.alloc.stack_slot_count {
             return Err(CodegenError::StackSlotOutOfBounds(
                 slot.0,
@@ -1149,6 +1234,7 @@ impl<'a> FuncCodegen<'a> {
     }
 
     fn field_offset(&self, field_tys: &[TyId], index: usize) -> usize {
+        // Sum sizes of preceding fields.
         field_tys
             .iter()
             .take(index)
@@ -1161,6 +1247,7 @@ impl<'a> FuncCodegen<'a> {
         fields: &[crate::mcir::types::StructField],
         index: usize,
     ) -> usize {
+        // Sum sizes of preceding struct fields.
         fields
             .iter()
             .take(index)
@@ -1169,6 +1256,7 @@ impl<'a> FuncCodegen<'a> {
     }
 
     fn const_projection_offset(&self, base: LocalId, projections: &[Projection]) -> Option<usize> {
+        // Compute a static offset when all indices are constant.
         let mut offset: usize = 0;
         let mut cur_kind = self.kind_for_local(base);
 
@@ -1235,6 +1323,7 @@ impl<'a> FuncCodegen<'a> {
         asm: &mut String,
         scratch_index: u8,
     ) -> String {
+        // Emit immediates when possible, otherwise materialize into a scratch reg.
         match policy {
             ImmPolicy::AddSubImm if Self::int_fits_add_sub_imm(value) => {
                 format!("#{}", value)
@@ -1261,6 +1350,7 @@ impl<'a> FuncCodegen<'a> {
 }
 
 fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
+    // Conservative size in bytes for scalar and aggregate types.
     match types.kind(ty) {
         TyKind::Unit => 0,
         TyKind::Bool => 1,

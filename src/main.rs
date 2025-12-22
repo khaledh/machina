@@ -232,7 +232,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
         if dump_liveness || dump_intervals {
             // --- Dump Liveness Analysis ---
             use regalloc::liveness::{
-                build_live_intervals, format_live_intervals, format_liveness_map, LivenessAnalysis,
+                LivenessAnalysis, build_live_intervals, format_live_intervals, format_liveness_map,
             };
             for (i, body) in bodies.iter().enumerate() {
                 let live_map = LivenessAnalysis::new(body).analyze();
