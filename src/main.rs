@@ -24,40 +24,55 @@ use crate::targets::TargetKind;
 use crate::typeck::type_check;
 
 const SOURCE: &str = r#"
-type Point = {
-  x: u64,
-  y: u64,
-}
+// Type Alias
+type Coord = u64
 
-type Line = {
-  start: Point,
-  end: Point,
+// Enum
+type Color = Red | Green | Blue
+
+// Struct
+type Point = {
+  x: Coord,
+  y: Coord,
   color: Color,
 }
 
-type Color = Red | Green | Blue
-
-fn color_matches(line1: Line, line2: Line) -> bool {
-    line1.color == line2.color
-}
-
 fn main() -> u64 {
-    let line1 = Line {
-        start: Point { x: 0, y: 0 },
-        end: Point { x: 10, y: 10 },
-        color: Color::Red,
-    };
-    let line2 = Line {
-        start: Point { x: 10, y: 10 },
-        end: Point { x: 20, y: 20 },
-        color: Color::Blue,
-    };
+    // Struct literals
+    let a = Point { x: 10, y: 20, color: Color::Green };
+    let b = Point { x: 5, y: 40, color: Color::Blue };
 
-    if color_matches(line1, line2) {
+    // Function calls (pass and return by value)
+    // (Optimized to pass by reference and RVO/NRVO internally)
+    let c = scale(a, 2, 3);
+    let d = change_color(b, Color::Green);
+
+    // Tuple destructuring
+    let (dx, dy) = delta(c, d);
+
+    if same_color(c, d) {
         42
     } else {
         21
     }
+}
+
+fn scale(p: Point, dx: u64, dy: u64) -> Point {
+    // Struct destructuring
+    let Point { x, y, color } = p;
+    Point { x: x * dx, y: y * dy, color: color }
+}
+
+fn change_color(p: Point, color: Color) -> Point {
+    Point { x: p.x, y: p.y, color: color }
+}
+
+fn same_color(p1: Point, p2: Point) -> bool {
+    p1.color == p2.color
+}
+
+fn delta(p1: Point, p2: Point) -> (u64, u64) {
+    (p2.x - p1.x, p2.y - p1.y)
 }
 "#;
 
