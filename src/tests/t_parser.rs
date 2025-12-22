@@ -1,8 +1,8 @@
 use super::*;
-use crate::ast::{ExprKind, Function, PatternKind, TypeExprKind};
+use crate::ast::{ExprKind, Function, Module, PatternKind, TypeDeclKind, TypeExprKind};
 use crate::lexer::{LexError, Lexer, Token};
 
-fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
+fn parse_module(source: &str) -> Result<Module, ParseError> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -10,7 +10,11 @@ fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
         .expect("Failed to tokenize");
 
     let mut parser = Parser::new(&tokens);
-    let module = parser.parse()?;
+    parser.parse()
+}
+
+fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
+    let module = parse_module(source)?;
     Ok(module.funcs().into_iter().cloned().collect())
 }
 
@@ -204,6 +208,58 @@ fn test_parse_tuple_type_nested() {
             }
         }
         _ => panic!("Expected tuple type"),
+    }
+}
+
+#[test]
+fn test_parse_enum_type_decl() {
+    let source = r#"
+        type Color = Red | Green | Blue
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let type_decls = module.type_decls();
+    assert_eq!(type_decls.len(), 1);
+
+    let type_decl = type_decls[0];
+    assert_eq!(type_decl.name, "Color");
+    match &type_decl.kind {
+        TypeDeclKind::Enum { variants } => {
+            let names = variants.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
+            assert_eq!(names, vec!["Red", "Green", "Blue"]);
+        }
+        _ => panic!("Expected enum type decl"),
+    }
+}
+
+#[test]
+fn test_parse_enum_variant_expr() {
+    let source = r#"
+        type Color = Red | Green
+
+        fn main() -> Color {
+            Color::Green
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        assert_eq!(exprs.len(), 1);
+        match &exprs[0].kind {
+            ExprKind::EnumVariant { enum_name, variant } => {
+                assert_eq!(enum_name, "Color");
+                assert_eq!(variant, "Green");
+            }
+            _ => panic!("Expected enum variant expr"),
+        }
+    } else {
+        panic!("Expected Block");
     }
 }
 

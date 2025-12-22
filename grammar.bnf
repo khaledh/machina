@@ -13,10 +13,14 @@ FunctionParam      ::= Identifier ":" TypeExpr
 TypeDecl           ::= "type" Identifier "=" TypeDeclBody
 TypeDeclBody       ::= TypeExpr ";"     # Type alias
                      | StructDef
+                     | EnumDef
 
 StructDef          ::= "{" StructFieldList? "}"
 StructFieldList    ::= StructField ("," StructField)* ","?
 StructField        ::= Identifier ":" TypeExpr
+
+EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
+EnumVariantDef     ::= Identifier
 
 # Type Expressions
 TypeExpr           ::= NamedType | ArrayType | TupleType
@@ -83,6 +87,7 @@ StructField        ::= "." Identifier
 
 Primary            ::= Literal
                      | Identifier
+                     | EnumVariant
                      | "(" Expr ")"
                      | Block
 
@@ -96,6 +101,8 @@ ExprList           ::= Expr ( "," Expr )* ","?
 StructLit          ::= Identifier "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
 StructLitField     ::= Identifier ":" Expr
+
+EnumVariant        ::= Identifier "::" Identifier
 
 # Terminals
 Unit               ::= "()"

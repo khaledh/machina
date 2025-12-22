@@ -1,6 +1,8 @@
 use crate::diagnostics::Span;
 use std::fmt;
 
+// -- Nodes ---
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
 
@@ -25,6 +27,9 @@ impl NodeIdGen {
         id
     }
 }
+
+// -- Module ---
+
 #[derive(Clone, Debug)]
 pub struct Module {
     pub decls: Vec<Decl>,
@@ -58,6 +63,8 @@ impl Module {
     }
 }
 
+// -- Declarations ---
+
 #[derive(Clone, Debug)]
 pub enum Decl {
     TypeDecl(TypeDecl),
@@ -75,6 +82,7 @@ pub struct TypeDecl {
 pub enum TypeDeclKind {
     Alias { aliased_ty: TypeExpr },
     Struct { fields: Vec<StructField> },
+    Enum { variants: Vec<EnumVariant> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +101,15 @@ pub struct StructLitField {
     pub span: Span,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub id: NodeId,
+    pub name: String,
+    pub span: Span,
+}
+
+// -- Functions ---
+
 #[derive(Clone, Debug)]
 pub struct Function {
     pub id: NodeId,
@@ -108,6 +125,8 @@ pub struct FunctionParam {
     pub name: String,
     pub typ: TypeExpr,
 }
+
+// -- Patterns ---
 
 #[derive(Clone, Debug)]
 pub struct Pattern {
@@ -140,6 +159,8 @@ pub struct StructPatternField {
     pub span: Span,
 }
 
+// -- Type Expressions ---
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeExpr {
     pub id: NodeId,
@@ -158,6 +179,8 @@ pub enum TypeExprKind {
         fields: Vec<TypeExpr>,
     },
 }
+
+// -- Expressions ---
 
 #[derive(Clone, Debug)]
 pub struct Expr {
@@ -181,6 +204,10 @@ pub enum ExprKind {
     StructLit {
         name: String,
         fields: Vec<StructLitField>,
+    },
+    EnumVariant {
+        enum_name: String,
+        variant: String,
     },
 
     // Operators
@@ -247,6 +274,8 @@ pub enum ExprKind {
     },
 }
 
+// -- Operators ---
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOp {
     // Arithmetic operators
@@ -268,6 +297,8 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Neg,
 }
+
+// -- Display ---
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -307,6 +338,12 @@ impl TypeDeclKind {
                 writeln!(f, "{}Struct:", pad)?;
                 for field in fields {
                     field.fmt_with_indent(f, level + 2)?;
+                }
+            }
+            TypeDeclKind::Enum { variants } => {
+                writeln!(f, "{}Enum:", pad)?;
+                for variant in variants {
+                    writeln!(f, "{}- {} [{}]", pad, variant.name, variant.id)?;
                 }
             }
         }
@@ -490,6 +527,12 @@ impl Expr {
                 writeln!(f, "{}Target:", pad1)?;
                 target.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Field: {}", pad1, field)?;
+            }
+            ExprKind::EnumVariant { enum_name, variant } => {
+                writeln!(f, "{}EnumVariant [{}]", pad, self.id)?;
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Type: {}", pad1, enum_name)?;
+                writeln!(f, "{}Variant: {}", pad1, variant)?;
             }
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);

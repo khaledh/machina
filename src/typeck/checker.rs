@@ -120,6 +120,19 @@ impl TypeChecker {
 
                     self.type_decls.insert(type_decl.name.clone(), ty);
                 }
+
+                TypeDeclKind::Enum { variants } => {
+                    // Collect the enum variant names
+                    let enum_variants = variants.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+
+                    // Create the enum type
+                    let ty = Type::Enum {
+                        name: type_decl.name.clone(),
+                        variants: enum_variants,
+                    };
+
+                    self.type_decls.insert(type_decl.name.clone(), ty);
+                }
             }
         }
         Ok(())
@@ -415,6 +428,35 @@ impl<'c, 'b> Checker<'c, 'b> {
                 target.span,
             )),
         }
+    }
+
+    fn type_check_enum_variant(
+        &mut self,
+        enum_name: &String,
+        variant: &String,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        // Lookup the type
+        let enum_ty = self
+            .type_decls
+            .get(enum_name)
+            .ok_or_else(|| TypeCheckError::UnknownEnumType(enum_name.clone(), span))?;
+
+        // Check that the type is an enum
+        let Type::Enum { variants, .. } = enum_ty else {
+            return Err(TypeCheckError::UnknownEnumType(enum_name.clone(), span));
+        };
+
+        // Check that the variant is valid
+        if !variants.contains(variant) {
+            return Err(TypeCheckError::UnknownEnumVariant(
+                enum_name.clone(),
+                variant.clone(),
+                span,
+            ));
+        }
+
+        Ok(enum_ty.clone())
     }
 
     fn type_check_block(&mut self, body: &Vec<Expr>) -> Result<Type, TypeCheckError> {
@@ -788,6 +830,10 @@ impl<'c, 'b> Checker<'c, 'b> {
             ExprKind::StructLit { name, fields } => self.type_check_struct_lit(expr, name, fields),
 
             ExprKind::StructField { target, field } => self.type_check_field_access(target, field),
+
+            ExprKind::EnumVariant { enum_name, variant } => {
+                self.type_check_enum_variant(enum_name, variant, expr.span)
+            }
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 

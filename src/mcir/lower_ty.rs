@@ -56,6 +56,13 @@ impl TyLowerer {
                     fields: struct_fields,
                 })
             }
+            Type::Enum { .. } => {
+                // Treat as a scalar tag for now
+                self.table.add(TyKind::Int {
+                    signed: false,
+                    bits: 64,
+                })
+            }
 
             Type::Unknown => panic!("Cannot lower unknown type"),
         };

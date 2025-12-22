@@ -270,6 +270,18 @@ impl<'a> FuncLowerer<'a> {
                 Ok(Operand::Const(c))
             }
 
+            // Enum variant
+            EK::EnumVariant { variant, .. } => {
+                let enum_ty = self.ty_for_node(expr.id)?;
+                let variant_index = enum_ty.enum_variant_index(variant);
+                let variant_tag = Const::Int {
+                    signed: false,
+                    bits: 64,
+                    value: variant_index as i128,
+                };
+                Ok(Operand::Const(variant_tag))
+            }
+
             // Place-based reads
             EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
                 let place = self.lower_place_scalar(expr)?;

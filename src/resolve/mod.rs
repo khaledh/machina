@@ -6,6 +6,12 @@ pub mod symbols;
 #[allow(unused_imports)]
 pub use def_map::{Def, DefId, DefIdGen, DefKind, DefMap, DefMapBuilder};
 #[allow(unused_imports)]
-pub use errors::{ResolveError, SymbolKind};
+pub use errors::ResolveError;
 #[allow(unused_imports)]
 pub use resolver::{SymbolResolver, resolve};
+#[allow(unused_imports)]
+pub use symbols::SymbolKind;
+
+#[cfg(test)]
+#[path = "../tests/t_resolve.rs"]
+mod tests;

@@ -20,6 +20,10 @@ pub enum Type {
         name: String,
         fields: Vec<StructField>,
     },
+    Enum {
+        name: String,
+        variants: Vec<String>,
+    },
 }
 
 impl PartialEq for Type {
@@ -41,6 +45,7 @@ impl PartialEq for Type {
             ) => e1 == e2 && d1 == d2,
             (Type::Tuple { fields: f1 }, Type::Tuple { fields: f2 }) => f1 == f2,
             (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
+            (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
             _ => false,
         }
     }
@@ -73,6 +78,11 @@ impl Hash for Type {
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
                 6u8.hash(state);
+                name.hash(state);
+            }
+            Type::Enum { name, .. } => {
+                // Nominal type: only hash the name
+                7u8.hash(state);
                 name.hash(state);
             }
         }
@@ -109,6 +119,10 @@ impl fmt::Display for Type {
                     .collect::<Vec<_>>();
                 write!(f, "{} {{ {} }}", name, fields_str.join(", "))
             }
+            Type::Enum { name, variants } => {
+                let variant_names = variants.iter().map(|v| v.as_str()).collect::<Vec<_>>();
+                write!(f, "{} = {}", name, variant_names.join(" | "))
+            }
         }
     }
 }
@@ -131,6 +145,7 @@ impl Type {
                 let total_size: usize = fields.iter().map(|f| f.ty.size_of()).sum();
                 total_size
             }
+            Type::Enum { .. } => 8, // scalar tag only for now
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -145,6 +160,7 @@ impl Type {
             Type::Struct { fields, .. } => {
                 fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
             }
+            Type::Enum { .. } => 8, // scalar tag only for now
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -157,7 +173,10 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
-        matches!(self, Type::Unit | Type::UInt64 | Type::Bool)
+        matches!(
+            self,
+            Type::Unit | Type::UInt64 | Type::Bool | Type::Enum { .. }
+        )
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
@@ -218,6 +237,16 @@ impl Type {
         match self {
             Type::Struct { fields, .. } => fields.iter().any(|f| f.name == field_name),
             _ => false,
+        }
+    }
+
+    pub fn enum_variant_index(&self, variant: &str) -> usize {
+        match self {
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .position(|v| v == variant)
+                .unwrap_or_else(|| panic!("Variant not found in enum")),
+            _ => panic!("Expected enum type"),
         }
     }
 }

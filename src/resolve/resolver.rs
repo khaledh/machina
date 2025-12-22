@@ -8,7 +8,8 @@ use crate::ast::{
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
 use crate::resolve::def_map::{Def, DefIdGen, DefKind, DefMap, DefMapBuilder};
-use crate::resolve::errors::{ResolveError, SymbolKind};
+use crate::resolve::errors::ResolveError;
+use crate::resolve::symbols::SymbolKind;
 use crate::resolve::symbols::{Scope, Symbol};
 use crate::types::BUILTIN_TYPES;
 
@@ -79,6 +80,7 @@ impl SymbolResolver {
             SymbolKind::Var { .. } => DefKind::LocalVar {
                 nrvo_eligible: false,
             },
+            SymbolKind::EnumDef { variants } => DefKind::EnumDef { variants },
         }
     }
 
@@ -125,6 +127,14 @@ impl SymbolResolver {
                     },
                     SymbolKind::StructDef {
                         fields: fields.clone(),
+                    },
+                ),
+                TypeDeclKind::Enum { variants } => (
+                    DefKind::EnumDef {
+                        variants: variants.clone(),
+                    },
+                    SymbolKind::EnumDef {
+                        variants: variants.clone(),
                     },
                 ),
             };
@@ -216,6 +226,9 @@ impl SymbolResolver {
                 for field in fields {
                     self.check_type_expr(&field.ty);
                 }
+            }
+            TypeDeclKind::Enum { .. } => {
+                // no type expressions to resolve
             }
         }
     }
@@ -375,7 +388,9 @@ impl SymbolResolver {
         match &type_expr.kind {
             TypeExprKind::Named(name) => match self.lookup_symbol(name) {
                 Some(symbol) => match &symbol.kind {
-                    SymbolKind::TypeAlias { .. } | SymbolKind::StructDef { .. } => {
+                    SymbolKind::TypeAlias { .. }
+                    | SymbolKind::StructDef { .. }
+                    | SymbolKind::EnumDef { .. } => {
                         self.def_map_builder.record_use(type_expr.id, symbol.def_id);
                     }
                     other => self.errors.push(ResolveError::ExpectedType(
@@ -449,6 +464,33 @@ impl SymbolResolver {
 
             ExprKind::StructField { target, .. } => {
                 self.check_expr(target);
+            }
+
+            ExprKind::EnumVariant { enum_name, variant } => {
+                // Resolve the enum name
+                let Some(Symbol {
+                    def_id,
+                    kind: SymbolKind::EnumDef { variants },
+                    ..
+                }) = self.lookup_symbol(enum_name)
+                else {
+                    self.errors
+                        .push(ResolveError::EnumUndefined(enum_name.clone(), expr.span));
+                    return;
+                };
+
+                // Ensure the variant is valid
+                if !variants.iter().any(|v| v.name == *variant) {
+                    self.errors.push(ResolveError::EnumVariantUndefined(
+                        enum_name.clone(),
+                        variant.clone(),
+                        expr.span,
+                    ));
+                    return;
+                }
+
+                // Record the use
+                self.def_map_builder.record_use(expr.id, *def_id);
             }
 
             ExprKind::BinOp { left, right, .. } => {

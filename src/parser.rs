@@ -2,8 +2,8 @@ use thiserror::Error;
 
 use crate::ast::NodeIdGen;
 use crate::ast::{
-    BinaryOp, Decl, Expr, ExprKind, Function, FunctionParam, Module, Pattern, PatternKind,
-    StructField, StructLitField, StructPatternField, TypeDecl, TypeDeclKind, TypeExpr,
+    BinaryOp, Decl, EnumVariant, Expr, ExprKind, Function, FunctionParam, Module, Pattern,
+    PatternKind, StructField, StructLitField, StructPatternField, TypeDecl, TypeDeclKind, TypeExpr,
     TypeExprKind, UnaryOp,
 };
 use crate::diagnostics::{Position, Span};
@@ -176,10 +176,12 @@ impl<'a> Parser<'a> {
         // Branch based on the next token
         let kind = if self.curr_token.kind == TK::LBrace {
             // Struct definition: type Foo = { ... }
-            self.advance(); // consume '{'
-            let fields = self.parse_struct_fields()?;
-            self.consume(&TK::RBrace)?; // consume '}'
-            TypeDeclKind::Struct { fields }
+            self.parse_struct_def()?
+        } else if matches!(self.curr_token.kind, TK::Ident(_))
+            && self.peek().map(|t| &t.kind) == Some(&TK::Pipe)
+        {
+            // Enum definition: type Foo = Bar | Baz;
+            self.parse_enum_def()?
         } else {
             // Type alias: type Foo = Bar;
             let ty = self.parse_type_expr()?;
@@ -194,8 +196,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_struct_fields(&mut self) -> Result<Vec<StructField>, ParseError> {
-        self.parse_list(TK::Comma, TK::RBrace, |parser| {
+    fn parse_struct_def(&mut self) -> Result<TypeDeclKind, ParseError> {
+        self.consume(&TK::LBrace)?;
+
+        // Parse struct fields
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
             let marker = parser.mark();
             // Parse field name
             let name = parser.parse_ident()?;
@@ -212,7 +217,43 @@ impl<'a> Parser<'a> {
                 ty,
                 span: parser.close(marker),
             })
-        })
+        })?;
+
+        self.consume(&TK::RBrace)?;
+        Ok(TypeDeclKind::Struct { fields })
+    }
+
+    fn parse_enum_def(&mut self) -> Result<TypeDeclKind, ParseError> {
+        let mut variants = Vec::new();
+
+        let marker = self.mark();
+
+        // Parse first variant
+        let name = self.parse_ident()?;
+        variants.push(EnumVariant {
+            id: self.id_gen.new_id(),
+            name,
+            span: self.close(marker),
+        });
+
+        // Parse remaining variants
+        while self.curr_token.kind == TK::Pipe {
+            self.advance(); // consume '|'
+            let marker = self.mark();
+            let name = self.parse_ident()?;
+            variants.push(EnumVariant {
+                id: self.id_gen.new_id(),
+                name,
+                span: self.close(marker),
+            });
+        }
+
+        // Consume optional ';'
+        if self.curr_token.kind == TK::Semicolon {
+            self.advance();
+        }
+
+        Ok(TypeDeclKind::Enum { variants })
     }
 
     fn parse_function(&mut self) -> Result<Function, ParseError> {
@@ -698,6 +739,19 @@ impl<'a> Parser<'a> {
         match &self.curr_token.kind {
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
+            TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
+                // Enum variant: Ident :: Variant
+                let marker = self.mark();
+                let enum_name = name.clone();
+                self.advance(); // ident
+                self.consume(&TK::DoubleColon)?;
+                let variant = self.parse_ident()?;
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::EnumVariant { enum_name, variant },
+                    span: self.close(marker),
+                })
+            }
             TK::Ident(name) => {
                 let marker = self.mark();
                 let name = name.clone();

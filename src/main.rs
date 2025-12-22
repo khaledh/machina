@@ -32,26 +32,32 @@ type Point = {
 type Line = {
   start: Point,
   end: Point,
+  color: Color,
 }
 
-fn add_points(a: Point, b: Point) -> Point {
-    let Point { x: x1, y: y1 } = a;
-    let Point { x: x2, y: y2 } = b;
-    Point {
-        x: x1 + x2,
-        y: y1 + y2,
-    }
+type Color = Red | Green | Blue
+
+fn color_matches(line1: Line, line2: Line) -> bool {
+    line1.color == line2.color
 }
 
 fn main() -> u64 {
-    let arr = [
-        Point { x: 10, y: 20 },
-        Point { x: 30, y: 40 },
-        Point { x: 50, y: 60 },
-    ];
-    let sum1 = add_points(arr[0], arr[1]);
-    let sum2 = add_points(sum1, arr[2]);
-    sum2.x + sum2.y
+    let line1 = Line {
+        start: Point { x: 0, y: 0 },
+        end: Point { x: 10, y: 10 },
+        color: Color::Red,
+    };
+    let line2 = Line {
+        start: Point { x: 10, y: 10 },
+        end: Point { x: 20, y: 20 },
+        color: Color::Blue,
+    };
+
+    if color_matches(line1, line2) {
+        42
+    } else {
+        21
+    }
 }
 "#;
 

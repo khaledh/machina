@@ -39,6 +39,13 @@ pub(crate) fn resolve_type_expr(
                             fields: struct_fields,
                         })
                     }
+                    DefKind::EnumDef { variants } => {
+                        let names = variants.iter().map(|v| v.name.clone()).collect();
+                        Ok(Type::Enum {
+                            name: def.name.clone(),
+                            variants: names,
+                        })
+                    }
                     _ => Err(TypeCheckError::UnknownType(type_expr.span)),
                 },
             }

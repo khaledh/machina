@@ -89,6 +89,12 @@ pub enum TypeCheckError {
 
     #[error("Invalid struct field target: expected struct, found {0}")]
     InvalidStructFieldTarget(Type, Span),
+
+    #[error("Unknown enum type: {0}")]
+    UnknownEnumType(String, Span),
+
+    #[error("Unknown enum variant: {0}::{1}")]
+    UnknownEnumVariant(String, String, Span),
 }
 
 impl TypeCheckError {
@@ -122,6 +128,8 @@ impl TypeCheckError {
             TypeCheckError::UnknownStructField(_, span) => *span,
             TypeCheckError::StructFieldsMissing(_, span) => *span,
             TypeCheckError::InvalidStructFieldTarget(_, span) => *span,
+            TypeCheckError::UnknownEnumType(_, span) => *span,
+            TypeCheckError::UnknownEnumVariant(_, _, span) => *span,
         }
     }
 }

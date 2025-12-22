@@ -1,32 +1,8 @@
 use thiserror::Error;
 
-use crate::ast::{ExprKind, StructField, TypeExpr};
+use crate::ast::ExprKind;
 use crate::diagnostics::Span;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SymbolKind {
-    Var { is_mutable: bool },
-    Func,
-    TypeAlias { ty_expr: TypeExpr },
-    StructDef { fields: Vec<StructField> },
-}
-
-impl std::fmt::Display for SymbolKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SymbolKind::Var { .. } => write!(f, "var"),
-            SymbolKind::Func => write!(f, "func"),
-            SymbolKind::TypeAlias { ty_expr } => write!(f, "type_alias[{}]", ty_expr),
-            SymbolKind::StructDef { fields } => {
-                let field_names = fields
-                    .iter()
-                    .map(|field| field.name.as_str())
-                    .collect::<Vec<_>>();
-                write!(f, "struct_def[{}]", field_names.join(", "))
-            }
-        }
-    }
-}
+use crate::resolve::symbols::SymbolKind;
 
 #[derive(Clone, Debug, Error)]
 pub enum ResolveError {
@@ -56,6 +32,12 @@ pub enum ResolveError {
 
     #[error("Undefined struct: {0}")]
     StructUndefined(String, Span),
+
+    #[error("Undefined enum: {0}")]
+    EnumUndefined(String, Span),
+
+    #[error("Undefined enum variant: {0}::{1}")]
+    EnumVariantUndefined(String, String, Span),
 }
 
 impl ResolveError {
@@ -70,6 +52,8 @@ impl ResolveError {
             ResolveError::ExpectedType(_, _, span) => *span,
             ResolveError::TypeUndefined(_, span) => *span,
             ResolveError::StructUndefined(_, span) => *span,
+            ResolveError::EnumUndefined(_, span) => *span,
+            ResolveError::EnumVariantUndefined(_, _, span) => *span,
         }
     }
 }

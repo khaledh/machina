@@ -52,8 +52,12 @@ pub enum TokenKind {
     Dot,
     #[display(":")]
     Colon,
+    #[display("::")]
+    DoubleColon,
     #[display(";")]
     Semicolon,
+    #[display("|")]
+    Pipe,
     #[display("=")]
     Equals,
     #[display("==")]
@@ -203,6 +207,10 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(TokenKind::RBracket)
             }
+            Some(&'|') => {
+                self.advance();
+                Ok(TokenKind::Pipe)
+            }
             Some(&',') => {
                 self.advance();
                 Ok(TokenKind::Comma)
@@ -213,7 +221,12 @@ impl<'a> Lexer<'a> {
             }
             Some(&':') => {
                 self.advance();
-                Ok(TokenKind::Colon)
+                if matches!(self.source.peek(), Some(&':')) {
+                    self.advance();
+                    Ok(TokenKind::DoubleColon)
+                } else {
+                    Ok(TokenKind::Colon)
+                }
             }
             Some(&';') => {
                 self.advance();

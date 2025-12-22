@@ -307,3 +307,39 @@ fn test_lower_struct_pattern_binding() {
     assert!(x_bound, "expected struct field x to be bound");
     assert!(y_bound, "expected struct field y to be bound");
 }
+
+#[test]
+fn test_lower_enum_variant_literal() {
+    let source = r#"
+        type Color = Red | Green | Blue
+
+        fn main() -> Color {
+            Color::Green
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let mut lowerer = FuncLowerer::new(&analyzed, func);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+    assert_eq!(entry_block.stmts.len(), 1);
+
+    match &entry_block.stmts[0] {
+        Statement::CopyScalar { dst, src } => {
+            assert_eq!(dst.base(), LocalId(0));
+            match src {
+                Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
+                    assert_eq!(*value, 1);
+                }
+                _ => panic!("unexpected enum literal src"),
+            }
+        }
+        _ => panic!("unexpected stmt[0]"),
+    }
+
+    assert!(matches!(entry_block.terminator, Terminator::Return));
+}

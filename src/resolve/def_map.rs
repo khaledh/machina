@@ -1,7 +1,8 @@
-use crate::ast::NodeId;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+
+use crate::ast::{EnumVariant, NodeId, StructField, TypeExpr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(pub u32);
@@ -30,19 +31,12 @@ impl DefIdGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
-    TypeAlias {
-        ty_expr: crate::ast::TypeExpr,
-    },
-    StructDef {
-        fields: Vec<crate::ast::StructField>,
-    },
+    TypeAlias { ty_expr: TypeExpr },
+    StructDef { fields: Vec<StructField> },
+    EnumDef { variants: Vec<EnumVariant> },
     Func,
-    LocalVar {
-        nrvo_eligible: bool,
-    },
-    Param {
-        index: u32,
-    },
+    LocalVar { nrvo_eligible: bool },
+    Param { index: u32 },
 }
 
 impl fmt::Display for DefKind {
@@ -55,6 +49,13 @@ impl fmt::Display for DefKind {
                     .map(|field| field.name.as_str())
                     .collect::<Vec<_>>();
                 write!(f, "StructDef[{}]", field_names.join(", "))
+            }
+            DefKind::EnumDef { variants } => {
+                let variant_names = variants
+                    .iter()
+                    .map(|variant| variant.name.as_str())
+                    .collect::<Vec<_>>();
+                write!(f, "EnumDef[{}]", variant_names.join(", "))
             }
             DefKind::Func => write!(f, "Func"),
             DefKind::LocalVar { nrvo_eligible } => {

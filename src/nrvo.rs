@@ -193,7 +193,10 @@ impl<'a> NrvoSafetyChecker<'a> {
                 left_ok && right_ok
             }
 
-            ExprKind::UnitLit | ExprKind::UInt64Lit(_) | ExprKind::BoolLit(_) => true,
+            ExprKind::UnitLit
+            | ExprKind::UInt64Lit(_)
+            | ExprKind::BoolLit(_)
+            | ExprKind::EnumVariant { .. } => true,
         }
     }
 
