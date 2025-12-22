@@ -131,11 +131,35 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(&ch) = self.source.peek()
-            && ch.is_whitespace()
-        {
-            self.advance();
+        loop {
+            while let Some(&ch) = self.source.peek()
+                && ch.is_whitespace()
+            {
+                self.advance();
+            }
+
+            if self.peek_line_comment() {
+                // Consume '//' and skip until the end of the line.
+                self.advance();
+                self.advance();
+                while let Some(&ch) = self.source.peek()
+                    && ch != '\n'
+                {
+                    self.advance();
+                }
+                if matches!(self.source.peek(), Some(&'\n')) {
+                    self.advance();
+                }
+                continue;
+            }
+
+            break;
         }
+    }
+
+    fn peek_line_comment(&mut self) -> bool {
+        let mut iter = self.source.clone();
+        matches!((iter.next(), iter.next()), (Some('/'), Some('/')))
     }
 
     pub fn next_token(&mut self) -> Result<Token, LexError> {
