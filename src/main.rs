@@ -6,6 +6,7 @@ mod diagnostics;
 mod lexer;
 mod mcir;
 mod nrvo;
+mod opt;
 mod parser;
 mod regalloc;
 mod resolve;
@@ -243,32 +244,35 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     // --- Lower to MCIR ---
     let lowered_context =
         mcir::lower_ast::lower_ast(analyzed_context).map_err(|e| vec![e.into()])?;
-    {
-        let bodies = &lowered_context.func_bodies;
-        if dump_ir {
-            println!("MCIR:");
+    if dump_ir {
+        println!("MCIR:");
+        println!("--------------------------------");
+        for body in &lowered_context.func_bodies {
+            println!("{}", body);
             println!("--------------------------------");
-            for body in bodies {
-                println!("{}", body);
-                println!("--------------------------------");
-            }
         }
+    }
 
-        if dump_liveness || dump_intervals {
-            // --- Dump Liveness Analysis ---
-            use regalloc::liveness::{
-                LivenessAnalysis, build_live_intervals, format_live_intervals, format_liveness_map,
-            };
-            for (i, body) in bodies.iter().enumerate() {
-                let live_map = LivenessAnalysis::new(body).analyze();
-                let func_name = lowered_context.symbols.func_name(i).unwrap_or("<unknown>");
-                if dump_liveness {
-                    print!("{}", format_liveness_map(&live_map, func_name));
-                }
-                if dump_intervals {
-                    let intervals = build_live_intervals(body, &live_map);
-                    print!("{}", format_live_intervals(&intervals, func_name));
-                }
+    // --- Optimize MCIR ---
+    let optimized_context = opt::optimize(lowered_context);
+
+    if dump_liveness || dump_intervals {
+        // --- Dump Liveness Analysis ---
+        use regalloc::liveness::{
+            LivenessAnalysis, build_live_intervals, format_live_intervals, format_liveness_map,
+        };
+        for (i, body) in optimized_context.func_bodies.iter().enumerate() {
+            let live_map = LivenessAnalysis::new(body).analyze();
+            let func_name = optimized_context
+                .symbols
+                .func_name(i)
+                .unwrap_or("<unknown>");
+            if dump_liveness {
+                print!("{}", format_liveness_map(&live_map, func_name));
+            }
+            if dump_intervals {
+                let intervals = build_live_intervals(body, &live_map);
+                print!("{}", format_live_intervals(&intervals, func_name));
             }
         }
     }
@@ -277,7 +281,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     let target = match args.target {
         TargetKind::Arm64 => targets::arm64::regs::Arm64Target::new(),
     };
-    let regalloc_context = regalloc::regalloc(lowered_context, &target);
+    let regalloc_context = regalloc::regalloc(optimized_context, &target);
 
     if dump_regalloc {
         for (i, alloc_result) in regalloc_context.alloc_results.iter().enumerate() {

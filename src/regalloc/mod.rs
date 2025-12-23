@@ -7,7 +7,7 @@ pub mod target;
 
 use std::collections::HashMap;
 
-use crate::context::{LoweredMcirContext, RegAllocatedContext};
+use crate::context::{OptimizedMcirContext, RegAllocatedContext};
 use crate::mcir::types::LocalId;
 use crate::regalloc::target::PhysReg;
 use stack::StackSlotId;
@@ -41,7 +41,7 @@ pub struct AllocationResult {
 }
 
 /// Run register allocation for a lowered MCIR context.
-pub fn regalloc(ctx: LoweredMcirContext, target: &dyn target::TargetSpec) -> RegAllocatedContext {
+pub fn regalloc(ctx: OptimizedMcirContext, target: &dyn target::TargetSpec) -> RegAllocatedContext {
     let mut alloc_results = Vec::new();
     for body in &ctx.func_bodies {
         let constraints = analyze_constraints(body, target);

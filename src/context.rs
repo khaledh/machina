@@ -90,6 +90,24 @@ pub struct LoweredMcirContext {
 }
 
 impl LoweredMcirContext {
+    pub fn with_optimized_bodies(self, func_bodies: Vec<FuncBody>) -> OptimizedMcirContext {
+        OptimizedMcirContext {
+            func_bodies,
+            symbols: self.symbols,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Optimized MCIR Context
+// -----------------------------------------------------------------------------
+#[derive(Clone)]
+pub struct OptimizedMcirContext {
+    pub func_bodies: Vec<FuncBody>,
+    pub symbols: SymbolTable,
+}
+
+impl OptimizedMcirContext {
     pub fn with_alloc_results(self, alloc_results: Vec<AllocationResult>) -> RegAllocatedContext {
         RegAllocatedContext {
             func_bodies: self.func_bodies,
@@ -100,7 +118,7 @@ impl LoweredMcirContext {
 }
 
 // -----------------------------------------------------------------------------
-// Lowered MCIR & Reg Alloc Context
+// Optimized MCIR & Reg Alloc Context
 // -----------------------------------------------------------------------------
 pub struct RegAllocatedContext {
     pub func_bodies: Vec<FuncBody>,
