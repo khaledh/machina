@@ -17,4 +17,4 @@ pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<Ty
 
 #[cfg(test)]
 #[path = "../tests/t_typeck.rs"]
-mod t_typeck;
+mod tests;
