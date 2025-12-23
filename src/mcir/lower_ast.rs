@@ -19,52 +19,14 @@
 
 use std::collections::HashMap;
 
-use thiserror::Error;
-
-use crate::ast::NodeId;
 use crate::ast::{self, ExprKind as EK, PatternKind as PK, *};
 use crate::context::{AnalyzedContext, LoweredMcirContext};
+use crate::mcir::errors::LowerError;
 use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::lower_ty::TyLowerer;
 use crate::mcir::types::*;
 use crate::resolve::def_map::{Def, DefId, DefKind};
 use crate::types::*;
-
-#[derive(Debug, Error)]
-pub enum LowerError {
-    #[error("expression def not found for node {0:?}")]
-    ExprDefNotFound(NodeId),
-
-    #[error("expression type not found for node {0:?}")]
-    ExprTypeNotFound(NodeId),
-
-    #[error("expression is not a place for node {0:?}")]
-    ExprIsNotPlace(NodeId),
-
-    #[error("expression is not an aggregate for node {0:?}")]
-    ExprIsNotAggregate(NodeId),
-
-    #[error("expression not allowed in value context for node {0:?}")]
-    ExprNotAllowedInValueContext(NodeId),
-
-    #[error("place is not {expected:?} for node {node_id:?}")]
-    PlaceKindMismatch {
-        node_id: NodeId,
-        expected: PlaceKind,
-    },
-
-    #[error("variable local not found for node {0:?} (def {1:?})")]
-    VarLocalNotFound(NodeId, DefId),
-
-    #[error("unsupported operand expression for node {0:?}")]
-    UnsupportedOperandExpr(NodeId),
-
-    #[error("pattern does not match expected shape for node {0:?}")]
-    PatternMismatch(NodeId),
-
-    #[error("unsupported aggregate rhs for node {0:?}")]
-    UnsupportedAggregateRhs(NodeId),
-}
 
 enum ExprValue {
     Scalar(Operand),
@@ -88,6 +50,8 @@ pub struct FuncLowerer<'a> {
 }
 
 impl<'a> FuncLowerer<'a> {
+    /// --- Entry points ---
+
     /// Create a lowering context for one function.
     pub fn new(ctx: &'a AnalyzedContext, func: &'a Function) -> Self {
         let mut ty_lowerer = TyLowerer::new();
@@ -137,13 +101,7 @@ impl<'a> FuncLowerer<'a> {
             let ret_place = Place::<Scalar>::new(ret_id, ret_ty, vec![]);
             let body_value = self.lower_expr_value(&self.func.body)?;
             if let ExprValue::Scalar(op) = body_value {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyScalar {
-                        dst: ret_place,
-                        src: Rvalue::Use(op),
-                    },
-                );
+                self.emit_copy_scalar(ret_place, Rvalue::Use(op));
             }
         } else {
             let ret_place = Place::<Aggregate>::new(ret_id, ret_ty, vec![]);
@@ -185,19 +143,19 @@ impl<'a> FuncLowerer<'a> {
                     // prefer place, fall back to aggregate literal
                     let place = self
                         .lower_place_agg(expr)
-                        .or_else(|_| self.lower_agg_expr(expr))?;
+                        .or_else(|_| self.lower_agg_expr_to_temp(expr))?;
                     Ok(ExprValue::Aggregate(place))
                 }
             }
         }
     }
 
-    // --- Expression (Block) ---
+    // --- Block Lowering ---
 
     /// Lower a block used as an expression.
     fn lower_block_expr(&mut self, exprs: &[Expr]) -> Result<ExprValue, LowerError> {
         // Evaluate all but the last expression for side effects.
-        self.lower_block_prefix(exprs)?;
+        self.lower_block_side_effects(exprs)?;
 
         match exprs.last() {
             None => {
@@ -210,7 +168,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Lower all but the last expression in a block (side effects only).
-    fn lower_block_prefix(&mut self, exprs: &[Expr]) -> Result<(), LowerError> {
+    fn lower_block_side_effects(&mut self, exprs: &[Expr]) -> Result<(), LowerError> {
         // Block prefix: execute in order, discard results.
         for e in exprs.iter().take(exprs.len().saturating_sub(1)) {
             self.lower_block_item(e)?;
@@ -244,6 +202,22 @@ impl<'a> FuncLowerer<'a> {
                 let _ = self.lower_expr_value(expr)?;
                 Ok(())
             }
+        }
+    }
+
+    /// Lower a block and write its final aggregate value into dst.
+    fn lower_block_into(
+        &mut self,
+        dst: Place<Aggregate>,
+        exprs: &[Expr],
+        block_id: NodeId,
+    ) -> Result<(), LowerError> {
+        // Evaluate prefix, then write the tail into dst.
+        self.lower_block_side_effects(exprs)?;
+
+        match exprs.last() {
+            Some(last_expr) => self.lower_agg_value_into(dst, last_expr),
+            None => Err(LowerError::UnsupportedAggregateRhs(block_id)),
         }
     }
 
@@ -341,17 +315,10 @@ impl<'a> FuncLowerer<'a> {
     /// Emit a scalar rvalue into a temp and return it as an operand.
     fn emit_scalar_rvalue(&mut self, ty_id: TyId, rvalue: Rvalue) -> Operand {
         // Materialize into a temp so later uses can be a place.
-        let temp_local_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
-        let temp_place = Place::new(temp_local_id, ty_id, vec![]);
+        let temp_place = self.new_temp_scalar(ty_id);
 
         // Emit the assignment
-        self.fb.push_stmt(
-            self.curr_block,
-            Statement::CopyScalar {
-                dst: temp_place.clone(),
-                src: rvalue,
-            },
-        );
+        self.emit_copy_scalar(temp_place.clone(), rvalue);
 
         // Return a copy of the temp place as an operand
         Operand::Copy(temp_place)
@@ -360,7 +327,7 @@ impl<'a> FuncLowerer<'a> {
     // --- Expression (Aggregate) ---
 
     /// Lower an aggregate expression into a fresh temp place.
-    fn lower_agg_expr(&mut self, expr: &Expr) -> Result<Place<Aggregate>, LowerError> {
+    fn lower_agg_expr_to_temp(&mut self, expr: &Expr) -> Result<Place<Aggregate>, LowerError> {
         let aggr_ty = self.ty_for_node(expr.id)?;
         let aggr_ty_id = self.ty_lowerer.lower_ty(&aggr_ty);
         if !self.is_aggregate(aggr_ty_id) {
@@ -368,41 +335,11 @@ impl<'a> FuncLowerer<'a> {
         }
 
         // Create a temp to hold the result.
-        let temp_local_id = self.fb.new_local(aggr_ty_id, LocalKind::Temp, None);
-        let temp_place = Place::new(temp_local_id, aggr_ty_id, vec![]);
+        let temp_place = self.new_temp_aggregate(aggr_ty_id);
 
         // Lower the aggregate into the temp place
         self.lower_agg_value_into(temp_place.clone(), expr)?;
         Ok(temp_place)
-    }
-
-    /// Emit a write into a projected field/element of an aggregate.
-    fn emit_agg_projection(
-        &mut self,
-        dst: &Place<Aggregate>,
-        field_ty_id: TyId,
-        field_expr: &Expr,
-        extra_proj: Projection,
-    ) -> Result<(), LowerError> {
-        // Extend the projection and write into the selected field/element.
-        let mut projs = dst.projections().to_vec();
-        projs.push(extra_proj);
-
-        if self.is_scalar(field_ty_id) {
-            let field_place = Place::new(dst.base(), field_ty_id, projs);
-            let field_operand = self.lower_scalar_expr(field_expr)?;
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::CopyScalar {
-                    dst: field_place,
-                    src: Rvalue::Use(field_operand),
-                },
-            );
-            Ok(())
-        } else {
-            let field_place = Place::new(dst.base(), field_ty_id, projs);
-            self.lower_agg_value_into(field_place, field_expr)
-        }
     }
 
     /// Lower an aggregate expression directly into a destination place.
@@ -418,7 +355,7 @@ impl<'a> FuncLowerer<'a> {
             | EK::StructUpdate { .. }
             | EK::EnumVariant { .. } => {
                 // Aggregate literal: build in place.
-                self.lower_agg_into(dst, expr)
+                self.lower_agg_lit_into(dst, expr)
             }
             EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
                 // Aggregate place: copy unless it's already the destination.
@@ -426,8 +363,7 @@ impl<'a> FuncLowerer<'a> {
                 if src.base() == dst.base() && src.projections() == dst.projections() {
                     return Ok(());
                 }
-                self.fb
-                    .push_stmt(self.curr_block, Statement::CopyAggregate { dst, src });
+                self.emit_copy_aggregate(dst, src);
                 Ok(())
             }
             EK::Call { callee, args } => {
@@ -443,10 +379,7 @@ impl<'a> FuncLowerer<'a> {
             } => self.lower_if_expr_into(dst, cond, then_body, else_body),
             _ => match self.lower_expr_value(expr)? {
                 ExprValue::Aggregate(place) => {
-                    self.fb.push_stmt(
-                        self.curr_block,
-                        Statement::CopyAggregate { dst, src: place },
-                    );
+                    self.emit_copy_aggregate(dst, place);
                     Ok(())
                 }
                 ExprValue::Scalar(_) => Err(LowerError::UnsupportedAggregateRhs(expr.id)),
@@ -455,7 +388,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Lower an aggregate literal directly into a destination place.
-    fn lower_agg_into(&mut self, dst: Place<Aggregate>, expr: &Expr) -> Result<(), LowerError> {
+    fn lower_agg_lit_into(&mut self, dst: Place<Aggregate>, expr: &Expr) -> Result<(), LowerError> {
         match &expr.kind {
             EK::TupleLit(fields) => {
                 // Lower each tuple field into its slot.
@@ -509,13 +442,7 @@ impl<'a> FuncLowerer<'a> {
                 // Copy base into dst unless it's already the same place
                 if base_place.base() != dst.base() || base_place.projections() != dst.projections()
                 {
-                    self.fb.push_stmt(
-                        self.curr_block,
-                        Statement::CopyAggregate {
-                            dst: dst.clone(),
-                            src: base_place,
-                        },
-                    );
+                    self.emit_copy_aggregate(dst.clone(), base_place);
                 }
 
                 // Overwrite updated fields
@@ -577,13 +504,7 @@ impl<'a> FuncLowerer<'a> {
                 tag_proj.push(Projection::Field { index: 0 });
                 let tag_place = Place::new(dst.base(), tag_ty_id, tag_proj);
 
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyScalar {
-                        dst: tag_place,
-                        src: Rvalue::Use(Operand::Const(tag)),
-                    },
-                );
+                self.emit_copy_scalar(tag_place, Rvalue::Use(Operand::Const(tag)));
 
                 // 2) payload fields (indices 1+)
                 for (i, payload_expr) in payload.iter().enumerate() {
@@ -602,29 +523,40 @@ impl<'a> FuncLowerer<'a> {
                     if self.is_scalar(field_ty_id) {
                         let field_place = Place::new(dst.base(), field_ty_id, projs);
                         let src_op = self.lower_scalar_expr(payload_expr)?;
-                        self.fb.push_stmt(
-                            self.curr_block,
-                            Statement::CopyScalar {
-                                dst: field_place,
-                                src: Rvalue::Use(src_op),
-                            },
-                        );
+                        self.emit_copy_scalar(field_place, Rvalue::Use(src_op));
                     } else {
                         let field_place = Place::new(dst.base(), field_ty_id, projs);
-                        let src_place = self.lower_agg_expr(payload_expr)?;
-                        self.fb.push_stmt(
-                            self.curr_block,
-                            Statement::CopyAggregate {
-                                dst: field_place,
-                                src: src_place,
-                            },
-                        );
+                        let src_place = self.lower_agg_expr_to_temp(payload_expr)?;
+                        self.emit_copy_aggregate(field_place, src_place);
                     }
                 }
                 Ok(())
             }
 
             _ => Err(LowerError::ExprIsNotAggregate(expr.id)),
+        }
+    }
+
+    /// Emit a write into a projected field/element of an aggregate.
+    fn emit_agg_projection(
+        &mut self,
+        dst: &Place<Aggregate>,
+        field_ty_id: TyId,
+        field_expr: &Expr,
+        extra_proj: Projection,
+    ) -> Result<(), LowerError> {
+        // Extend the projection and write into the selected field/element.
+        let mut projs = dst.projections().to_vec();
+        projs.push(extra_proj);
+
+        if self.is_scalar(field_ty_id) {
+            let field_place = Place::new(dst.base(), field_ty_id, projs);
+            let field_operand = self.lower_scalar_expr(field_expr)?;
+            self.emit_copy_scalar(field_place, Rvalue::Use(field_operand));
+            Ok(())
+        } else {
+            let field_place = Place::new(dst.base(), field_ty_id, projs);
+            self.lower_agg_value_into(field_place, field_expr)
         }
     }
 
@@ -673,7 +605,7 @@ impl<'a> FuncLowerer<'a> {
 
         let local_ty = self.fb.body.locals[local_id.0 as usize].ty;
 
-        let place = self.place_from_ty(local_id, local_ty, vec![]);
+        let place = self.place_from_ty_id(local_id, local_ty, vec![]);
 
         Ok(place)
     }
@@ -705,7 +637,7 @@ impl<'a> FuncLowerer<'a> {
                 .map(|index_place| Projection::Index { index: index_place }),
         );
 
-        let place = self.place_from_ty(target_place.base(), result_ty_id, projs);
+        let place = self.place_from_ty_id(target_place.base(), result_ty_id, projs);
         Ok(place)
     }
 
@@ -720,7 +652,7 @@ impl<'a> FuncLowerer<'a> {
         let mut projs = target_place.projections().to_vec();
         projs.push(Projection::Field { index });
 
-        let place = self.place_from_ty(target_place.base(), field_ty_id, projs);
+        let place = self.place_from_ty_id(target_place.base(), field_ty_id, projs);
 
         Ok(place)
     }
@@ -742,13 +674,20 @@ impl<'a> FuncLowerer<'a> {
         let mut projs = target_place.projections().to_vec();
         projs.push(Projection::Field { index: field_index });
 
-        let place = self.place_from_ty(target_place.base(), field_ty_id, projs);
+        let place = self.place_from_ty_id(target_place.base(), field_ty_id, projs);
 
         Ok(place)
     }
 
+    /// Create a projected place from an aggregate base.
+    fn project_place(&self, src: &Place<Aggregate>, proj: Projection, ty_id: TyId) -> PlaceAny {
+        let mut projs = src.projections().to_vec();
+        projs.push(proj);
+        self.place_from_ty_id(src.base(), ty_id, projs)
+    }
+
     /// Construct a typed place from a base local and projections.
-    fn place_from_ty(&self, base: LocalId, ty: TyId, proj: Vec<Projection>) -> PlaceAny {
+    fn place_from_ty_id(&self, base: LocalId, ty: TyId, proj: Vec<Projection>) -> PlaceAny {
         if self.is_scalar(ty) {
             PlaceAny::Scalar(Place::new(base, ty, proj))
         } else {
@@ -919,6 +858,42 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Bind an identifier to a place, emitting the appropriate assignment.
+    fn bind_ident(
+        &mut self,
+        def_id: DefId,
+        name: String,
+        ty_id: TyId,
+        src_place: PlaceAny,
+    ) -> Result<(), LowerError> {
+        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name));
+        match src_place {
+            PlaceAny::Scalar(place) => {
+                self.emit_copy_scalar(
+                    Place::new(local_id, ty_id, vec![]),
+                    Rvalue::Use(Operand::Copy(place)),
+                );
+            }
+            PlaceAny::Aggregate(place) => {
+                self.emit_copy_aggregate(Place::new(local_id, ty_id, vec![]), place);
+            }
+        }
+        Ok(())
+    }
+
+    /// Bind an identifier to a scalar operand.
+    fn bind_ident_operand(
+        &mut self,
+        def_id: DefId,
+        name: String,
+        ty_id: TyId,
+        op: Operand,
+    ) -> Result<(), LowerError> {
+        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name));
+        self.emit_copy_scalar(Place::new(local_id, ty_id, vec![]), Rvalue::Use(op));
+        Ok(())
+    }
+
     /// Create or reuse a local for a definition id.
     fn ensure_local_for_def(
         &mut self,
@@ -934,64 +909,6 @@ impl<'a> FuncLowerer<'a> {
         id
     }
 
-    /// Bind an identifier to a place, emitting the appropriate assignment.
-    fn bind_ident(
-        &mut self,
-        def_id: DefId,
-        name: String,
-        ty_id: TyId,
-        src_place: PlaceAny,
-    ) -> Result<(), LowerError> {
-        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name));
-        match src_place {
-            PlaceAny::Scalar(place) => {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyScalar {
-                        dst: Place::new(local_id, ty_id, vec![]),
-                        src: Rvalue::Use(Operand::Copy(place)),
-                    },
-                );
-            }
-            PlaceAny::Aggregate(place) => {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyAggregate {
-                        dst: Place::new(local_id, ty_id, vec![]),
-                        src: place,
-                    },
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Bind an identifier to a scalar operand.
-    fn bind_ident_operand(
-        &mut self,
-        def_id: DefId,
-        name: String,
-        ty_id: TyId,
-        op: Operand,
-    ) -> Result<(), LowerError> {
-        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name));
-        self.fb.push_stmt(
-            self.curr_block,
-            Statement::CopyScalar {
-                dst: Place::new(local_id, ty_id, vec![]),
-                src: Rvalue::Use(op),
-            },
-        );
-        Ok(())
-    }
-
-    /// Create a projected place from an aggregate base.
-    fn project_place(&self, src: &Place<Aggregate>, proj: Projection, ty_id: TyId) -> PlaceAny {
-        let mut projs = src.projections().to_vec();
-        projs.push(proj);
-        self.place_from_ty(src.base(), ty_id, projs)
-    }
-
     // --- Assignment ---
 
     /// Lower an assignment expression.
@@ -1003,13 +920,7 @@ impl<'a> FuncLowerer<'a> {
             let assignee_place = self.lower_place_scalar(assignee)?;
             let value_operand = self.lower_scalar_expr(value)?;
 
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::CopyScalar {
-                    dst: assignee_place,
-                    src: Rvalue::Use(value_operand),
-                },
-            );
+            self.emit_copy_scalar(assignee_place, Rvalue::Use(value_operand));
         } else {
             // Aggregate assignment (value written directly into place).
             let assignee_place = self.lower_place_agg(assignee)?;
@@ -1029,8 +940,74 @@ impl<'a> FuncLowerer<'a> {
         else_body: &Expr,
     ) -> Result<ExprValue, LowerError> {
         let cond_op = self.lower_scalar_expr(cond)?;
+        let result_ty = self.ty_for_node(then_body.id)?;
+        let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
-        // Split control flow into then/else with a join block.
+        if result_ty.is_scalar() {
+            // Scalar if-expr: write both branches into the same temp.
+            let temp_place = self.new_temp_scalar(result_ty_id);
+
+            self.lower_if_with_join(
+                cond_op,
+                |this| {
+                    if let ExprValue::Scalar(op) = this.lower_expr_value(then_body)? {
+                        this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
+                    }
+                    Ok(())
+                },
+                |this| {
+                    if let ExprValue::Scalar(op) = this.lower_expr_value(else_body)? {
+                        this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
+                    }
+                    Ok(())
+                },
+            )?;
+
+            Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
+        } else {
+            // Aggregate if-expr: lower both branches into a temp place.
+            let temp_place = self.new_temp_aggregate(result_ty_id);
+
+            self.lower_if_with_join(
+                cond_op,
+                |this| this.lower_agg_value_into(temp_place.clone(), then_body),
+                |this| this.lower_agg_value_into(temp_place.clone(), else_body),
+            )?;
+
+            Ok(ExprValue::Aggregate(temp_place))
+        }
+    }
+
+    /// Lower an if-expression into a destination aggregate place.
+    fn lower_if_expr_into(
+        &mut self,
+        dst: Place<Aggregate>,
+        cond: &Expr,
+        then_body: &Expr,
+        else_body: &Expr,
+    ) -> Result<(), LowerError> {
+        let cond_op = self.lower_scalar_expr(cond)?;
+
+        self.lower_if_with_join(
+            cond_op,
+            |this| this.lower_agg_value_into(dst.clone(), then_body),
+            |this| this.lower_agg_value_into(dst.clone(), else_body),
+        )?;
+
+        Ok(())
+    }
+
+    /// Helper for lowering an if-expression.
+    fn lower_if_with_join<FThen, FElse>(
+        &mut self,
+        cond: Operand,
+        then_fn: FThen,
+        else_fn: FElse,
+    ) -> Result<(), LowerError>
+    where
+        FThen: FnOnce(&mut Self) -> Result<(), LowerError>,
+        FElse: FnOnce(&mut Self) -> Result<(), LowerError>,
+    {
         let then_bb = self.fb.new_block();
         let else_bb = self.fb.new_block();
         let join_bb = self.fb.new_block();
@@ -1038,70 +1015,25 @@ impl<'a> FuncLowerer<'a> {
         self.fb.set_terminator(
             self.curr_block,
             Terminator::If {
-                cond: cond_op,
+                cond: cond,
                 then_bb,
                 else_bb,
             },
         );
 
-        let result_ty = self.ty_for_node(then_body.id)?;
-        let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
+        self.curr_block = then_bb;
+        then_fn(self)?;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
 
-        if result_ty.is_scalar() {
-            // Scalar if-expr: write both branches into the same temp.
-            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
+        self.curr_block = else_bb;
+        else_fn(self)?;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
 
-            // then
-            self.curr_block = then_bb;
-            if let ExprValue::Scalar(op) = self.lower_expr_value(then_body)? {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyScalar {
-                        dst: temp_place.clone(),
-                        src: Rvalue::Use(op),
-                    },
-                );
-            }
-            self.fb
-                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+        self.curr_block = join_bb;
 
-            // else
-            self.curr_block = else_bb;
-            if let ExprValue::Scalar(op) = self.lower_expr_value(else_body)? {
-                self.fb.push_stmt(
-                    self.curr_block,
-                    Statement::CopyScalar {
-                        dst: temp_place.clone(),
-                        src: Rvalue::Use(op),
-                    },
-                );
-            }
-            self.fb
-                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
-
-            self.curr_block = join_bb;
-            Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
-        } else {
-            // Aggregate if-expr: lower both branches into a temp place.
-            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
-
-            // then
-            self.curr_block = then_bb;
-            self.lower_agg_value_into(temp_place.clone(), then_body)?;
-            self.fb
-                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
-
-            // else
-            self.curr_block = else_bb;
-            self.lower_agg_value_into(temp_place.clone(), else_body)?;
-            self.fb
-                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
-
-            self.curr_block = join_bb;
-            Ok(ExprValue::Aggregate(temp_place))
-        }
+        Ok(())
     }
 
     /// Lower a while expression (returns unit).
@@ -1140,61 +1072,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(ExprValue::Scalar(Operand::Const(c)))
     }
 
-    /// Lower a block and write its final aggregate value into dst.
-    fn lower_block_into(
-        &mut self,
-        dst: Place<Aggregate>,
-        exprs: &[Expr],
-        block_id: NodeId,
-    ) -> Result<(), LowerError> {
-        // Evaluate prefix, then write the tail into dst.
-        self.lower_block_prefix(exprs)?;
-
-        match exprs.last() {
-            Some(last_expr) => self.lower_agg_value_into(dst, last_expr),
-            None => Err(LowerError::UnsupportedAggregateRhs(block_id)),
-        }
-    }
-
-    /// Lower an if-expression into a destination aggregate place.
-    fn lower_if_expr_into(
-        &mut self,
-        dst: Place<Aggregate>,
-        cond: &Expr,
-        then_body: &Expr,
-        else_body: &Expr,
-    ) -> Result<(), LowerError> {
-        let cond_op = self.lower_scalar_expr(cond)?;
-
-        // Lower both branches into dst, then join.
-        let then_bb = self.fb.new_block();
-        let else_bb = self.fb.new_block();
-        let join_bb = self.fb.new_block();
-
-        self.fb.set_terminator(
-            self.curr_block,
-            Terminator::If {
-                cond: cond_op,
-                then_bb,
-                else_bb,
-            },
-        );
-
-        self.curr_block = then_bb;
-        self.lower_agg_value_into(dst.clone(), then_body)?;
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
-
-        self.curr_block = else_bb;
-        self.lower_agg_value_into(dst.clone(), else_body)?;
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
-
-        self.curr_block = join_bb;
-        Ok(())
-    }
-
-    // --- Call ---
+    // --- Calls ---
 
     /// Lower a call expression and return the produced value.
     fn lower_call_expr(
@@ -1208,14 +1086,12 @@ impl<'a> FuncLowerer<'a> {
 
         if result_ty.is_scalar() {
             // Scalar call: capture result into a temp.
-            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
+            let temp_place = self.new_temp_scalar(result_ty_id);
             self.emit_call_into(PlaceAny::Scalar(temp_place.clone()), callee, args)?;
             Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
         } else {
             // Aggregate call: capture result into a temp place.
-            let temp_id = self.fb.new_local(result_ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, result_ty_id, vec![]);
+            let temp_place = self.new_temp_aggregate(result_ty_id);
             self.emit_call_into(PlaceAny::Aggregate(temp_place.clone()), callee, args)?;
             Ok(ExprValue::Aggregate(temp_place))
         }
@@ -1233,7 +1109,7 @@ impl<'a> FuncLowerer<'a> {
 
         let arg_vals = args
             .iter()
-            .map(|a| self.lower_call_arg(a))
+            .map(|a| self.lower_call_arg_place(a))
             .collect::<Result<Vec<_>, _>>()?;
 
         self.fb.push_stmt(
@@ -1248,7 +1124,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Lower a call argument into a place (or temp if needed).
-    fn lower_call_arg(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
+    fn lower_call_arg_place(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
         let ty = self.ty_for_node(arg.id)?;
         let ty_id = self.ty_lowerer.lower_ty(&ty);
 
@@ -1260,22 +1136,15 @@ impl<'a> FuncLowerer<'a> {
 
             // Otherwise, evaluate to operand and spill into a temp.
             let op = self.lower_scalar_expr(arg)?;
-            let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
-            let temp_place = Place::new(temp_id, ty_id, vec![]);
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::CopyScalar {
-                    dst: temp_place.clone(),
-                    src: Rvalue::Use(op),
-                },
-            );
+            let temp_place = self.new_temp_scalar(ty_id);
+            self.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
             Ok(PlaceAny::Scalar(temp_place))
         } else {
             // Aggregate arg: prefer a place, otherwise lower into a temp.
             if let Ok(place) = self.lower_place_agg(arg) {
                 Ok(PlaceAny::Aggregate(place))
             } else {
-                Ok(PlaceAny::Aggregate(self.lower_agg_expr(arg)?))
+                Ok(PlaceAny::Aggregate(self.lower_agg_expr_to_temp(arg)?))
             }
         }
     }
@@ -1331,6 +1200,30 @@ impl<'a> FuncLowerer<'a> {
     /// Check whether a lowered type is aggregate.
     fn is_aggregate(&self, ty_id: TyId) -> bool {
         self.ty_lowerer.table.get(ty_id).is_aggregate()
+    }
+
+    // Emit a copy statement for a scalar.
+    fn emit_copy_scalar(&mut self, dst: Place<Scalar>, src: Rvalue) {
+        self.fb
+            .push_stmt(self.curr_block, Statement::CopyScalar { dst, src });
+    }
+
+    // Emit a copy statement for an aggregate.
+    fn emit_copy_aggregate(&mut self, dst: Place<Aggregate>, src: Place<Aggregate>) {
+        self.fb
+            .push_stmt(self.curr_block, Statement::CopyAggregate { dst, src });
+    }
+
+    /// Create a scalar temp place.
+    fn new_temp_scalar(&mut self, ty_id: TyId) -> Place<Scalar> {
+        let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
+        Place::new(temp_id, ty_id, vec![])
+    }
+
+    /// Create an aggregate temp place.
+    fn new_temp_aggregate(&mut self, ty_id: TyId) -> Place<Aggregate> {
+        let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
+        Place::new(temp_id, ty_id, vec![])
     }
 }
 
