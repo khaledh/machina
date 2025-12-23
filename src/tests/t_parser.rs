@@ -1,5 +1,7 @@
 use super::*;
-use crate::ast::{ExprKind, Function, MatchPattern, Module, PatternKind, TypeDeclKind, TypeExprKind};
+use crate::ast::{
+    ExprKind, Function, MatchPattern, Module, PatternKind, TypeDeclKind, TypeExprKind,
+};
 use crate::lexer::{LexError, Lexer, Token};
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
@@ -718,46 +720,51 @@ fn test_parse_match_expr_enum_variants() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    match &func.body.kind {
-        ExprKind::Match { scrutinee, arms } => {
-            match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "c"),
-                _ => panic!("Expected scrutinee Var"),
-            }
-            assert_eq!(arms.len(), 3);
-
-            match &arms[0].pattern {
-                MatchPattern::EnumVariant {
-                    enum_name,
-                    variant_name,
-                    bindings,
-                    ..
-                } => {
-                    assert!(enum_name.is_none());
-                    assert_eq!(variant_name, "Red");
-                    assert_eq!(bindings.len(), 1);
-                    assert_eq!(bindings[0].name, "x");
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        let last = exprs.last().expect("Expected block to have a tail expr");
+        match &last.kind {
+            ExprKind::Match { scrutinee, arms } => {
+                match &scrutinee.kind {
+                    ExprKind::Var(name) => assert_eq!(name, "c"),
+                    _ => panic!("Expected scrutinee Var"),
                 }
-                _ => panic!("Expected enum variant pattern in arm 0"),
-            }
+                assert_eq!(arms.len(), 3);
 
-            match &arms[1].pattern {
-                MatchPattern::EnumVariant {
-                    enum_name,
-                    variant_name,
-                    bindings,
-                    ..
-                } => {
-                    assert_eq!(enum_name.as_deref(), Some("Color"));
-                    assert_eq!(variant_name, "Blue");
-                    assert_eq!(bindings.len(), 1);
-                    assert_eq!(bindings[0].name, "y");
+                match &arms[0].pattern {
+                    MatchPattern::EnumVariant {
+                        enum_name,
+                        variant_name,
+                        bindings,
+                        ..
+                    } => {
+                        assert!(enum_name.is_none());
+                        assert_eq!(variant_name, "Red");
+                        assert_eq!(bindings.len(), 1);
+                        assert_eq!(bindings[0].name, "x");
+                    }
+                    _ => panic!("Expected enum variant pattern in arm 0"),
                 }
-                _ => panic!("Expected enum variant pattern in arm 1"),
-            }
 
-            assert!(matches!(arms[2].pattern, MatchPattern::Wildcard { .. }));
+                match &arms[1].pattern {
+                    MatchPattern::EnumVariant {
+                        enum_name,
+                        variant_name,
+                        bindings,
+                        ..
+                    } => {
+                        assert_eq!(enum_name.as_deref(), Some("Color"));
+                        assert_eq!(variant_name, "Blue");
+                        assert_eq!(bindings.len(), 1);
+                        assert_eq!(bindings[0].name, "y");
+                    }
+                    _ => panic!("Expected enum variant pattern in arm 1"),
+                }
+
+                assert!(matches!(arms[2].pattern, MatchPattern::Wildcard { .. }));
+            }
+            _ => panic!("Expected match expression"),
         }
-        _ => panic!("Expected match expression"),
+    } else {
+        panic!("Expected Block");
     }
 }

@@ -72,7 +72,7 @@ impl NrvoAnalyzer {
                     let this_id = Self::find_ret_var_def_id(def_map, &arm.body);
                     match (arm_def_id, this_id) {
                         (None, Some(id)) => arm_def_id = Some(id),
-                        (Some(id), Some(this_id)) if id == this_id => {},
+                        (Some(id), Some(this_id)) if id == this_id => {}
                         _ => return None, // mismatch or missing -> not NRVO safe
                     }
                 }

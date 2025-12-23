@@ -965,7 +965,10 @@ impl<'a> Parser<'a> {
         self.consume_keyword("match")?;
 
         // Parse scrutinee
+        // (disallow struct literals to avoid ambiguity between struct literals and match arms)
+        self.allow_struct_lit = false;
         let scrutinee = self.parse_expr(0)?;
+        self.allow_struct_lit = true;
 
         // Expect '{'
         self.consume(&TK::LBrace)?;
