@@ -138,16 +138,6 @@ impl TypeChecker {
                         });
                     }
 
-                    // Temporary rule: all variants must have the same payload type
-                    if enum_variants.len() > 1 {
-                        let first_payload = &enum_variants[0].payload;
-                        for variant in &enum_variants[1..] {
-                            if variant.payload != *first_payload {
-                                panic!("Enum variant payload type mismatch");
-                            }
-                        }
-                    }
-
                     // Create the enum type
                     let ty = Type::Enum {
                         name: type_decl.name.clone(),

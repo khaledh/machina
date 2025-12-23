@@ -166,15 +166,9 @@ impl Type {
                 let total_size: usize = fields.iter().map(|f| f.ty.size_of()).sum();
                 total_size
             }
-            Type::Enum { variants, .. } => {
-                // Temporary assumption: all variants have the same payload type
-                let payload_size = if variants.is_empty() {
-                    0
-                } else {
-                    // sum the size of the payload types
-                    variants[0].payload.iter().map(|p| p.size_of()).sum()
-                };
-                8 + payload_size // 8 bytes for the scalar tag + payload size
+            Type::Enum { .. } => {
+                // 8 bytes for the scalar tag + max payload size
+                8 + self.enum_max_payload_size()
             }
             Type::Unknown => panic!("Unknown type"),
         }
@@ -191,19 +185,13 @@ impl Type {
                 fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
             }
             Type::Enum { variants, .. } => {
-                // Temporary assumption: all variants have the same payload type
-                let payload_align = if variants.is_empty() {
-                    8
-                } else {
-                    // maximum alignment of the payload types
-                    variants[0]
-                        .payload
-                        .iter()
-                        .map(|p| p.align_of())
-                        .max()
-                        .unwrap_or(1)
-                };
-                payload_align.max(8)
+                // max of 8 and the max alignment of any payload element across all variants.
+                let max_payload_align = variants
+                    .iter()
+                    .map(|v| v.payload.iter().map(|p| p.align_of()).max().unwrap_or(0))
+                    .max()
+                    .unwrap_or(0);
+                max_payload_align.max(8)
             }
             Type::Unknown => panic!("Unknown type"),
         }
@@ -230,73 +218,93 @@ impl Type {
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
-        match self {
-            Type::Tuple { fields } => {
-                assert!(index < fields.len(), "Tuple field index out of bounds");
-                fields.iter().take(index).map(|f| f.size_of()).sum()
-            }
-            _ => panic!("Expected tuple type"),
-        }
+        let Type::Tuple { fields } = self else {
+            panic!("Expected tuple type");
+        };
+        assert!(index < fields.len(), "Tuple field index out of bounds");
+        fields.iter().take(index).map(|f| f.size_of()).sum()
     }
 
     pub fn tuple_field_type(&self, index: usize) -> Type {
-        match self {
-            Type::Tuple { fields } => fields[index].clone(),
-            _ => panic!("Expected tuple type"),
-        }
+        let Type::Tuple { fields } = self else {
+            panic!("Expected tuple type");
+        };
+        fields[index].clone()
     }
 
     pub fn struct_field_offset(&self, field_name: &str) -> usize {
-        match self {
-            Type::Struct { fields, .. } => {
-                let mut offset = 0;
-                for field in fields {
-                    if field.name == field_name {
-                        return offset;
-                    }
-                    offset += field.ty.size_of();
-                }
-                panic!("Field not found in struct");
+        let Type::Struct { fields, .. } = self else {
+            panic!("Expected struct type");
+        };
+        let mut offset = 0;
+        for field in fields {
+            if field.name == field_name {
+                return offset;
             }
-            _ => panic!("Expected struct type"),
+            offset += field.ty.size_of();
         }
+        panic!("Field not found in struct");
     }
 
     pub fn struct_field_index(&self, field_name: &str) -> usize {
-        match self {
-            Type::Struct { fields, .. } => fields
-                .iter()
-                .position(|f| f.name == field_name)
-                .expect("Field not found in struct"),
-            _ => panic!("Expected struct type"),
-        }
+        let Type::Struct { fields, .. } = self else {
+            panic!("Expected struct type");
+        };
+        fields
+            .iter()
+            .position(|f| f.name == field_name)
+            .expect("Field not found in struct")
     }
 
     pub fn struct_field_type(&self, field_name: &str) -> Type {
-        match self {
-            Type::Struct { fields, .. } => fields
-                .iter()
-                .find(|f| f.name == field_name)
-                .map(|f| f.ty.clone())
-                .unwrap_or_else(|| panic!("Field not found in struct")),
-            _ => panic!("Expected struct type"),
-        }
+        let Type::Struct { fields, .. } = self else {
+            panic!("Expected struct type");
+        };
+        fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .map(|f| f.ty.clone())
+            .unwrap_or_else(|| panic!("Field not found in struct"))
     }
 
     pub fn has_field(&self, field_name: &str) -> bool {
-        match self {
-            Type::Struct { fields, .. } => fields.iter().any(|f| f.name == field_name),
-            _ => false,
-        }
+        let Type::Struct { fields, .. } = self else {
+            panic!("Expected struct type");
+        };
+        fields.iter().any(|f| f.name == field_name)
     }
 
     pub fn enum_variant_index(&self, variant: &str) -> usize {
-        match self {
-            Type::Enum { variants, .. } => variants
-                .iter()
-                .position(|v| v.name == variant)
-                .unwrap_or_else(|| panic!("Variant not found in enum")),
-            _ => panic!("Expected enum type"),
+        let Type::Enum { variants, .. } = self else {
+            panic!("Expected enum type");
+        };
+        variants
+            .iter()
+            .position(|v| v.name == variant)
+            .unwrap_or_else(|| panic!("Variant not found in enum"))
+    }
+
+    pub fn enum_max_payload_size(&self) -> usize {
+        let Type::Enum { variants, .. } = self else {
+            panic!("Expected enum type");
+        };
+        variants.iter().map(|v| v.payload.len()).max().unwrap_or(0)
+    }
+
+    pub fn enum_variant_payload_offsets(&self, variant: &str) -> Vec<usize> {
+        let Type::Enum { variants, .. } = self else {
+            panic!("Expected enum type");
+        };
+        let v = variants
+            .iter()
+            .find(|v| v.name == variant)
+            .expect("Variant not found in enum");
+        let mut offsets = Vec::with_capacity(v.payload.len());
+        let mut offset = 0;
+        for ty in &v.payload {
+            offsets.push(offset);
+            offset += ty.size_of();
         }
+        offsets
     }
 }
