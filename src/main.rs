@@ -27,8 +27,10 @@ const SOURCE: &str = r#"
 // Type Alias
 type Coord = u64
 
+type Shade = Light | Dark
+
 // Enum
-type Color = Red(u64) | Green(u64) | Blue(u64)
+type Color = Red(Shade) | Green(u64) | Blue(u64, Shade, bool)
 
 // Struct
 type Point = {
@@ -39,13 +41,13 @@ type Point = {
 
 fn main() -> u64 {
     // Struct literals
-    let a = Point { x: 10, y: 20, color: Color::Green(10) };
-    let b = Point { x: 5, y: 40, color: Color::Blue(20) };
+    let a = Point { x: 10, y: 20, color: Color::Red(Shade::Light) };
+    let b = Point { x: 5, y: 40, color: Color::Blue(20, Shade::Dark, true) };
 
     // Function calls (pass and return by value)
     // (Optimized to pass by reference and RVO/NRVO internally)
     let c = scale(a, 2, 3);
-    let d = change_color(b, Color::Green(10));
+    let d = change_color(b, Color::Blue(20, Shade::Dark, false));
 
     // Tuple destructuring
     let (dx, dy) = delta(c, d);

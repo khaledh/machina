@@ -18,6 +18,7 @@ development. The compiler currently targets only ARM64 assembly.
 - Tuples: `(u64, bool)`, `let t = (10, true)`
 - Structs: `type Point = { x: u64, y: u64 }`, `let p = Point { x: 10, y: 20 }`
 - Enums: `type Color = Red | Green | Blue`, `let c = Color::Green`
+- Enum payloads: `type Shape = Circle(u64) | Rect(u64, u64)`, `let s = Shape::Circle(10)`
 - Type aliases: `type Size = u64`, `let s: Size = 10`
 - Array destructuring: `let [a, b, c] = [1, 2, 3]`
 - Tuple destructuring: `let (x, y) = (1, true)`
@@ -45,8 +46,9 @@ development. The compiler currently targets only ARM64 assembly.
 // Type Alias
 type Coord = u64
 
-// Enum
-type Color = Red | Green | Blue
+// Enums
+type Shade = Light | Dark
+type Color = Red(Shade) | Green | Blue(u64, Shade)
 
 // Struct
 type Point = {
@@ -57,8 +59,8 @@ type Point = {
 
 fn main() -> u64 {
     // Struct literals
-    let a = Point { x: 10, y: 20, color: Color::Green };
-    let b = Point { x: 5, y: 40, color: Color::Blue };
+    let a = Point { x: 10, y: 20, color: Color::Red(Shade::Light) };
+    let b = Point { x: 5, y: 40, color: Color::Blue(20, Shade::Dark) };
 
     // Function calls (pass and return by value)
     // (Optimized to pass by reference and RVO/NRVO internally)
@@ -68,7 +70,7 @@ fn main() -> u64 {
     // Tuple destructuring
     let (dx, dy) = delta(c, d);
 
-    if same_color(c, d) {
+    if same_delta_x(c, d) {
         42
     } else {
         21
@@ -87,8 +89,8 @@ fn change_color(p: Point, color: Color) -> Point {
     { p | color: color }
 }
 
-fn same_color(p1: Point, p2: Point) -> bool {
-    p1.color == p2.color
+fn same_delta_x(p1: Point, p2: Point) -> bool {
+    p1.x == p2.x
 }
 
 fn delta(p1: Point, p2: Point) -> (u64, u64) {

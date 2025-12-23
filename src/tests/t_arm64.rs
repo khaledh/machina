@@ -183,8 +183,16 @@ fn test_enum_payload_stores_to_return_slot() {
     let mut types = TyTable::new();
     let u64_ty = u64_ty(&mut types);
     let bool_ty = types.add(TyKind::Bool);
+    let u8_ty = types.add(TyKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let payload_blob_ty = types.add(TyKind::Array {
+        elem_ty: u8_ty,
+        dims: vec![9],
+    });
     let enum_ty = types.add(TyKind::Tuple {
-        field_tys: vec![u64_ty, u64_ty, bool_ty],
+        field_tys: vec![u64_ty, payload_blob_ty],
     });
 
     let locals = vec![Local {
@@ -211,7 +219,10 @@ fn test_enum_payload_stores_to_return_slot() {
                 dst: Place::new(
                     ret,
                     u64_ty,
-                    vec![crate::mcir::types::Projection::Field { index: 1 }],
+                    vec![
+                        crate::mcir::types::Projection::Field { index: 1 },
+                        crate::mcir::types::Projection::ByteOffset { offset: 0 },
+                    ],
                 ),
                 src: Rvalue::Use(Operand::Const(Const::Int {
                     value: 7,
@@ -223,7 +234,10 @@ fn test_enum_payload_stores_to_return_slot() {
                 dst: Place::new(
                     ret,
                     bool_ty,
-                    vec![crate::mcir::types::Projection::Field { index: 2 }],
+                    vec![
+                        crate::mcir::types::Projection::Field { index: 1 },
+                        crate::mcir::types::Projection::ByteOffset { offset: 8 },
+                    ],
                 ),
                 src: Rvalue::Use(Operand::Const(Const::Bool(true))),
             },

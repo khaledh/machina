@@ -807,6 +807,11 @@ impl<'a> FuncCodegen<'a> {
                         }
                     };
                 }
+                Projection::ByteOffset { offset } => {
+                    if *offset != 0 {
+                        self.add_to_reg(*offset as i64, asm)?;
+                    }
+                }
             }
         }
 
@@ -1337,6 +1342,11 @@ impl<'a> FuncCodegen<'a> {
                             dims: dims[1..].to_vec(),
                         }
                     };
+                }
+                Projection::ByteOffset {
+                    offset: byte_offset,
+                } => {
+                    offset = offset.checked_add(*byte_offset)?;
                 }
             }
         }

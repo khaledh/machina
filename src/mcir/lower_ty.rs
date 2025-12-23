@@ -57,25 +57,39 @@ impl TyLowerer {
                 })
             }
             Type::Enum { variants, .. } => {
-                let has_payload = variants.iter().any(|v| !v.payload.is_empty());
-                if !has_payload {
-                    // Treat as a scalar tag
-                    self.table.add(TyKind::Int {
-                        signed: false,
-                        bits: 64,
-                    })
+                // Enums are modeled as a tuple of (scalar tag, blob of bytes for the payload).
+                // When lowering a variant, we compute the offset of each payload element in
+                // the blob and use that to project the payload elements.
+                let max_payload_size = variants
+                    .iter()
+                    .map(|v| v.payload.iter().map(|p| p.size_of()).sum::<usize>())
+                    .max()
+                    .unwrap_or(0);
+
+                // tag type (u64)
+                let tag_ty_id = self.table.add(TyKind::Int {
+                    signed: false,
+                    bits: 64,
+                });
+
+                if max_payload_size == 0 {
+                    // no payload, just a scalar tag
+                    tag_ty_id
                 } else {
-                    // Temp Assumption: all variants have the same payload type
-                    let payload_tys = &variants[0].payload;
-                    let mut field_tys = Vec::with_capacity(1 + payload_tys.len());
-                    // Tag
-                    let tag_ty = self.lower_ty(&Type::UInt64);
-                    field_tys.push(tag_ty);
-                    // Payload fields
-                    for ty in payload_tys {
-                        field_tys.push(self.lower_ty(ty));
-                    }
-                    self.table.add(TyKind::Tuple { field_tys })
+                    // blob type (u8 array)
+                    let u8_ty_id = self.table.add(TyKind::Int {
+                        signed: false,
+                        bits: 8,
+                    });
+                    let blob_ty_id = self.table.add(TyKind::Array {
+                        elem_ty: u8_ty_id,
+                        dims: vec![max_payload_size],
+                    });
+
+                    // tuple type (tag, blob)
+                    self.table.add(TyKind::Tuple {
+                        field_tys: vec![tag_ty_id, blob_ty_id],
+                    })
                 }
             }
 

@@ -288,7 +288,12 @@ impl Type {
         let Type::Enum { variants, .. } = self else {
             panic!("Expected enum type");
         };
-        variants.iter().map(|v| v.payload.len()).max().unwrap_or(0)
+        // take the max payload size across all variants
+        variants
+            .iter()
+            .map(|v| v.payload.iter().map(|p| p.size_of()).sum::<usize>())
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn enum_variant_payload_offsets(&self, variant: &str) -> Vec<usize> {

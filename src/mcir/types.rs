@@ -200,6 +200,7 @@ pub enum Aggregate {}
 pub enum Projection {
     Field { index: usize },
     Index { index: Operand },
+    ByteOffset { offset: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -409,6 +410,7 @@ impl fmt::Display for Projection {
         match self {
             Projection::Field { index } => write!(f, ".{}", index),
             Projection::Index { index } => write!(f, "[{}]", index),
+            Projection::ByteOffset { offset } => write!(f, "+{}", offset),
         }
     }
 }

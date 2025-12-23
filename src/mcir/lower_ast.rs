@@ -589,12 +589,37 @@ impl<'a> FuncLowerer<'a> {
                 for (i, payload_expr) in payload.iter().enumerate() {
                     let field_ty = self.ty_for_node(payload_expr.id)?;
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
-                    self.emit_agg_projection(
-                        &dst,
-                        field_ty_id,
-                        payload_expr,
-                        Projection::Field { index: i + 1 },
-                    )?;
+
+                    // Compute the byte offset of the payload field
+                    let byte_offset = enum_ty.enum_variant_payload_offsets(variant)[i];
+
+                    let mut projs = dst.projections().to_vec();
+                    projs.push(Projection::Field { index: 1 });
+                    projs.push(Projection::ByteOffset {
+                        offset: byte_offset,
+                    });
+
+                    if self.is_scalar(field_ty_id) {
+                        let field_place = Place::new(dst.base(), field_ty_id, projs);
+                        let src_op = self.lower_scalar_expr(payload_expr)?;
+                        self.fb.push_stmt(
+                            self.curr_block,
+                            Statement::CopyScalar {
+                                dst: field_place,
+                                src: Rvalue::Use(src_op),
+                            },
+                        );
+                    } else {
+                        let field_place = Place::new(dst.base(), field_ty_id, projs);
+                        let src_place = self.lower_agg_expr(payload_expr)?;
+                        self.fb.push_stmt(
+                            self.curr_block,
+                            Statement::CopyAggregate {
+                                dst: field_place,
+                                src: src_place,
+                            },
+                        );
+                    }
                 }
                 Ok(())
             }

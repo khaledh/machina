@@ -381,7 +381,13 @@ fn test_lower_enum_variant_payload_literal() {
     match &entry_block.stmts[1] {
         Statement::CopyScalar { dst, src } => {
             assert_eq!(dst.base(), LocalId(0));
-            assert_eq!(dst.projections(), &[Projection::Field { index: 1 }]);
+            assert_eq!(
+                dst.projections(),
+                &[
+                    Projection::Field { index: 1 },
+                    Projection::ByteOffset { offset: 0 }
+                ]
+            );
             match src {
                 Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
                     assert_eq!(*value, 7);
@@ -395,7 +401,13 @@ fn test_lower_enum_variant_payload_literal() {
     match &entry_block.stmts[2] {
         Statement::CopyScalar { dst, src } => {
             assert_eq!(dst.base(), LocalId(0));
-            assert_eq!(dst.projections(), &[Projection::Field { index: 2 }]);
+            assert_eq!(
+                dst.projections(),
+                &[
+                    Projection::Field { index: 1 },
+                    Projection::ByteOffset { offset: 8 }
+                ]
+            );
             match src {
                 Rvalue::Use(Operand::Const(Const::Bool(value))) => {
                     assert_eq!(*value, true);
