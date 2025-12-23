@@ -66,6 +66,18 @@ impl NrvoAnalyzer {
             ExprKind::Block(exprs) => exprs
                 .last()
                 .and_then(|e| Self::find_ret_var_def_id(def_map, e)),
+            ExprKind::Match { arms, .. } => {
+                let mut arm_def_id = None;
+                for arm in arms {
+                    let this_id = Self::find_ret_var_def_id(def_map, &arm.body);
+                    match (arm_def_id, this_id) {
+                        (None, Some(id)) => arm_def_id = Some(id),
+                        (Some(id), Some(this_id)) if id == this_id => {},
+                        _ => return None, // mismatch or missing -> not NRVO safe
+                    }
+                }
+                arm_def_id
+            }
             _ => None,
         }
     }
@@ -147,6 +159,12 @@ impl<'a> NrvoSafetyChecker<'a> {
                 let cond_ok = self.check_expr(cond, false);
                 let body_ok = self.check_expr(body, false);
                 cond_ok && body_ok
+            }
+
+            ExprKind::Match { scrutinee, arms } => {
+                let scrutinee_ok = self.check_expr(scrutinee, false);
+                let arms_ok = arms.iter().all(|arm| self.check_expr(&arm.body, at_return));
+                scrutinee_ok && arms_ok
             }
 
             ExprKind::Call { callee, args } => {

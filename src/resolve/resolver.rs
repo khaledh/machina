@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::ast::NodeId;
 use crate::ast::{
-    Decl, ExprKind, Function, Module, PatternKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
+    Decl, ExprKind, Function, MatchPattern, Module, PatternKind, TypeDecl, TypeDeclKind, TypeExpr,
+    TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
@@ -389,6 +390,64 @@ impl SymbolResolver {
         }
     }
 
+    fn check_match_pattern(&mut self, pattern: &MatchPattern, arm_id: NodeId) {
+        match pattern {
+            MatchPattern::Wildcard { .. } => {}
+            MatchPattern::EnumVariant {
+                enum_name,
+                bindings,
+                span,
+                ..
+            } => {
+                // Resolve the enum name if present
+                if let Some(enum_name) = enum_name {
+                    let Some(Symbol {
+                        def_id,
+                        kind: SymbolKind::EnumDef { .. },
+                        ..
+                    }) = self.lookup_symbol(enum_name)
+                    else {
+                        self.errors
+                            .push(ResolveError::EnumUndefined(enum_name.clone(), *span));
+                        return;
+                    };
+                    self.def_map_builder.record_use(arm_id, *def_id);
+                }
+
+                // Note: We delegate to the type checker to validate the variant.
+
+                // Bind each binding's sub-pattern
+                for binding in bindings {
+                    // Check for duplicate bindings
+                    if self.lookup_symbol_direct(&binding.name).is_some() {
+                        self.errors
+                            .push(ResolveError::VarAlreadyDefined(binding.name.clone(), *span));
+                        return;
+                    }
+
+                    // Create a new def
+                    let def_id = self.def_id_gen.new_id();
+                    let def = Def {
+                        id: def_id,
+                        name: binding.name.clone(),
+                        kind: DefKind::LocalVar {
+                            nrvo_eligible: false,
+                        },
+                    };
+                    self.def_map_builder.record_def(def, binding.id);
+                    self.insert_symbol(
+                        &binding.name,
+                        Symbol {
+                            def_id,
+                            name: binding.name.clone(),
+                            kind: SymbolKind::Var { is_mutable: false },
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     fn check_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
             TypeExprKind::Named(name) => match self.lookup_symbol(name) {
@@ -513,6 +572,17 @@ impl SymbolResolver {
                 // Resolve each payload expression
                 for payload_expr in payload {
                     self.check_expr(payload_expr);
+                }
+            }
+
+            ExprKind::Match { scrutinee, arms } => {
+                self.check_expr(scrutinee);
+                for arm in arms {
+                    // enter a new scope
+                    self.with_scope(|checker| {
+                        checker.check_match_pattern(&arm.pattern, arm.id);
+                        checker.check_expr(&arm.body);
+                    });
                 }
             }
 

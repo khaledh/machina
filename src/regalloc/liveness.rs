@@ -143,6 +143,15 @@ pub fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
                 }
             }
         }
+        Terminator::Switch { discr, .. } => {
+            let mut uses = HashSet::new();
+            collect_operand_uses(discr, &mut uses);
+            for u in uses {
+                if !kill_set.contains(&u) {
+                    gen_set.insert(u);
+                }
+            }
+        }
         Terminator::Return | Terminator::Goto(_) | Terminator::Unterminated => {}
     }
 
@@ -179,6 +188,12 @@ fn compute_succs(body: &FuncBody) -> Vec<Vec<BlockId>> {
             } => {
                 v.push(*then_bb);
                 v.push(*else_bb);
+            }
+            Terminator::Switch { cases, default, .. } => {
+                for case in cases {
+                    v.push(case.target);
+                }
+                v.push(*default);
             }
             Terminator::Return | Terminator::Unterminated => {}
         }

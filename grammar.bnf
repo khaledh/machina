@@ -39,6 +39,7 @@ Expr               ::= Let
                      | Assign
                      | If
                      | While
+                     | Match
                      | InfixExpr
 
 # Binding
@@ -63,6 +64,12 @@ Assign             ::= PostfixExpr "=" Expr
 # Control flow
 If                 ::= "if" Expr Block ( "else" Block )?
 While              ::= "while" Expr Block
+
+Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
+MatchArm           ::= MatchPattern "=>" Expr
+MatchPattern       ::= "_" | EnumVariantPattern
+EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" IdentList? ")" )?
+IdentList          ::= Identifier ("," Identifier)* ","?
 
 # Operator Precedence (Lowest to Highest)
 # 1. Comparison (==, !=, <, <=, >, >=)

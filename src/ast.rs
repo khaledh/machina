@@ -168,6 +168,36 @@ pub struct StructPatternField {
     pub span: Span,
 }
 
+// -- Match patterns ---
+
+#[derive(Clone, Debug)]
+pub struct MatchArm {
+    pub id: NodeId,
+    pub pattern: MatchPattern,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum MatchPattern {
+    Wildcard {
+        span: Span,
+    },
+    EnumVariant {
+        enum_name: Option<String>,
+        variant_name: String,
+        bindings: Vec<MatchPatternBinding>,
+        span: Span,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchPatternBinding {
+    pub id: NodeId,
+    pub name: String,
+    pub span: Span,
+}
+
 // -- Type Expressions ---
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -281,6 +311,12 @@ pub enum ExprKind {
     While {
         cond: Box<Expr>,
         body: Box<Expr>,
+    },
+
+    // Match
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
     },
 
     // Function call
@@ -511,6 +547,54 @@ impl StructPatternField {
     }
 }
 
+impl MatchArm {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}MatchArm [{}]", pad, self.id)?;
+        self.pattern.fmt_with_indent(f, level + 1)?;
+        writeln!(f, "{}Body:", pad)?;
+        self.body.fmt_with_indent(f, level + 1)?;
+        Ok(())
+    }
+}
+
+impl MatchPattern {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match self {
+            MatchPattern::Wildcard { .. } => {
+                writeln!(f, "{}Wildcard", pad)?;
+            }
+            MatchPattern::EnumVariant {
+                enum_name,
+                variant_name,
+                bindings,
+                ..
+            } => {
+                writeln!(f, "{}EnumVariant", pad)?;
+                let pad1 = indent(level + 1);
+                if let Some(enum_name) = enum_name {
+                    writeln!(f, "{}Enum Name: {}", pad1, enum_name)?;
+                }
+                writeln!(f, "{}Variant Name: {}", pad1, variant_name)?;
+                writeln!(f, "{}Bindings:", pad1)?;
+                for binding in bindings {
+                    binding.fmt_with_indent(f, level + 2)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MatchPatternBinding {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}{}: [{}]", pad1, self.name, self.id)?;
+        Ok(())
+    }
+}
+
 impl Expr {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
@@ -684,6 +768,16 @@ impl Expr {
                 writeln!(f, "{}Args:", pad1)?;
                 for arg in args {
                     arg.fmt_with_indent(f, level + 2)?;
+                }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Match [{}]", pad, self.id)?;
+                writeln!(f, "{}Scrutinee:", pad1)?;
+                scrutinee.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Arms:", pad1)?;
+                for arm in arms {
+                    arm.fmt_with_indent(f, level + 2)?;
                 }
             }
         }

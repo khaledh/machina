@@ -107,6 +107,21 @@ pub enum TypeCheckError {
 
     #[error("Enum variant payload type mismatch: variant {0} index {1} expected {2}, found {3}")]
     EnumVariantPayloadTypeMismatch(String, usize, Type, Type, Span),
+
+    #[error("Match target is not an enum: {0}")]
+    MatchTargetNotEnum(Type, Span),
+
+    #[error("Match arm type mismatch: expected {0}, found {1}")]
+    MatchArmTypeMismatch(Type, Type, Span),
+
+    #[error("Match pattern enum mismatch: expected {0}, found {1}")]
+    MatchPatternEnumMismatch(String, String, Span),
+
+    #[error("Match is not exhaustive: {0}")]
+    NonExhaustiveMatch(Span),
+
+    #[error("Duplicate match arm variant: {0}")]
+    DuplicateMatchVariant(String, Span),
 }
 
 impl TypeCheckError {
@@ -146,6 +161,11 @@ impl TypeCheckError {
             TypeCheckError::InvalidStructUpdateTarget(_, span) => *span,
             TypeCheckError::EnumVariantPayloadArityMismatch(_, _, _, span) => *span,
             TypeCheckError::EnumVariantPayloadTypeMismatch(_, _, _, _, span) => *span,
+            TypeCheckError::MatchTargetNotEnum(_, span) => *span,
+            TypeCheckError::MatchArmTypeMismatch(_, _, span) => *span,
+            TypeCheckError::MatchPatternEnumMismatch(_, _, span) => *span,
+            TypeCheckError::NonExhaustiveMatch(span) => *span,
+            TypeCheckError::DuplicateMatchVariant(_, span) => *span,
         }
     }
 }

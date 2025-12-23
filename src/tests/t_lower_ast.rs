@@ -422,6 +422,91 @@ fn test_lower_enum_variant_payload_literal() {
 }
 
 #[test]
+fn test_lower_match_switch_payload_binding() {
+    let source = r#"
+        type Color = Red(u64) | Green
+
+        fn main(c: Color) -> u64 {
+            match c {
+                Red(x) => x,
+                Green => 0,
+                _ => 1,
+            }
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = *analyzed
+        .module
+        .funcs()
+        .iter()
+        .find(|f| f.name == "main")
+        .expect("main not found");
+    let mut lowerer = FuncLowerer::new(&analyzed, func);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+
+    let c_local = body
+        .locals
+        .iter()
+        .enumerate()
+        .find(|(_, local)| local.name.as_deref() == Some("c"))
+        .map(|(idx, _)| LocalId(idx as u32))
+        .expect("c local not found");
+    let x_local = body
+        .locals
+        .iter()
+        .enumerate()
+        .find(|(_, local)| local.name.as_deref() == Some("x"))
+        .map(|(idx, _)| LocalId(idx as u32))
+        .expect("x local not found");
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+    match &entry_block.terminator {
+        Terminator::Switch {
+            discr,
+            cases,
+            default: _,
+        } => {
+            let mut values = cases.iter().map(|c| c.value).collect::<Vec<_>>();
+            values.sort_unstable();
+            assert_eq!(values, vec![0, 1]);
+            match discr {
+                Operand::Copy(place) => {
+                    assert_eq!(place.base(), c_local);
+                    assert_eq!(place.projections(), &[Projection::Field { index: 0 }]);
+                }
+                _ => panic!("unexpected match discr"),
+            }
+        }
+        _ => panic!("expected Switch terminator"),
+    }
+
+    let mut saw_binding = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::CopyScalar { dst, src } = stmt {
+                if dst.base() == x_local {
+                    if let Rvalue::Use(Operand::Copy(place)) = src {
+                        if place.base() == c_local
+                            && place.projections()
+                                == &[
+                                    Projection::Field { index: 1 },
+                                    Projection::ByteOffset { offset: 0 },
+                                ]
+                        {
+                            saw_binding = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_binding, "expected payload binding for x");
+}
+
+#[test]
 fn test_lower_struct_update() {
     let source = r#"
         type Point = { x: u64, y: u64 }

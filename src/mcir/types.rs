@@ -321,7 +321,18 @@ pub enum Terminator {
         then_bb: BlockId,
         else_bb: BlockId,
     },
+    Switch {
+        discr: Operand,
+        cases: Vec<SwitchCase>,
+        default: BlockId,
+    },
     Unterminated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchCase {
+    pub value: u64, // enum tag
+    pub target: BlockId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -502,6 +513,18 @@ impl fmt::Display for Terminator {
                 then_bb,
                 else_bb,
             } => write!(f, "if {} goto {} else {}", cond, then_bb, else_bb),
+            Terminator::Switch {
+                discr,
+                cases,
+                default,
+            } => {
+                write!(f, "switch {} {{", discr)?;
+                for case in cases {
+                    write!(f, "  case {}: goto {}", case.value, case.target)?;
+                }
+                write!(f, "  default: goto {}", default)?;
+                write!(f, "}}")
+            }
             Terminator::Unterminated => write!(f, "unterminated"),
         }
     }

@@ -52,8 +52,7 @@ fn main() -> u64 {
     // Tuple destructuring
     let (dx, dy) = delta(c, d);
 
-    // if same_color(c, d) {
-    if dx == dy {
+    if is_blue(d) {
         42
     } else {
         21
@@ -72,10 +71,12 @@ fn change_color(p: Point, color: Color) -> Point {
     { p | color: color }
 }
 
-fn same_color(p1: Point, p2: Point) -> bool {
-    // TODO: can't compare enum with payloads yet
-    // p1.color == p2.color
-    true
+fn is_blue(p: Point) -> bool {
+   // pattern matching on enum
+    match p.color {
+        Color::Blue(val, shade, b) => true,
+        _ => false,
+    }
 }
 
 fn delta(p1: Point, p2: Point) -> (u64, u64) {

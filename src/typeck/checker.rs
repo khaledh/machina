@@ -1,9 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{
-    BinaryOp, Expr, ExprKind, Function, NodeId, Pattern, PatternKind, StructLitField,
-    StructUpdateField, TypeDeclKind, TypeExpr,
-};
+use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
 use crate::types::{EnumVariant, StructField, Type};
@@ -858,6 +855,136 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
+    fn type_check_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        let scrutinee_ty = self.type_check_expr(scrutinee)?;
+
+        let (enum_name, variants) = match scrutinee_ty {
+            Type::Enum { name, variants } => (name.clone(), variants),
+            _ => {
+                return Err(TypeCheckError::MatchTargetNotEnum(
+                    scrutinee_ty,
+                    scrutinee.span,
+                ));
+            }
+        };
+
+        let mut seen_variants = HashSet::new();
+        let mut has_wildcard = false;
+        let mut arm_ty: Option<Type> = None;
+
+        for arm in arms {
+            match &arm.pattern {
+                MatchPattern::Wildcard { .. } => {
+                    has_wildcard = true;
+                }
+                MatchPattern::EnumVariant {
+                    variant_name, span, ..
+                } => {
+                    // check for duplicate variants
+                    if !seen_variants.insert(variant_name.clone()) {
+                        return Err(TypeCheckError::DuplicateMatchVariant(
+                            variant_name.clone(),
+                            *span,
+                        ));
+                    }
+                }
+            }
+
+            self.type_check_match_pattern(&enum_name, &variants, &arm.pattern)?;
+
+            let body_ty = self.type_check_expr(&arm.body)?;
+            if let Some(expected_ty) = &arm_ty {
+                if body_ty != *expected_ty {
+                    return Err(TypeCheckError::MatchArmTypeMismatch(
+                        expected_ty.clone(),
+                        body_ty,
+                        arm.span,
+                    ));
+                }
+            } else {
+                arm_ty = Some(body_ty);
+            }
+        }
+
+        if !has_wildcard {
+            return Err(TypeCheckError::NonExhaustiveMatch(span));
+        }
+
+        Ok(arm_ty.unwrap_or(Type::Unit))
+    }
+
+    fn type_check_match_pattern(
+        &mut self,
+        enum_name: &String,
+        variants: &[EnumVariant],
+        pattern: &MatchPattern,
+    ) -> Result<(), TypeCheckError> {
+        match pattern {
+            MatchPattern::Wildcard { .. } => Ok(()),
+
+            MatchPattern::EnumVariant {
+                enum_name: pat_enum_name,
+                variant_name,
+                bindings,
+                span,
+            } => {
+                // Check that the enum name matches
+                if let Some(pat_enum_name) = pat_enum_name {
+                    if pat_enum_name != enum_name {
+                        return Err(TypeCheckError::MatchPatternEnumMismatch(
+                            enum_name.clone(),
+                            pat_enum_name.clone(),
+                            *span,
+                        ));
+                    }
+                }
+
+                // Get the variant
+                let variant = variants
+                    .iter()
+                    .find(|v| v.name == *variant_name)
+                    .ok_or_else(|| {
+                        TypeCheckError::UnknownEnumVariant(
+                            enum_name.clone(),
+                            variant_name.clone(),
+                            *span,
+                        )
+                    })?;
+
+                // Check that the payload has the right number of elements
+                if bindings.len() != variant.payload.len() {
+                    return Err(TypeCheckError::EnumVariantPayloadArityMismatch(
+                        variant_name.clone(),
+                        variant.payload.len(),
+                        bindings.len(),
+                        *span,
+                    ));
+                }
+
+                // Type check each binding
+                for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
+                    match self.context.def_map.lookup_def(binding.id) {
+                        Some(def) => {
+                            self.builder.record_def_type(def.clone(), ty.clone());
+                            self.builder.record_node_type(binding.id, ty.clone());
+                        }
+                        None => panic!(
+                            "compiler bug: binding [{}] not found in def_map",
+                            binding.id
+                        ),
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+
     fn type_check_bin_op(
         &mut self,
         left: &Expr,
@@ -959,6 +1086,10 @@ impl<'c, 'b> Checker<'c, 'b> {
             } => self.type_check_if(cond, then_body, else_body),
 
             ExprKind::While { cond, body } => self.type_check_while(cond, body),
+
+            ExprKind::Match { scrutinee, arms } => {
+                self.type_check_match(scrutinee, arms, expr.span)
+            }
         };
 
         result.map(|ty| {

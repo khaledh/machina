@@ -1,11 +1,7 @@
 use thiserror::Error;
 
 use crate::ast::NodeIdGen;
-use crate::ast::{
-    BinaryOp, Decl, EnumVariant, Expr, ExprKind, Function, FunctionParam, Module, Pattern,
-    PatternKind, StructField, StructLitField, StructPatternField, StructUpdateField, TypeDecl,
-    TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
-};
+use crate::ast::*;
 use crate::diagnostics::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 
@@ -41,6 +37,12 @@ pub enum ParseError {
 
     #[error("Expected struct field, found: {0}")]
     ExpectedStructField(Token),
+
+    #[error("Expected match arm, found: {0}")]
+    ExpectedMatchArm(Token),
+
+    #[error("Expected match pattern, found: {0}")]
+    ExpectedMatchPattern(Token),
 }
 
 impl ParseError {
@@ -56,6 +58,8 @@ impl ParseError {
             ParseError::ExpectedPattern(token) => token.span,
             ParseError::SingleFieldTupleMissingComma(token) => token.span,
             ParseError::ExpectedStructField(token) => token.span,
+            ParseError::ExpectedMatchArm(token) => token.span,
+            ParseError::ExpectedMatchPattern(token) => token.span,
         }
     }
 }
@@ -790,6 +794,7 @@ impl<'a> Parser<'a> {
         match &self.curr_token.kind {
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
+            TK::Ident(name) if name == "match" => self.parse_match_expr(),
             TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 // Enum variant: Ident :: Variant
                 self.parse_enum_variant(name.clone())
@@ -949,6 +954,106 @@ impl<'a> Parser<'a> {
                 variant,
                 payload,
             },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_match_expr(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+
+        // Expect 'match'
+        self.consume_keyword("match")?;
+
+        // Parse scrutinee
+        let scrutinee = self.parse_expr(0)?;
+
+        // Expect '{'
+        self.consume(&TK::LBrace)?;
+
+        // Parse match arms
+        let arms = self.parse_list(TK::Comma, TK::RBrace, |parser| parser.parse_match_arm())?;
+        if arms.is_empty() {
+            return Err(ParseError::ExpectedMatchArm(self.curr_token.clone()));
+        }
+
+        // Expect '}'
+        self.consume(&TK::RBrace)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
+        let marker = self.mark();
+
+        // Parse match pattern
+        let pattern = self.parse_match_pattern()?;
+
+        // Expect '=>'
+        self.consume(&TK::FatArrow)?;
+
+        // Parse match body
+        let body = self.parse_expr(0)?;
+
+        Ok(MatchArm {
+            id: self.id_gen.new_id(),
+            pattern,
+            body,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
+        let marker = self.mark();
+
+        // Case 1: Wildcard
+        if self.curr_token.kind == TK::Underscore {
+            self.advance();
+            return Ok(MatchPattern::Wildcard {
+                span: self.close(marker),
+            });
+        }
+
+        // Case 2: Enum variant (either Enum::Variant or Variant)
+        if !matches!(self.curr_token.kind, TK::Ident(_)) {
+            return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
+        }
+
+        let mut enum_name = None;
+        let mut variant_name = self.parse_ident()?;
+
+        if self.curr_token.kind == TK::DoubleColon {
+            self.advance();
+            enum_name = Some(variant_name);
+            variant_name = self.parse_ident()?;
+        }
+
+        // Parse bindings (if any)
+        let mut bindings = vec![];
+        if self.curr_token.kind == TK::LParen {
+            self.advance();
+            bindings = self.parse_list(TK::Comma, TK::RParen, |parser| {
+                let marker = parser.mark();
+                let name = parser.parse_ident()?;
+                Ok(MatchPatternBinding {
+                    id: parser.id_gen.new_id(),
+                    name,
+                    span: parser.close(marker),
+                })
+            })?;
+            self.consume(&TK::RParen)?;
+        }
+
+        Ok(MatchPattern::EnumVariant {
+            enum_name,
+            variant_name,
+            bindings,
             span: self.close(marker),
         })
     }

@@ -486,6 +486,20 @@ impl<'a> FuncCodegen<'a> {
                     asm.push_str(&format!("  b {}\n", self.block_labels[else_bb]));
                 }
             }
+            Terminator::Switch {
+                discr,
+                cases,
+                default,
+            } => {
+                // Evaluate discriminator and branch to the appropriate case.
+                let discr_reg = self.materialize_operand(discr, &mut asm, R::X16)?;
+                for case in cases {
+                    asm.push_str(&format!("  cmp {}, #{}\n", discr_reg, case.value));
+                    asm.push_str(&format!("  b.eq {}\n", self.block_labels[&case.target]));
+                }
+                // Branch to defautlt block if no case matches.
+                asm.push_str(&format!("  b {}\n", self.block_labels[default]));
+            }
             Terminator::Unterminated => {
                 // Should not happen in well-formed IR.
                 let label = self

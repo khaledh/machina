@@ -577,3 +577,99 @@ fn test_enum_variant_payload_type_mismatch() {
         }
     }
 }
+
+#[test]
+fn test_match_enum_ok() {
+    let source = r#"
+        type Color = Red(u64) | Green
+
+        fn test(c: Color) -> u64 {
+            match c {
+                Red(x) => x,
+                Green => 0,
+                _ => 1,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_match_non_exhaustive() {
+    let source = r#"
+        type Color = Red | Green
+
+        fn test(c: Color) -> u64 {
+            match c {
+                Red => 0,
+                Green => 1,
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::NonExhaustiveMatch(_) => {
+                // Expected error
+            }
+            e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_match_duplicate_variant() {
+    let source = r#"
+        type Color = Red | Green
+
+        fn test(c: Color) -> u64 {
+            match c {
+                Red => 0,
+                Red => 1,
+                _ => 2,
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::DuplicateMatchVariant(name, _) => {
+                assert_eq!(name, "Red");
+            }
+            e => panic!("Expected DuplicateMatchVariant error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_match_target_not_enum() {
+    let source = r#"
+        fn test() -> u64 {
+            match 1 {
+                _ => 0,
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::MatchTargetNotEnum(ty, _) => {
+                assert_eq!(*ty, Type::UInt64);
+            }
+            e => panic!("Expected MatchTargetNotEnum error, got {:?}", e),
+        }
+    }
+}

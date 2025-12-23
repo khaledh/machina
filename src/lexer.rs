@@ -38,6 +38,8 @@ pub enum TokenKind {
     RBrace,
     #[display("->")]
     Arrow,
+    #[display("=>")]
+    FatArrow,
     #[display("+")]
     Plus,
     #[display("-")]
@@ -58,6 +60,8 @@ pub enum TokenKind {
     Semicolon,
     #[display("|")]
     Pipe,
+    #[display("_")]
+    Underscore,
     #[display("=")]
     Equals,
     #[display("==")]
@@ -179,7 +183,11 @@ impl<'a> Lexer<'a> {
                     ident.push(ch);
                     self.advance();
                 }
-                Ok(TokenKind::Ident(ident))
+                if ident == "_" {
+                    Ok(TokenKind::Underscore)
+                } else {
+                    Ok(TokenKind::Ident(ident))
+                }
             }
             Some(&ch) if ch.is_ascii_digit() => {
                 let mut num_str = String::new();
@@ -235,6 +243,10 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(TokenKind::Pipe)
             }
+            Some(&'_') => {
+                self.advance();
+                Ok(TokenKind::Underscore)
+            }
             Some(&',') => {
                 self.advance();
                 Ok(TokenKind::Comma)
@@ -266,11 +278,16 @@ impl<'a> Lexer<'a> {
             }
             Some(&'=') => {
                 self.advance();
-                if matches!(self.source.peek(), Some(&'=')) {
-                    self.advance();
-                    Ok(TokenKind::EqEq)
-                } else {
-                    Ok(TokenKind::Equals)
+                match self.source.peek() {
+                    Some(&'=') => {
+                        self.advance();
+                        Ok(TokenKind::EqEq)
+                    }
+                    Some(&'>') => {
+                        self.advance();
+                        Ok(TokenKind::FatArrow)
+                    }
+                    _ => Ok(TokenKind::Equals),
                 }
             }
             Some(&'!') => {
