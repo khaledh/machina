@@ -44,7 +44,8 @@ impl TyLowerer {
                 let ids = fields.iter().map(|t| self.lower_ty(t)).collect();
                 self.table.add(TyKind::Tuple { field_tys: ids })
             }
-            Type::Struct { fields, .. } => {
+            Type::Struct { name, fields } => {
+                let name = name.clone();
                 let struct_fields = fields
                     .iter()
                     .map(|f| StructField {
@@ -52,11 +53,15 @@ impl TyLowerer {
                         ty: self.lower_ty(&f.ty),
                     })
                     .collect();
-                self.table.add(TyKind::Struct {
-                    fields: struct_fields,
-                })
+                self.table.add_named(
+                    TyKind::Struct {
+                        fields: struct_fields,
+                    },
+                    name,
+                )
             }
-            Type::Enum { variants, .. } => {
+            Type::Enum { name, variants } => {
+                let name = name.clone();
                 // Enums are modeled as a tuple of (scalar tag, blob of bytes for the payload).
                 // When lowering a variant, we compute the offset of each payload element in
                 // the blob and use that to project the payload elements.
@@ -67,15 +72,16 @@ impl TyLowerer {
                     .unwrap_or(0);
 
                 // tag type (u64)
-                let tag_ty_id = self.table.add(TyKind::Int {
+                let tag_kind = TyKind::Int {
                     signed: false,
                     bits: 64,
-                });
+                };
 
                 if max_payload_size == 0 {
                     // no payload, just a scalar tag
-                    tag_ty_id
+                    self.table.add_named(tag_kind, name)
                 } else {
+                    let tag_ty_id = self.table.add(tag_kind);
                     // blob type (u8 array)
                     let u8_ty_id = self.table.add(TyKind::Int {
                         signed: false,
@@ -87,9 +93,12 @@ impl TyLowerer {
                     });
 
                     // tuple type (tag, blob)
-                    self.table.add(TyKind::Tuple {
-                        field_tys: vec![tag_ty_id, blob_ty_id],
-                    })
+                    self.table.add_named(
+                        TyKind::Tuple {
+                            field_tys: vec![tag_ty_id, blob_ty_id],
+                        },
+                        name,
+                    )
                 }
             }
 

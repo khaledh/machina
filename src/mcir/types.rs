@@ -38,6 +38,7 @@ pub struct StructField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TyInfo {
     pub kind: TyKind,
+    pub name: Option<String>,
 }
 
 impl TyInfo {
@@ -65,7 +66,16 @@ impl TyTable {
 
     pub fn add(&mut self, kind: TyKind) -> TyId {
         let id = TyId(self.types.len() as u32);
-        self.types.push(TyInfo { kind });
+        self.types.push(TyInfo { kind, name: None });
+        id
+    }
+
+    pub fn add_named(&mut self, kind: TyKind, name: String) -> TyId {
+        let id = TyId(self.types.len() as u32);
+        self.types.push(TyInfo {
+            kind,
+            name: Some(name),
+        });
         id
     }
 
@@ -84,7 +94,11 @@ impl TyTable {
     }
 
     fn write_ty(&self, id: TyId, out: &mut String) -> fmt::Result {
-        match self.kind(id) {
+        let info = self.get(id);
+        if let Some(name) = &info.name {
+            return write!(out, "{}", name);
+        }
+        match &info.kind {
             TyKind::Unit => write!(out, "()"),
             TyKind::Bool => write!(out, "bool"),
             TyKind::Int { signed, bits } => {

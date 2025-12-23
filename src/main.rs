@@ -23,71 +23,14 @@ use crate::parser::Parser;
 use crate::resolve::resolve;
 use crate::targets::TargetKind;
 use crate::typeck::type_check;
-
-const SOURCE: &str = r#"
-// Type Alias
-type Coord = u64
-
-type Shade = Light | Dark
-
-// Enum
-type Color = Red(Shade) | Green(u64) | Blue(u64, Shade, bool)
-
-// Struct
-type Point = {
-  x: Coord,
-  y: Coord,
-  color: Color,
-}
-
-fn main() -> u64 {
-    // Struct literals
-    let a = Point { x: 10, y: 20, color: Color::Red(Shade::Light) };
-    let b = Point { x: 5, y: 40, color: Color::Blue(20, Shade::Dark, true) };
-
-    // Function calls (pass and return by value)
-    // (Optimized to pass by reference and RVO/NRVO internally)
-    let c = scale(a, 2, 3);
-    let d = change_color(b, Color::Blue(20, Shade::Dark, false));
-
-    // Tuple destructuring
-    let (dx, dy) = delta(c, d);
-
-    if is_blue(d) {
-        42
-    } else {
-        21
-    }
-}
-
-fn scale(p: Point, dx: u64, dy: u64) -> Point {
-    // Struct destructuring
-    let Point { x, y, color } = p;
-
-    // Struct update (creates a new struct value)
-    { p | x: x * dx, y: y * dy }
-}
-
-fn change_color(p: Point, color: Color) -> Point {
-    { p | color: color }
-}
-
-fn is_blue(p: Point) -> bool {
-   // pattern matching on enum
-    match p.color {
-        Color::Blue(val, shade, b) => true,
-        _ => false,
-    }
-}
-
-fn delta(p1: Point, p2: Point) -> (u64, u64) {
-    (p2.x - p1.x, p2.y - p1.y)
-}
-"#;
+use std::path::Path;
 
 #[derive(ClapParser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Input source file path
+    input: String,
+
     /// Comma-separated list of things to dump: ast,defmap,typemap,ir,liveness,intervals,regalloc,asm
     #[clap(long)]
     dump: Option<String>,
@@ -99,33 +42,52 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let output = compile(SOURCE, args);
+    let input_path = args.input.clone();
+    let source = match std::fs::read_to_string(&input_path) {
+        Ok(source) => source,
+        Err(e) => {
+            println!("[ERROR] failed to read {}: {e}", input_path);
+            return;
+        }
+    };
+    let output = compile(&source, args);
 
     match output {
-        Ok(asm) => match std::fs::write("output.s", asm) {
-            Ok(_) => println!("[SUCCESS] assembly written to output.s"),
-            Err(e) => println!("[ERROR] failed to write assembly: {e}"),
-        },
+        Ok(asm) => {
+            let output_path = Path::new(&input_path).with_extension("s");
+            match std::fs::write(&output_path, asm) {
+                Ok(_) => {
+                    println!(
+                        "[SUCCESS] assembly written to {}",
+                        output_path.display()
+                    )
+                }
+                Err(e) => println!(
+                    "[ERROR] failed to write {}: {e}",
+                    output_path.display()
+                ),
+            }
+        }
         Err(errors) => {
             for error in errors {
                 match error {
                     CompileError::Lex(e) => {
-                        println!("{}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(&source, e.span(), e));
                     }
                     CompileError::Parse(e) => {
-                        println!("{}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(&source, e.span(), e));
                     }
                     CompileError::Resolve(e) => {
-                        println!("{}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(&source, e.span(), e));
                     }
                     CompileError::TypeCheck(e) => {
-                        println!("{}", format_error(SOURCE, e.span(), e));
+                        println!("{}", format_error(&source, e.span(), e));
                     }
                     CompileError::Lower(e) => {
-                        println!("{}", format_error(SOURCE, Span::default(), e));
+                        println!("{}", format_error(&source, Span::default(), e));
                     }
                     CompileError::Codegen(e) => {
-                        println!("{}", format_error(SOURCE, Span::default(), e));
+                        println!("{}", format_error(&source, Span::default(), e));
                     }
                 }
             }
@@ -247,14 +209,27 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     if dump_ir {
         println!("MCIR:");
         println!("--------------------------------");
-        for body in &lowered_context.func_bodies {
-            println!("{}", body);
+        for (i, body) in lowered_context.func_bodies.iter().enumerate() {
+            let func_name = lowered_context.symbols.func_name(i).unwrap_or("<unknown>");
+            println!("{}", format_mcir_body(body, func_name));
             println!("--------------------------------");
         }
     }
 
     // --- Optimize MCIR ---
     let optimized_context = opt::optimize(lowered_context);
+
+    // --- Write MCIR Dump ---
+    let mcir_path = Path::new(&args.input).with_extension("mcir");
+    let mut mcir_out = String::new();
+    for (i, body) in optimized_context.func_bodies.iter().enumerate() {
+        let func_name = optimized_context.symbols.func_name(i).unwrap_or("<unknown>");
+        mcir_out.push_str(&format!("{}\n", format_mcir_body(body, func_name)));
+        mcir_out.push_str("\n");
+    }
+    if let Err(e) = std::fs::write(&mcir_path, mcir_out) {
+        eprintln!("[WARN] failed to write {}: {e}", mcir_path.display());
+    }
 
     if dump_liveness || dump_intervals {
         // --- Dump Liveness Analysis ---
@@ -310,4 +285,34 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     }
 
     Ok(asm)
+}
+
+fn format_mcir_body(body: &mcir::FuncBody, name: &str) -> String {
+    use crate::mcir::LocalKind;
+
+    let mut params = body
+        .locals
+        .iter()
+        .enumerate()
+        .filter_map(|(i, local)| match local.kind {
+            LocalKind::Param { index } => Some((index, i, local)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    params.sort_by_key(|(index, _, _)| *index);
+
+    let mut param_parts = Vec::new();
+    for (index, _, local) in params {
+        let ty_str = body.types.type_to_string(local.ty);
+        let name = local
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("p{}", index));
+        param_parts.push(format!("{}: {}", name, ty_str));
+    }
+
+    let ret_ty = body.types.type_to_string(body.locals[body.ret_local.index()].ty);
+    let header = format!("fn {}({}) -> {} {{", name, param_parts.join(", "), ret_ty);
+
+    body.to_string().replacen("body {", &header, 1)
 }

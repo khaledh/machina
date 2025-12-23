@@ -3,3 +3,5 @@
 /output*
 /target
 /CLAUDE.md
+/examples/*.mcir
+/examples/*.s
