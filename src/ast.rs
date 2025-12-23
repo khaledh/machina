@@ -113,6 +113,7 @@ pub struct StructUpdateField {
 pub struct EnumVariant {
     pub id: NodeId,
     pub name: String,
+    pub payload: Vec<TypeExpr>,
     pub span: Span,
 }
 
@@ -216,6 +217,7 @@ pub enum ExprKind {
     EnumVariant {
         enum_name: String,
         variant: String,
+        payload: Vec<Expr>,
     },
 
     // Struct update
@@ -357,7 +359,23 @@ impl TypeDeclKind {
             TypeDeclKind::Enum { variants } => {
                 writeln!(f, "{}Enum:", pad)?;
                 for variant in variants {
-                    writeln!(f, "{}- {} [{}]", pad, variant.name, variant.id)?;
+                    if variant.payload.is_empty() {
+                        writeln!(f, "{}- {} [{}]", pad, variant.name, variant.id)?;
+                    } else {
+                        let payload_str = variant
+                            .payload
+                            .iter()
+                            .map(|p| p.to_string())
+                            .collect::<Vec<_>>();
+                        writeln!(
+                            f,
+                            "{}- {}({}) [{}]",
+                            pad,
+                            variant.name,
+                            payload_str.join(", "),
+                            variant.id
+                        )?;
+                    }
                 }
             }
         }
@@ -550,11 +568,21 @@ impl Expr {
                 target.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Field: {}", pad1, field)?;
             }
-            ExprKind::EnumVariant { enum_name, variant } => {
+            ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
+            } => {
                 writeln!(f, "{}EnumVariant [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Type: {}", pad1, enum_name)?;
                 writeln!(f, "{}Variant: {}", pad1, variant)?;
+                if !payload.is_empty() {
+                    writeln!(f, "{}Payload:", pad1)?;
+                    for expr in payload {
+                        expr.fmt_with_indent(f, level + 2)?;
+                    }
+                }
             }
             ExprKind::StructUpdate { target, fields } => {
                 let pad1 = indent(level + 1);

@@ -227,8 +227,13 @@ impl SymbolResolver {
                     self.check_type_expr(&field.ty);
                 }
             }
-            TypeDeclKind::Enum { .. } => {
-                // no type expressions to resolve
+            TypeDeclKind::Enum { variants } => {
+                // resolve each variant payload type expr
+                for variant in variants {
+                    for payload_ty in &variant.payload {
+                        self.check_type_expr(payload_ty);
+                    }
+                }
             }
         }
     }
@@ -475,7 +480,11 @@ impl SymbolResolver {
                 }
             }
 
-            ExprKind::EnumVariant { enum_name, variant } => {
+            ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
+            } => {
                 // Resolve the enum name
                 let Some(Symbol {
                     def_id,
@@ -500,6 +509,11 @@ impl SymbolResolver {
 
                 // Record the use
                 self.def_map_builder.record_use(expr.id, *def_id);
+
+                // Resolve each payload expression
+                for payload_expr in payload {
+                    self.check_expr(payload_expr);
+                }
             }
 
             ExprKind::BinOp { left, right, .. } => {

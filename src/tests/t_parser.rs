@@ -252,9 +252,82 @@ fn test_parse_enum_variant_expr() {
     if let ExprKind::Block(exprs) = &func.body.kind {
         assert_eq!(exprs.len(), 1);
         match &exprs[0].kind {
-            ExprKind::EnumVariant { enum_name, variant } => {
+            ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
+            } => {
                 assert_eq!(enum_name, "Color");
                 assert_eq!(variant, "Green");
+                assert!(payload.is_empty());
+            }
+            _ => panic!("Expected enum variant expr"),
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_enum_type_decl_with_payload() {
+    let source = r#"
+        type Option = None | Some(u64)
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let type_decls = module.type_decls();
+    assert_eq!(type_decls.len(), 1);
+
+    let type_decl = type_decls[0];
+    assert_eq!(type_decl.name, "Option");
+    match &type_decl.kind {
+        TypeDeclKind::Enum { variants } => {
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].name, "None");
+            assert!(variants[0].payload.is_empty());
+            assert_eq!(variants[1].name, "Some");
+            assert_eq!(variants[1].payload.len(), 1);
+            match &variants[1].payload[0].kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                _ => panic!("Expected named payload type"),
+            }
+        }
+        _ => panic!("Expected enum type decl"),
+    }
+}
+
+#[test]
+fn test_parse_enum_variant_expr_with_payload() {
+    let source = r#"
+        type Option = None | Some(u64)
+
+        fn main() -> Option {
+            Option::Some(42)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        let last = exprs.last().expect("Expected block to have a tail expr");
+        match &last.kind {
+            ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
+            } => {
+                assert_eq!(enum_name, "Option");
+                assert_eq!(variant, "Some");
+                assert_eq!(payload.len(), 1);
+                match &payload[0].kind {
+                    ExprKind::UInt64Lit(value) => assert_eq!(*value, 42),
+                    _ => panic!("Expected integer payload"),
+                }
             }
             _ => panic!("Expected enum variant expr"),
         }
@@ -289,9 +362,14 @@ fn test_parse_struct_update_expr() {
                 assert_eq!(fields.len(), 1);
                 assert_eq!(fields[0].name, "color");
                 match &fields[0].value.kind {
-                    ExprKind::EnumVariant { enum_name, variant } => {
+                    ExprKind::EnumVariant {
+                        enum_name,
+                        variant,
+                        payload,
+                    } => {
                         assert_eq!(enum_name, "Color");
                         assert_eq!(variant, "Green");
+                        assert!(payload.is_empty());
                     }
                     _ => panic!("Expected enum variant value"),
                 }

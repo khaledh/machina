@@ -272,7 +272,12 @@ impl<'a> FuncLowerer<'a> {
 
             // Enum variant
             EK::EnumVariant { variant, .. } => {
+                // Only handle enums with no payload here
                 let enum_ty = self.ty_for_node(expr.id)?;
+                if !enum_ty.is_scalar() {
+                    return Err(LowerError::UnsupportedOperandExpr(expr.id));
+                }
+
                 let variant_index = enum_ty.enum_variant_index(variant);
                 let variant_tag = Const::Int {
                     signed: false,
@@ -367,8 +372,86 @@ impl<'a> FuncLowerer<'a> {
         let temp_place = Place::new(temp_local_id, aggr_ty_id, vec![]);
 
         // Lower the aggregate into the temp place
-        self.lower_agg_into(temp_place.clone(), expr)?;
+        self.lower_agg_value_into(temp_place.clone(), expr)?;
         Ok(temp_place)
+    }
+
+    /// Emit a write into a projected field/element of an aggregate.
+    fn emit_agg_projection(
+        &mut self,
+        dst: &Place<Aggregate>,
+        field_ty_id: TyId,
+        field_expr: &Expr,
+        extra_proj: Projection,
+    ) -> Result<(), LowerError> {
+        // Extend the projection and write into the selected field/element.
+        let mut projs = dst.projections().to_vec();
+        projs.push(extra_proj);
+
+        if self.is_scalar(field_ty_id) {
+            let field_place = Place::new(dst.base(), field_ty_id, projs);
+            let field_operand = self.lower_scalar_expr(field_expr)?;
+            self.fb.push_stmt(
+                self.curr_block,
+                Statement::CopyScalar {
+                    dst: field_place,
+                    src: Rvalue::Use(field_operand),
+                },
+            );
+            Ok(())
+        } else {
+            let field_place = Place::new(dst.base(), field_ty_id, projs);
+            self.lower_agg_value_into(field_place, field_expr)
+        }
+    }
+
+    /// Lower an aggregate expression directly into a destination place.
+    fn lower_agg_value_into(
+        &mut self,
+        dst: Place<Aggregate>,
+        expr: &Expr,
+    ) -> Result<(), LowerError> {
+        match &expr.kind {
+            EK::ArrayLit(..)
+            | EK::TupleLit(..)
+            | EK::StructLit { .. }
+            | EK::StructUpdate { .. }
+            | EK::EnumVariant { .. } => {
+                // Aggregate literal: build in place.
+                self.lower_agg_into(dst, expr)
+            }
+            EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
+                // Aggregate place: copy unless it's already the destination.
+                let src = self.lower_place_agg(expr)?;
+                if src.base() == dst.base() && src.projections() == dst.projections() {
+                    return Ok(());
+                }
+                self.fb
+                    .push_stmt(self.curr_block, Statement::CopyAggregate { dst, src });
+                Ok(())
+            }
+            EK::Call { callee, args } => {
+                // Aggregate call result: direct into destination.
+                self.emit_call_into(PlaceAny::Aggregate(dst), callee, args)?;
+                Ok(())
+            }
+            EK::Block(exprs) => self.lower_block_into(dst, exprs, expr.id),
+            EK::If {
+                cond,
+                then_body,
+                else_body,
+            } => self.lower_if_expr_into(dst, cond, then_body, else_body),
+            _ => match self.lower_expr_value(expr)? {
+                ExprValue::Aggregate(place) => {
+                    self.fb.push_stmt(
+                        self.curr_block,
+                        Statement::CopyAggregate { dst, src: place },
+                    );
+                    Ok(())
+                }
+                ExprValue::Scalar(_) => Err(LowerError::UnsupportedAggregateRhs(expr.id)),
+            },
+        }
     }
 
     /// Lower an aggregate literal directly into a destination place.
@@ -478,36 +561,45 @@ impl<'a> FuncLowerer<'a> {
                 Ok(())
             }
 
+            EK::EnumVariant {
+                variant, payload, ..
+            } => {
+                // 1) tag field (index 0)
+                let enum_ty = self.ty_for_node(expr.id)?;
+                let tag = Const::Int {
+                    signed: false,
+                    bits: 64,
+                    value: enum_ty.enum_variant_index(variant) as i128,
+                };
+
+                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+                let mut tag_proj = dst.projections().to_vec();
+                tag_proj.push(Projection::Field { index: 0 });
+                let tag_place = Place::new(dst.base(), tag_ty_id, tag_proj);
+
+                self.fb.push_stmt(
+                    self.curr_block,
+                    Statement::CopyScalar {
+                        dst: tag_place,
+                        src: Rvalue::Use(Operand::Const(tag)),
+                    },
+                );
+
+                // 2) payload fields (indices 1+)
+                for (i, payload_expr) in payload.iter().enumerate() {
+                    let field_ty = self.ty_for_node(payload_expr.id)?;
+                    let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
+                    self.emit_agg_projection(
+                        &dst,
+                        field_ty_id,
+                        payload_expr,
+                        Projection::Field { index: i + 1 },
+                    )?;
+                }
+                Ok(())
+            }
+
             _ => Err(LowerError::ExprIsNotAggregate(expr.id)),
-        }
-    }
-
-    /// Emit a write into a projected field/element of an aggregate.
-    fn emit_agg_projection(
-        &mut self,
-        dst: &Place<Aggregate>,
-        field_ty_id: TyId,
-        field_expr: &Expr,
-        extra_proj: Projection,
-    ) -> Result<(), LowerError> {
-        // Extend the projection and write into the selected field/element.
-        let mut projs = dst.projections().to_vec();
-        projs.push(extra_proj);
-
-        if self.is_scalar(field_ty_id) {
-            let field_place = Place::new(dst.base(), field_ty_id, projs);
-            let field_operand = self.lower_scalar_expr(field_expr)?;
-            self.fb.push_stmt(
-                self.curr_block,
-                Statement::CopyScalar {
-                    dst: field_place,
-                    src: Rvalue::Use(field_operand),
-                },
-            );
-            Ok(())
-        } else {
-            let field_place = Place::new(dst.base(), field_ty_id, projs);
-            self.lower_agg_value_into(field_place, field_expr)
         }
     }
 
@@ -1021,54 +1113,6 @@ impl<'a> FuncLowerer<'a> {
         // while loops return unit
         let c = Const::Unit;
         Ok(ExprValue::Scalar(Operand::Const(c)))
-    }
-
-    /// Lower an aggregate expression directly into a destination place.
-    fn lower_agg_value_into(
-        &mut self,
-        dst: Place<Aggregate>,
-        expr: &Expr,
-    ) -> Result<(), LowerError> {
-        match &expr.kind {
-            EK::ArrayLit(..)
-            | EK::TupleLit(..)
-            | EK::StructLit { .. }
-            | EK::StructUpdate { .. } => {
-                // Aggregate literal: build in place.
-                self.lower_agg_into(dst, expr)
-            }
-            EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
-                // Aggregate place: copy unless it's already the destination.
-                let src = self.lower_place_agg(expr)?;
-                if src.base() == dst.base() && src.projections() == dst.projections() {
-                    return Ok(());
-                }
-                self.fb
-                    .push_stmt(self.curr_block, Statement::CopyAggregate { dst, src });
-                Ok(())
-            }
-            EK::Call { callee, args } => {
-                // Aggregate call result: direct into destination.
-                self.emit_call_into(PlaceAny::Aggregate(dst), callee, args)?;
-                Ok(())
-            }
-            EK::Block(exprs) => self.lower_block_into(dst, exprs, expr.id),
-            EK::If {
-                cond,
-                then_body,
-                else_body,
-            } => self.lower_if_expr_into(dst, cond, then_body, else_body),
-            _ => match self.lower_expr_value(expr)? {
-                ExprValue::Aggregate(place) => {
-                    self.fb.push_stmt(
-                        self.curr_block,
-                        Statement::CopyAggregate { dst, src: place },
-                    );
-                    Ok(())
-                }
-                ExprValue::Scalar(_) => Err(LowerError::UnsupportedAggregateRhs(expr.id)),
-            },
-        }
     }
 
     /// Lower a block and write its final aggregate value into dst.

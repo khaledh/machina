@@ -345,6 +345,71 @@ fn test_lower_enum_variant_literal() {
 }
 
 #[test]
+fn test_lower_enum_variant_payload_literal() {
+    let source = r#"
+        type Pair = A(u64, bool) | B(u64, bool)
+
+        fn main() -> Pair {
+            Pair::B(7, true)
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let mut lowerer = FuncLowerer::new(&analyzed, func);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+    assert_eq!(entry_block.stmts.len(), 3);
+
+    match &entry_block.stmts[0] {
+        Statement::CopyScalar { dst, src } => {
+            assert_eq!(dst.base(), LocalId(0));
+            assert_eq!(dst.projections(), &[Projection::Field { index: 0 }]);
+            match src {
+                Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
+                    assert_eq!(*value, 1);
+                }
+                _ => panic!("unexpected enum tag src"),
+            }
+        }
+        _ => panic!("unexpected stmt[0]"),
+    }
+
+    match &entry_block.stmts[1] {
+        Statement::CopyScalar { dst, src } => {
+            assert_eq!(dst.base(), LocalId(0));
+            assert_eq!(dst.projections(), &[Projection::Field { index: 1 }]);
+            match src {
+                Rvalue::Use(Operand::Const(Const::Int { value, .. })) => {
+                    assert_eq!(*value, 7);
+                }
+                _ => panic!("unexpected enum payload[0] src"),
+            }
+        }
+        _ => panic!("unexpected stmt[1]"),
+    }
+
+    match &entry_block.stmts[2] {
+        Statement::CopyScalar { dst, src } => {
+            assert_eq!(dst.base(), LocalId(0));
+            assert_eq!(dst.projections(), &[Projection::Field { index: 2 }]);
+            match src {
+                Rvalue::Use(Operand::Const(Const::Bool(value))) => {
+                    assert_eq!(*value, true);
+                }
+                _ => panic!("unexpected enum payload[1] src"),
+            }
+        }
+        _ => panic!("unexpected stmt[2]"),
+    }
+
+    assert!(matches!(entry_block.terminator, Terminator::Return));
+}
+
+#[test]
 fn test_lower_struct_update() {
     let source = r#"
         type Point = { x: u64, y: u64 }

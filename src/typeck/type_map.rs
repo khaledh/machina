@@ -1,7 +1,7 @@
 use crate::ast::{NodeId, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefKind, DefMap};
 use crate::typeck::errors::TypeCheckError;
-use crate::types::{StructField, Type};
+use crate::types::{EnumVariant, StructField, Type};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -40,10 +40,22 @@ pub(crate) fn resolve_type_expr(
                         })
                     }
                     DefKind::EnumDef { variants } => {
-                        let names = variants.iter().map(|v| v.name.clone()).collect();
+                        let mut enum_variants = Vec::new();
+                        for variant in variants {
+                            let payload = variant
+                                .payload
+                                .iter()
+                                .map(|p| resolve_type_expr(def_map, p))
+                                .collect::<Result<Vec<Type>, _>>()?;
+                            enum_variants.push(EnumVariant {
+                                name: variant.name.clone(),
+                                payload,
+                            });
+                        }
+
                         Ok(Type::Enum {
                             name: def.name.clone(),
-                            variants: names,
+                            variants: enum_variants,
                         })
                     }
                     _ => Err(TypeCheckError::UnknownType(type_expr.span)),

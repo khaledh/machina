@@ -22,7 +22,7 @@ pub enum Type {
     },
     Enum {
         name: String,
-        variants: Vec<String>,
+        variants: Vec<EnumVariant>,
     },
 }
 
@@ -95,6 +95,12 @@ pub struct StructField {
     pub ty: Type,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub payload: Vec<Type>,
+}
+
 pub const BUILTIN_TYPES: &[Type] = &[Type::Unit, Type::UInt64, Type::Bool];
 
 impl fmt::Display for Type {
@@ -120,7 +126,22 @@ impl fmt::Display for Type {
                 write!(f, "{} {{ {} }}", name, fields_str.join(", "))
             }
             Type::Enum { name, variants } => {
-                let variant_names = variants.iter().map(|v| v.as_str()).collect::<Vec<_>>();
+                let variant_names = variants
+                    .iter()
+                    .map(|v| {
+                        if v.payload.is_empty() {
+                            v.name.clone()
+                        } else {
+                            let payload_str = v
+                                .payload
+                                .iter()
+                                .map(|p| p.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("{}({})", v.name, payload_str)
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 write!(f, "{} = {}", name, variant_names.join(" | "))
             }
         }
@@ -145,7 +166,16 @@ impl Type {
                 let total_size: usize = fields.iter().map(|f| f.ty.size_of()).sum();
                 total_size
             }
-            Type::Enum { .. } => 8, // scalar tag only for now
+            Type::Enum { variants, .. } => {
+                // Temporary assumption: all variants have the same payload type
+                let payload_size = if variants.is_empty() {
+                    0
+                } else {
+                    // sum the size of the payload types
+                    variants[0].payload.iter().map(|p| p.size_of()).sum()
+                };
+                8 + payload_size // 8 bytes for the scalar tag + payload size
+            }
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -160,23 +190,43 @@ impl Type {
             Type::Struct { fields, .. } => {
                 fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
             }
-            Type::Enum { .. } => 8, // scalar tag only for now
+            Type::Enum { variants, .. } => {
+                // Temporary assumption: all variants have the same payload type
+                let payload_align = if variants.is_empty() {
+                    8
+                } else {
+                    // maximum alignment of the payload types
+                    variants[0]
+                        .payload
+                        .iter()
+                        .map(|p| p.align_of())
+                        .max()
+                        .unwrap_or(1)
+                };
+                payload_align.max(8)
+            }
             Type::Unknown => panic!("Unknown type"),
         }
     }
 
     pub fn is_compound(&self) -> bool {
-        matches!(
+        let is_compound = matches!(
             self,
             Type::Array { .. } | Type::Tuple { .. } | Type::Struct { .. }
-        )
+        );
+
+        // if it's an enum, check if it has a payload
+        let has_payload = if let Type::Enum { variants, .. } = self {
+            variants.iter().any(|v| !v.payload.is_empty())
+        } else {
+            false
+        };
+
+        is_compound || has_payload
     }
 
     pub fn is_scalar(&self) -> bool {
-        matches!(
-            self,
-            Type::Unit | Type::UInt64 | Type::Bool | Type::Enum { .. }
-        )
+        !self.is_compound()
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
@@ -244,7 +294,7 @@ impl Type {
         match self {
             Type::Enum { variants, .. } => variants
                 .iter()
-                .position(|v| v == variant)
+                .position(|v| v.name == variant)
                 .unwrap_or_else(|| panic!("Variant not found in enum")),
             _ => panic!("Expected enum type"),
         }

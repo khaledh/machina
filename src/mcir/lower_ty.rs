@@ -56,12 +56,27 @@ impl TyLowerer {
                     fields: struct_fields,
                 })
             }
-            Type::Enum { .. } => {
-                // Treat as a scalar tag for now
-                self.table.add(TyKind::Int {
-                    signed: false,
-                    bits: 64,
-                })
+            Type::Enum { variants, .. } => {
+                let has_payload = variants.iter().any(|v| !v.payload.is_empty());
+                if !has_payload {
+                    // Treat as a scalar tag
+                    self.table.add(TyKind::Int {
+                        signed: false,
+                        bits: 64,
+                    })
+                } else {
+                    // Temp Assumption: all variants have the same payload type
+                    let payload_tys = &variants[0].payload;
+                    let mut field_tys = Vec::with_capacity(1 + payload_tys.len());
+                    // Tag
+                    let tag_ty = self.lower_ty(&Type::UInt64);
+                    field_tys.push(tag_ty);
+                    // Payload fields
+                    for ty in payload_tys {
+                        field_tys.push(self.lower_ty(ty));
+                    }
+                    self.table.add(TyKind::Tuple { field_tys })
+                }
             }
 
             Type::Unknown => panic!("Cannot lower unknown type"),

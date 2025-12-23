@@ -506,3 +506,74 @@ fn test_struct_update_invalid_target() {
         }
     }
 }
+
+#[test]
+fn test_enum_variant_payload_ok() {
+    let source = r#"
+        type Pair = A(u64) | B(u64)
+
+        fn test() -> Pair {
+            Pair::B(1)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_enum_variant_payload_arity_mismatch() {
+    let source = r#"
+        type Pair = A(u64) | B(u64)
+
+        fn test() -> Pair {
+            Pair::A(1, 2)
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::EnumVariantPayloadArityMismatch(name, expected, got, _) => {
+                assert_eq!(name, "A");
+                assert_eq!(*expected, 1);
+                assert_eq!(*got, 2);
+            }
+            e => panic!(
+                "Expected EnumVariantPayloadArityMismatch error, got {:?}",
+                e
+            ),
+        }
+    }
+}
+
+#[test]
+fn test_enum_variant_payload_type_mismatch() {
+    let source = r#"
+        type Pair = A(u64) | B(u64)
+
+        fn test() -> Pair {
+            Pair::A(true)
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match &errors[0] {
+            TypeCheckError::EnumVariantPayloadTypeMismatch(name, index, expected, found, _) => {
+                assert_eq!(name, "A");
+                assert_eq!(*index, 0);
+                assert_eq!(*expected, Type::UInt64);
+                assert_eq!(*found, Type::Bool);
+            }
+            e => panic!("Expected EnumVariantPayloadTypeMismatch error, got {:?}", e),
+        }
+    }
+}

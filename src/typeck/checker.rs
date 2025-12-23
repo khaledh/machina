@@ -6,7 +6,7 @@ use crate::ast::{
 };
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
-use crate::types::{StructField, Type};
+use crate::types::{EnumVariant, StructField, Type};
 
 use super::errors::TypeCheckError;
 use super::type_map::{TypeMap, TypeMapBuilder, resolve_type_expr};
@@ -122,8 +122,31 @@ impl TypeChecker {
                 }
 
                 TypeDeclKind::Enum { variants } => {
-                    // Collect the enum variant names
-                    let enum_variants = variants.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+                    // Collect the enum variant names + payload types
+                    let mut enum_variants = Vec::new();
+                    for variant in variants {
+                        let payload = variant
+                            .payload
+                            .iter()
+                            .map(|ty_expr| resolve_type_expr(&self.context.def_map, ty_expr))
+                            .collect::<Result<Vec<Type>, _>>()
+                            .map_err(|e| vec![e])?;
+
+                        enum_variants.push(EnumVariant {
+                            name: variant.name.clone(),
+                            payload,
+                        });
+                    }
+
+                    // Temporary rule: all variants must have the same payload type
+                    if enum_variants.len() > 1 {
+                        let first_payload = &enum_variants[0].payload;
+                        for variant in &enum_variants[1..] {
+                            if variant.payload != *first_payload {
+                                panic!("Enum variant payload type mismatch");
+                            }
+                        }
+                    }
 
                     // Create the enum type
                     let ty = Type::Enum {
@@ -433,7 +456,8 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_enum_variant(
         &mut self,
         enum_name: &String,
-        variant: &String,
+        variant_name: &String,
+        payload: &[Expr],
         span: Span,
     ) -> Result<Type, TypeCheckError> {
         // Lookup the type
@@ -447,13 +471,38 @@ impl<'c, 'b> Checker<'c, 'b> {
             return Err(TypeCheckError::UnknownEnumType(enum_name.clone(), span));
         };
 
-        // Check that the variant is valid
-        if !variants.contains(variant) {
-            return Err(TypeCheckError::UnknownEnumVariant(
-                enum_name.clone(),
-                variant.clone(),
+        // Get the variant
+        let variant_ty = variants
+            .iter()
+            .find(|v| v.name == *variant_name)
+            .ok_or_else(|| {
+                TypeCheckError::UnknownEnumVariant(enum_name.clone(), variant_name.clone(), span)
+            })?;
+
+        // Check that the payload has the right number of elements
+        if payload.len() != variant_ty.payload.len() {
+            return Err(TypeCheckError::EnumVariantPayloadArityMismatch(
+                variant_name.clone(),
+                variant_ty.payload.len(),
+                payload.len(),
                 span,
             ));
+        }
+
+        // Type check each payload element
+        for (i, (payload_expr, payload_ty)) in
+            payload.iter().zip(variant_ty.payload.iter()).enumerate()
+        {
+            let actual_ty = self.type_check_expr(payload_expr)?;
+            if actual_ty != *payload_ty {
+                return Err(TypeCheckError::EnumVariantPayloadTypeMismatch(
+                    variant_name.clone(),
+                    i,
+                    payload_ty.clone(),
+                    actual_ty,
+                    payload_expr.span,
+                ));
+            }
         }
 
         Ok(enum_ty.clone())
@@ -845,9 +894,11 @@ impl<'c, 'b> Checker<'c, 'b> {
             | BinaryOp::Gt
             | BinaryOp::LtEq
             | BinaryOp::GtEq => {
+                let span = Span::merge_all(vec![left.span, right.span]);
                 if left_type != right_type {
-                    let span = Span::merge_all(vec![left.span, right.span]);
                     Err(TypeCheckError::CmpTypeMismatch(left_type, right_type, span))
+                } else if !left_type.is_scalar() {
+                    Err(TypeCheckError::CmpNonScalar(left_type, span))
                 } else {
                     Ok(Type::Bool)
                 }
@@ -881,9 +932,11 @@ impl<'c, 'b> Checker<'c, 'b> {
                 self.type_check_struct_update(target, fields)
             }
 
-            ExprKind::EnumVariant { enum_name, variant } => {
-                self.type_check_enum_variant(enum_name, variant, expr.span)
-            }
+            ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
+            } => self.type_check_enum_variant(enum_name, variant, payload, expr.span),
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 

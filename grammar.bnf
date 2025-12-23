@@ -22,7 +22,7 @@ StructFieldList    ::= StructField ("," StructField)* ","?
 StructField        ::= Identifier ":" TypeExpr
 
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
-EnumVariantDef     ::= Identifier
+EnumVariantDef     ::= Identifier ( "(" TypeExpr ("," TypeExpr)* ","? ")" )?
 
 # Type Expressions
 TypeExpr           ::= NamedType | ArrayType | TupleType
@@ -108,7 +108,7 @@ StructLitField     ::= Identifier ":" Expr
 StructUpdate       ::= "{" Expr "|" StructUpdateField ("," StructUpdateField)* ","? "}"
 StructUpdateField  ::= Identifier ":" Expr
 
-EnumVariant        ::= Identifier "::" Identifier
+EnumVariant        ::= Identifier "::" Identifier ( "(" Expr ("," Expr)* ","? ")" )?
 
 # Terminals
 Unit               ::= "()"

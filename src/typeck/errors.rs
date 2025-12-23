@@ -15,6 +15,9 @@ pub enum TypeCheckError {
     #[error("Invalid types for comparison operation: {0} != {1}")]
     CmpTypeMismatch(Type, Type, Span),
 
+    #[error("Comparison of non-scalars types is not supported: {0}")]
+    CmpNonScalar(Type, Span),
+
     #[error("Condition must be a boolean, found {0}")]
     CondNotBoolean(Type, Span),
 
@@ -98,6 +101,12 @@ pub enum TypeCheckError {
 
     #[error("Invalid struct update target: expected struct, found {0}")]
     InvalidStructUpdateTarget(Type, Span),
+
+    #[error("Enum variant payload arity mismatch: variant {0} expected {1} elements, found {2}")]
+    EnumVariantPayloadArityMismatch(String, usize, usize, Span),
+
+    #[error("Enum variant payload type mismatch: variant {0} index {1} expected {2}, found {3}")]
+    EnumVariantPayloadTypeMismatch(String, usize, Type, Type, Span),
 }
 
 impl TypeCheckError {
@@ -106,6 +115,7 @@ impl TypeCheckError {
             TypeCheckError::FuncReturnTypeMismatch(_, _, span) => *span,
             TypeCheckError::ArithTypeMismatch(_, _, span) => *span,
             TypeCheckError::CmpTypeMismatch(_, _, span) => *span,
+            TypeCheckError::CmpNonScalar(_, span) => *span,
             TypeCheckError::CondNotBoolean(_, span) => *span,
             TypeCheckError::ThenElseTypeMismatch(_, _, span) => *span,
             TypeCheckError::AssignTypeMismatch(_, _, span) => *span,
@@ -134,6 +144,8 @@ impl TypeCheckError {
             TypeCheckError::UnknownEnumType(_, span) => *span,
             TypeCheckError::UnknownEnumVariant(_, _, span) => *span,
             TypeCheckError::InvalidStructUpdateTarget(_, span) => *span,
+            TypeCheckError::EnumVariantPayloadArityMismatch(_, _, _, span) => *span,
+            TypeCheckError::EnumVariantPayloadTypeMismatch(_, _, _, _, span) => *span,
         }
     }
 }

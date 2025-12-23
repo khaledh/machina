@@ -70,6 +70,7 @@ pub struct Parser<'a> {
     pos: usize,
     curr_token: &'a Token,
     id_gen: NodeIdGen,
+    allow_struct_lit: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -79,6 +80,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             curr_token: &tokens[0],
             id_gen: NodeIdGen::new(),
+            allow_struct_lit: true,
         }
     }
 
@@ -178,9 +180,12 @@ impl<'a> Parser<'a> {
             // Struct definition: type Foo = { ... }
             self.parse_struct_def()?
         } else if matches!(self.curr_token.kind, TK::Ident(_))
-            && self.peek().map(|t| &t.kind) == Some(&TK::Pipe)
+            && matches!(
+                self.peek().map(|t| &t.kind),
+                Some(TK::Pipe) | Some(TK::LParen)
+            )
         {
-            // Enum definition: type Foo = Bar | Baz
+            // Enum definition: type Foo = Bar | Baz (or type Foo = Bar(...) | Baz(...))
             self.parse_enum_def()?
         } else {
             // Type alias: type Foo = Bar
@@ -235,9 +240,26 @@ impl<'a> Parser<'a> {
 
         // Parse first variant
         let name = self.parse_ident()?;
+
+        fn parse_payload(parser: &mut Parser) -> Result<Vec<TypeExpr>, ParseError> {
+            if parser.curr_token.kind == TK::LParen {
+                parser.advance();
+                let tys =
+                    parser.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_type_expr())?;
+                parser.consume(&TK::RParen)?;
+                Ok(tys)
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        // Parse payload (if any)
+        let payload = parse_payload(self)?;
+
         variants.push(EnumVariant {
             id: self.id_gen.new_id(),
             name,
+            payload,
             span: self.close(marker),
         });
 
@@ -246,9 +268,11 @@ impl<'a> Parser<'a> {
             self.advance(); // consume '|'
             let marker = self.mark();
             let name = self.parse_ident()?;
+            let payload = parse_payload(self)?;
             variants.push(EnumVariant {
                 id: self.id_gen.new_id(),
                 name,
+                payload,
                 span: self.close(marker),
             });
         }
@@ -631,11 +655,33 @@ impl<'a> Parser<'a> {
 
     fn parse_if(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
+
+        // Expect 'if'
         self.consume_keyword("if")?;
+
+        // Parse condition
+        // (disallow struct literals to avoid ambiguity between struct literals and blocks)
+        self.allow_struct_lit = false;
         let cond = self.parse_expr(0)?;
-        let then_body = self.parse_expr(0)?;
+        self.allow_struct_lit = true;
+
+        // Parse then body
+        let then_body = if self.curr_token.kind == TK::LBrace {
+            self.parse_block()?
+        } else {
+            self.parse_expr(0)?
+        };
+
+        // Expect 'else'
         self.consume_keyword("else")?;
-        let else_body = self.parse_expr(0)?;
+
+        // Parse else body
+        let else_body = if self.curr_token.kind == TK::LBrace {
+            self.parse_block()?
+        } else {
+            self.parse_expr(0)?
+        };
+
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::If {
@@ -746,16 +792,7 @@ impl<'a> Parser<'a> {
             TK::Ident(name) if name == "while" => self.parse_while(),
             TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 // Enum variant: Ident :: Variant
-                let marker = self.mark();
-                let enum_name = name.clone();
-                self.advance(); // ident
-                self.consume(&TK::DoubleColon)?;
-                let variant = self.parse_ident()?;
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::EnumVariant { enum_name, variant },
-                    span: self.close(marker),
-                })
+                self.parse_enum_variant(name.clone())
             }
             TK::Ident(name) => {
                 let marker = self.mark();
@@ -775,7 +812,7 @@ impl<'a> Parser<'a> {
                     }),
                     _ => {
                         // Check for struct literal: Ident { ....}
-                        if self.curr_token.kind == TK::LBrace {
+                        if self.allow_struct_lit && self.curr_token.kind == TK::LBrace {
                             self.parse_struct_lit(marker, name)
                         } else {
                             // Regular variable reference
@@ -798,27 +835,9 @@ impl<'a> Parser<'a> {
                 })
             }
             TK::LParen => self.parse_paren_or_tuple(),
-            TK::LBrace => {
-                // Peek ahead for a pipe to determine if this is a struct update
-                if self.looks_like_struct_update() {
-                    self.parse_struct_update()
-                } else {
-                    self.parse_block()
-                }
-            }
-            TK::LBracket => {
-                // Array literal
-                let marker = self.mark();
-                self.advance(); // consume '['
-                let elems =
-                    self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
-                self.consume(&TK::RBracket)?; // consume ']'
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::ArrayLit(elems),
-                    span: self.close(marker),
-                })
-            }
+            TK::LBrace if self.looks_like_struct_update() => self.parse_struct_update(),
+            TK::LBrace => self.parse_block(),
+            TK::LBracket => self.parse_array_lit(),
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
     }
@@ -890,6 +909,45 @@ impl<'a> Parser<'a> {
             kind: ExprKind::StructUpdate {
                 target: Box::new(base),
                 fields,
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_array_lit(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.advance(); // consume '['
+        let elems = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+        self.consume(&TK::RBracket)?; // consume ']'
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::ArrayLit(elems),
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_enum_variant(&mut self, enum_name: String) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.advance(); // ident
+        self.consume(&TK::DoubleColon)?;
+        let variant = self.parse_ident()?;
+
+        // Parse payload (if any)
+        let payload = if self.curr_token.kind == TK::LParen {
+            self.advance();
+            let payload = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
+            self.consume(&TK::RParen)?;
+            payload
+        } else {
+            vec![]
+        };
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
             },
             span: self.close(marker),
         })

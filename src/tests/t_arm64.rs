@@ -8,6 +8,7 @@ use crate::mcir::types::{
     Rvalue, Statement, Terminator, TyId, TyKind, TyTable,
 };
 use crate::regalloc::moves::FnMoveList;
+use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::{AllocationResult, MappedLocal};
 use crate::resolve::def_map::DefId;
 use crate::targets::arm64::regs::{self, Arm64Reg as R};
@@ -175,4 +176,80 @@ fn test_call_emits_bl() {
 
     let asm = codegen.generate().unwrap();
     assert!(asm.contains("  bl _callee\n"));
+}
+
+#[test]
+fn test_enum_payload_stores_to_return_slot() {
+    let mut types = TyTable::new();
+    let u64_ty = u64_ty(&mut types);
+    let bool_ty = types.add(TyKind::Bool);
+    let enum_ty = types.add(TyKind::Tuple {
+        field_tys: vec![u64_ty, u64_ty, bool_ty],
+    });
+
+    let locals = vec![Local {
+        ty: enum_ty,
+        kind: LocalKind::Return,
+        name: Some("ret".to_string()),
+    }];
+    let ret = LocalId(0);
+    let blocks = vec![BasicBlock {
+        stmts: vec![
+            Statement::CopyScalar {
+                dst: Place::new(
+                    ret,
+                    u64_ty,
+                    vec![crate::mcir::types::Projection::Field { index: 0 }],
+                ),
+                src: Rvalue::Use(Operand::Const(Const::Int {
+                    value: 1,
+                    signed: false,
+                    bits: 64,
+                })),
+            },
+            Statement::CopyScalar {
+                dst: Place::new(
+                    ret,
+                    u64_ty,
+                    vec![crate::mcir::types::Projection::Field { index: 1 }],
+                ),
+                src: Rvalue::Use(Operand::Const(Const::Int {
+                    value: 7,
+                    signed: false,
+                    bits: 64,
+                })),
+            },
+            Statement::CopyScalar {
+                dst: Place::new(
+                    ret,
+                    bool_ty,
+                    vec![crate::mcir::types::Projection::Field { index: 2 }],
+                ),
+                src: Rvalue::Use(Operand::Const(Const::Bool(true))),
+            },
+        ],
+        terminator: Terminator::Return,
+    }];
+    let body = mk_body(types, locals, blocks, ret);
+
+    let mut alloc_map = HashMap::new();
+    alloc_map.insert(ret, MappedLocal::StackAddr(StackSlotId(2)));
+    let alloc = AllocationResult {
+        alloc_map,
+        moves: FnMoveList::new(),
+        frame_size: 24,
+        used_callee_saved: Vec::new(),
+        stack_slot_count: 3,
+    };
+    let func = McFunction {
+        name: "test".to_string(),
+        body: &body,
+        alloc: &alloc,
+    };
+    let def_names = HashMap::new();
+    let mut codegen = FuncCodegen::new(&func, &def_names, 0).unwrap();
+
+    let asm = codegen.generate().unwrap();
+    assert_eq!(asm.matches("\n  str ").count(), 2);
+    assert_eq!(asm.matches("\n  strb ").count(), 1);
 }
