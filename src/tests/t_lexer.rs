@@ -107,3 +107,52 @@ fn test_lex_char_literal_non_ascii() {
 
     assert!(matches!(result, Err(LexError::InvalidEscapeSequence(_, _))));
 }
+
+#[test]
+fn test_lex_string_ascii() {
+    let mut lexer = Lexer::new("\"hello\"");
+    let token = lexer.next_token().unwrap();
+
+    assert_eq!(token.kind, TokenKind::StringLit("hello".to_string()));
+    assert_span_eq(token.span, (1, 1), (1, 8));
+}
+
+#[test]
+fn test_lex_string_escape_newline() {
+    let mut lexer = Lexer::new("\"a\\n b\"");
+    let token = lexer.next_token().unwrap();
+
+    assert_eq!(token.kind, TokenKind::StringLit("a\n b".to_string()));
+}
+
+#[test]
+fn test_lex_string_escape_hex() {
+    let mut lexer = Lexer::new("\"A\\x42C\"");
+    let token = lexer.next_token().unwrap();
+
+    assert_eq!(token.kind, TokenKind::StringLit("ABC".to_string()));
+}
+
+#[test]
+fn test_lex_string_utf8() {
+    let mut lexer = Lexer::new("\"caf\u{00e9}\"");
+    let token = lexer.next_token().unwrap();
+
+    assert_eq!(token.kind, TokenKind::StringLit("caf\u{00e9}".to_string()));
+}
+
+#[test]
+fn test_lex_string_unterminated() {
+    let mut lexer = Lexer::new("\"abc");
+    let result = lexer.next_token();
+
+    assert!(matches!(result, Err(LexError::UnterminatedString(_))));
+}
+
+#[test]
+fn test_lex_string_bad_escape() {
+    let mut lexer = Lexer::new("\"a\\q\"");
+    let result = lexer.next_token();
+
+    assert!(matches!(result, Err(LexError::InvalidEscapeSequence(_, _))));
+}

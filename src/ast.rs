@@ -117,6 +117,12 @@ pub struct EnumVariant {
     pub span: Span,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StringTag {
+    Ascii,
+    Utf8,
+}
+
 // -- Functions ---
 
 #[derive(Clone, Debug)]
@@ -236,6 +242,10 @@ pub enum ExprKind {
     UInt64Lit(u64),
     BoolLit(bool),
     CharLit(u8),
+    StringLit {
+        value: String,
+        tag: StringTag,
+    },
     UnitLit,
 
     // Literals (compound)
@@ -608,6 +618,17 @@ impl Expr {
             }
             ExprKind::CharLit(value) => {
                 writeln!(f, "{}CharLit({}) [{}]", pad, fmt_char(*value), self.id)?;
+            }
+            ExprKind::StringLit { value, tag } => {
+                let tag_str = match tag {
+                    StringTag::Ascii => "ascii",
+                    StringTag::Utf8 => "utf8",
+                };
+                writeln!(
+                    f,
+                    "{}StringLit(\"{}\", {}) [{}]",
+                    pad, value, tag_str, self.id
+                )?;
             }
             ExprKind::UnitLit => {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;

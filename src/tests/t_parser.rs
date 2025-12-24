@@ -1,6 +1,6 @@
 use super::*;
 use crate::ast::{
-    ExprKind, Function, MatchPattern, Module, PatternKind, TypeDeclKind, TypeExprKind,
+    ExprKind, Function, MatchPattern, Module, PatternKind, StringTag, TypeDeclKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -409,6 +409,56 @@ fn test_parse_tuple_literal() {
             }
         } else {
             panic!("Expected TupleLit");
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_string_literal_ascii() {
+    let source = r#"
+        fn main() {
+            "hello"
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        let last = exprs.last().expect("Expected block to have a tail expr");
+        match &last.kind {
+            ExprKind::StringLit { value, tag } => {
+                assert_eq!(value, "hello");
+                assert_eq!(*tag, StringTag::Ascii);
+            }
+            _ => panic!("Expected string literal"),
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}
+
+#[test]
+fn test_parse_string_literal_utf8() {
+    let source = r#"
+        fn main() {
+            "café"
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        let last = exprs.last().expect("Expected block to have a tail expr");
+        match &last.kind {
+            ExprKind::StringLit { value, tag } => {
+                assert_eq!(value, "café");
+                assert_eq!(*tag, StringTag::Utf8);
+            }
+            _ => panic!("Expected string literal"),
         }
     } else {
         panic!("Expected Block");

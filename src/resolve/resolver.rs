@@ -483,6 +483,7 @@ impl SymbolResolver {
             ExprKind::UInt64Lit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
+            | ExprKind::StringLit { .. }
             | ExprKind::UnitLit => {}
 
             ExprKind::ArrayLit(elems) => {

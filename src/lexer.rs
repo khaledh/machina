@@ -26,6 +26,8 @@ pub enum TokenKind {
     IntLit(u64),
     #[display("CharLit({0})")]
     CharLit(u8),
+    #[display("StringLit({0})")]
+    StringLit(String),
     #[display("[")]
     LBracket,
     #[display("]")]
@@ -92,6 +94,9 @@ pub enum LexError {
 
     #[error("Invalid escape sequence: {0}")]
     InvalidEscapeSequence(String, Span),
+
+    #[error("Unterminated string literal")]
+    UnterminatedString(Span),
 }
 
 impl LexError {
@@ -100,6 +105,7 @@ impl LexError {
             LexError::UnexpectedCharacter(_, span) => *span,
             LexError::InvalidInteger(_, span) => *span,
             LexError::InvalidEscapeSequence(_, span) => *span,
+            LexError::UnterminatedString(span) => *span,
         }
     }
 }
@@ -177,7 +183,7 @@ impl<'a> Lexer<'a> {
         // Escapes: \n, \r, \t, \\, \', \0, \xNN.
         // Reject empty ' or multi‑char.
         // Reject non‑ASCII in either raw or \xNN > 0x7F.
-        let mut next_char = |lexer: &mut Lexer<'a>| -> Result<char, LexError> {
+        let next_char = |lexer: &mut Lexer<'a>| -> Result<char, LexError> {
             match lexer.source.peek().copied() {
                 Some(ch) => {
                     lexer.advance();
@@ -200,40 +206,8 @@ impl<'a> Lexer<'a> {
         }
 
         let value = if ch == '\\' {
-            // Handle escape sequences
-            let escape_ch = next_char(self)?;
-            match escape_ch {
-                'n' => b'\n',
-                'r' => b'\r',
-                't' => b'\t',
-                '\\' => b'\\',
-                '\'' => b'\'',
-                '0' => b'\0',
-                'x' => {
-                    // Parse hex escape \xNN
-                    let hex1 = next_char(self)?;
-                    let hex2 = next_char(self)?;
-
-                    let hex_str = format!("{}{}", hex1, hex2);
-                    let hex_value = u8::from_str_radix(&hex_str, 16).map_err(|_| {
-                        LexError::InvalidEscapeSequence(hex_str.clone(), Span::new(start, self.pos))
-                    })?;
-
-                    if hex_value > 0x7F {
-                        return Err(LexError::InvalidEscapeSequence(
-                            hex_str,
-                            Span::new(start, self.pos),
-                        ));
-                    }
-                    hex_value
-                }
-                _ => {
-                    return Err(LexError::InvalidEscapeSequence(
-                        format!("\\{}", escape_ch),
-                        Span::new(start, self.pos),
-                    ));
-                }
-            }
+            let esc = self.parse_escape(start, /*allow_non_ascii=*/ false)?;
+            esc as u8
         } else {
             if !ch.is_ascii() {
                 return Err(LexError::InvalidEscapeSequence(
@@ -262,6 +236,80 @@ impl<'a> Lexer<'a> {
         }
 
         Ok(TokenKind::CharLit(value))
+    }
+
+    fn lex_string_lit(&mut self, start: Position) -> Result<TokenKind, LexError> {
+        self.advance(); // consume opening quote
+        let mut buf = String::new();
+
+        loop {
+            let Some(&ch) = self.source.peek() else {
+                return Err(LexError::UnterminatedString(Span::new(start, self.pos)));
+            };
+
+            self.advance();
+
+            match ch {
+                '"' => break,
+                '\\' => {
+                    let unescaped = self.parse_escape(start, /*allow_non_ascii=*/ true)?;
+                    buf.push(unescaped);
+                }
+                _ => buf.push(ch),
+            }
+        }
+
+        Ok(TokenKind::StringLit(buf))
+    }
+
+    fn parse_escape(&mut self, start: Position, allow_non_ascii: bool) -> Result<char, LexError> {
+        let esc = match self.source.peek().copied() {
+            Some(c) => c,
+            None => return Err(LexError::UnterminatedString(Span::new(start, self.pos))),
+        };
+        self.advance();
+
+        let ch =
+            match esc {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '"' => '"',
+                '\'' => '\'',
+                '0' => '\0',
+                'x' => {
+                    let h1 =
+                        self.source.peek().copied().ok_or_else(|| {
+                            LexError::UnterminatedString(Span::new(start, self.pos))
+                        })?;
+                    self.advance();
+                    let h2 =
+                        self.source.peek().copied().ok_or_else(|| {
+                            LexError::UnterminatedString(Span::new(start, self.pos))
+                        })?;
+                    self.advance();
+                    let hex = format!("{}{}", h1, h2);
+                    let byte = u8::from_str_radix(&hex, 16).map_err(|_| {
+                        LexError::InvalidEscapeSequence(hex.clone(), Span::new(start, self.pos))
+                    })?;
+                    if !allow_non_ascii && byte > 0x7F {
+                        return Err(LexError::InvalidEscapeSequence(
+                            hex,
+                            Span::new(start, self.pos),
+                        ));
+                    }
+                    char::from(byte)
+                }
+                _ => {
+                    return Err(LexError::InvalidEscapeSequence(
+                        format!("\\{}", esc),
+                        Span::new(start, self.pos),
+                    ));
+                }
+            };
+
+        Ok(ch)
     }
 
     pub fn next_token(&mut self) -> Result<Token, LexError> {
@@ -301,6 +349,7 @@ impl<'a> Lexer<'a> {
                 Ok(TokenKind::IntLit(value))
             }
             Some('\'') => self.lex_char_lit(start),
+            Some('"') => self.lex_string_lit(start),
             Some(&'-') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'>')) {

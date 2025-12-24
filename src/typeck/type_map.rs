@@ -20,6 +20,10 @@ pub(crate) fn resolve_type_expr(
                 "()" => Ok(Type::Unit),
                 "u64" => Ok(Type::UInt64),
                 "bool" => Ok(Type::Bool),
+                "u32" => Ok(Type::UInt32),
+                "u8" => Ok(Type::UInt8),
+                "char" => Ok(Type::Char),
+                "string" => Ok(Type::String),
                 _ => match &def.kind {
                     DefKind::TypeAlias { ty_expr } => resolve_type_expr(def_map, ty_expr),
                     DefKind::StructDef { fields } => {

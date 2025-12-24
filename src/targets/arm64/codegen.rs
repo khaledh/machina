@@ -4,10 +4,7 @@ use thiserror::Error;
 
 use super::regs::{self, Arm64Reg as R, to_w_reg};
 use crate::context::RegAllocatedContext;
-use crate::mcir::types::{
-    BasicBlock, BinOp, BlockId, Callee, Const, FuncBody, LocalId, Operand, Place, PlaceAny,
-    Projection, Rvalue, Statement, Terminator, TyId, TyKind, TyTable, UnOp,
-};
+use crate::mcir::types::*;
 use crate::regalloc::moves::{Location, Move};
 use crate::regalloc::pos::InstPos;
 use crate::regalloc::stack::StackSlotId;
@@ -54,14 +51,20 @@ pub struct McFunction<'a> {
 pub struct Arm64Codegen<'a> {
     funcs: Vec<McFunction<'a>>,
     def_names: &'a HashMap<DefId, String>,
+    globals: &'a [GlobalItem],
     label_counter: u32,
 }
 
 impl<'a> Arm64Codegen<'a> {
-    pub fn new(funcs: Vec<McFunction<'a>>, def_names: &'a HashMap<DefId, String>) -> Self {
+    pub fn new(
+        funcs: Vec<McFunction<'a>>,
+        def_names: &'a HashMap<DefId, String>,
+        globals: &'a [GlobalItem],
+    ) -> Self {
         Self {
             funcs,
             def_names,
+            globals,
             label_counter: 0,
         }
     }
@@ -84,18 +87,91 @@ impl<'a> Arm64Codegen<'a> {
                 McFunction { name, body, alloc }
             })
             .collect();
-        Self::new(funcs, &ctx.symbols.def_names)
+        Self::new(funcs, &ctx.symbols.def_names, &ctx.globals)
     }
 
     pub fn generate(&mut self) -> Result<String, CodegenError> {
         let mut asm = String::new();
+
+        let global_labels = self.emit_globals(&mut asm);
+        self.emit_funcs(&mut asm, &global_labels);
+
+        Ok(asm)
+    }
+
+    fn emit_globals(&mut self, asm: &mut String) -> HashMap<GlobalId, String> {
+        let mut global_labels = HashMap::new();
+
+        // Mach-O (macOS) uses "__TEXT,__const" for rodata.
+        asm.push_str(&format!(".section __TEXT,__const\n"));
+
+        for global in self.globals {
+            if global.kind != GlobalSection::RoData {
+                panic!("Non-rodata global are not supported yet: {:?}", global);
+            }
+            let label = self.global_label(global.id, &mut global_labels);
+            asm.push_str(&format!("  .p2align 3\n"));
+            asm.push_str(&format!("  {}:\n", label));
+            match &global.payload {
+                GlobalPayload::Bytes(bytes) => {
+                    asm.push_str(&format!("    .byte "));
+                    for byte in bytes {
+                        asm.push_str(&format!("0x{:02x}, ", byte));
+                    }
+                    asm.push_str(&format!("\n"));
+                }
+                GlobalPayload::String(string) => {
+                    asm.push_str(&format!(
+                        "    .ascii \"{}\"\n",
+                        Self::escape_ascii(string.as_bytes())
+                    ));
+                }
+            }
+        }
+
+        asm.push('\n');
+
+        global_labels
+    }
+
+    fn emit_funcs(
+        &mut self,
+        asm: &mut String,
+        global_labels: &HashMap<GlobalId, String>,
+    ) -> Result<(), CodegenError> {
+        asm.push_str(&format!(".text\n\n"));
+
         for func in &self.funcs {
-            let mut codegen = FuncCodegen::new(func, self.def_names, self.label_counter)?;
+            let mut codegen =
+                FuncCodegen::new(func, self.def_names, &global_labels, self.label_counter)?;
             asm.push_str(&codegen.generate()?);
             asm.push('\n');
             self.label_counter = codegen.label_counter;
         }
-        Ok(asm)
+
+        Ok(())
+    }
+
+    fn global_label(&mut self, global: GlobalId, labels: &mut HashMap<GlobalId, String>) -> String {
+        if let Some(label) = labels.get(&global) {
+            return label.clone();
+        }
+        let label = format!(".G{}", global.index());
+        labels.insert(global, label.clone());
+        label
+    }
+
+    fn escape_ascii(bytes: &[u8]) -> String {
+        let mut out = String::new();
+        for &b in bytes {
+            match b {
+                b'\\' => out.push_str("\\\\"),
+                b'"' => out.push_str("\\\""),
+                0x20..=0x7e => out.push(b as char),
+                _ => out.push_str(&format!("\\x{:02x}", b)),
+            }
+        }
+        out
     }
 }
 
@@ -104,6 +180,7 @@ struct FuncCodegen<'a> {
     body: &'a FuncBody,
     alloc: &'a AllocationResult,
     def_names: &'a HashMap<DefId, String>,
+    global_labels: &'a HashMap<GlobalId, String>,
     stack_alloc_size: u32,
     stack_padding: u32,
     label_counter: u32,
@@ -114,6 +191,7 @@ impl<'a> FuncCodegen<'a> {
     pub fn new(
         func: &'a McFunction<'a>,
         def_names: &'a HashMap<DefId, String>,
+        global_labels: &'a HashMap<GlobalId, String>,
         label_start: u32,
     ) -> Result<Self, CodegenError> {
         let stack_alloc_size =
@@ -127,6 +205,7 @@ impl<'a> FuncCodegen<'a> {
             body: func.body,
             alloc: func.alloc,
             def_names,
+            global_labels,
             stack_alloc_size,
             stack_padding,
             label_counter: label_start,
@@ -677,6 +756,20 @@ impl<'a> FuncCodegen<'a> {
                         }
                     }
                     Const::Int { value, .. } => *value as i64,
+                    Const::GlobalAddr { id } => {
+                        let label = self
+                            .global_labels
+                            .get(id)
+                            .expect(&format!("Global label not found for id {}", id.index()));
+
+                        // PC-relative load from the global data section.
+                        asm.push_str(&format!("  adrp {}, {}@PAGE\n", scratch, label));
+                        asm.push_str(&format!(
+                            "  add {}, {}, {}@PAGEOFF\n",
+                            scratch, scratch, label
+                        ));
+                        return Ok(scratch);
+                    }
                 };
                 asm.push_str(&format!("  mov {}, #{}\n", scratch, val));
                 Ok(scratch)

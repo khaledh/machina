@@ -14,6 +14,7 @@ pub fn optimize(ctx: LoweredMcirContext) -> OptimizedMcirContext {
     let LoweredMcirContext {
         func_bodies,
         symbols,
+        globals,
     } = ctx;
     let mut bodies = func_bodies;
 
@@ -23,6 +24,7 @@ pub fn optimize(ctx: LoweredMcirContext) -> OptimizedMcirContext {
     OptimizedMcirContext {
         func_bodies: bodies,
         symbols,
+        globals,
     }
 }
 

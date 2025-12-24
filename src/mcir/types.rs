@@ -188,6 +188,36 @@ pub enum Const {
     Unit,
     Bool(bool),
     Int { value: i128, signed: bool, bits: u8 },
+    GlobalAddr { id: GlobalId },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobalId(pub u32);
+
+impl GlobalId {
+    #[inline]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GlobalSection {
+    RoData,
+    RwData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GlobalPayload {
+    Bytes(Vec<u8>),
+    String(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalItem {
+    pub id: GlobalId,
+    pub kind: GlobalSection,
+    pub payload: GlobalPayload,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -404,6 +434,7 @@ impl fmt::Display for Const {
             Const::Unit => write!(f, "()"),
             Const::Bool(value) => write!(f, "{}", value),
             Const::Int { value, .. } => write!(f, "{}", value),
+            Const::GlobalAddr { id } => write!(f, "g#{}", id.index()),
         }
     }
 }

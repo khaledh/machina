@@ -5,12 +5,16 @@ use std::hash::{Hash, Hasher};
 pub enum Type {
     Unknown,
 
+    // Scalar Types
     Unit,
     UInt64,
+    UInt32,
+    UInt8,
     Bool,
     Char,
 
     // Compound Types
+    String,
     Array {
         elem_ty: Box<Type>,
         dims: Vec<usize>,
@@ -36,6 +40,7 @@ impl PartialEq for Type {
             (Type::UInt64, Type::UInt64) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::Char, Type::Char) => true,
+            (Type::String, Type::String) => true,
             (
                 Type::Array {
                     elem_ty: e1,
@@ -66,29 +71,38 @@ impl Hash for Type {
             Type::UInt64 => {
                 2u8.hash(state);
             }
-            Type::Bool => {
+            Type::UInt32 => {
                 3u8.hash(state);
             }
-            Type::Char => {
+            Type::UInt8 => {
                 4u8.hash(state);
             }
-            Type::Array { elem_ty, dims } => {
+            Type::Bool => {
                 5u8.hash(state);
+            }
+            Type::Char => {
+                6u8.hash(state);
+            }
+            Type::String => {
+                7u8.hash(state);
+            }
+            Type::Array { elem_ty, dims } => {
+                8u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
             }
             Type::Tuple { fields } => {
-                6u8.hash(state);
+                9u8.hash(state);
                 fields.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
-                7u8.hash(state);
+                10u8.hash(state);
                 name.hash(state);
             }
             Type::Enum { name, .. } => {
                 // Nominal type: only hash the name
-                8u8.hash(state);
+                11u8.hash(state);
                 name.hash(state);
             }
         }
@@ -107,7 +121,15 @@ pub struct EnumVariant {
     pub payload: Vec<Type>,
 }
 
-pub const BUILTIN_TYPES: &[Type] = &[Type::Unit, Type::UInt64, Type::Bool];
+pub const BUILTIN_TYPES: &[Type] = &[
+    Type::Unit,
+    Type::UInt64,
+    Type::UInt32,
+    Type::UInt8,
+    Type::Bool,
+    Type::Char,
+    Type::String,
+];
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -115,8 +137,11 @@ impl fmt::Display for Type {
             Type::Unknown => write!(f, "unknown"),
             Type::Unit => write!(f, "()"),
             Type::UInt64 => write!(f, "u64"),
+            Type::UInt32 => write!(f, "u32"),
+            Type::UInt8 => write!(f, "u8"),
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
+            Type::String => write!(f, "string"),
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
@@ -160,8 +185,11 @@ impl Type {
         match self {
             Type::Unit => 0,
             Type::UInt64 => 8,
+            Type::UInt32 => 4,
+            Type::UInt8 => 1,
             Type::Bool => 1,
             Type::Char => 1,
+            Type::String => 16,
             Type::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
@@ -186,8 +214,11 @@ impl Type {
         match self {
             Type::Unit => 1,
             Type::UInt64 => 8,
+            Type::UInt32 => 4,
+            Type::UInt8 => 1,
             Type::Bool => 1,
             Type::Char => 1,
+            Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
             Type::Struct { fields, .. } => {
@@ -209,7 +240,7 @@ impl Type {
     pub fn is_compound(&self) -> bool {
         let is_compound = matches!(
             self,
-            Type::Array { .. } | Type::Tuple { .. } | Type::Struct { .. }
+            Type::Array { .. } | Type::Tuple { .. } | Type::Struct { .. } | Type::String
         );
 
         // if it's an enum, check if it has a payload

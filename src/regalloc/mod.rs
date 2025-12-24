@@ -42,13 +42,26 @@ pub struct AllocationResult {
 
 /// Run register allocation for a lowered MCIR context.
 pub fn regalloc(ctx: OptimizedMcirContext, target: &dyn target::TargetSpec) -> RegAllocatedContext {
+    let OptimizedMcirContext {
+        func_bodies,
+        globals,
+        ..
+    } = ctx;
+
     let mut alloc_results = Vec::new();
-    for body in &ctx.func_bodies {
-        let constraints = analyze_constraints(body, target);
-        let alloc_result = RegAlloc::new(body, &constraints, target).alloc();
+
+    for body in &func_bodies {
+        let constraints = analyze_constraints(&body, target);
+        let alloc_result = RegAlloc::new(&body, &constraints, target).alloc();
         alloc_results.push(alloc_result);
     }
-    ctx.with_alloc_results(alloc_results)
+
+    RegAllocatedContext {
+        func_bodies,
+        globals,
+        alloc_results,
+        symbols: ctx.symbols,
+    }
 }
 
 impl AllocationResult {

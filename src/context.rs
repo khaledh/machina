@@ -1,5 +1,5 @@
 use crate::ast::Module;
-use crate::mcir::FuncBody;
+use crate::mcir::{FuncBody, GlobalItem};
 use crate::regalloc::AllocationResult;
 use crate::resolve::def_map::DefMap;
 use crate::symtab::SymbolTable;
@@ -72,10 +72,15 @@ pub struct AnalyzedContext {
 }
 
 impl AnalyzedContext {
-    pub fn with_func_bodies(self, func_bodies: Vec<FuncBody>) -> LoweredMcirContext {
+    pub fn with_func_bodies(
+        self,
+        func_bodies: Vec<FuncBody>,
+        globals: Vec<GlobalItem>,
+    ) -> LoweredMcirContext {
         LoweredMcirContext {
             func_bodies,
             symbols: self.symbols,
+            globals,
         }
     }
 }
@@ -87,13 +92,19 @@ impl AnalyzedContext {
 pub struct LoweredMcirContext {
     pub func_bodies: Vec<FuncBody>,
     pub symbols: SymbolTable,
+    pub globals: Vec<GlobalItem>,
 }
 
 impl LoweredMcirContext {
-    pub fn with_optimized_bodies(self, func_bodies: Vec<FuncBody>) -> OptimizedMcirContext {
+    pub fn with_optimized_bodies(
+        self,
+        func_bodies: Vec<FuncBody>,
+        globals: Vec<GlobalItem>,
+    ) -> OptimizedMcirContext {
         OptimizedMcirContext {
             func_bodies,
             symbols: self.symbols,
+            globals,
         }
     }
 }
@@ -105,6 +116,7 @@ impl LoweredMcirContext {
 pub struct OptimizedMcirContext {
     pub func_bodies: Vec<FuncBody>,
     pub symbols: SymbolTable,
+    pub globals: Vec<GlobalItem>,
 }
 
 impl OptimizedMcirContext {
@@ -113,6 +125,7 @@ impl OptimizedMcirContext {
             func_bodies: self.func_bodies,
             alloc_results,
             symbols: self.symbols,
+            globals: self.globals,
         }
     }
 }
@@ -124,4 +137,5 @@ pub struct RegAllocatedContext {
     pub func_bodies: Vec<FuncBody>,
     pub alloc_results: Vec<AllocationResult>,
     pub symbols: SymbolTable,
+    pub globals: Vec<GlobalItem>,
 }

@@ -18,6 +18,7 @@ mod types;
 use crate::context::AstContext;
 use crate::diagnostics::{CompileError, Span, format_error};
 use crate::lexer::{LexError, Lexer, Token};
+use crate::mcir::types::GlobalSection;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
 use crate::resolve::resolve;
@@ -216,6 +217,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     // --- Write MCIR Dump ---
     let mcir_path = Path::new(&args.input).with_extension("mcir");
     let mut mcir_out = String::new();
+    mcir_out.push_str(&format_globals(&optimized_context.globals));
     for (i, body) in optimized_context.func_bodies.iter().enumerate() {
         let func_name = optimized_context
             .symbols
@@ -311,4 +313,32 @@ fn format_mcir_body(body: &mcir::FuncBody, name: &str) -> String {
     let header = format!("fn {}({}) -> {} {{", name, param_parts.join(", "), ret_ty);
 
     body.to_string().replacen("body {", &header, 1)
+}
+
+fn format_globals(globals: &[mcir::types::GlobalItem]) -> String {
+    if globals.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    out.push_str("globals:\n");
+    for g in globals {
+        let kind = match g.kind {
+            GlobalSection::RoData => "rodata",
+            GlobalSection::RwData => "rwdata",
+        };
+        let payload = match &g.payload {
+            crate::mcir::types::GlobalPayload::Bytes(b) => {
+                let hex = b
+                    .iter()
+                    .map(|b| format!("0x{:02x}", b))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", hex)
+            }
+            crate::mcir::types::GlobalPayload::String(s) => format!("\"{}\"", s),
+        };
+        out.push_str(&format!("  g#{} ({}): {}\n", g.id.index(), kind, payload));
+    }
+    out.push('\n');
+    out
 }

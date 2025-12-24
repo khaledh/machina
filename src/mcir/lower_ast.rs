@@ -23,6 +23,7 @@ use crate::ast::{self, ExprKind as EK, PatternKind as PK, *};
 use crate::context::{AnalyzedContext, LoweredMcirContext};
 use crate::mcir::errors::LowerError;
 use crate::mcir::func_builder::FuncBuilder;
+use crate::mcir::interner::GlobalInterner;
 use crate::mcir::lower_ty::TyLowerer;
 use crate::mcir::types::*;
 use crate::resolve::def_map::{Def, DefId, DefKind};
@@ -42,6 +43,7 @@ pub enum PlaceKind {
 #[derive(Debug)]
 pub struct FuncLowerer<'a> {
     ctx: &'a AnalyzedContext,
+    global_interner: &'a mut GlobalInterner,
     func: &'a Function,
     fb: FuncBuilder,
     locals: HashMap<DefId, LocalId>,
@@ -53,7 +55,11 @@ impl<'a> FuncLowerer<'a> {
     /// --- Entry points ---
 
     /// Create a lowering context for one function.
-    pub fn new(ctx: &'a AnalyzedContext, func: &'a Function) -> Self {
+    pub fn new(
+        ctx: &'a AnalyzedContext,
+        func: &'a Function,
+        global_interner: &'a mut GlobalInterner,
+    ) -> Self {
         let mut ty_lowerer = TyLowerer::new();
 
         // Lower the function return type
@@ -69,6 +75,7 @@ impl<'a> FuncLowerer<'a> {
 
         Self {
             ctx,
+            global_interner,
             func,
             fb,
             locals: HashMap::new(),
@@ -554,7 +561,8 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
-            EK::ArrayLit(..)
+            EK::StringLit { .. }
+            | EK::ArrayLit(..)
             | EK::TupleLit(..)
             | EK::StructLit { .. }
             | EK::StructUpdate { .. }
@@ -596,13 +604,63 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an aggregate literal directly into a destination place.
     fn lower_agg_lit_into(&mut self, dst: Place<Aggregate>, expr: &Expr) -> Result<(), LowerError> {
         match &expr.kind {
+            EK::StringLit { value, tag } => {
+                // 1) intern payload
+                let gid = self
+                    .global_interner
+                    .intern(GlobalPayload::String(value.clone()), GlobalSection::RoData);
+
+                // 2) build constants for fields
+                let ptr_const = Operand::Const(Const::GlobalAddr { id: gid });
+                let len_const = Operand::Const(Const::Int {
+                    signed: false,
+                    bits: 32,
+                    value: value.len() as i128,
+                });
+                let tag_const = Operand::Const(Const::Int {
+                    signed: false,
+                    bits: 8,
+                    value: match tag {
+                        StringTag::Ascii => 0,
+                        StringTag::Utf8 => 1,
+                    },
+                });
+
+                // 3) build aggregate temp {ptr, len, tag}
+                // field 0: ptr
+                let ptr_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+                self.emit_operand_into_agg_projection(
+                    &dst,
+                    Projection::Field { index: 0 },
+                    ptr_const,
+                    ptr_ty_id,
+                )?;
+                // field 1: len
+                let len_ty_id = self.ty_lowerer.lower_ty(&Type::UInt32);
+                self.emit_operand_into_agg_projection(
+                    &dst,
+                    Projection::Field { index: 1 },
+                    len_const,
+                    len_ty_id,
+                )?;
+                // field 2: tag
+                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::UInt8);
+                self.emit_operand_into_agg_projection(
+                    &dst,
+                    Projection::Field { index: 2 },
+                    tag_const,
+                    tag_ty_id,
+                )?;
+
+                Ok(())
+            }
             EK::TupleLit(fields) => {
                 // Lower each tuple field into its slot.
                 for (i, field_expr) in fields.iter().enumerate() {
                     let field_ty = self.ty_for_node(field_expr.id)?;
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
 
-                    self.emit_agg_projection(
+                    self.emit_expr_into_agg_projection(
                         &dst,
                         field_ty_id,
                         field_expr,
@@ -627,7 +685,7 @@ impl<'a> FuncLowerer<'a> {
                         dst_ty.struct_field_index(field_name)
                     };
 
-                    self.emit_agg_projection(
+                    self.emit_expr_into_agg_projection(
                         &dst,
                         field_ty_id,
                         field_expr,
@@ -658,7 +716,7 @@ impl<'a> FuncLowerer<'a> {
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
                     let field_index = struct_ty.struct_field_index(&field.name);
 
-                    self.emit_agg_projection(
+                    self.emit_expr_into_agg_projection(
                         &dst,
                         field_ty_id,
                         &field.value,
@@ -689,7 +747,7 @@ impl<'a> FuncLowerer<'a> {
                         }),
                     };
 
-                    self.emit_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
+                    self.emit_expr_into_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
                 }
                 Ok(())
             }
@@ -743,8 +801,8 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    /// Emit a write into a projected field/element of an aggregate.
-    fn emit_agg_projection(
+    /// Emit an expression value into a projected field/element of an aggregate.
+    fn emit_expr_into_agg_projection(
         &mut self,
         dst: &Place<Aggregate>,
         field_ty_id: TyId,
@@ -764,6 +822,23 @@ impl<'a> FuncLowerer<'a> {
             let field_place = Place::new(dst.base(), field_ty_id, projs);
             self.lower_agg_value_into(field_place, field_expr)
         }
+    }
+
+    // Emit an operand into a projected field/element of an aggregate.
+    fn emit_operand_into_agg_projection(
+        &mut self,
+        dst: &Place<Aggregate>,
+        extra_proj: Projection,
+        op: Operand,
+        op_ty_id: TyId,
+    ) -> Result<(), LowerError> {
+        // Extend the projection and write into the selected field/element.
+        let mut projs = dst.projections().to_vec();
+        projs.push(extra_proj);
+
+        let field_place = Place::new(dst.base(), op_ty_id, projs);
+        self.emit_copy_scalar(field_place, Rvalue::Use(op));
+        Ok(())
     }
 
     // --- Place (Lvalue) ---
@@ -1436,11 +1511,17 @@ impl<'a> FuncLowerer<'a> {
 /// Lower all functions in a module into MCIR bodies.
 pub fn lower_ast(ctx: AnalyzedContext) -> Result<LoweredMcirContext, LowerError> {
     let mut bodies = Vec::new();
+
+    // Interned globals
+    let mut global_interner = GlobalInterner::new();
+
+    // Lower all functions
     for func in ctx.module.funcs() {
-        let body = FuncLowerer::new(&ctx, func).lower()?;
+        let body = FuncLowerer::new(&ctx, func, &mut global_interner).lower()?;
         bodies.push(body);
     }
-    Ok(ctx.with_func_bodies(bodies))
+
+    Ok(ctx.with_func_bodies(bodies, global_interner.take()))
 }
 
 #[cfg(test)]

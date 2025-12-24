@@ -226,6 +226,7 @@ impl<'a> NrvoSafetyChecker<'a> {
             | ExprKind::UInt64Lit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
+            | ExprKind::StringLit { .. }
             | ExprKind::EnumVariant { .. } => true,
         }
     }

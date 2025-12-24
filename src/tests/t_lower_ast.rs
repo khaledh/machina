@@ -1,6 +1,8 @@
 use super::*;
 use crate::context::AstContext;
 use crate::lexer::{LexError, Lexer, Token};
+use crate::mcir::interner::GlobalInterner;
+use crate::mcir::types::{GlobalItem, GlobalPayload, GlobalSection};
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
 use crate::resolve::resolve;
@@ -23,6 +25,13 @@ fn analyze(source: &str) -> AnalyzedContext {
     NrvoAnalyzer::new(type_checked_context).analyze()
 }
 
+fn lower_body_with_globals(ctx: &AnalyzedContext, func: &Function) -> (FuncBody, Vec<GlobalItem>) {
+    let mut interner = GlobalInterner::new();
+    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner);
+    let body = lowerer.lower().expect("Failed to lower function");
+    (body, interner.take())
+}
+
 #[test]
 fn test_lower_literal_value() {
     let source = r#"
@@ -33,9 +42,7 @@ fn test_lower_literal_value() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     println!("Lowered body:\n{}", body);
 
@@ -60,6 +67,67 @@ fn test_lower_literal_value() {
 }
 
 #[test]
+fn test_lower_string_literal_global() {
+    let source = r#"
+        fn main() -> string {
+            "hi"
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let mut interner = GlobalInterner::new();
+    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner);
+
+    let body = lowerer.lower().expect("Failed to lower function");
+    let globals = interner.take();
+
+    assert_eq!(globals.len(), 1);
+    let g0 = &globals[0];
+    assert_eq!(g0.kind, GlobalSection::RoData);
+    match &g0.payload {
+        GlobalPayload::String(s) => assert_eq!(s, "hi"),
+        _ => panic!("expected string payload"),
+    }
+
+    let entry = body.entry;
+    let entry_block = &body.blocks[entry.index()];
+    assert_eq!(entry_block.stmts.len(), 3);
+
+    match &entry_block.stmts[0] {
+        Statement::CopyScalar { src, .. } => match src {
+            Rvalue::Use(Operand::Const(Const::GlobalAddr { .. })) => {}
+            _ => panic!("expected global addr for string ptr"),
+        },
+        _ => panic!("unexpected stmt[0]"),
+    }
+
+    match &entry_block.stmts[1] {
+        Statement::CopyScalar { src, .. } => match src {
+            Rvalue::Use(Operand::Const(Const::Int { value, bits, .. })) => {
+                assert_eq!(*value, 2);
+                assert_eq!(*bits, 32);
+            }
+            _ => panic!("expected len const"),
+        },
+        _ => panic!("unexpected stmt[1]"),
+    }
+
+    match &entry_block.stmts[2] {
+        Statement::CopyScalar { src, .. } => match src {
+            Rvalue::Use(Operand::Const(Const::Int { value, bits, .. })) => {
+                assert_eq!(*value, 0);
+                assert_eq!(*bits, 8);
+            }
+            _ => panic!("expected tag const"),
+        },
+        _ => panic!("unexpected stmt[2]"),
+    }
+
+    assert!(matches!(entry_block.terminator, Terminator::Return));
+}
+
+#[test]
 fn test_lower_call_emits_arg_temp() {
     let source = r#"
         fn id(x: u64) -> u64 {
@@ -78,9 +146,7 @@ fn test_lower_call_emits_arg_temp() {
         .iter()
         .find(|f| f.name == "main")
         .expect("main not found");
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     println!("Lowered body:\n{}", body);
 
@@ -137,9 +203,7 @@ fn test_lower_call_emits_arg_temp() {
         .iter()
         .find(|f| f.name == "id")
         .expect("id not found");
-    let mut lowerer = FuncLowerer::new(&analyzed, id_func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, id_func);
 
     println!("Lowered body:\n{}", body);
 }
@@ -154,9 +218,7 @@ fn test_lower_tuple_return_literal() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     println!("Lowered body:\n{}", body);
 
@@ -206,9 +268,7 @@ fn test_lower_nrvo_binding_elides_copy() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     println!("Lowered body:\n{}", body);
 
@@ -261,9 +321,7 @@ fn test_lower_struct_pattern_binding() {
         .find(|f| f.name == "main")
         .copied()
         .expect("main not found");
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     let x_local = body
         .locals
@@ -320,9 +378,7 @@ fn test_lower_enum_variant_literal() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
@@ -356,9 +412,7 @@ fn test_lower_enum_variant_payload_literal() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
@@ -442,9 +496,7 @@ fn test_lower_match_switch_payload_binding() {
         .iter()
         .find(|f| f.name == "main")
         .expect("main not found");
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     let c_local = body
         .locals
@@ -519,9 +571,7 @@ fn test_lower_struct_update() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let mut lowerer = FuncLowerer::new(&analyzed, func);
-
-    let body = lowerer.lower().expect("Failed to lower function");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
 
     let p_local = body
         .locals

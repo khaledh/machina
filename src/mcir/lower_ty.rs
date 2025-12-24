@@ -35,6 +35,14 @@ impl TyLowerer {
                 bits: 64,
                 signed: false,
             }),
+            Type::UInt32 => self.table.add(TyKind::Int {
+                bits: 32,
+                signed: false,
+            }),
+            Type::UInt8 => self.table.add(TyKind::Int {
+                bits: 8,
+                signed: false,
+            }),
 
             // Aggregate Types
             Type::Array { elem_ty, dims } => {
@@ -104,6 +112,32 @@ impl TyLowerer {
                         name,
                     )
                 }
+            }
+            Type::String => {
+                // Map to a struct { ptr, len, tag }
+                let u64_id = self.lower_ty(&Type::UInt64);
+                let u32_id = self.lower_ty(&Type::UInt32);
+                let u8_id = self.lower_ty(&Type::UInt8);
+
+                self.table.add_named(
+                    TyKind::Struct {
+                        fields: vec![
+                            StructField {
+                                name: "ptr".to_string(),
+                                ty: u64_id,
+                            },
+                            StructField {
+                                name: "len".to_string(),
+                                ty: u32_id,
+                            },
+                            StructField {
+                                name: "tag".to_string(),
+                                ty: u8_id,
+                            },
+                        ],
+                    },
+                    "string".to_string(),
+                )
             }
 
             Type::Unknown => panic!("Cannot lower unknown type"),

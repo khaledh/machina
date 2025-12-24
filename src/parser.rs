@@ -810,6 +810,23 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
+            TK::StringLit(s) => {
+                let span = self.curr_token.span;
+                self.advance();
+                let tag = if s.is_ascii() {
+                    StringTag::Ascii
+                } else {
+                    StringTag::Utf8
+                };
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::StringLit {
+                        value: s.clone(),
+                        tag,
+                    },
+                    span,
+                })
+            }
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
             TK::Ident(name) if name == "match" => self.parse_match_expr(),

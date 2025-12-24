@@ -259,29 +259,19 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(array_ty)
     }
 
-    fn type_check_index(
+    fn type_check_array_index(
         &mut self,
-        target: &Expr,
+        elem_ty: &Type,
+        dims: &[usize],
         indices: &[Expr],
+        span: Span,
     ) -> Result<Type, TypeCheckError> {
-        // type check target
-        let target_ty = self.type_check_expr(target)?;
-        let (elem_ty, dims) = match target_ty {
-            Type::Array { elem_ty, dims } => (elem_ty, dims),
-            _ => {
-                return Err(TypeCheckError::InvalidIndexTargetType(
-                    target_ty,
-                    target.span,
-                ));
-            }
-        };
-
         // Check we don't have more indices than dimensions
         if indices.len() > dims.len() {
             return Err(TypeCheckError::TooManyIndices(
                 dims.len(),
                 indices.len(),
-                target.span,
+                span,
             ));
         }
 
@@ -296,13 +286,39 @@ impl<'c, 'b> Checker<'c, 'b> {
         // Determine result type
         if indices.len() == dims.len() {
             // Fully indexed, return the element type
-            Ok(*elem_ty)
+            Ok(elem_ty.clone())
         } else {
             // Partially indexed, return array with the remaining dimensions
             Ok(Type::Array {
-                elem_ty,
+                elem_ty: Box::new(elem_ty.clone()),
                 dims: dims[indices.len()..].to_vec(),
             })
+        }
+    }
+
+    fn type_check_string_index(
+        &mut self,
+        target: &Expr,
+        indices: &[Expr],
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        // Check we have exactly one index
+        if indices.len() > 1 {
+            return Err(TypeCheckError::TooManyIndices(1, indices.len(), span));
+        }
+
+        let index_ty = self.type_check_expr(&indices[0])?;
+        if index_ty != Type::UInt64 {
+            return Err(TypeCheckError::IndexTypeNotInt(index_ty, indices[0].span));
+        }
+
+        // We only support indexing ASCII strings for now
+        match &target.kind {
+            ExprKind::StringLit {
+                tag: StringTag::Ascii,
+                ..
+            } => Ok(Type::Char),
+            _ => Err(TypeCheckError::StringIndexNonAscii(target.span)),
         }
     }
 
@@ -1031,11 +1047,27 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::CharLit(_) => Ok(Type::Char),
 
+            ExprKind::StringLit { .. } => Ok(Type::String),
+
             ExprKind::UnitLit => Ok(Type::Unit),
 
             ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),
 
-            ExprKind::ArrayIndex { target, indices } => self.type_check_index(target, indices),
+            ExprKind::ArrayIndex { target, indices } => {
+                let target_ty = self.type_check_expr(target)?;
+                match target_ty {
+                    Type::Array { elem_ty, dims } => {
+                        self.type_check_array_index(&elem_ty, &dims, indices, target.span)
+                    }
+                    Type::String => self.type_check_string_index(target, indices, target.span),
+                    _ => {
+                        return Err(TypeCheckError::InvalidIndexTargetType(
+                            target_ty,
+                            target.span,
+                        ));
+                    }
+                }
+            }
 
             ExprKind::TupleLit(fields) => self.type_check_tuple_lit(fields),
 

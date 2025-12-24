@@ -122,6 +122,9 @@ pub enum TypeCheckError {
 
     #[error("Duplicate match arm variant: {0}")]
     DuplicateMatchVariant(String, Span),
+
+    #[error("String index operation on non-ASCII string: {0}")]
+    StringIndexNonAscii(Span),
 }
 
 impl TypeCheckError {
@@ -166,6 +169,7 @@ impl TypeCheckError {
             TypeCheckError::MatchPatternEnumMismatch(_, _, span) => *span,
             TypeCheckError::NonExhaustiveMatch(span) => *span,
             TypeCheckError::DuplicateMatchVariant(_, span) => *span,
+            TypeCheckError::StringIndexNonAscii(span) => *span,
         }
     }
 }

@@ -101,8 +101,10 @@ Primary            ::= Literal
                      | "(" Expr ")"
                      | Block
 
-Literal            ::= Unit | Integer | Boolean | Char | ArrayLit | TupleLit | StructLit
+Literal            ::= Unit | Integer | Boolean | Char | String
+                     | ArrayLit | TupleLit | StructLit
 Char               ::= '\'' (ascii-char | escape) '\''
+String             ::= '"' (string-char | escape)* '"'
 
 ArrayLit           ::= "[" ExprList "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
@@ -123,4 +125,5 @@ Unit               ::= "()"
 Boolean            ::= "true" | "false"
 Integer            ::= [0-9]+
 Char               ::= "'" ( "\\n" | "\\r" | "\\t" | "\\" | "'" | "\\0" | "\\x" [0-9A-Fa-f]{2} ) "'"
+String             ::= '"' ( [^"\\] | "\\n" | "\\r" | "\\t" | "\\" | "\\\"" | "\\0" | "\\x" [0-9A-Fa-f]{2} )* '"'
 Identifier         ::= [a-zA-Z_][a-zA-Z0-9_]*
