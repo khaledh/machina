@@ -67,6 +67,7 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
     match types.kind(ty) {
         TyKind::Unit => 0,
         TyKind::Bool => 1,
+        TyKind::Char => 1,
         TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
         TyKind::Array { elem_ty, dims } => {
             let elems: usize = dims.iter().product();

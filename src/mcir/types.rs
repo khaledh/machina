@@ -21,6 +21,7 @@ pub enum TyKind {
     // Scalar Types
     Unit,
     Bool,
+    Char,
     Int { signed: bool, bits: u8 },
 
     // Aggregate Types
@@ -43,7 +44,10 @@ pub struct TyInfo {
 
 impl TyInfo {
     pub fn is_scalar(&self) -> bool {
-        matches!(self.kind, TyKind::Unit | TyKind::Bool | TyKind::Int { .. })
+        matches!(
+            self.kind,
+            TyKind::Unit | TyKind::Bool | TyKind::Char | TyKind::Int { .. }
+        )
     }
 
     pub fn is_aggregate(&self) -> bool {
@@ -101,6 +105,7 @@ impl TyTable {
         match &info.kind {
             TyKind::Unit => write!(out, "()"),
             TyKind::Bool => write!(out, "bool"),
+            TyKind::Char => write!(out, "char"),
             TyKind::Int { signed, bits } => {
                 let prefix = if *signed { "i" } else { "u" };
                 write!(out, "{}{}", prefix, bits)

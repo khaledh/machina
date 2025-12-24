@@ -24,6 +24,8 @@ pub enum TokenKind {
     Ident(String),
     #[display("IntLit({0})")]
     IntLit(u64),
+    #[display("CharLit({0})")]
+    CharLit(u8),
     #[display("[")]
     LBracket,
     #[display("]")]
@@ -87,6 +89,9 @@ pub enum LexError {
 
     #[error("Invalid integer: {0}")]
     InvalidInteger(ParseIntError, Span),
+
+    #[error("Invalid escape sequence: {0}")]
+    InvalidEscapeSequence(String, Span),
 }
 
 impl LexError {
@@ -94,6 +99,7 @@ impl LexError {
         match self {
             LexError::UnexpectedCharacter(_, span) => *span,
             LexError::InvalidInteger(_, span) => *span,
+            LexError::InvalidEscapeSequence(_, span) => *span,
         }
     }
 }
@@ -166,6 +172,98 @@ impl<'a> Lexer<'a> {
         matches!((iter.next(), iter.next()), (Some('/'), Some('/')))
     }
 
+    fn lex_char_lit(&mut self, start: Position) -> Result<TokenKind, LexError> {
+        // Accept exactly one ASCII codepoint after escapes.
+        // Escapes: \n, \r, \t, \\, \', \0, \xNN.
+        // Reject empty ' or multi‑char.
+        // Reject non‑ASCII in either raw or \xNN > 0x7F.
+        let mut next_char = |lexer: &mut Lexer<'a>| -> Result<char, LexError> {
+            match lexer.source.peek().copied() {
+                Some(ch) => {
+                    lexer.advance();
+                    Ok(ch)
+                }
+                None => Err(LexError::UnexpectedCharacter(
+                    '\'',
+                    Span::new(start, lexer.pos),
+                )),
+            }
+        };
+
+        self.advance(); // consume opening quote
+        let ch = next_char(self)?;
+        if ch == '\'' {
+            return Err(LexError::InvalidEscapeSequence(
+                "empty char literal".to_string(),
+                Span::new(start, self.pos),
+            ));
+        }
+
+        let value = if ch == '\\' {
+            // Handle escape sequences
+            let escape_ch = next_char(self)?;
+            match escape_ch {
+                'n' => b'\n',
+                'r' => b'\r',
+                't' => b'\t',
+                '\\' => b'\\',
+                '\'' => b'\'',
+                '0' => b'\0',
+                'x' => {
+                    // Parse hex escape \xNN
+                    let hex1 = next_char(self)?;
+                    let hex2 = next_char(self)?;
+
+                    let hex_str = format!("{}{}", hex1, hex2);
+                    let hex_value = u8::from_str_radix(&hex_str, 16).map_err(|_| {
+                        LexError::InvalidEscapeSequence(hex_str.clone(), Span::new(start, self.pos))
+                    })?;
+
+                    if hex_value > 0x7F {
+                        return Err(LexError::InvalidEscapeSequence(
+                            hex_str,
+                            Span::new(start, self.pos),
+                        ));
+                    }
+                    hex_value
+                }
+                _ => {
+                    return Err(LexError::InvalidEscapeSequence(
+                        format!("\\{}", escape_ch),
+                        Span::new(start, self.pos),
+                    ));
+                }
+            }
+        } else {
+            if !ch.is_ascii() {
+                return Err(LexError::InvalidEscapeSequence(
+                    format!("{}", ch),
+                    Span::new(start, self.pos),
+                ));
+            }
+            ch as u8
+        };
+
+        // expect closing quote
+        match self.source.peek() {
+            Some('\'') => self.advance(),
+            Some(&ch) => {
+                return Err(LexError::UnexpectedCharacter(
+                    ch,
+                    Span::new(start, self.pos),
+                ));
+            }
+            None => {
+                return Err(LexError::UnexpectedCharacter(
+                    '\'',
+                    Span::new(start, self.pos),
+                ));
+            }
+        }
+
+        Ok(TokenKind::CharLit(value))
+    }
+
     pub fn next_token(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace();
 
@@ -202,6 +300,7 @@ impl<'a> Lexer<'a> {
                     .map_err(|e| LexError::InvalidInteger(e, Span::new(start, self.pos)))?;
                 Ok(TokenKind::IntLit(value))
             }
+            Some('\'') => self.lex_char_lit(start),
             Some(&'-') => {
                 self.advance();
                 if matches!(self.source.peek(), Some(&'>')) {

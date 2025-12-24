@@ -480,7 +480,10 @@ impl SymbolResolver {
 
     fn check_expr(&mut self, expr: &ast::Expr) {
         match &expr.kind {
-            ExprKind::UInt64Lit(_) | ExprKind::BoolLit(_) | ExprKind::UnitLit => {}
+            ExprKind::UInt64Lit(_)
+            | ExprKind::BoolLit(_)
+            | ExprKind::CharLit(_)
+            | ExprKind::UnitLit => {}
 
             ExprKind::ArrayLit(elems) => {
                 for elem in elems {

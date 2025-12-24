@@ -4,9 +4,11 @@ use std::hash::{Hash, Hasher};
 #[derive(Debug, Clone, Eq)]
 pub enum Type {
     Unknown,
+
     Unit,
     UInt64,
     Bool,
+    Char,
 
     // Compound Types
     Array {
@@ -33,6 +35,7 @@ impl PartialEq for Type {
             (Type::Unit, Type::Unit) => true,
             (Type::UInt64, Type::UInt64) => true,
             (Type::Bool, Type::Bool) => true,
+            (Type::Char, Type::Char) => true,
             (
                 Type::Array {
                     elem_ty: e1,
@@ -66,23 +69,26 @@ impl Hash for Type {
             Type::Bool => {
                 3u8.hash(state);
             }
-            Type::Array { elem_ty, dims } => {
+            Type::Char => {
                 4u8.hash(state);
+            }
+            Type::Array { elem_ty, dims } => {
+                5u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
             }
             Type::Tuple { fields } => {
-                5u8.hash(state);
+                6u8.hash(state);
                 fields.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
-                6u8.hash(state);
+                7u8.hash(state);
                 name.hash(state);
             }
             Type::Enum { name, .. } => {
                 // Nominal type: only hash the name
-                7u8.hash(state);
+                8u8.hash(state);
                 name.hash(state);
             }
         }
@@ -110,6 +116,7 @@ impl fmt::Display for Type {
             Type::Unit => write!(f, "()"),
             Type::UInt64 => write!(f, "u64"),
             Type::Bool => write!(f, "bool"),
+            Type::Char => write!(f, "char"),
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
@@ -154,6 +161,7 @@ impl Type {
             Type::Unit => 0,
             Type::UInt64 => 8,
             Type::Bool => 1,
+            Type::Char => 1,
             Type::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
@@ -179,6 +187,7 @@ impl Type {
             Type::Unit => 1,
             Type::UInt64 => 8,
             Type::Bool => 1,
+            Type::Char => 1,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
             Type::Struct { fields, .. } => {

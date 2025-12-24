@@ -241,6 +241,14 @@ impl<'a> FuncLowerer<'a> {
                 let c = Const::Bool(*value);
                 Ok(Operand::Const(c))
             }
+            EK::CharLit(value) => {
+                let c = Const::Int {
+                    signed: false,
+                    bits: 8,
+                    value: *value as i128,
+                };
+                Ok(Operand::Const(c))
+            }
             EK::UnitLit => {
                 let c = Const::Unit;
                 Ok(Operand::Const(c))

@@ -14,7 +14,7 @@ development. The compiler currently targets only ARM64 assembly.
 ### Types
 
 **Basic types**
-- `u64`, `bool`, `()`
+- `u64`, `bool`, `char`, `()`
 
 **Arrays**
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`

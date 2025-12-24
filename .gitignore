@@ -2,6 +2,10 @@
 /.vscode
 /output*
 /target
+/AGENTS.md
 /CLAUDE.md
-/examples/*.mcir
-/examples/*.s
+
+# Example artifacts
+/examples/*
+!/examples/*.mc
+!/examples/*.md

@@ -113,28 +113,38 @@ fn build_marker(len: usize, single_line: bool) -> String {
 /// - Single-line spans: caret (^) for a single char, dashes for multi-char.
 /// - Multi-line spans: each covered line gets an underline of dashes aligned
 ///   to the span start/end columns (no corner or ribbon glyphs).
+/// - Shows one line before and one line after the error span for context.
 ///
 /// Example (single char):
 /// ```text
 /// (3:9) Unexpected token
+/// │ 2 │ fn main() {
 /// │ 3 │ let a = @;
 /// │   │         ^
+/// │ 4 │     let b = 42;
 /// ```
 /// Example (multi-line):
 /// ```text
 /// (12:9) Then and else branches have different types: UInt32 != Bool
+/// │ 11 │     if cond {
 /// │ 12 │         42 / 2
 /// │    │         ------
 /// │ 13 │     } else {
 /// │    │ ------------
 /// │ 14 │        false
 /// │    │ ------------
+/// │ 15 │     }
 /// ```
 pub fn format_error(source: &str, span: Span, error: impl Display) -> String {
     let start_line = span.start.line.max(1);
     let end_line = span.end.line.max(start_line);
     let lines: Vec<&str> = source.lines().collect();
-    let number_width = end_line.to_string().len();
+
+    // Include one line before and after for context
+    let first_line = start_line.saturating_sub(1).max(1);
+    let last_line = (end_line + 1).min(lines.len());
+
+    let number_width = last_line.to_string().len();
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -144,7 +154,7 @@ pub fn format_error(source: &str, span: Span, error: impl Display) -> String {
 
     let single_line = start_line == end_line;
 
-    for line_no in start_line..=end_line {
+    for line_no in first_line..=last_line {
         let content = lines.get(line_no - 1).copied().unwrap_or("");
         out.push_str(&format!(
             "│ {:>number_width$} │ {}\n",
@@ -152,6 +162,11 @@ pub fn format_error(source: &str, span: Span, error: impl Display) -> String {
             content,
             number_width = number_width
         ));
+
+        // Only show markers for lines within the actual error span
+        if line_no < start_line || line_no > end_line {
+            continue;
+        }
 
         let start_col = if line_no == span.start.line {
             span.start.column.max(1)

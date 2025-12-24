@@ -57,15 +57,9 @@ fn main() {
             let output_path = Path::new(&input_path).with_extension("s");
             match std::fs::write(&output_path, asm) {
                 Ok(_) => {
-                    println!(
-                        "[SUCCESS] assembly written to {}",
-                        output_path.display()
-                    )
+                    println!("[SUCCESS] assembly written to {}", output_path.display())
                 }
-                Err(e) => println!(
-                    "[ERROR] failed to write {}: {e}",
-                    output_path.display()
-                ),
+                Err(e) => println!("[ERROR] failed to write {}: {e}", output_path.display()),
             }
         }
         Err(errors) => {
@@ -223,7 +217,10 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
     let mcir_path = Path::new(&args.input).with_extension("mcir");
     let mut mcir_out = String::new();
     for (i, body) in optimized_context.func_bodies.iter().enumerate() {
-        let func_name = optimized_context.symbols.func_name(i).unwrap_or("<unknown>");
+        let func_name = optimized_context
+            .symbols
+            .func_name(i)
+            .unwrap_or("<unknown>");
         mcir_out.push_str(&format!("{}\n", format_mcir_body(body, func_name)));
         mcir_out.push_str("\n");
     }
@@ -304,14 +301,13 @@ fn format_mcir_body(body: &mcir::FuncBody, name: &str) -> String {
     let mut param_parts = Vec::new();
     for (index, _, local) in params {
         let ty_str = body.types.type_to_string(local.ty);
-        let name = local
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("p{}", index));
+        let name = local.name.clone().unwrap_or_else(|| format!("p{}", index));
         param_parts.push(format!("{}: {}", name, ty_str));
     }
 
-    let ret_ty = body.types.type_to_string(body.locals[body.ret_local.index()].ty);
+    let ret_ty = body
+        .types
+        .type_to_string(body.locals[body.ret_local.index()].ty);
     let header = format!("fn {}({}) -> {} {{", name, param_parts.join(", "), ret_ty);
 
     body.to_string().replacen("body {", &header, 1)

@@ -768,3 +768,25 @@ fn test_parse_match_expr_enum_variants() {
         panic!("Expected Block");
     }
 }
+
+#[test]
+fn test_parse_char_literal() {
+    let source = r#"
+        fn test() -> char {
+            'a'
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        let last = exprs.last().expect("Expected block to have a tail expr");
+        match &last.kind {
+            ExprKind::CharLit(value) => assert_eq!(*value, b'a'),
+            _ => panic!("Expected CharLit"),
+        }
+    } else {
+        panic!("Expected Block");
+    }
+}

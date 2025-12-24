@@ -792,6 +792,24 @@ impl<'a> Parser<'a> {
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match &self.curr_token.kind {
+            TK::IntLit(value) => {
+                let span = self.curr_token.span;
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::UInt64Lit(*value),
+                    span,
+                })
+            }
+            TK::CharLit(value) => {
+                let span = self.curr_token.span;
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::CharLit(*value),
+                    span,
+                })
+            }
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
             TK::Ident(name) if name == "match" => self.parse_match_expr(),
@@ -829,15 +847,6 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-            }
-            TK::IntLit(value) => {
-                let span = self.curr_token.span;
-                self.advance();
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::UInt64Lit(*value),
-                    span,
-                })
             }
             TK::LParen => self.parse_paren_or_tuple(),
             TK::LBrace if self.looks_like_struct_update() => self.parse_struct_update(),

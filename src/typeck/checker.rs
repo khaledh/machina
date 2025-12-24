@@ -1029,6 +1029,8 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::BoolLit(_) => Ok(Type::Bool),
 
+            ExprKind::CharLit(_) => Ok(Type::Char),
+
             ExprKind::UnitLit => Ok(Type::Unit),
 
             ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),

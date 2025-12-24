@@ -9,7 +9,7 @@ pub enum TypeCheckError {
     #[error("Function return type mismatch: expected {0}, found {1}")]
     FuncReturnTypeMismatch(Type, Type, Span),
 
-    #[error("Invalid types for arithmetic operation: {0} != {1}")]
+    #[error("Invalid types for arithmetic operation: {0}, {1}")]
     ArithTypeMismatch(Type, Type, Span),
 
     #[error("Invalid types for comparison operation: {0} != {1}")]

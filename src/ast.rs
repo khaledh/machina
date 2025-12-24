@@ -235,6 +235,7 @@ pub enum ExprKind {
     // Literals (scalar)
     UInt64Lit(u64),
     BoolLit(bool),
+    CharLit(u8),
     UnitLit,
 
     // Literals (compound)
@@ -605,6 +606,9 @@ impl Expr {
             ExprKind::BoolLit(value) => {
                 writeln!(f, "{}BoolLit({}) [{}]", pad, value, self.id)?;
             }
+            ExprKind::CharLit(value) => {
+                writeln!(f, "{}CharLit({}) [{}]", pad, fmt_char(*value), self.id)?;
+            }
             ExprKind::UnitLit => {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;
             }
@@ -820,4 +824,18 @@ impl fmt::Display for UnaryOp {
 
 fn indent(level: usize) -> String {
     "  ".repeat(level)
+}
+
+fn fmt_char(value: u8) -> String {
+    match value {
+        b'\n' => "'\\n'".to_string(),
+        b'\r' => "'\\r'".to_string(),
+        b'\t' => "'\\t'".to_string(),
+        b'\\' => "'\\\\'".to_string(),
+        b'\'' => "'\\''".to_string(),
+        b'\0' => "'\\0'".to_string(),
+        0..=31 => format!("'\\x{:02X}'", value),
+        32..=126 => format!("'{}'", value as char),
+        127..=255 => format!("'\\x{:02X}'", value),
+    }
 }

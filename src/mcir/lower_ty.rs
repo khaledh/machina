@@ -27,6 +27,10 @@ impl TyLowerer {
             // Scalar Types
             Type::Unit => self.table.add(TyKind::Unit),
             Type::Bool => self.table.add(TyKind::Bool),
+            Type::Char => self.table.add(TyKind::Int {
+                bits: 8,
+                signed: false,
+            }),
             Type::UInt64 => self.table.add(TyKind::Int {
                 bits: 64,
                 signed: false,
