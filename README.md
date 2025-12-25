@@ -46,7 +46,8 @@ development. The compiler currently targets only ARM64 assembly.
 
 - `if`/`else`
 - `while`
-- `for <pattern> in <start>..<end> { ... }` (range literals only)
+- `for <pattern> in <start>..<end> { ... }` (range literals)
+- `for <pattern> in <expr> { ... }` where `<expr>` is an array
 
 ### Functions
 

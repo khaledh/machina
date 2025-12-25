@@ -753,8 +753,17 @@ impl<'a> Parser<'a> {
         // Expect 'in'
         self.consume_keyword("in")?;
 
-        // Parse range
-        let iter = self.parse_range_expr()?;
+        // Parse range literal or general iterator expression
+        // (disallow struct literals to avoid ambiguity with the loop body block)
+        self.allow_struct_lit = false;
+        let iter = if matches!(self.curr_token.kind, TK::IntLit(_))
+            && matches!(self.peek().map(|t| &t.kind), Some(TK::DotDot))
+        {
+            self.parse_range_expr()?
+        } else {
+            self.parse_expr(0)?
+        };
+        self.allow_struct_lit = true;
 
         // Parse body
         let body = self.parse_expr(0)?;

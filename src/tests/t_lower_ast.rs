@@ -651,3 +651,79 @@ fn test_lower_for_range_loop() {
     assert!(saw_lt, "expected loop condition comparison");
     assert!(saw_add, "expected loop increment");
 }
+
+#[test]
+fn test_lower_for_array_loop() {
+    let source = r#"
+        fn main() -> u64 {
+            let arr = [1, 2, 3];
+            var acc = 0;
+            for x in arr { acc = acc + x; };
+            acc
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    fn place_has_index<K>(place: &Place<K>) -> bool {
+        place
+            .projections()
+            .iter()
+            .any(|proj| matches!(proj, Projection::Index { .. }))
+    }
+
+    fn place_any_has_index(place: &PlaceAny) -> bool {
+        match place {
+            PlaceAny::Scalar(p) => place_has_index(p),
+            PlaceAny::Aggregate(p) => place_has_index(p),
+        }
+    }
+
+    fn operand_has_index(op: &Operand) -> bool {
+        match op {
+            Operand::Copy(place) => place_has_index(place),
+            _ => false,
+        }
+    }
+
+    fn rvalue_has_index(rv: &Rvalue) -> bool {
+        match rv {
+            Rvalue::Use(op) => operand_has_index(op),
+            Rvalue::BinOp { lhs, rhs, .. } => operand_has_index(lhs) || operand_has_index(rhs),
+            Rvalue::UnOp { arg, .. } => operand_has_index(arg),
+            Rvalue::AddrOf(place) => place_any_has_index(place),
+        }
+    }
+
+    let mut saw_index = false;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            match stmt {
+                Statement::CopyScalar { dst, src } => {
+                    if place_has_index(dst) || rvalue_has_index(src) {
+                        saw_index = true;
+                    }
+                }
+                Statement::CopyAggregate { dst, src } => {
+                    if place_has_index(dst) || place_has_index(src) {
+                        saw_index = true;
+                    }
+                }
+                Statement::Call { dst, args, .. } => {
+                    if place_any_has_index(dst) {
+                        saw_index = true;
+                    }
+                    if args.iter().any(place_any_has_index) {
+                        saw_index = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(saw_index, "expected indexed array access in loop body");
+}

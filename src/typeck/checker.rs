@@ -890,12 +890,10 @@ impl<'c, 'b> Checker<'c, 'b> {
         body: &Expr,
     ) -> Result<Type, TypeCheckError> {
         let iter_ty = self.type_check_expr(iter)?;
-        let Type::Range { .. } = iter_ty else {
-            return Err(TypeCheckError::ForIterNotRange(iter_ty, iter.span));
-        };
+        let item_ty = self.iterable_item_type(&iter_ty, iter.span)?;
 
-        // Loop variable is u64 (not range) for now
-        self.type_check_pattern(pattern, &Type::UInt64)?;
+        // Loop variable's type is the item type of the iterable
+        self.type_check_pattern(pattern, &item_ty)?;
 
         // Type check body
         let _ = self.type_check_expr(body)?;
@@ -1177,5 +1175,27 @@ impl<'c, 'b> Checker<'c, 'b> {
             self.builder.record_node_type(expr.id, ty.clone());
             ty.clone()
         })
+    }
+
+    // --- Helper functions ---
+
+    fn iterable_item_type(&self, iter_ty: &Type, span: Span) -> Result<Type, TypeCheckError> {
+        match iter_ty {
+            Type::Range { .. } => Ok(Type::UInt64),
+            Type::Array { elem_ty, dims } => {
+                if dims.is_empty() {
+                    return Err(TypeCheckError::ForIterNotIterable(iter_ty.clone(), span));
+                }
+                if dims.len() == 1 {
+                    Ok((**elem_ty).clone())
+                } else {
+                    Ok(Type::Array {
+                        elem_ty: Box::new((**elem_ty).clone()),
+                        dims: dims[1..].to_vec(),
+                    })
+                }
+            }
+            _ => Err(TypeCheckError::ForIterNotIterable(iter_ty.clone(), span)),
+        }
     }
 }

@@ -711,6 +711,43 @@ fn test_for_range_invalid_bounds() {
 }
 
 #[test]
+fn test_for_array_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            var acc = 0;
+            for x in arr { acc = acc + x; };
+            acc
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_for_non_iterable_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            for x in 0 { x; };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::ForIterNotIterable(ty, _) => {
+                assert_eq!(*ty, Type::UInt64);
+            }
+            e => panic!("Expected ForIterNotIterable error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_range_literal_in_bounds() {
     let source = r#"
         fn test() -> u64 {
