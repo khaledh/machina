@@ -4,6 +4,7 @@ mod ast;
 mod context;
 mod diagnostics;
 mod lexer;
+mod lower;
 mod mcir;
 mod nrvo;
 mod opt;
@@ -200,7 +201,7 @@ fn compile(source: &str, args: Args) -> Result<String, Vec<CompileError>> {
 
     // --- Lower to MCIR ---
     let lowered_context =
-        mcir::lower_ast::lower_ast(analyzed_context).map_err(|e| vec![e.into()])?;
+        lower::lower_ast::lower_ast(analyzed_context).map_err(|e| vec![e.into()])?;
     if dump_ir {
         println!("MCIR:");
         println!("--------------------------------");

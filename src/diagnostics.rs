@@ -1,5 +1,5 @@
 use crate::lexer::LexError;
-use crate::mcir::errors::LowerError;
+use crate::lower::errors::LowerError;
 use crate::parser::ParseError;
 use crate::resolve::ResolveError;
 use crate::targets::CodegenError;

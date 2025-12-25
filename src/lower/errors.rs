@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::ast::NodeId;
-use crate::mcir::lower_ast::PlaceKind;
+use crate::lower::lower_ast::PlaceKind;
 use crate::resolve::def_map::DefId;
 
 #[derive(Debug, Error)]
