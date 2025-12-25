@@ -65,6 +65,9 @@ Assign             ::= PostfixExpr "=" Expr
 # Control flow
 If                 ::= "if" Expr Block ( "else" Block )?
 While              ::= "while" Expr Block
+For                ::= "for" Pattern "in" RangeExpr Block
+
+RangeExpr          ::= Integer ".." Integer
 
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr

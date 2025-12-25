@@ -38,10 +38,15 @@ development. The compiler currently targets only ARM64 assembly.
 **Type aliases**
 - `type Size = u64`, `let s: Size = 10`
 
+**Range types**
+- `range(max)` and `range(min, max)` (half-open, `[min, max)`)
+- Compile-time validation for integer literals (runtime checks coming later)
+
 ### Control flow
 
 - `if`/`else`
 - `while`
+- `for <pattern> in <start>..<end> { ... }` (range literals only)
 
 ### Functions
 

@@ -131,6 +131,9 @@ pub enum TypeCheckError {
 
     #[error("Value out of range: {0} not in range [{1},{2})")]
     ValueOutOfRange(u64, u64, u64, Span),
+
+    #[error("For iterator is not a range: {0}")]
+    ForIterNotRange(Type, Span),
 }
 
 impl TypeCheckError {
@@ -178,6 +181,7 @@ impl TypeCheckError {
             TypeCheckError::StringIndexNonAscii(span) => *span,
             TypeCheckError::InvalidRangeBounds(_, _, span) => *span,
             TypeCheckError::ValueOutOfRange(_, _, _, span) => *span,
+            TypeCheckError::ForIterNotRange(_, span) => *span,
         }
     }
 }

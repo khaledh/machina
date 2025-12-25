@@ -161,6 +161,12 @@ impl<'a> NrvoSafetyChecker<'a> {
                 cond_ok && body_ok
             }
 
+            ExprKind::For { iter, body, .. } => {
+                let iter_ok = self.check_expr(iter, false);
+                let body_ok = self.check_expr(body, false);
+                iter_ok && body_ok
+            }
+
             ExprKind::Match { scrutinee, arms } => {
                 let scrutinee_ok = self.check_expr(scrutinee, false);
                 let arms_ok = arms.iter().all(|arm| self.check_expr(&arm.body, at_return));
@@ -227,7 +233,8 @@ impl<'a> NrvoSafetyChecker<'a> {
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
-            | ExprKind::EnumVariant { .. } => true,
+            | ExprKind::EnumVariant { .. }
+            | ExprKind::Range { .. } => true,
         }
     }
 

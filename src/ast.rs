@@ -327,6 +327,15 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Box<Expr>,
     },
+    For {
+        pattern: Pattern,
+        iter: Box<Expr>, // For now this must be ExprKind::Range
+        body: Box<Expr>,
+    },
+    Range {
+        start: u64,
+        end: u64, // exclusive
+    },
 
     // Match
     Match {
@@ -811,6 +820,26 @@ impl Expr {
                 for arm in arms {
                     arm.fmt_with_indent(f, level + 2)?;
                 }
+            }
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}For [{}]", pad, self.id)?;
+                writeln!(f, "{}Pattern:", pad1)?;
+                pattern.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Iter:", pad1)?;
+                iter.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Body:", pad1)?;
+                body.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Range { start, end } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Range [{}]", pad, self.id)?;
+                writeln!(f, "{}Start: {}", pad1, start)?;
+                writeln!(f, "{}End: {}", pad1, end)?;
             }
         }
         Ok(())

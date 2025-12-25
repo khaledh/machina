@@ -675,6 +675,42 @@ fn test_match_target_not_enum() {
 }
 
 #[test]
+fn test_for_range_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            for i in 0..3 { i; };
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_for_range_invalid_bounds() {
+    let source = r#"
+        fn test() -> u64 {
+            for i in 5..5 { i; };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::InvalidRangeBounds(min, max, _) => {
+                assert_eq!(*min, 5);
+                assert_eq!(*max, 5);
+            }
+            e => panic!("Expected InvalidRangeBounds error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_range_literal_in_bounds() {
     let source = r#"
         fn test() -> u64 {

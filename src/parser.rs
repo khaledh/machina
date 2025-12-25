@@ -741,6 +741,49 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_for(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+
+        // Expect 'for'
+        self.consume_keyword("for")?;
+
+        // Parse pattern
+        let pattern = self.parse_pattern()?;
+
+        // Expect 'in'
+        self.consume_keyword("in")?;
+
+        // Parse range
+        let iter = self.parse_range_expr()?;
+
+        // Parse body
+        let body = self.parse_expr(0)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::For {
+                pattern,
+                iter: Box::new(iter),
+                body: Box::new(body),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_range_expr(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+
+        let start = self.parse_int_lit()?;
+        self.consume(&TK::DotDot)?;
+        let end = self.parse_int_lit()?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Range { start, end },
+            span: self.close(marker),
+        })
+    }
+
     fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         let mut expr = self.parse_primary()?;
@@ -858,6 +901,7 @@ impl<'a> Parser<'a> {
             }
             TK::Ident(name) if name == "if" => self.parse_if(),
             TK::Ident(name) if name == "while" => self.parse_while(),
+            TK::Ident(name) if name == "for" => self.parse_for(),
             TK::Ident(name) if name == "match" => self.parse_match_expr(),
             TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 // Enum variant: Ident :: Variant

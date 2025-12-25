@@ -127,9 +127,11 @@ impl<'a> FuncLowerer<'a> {
     fn lower_expr_value(&mut self, expr: &Expr) -> Result<ExprValue, LowerError> {
         match &expr.kind {
             // These are only allowed as block items.
-            EK::LetBind { .. } | EK::VarBind { .. } | EK::Assign { .. } | EK::While { .. } => {
-                Err(LowerError::ExprNotAllowedInValueContext(expr.id))
-            }
+            EK::LetBind { .. }
+            | EK::VarBind { .. }
+            | EK::Assign { .. }
+            | EK::While { .. }
+            | EK::For { .. } => Err(LowerError::ExprNotAllowedInValueContext(expr.id)),
 
             EK::Block(exprs) => self.lower_block_expr(exprs),
 
@@ -195,6 +197,15 @@ impl<'a> FuncLowerer<'a> {
             EK::While { cond, body } => {
                 // while in block‑item position: just lower and discard
                 self.lower_while_expr(cond, body)?;
+                Ok(())
+            }
+            EK::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                // for in block‑item position: just lower and discard
+                self.lower_for_expr(pattern, iter, body)?;
                 Ok(())
             }
             EK::If {
@@ -1341,7 +1352,7 @@ impl<'a> FuncLowerer<'a> {
 
         // Loop body
         self.curr_block = loop_body_bb;
-        let _ = self.lower_expr_value(body)?;
+        self.lower_stmt_body(body)?;
         self.fb
             .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
 
@@ -1351,6 +1362,131 @@ impl<'a> FuncLowerer<'a> {
         // while loops return unit
         let c = Const::Unit;
         Ok(ExprValue::Scalar(Operand::Const(c)))
+    }
+
+    /// Lower a loop/body expression for side effects only.
+    fn lower_stmt_body(&mut self, body: &Expr) -> Result<(), LowerError> {
+        match &body.kind {
+            EK::Block(exprs) => {
+                for expr in exprs {
+                    self.lower_block_item(expr)?;
+                }
+            }
+            _ => {
+                self.lower_block_item(body)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Lower a for expression (returns unit).
+    fn lower_for_expr(
+        &mut self,
+        pattern: &Pattern,
+        iter: &Expr,
+        body: &Expr,
+    ) -> Result<ExprValue, LowerError> {
+        // Lowered form:
+        // var i = start;
+        // while i < end {
+        //     <bind pattern to i>
+        //     body
+        //     i = i + 1;
+        // }
+
+        // Expect iter is ExprKind::Range { start, end }
+        let (start, end) = match &iter.kind {
+            EK::Range { start, end } => (*start, *end),
+            _ => return Err(LowerError::UnsupportedOperandExpr(iter.id)),
+        };
+
+        // Create a temp local for the induction variable
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+        let idx_place = self.new_temp_scalar(u64_ty_id);
+
+        // i = start
+        let start_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: start as i128,
+        });
+        self.emit_copy_scalar(idx_place.clone(), Rvalue::Use(start_op));
+
+        // blocks
+        let loop_cond_bb = self.fb.new_block();
+        let loop_body_bb = self.fb.new_block();
+        let loop_exit_bb = self.fb.new_block();
+
+        // Jump to loop condition
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
+
+        // Loop condition: i < end
+        self.curr_block = loop_cond_bb;
+        let end_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: end as i128,
+        });
+        let cond_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+        let cond_op = self.emit_scalar_rvalue(
+            cond_ty_id,
+            Rvalue::BinOp {
+                op: BinOp::Lt,
+                lhs: Operand::Copy(idx_place.clone()),
+                rhs: end_op,
+            },
+        );
+        self.fb.set_terminator(
+            self.curr_block,
+            Terminator::If {
+                cond: cond_op,
+                then_bb: loop_body_bb,
+                else_bb: loop_exit_bb,
+            },
+        );
+
+        // Loop body
+        self.curr_block = loop_body_bb;
+
+        // Bind pattern to current index (only ident pattern expected)
+        let PK::Ident { name } = &pattern.kind else {
+            return Err(LowerError::PatternMismatch(pattern.id));
+        };
+        let def_id = self.def_for_node(pattern.id)?.id;
+        self.bind_ident(
+            def_id,
+            name.clone(),
+            u64_ty_id,
+            PlaceAny::Scalar(idx_place.clone()),
+        )?;
+
+        self.lower_stmt_body(body)?;
+
+        // i = i + 1
+        let one_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: 1 as i128,
+        });
+        self.emit_copy_scalar(
+            idx_place.clone(),
+            Rvalue::BinOp {
+                op: BinOp::Add,
+                lhs: Operand::Copy(idx_place.clone()),
+                rhs: one_op,
+            },
+        );
+
+        // Jump to loop condition
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
+
+        // After loop
+        self.curr_block = loop_exit_bb;
+
+        // for loops return unit
+        Ok(ExprValue::Scalar(Operand::Const(Const::Unit)))
     }
 
     // --- Calls ---

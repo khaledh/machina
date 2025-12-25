@@ -661,6 +661,22 @@ impl SymbolResolver {
                 self.check_expr(body);
             }
 
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                // Resolve iter first (pattern not in scope for it)
+                self.check_expr(iter);
+                // Enter a new scope for the pattern + body
+                self.with_scope(|checker| {
+                    checker.check_pattern(pattern, false);
+                    checker.check_expr(body);
+                });
+            }
+
+            ExprKind::Range { .. } => { /* nothing to resolve */ }
+
             ExprKind::Call { callee, args } => {
                 // For now, callee must be a Var to a function.
                 // In the future, this can be generalized.

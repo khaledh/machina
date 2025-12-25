@@ -840,3 +840,42 @@ fn test_parse_char_literal() {
         panic!("Expected Block");
     }
 }
+
+#[test]
+fn test_parse_for_range_loop() {
+    let source = r#"
+        fn test() -> u64 {
+            for i in 0..3 { i; };
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    if let ExprKind::Block(exprs) = &func.body.kind {
+        if let ExprKind::For {
+            pattern,
+            iter,
+            body,
+        } = &exprs[0].kind
+        {
+            match &pattern.kind {
+                PatternKind::Ident { name } => assert_eq!(name, "i"),
+                _ => panic!("Expected ident pattern"),
+            }
+            match &iter.kind {
+                ExprKind::Range { start, end } => {
+                    assert_eq!(*start, 0);
+                    assert_eq!(*end, 3);
+                }
+                _ => panic!("Expected range iterator"),
+            }
+            assert!(matches!(body.kind, ExprKind::Block(_)));
+        } else {
+            panic!("Expected for loop");
+        }
+    } else {
+        panic!("Expected block");
+    }
+}

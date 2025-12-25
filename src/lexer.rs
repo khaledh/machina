@@ -56,6 +56,8 @@ pub enum TokenKind {
     Comma,
     #[display(".")]
     Dot,
+    #[display("..")]
+    DotDot,
     #[display(":")]
     Colon,
     #[display("::")]
@@ -401,7 +403,12 @@ impl<'a> Lexer<'a> {
             }
             Some(&'.') => {
                 self.advance();
-                Ok(TokenKind::Dot)
+                if matches!(self.source.peek(), Some(&'.')) {
+                    self.advance();
+                    Ok(TokenKind::DotDot)
+                } else {
+                    Ok(TokenKind::Dot)
+                }
             }
             Some(&':') => {
                 self.advance();

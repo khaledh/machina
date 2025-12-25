@@ -883,6 +883,26 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
+    fn type_check_for(
+        &mut self,
+        pattern: &Pattern,
+        iter: &Expr,
+        body: &Expr,
+    ) -> Result<Type, TypeCheckError> {
+        let iter_ty = self.type_check_expr(iter)?;
+        let Type::Range { .. } = iter_ty else {
+            return Err(TypeCheckError::ForIterNotRange(iter_ty, iter.span));
+        };
+
+        // Loop variable is u64 (not range) for now
+        self.type_check_pattern(pattern, &Type::UInt64)?;
+
+        // Type check body
+        let _ = self.type_check_expr(body)?;
+
+        Ok(Type::Unit)
+    }
+
     fn type_check_match(
         &mut self,
         scrutinee: &Expr,
@@ -1131,6 +1151,22 @@ impl<'c, 'b> Checker<'c, 'b> {
             } => self.type_check_if(cond, then_body, else_body),
 
             ExprKind::While { cond, body } => self.type_check_while(cond, body),
+
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => self.type_check_for(pattern, iter, body),
+
+            ExprKind::Range { start, end } => {
+                if start >= end {
+                    return Err(TypeCheckError::InvalidRangeBounds(*start, *end, expr.span));
+                }
+                Ok(Type::Range {
+                    min: *start,
+                    max: *end,
+                })
+            }
 
             ExprKind::Match { scrutinee, arms } => {
                 self.type_check_match(scrutinee, arms, expr.span)

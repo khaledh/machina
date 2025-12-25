@@ -612,3 +612,42 @@ fn test_lower_struct_update() {
     assert!(saw_update, "expected updated field write to be emitted");
     assert!(matches!(entry_block.terminator, Terminator::Return));
 }
+
+#[test]
+fn test_lower_for_range_loop() {
+    let source = r#"
+        fn main() -> u64 {
+            for i in 0..3 { i; };
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    assert!(
+        body.blocks.len() >= 4,
+        "expected loop lowering to create multiple blocks"
+    );
+
+    let mut saw_lt = false;
+    let mut saw_add = false;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::CopyScalar { src, .. } = stmt {
+                if let Rvalue::BinOp { op, .. } = src {
+                    match op {
+                        BinOp::Lt => saw_lt = true,
+                        BinOp::Add => saw_add = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(saw_lt, "expected loop condition comparison");
+    assert!(saw_add, "expected loop increment");
+}
