@@ -223,6 +223,10 @@ pub enum TypeExprKind {
     Tuple {
         fields: Vec<TypeExpr>,
     },
+    Range {
+        min: u64,
+        max: u64,
+    },
 }
 
 // -- Expressions ---
@@ -513,6 +517,9 @@ impl fmt::Display for TypeExprKind {
             TypeExprKind::Tuple { fields } => {
                 let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "Tuple([{}])", fields_str.join(", "))?;
+            }
+            TypeExprKind::Range { min, max } => {
+                write!(f, "Range({}, {})", min, max)?;
             }
         }
         Ok(())

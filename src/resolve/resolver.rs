@@ -475,6 +475,7 @@ impl SymbolResolver {
                     self.check_type_expr(field);
                 }
             }
+            TypeExprKind::Range { .. } => { /* nothing to resolve */ }
         }
     }
 

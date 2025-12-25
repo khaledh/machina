@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
         let kind = if self.curr_token.kind == TK::LBrace {
             // Struct definition: type Foo = { ... }
             self.parse_struct_def()?
-        } else if matches!(self.curr_token.kind, TK::Ident(_))
+        } else if matches!(&self.curr_token.kind, TK::Ident(name) if name != "range")
             && matches!(
                 self.peek().map(|t| &t.kind),
                 Some(TK::Pipe) | Some(TK::LParen)
@@ -340,8 +340,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
-        // Parse base type (named or tuple)
-        let mut typ = if self.curr_token.kind == TK::LParen
+        // Check for range type first, then tuple, then named type
+        let mut typ = if let TK::Ident(name) = &self.curr_token.kind
+            && name == "range"
+        {
+            self.parse_range_type()?
+        } else if self.curr_token.kind == TK::LParen
             && self.peek().map(|t| &t.kind) != Some(&TK::RParen)
         {
             self.advance();
@@ -350,7 +354,7 @@ impl<'a> Parser<'a> {
             self.parse_named_type()?
         };
 
-        // Check for array type
+        // Check for array type suffix
         if self.curr_token.kind == TK::LBracket {
             typ = self.parse_array_type(typ)?;
         }
@@ -429,6 +433,31 @@ impl<'a> Parser<'a> {
                 elem_ty: Box::new(elem_ty),
                 dims: dims.into_iter().map(|d| d as usize).collect(),
             },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_range_type(&mut self) -> Result<TypeExpr, ParseError> {
+        // Range Type: "range(min, max)" or "range(max)"
+        let marker = self.mark();
+
+        self.consume_keyword("range")?;
+        self.consume(&TK::LParen)?;
+
+        let first = self.parse_int_lit()?;
+        let (min, max) = if self.curr_token.kind == TK::Comma {
+            self.advance();
+            let second = self.parse_int_lit()?;
+            (first, second)
+        } else {
+            (0, first)
+        };
+
+        self.consume(&TK::RParen)?;
+
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Range { min, max },
             span: self.close(marker),
         })
     }

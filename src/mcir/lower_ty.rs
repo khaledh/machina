@@ -43,6 +43,7 @@ impl TyLowerer {
                 bits: 8,
                 signed: false,
             }),
+            Type::Range { .. } => self.lower_ty(&Type::UInt64),
 
             // Aggregate Types
             Type::Array { elem_ty, dims } => {

@@ -25,10 +25,11 @@ EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExpr ("," TypeExpr)* ","? ")" )?
 
 # Type Expressions
-TypeExpr           ::= NamedType | ArrayType | TupleType
+TypeExpr           ::= NamedType | ArrayType | TupleType | RangeType
 NamedType          ::= "()" | Identifier
 ArrayType          ::= TypeExpr "[" Integer ("," Integer)* ","? "]"
 TupleType          ::= "(" TypeExpr "," ( TypeExpr ( "," TypeExpr )* )? ","? ")"
+RangeType          ::= "range" "(" Integer ("," Integer)? ")"
 
 # Blocks
 Block              ::= "{" (Expr ";")* Expr? "}"

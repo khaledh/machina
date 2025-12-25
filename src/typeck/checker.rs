@@ -706,54 +706,66 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_let(
+    fn type_check_binding(
         &mut self,
         pattern: &Pattern,
         decl_ty: &Option<TypeExpr>,
         value: &Expr,
     ) -> Result<Type, TypeCheckError> {
         // type check value
-        let expr_type = self.type_check_expr(value)?;
+        let mut value_ty = self.type_check_expr(value)?;
 
         // check declaration type (if present)
-        if let Some(decl_ty) = decl_ty {
-            let decl_ty = resolve_type_expr(&self.context.def_map, decl_ty)?;
-            if expr_type != decl_ty {
-                return Err(TypeCheckError::DeclTypeMismatch(
-                    decl_ty, expr_type, value.span,
-                ));
-            }
+        if let Some(decl_ty_expr) = decl_ty {
+            let decl_ty = resolve_type_expr(&self.context.def_map, decl_ty_expr)?;
+            self.check_assignable_to(value, &value_ty, &decl_ty)?;
+            value_ty = decl_ty;
         }
 
         // type check pattern
-        self.type_check_pattern(pattern, &expr_type)?;
+        self.type_check_pattern(pattern, &value_ty)?;
 
         Ok(Type::Unit)
     }
 
-    fn type_check_var(
+    fn check_assignable_to(
         &mut self,
-        pattern: &Pattern,
-        decl_ty: &Option<TypeExpr>,
-        value: &Expr,
-    ) -> Result<Type, TypeCheckError> {
-        // type check value
-        let expr_type = self.type_check_expr(value)?;
-
-        // check declaration type (if present)
-        if let Some(decl_ty) = decl_ty {
-            let decl_ty = resolve_type_expr(&self.context.def_map, decl_ty)?;
-            if expr_type != decl_ty {
-                return Err(TypeCheckError::DeclTypeMismatch(
-                    decl_ty, expr_type, value.span,
-                ));
-            }
+        from_value: &Expr,
+        from_ty: &Type,
+        to_ty: &Type,
+    ) -> Result<(), TypeCheckError> {
+        if from_ty == to_ty {
+            return Ok(());
         }
 
-        // type check pattern
-        self.type_check_pattern(pattern, &expr_type)?;
-
-        Ok(Type::Unit)
+        match (from_ty, to_ty) {
+            (Type::UInt64, Type::Range { min, max }) => {
+                if let ExprKind::UInt64Lit(val) = from_value.kind {
+                    if val < *min || val >= *max {
+                        return Err(TypeCheckError::ValueOutOfRange(
+                            val,
+                            *min,
+                            *max,
+                            from_value.span,
+                        ));
+                    }
+                    Ok(())
+                } else {
+                    // Block assigning non-uint64 literals to range types
+                    // until we support runtime checking
+                    Err(TypeCheckError::DeclTypeMismatch(
+                        to_ty.clone(),
+                        from_ty.clone(),
+                        from_value.span,
+                    ))
+                }
+            }
+            _ => Err(TypeCheckError::DeclTypeMismatch(
+                to_ty.clone(),
+                from_ty.clone(),
+                from_value.span,
+            )),
+        }
     }
 
     fn type_check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
@@ -1099,13 +1111,12 @@ impl<'c, 'b> Checker<'c, 'b> {
                 pattern,
                 decl_ty,
                 value,
-            } => self.type_check_let(pattern, decl_ty, value),
-
-            ExprKind::VarBind {
+            }
+            | ExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
-            } => self.type_check_var(pattern, decl_ty, value),
+            } => self.type_check_binding(pattern, decl_ty, value),
 
             ExprKind::Assign { value, assignee } => self.type_check_assign(assignee, value),
 

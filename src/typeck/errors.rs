@@ -125,6 +125,12 @@ pub enum TypeCheckError {
 
     #[error("String index operation on non-ASCII string: {0}")]
     StringIndexNonAscii(Span),
+
+    #[error("Invalid range bounds: {0} >= {1}")]
+    InvalidRangeBounds(u64, u64, Span),
+
+    #[error("Value out of range: {0} not in range [{1},{2})")]
+    ValueOutOfRange(u64, u64, u64, Span),
 }
 
 impl TypeCheckError {
@@ -170,6 +176,8 @@ impl TypeCheckError {
             TypeCheckError::NonExhaustiveMatch(span) => *span,
             TypeCheckError::DuplicateMatchVariant(_, span) => *span,
             TypeCheckError::StringIndexNonAscii(span) => *span,
+            TypeCheckError::InvalidRangeBounds(_, _, span) => *span,
+            TypeCheckError::ValueOutOfRange(_, _, _, span) => *span,
         }
     }
 }

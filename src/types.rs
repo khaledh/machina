@@ -12,6 +12,10 @@ pub enum Type {
     UInt8,
     Bool,
     Char,
+    Range {
+        min: u64,
+        max: u64,
+    },
 
     // Compound Types
     String,
@@ -35,6 +39,16 @@ pub enum Type {
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (
+                Type::Range {
+                    min: lmin,
+                    max: lmax,
+                },
+                Type::Range {
+                    min: rmin,
+                    max: rmax,
+                },
+            ) => lmin == rmin && lmax == rmax,
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
             (Type::UInt64, Type::UInt64) => true,
@@ -83,26 +97,31 @@ impl Hash for Type {
             Type::Char => {
                 6u8.hash(state);
             }
-            Type::String => {
+            Type::Range { min, max } => {
                 7u8.hash(state);
+                min.hash(state);
+                max.hash(state);
+            }
+            Type::String => {
+                8u8.hash(state);
             }
             Type::Array { elem_ty, dims } => {
-                8u8.hash(state);
+                9u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
             }
             Type::Tuple { fields } => {
-                9u8.hash(state);
+                10u8.hash(state);
                 fields.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
-                10u8.hash(state);
+                11u8.hash(state);
                 name.hash(state);
             }
             Type::Enum { name, .. } => {
                 // Nominal type: only hash the name
-                11u8.hash(state);
+                12u8.hash(state);
                 name.hash(state);
             }
         }
@@ -141,6 +160,7 @@ impl fmt::Display for Type {
             Type::UInt8 => write!(f, "u8"),
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
+            Type::Range { min, max } => write!(f, "range({}, {})", min, max),
             Type::String => write!(f, "string"),
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
@@ -189,6 +209,7 @@ impl Type {
             Type::UInt8 => 1,
             Type::Bool => 1,
             Type::Char => 1,
+            Type::Range { .. } => 8,
             Type::String => 16,
             Type::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
@@ -218,6 +239,7 @@ impl Type {
             Type::UInt8 => 1,
             Type::Bool => 1,
             Type::Char => 1,
+            Type::Range { .. } => 8,
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),

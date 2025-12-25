@@ -673,3 +673,89 @@ fn test_match_target_not_enum() {
         }
     }
 }
+
+#[test]
+fn test_range_literal_in_bounds() {
+    let source = r#"
+        fn test() -> u64 {
+            let x: range(100) = 42;
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_range_literal_out_of_bounds() {
+    let source = r#"
+        fn test() -> u64 {
+            let x: range(50, 100) = 42;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::ValueOutOfRange(value, min, max, _) => {
+                assert_eq!(*value, 42);
+                assert_eq!(*min, 50);
+                assert_eq!(*max, 100);
+            }
+            e => panic!("Expected ValueOutOfRange error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_range_invalid_bounds() {
+    let source = r#"
+        fn test() -> u64 {
+            let x: range(10, 10) = 0;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::InvalidRangeBounds(min, max, _) => {
+                assert_eq!(*min, 10);
+                assert_eq!(*max, 10);
+            }
+            e => panic!("Expected InvalidRangeBounds error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_range_non_literal_assignment_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let y = 5;
+            let x: range(100) = y;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            TypeCheckError::DeclTypeMismatch(expected, found, _) => {
+                assert_eq!(*expected, Type::Range { min: 0, max: 100 });
+                assert_eq!(*found, Type::UInt64);
+            }
+            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
+        }
+    }
+}
