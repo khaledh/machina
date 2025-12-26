@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::mcir::types::{
-    BasicBlock, BlockId, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue,
-    Statement, Terminator,
+    BasicBlock, BlockId, CheckKind, FuncBody, LocalId, Operand, Place, PlaceAny, Projection,
+    Rvalue, Statement, Terminator,
 };
 
 // --- Def/use extraction ---
@@ -142,10 +142,21 @@ pub fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
                 }
             }
         }
-        Terminator::Return
-        | Terminator::Goto(_)
-        | Terminator::Trap { .. }
-        | Terminator::Unterminated => {}
+        Terminator::Trap { kind } => {
+            let mut uses = HashSet::new();
+            match &kind {
+                CheckKind::Bounds { index, len } => {
+                    collect_operand_uses(index, &mut uses);
+                    collect_operand_uses(len, &mut uses);
+                }
+            }
+            for u in uses {
+                if !kill_set.contains(&u) {
+                    gen_set.insert(u);
+                }
+            }
+        }
+        Terminator::Return | Terminator::Goto(_) | Terminator::Unterminated => {}
     }
 
     GenKillSet { gen_set, kill_set }

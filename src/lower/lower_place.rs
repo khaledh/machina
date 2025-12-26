@@ -89,10 +89,16 @@ impl<'a> FuncLowerer<'a> {
                 Rvalue::BinOp {
                     op: BinOp::Lt,
                     lhs: idx_op.clone(),
-                    rhs: dim_op,
+                    rhs: dim_op.clone(),
                 },
             );
-            self.emit_runtime_check(cond_op, CheckKind::Bounds);
+            self.emit_runtime_check(
+                cond_op,
+                CheckKind::Bounds {
+                    index: idx_op.clone(),
+                    len: dim_op,
+                },
+            );
 
             index_operands.push(idx_op);
         }

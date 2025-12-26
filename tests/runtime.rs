@@ -9,9 +9,19 @@ use machina::targets::TargetKind;
 #[test]
 fn test_bounds_check_traps_with_message_and_exit_code() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root.join("examples").join("bounds_check.mc");
-    let source =
-        std::fs::read_to_string(&source_path).expect("failed to read examples/bounds_check.mc");
+    let temp_dir =
+        std::env::temp_dir().join(format!("machina_runtime_test_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+
+    let source_path = temp_dir.join("bounds_check.mc");
+    let source = r#"
+        fn main() -> u64 {
+            let arr = [1, 2, 3];
+            arr[5]
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write temp source");
+    let source = std::fs::read_to_string(&source_path).expect("failed to read temp source");
 
     let opts = CompileOptions {
         dump: None,
@@ -19,10 +29,6 @@ fn test_bounds_check_traps_with_message_and_exit_code() {
         emit_mcir: false,
     };
     let output = compile(&source, &opts).expect("compile failed");
-
-    let temp_dir =
-        std::env::temp_dir().join(format!("machina_runtime_test_{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
     let asm_path = temp_dir.join("bounds_check.s");
     let exe_path = temp_dir.join("bounds_check");
@@ -45,8 +51,8 @@ fn test_bounds_check_traps_with_message_and_exit_code() {
     assert_eq!(run.status.code(), Some(100));
 
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(
-        stderr.contains("Machina runtime error: bounds check failed"),
+    assert_eq!(
+        stderr, "Machina runtime error: bounds check failed (index=5, len=3)\n",
         "unexpected stderr: {stderr}"
     );
 

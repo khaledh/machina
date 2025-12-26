@@ -57,7 +57,8 @@ Blocks end in:
 - `Goto`
 - `If { cond, then_bb, else_bb }`
 - `Switch { discr, cases, default }`
-- `Trap { kind }`
+- `Trap { kind }`, where `kind` is a `CheckKind`:
+   - `Bounds { index, len }`
 - `Unterminated` (placeholder during building)
 
 ## Control Flow

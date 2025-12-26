@@ -394,7 +394,7 @@ pub struct FuncBody {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckKind {
-    Bounds,
+    Bounds { index: Operand, len: Operand },
 }
 
 // --- Display ---
@@ -564,7 +564,7 @@ impl fmt::Display for Terminator {
                 write!(f, "  default: goto {}", default)?;
                 write!(f, "}}")
             }
-            Terminator::Trap { kind } => write!(f, "trap ({})", kind),
+            Terminator::Trap { kind } => write!(f, "trap: {}", kind),
             Terminator::Unterminated => write!(f, "unterminated"),
         }
     }
@@ -612,7 +612,7 @@ impl fmt::Display for FuncBody {
 impl fmt::Display for CheckKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CheckKind::Bounds => write!(f, "bounds"),
+            CheckKind::Bounds { index, len } => write!(f, "bounds (index={}, len={})", index, len),
         }
     }
 }

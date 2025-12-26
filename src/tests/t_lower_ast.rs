@@ -743,7 +743,7 @@ fn test_lower_array_index_emits_bounds_check() {
         matches!(
             block.terminator,
             Terminator::Trap {
-                kind: CheckKind::Bounds
+                kind: CheckKind::Bounds { .. }
             }
         )
     });
