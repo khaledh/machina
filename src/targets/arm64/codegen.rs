@@ -359,7 +359,6 @@ impl<'a> FuncCodegen<'a> {
     fn emit_stmt(&mut self, stmt: &Statement) -> Result<String, CodegenError> {
         match stmt {
             Statement::CopyScalar { dst, src } => self.emit_copy_scalar(dst, src),
-            Statement::InitAggregate { dst, fields } => self.emit_init_aggregate(dst, fields),
             Statement::CopyAggregate { dst, src } => self.emit_copy_aggregate(dst, src),
             Statement::Call { callee, .. } => self.emit_call(callee),
         }
@@ -443,55 +442,6 @@ impl<'a> FuncCodegen<'a> {
                 | Rvalue::Use(Operand::Const(Const::Bool(false)))
                 | Rvalue::Use(Operand::Const(Const::Int { value: 0, .. }))
         )
-    }
-
-    fn emit_init_aggregate(
-        &mut self,
-        dst: &Place<crate::mcir::types::Aggregate>,
-        fields: &[Operand],
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-
-        // Compute base address of the aggregate.
-        let base_addr = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
-        let mut cur_kind = self.kind_for_local(dst.base());
-
-        // Write each aggregate field in-place at its computed offset.
-        match &mut cur_kind {
-            TyKind::Tuple { field_tys } => {
-                for (i, field) in fields.iter().enumerate() {
-                    let offset = self.field_offset(field_tys, i);
-                    let value_reg = self.materialize_operand(field, &mut asm, R::X16)?;
-                    self.store_at_addr(base_addr, offset, field_tys[i], value_reg, &mut asm)?;
-                }
-            }
-            TyKind::Struct {
-                fields: struct_fields,
-            } => {
-                for (i, field) in fields.iter().enumerate() {
-                    let offset = self.struct_field_offset(struct_fields, i);
-                    let value_reg = self.materialize_operand(field, &mut asm, R::X16)?;
-                    self.store_at_addr(
-                        base_addr,
-                        offset,
-                        struct_fields[i].ty,
-                        value_reg,
-                        &mut asm,
-                    )?;
-                }
-            }
-            TyKind::Array { elem_ty, .. } => {
-                let elem_size = size_of_ty(&self.body.types, *elem_ty);
-                for (i, field) in fields.iter().enumerate() {
-                    let offset = (i * elem_size) as i64;
-                    let value_reg = self.materialize_operand(field, &mut asm, R::X16)?;
-                    self.store_at_addr(base_addr, offset as usize, *elem_ty, value_reg, &mut asm)?;
-                }
-            }
-            _ => return Err(CodegenError::InvalidProjectionType),
-        }
-
-        Ok(asm)
     }
 
     fn emit_copy_aggregate(
@@ -692,11 +642,6 @@ impl<'a> FuncCodegen<'a> {
                         asm.push_str(&format!("  cset w16, {}\n", cond));
                     }
                 }
-                Ok(R::X16)
-            }
-            Rvalue::AddrOf(place) => {
-                let _ = self.emit_place_addr_any(place, asm)?;
-                asm.push_str("  mov x16, x17\n");
                 Ok(R::X16)
             }
         }
@@ -1499,7 +1444,6 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
     match types.kind(ty) {
         TyKind::Unit => 0,
         TyKind::Bool => 1,
-        TyKind::Char => 1,
         TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
         TyKind::Array { elem_ty, dims } => {
             let elems: usize = dims.iter().product();

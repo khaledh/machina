@@ -70,20 +70,9 @@ fn test_alloc_stack_addr_for_aggregate() {
     let p1 = Place::new(l1, tup_ty, vec![]);
 
     let stmts = vec![
-        Statement::InitAggregate {
+        Statement::CopyAggregate {
             dst: p1.clone(),
-            fields: vec![
-                Operand::Const(Const::Int {
-                    value: 1,
-                    signed: false,
-                    bits: 64,
-                }),
-                Operand::Const(Const::Int {
-                    value: 2,
-                    signed: false,
-                    bits: 64,
-                }),
-            ],
+            src: p1.clone(),
         },
         Statement::CopyScalar {
             dst: p0.clone(),
@@ -197,64 +186,6 @@ fn test_aggregate_return_uses_indirect_reg() {
     assert!(matches!(
         alloc.alloc_map.get(&l0),
         Some(MappedLocal::Reg(reg)) if *reg == target.indirect_result_reg().unwrap()
-    ));
-}
-
-#[test]
-fn test_alloc_stack_addr_for_address_taken() {
-    let mut types = TyTable::new();
-    let u64_ty = u64_ty(&mut types);
-
-    let locals = vec![
-        Local {
-            ty: u64_ty,
-            kind: LocalKind::Return,
-            name: Some("ret".to_string()),
-        },
-        Local {
-            ty: u64_ty,
-            kind: LocalKind::Temp,
-            name: None,
-        },
-        Local {
-            ty: u64_ty,
-            kind: LocalKind::Temp,
-            name: None,
-        },
-    ];
-
-    let l0 = LocalId(0);
-    let l1 = LocalId(1);
-    let l2 = LocalId(2);
-
-    let p0 = Place::new(l0, u64_ty, vec![]);
-    let p1 = Place::new(l1, u64_ty, vec![]);
-    let p2 = Place::new(l2, u64_ty, vec![]);
-
-    let stmts = vec![
-        Statement::CopyScalar {
-            dst: p2.clone(),
-            src: Rvalue::AddrOf(PlaceAny::Scalar(p1.clone())),
-        },
-        Statement::CopyScalar {
-            dst: p0.clone(),
-            src: Rvalue::Use(Operand::Copy(p2.clone())),
-        },
-    ];
-
-    let blocks = vec![BasicBlock {
-        stmts,
-        terminator: Terminator::Return,
-    }];
-
-    let body = mk_body(types, locals, blocks, l0);
-    let target = arm64_target();
-    let constraints = analyze_constraints(&body, &target);
-    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
-
-    assert!(matches!(
-        alloc.alloc_map.get(&l1),
-        Some(MappedLocal::StackAddr(_))
     ));
 }
 

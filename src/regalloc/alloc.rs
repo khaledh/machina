@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::mcir::types::{
-    BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Rvalue, Statement, TyId, TyKind, TyTable,
-};
+use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, TyId, TyKind, TyTable};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::liveness::{
     LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
@@ -14,45 +12,18 @@ use crate::regalloc::target::{PhysReg, TargetSpec};
 use crate::regalloc::{AllocationResult, LocalAllocMap, LocalClass, MappedLocal};
 
 // --- Local classification ---
-
-fn record_addr_of(place: &PlaceAny, out: &mut HashSet<LocalId>) {
-    let base = match place {
-        PlaceAny::Scalar(p) => p.base(),
-        PlaceAny::Aggregate(p) => p.base(),
-    };
-    out.insert(base);
-}
-
-fn scan_address_taken(body: &FuncBody) -> HashSet<LocalId> {
-    let mut out = HashSet::new();
-    for block in &body.blocks {
-        for stmt in &block.stmts {
-            if let Statement::CopyScalar {
-                src: Rvalue::AddrOf(place),
-                ..
-            } = stmt
-            {
-                record_addr_of(place, &mut out);
-            }
-        }
-    }
-    out
-}
-
 pub(crate) fn classify_locals(body: &FuncBody) -> Vec<LocalClass> {
-    let addr_taken = scan_address_taken(body);
     body.locals
         .iter()
         .enumerate()
-        .map(|(i, local)| {
-            let id = LocalId(i as u32);
+        .map(|(_, local)| {
             let ty_info = body.types.get(local.ty);
             if (matches!(local.kind, LocalKind::Param { .. })
                 || matches!(local.kind, LocalKind::Return))
                 && ty_info.is_aggregate()
             {
                 LocalClass::Reg
-            } else if ty_info.is_aggregate() || addr_taken.contains(&id) {
+            } else if ty_info.is_aggregate() {
                 LocalClass::StackAddr
             } else {
                 LocalClass::Reg
@@ -67,7 +38,6 @@ fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
     match types.kind(ty) {
         TyKind::Unit => 0,
         TyKind::Bool => 1,
-        TyKind::Char => 1,
         TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
         TyKind::Array { elem_ty, dims } => {
             let elems: usize = dims.iter().product();

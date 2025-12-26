@@ -19,18 +19,18 @@ impl<'a> FuncLowerer<'a> {
         if result_ty.is_scalar() {
             // Scalar call: capture result into a temp.
             let temp_place = self.new_temp_scalar(result_ty_id);
-            self.emit_call_into(PlaceAny::Scalar(temp_place.clone()), callee, args)?;
+            self.lower_call_into(PlaceAny::Scalar(temp_place.clone()), callee, args)?;
             Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
         } else {
             // Aggregate call: capture result into a temp place.
             let temp_place = self.new_temp_aggregate(result_ty_id);
-            self.emit_call_into(PlaceAny::Aggregate(temp_place.clone()), callee, args)?;
+            self.lower_call_into(PlaceAny::Aggregate(temp_place.clone()), callee, args)?;
             Ok(ExprValue::Aggregate(temp_place))
         }
     }
 
-    /// Emit a call statement that writes into the given destination place.
-    pub(super) fn emit_call_into(
+    /// Lower a call into the given destination place.
+    pub(super) fn lower_call_into(
         &mut self,
         dst: PlaceAny,
         callee: &Expr,

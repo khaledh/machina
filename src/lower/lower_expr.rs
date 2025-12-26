@@ -195,7 +195,7 @@ impl<'a> FuncLowerer<'a> {
             }
             EK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.
-                self.emit_call_into(PlaceAny::Aggregate(dst), callee, args)
+                self.lower_call_into(PlaceAny::Aggregate(dst), callee, args)
             }
             EK::Block { items, tail } => {
                 self.lower_block_into(dst, items, tail.as_deref(), expr.id)
@@ -279,7 +279,7 @@ impl<'a> FuncLowerer<'a> {
                     let field_ty = self.ty_for_node(field_expr.id)?;
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
 
-                    self.emit_expr_into_agg_projection(
+                    self.lower_expr_into_agg_projection(
                         &dst,
                         field_ty_id,
                         field_expr,
@@ -304,7 +304,7 @@ impl<'a> FuncLowerer<'a> {
                         dst_ty.struct_field_index(field_name)
                     };
 
-                    self.emit_expr_into_agg_projection(
+                    self.lower_expr_into_agg_projection(
                         &dst,
                         field_ty_id,
                         field_expr,
@@ -335,7 +335,7 @@ impl<'a> FuncLowerer<'a> {
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
                     let field_index = struct_ty.struct_field_index(&field.name);
 
-                    self.emit_expr_into_agg_projection(
+                    self.lower_expr_into_agg_projection(
                         &dst,
                         field_ty_id,
                         &field.value,
@@ -366,7 +366,7 @@ impl<'a> FuncLowerer<'a> {
                         }),
                     };
 
-                    self.emit_expr_into_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
+                    self.lower_expr_into_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
                 }
                 Ok(())
             }
@@ -420,8 +420,8 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    /// Emit an expression value into a projected field/element of an aggregate.
-    pub(super) fn emit_expr_into_agg_projection(
+    /// Lower an expression value into a projected field/element of an aggregate.
+    pub(super) fn lower_expr_into_agg_projection(
         &mut self,
         dst: &Place<Aggregate>,
         field_ty_id: TyId,

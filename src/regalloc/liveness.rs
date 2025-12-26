@@ -57,16 +57,12 @@ fn collect_rvalue_uses(rv: &Rvalue, out: &mut HashSet<LocalId>) {
             collect_operand_uses(rhs, out);
         }
         Rvalue::UnOp { arg, .. } => collect_operand_uses(arg, out),
-        Rvalue::AddrOf(place) => collect_place_any_uses(place, out),
     }
 }
 
 fn stmt_defs(stmt: &Statement, out: &mut HashSet<LocalId>) {
     match stmt {
         Statement::CopyScalar { dst, .. } => {
-            out.insert(dst.base());
-        }
-        Statement::InitAggregate { dst, .. } => {
             out.insert(dst.base());
         }
         Statement::CopyAggregate { dst, .. } => {
@@ -86,12 +82,6 @@ fn stmt_uses(stmt: &Statement, out: &mut HashSet<LocalId>) {
         Statement::CopyScalar { dst, src } => {
             collect_place_lhs_uses(dst, out);
             collect_rvalue_uses(src, out);
-        }
-        Statement::InitAggregate { dst, fields } => {
-            collect_place_lhs_uses(dst, out);
-            for field in fields {
-                collect_operand_uses(field, out);
-            }
         }
         Statement::CopyAggregate { dst, src } => {
             collect_place_lhs_uses(dst, out);

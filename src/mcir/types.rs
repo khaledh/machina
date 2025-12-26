@@ -21,7 +21,6 @@ pub enum TyKind {
     // Scalar Types
     Unit,
     Bool,
-    Char,
     Int { signed: bool, bits: u8 },
 
     // Aggregate Types
@@ -44,10 +43,7 @@ pub struct TyInfo {
 
 impl TyInfo {
     pub fn is_scalar(&self) -> bool {
-        matches!(
-            self.kind,
-            TyKind::Unit | TyKind::Bool | TyKind::Char | TyKind::Int { .. }
-        )
+        matches!(self.kind, TyKind::Unit | TyKind::Bool | TyKind::Int { .. })
     }
 
     pub fn is_aggregate(&self) -> bool {
@@ -105,7 +101,6 @@ impl TyTable {
         match &info.kind {
             TyKind::Unit => write!(out, "()"),
             TyKind::Bool => write!(out, "bool"),
-            TyKind::Char => write!(out, "char"),
             TyKind::Int { signed, bits } => {
                 let prefix = if *signed { "i" } else { "u" };
                 write!(out, "{}{}", prefix, bits)
@@ -330,8 +325,6 @@ pub enum Rvalue {
         op: UnOp,
         arg: Operand,
     },
-    #[allow(dead_code)]
-    AddrOf(PlaceAny),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,11 +332,6 @@ pub enum Statement {
     CopyScalar {
         dst: Place<Scalar>,
         src: Rvalue,
-    },
-    #[allow(dead_code)]
-    InitAggregate {
-        dst: Place<Aggregate>,
-        fields: Vec<Operand>,
     },
     CopyAggregate {
         dst: Place<Aggregate>,
@@ -511,7 +499,6 @@ impl fmt::Display for Rvalue {
             Rvalue::Use(op) => write!(f, "{}", op),
             Rvalue::BinOp { op, lhs, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
             Rvalue::UnOp { op, arg } => write!(f, "({}{})", op, arg),
-            Rvalue::AddrOf(place) => write!(f, "&{}", place),
         }
     }
 }
@@ -528,16 +515,6 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Statement::CopyScalar { dst, src } => write!(f, "{} = {}", dst, src),
-            Statement::InitAggregate { dst, fields } => {
-                write!(f, "init {} = [", dst)?;
-                for (i, field) in fields.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", field)?;
-                }
-                write!(f, "]")
-            }
             Statement::CopyAggregate { dst, src } => write!(f, "{} = copy {}", dst, src),
             Statement::Call { dst, callee, args } => {
                 write!(f, "{} = call {}(", dst, callee)?;

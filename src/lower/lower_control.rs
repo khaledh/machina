@@ -22,7 +22,7 @@ impl<'a> FuncLowerer<'a> {
             // Scalar if-expr: write both branches into the same temp.
             let temp_place = self.new_temp_scalar(result_ty_id);
 
-            self.lower_if_with_join(
+            self.lower_if_join(
                 cond_op,
                 |this| {
                     if let ExprValue::Scalar(op) = this.lower_expr_value(then_body)? {
@@ -43,7 +43,7 @@ impl<'a> FuncLowerer<'a> {
             // Aggregate if-expr: lower both branches into a temp place.
             let temp_place = self.new_temp_aggregate(result_ty_id);
 
-            self.lower_if_with_join(
+            self.lower_if_join(
                 cond_op,
                 |this| this.lower_agg_value_into(temp_place.clone(), then_body),
                 |this| this.lower_agg_value_into(temp_place.clone(), else_body),
@@ -63,7 +63,7 @@ impl<'a> FuncLowerer<'a> {
     ) -> Result<(), LowerError> {
         let cond_op = self.lower_scalar_expr(cond)?;
 
-        self.lower_if_with_join(
+        self.lower_if_join(
             cond_op,
             |this| this.lower_agg_value_into(dst.clone(), then_body),
             |this| this.lower_agg_value_into(dst.clone(), else_body),
@@ -73,7 +73,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Helper for lowering an if-expression.
-    pub(super) fn lower_if_with_join<FThen, FElse>(
+    pub(super) fn lower_if_join<FThen, FElse>(
         &mut self,
         cond: Operand,
         then_fn: FThen,
@@ -164,13 +164,13 @@ impl<'a> FuncLowerer<'a> {
         let iter_ty = self.ty_for_node(iter.id)?;
 
         match (&iter.kind, &iter_ty) {
-            (EK::Range { start, end }, _) => self.lower_for_range(*start, *end, pattern, body),
-            (_, Type::Array { .. }) => self.lower_for_array(pattern, iter, &iter_ty, body),
+            (EK::Range { start, end }, _) => self.lower_for_range_expr(*start, *end, pattern, body),
+            (_, Type::Array { .. }) => self.lower_for_array_expr(pattern, iter, &iter_ty, body),
             _ => return Err(LowerError::UnsupportedOperandExpr(iter.id)),
         }
     }
 
-    pub(super) fn lower_for_range(
+    pub(super) fn lower_for_range_expr(
         &mut self,
         start: u64,
         end: u64,
@@ -278,7 +278,7 @@ impl<'a> FuncLowerer<'a> {
         Ok(ExprValue::Scalar(Operand::Const(Const::Unit)))
     }
 
-    pub(super) fn lower_for_array(
+    pub(super) fn lower_for_array_expr(
         &mut self,
         pattern: &Pattern,
         iter: &Expr,

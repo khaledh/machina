@@ -40,13 +40,13 @@ path (fields/indices). Places are typed, with a marker `K`:
 ### Operands and Rvalues
 
 - `Operand` represents a scalar value: `Copy(place)`, `Move(place)`, or `Const`.
-- `Rvalue` represents computed scalar values: `Use`, `BinOp`, `UnOp`, or `AddrOf`.
+- `Rvalue` represents computed scalar values: `Use`, `BinOp`, or `UnOp`.
+  `Const::GlobalAddr` is treated as an address-sized `u64` constant.
 
 ### Statements
 
 Statements encode side effects and writes:
 - `CopyScalar { dst, src }`
-- `InitAggregate { dst, fields }`
 - `CopyAggregate { dst, src }`
 - `Call { dst, callee, args }`
 
@@ -76,11 +76,3 @@ structure explicit.
 
 Calls use a `Callee::Def(DefId)` so codegen can resolve symbol names via the
 symbol table (DefId -> name mapping).
-
-## Lowering Strategy
-
-- Scalar expressions lower to `Operand` or `Rvalue`.
-- Aggregate expressions lower into a destination `Place<Aggregate>` using
-  projections to fill fields in-place.
-- Expressions allowed only at block level (let/var/assign/while) are rejected
-  in value position.
