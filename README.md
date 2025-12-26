@@ -32,8 +32,8 @@ development. The compiler currently targets only ARM64 assembly.
 - Struct update: `{ base | x: 10 }`
 
 **Enums**
-- `type Color = Red | Green | Blue`, `let c = Color::Green`
-- Enum payloads: `type Shape = Circle(u64) | Rect(u64, u64)`, `let s = Shape::Circle(10)`
+- `type Color = Red | Green | Blue`, `let c = Color::Green` - Enum payloads:
+`type Shape = Circle(u64) | Rect(u64, u64)`, `let s = Shape::Circle(10)`
 - Enum pattern matching: `match color { Color::Green(val) => val, _ => 0 }`
 
 **Type aliases**
@@ -125,20 +125,26 @@ fn delta(p1: Point, p2: Point) -> (u64, u64) {
 
 ## Compiling and running
 
-Change the `SOURCE` constant in `src/main.rs` to your source code and run:
+During development, run the compiler via cargo (prefix `cargo mcc` or `cargo run
+--`):
 ```
-cargo run
-```
-
-This will compile the source code to arm64 assembly in `output.s` in the root
-directory. Use clang to assemble and link:
-```
-clang output.s -o output
+cargo mcc build examples/for_array.mc
 ```
 
-Then run the executable:
+The compiler supports three modes:
 ```
-./output; echo $?  # or ./output; echo $status (for fish shell)
+mcc compile input.mc          # produces input.o
+mcc build input.mc            # produces input (executable)
+mcc run input.mc              # builds + runs input
 ```
 
-This should print the return value of the `main` function.
+You can override outputs with `-o`:
+```
+mcc compile -o output.o input.mc
+mcc build -o output input.mc
+```
+
+Use `--emit` to keep intermediate artifacts (otherwise `.s` is a temp file):
+```
+mcc build --emit asm,mcir input.mc
+```
