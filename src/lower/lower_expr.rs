@@ -128,10 +128,7 @@ impl<'a> FuncLowerer<'a> {
                             rhs: zero,
                         },
                     );
-                    self.emit_runtime_check(
-                        cond_op,
-                        CheckKind::DivByZero,
-                    );
+                    self.emit_runtime_check(cond_op, CheckKind::DivByZero);
                 }
 
                 let operand = self.emit_scalar_rvalue(

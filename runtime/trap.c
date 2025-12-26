@@ -36,15 +36,15 @@ static void write_u64(uint64_t value) {
  * - arg1: payload slot 1
  */
 void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1) {
-    const char *fallback = "Machina runtime error: unknown trap\n";
+    const char *fallback = "unknown trap";
 
     // common prefix and suffix
-    const char *prefix = "Machina runtime error: ";
+    const char *prefix = "Runtime error: ";
     const char *suffix = ")";
     const char *line_end = "\n";
 
     // bounds check
-    const char *bounds_prefix = "Out-of-bounds (index=";
+    const char *bounds_prefix = "Index out of bounds (index=";
     const char *bounds_mid = ", len=";
 
     // division by zero
@@ -66,7 +66,9 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1) {
             write_msg(line_end);
             break;
         default:
+            write_msg(prefix);
             write_msg(fallback);
+            write_msg(line_end);
             break;
     }
 

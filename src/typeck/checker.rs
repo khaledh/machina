@@ -1054,7 +1054,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                     let span = Span::merge_all(vec![left.span, right.span]);
                     return Err(TypeCheckError::ArithTypeMismatch(
                         left_type, right_type, span,
-                    ))
+                    ));
                 }
                 // Check for division by zero
                 if op == &BinaryOp::Div && matches!(right.kind, ExprKind::UInt64Lit(0)) {

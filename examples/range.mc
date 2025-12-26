@@ -1,4 +1,4 @@
-// Range type demo
+// Range type
 
 type MidRange = range(50, 100);
 

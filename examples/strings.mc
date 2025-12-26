@@ -1,8 +1,6 @@
-// Simple string literal example.
-// Demonstrates ASCII tagging; main still returns an integer.
+// String literals (not useful yet)
 
 fn main() -> u64 {
     let greeting = "hello world";
-    // Do something with the string (no ops yet), return 0.
     0
 }

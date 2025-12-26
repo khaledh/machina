@@ -1,4 +1,5 @@
-// For-loop over a range literal
+// For-loop over a range
+
 fn main() -> u64 {
     var acc = 0;
     for i in 0..10 {

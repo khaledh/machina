@@ -529,43 +529,7 @@ impl<'a> FuncCodegen<'a> {
                 // Branch to default block if no case matches.
                 asm.push_str(&format!("  b {}\n", self.block_labels[default]));
             }
-            Terminator::Trap { kind } => {
-                match kind {
-                    CheckKind::Bounds { index, len } => {
-                        let kind_op = Operand::Const(Const::Int {
-                            value: 0 as i128,
-                            signed: false,
-                            bits: 64,
-                        });
-                        let _ = self.materialize_operand(&kind_op, &mut asm, R::X0)?;
-                        let _ = self.materialize_operand(index, &mut asm, R::X1)?;
-                        let _ = self.materialize_operand(len, &mut asm, R::X2)?;
-
-                        // On Mach-O, external symbols are referenced with a leading underscore.
-                        // __mc_trap (C symbol) => ___mc_trap in asm.
-                        asm.push_str("  bl ___mc_trap\n");
-                    }
-                    CheckKind::DivByZero => {
-                        let kind_op = Operand::Const(Const::Int {
-                            value: 1 as i128,
-                            signed: false,
-                            bits: 64,
-                        });
-                        let _ = self.materialize_operand(&kind_op, &mut asm, R::X0)?;
-                        let zero_op = Operand::Const(Const::Int {
-                            value: 0,
-                            signed: false,
-                            bits: 64,
-                        });
-                        let _ = self.materialize_operand(&zero_op, &mut asm, R::X1)?;
-                        let _ = self.materialize_operand(&zero_op, &mut asm, R::X2)?;
-
-                        // On Mach-O, external symbols are referenced with a leading underscore.
-                        // __mc_trap (C symbol) => ___mc_trap in asm.
-                        asm.push_str("  bl ___mc_trap\n");
-                    }
-                };
-            }
+            Terminator::Trap { kind } => self.emit_runtime_check(kind, &mut asm)?,
             Terminator::Unterminated => {
                 // Should not happen in well-formed IR.
                 let label = self
@@ -1330,6 +1294,46 @@ impl<'a> FuncCodegen<'a> {
         };
         asm.push_str(&inst);
         Ok(asm)
+    }
+
+    fn emit_runtime_check(
+        &mut self,
+        kind: &CheckKind,
+        asm: &mut String,
+    ) -> Result<(), CodegenError> {
+        match kind {
+            CheckKind::Bounds { index, len } => {
+                let kind_op = Operand::Const(Const::Int {
+                    value: 0 as i128,
+                    signed: false,
+                    bits: 64,
+                });
+                let _ = self.materialize_operand(&kind_op, asm, R::X0)?;
+                let _ = self.materialize_operand(&index, asm, R::X1)?;
+                let _ = self.materialize_operand(&len, asm, R::X2)?;
+            }
+            CheckKind::DivByZero => {
+                let kind_op = Operand::Const(Const::Int {
+                    value: 1 as i128,
+                    signed: false,
+                    bits: 64,
+                });
+                let zero_op = Operand::Const(Const::Int {
+                    value: 0,
+                    signed: false,
+                    bits: 64,
+                });
+                let _ = self.materialize_operand(&kind_op, asm, R::X0)?;
+                let _ = self.materialize_operand(&zero_op, asm, R::X1)?;
+                let _ = self.materialize_operand(&zero_op, asm, R::X2)?;
+            }
+        };
+
+        // On Mach-O, external symbols are referenced with a leading underscore.
+        // __mc_trap (C symbol) => ___mc_trap in asm.
+        asm.push_str("  bl ___mc_trap\n");
+
+        Ok(())
     }
 
     fn get_stack_offset(&self, slot: &StackSlotId) -> Result<u32, CodegenError> {

@@ -1,3 +1,5 @@
+// Custom types (type aliases, enums, and structs)
+
 // Type Alias
 type Coord = u64
 
