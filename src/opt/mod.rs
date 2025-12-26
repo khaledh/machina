@@ -29,6 +29,7 @@ pub fn optimize(ctx: LoweredMcirContext) -> OptimizedMcirContext {
 }
 
 trait Pass {
+    #[allow(dead_code)]
     fn name(&self) -> &'static str;
     fn run(&mut self, body: &mut FuncBody) -> bool;
 }

@@ -103,7 +103,7 @@ impl<'a> NrvoSafetyChecker<'a> {
         }
     }
 
-    fn check_stmt_expr(&self, stmt_expr: &StmtExpr, at_return: bool) -> bool {
+    fn check_stmt_expr(&self, stmt_expr: &StmtExpr) -> bool {
         match &stmt_expr.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 self.check_expr(value, false)
@@ -151,7 +151,7 @@ impl<'a> NrvoSafetyChecker<'a> {
             // Block expression: check all expressions, with last one in return context
             ExprKind::Block { items, tail } => {
                 let items_ok = items.iter().all(|item| match item {
-                    BlockItem::Stmt(stmt) => self.check_stmt_expr(stmt, false),
+                    BlockItem::Stmt(stmt) => self.check_stmt_expr(stmt),
                     BlockItem::Expr(expr) => self.check_expr(expr, false),
                 });
 
