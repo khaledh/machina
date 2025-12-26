@@ -395,6 +395,7 @@ pub struct FuncBody {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckKind {
     Bounds { index: Operand, len: Operand },
+    DivByZero,
 }
 
 // --- Display ---
@@ -612,7 +613,10 @@ impl fmt::Display for FuncBody {
 impl fmt::Display for CheckKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CheckKind::Bounds { index, len } => write!(f, "bounds (index={}, len={})", index, len),
+            CheckKind::Bounds { index, len } => {
+                write!(f, "out-of-bounds (index={}, len={})", index, len)
+            }
+            CheckKind::DivByZero => write!(f, "div-by-zero"),
         }
     }
 }

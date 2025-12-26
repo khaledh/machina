@@ -31,23 +31,39 @@ static void write_u64(uint64_t value) {
 
 /*
  * Runtime trap handler called by generated code.
- * - kind: check kind discriminator (0 = bounds)
- * - arg0: payload slot 0 (bounds: index)
- * - arg1: payload slot 1 (bounds: length)
+ * - kind: check kind discriminator
+ * - arg0: payload slot 0
+ * - arg1: payload slot 1
  */
 void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1) {
     const char *fallback = "Machina runtime error: unknown trap\n";
 
-    const char *prefix = "Machina runtime error: bounds check failed (index=";
-    const char *mid = ", len=";
-    const char *suffix = ")\n";
+    // common prefix and suffix
+    const char *prefix = "Machina runtime error: ";
+    const char *suffix = ")";
+    const char *line_end = "\n";
+
+    // bounds check
+    const char *bounds_prefix = "Out-of-bounds (index=";
+    const char *bounds_mid = ", len=";
+
+    // division by zero
+    const char *div_prefix = "Division by zero";
+
     switch (kind) {
         case 0:
             write_msg(prefix);
+            write_msg(bounds_prefix);
             write_u64(arg0);
-            write_msg(mid);
+            write_msg(bounds_mid);
             write_u64(arg1);
             write_msg(suffix);
+            write_msg(line_end);
+            break;
+        case 1:
+            write_msg(prefix);
+            write_msg(div_prefix);
+            write_msg(line_end);
             break;
         default:
             write_msg(fallback);

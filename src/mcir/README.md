@@ -59,6 +59,7 @@ Blocks end in:
 - `Switch { discr, cases, default }`
 - `Trap { kind }`, where `kind` is a `CheckKind`:
    - `Bounds { index, len }`
+   - `DivByZero`
 - `Unterminated` (placeholder during building)
 
 ## Control Flow

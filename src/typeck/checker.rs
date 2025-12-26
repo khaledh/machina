@@ -1052,12 +1052,15 @@ impl<'c, 'b> Checker<'c, 'b> {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                 if left_type != Type::UInt64 || right_type != Type::UInt64 {
                     let span = Span::merge_all(vec![left.span, right.span]);
-                    Err(TypeCheckError::ArithTypeMismatch(
+                    return Err(TypeCheckError::ArithTypeMismatch(
                         left_type, right_type, span,
                     ))
-                } else {
-                    Ok(Type::UInt64)
                 }
+                // Check for division by zero
+                if op == &BinaryOp::Div && matches!(right.kind, ExprKind::UInt64Lit(0)) {
+                    return Err(TypeCheckError::DivisionByZero(right.span));
+                }
+                Ok(Type::UInt64)
             }
             BinaryOp::Eq
             | BinaryOp::Ne

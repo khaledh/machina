@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind as EK, StringTag, StructLitField};
+use crate::ast::{BinaryOp, Expr, ExprKind as EK, StringTag, StructLitField};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -111,6 +111,28 @@ impl<'a> FuncLowerer<'a> {
 
                 let lhs_operand = self.lower_scalar_expr(left)?;
                 let rhs_operand = self.lower_scalar_expr(right)?;
+
+                // Check for division by zero
+                if *op == BinaryOp::Div {
+                    let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+                    let zero = Operand::Const(Const::Int {
+                        signed: false,
+                        bits: 64,
+                        value: 0,
+                    });
+                    let cond_op = self.emit_scalar_rvalue(
+                        bool_ty_id,
+                        Rvalue::BinOp {
+                            op: BinOp::Ne,
+                            lhs: rhs_operand.clone(),
+                            rhs: zero,
+                        },
+                    );
+                    self.emit_runtime_check(
+                        cond_op,
+                        CheckKind::DivByZero,
+                    );
+                }
 
                 let operand = self.emit_scalar_rvalue(
                     ty_id,

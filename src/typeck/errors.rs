@@ -134,6 +134,9 @@ pub enum TypeCheckError {
 
     #[error("For iterator is not iterable: {0}")]
     ForIterNotIterable(Type, Span),
+
+    #[error("Division by zero: {0}")]
+    DivisionByZero(Span),
 }
 
 impl TypeCheckError {
@@ -182,6 +185,7 @@ impl TypeCheckError {
             TypeCheckError::InvalidRangeBounds(_, _, span) => *span,
             TypeCheckError::ValueOutOfRange(_, _, _, span) => *span,
             TypeCheckError::ForIterNotIterable(_, span) => *span,
+            TypeCheckError::DivisionByZero(span) => *span,
         }
     }
 }

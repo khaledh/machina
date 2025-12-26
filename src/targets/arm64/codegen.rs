@@ -545,6 +545,25 @@ impl<'a> FuncCodegen<'a> {
                         // __mc_trap (C symbol) => ___mc_trap in asm.
                         asm.push_str("  bl ___mc_trap\n");
                     }
+                    CheckKind::DivByZero => {
+                        let kind_op = Operand::Const(Const::Int {
+                            value: 1 as i128,
+                            signed: false,
+                            bits: 64,
+                        });
+                        let _ = self.materialize_operand(&kind_op, &mut asm, R::X0)?;
+                        let zero_op = Operand::Const(Const::Int {
+                            value: 0,
+                            signed: false,
+                            bits: 64,
+                        });
+                        let _ = self.materialize_operand(&zero_op, &mut asm, R::X1)?;
+                        let _ = self.materialize_operand(&zero_op, &mut asm, R::X2)?;
+
+                        // On Mach-O, external symbols are referenced with a leading underscore.
+                        // __mc_trap (C symbol) => ___mc_trap in asm.
+                        asm.push_str("  bl ___mc_trap\n");
+                    }
                 };
             }
             Terminator::Unterminated => {
