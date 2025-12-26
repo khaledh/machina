@@ -125,8 +125,7 @@ fn delta(p1: Point, p2: Point) -> (u64, u64) {
 
 ## Compiling and running
 
-During development, run the compiler via cargo (prefix `cargo mcc` or `cargo run
---`):
+During development, run the compiler via cargo (prefix `cargo mcc` or `cargo run --`):
 ```
 cargo mcc build examples/for_array.mc
 ```
@@ -147,4 +146,16 @@ mcc build -o output input.mc
 Use `--emit` to keep intermediate artifacts (otherwise `.s` is a temp file):
 ```
 mcc build --emit asm,mcir input.mc
+```
+
+## Testing
+
+Unit tests only:
+```
+cargo test --lib
+```
+
+Integration tests only:
+```
+cargo test --test '*'
 ```

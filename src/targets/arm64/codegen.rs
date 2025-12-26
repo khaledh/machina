@@ -526,12 +526,22 @@ impl<'a> FuncCodegen<'a> {
                     asm.push_str(&format!("  cmp {}, #{}\n", discr_reg, case.value));
                     asm.push_str(&format!("  b.eq {}\n", self.block_labels[&case.target]));
                 }
-                // Branch to defautlt block if no case matches.
+                // Branch to default block if no case matches.
                 asm.push_str(&format!("  b {}\n", self.block_labels[default]));
             }
             Terminator::Trap { kind } => {
-                asm.push_str(&format!("  // trap {}\n", kind));
-                asm.push_str(&format!("  brk #0\n"));
+                let kind_value = match kind {
+                    CheckKind::Bounds => 0,
+                };
+                let op = Operand::Const(Const::Int {
+                    value: kind_value as i128,
+                    signed: false,
+                    bits: 64,
+                });
+                let _ = self.materialize_operand(&op, &mut asm, R::X0)?;
+                // On Mach-O, external symbols are referenced with a leading underscore.
+                // __mc_trap (C symbol) => ___mc_trap in asm.
+                asm.push_str("  bl ___mc_trap\n");
             }
             Terminator::Unterminated => {
                 // Should not happen in well-formed IR.

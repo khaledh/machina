@@ -1,25 +1,7 @@
 use clap::Parser as ClapParser;
-
-mod ast;
-mod compile;
-mod context;
-mod diagnostics;
-mod lexer;
-mod lower;
-mod mcir;
-mod nrvo;
-mod opt;
-mod parser;
-mod regalloc;
-mod resolve;
-mod symtab;
-mod targets;
-mod typeck;
-mod types;
-
-use crate::compile::{CompileOptions, compile};
-use crate::diagnostics::{CompileError, Span, format_error};
-use crate::targets::TargetKind;
+use machina::compile::{CompileOptions, compile};
+use machina::diagnostics::{CompileError, Span, format_error};
+use machina::targets::TargetKind;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -87,6 +69,11 @@ struct DriverInvocation {
     kind: DriverKind,
 }
 
+enum DriverResult {
+    Success { remove_asm: bool },
+    RunExit { remove_asm: bool, exit_code: i32 },
+}
+
 fn main() {
     let Args {
         cmd,
@@ -133,10 +120,7 @@ fn main() {
             if let Some(mcir) = output.mcir {
                 let mcir_path = input_path.with_extension("mcir");
                 if let Err(e) = std::fs::write(&mcir_path, mcir) {
-                    eprintln!(
-                        "[WARN] failed to write {}: {e}",
-                        mcir_path.display()
-                    );
+                    eprintln!("[WARN] failed to write {}: {e}", mcir_path.display());
                 }
             }
 
@@ -150,7 +134,7 @@ fn main() {
                 return;
             }
 
-            let (result, remove_asm) = match invocation.kind {
+            let result = match invocation.kind {
                 DriverKind::Compile => {
                     let obj_path = invocation
                         .output
@@ -158,13 +142,10 @@ fn main() {
                         .unwrap_or_else(|| input_path.with_extension("o"));
                     let result = assemble_object(&asm_path, &obj_path);
                     if result.is_ok() {
-                        println!(
-                            "[SUCCESS] object written to {}",
-                            obj_path.display()
-                        );
+                        println!("[SUCCESS] object written to {}", obj_path.display());
                     }
                     let remove_asm = result.is_ok();
-                    (result, remove_asm)
+                    result.map(|_| DriverResult::Success { remove_asm })
                 }
                 DriverKind::Build => {
                     let exe_path = invocation
@@ -173,20 +154,20 @@ fn main() {
                         .unwrap_or_else(|| default_exe_path(&input_path));
                     let result = link_executable(&asm_path, &exe_path);
                     if result.is_ok() {
-                        println!(
-                            "[SUCCESS] executable written to {}",
-                            exe_path.display()
-                        );
+                        println!("[SUCCESS] executable written to {}", exe_path.display());
                     }
                     let remove_asm = result.is_ok();
-                    (result, remove_asm)
+                    result.map(|_| DriverResult::Success { remove_asm })
                 }
                 DriverKind::Run => {
                     let exe_path = default_exe_path(&input_path);
                     let link_result = link_executable(&asm_path, &exe_path);
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));
-                    (result, remove_asm)
+                    result.map(|exit_code| DriverResult::RunExit {
+                        remove_asm,
+                        exit_code,
+                    })
                 }
             };
 
@@ -197,8 +178,20 @@ fn main() {
                     DriverKind::Run => "run",
                 };
                 println!("[ERROR] {command} failed: {message}");
-            } else if remove_asm && !emit_asm {
-                let _ = std::fs::remove_file(&asm_path);
+            } else if let Ok(driver_result) = result {
+                let (remove_asm, exit_code) = match driver_result {
+                    DriverResult::Success { remove_asm } => (remove_asm, None),
+                    DriverResult::RunExit {
+                        remove_asm,
+                        exit_code,
+                    } => (remove_asm, Some(exit_code)),
+                };
+                if remove_asm && !emit_asm {
+                    let _ = std::fs::remove_file(&asm_path);
+                }
+                if let Some(exit_code) = exit_code {
+                    std::process::exit(exit_code);
+                }
             }
         }
         Err(errors) => {
@@ -229,9 +222,7 @@ fn main() {
 }
 
 fn default_exe_path(input_path: &Path) -> PathBuf {
-    let stem = input_path
-        .file_stem()
-        .unwrap_or_else(|| OsStr::new("out"));
+    let stem = input_path.file_stem().unwrap_or_else(|| OsStr::new("out"));
     let mut path = input_path.to_path_buf();
     path.set_file_name(stem);
     path
@@ -264,10 +255,15 @@ fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), String> {
 }
 
 fn link_executable(asm_path: &Path, exe_path: &Path) -> Result<(), String> {
+    let runtime_path = runtime_trap_path();
+    if !runtime_path.exists() {
+        return Err(format!("runtime not found at {}", runtime_path.display()));
+    }
     let status = ProcessCommand::new("cc")
         .arg("-o")
         .arg(exe_path)
         .arg(asm_path)
+        .arg(runtime_path)
         .status()
         .map_err(|e| format!("failed to invoke cc: {e}"))?;
     if status.success() {
@@ -277,7 +273,7 @@ fn link_executable(asm_path: &Path, exe_path: &Path) -> Result<(), String> {
     }
 }
 
-fn run_executable(exe_path: &Path) -> Result<(), String> {
+fn run_executable(exe_path: &Path) -> Result<i32, String> {
     let run_path = if exe_path.components().count() == 1 {
         PathBuf::from(format!("./{}", exe_path.display()))
     } else {
@@ -286,9 +282,11 @@ fn run_executable(exe_path: &Path) -> Result<(), String> {
     let status = ProcessCommand::new(&run_path)
         .status()
         .map_err(|e| format!("failed to run {}: {e}", run_path.display()))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("program exited with status {}", status))
-    }
+    Ok(status.code().unwrap_or(1))
+}
+
+fn runtime_trap_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("runtime")
+        .join("trap.c")
 }
