@@ -137,9 +137,12 @@ impl<'a> FuncLowerer<'a> {
             },
         );
 
-        // Loop body
+        // Lower body
         self.curr_block = loop_body_bb;
-        self.lower_stmt_body(body)?;
+        let EK::Block { items, tail } = &body.kind else {
+            return Err(LowerError::ExpectedBlock(body.id));
+        };
+        self.lower_block_expr(items, tail.as_deref())?;
         self.fb
             .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
 
@@ -149,24 +152,6 @@ impl<'a> FuncLowerer<'a> {
         // while loops return unit
         let c = Const::Unit;
         Ok(ExprValue::Scalar(Operand::Const(c)))
-    }
-
-    /// Lower a loop/body expression for side effects only.
-    pub(super) fn lower_stmt_body(&mut self, body: &Expr) -> Result<(), LowerError> {
-        match &body.kind {
-            EK::Block { items, tail } => {
-                for item in items {
-                    self.lower_block_item(item)?;
-                }
-                if let Some(expr) = tail {
-                    self.lower_expr_value(expr)?;
-                }
-            }
-            _ => {
-                self.lower_expr_value(body)?;
-            }
-        }
-        Ok(())
     }
 
     /// Lower a for expression (returns unit).
@@ -261,7 +246,11 @@ impl<'a> FuncLowerer<'a> {
             PlaceAny::Scalar(idx_place.clone()),
         )?;
 
-        self.lower_stmt_body(body)?;
+        // Lower body
+        let EK::Block { items, tail } = &body.kind else {
+            return Err(LowerError::ExpectedBlock(body.id));
+        };
+        self.lower_block_expr(items, tail.as_deref())?;
 
         // i = i + 1
         let one_op = Operand::Const(Const::Int {
@@ -384,8 +373,11 @@ impl<'a> FuncLowerer<'a> {
         // Bind pattern to element
         self.bind_pattern_with_type(pattern, elem_place, &item_ty)?;
 
-        // body (statement-like)
-        self.lower_stmt_body(body)?;
+        // Lower body
+        let EK::Block { items, tail } = &body.kind else {
+            return Err(LowerError::ExpectedBlock(body.id));
+        };
+        self.lower_block_expr(items, tail.as_deref())?;
 
         // idx = idx + 1
         let one_op = Operand::Const(Const::Int {

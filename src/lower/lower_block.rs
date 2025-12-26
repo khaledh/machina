@@ -63,4 +63,23 @@ impl<'a> FuncLowerer<'a> {
             } => self.lower_for_expr(pattern, iter, body).map(|_| ()),
         }
     }
+
+    /// Lower an assignment expression.
+    pub(super) fn lower_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<(), LowerError> {
+        let value_ty = self.ty_for_node(value.id)?;
+
+        if value_ty.is_scalar() {
+            // Scalar assignment.
+            let assignee_place = self.lower_place_scalar(assignee)?;
+            let value_operand = self.lower_scalar_expr(value)?;
+
+            self.emit_copy_scalar(assignee_place, Rvalue::Use(value_operand));
+        } else {
+            // Aggregate assignment (value written directly into place).
+            let assignee_place = self.lower_place_agg(assignee)?;
+            self.lower_agg_value_into(assignee_place, value)?;
+        }
+
+        Ok(())
+    }
 }

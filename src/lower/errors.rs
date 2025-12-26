@@ -38,4 +38,7 @@ pub enum LowerError {
 
     #[error("unsupported aggregate rhs for node {0:?}")]
     UnsupportedAggregateRhs(NodeId),
+
+    #[error("expected block for node {0:?}")]
+    ExpectedBlock(NodeId),
 }
