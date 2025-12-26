@@ -617,7 +617,7 @@ fn test_lower_struct_update() {
 fn test_lower_for_range_loop() {
     let source = r#"
         fn main() -> u64 {
-            for i in 0..3 { i; };
+            for i in 0..3 { i; }
             0
         }
     "#;
@@ -658,7 +658,7 @@ fn test_lower_for_array_loop() {
         fn main() -> u64 {
             let arr = [1, 2, 3];
             var acc = 0;
-            for x in arr { acc = acc + x; };
+            for x in arr { acc = acc + x; }
             acc
         }
     "#;

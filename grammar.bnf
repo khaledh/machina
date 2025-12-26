@@ -3,11 +3,7 @@
 # Top-level
 Module             ::= Decl*
 
-Decl               ::= Function | TypeDecl
-
-Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )? Block
-FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
-FunctionParam      ::= Identifier ":" TypeExpr
+Decl               ::= TypeDecl | Function
 
 # Type Declarations
 TypeDecl           ::= "type" Identifier "=" TypeDeclBody
@@ -22,30 +18,44 @@ StructFieldList    ::= StructField ("," StructField)* ","?
 StructField        ::= Identifier ":" TypeExpr
 
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
-EnumVariantDef     ::= Identifier ( "(" TypeExpr ("," TypeExpr)* ","? ")" )?
+EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
 
 # Type Expressions
-TypeExpr           ::= NamedType | ArrayType | TupleType | RangeType
-NamedType          ::= "()" | Identifier
-ArrayType          ::= TypeExpr "[" Integer ("," Integer)* ","? "]"
-TupleType          ::= "(" TypeExpr "," ( TypeExpr ( "," TypeExpr )* )? ","? ")"
-RangeType          ::= "range" "(" Integer ("," Integer)? ")"
+TypeExpr           ::= UnitType | NamedType | ArrayType | TupleType | RangeType
+
+UnitType           ::= "()"
+NamedType          ::= Identifier
+ArrayType          ::= TypeExpr "[" IntLitList "]"
+TupleType          ::= "(" TypeExpr "," ( TypeExprList )? ")"
+RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
+
+TypeExprList       ::= TypeExpr ( "," TypeExpr )* ","?
+IntLitList         ::= IntLit ("," IntLit)* ","?
+
+# Functions
+Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )? Block
+FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
+FunctionParam      ::= Identifier ":" TypeExpr
 
 # Blocks
-Block              ::= "{" (Expr ";")* Expr? "}"
+Block              ::= "{" BlockItem* (Expr ";"?)? "}"
+BlockItem          ::= StmtExpr | Expr ";"
 
-# Expressions
-Expr               ::= Let
-                     | Var
-                     | Assign
-                     | If
-                     | While
-                     | Match
-                     | InfixExpr
+# Statement Expressions
+StmtExpr           ::= LetBind | VarBind | Assign | While | For
 
 # Binding
-LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr
-VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr
+LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr ";"
+VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr ";"
+
+# Assignment
+Assign             ::= PostfixExpr "=" Expr ";"
+
+# Loops
+While              ::= "while" Expr Block
+For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
+
+RangeExpr          ::= IntLit ".." IntLit
 
 # Patterns
 Pattern            ::= IdentPattern | ArrayPattern | TuplePattern | StructPattern
@@ -59,15 +69,11 @@ StructPatternField ::= Identifier ( ":" Pattern )?
 
 PatternList        ::= Pattern ( "," Pattern )* ","?
 
-# Assignment
-Assign             ::= PostfixExpr "=" Expr
+# Expressions
+Expr               ::= If | Match | InfixExpr
 
 # Control flow
 If                 ::= "if" Expr Block ( "else" Block )?
-While              ::= "while" Expr Block
-For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
-
-RangeExpr          ::= Integer ".." Integer
 
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr
@@ -95,7 +101,7 @@ PostfixExpr        ::= Primary ( Call | ArrayIndex | TupleField | StructField )*
 
 Call               ::= "(" ExprList? ")"
 ArrayIndex         ::= "[" ExprList? "]"
-TupleField         ::= "." Integer
+TupleField         ::= "." IntLit
 StructField        ::= "." Identifier
 
 Primary            ::= Literal
@@ -105,15 +111,11 @@ Primary            ::= Literal
                      | "(" Expr ")"
                      | Block
 
-Literal            ::= Unit | Integer | Boolean | Char | String
+Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit
                      | ArrayLit | TupleLit | StructLit
-Char               ::= '\'' (ascii-char | escape) '\''
-String             ::= '"' (string-char | escape)* '"'
 
 ArrayLit           ::= "[" ExprList "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
-
-ExprList           ::= Expr ( "," Expr )* ","?
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
@@ -122,12 +124,16 @@ StructLitField     ::= Identifier ":" Expr
 StructUpdate       ::= "{" Expr "|" StructUpdateField ("," StructUpdateField)* ","? "}"
 StructUpdateField  ::= Identifier ":" Expr
 
-EnumVariant        ::= Identifier "::" Identifier ( "(" Expr ("," Expr)* ","? ")" )?
+EnumVariant        ::= Identifier "::" Identifier ( "(" ExprList ")" )?
+
+# Common
+ExprList           ::= Expr ( "," Expr )* ","?
 
 # Terminals
-Unit               ::= "()"
-Boolean            ::= "true" | "false"
-Integer            ::= [0-9]+
-Char               ::= "'" ( "\\n" | "\\r" | "\\t" | "\\" | "'" | "\\0" | "\\x" [0-9A-Fa-f]{2} ) "'"
-String             ::= '"' ( [^"\\] | "\\n" | "\\r" | "\\t" | "\\" | "\\\"" | "\\0" | "\\x" [0-9A-Fa-f]{2} )* '"'
+UnitLit            ::= "()"
+BoolLit            ::= "true" | "false"
+IntLit             ::= [0-9]+
+CharLit            ::= '\'' (ascii-char | escape) '\''
+StringLit          ::= '"' (string-char | escape)* '"'
+
 Identifier         ::= [a-zA-Z_][a-zA-Z0-9_]*

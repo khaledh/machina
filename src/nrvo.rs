@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Function};
+use crate::ast::{BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind};
 use crate::context::{AnalyzedContext, TypeCheckedContext};
 use crate::resolve::def_map::DefId;
 use crate::resolve::def_map::DefMap;
@@ -63,9 +63,11 @@ impl NrvoAnalyzer {
     fn find_ret_var_def_id(def_map: &DefMap, expr: &Expr) -> Option<DefId> {
         match &expr.kind {
             ExprKind::Var(_) => def_map.lookup_def(expr.id).map(|def| def.id),
-            ExprKind::Block(exprs) => exprs
-                .last()
-                .and_then(|e| Self::find_ret_var_def_id(def_map, e)),
+
+            ExprKind::Block { tail, .. } => tail
+                .as_deref()
+                .and_then(|expr| Self::find_ret_var_def_id(def_map, expr)),
+
             ExprKind::Match { arms, .. } => {
                 let mut arm_def_id = None;
                 for arm in arms {
@@ -101,6 +103,38 @@ impl<'a> NrvoSafetyChecker<'a> {
         }
     }
 
+    fn check_stmt_expr(&self, stmt_expr: &StmtExpr, at_return: bool) -> bool {
+        match &stmt_expr.kind {
+            StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
+                self.check_expr(value, false)
+            }
+
+            // Assignment is ok if it's at return position
+            StmtExprKind::Assign { assignee, value } => {
+                // If this is a write to our variable (lvalue use), that's OK
+                if self.is_lvalue_use(assignee) {
+                    // Just check RHS doesn't use our variable as rvalue
+                    self.check_expr(value, false)
+                } else {
+                    // Assignment to something else - check both sides don't use our var
+                    self.check_expr(assignee, false) && self.check_expr(value, false)
+                }
+            }
+
+            StmtExprKind::While { cond, body } => {
+                let cond_ok = self.check_expr(cond, false);
+                let body_ok = self.check_expr(body, false);
+                cond_ok && body_ok
+            }
+
+            StmtExprKind::For { iter, body, .. } => {
+                let iter_ok = self.check_expr(iter, false);
+                let body_ok = self.check_expr(body, false);
+                iter_ok && body_ok
+            }
+        }
+    }
+
     fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
         match &expr.kind {
             ExprKind::Var(_) => {
@@ -114,34 +148,18 @@ impl<'a> NrvoSafetyChecker<'a> {
                 }
             }
 
-            // Assignment is ok if it's at return position
-            ExprKind::Assign { assignee, value } => {
-                // If this is a write to our variable (lvalue use), that's OK
-                if self.is_lvalue_use(assignee) {
-                    // Just check RHS doesn't use our variable as rvalue
-                    self.check_expr(value, false)
-                } else {
-                    // Assignment to something else - check both sides don't use our var
-                    self.check_expr(assignee, false) && self.check_expr(value, false)
-                }
-            }
-
             // Block expression: check all expressions, with last one in return context
-            ExprKind::Block(exprs) => {
-                if exprs.is_empty() {
-                    return true;
-                }
+            ExprKind::Block { items, tail } => {
+                let items_ok = items.iter().all(|item| match item {
+                    BlockItem::Stmt(stmt) => self.check_stmt_expr(stmt, false),
+                    BlockItem::Expr(expr) => self.check_expr(expr, false),
+                });
 
-                // Check all expressions except last one
-                let earlier_ok = exprs[..exprs.len() - 1]
-                    .iter()
-                    .all(|e| self.check_expr(e, false));
-                let last_ok = exprs.last().is_none_or(|e| self.check_expr(e, at_return));
-                earlier_ok && last_ok
-            }
+                let tail_ok = tail
+                    .as_deref()
+                    .is_none_or(|expr| self.check_expr(expr, at_return));
 
-            ExprKind::LetBind { value, .. } | ExprKind::VarBind { value, .. } => {
-                self.check_expr(value, false)
+                items_ok && tail_ok
             }
 
             ExprKind::If {
@@ -153,18 +171,6 @@ impl<'a> NrvoSafetyChecker<'a> {
                 let then_ok = self.check_expr(then_body, at_return);
                 let else_ok = self.check_expr(else_body, at_return);
                 cond_ok && then_ok && else_ok
-            }
-
-            ExprKind::While { cond, body } => {
-                let cond_ok = self.check_expr(cond, false);
-                let body_ok = self.check_expr(body, false);
-                cond_ok && body_ok
-            }
-
-            ExprKind::For { iter, body, .. } => {
-                let iter_ok = self.check_expr(iter, false);
-                let body_ok = self.check_expr(body, false);
-                iter_ok && body_ok
             }
 
             ExprKind::Match { scrutinee, arms } => {

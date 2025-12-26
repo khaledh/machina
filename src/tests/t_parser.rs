@@ -1,6 +1,7 @@
 use super::*;
 use crate::ast::{
-    ExprKind, Function, MatchPattern, Module, PatternKind, StringTag, TypeDeclKind, TypeExprKind,
+    BlockItem, Expr, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExpr, StmtExprKind,
+    StringTag, TypeDeclKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -18,6 +19,25 @@ fn parse_module(source: &str) -> Result<Module, ParseError> {
 fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
     let module = parse_module(source)?;
     Ok(module.funcs().into_iter().cloned().collect())
+}
+
+fn block_parts(expr: &Expr) -> (&[BlockItem], Option<&Expr>) {
+    match &expr.kind {
+        ExprKind::Block { items, tail } => (items, tail.as_deref()),
+        _ => panic!("Expected Block"),
+    }
+}
+
+fn block_tail(expr: &Expr) -> &Expr {
+    let (_, tail) = block_parts(expr);
+    tail.expect("Expected block to have a tail expr")
+}
+
+fn block_stmt_at(items: &[BlockItem], index: usize) -> &StmtExpr {
+    match &items[index] {
+        BlockItem::Stmt(stmt) => stmt,
+        BlockItem::Expr(_) => panic!("Expected stmt block item"),
+    }
 }
 
 #[test]
@@ -79,33 +99,31 @@ fn test_parse_multi_index_expr() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    // Body is a block
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        // Second expression is the index
-        if let ExprKind::ArrayIndex { target, indices } = &exprs[1].kind {
-            // Check target is Var
-            match &target.kind {
-                ExprKind::Var(name) => assert_eq!(name, "arr"),
-                _ => panic!("Expected Var"),
-            }
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 1);
 
-            // Check we have 2 indices
-            assert_eq!(indices.len(), 2);
+    let tail = tail.expect("Expected block to have a tail expr");
+    if let ExprKind::ArrayIndex { target, indices } = &tail.kind {
+        // Check target is Var
+        match &target.kind {
+            ExprKind::Var(name) => assert_eq!(name, "arr"),
+            _ => panic!("Expected Var"),
+        }
 
-            // Check indices are literals 1 and 0
-            match &indices[0].kind {
-                ExprKind::UInt64Lit(val) => assert_eq!(*val, 1),
-                _ => panic!("Expected UInt64Lit"),
-            }
-            match &indices[1].kind {
-                ExprKind::UInt64Lit(val) => assert_eq!(*val, 0),
-                _ => panic!("Expected UInt64Lit"),
-            }
-        } else {
-            panic!("Expected ArrayIndex expression");
+        // Check we have 2 indices
+        assert_eq!(indices.len(), 2);
+
+        // Check indices are literals 1 and 0
+        match &indices[0].kind {
+            ExprKind::UInt64Lit(val) => assert_eq!(*val, 1),
+            _ => panic!("Expected UInt64Lit"),
+        }
+        match &indices[1].kind {
+            ExprKind::UInt64Lit(val) => assert_eq!(*val, 0),
+            _ => panic!("Expected UInt64Lit"),
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected ArrayIndex expression");
     }
 }
 
@@ -121,30 +139,28 @@ fn test_parse_nested_array_literal() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        // First expression is the let binding
-        if let ExprKind::LetBind { value, .. } = &exprs[0].kind {
-            // Value should be an ArrayLit
-            if let ExprKind::ArrayLit(outer_elems) = &value.kind {
-                assert_eq!(outer_elems.len(), 2);
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
 
-                // Each element should be an ArrayLit
-                for elem in outer_elems {
-                    match &elem.kind {
-                        ExprKind::ArrayLit(inner_elems) => {
-                            assert_eq!(inner_elems.len(), 3);
-                        }
-                        _ => panic!("Expected nested ArrayLit"),
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        // Value should be an ArrayLit
+        if let ExprKind::ArrayLit(outer_elems) = &value.kind {
+            assert_eq!(outer_elems.len(), 2);
+
+            // Each element should be an ArrayLit
+            for elem in outer_elems {
+                match &elem.kind {
+                    ExprKind::ArrayLit(inner_elems) => {
+                        assert_eq!(inner_elems.len(), 3);
                     }
+                    _ => panic!("Expected nested ArrayLit"),
                 }
-            } else {
-                panic!("Expected ArrayLit");
             }
         } else {
-            panic!("Expected Let");
+            panic!("Expected ArrayLit");
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected Let");
     }
 }
 
@@ -251,22 +267,18 @@ fn test_parse_enum_variant_expr() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        assert_eq!(exprs.len(), 1);
-        match &exprs[0].kind {
-            ExprKind::EnumVariant {
-                enum_name,
-                variant,
-                payload,
-            } => {
-                assert_eq!(enum_name, "Color");
-                assert_eq!(variant, "Green");
-                assert!(payload.is_empty());
-            }
-            _ => panic!("Expected enum variant expr"),
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::EnumVariant {
+            enum_name,
+            variant,
+            payload,
+        } => {
+            assert_eq!(enum_name, "Color");
+            assert_eq!(variant, "Green");
+            assert!(payload.is_empty());
         }
-    } else {
-        panic!("Expected Block");
+        _ => panic!("Expected enum variant expr"),
     }
 }
 
@@ -315,26 +327,22 @@ fn test_parse_enum_variant_expr_with_payload() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        let last = exprs.last().expect("Expected block to have a tail expr");
-        match &last.kind {
-            ExprKind::EnumVariant {
-                enum_name,
-                variant,
-                payload,
-            } => {
-                assert_eq!(enum_name, "Option");
-                assert_eq!(variant, "Some");
-                assert_eq!(payload.len(), 1);
-                match &payload[0].kind {
-                    ExprKind::UInt64Lit(value) => assert_eq!(*value, 42),
-                    _ => panic!("Expected integer payload"),
-                }
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::EnumVariant {
+            enum_name,
+            variant,
+            payload,
+        } => {
+            assert_eq!(enum_name, "Option");
+            assert_eq!(variant, "Some");
+            assert_eq!(payload.len(), 1);
+            match &payload[0].kind {
+                ExprKind::UInt64Lit(value) => assert_eq!(*value, 42),
+                _ => panic!("Expected integer payload"),
             }
-            _ => panic!("Expected enum variant expr"),
         }
-    } else {
-        panic!("Expected Block");
+        _ => panic!("Expected enum variant expr"),
     }
 }
 
@@ -353,33 +361,32 @@ fn test_parse_struct_update_expr() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        let last = exprs.last().expect("Expected block to have a tail expr");
-        match &last.kind {
-            ExprKind::StructUpdate { target, fields } => {
-                match &target.kind {
-                    ExprKind::Var(name) => assert_eq!(name, "p"),
-                    _ => panic!("Expected StructUpdate target to be Var"),
-                }
-                assert_eq!(fields.len(), 1);
-                assert_eq!(fields[0].name, "color");
-                match &fields[0].value.kind {
-                    ExprKind::EnumVariant {
-                        enum_name,
-                        variant,
-                        payload,
-                    } => {
-                        assert_eq!(enum_name, "Color");
-                        assert_eq!(variant, "Green");
-                        assert!(payload.is_empty());
-                    }
-                    _ => panic!("Expected enum variant value"),
-                }
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 1);
+
+    let tail = tail.expect("Expected block to have a tail expr");
+    match &tail.kind {
+        ExprKind::StructUpdate { target, fields } => {
+            match &target.kind {
+                ExprKind::Var(name) => assert_eq!(name, "p"),
+                _ => panic!("Expected StructUpdate target to be Var"),
             }
-            _ => panic!("Expected StructUpdate expression"),
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "color");
+            match &fields[0].value.kind {
+                ExprKind::EnumVariant {
+                    enum_name,
+                    variant,
+                    payload,
+                } => {
+                    assert_eq!(enum_name, "Color");
+                    assert_eq!(variant, "Green");
+                    assert!(payload.is_empty());
+                }
+                _ => panic!("Expected enum variant value"),
+            }
         }
-    } else {
-        panic!("Expected Block");
+        _ => panic!("Expected StructUpdate expression"),
     }
 }
 
@@ -394,24 +401,21 @@ fn test_parse_tuple_literal() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::TupleLit(fields) = &exprs[0].kind {
-            assert_eq!(fields.len(), 2);
+    let tail = block_tail(&func.body);
+    if let ExprKind::TupleLit(fields) = &tail.kind {
+        assert_eq!(fields.len(), 2);
 
-            match &fields[0].kind {
-                ExprKind::UInt64Lit(val) => assert_eq!(*val, 42),
-                _ => panic!("Expected UInt64Lit"),
-            }
+        match &fields[0].kind {
+            ExprKind::UInt64Lit(val) => assert_eq!(*val, 42),
+            _ => panic!("Expected UInt64Lit"),
+        }
 
-            match &fields[1].kind {
-                ExprKind::BoolLit(val) => assert_eq!(*val, true),
-                _ => panic!("Expected BoolLit"),
-            }
-        } else {
-            panic!("Expected TupleLit");
+        match &fields[1].kind {
+            ExprKind::BoolLit(val) => assert_eq!(*val, true),
+            _ => panic!("Expected BoolLit"),
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected TupleLit");
     }
 }
 
@@ -426,17 +430,13 @@ fn test_parse_string_literal_ascii() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        let last = exprs.last().expect("Expected block to have a tail expr");
-        match &last.kind {
-            ExprKind::StringLit { value, tag } => {
-                assert_eq!(value, "hello");
-                assert_eq!(*tag, StringTag::Ascii);
-            }
-            _ => panic!("Expected string literal"),
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::StringLit { value, tag } => {
+            assert_eq!(value, "hello");
+            assert_eq!(*tag, StringTag::Ascii);
         }
-    } else {
-        panic!("Expected Block");
+        _ => panic!("Expected string literal"),
     }
 }
 
@@ -451,17 +451,13 @@ fn test_parse_string_literal_utf8() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        let last = exprs.last().expect("Expected block to have a tail expr");
-        match &last.kind {
-            ExprKind::StringLit { value, tag } => {
-                assert_eq!(value, "café");
-                assert_eq!(*tag, StringTag::Utf8);
-            }
-            _ => panic!("Expected string literal"),
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::StringLit { value, tag } => {
+            assert_eq!(value, "café");
+            assert_eq!(*tag, StringTag::Utf8);
         }
-    } else {
-        panic!("Expected Block");
+        _ => panic!("Expected string literal"),
     }
 }
 
@@ -476,14 +472,11 @@ fn test_parse_tuple_literal_trailing_comma() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::TupleLit(fields) = &exprs[0].kind {
-            assert_eq!(fields.len(), 2);
-        } else {
-            panic!("Expected TupleLit");
-        }
+    let tail = block_tail(&func.body);
+    if let ExprKind::TupleLit(fields) = &tail.kind {
+        assert_eq!(fields.len(), 2);
     } else {
-        panic!("Expected Block");
+        panic!("Expected TupleLit");
     }
 }
 
@@ -499,22 +492,21 @@ fn test_parse_tuple_field_access() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        // Second expression is the field access
-        if let ExprKind::TupleField { target, index } = &exprs[1].kind {
-            // Check target is Var
-            match &target.kind {
-                ExprKind::Var(name) => assert_eq!(name, "t"),
-                _ => panic!("Expected Var"),
-            }
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 1);
 
-            // Check index is 0
-            assert_eq!(*index, 0);
-        } else {
-            panic!("Expected TupleField");
+    let tail = tail.expect("Expected block to have a tail expr");
+    if let ExprKind::TupleField { target, index } = &tail.kind {
+        // Check target is Var
+        match &target.kind {
+            ExprKind::Var(name) => assert_eq!(name, "t"),
+            _ => panic!("Expected Var"),
         }
+
+        // Check index is 0
+        assert_eq!(*index, 0);
     } else {
-        panic!("Expected Block");
+        panic!("Expected TupleField");
     }
 }
 
@@ -530,31 +522,30 @@ fn test_parse_tuple_field_access_chained() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        // Second expression should be field access of field access
-        if let ExprKind::TupleField { target, index } = &exprs[1].kind {
-            assert_eq!(*index, 0);
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 1);
 
-            // Inner target should also be field access
-            if let ExprKind::TupleField {
-                target: inner_target,
-                index: inner_index,
-            } = &target.kind
-            {
-                assert_eq!(*inner_index, 1);
+    let tail = tail.expect("Expected block to have a tail expr");
+    if let ExprKind::TupleField { target, index } = &tail.kind {
+        assert_eq!(*index, 0);
 
-                match &inner_target.kind {
-                    ExprKind::Var(name) => assert_eq!(name, "t"),
-                    _ => panic!("Expected Var"),
-                }
-            } else {
-                panic!("Expected nested TupleField");
+        // Inner target should also be field access
+        if let ExprKind::TupleField {
+            target: inner_target,
+            index: inner_index,
+        } = &target.kind
+        {
+            assert_eq!(*inner_index, 1);
+
+            match &inner_target.kind {
+                ExprKind::Var(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected Var"),
             }
         } else {
-            panic!("Expected TupleField");
+            panic!("Expected nested TupleField");
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected TupleField");
     }
 }
 
@@ -570,31 +561,30 @@ fn test_parse_tuple_with_array_indexing() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        // Second expression should be index of field access
-        if let ExprKind::ArrayIndex { target, indices } = &exprs[1].kind {
-            assert_eq!(indices.len(), 1);
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 1);
 
-            // Target should be field access
-            if let ExprKind::TupleField {
-                target: field_target,
-                index,
-            } = &target.kind
-            {
-                assert_eq!(*index, 0);
+    let tail = tail.expect("Expected block to have a tail expr");
+    if let ExprKind::ArrayIndex { target, indices } = &tail.kind {
+        assert_eq!(indices.len(), 1);
 
-                match &field_target.kind {
-                    ExprKind::Var(name) => assert_eq!(name, "t"),
-                    _ => panic!("Expected Var"),
-                }
-            } else {
-                panic!("Expected TupleField");
+        // Target should be field access
+        if let ExprKind::TupleField {
+            target: field_target,
+            index,
+        } = &target.kind
+        {
+            assert_eq!(*index, 0);
+
+            match &field_target.kind {
+                ExprKind::Var(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected Var"),
             }
         } else {
-            panic!("Expected ArrayIndex");
+            panic!("Expected TupleField");
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected ArrayIndex");
     }
 }
 
@@ -610,40 +600,39 @@ fn test_parse_tuple_pattern() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::LetBind { pattern, value, .. } = &exprs[0].kind {
-            // Check pattern is a tuple pattern
-            match &pattern.kind {
-                PatternKind::Tuple { patterns } => {
-                    assert_eq!(patterns.len(), 2);
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
 
-                    // First pattern should be identifier "a"
-                    match &patterns[0].kind {
-                        PatternKind::Ident { name } => assert_eq!(name, "a"),
-                        _ => panic!("Expected Ident pattern"),
-                    }
+    if let StmtExprKind::LetBind { pattern, value, .. } = &stmt.kind {
+        // Check pattern is a tuple pattern
+        match &pattern.kind {
+            PatternKind::Tuple { patterns } => {
+                assert_eq!(patterns.len(), 2);
 
-                    // Second pattern should be identifier "b"
-                    match &patterns[1].kind {
-                        PatternKind::Ident { name } => assert_eq!(name, "b"),
-                        _ => panic!("Expected Ident pattern"),
-                    }
+                // First pattern should be identifier "a"
+                match &patterns[0].kind {
+                    PatternKind::Ident { name } => assert_eq!(name, "a"),
+                    _ => panic!("Expected Ident pattern"),
                 }
-                _ => panic!("Expected Tuple pattern"),
-            }
 
-            // Check value is a tuple literal
-            match &value.kind {
-                ExprKind::TupleLit(fields) => {
-                    assert_eq!(fields.len(), 2);
+                // Second pattern should be identifier "b"
+                match &patterns[1].kind {
+                    PatternKind::Ident { name } => assert_eq!(name, "b"),
+                    _ => panic!("Expected Ident pattern"),
                 }
-                _ => panic!("Expected TupleLit"),
             }
-        } else {
-            panic!("Expected Let");
+            _ => panic!("Expected Tuple pattern"),
+        }
+
+        // Check value is a tuple literal
+        match &value.kind {
+            ExprKind::TupleLit(fields) => {
+                assert_eq!(fields.len(), 2);
+            }
+            _ => panic!("Expected TupleLit"),
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected Let");
     }
 }
 
@@ -659,41 +648,40 @@ fn test_parse_tuple_pattern_nested() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::LetBind { pattern, .. } = &exprs[0].kind {
-            match &pattern.kind {
-                PatternKind::Tuple { patterns } => {
-                    assert_eq!(patterns.len(), 2);
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
 
-                    // First pattern should be identifier "a"
-                    match &patterns[0].kind {
-                        PatternKind::Ident { name } => assert_eq!(name, "a"),
-                        _ => panic!("Expected Ident pattern"),
-                    }
+    if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
+        match &pattern.kind {
+            PatternKind::Tuple { patterns } => {
+                assert_eq!(patterns.len(), 2);
 
-                    // Second pattern should be a nested tuple pattern
-                    match &patterns[1].kind {
-                        PatternKind::Tuple { patterns: inner } => {
-                            assert_eq!(inner.len(), 2);
-                            match &inner[0].kind {
-                                PatternKind::Ident { name } => assert_eq!(name, "b"),
-                                _ => panic!("Expected Ident pattern"),
-                            }
-                            match &inner[1].kind {
-                                PatternKind::Ident { name } => assert_eq!(name, "c"),
-                                _ => panic!("Expected Ident pattern"),
-                            }
-                        }
-                        _ => panic!("Expected nested Tuple pattern"),
-                    }
+                // First pattern should be identifier "a"
+                match &patterns[0].kind {
+                    PatternKind::Ident { name } => assert_eq!(name, "a"),
+                    _ => panic!("Expected Ident pattern"),
                 }
-                _ => panic!("Expected Tuple pattern"),
+
+                // Second pattern should be a nested tuple pattern
+                match &patterns[1].kind {
+                    PatternKind::Tuple { patterns: inner } => {
+                        assert_eq!(inner.len(), 2);
+                        match &inner[0].kind {
+                            PatternKind::Ident { name } => assert_eq!(name, "b"),
+                            _ => panic!("Expected Ident pattern"),
+                        }
+                        match &inner[1].kind {
+                            PatternKind::Ident { name } => assert_eq!(name, "c"),
+                            _ => panic!("Expected Ident pattern"),
+                        }
+                    }
+                    _ => panic!("Expected nested Tuple pattern"),
+                }
             }
-        } else {
-            panic!("Expected Let");
+            _ => panic!("Expected Tuple pattern"),
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected Let");
     }
 }
 
@@ -709,19 +697,18 @@ fn test_parse_tuple_pattern_trailing_comma() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::LetBind { pattern, .. } = &exprs[0].kind {
-            match &pattern.kind {
-                PatternKind::Tuple { patterns } => {
-                    assert_eq!(patterns.len(), 2);
-                }
-                _ => panic!("Expected Tuple pattern"),
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
+        match &pattern.kind {
+            PatternKind::Tuple { patterns } => {
+                assert_eq!(patterns.len(), 2);
             }
-        } else {
-            panic!("Expected Let");
+            _ => panic!("Expected Tuple pattern"),
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected Let");
     }
 }
 
@@ -738,18 +725,17 @@ fn test_parse_parenthesized_pattern() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::LetBind { pattern, .. } = &exprs[0].kind {
-            // Should be an Ident pattern, not a Tuple pattern
-            match &pattern.kind {
-                PatternKind::Ident { name } => assert_eq!(name, "a"),
-                _ => panic!("Expected Ident pattern (parenthesized), got {:?}", pattern),
-            }
-        } else {
-            panic!("Expected Let");
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
+        // Should be an Ident pattern, not a Tuple pattern
+        match &pattern.kind {
+            PatternKind::Ident { name } => assert_eq!(name, "a"),
+            _ => panic!("Expected Ident pattern (parenthesized), got {:?}", pattern),
         }
     } else {
-        panic!("Expected Block");
+        panic!("Expected Let");
     }
 }
 
@@ -770,52 +756,48 @@ fn test_parse_match_expr_enum_variants() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        let last = exprs.last().expect("Expected block to have a tail expr");
-        match &last.kind {
-            ExprKind::Match { scrutinee, arms } => {
-                match &scrutinee.kind {
-                    ExprKind::Var(name) => assert_eq!(name, "c"),
-                    _ => panic!("Expected scrutinee Var"),
-                }
-                assert_eq!(arms.len(), 3);
-
-                match &arms[0].pattern {
-                    MatchPattern::EnumVariant {
-                        enum_name,
-                        variant_name,
-                        bindings,
-                        ..
-                    } => {
-                        assert!(enum_name.is_none());
-                        assert_eq!(variant_name, "Red");
-                        assert_eq!(bindings.len(), 1);
-                        assert_eq!(bindings[0].name, "x");
-                    }
-                    _ => panic!("Expected enum variant pattern in arm 0"),
-                }
-
-                match &arms[1].pattern {
-                    MatchPattern::EnumVariant {
-                        enum_name,
-                        variant_name,
-                        bindings,
-                        ..
-                    } => {
-                        assert_eq!(enum_name.as_deref(), Some("Color"));
-                        assert_eq!(variant_name, "Blue");
-                        assert_eq!(bindings.len(), 1);
-                        assert_eq!(bindings[0].name, "y");
-                    }
-                    _ => panic!("Expected enum variant pattern in arm 1"),
-                }
-
-                assert!(matches!(arms[2].pattern, MatchPattern::Wildcard { .. }));
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::Match { scrutinee, arms } => {
+            match &scrutinee.kind {
+                ExprKind::Var(name) => assert_eq!(name, "c"),
+                _ => panic!("Expected scrutinee Var"),
             }
-            _ => panic!("Expected match expression"),
+            assert_eq!(arms.len(), 3);
+
+            match &arms[0].pattern {
+                MatchPattern::EnumVariant {
+                    enum_name,
+                    variant_name,
+                    bindings,
+                    ..
+                } => {
+                    assert!(enum_name.is_none());
+                    assert_eq!(variant_name, "Red");
+                    assert_eq!(bindings.len(), 1);
+                    assert_eq!(bindings[0].name, "x");
+                }
+                _ => panic!("Expected enum variant pattern in arm 0"),
+            }
+
+            match &arms[1].pattern {
+                MatchPattern::EnumVariant {
+                    enum_name,
+                    variant_name,
+                    bindings,
+                    ..
+                } => {
+                    assert_eq!(enum_name.as_deref(), Some("Color"));
+                    assert_eq!(variant_name, "Blue");
+                    assert_eq!(bindings.len(), 1);
+                    assert_eq!(bindings[0].name, "y");
+                }
+                _ => panic!("Expected enum variant pattern in arm 1"),
+            }
+
+            assert!(matches!(arms[2].pattern, MatchPattern::Wildcard { .. }));
         }
-    } else {
-        panic!("Expected Block");
+        _ => panic!("Expected match expression"),
     }
 }
 
@@ -830,14 +812,10 @@ fn test_parse_char_literal() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        let last = exprs.last().expect("Expected block to have a tail expr");
-        match &last.kind {
-            ExprKind::CharLit(value) => assert_eq!(*value, b'a'),
-            _ => panic!("Expected CharLit"),
-        }
-    } else {
-        panic!("Expected Block");
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::CharLit(value) => assert_eq!(*value, b'a'),
+        _ => panic!("Expected CharLit"),
     }
 }
 
@@ -845,7 +823,7 @@ fn test_parse_char_literal() {
 fn test_parse_for_range_loop() {
     let source = r#"
         fn test() -> u64 {
-            for i in 0..3 { i; };
+            for i in 0..3 { i; }
             0
         }
     "#;
@@ -853,38 +831,40 @@ fn test_parse_for_range_loop() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::For {
-            pattern,
-            iter,
-            body,
-        } = &exprs[0].kind
-        {
-            match &pattern.kind {
-                PatternKind::Ident { name } => assert_eq!(name, "i"),
-                _ => panic!("Expected ident pattern"),
-            }
-            match &iter.kind {
-                ExprKind::Range { start, end } => {
-                    assert_eq!(*start, 0);
-                    assert_eq!(*end, 3);
-                }
-                _ => panic!("Expected range iterator"),
-            }
-            assert!(matches!(body.kind, ExprKind::Block(_)));
-        } else {
-            panic!("Expected for loop");
+    let (items, tail) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::For {
+        pattern,
+        iter,
+        body,
+    } = &stmt.kind
+    {
+        match &pattern.kind {
+            PatternKind::Ident { name } => assert_eq!(name, "i"),
+            _ => panic!("Expected ident pattern"),
         }
+        match &iter.kind {
+            ExprKind::Range { start, end } => {
+                assert_eq!(*start, 0);
+                assert_eq!(*end, 3);
+            }
+            _ => panic!("Expected range iterator"),
+        }
+        assert!(matches!(body.kind, ExprKind::Block { .. }));
     } else {
-        panic!("Expected block");
+        panic!("Expected for loop");
     }
+
+    let tail = tail.expect("Expected block to have a tail expr");
+    assert!(matches!(tail.kind, ExprKind::UInt64Lit(0)));
 }
 
 #[test]
 fn test_parse_for_array_loop() {
     let source = r#"
         fn test() -> u64 {
-            for x in [1, 2, 3] { x; };
+            for x in [1, 2, 3] { x; }
             0
         }
     "#;
@@ -892,23 +872,25 @@ fn test_parse_for_array_loop() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    if let ExprKind::Block(exprs) = &func.body.kind {
-        if let ExprKind::For {
-            pattern,
-            iter,
-            body,
-        } = &exprs[0].kind
-        {
-            match &pattern.kind {
-                PatternKind::Ident { name } => assert_eq!(name, "x"),
-                _ => panic!("Expected ident pattern"),
-            }
-            assert!(matches!(iter.kind, ExprKind::ArrayLit(_)));
-            assert!(matches!(body.kind, ExprKind::Block(_)));
-        } else {
-            panic!("Expected for loop");
+    let (items, tail) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::For {
+        pattern,
+        iter,
+        body,
+    } = &stmt.kind
+    {
+        match &pattern.kind {
+            PatternKind::Ident { name } => assert_eq!(name, "x"),
+            _ => panic!("Expected ident pattern"),
         }
+        assert!(matches!(iter.kind, ExprKind::ArrayLit(_)));
+        assert!(matches!(body.kind, ExprKind::Block { .. }));
     } else {
-        panic!("Expected block");
+        panic!("Expected for loop");
     }
+
+    let tail = tail.expect("Expected block to have a tail expr");
+    assert!(matches!(tail.kind, ExprKind::UInt64Lit(0)));
 }

@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::ast::NodeId;
 use crate::ast::{
-    Decl, ExprKind, Function, MatchPattern, Module, PatternKind, TypeDecl, TypeDeclKind, TypeExpr,
-    TypeExprKind,
+    BlockItem, Decl, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExprKind, TypeDecl,
+    TypeDeclKind, TypeExpr, TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
@@ -479,24 +479,87 @@ impl SymbolResolver {
         }
     }
 
+    fn check_stmt_expr(&mut self, stmt: &ast::StmtExpr) {
+        match &stmt.kind {
+            StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value,
+            } => {
+                // Check the value first before introducing the lhs symbol(s) into the scope.
+                self.check_expr(value);
+                if let Some(decl_ty) = decl_ty {
+                    self.check_type_expr(decl_ty);
+                }
+                self.check_pattern(pattern, false);
+            }
+
+            StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+            } => {
+                // Check the value first before introducing the lhs symbol(s) into the scope.
+                self.check_expr(value);
+                if let Some(decl_ty) = decl_ty {
+                    self.check_type_expr(decl_ty);
+                }
+                self.check_pattern(pattern, true);
+            }
+
+            StmtExprKind::Assign { assignee, value } => {
+                self.check_lvalue_mutability(assignee);
+                self.check_expr(value);
+            }
+
+            StmtExprKind::While { cond, body } => {
+                self.check_expr(cond);
+                self.check_expr(body);
+            }
+
+            StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                // Resolve iter first (pattern not in scope for it)
+                self.check_expr(iter);
+                // Enter a new scope for the pattern + body
+                self.with_scope(|checker| {
+                    checker.check_pattern(pattern, false);
+                    checker.check_expr(body);
+                });
+            }
+        }
+    }
+
     fn check_expr(&mut self, expr: &ast::Expr) {
         match &expr.kind {
+            ExprKind::Block { items, tail } => {
+                self.with_scope(|checker| {
+                    for item in items {
+                        match item {
+                            BlockItem::Stmt(stmt) => checker.check_stmt_expr(stmt),
+                            BlockItem::Expr(expr) => checker.check_expr(expr),
+                        }
+                    }
+                    if let Some(tail) = tail {
+                        checker.check_expr(tail);
+                    }
+                });
+            }
+
+            // Scalar literals
             ExprKind::UInt64Lit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
             | ExprKind::UnitLit => {}
 
+            // Compound literals
             ExprKind::ArrayLit(elems) => {
                 for elem in elems {
                     self.check_expr(elem);
-                }
-            }
-
-            ExprKind::ArrayIndex { target, indices } => {
-                self.check_expr(target);
-                for index in indices {
-                    self.check_expr(index);
                 }
             }
 
@@ -504,10 +567,6 @@ impl SymbolResolver {
                 for field in fields {
                     self.check_expr(field);
                 }
-            }
-
-            ExprKind::TupleField { target, .. } => {
-                self.check_expr(target);
             }
 
             ExprKind::StructLit { name, fields } => {
@@ -531,6 +590,25 @@ impl SymbolResolver {
                 }
             }
 
+            // Accessors
+            ExprKind::Var(name) => match self.lookup_symbol(name) {
+                Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id),
+                None => self
+                    .errors
+                    .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
+            },
+
+            ExprKind::ArrayIndex { target, indices } => {
+                self.check_expr(target);
+                for index in indices {
+                    self.check_expr(index);
+                }
+            }
+
+            ExprKind::TupleField { target, .. } => {
+                self.check_expr(target);
+            }
+
             ExprKind::StructField { target, .. } => {
                 self.check_expr(target);
             }
@@ -544,6 +622,10 @@ impl SymbolResolver {
                 }
             }
 
+            // Range
+            ExprKind::Range { .. } => { /* nothing to resolve */ }
+
+            // Enum variants
             ExprKind::EnumVariant {
                 enum_name,
                 variant,
@@ -580,6 +662,28 @@ impl SymbolResolver {
                 }
             }
 
+            // Operators
+            ExprKind::BinOp { left, right, .. } => {
+                self.check_expr(left);
+                self.check_expr(right);
+            }
+
+            ExprKind::UnaryOp { expr, .. } => {
+                self.check_expr(expr);
+            }
+
+            // Control flow (If)
+            ExprKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.check_expr(cond);
+                self.check_expr(then_body);
+                self.check_expr(else_body);
+            }
+
+            // Control flow (Match)
             ExprKind::Match { scrutinee, arms } => {
                 self.check_expr(scrutinee);
                 for arm in arms {
@@ -591,92 +695,7 @@ impl SymbolResolver {
                 }
             }
 
-            ExprKind::BinOp { left, right, .. } => {
-                self.check_expr(left);
-                self.check_expr(right);
-            }
-
-            ExprKind::UnaryOp { expr, .. } => {
-                self.check_expr(expr);
-            }
-
-            ExprKind::Block(body) => {
-                self.with_scope(|checker| {
-                    for expr in body {
-                        checker.check_expr(expr);
-                    }
-                });
-            }
-
-            ExprKind::LetBind {
-                pattern,
-                decl_ty,
-                value,
-            } => {
-                // Check the value first before introducing the lhs symbol(s) into the scope.
-                self.check_expr(value);
-                if let Some(decl_ty) = decl_ty {
-                    self.check_type_expr(decl_ty);
-                }
-                self.check_pattern(pattern, false);
-            }
-
-            ExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value,
-            } => {
-                // Check the value first before introducing the lhs symbol(s) into the scope.
-                self.check_expr(value);
-                if let Some(decl_ty) = decl_ty {
-                    self.check_type_expr(decl_ty);
-                }
-                self.check_pattern(pattern, true);
-            }
-
-            ExprKind::Var(name) => match self.lookup_symbol(name) {
-                Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id),
-                None => self
-                    .errors
-                    .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
-            },
-
-            ExprKind::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                self.check_expr(cond);
-                self.check_expr(then_body);
-                self.check_expr(else_body);
-            }
-
-            ExprKind::Assign { assignee, value } => {
-                self.check_lvalue_mutability(assignee);
-                self.check_expr(value);
-            }
-
-            ExprKind::While { cond, body } => {
-                self.check_expr(cond);
-                self.check_expr(body);
-            }
-
-            ExprKind::For {
-                pattern,
-                iter,
-                body,
-            } => {
-                // Resolve iter first (pattern not in scope for it)
-                self.check_expr(iter);
-                // Enter a new scope for the pattern + body
-                self.with_scope(|checker| {
-                    checker.check_pattern(pattern, false);
-                    checker.check_expr(body);
-                });
-            }
-
-            ExprKind::Range { .. } => { /* nothing to resolve */ }
-
+            // Function calls
             ExprKind::Call { callee, args } => {
                 // For now, callee must be a Var to a function.
                 // In the future, this can be generalized.

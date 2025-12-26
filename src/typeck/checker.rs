@@ -201,7 +201,9 @@ impl<'c, 'b> Checker<'c, 'b> {
         if ret_ty != func_sig.return_type {
             // get the span of the last expression in the body
             let span = match &function.body.kind {
-                ExprKind::Block(body) => body.last().unwrap().span,
+                ExprKind::Block {
+                    tail: Some(tail), ..
+                } => tail.span,
                 _ => function.body.span,
             };
             self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
@@ -557,12 +559,26 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(struct_ty)
     }
 
-    fn type_check_block(&mut self, body: &Vec<Expr>) -> Result<Type, TypeCheckError> {
-        let mut last_type = Type::Unit;
-        for expr in body {
-            last_type = self.type_check_expr(expr)?;
+    fn type_check_block(
+        &mut self,
+        items: &Vec<BlockItem>,
+        tail: &Option<&Expr>,
+    ) -> Result<Type, TypeCheckError> {
+        for item in items {
+            match item {
+                BlockItem::Stmt(stmt) => {
+                    self.type_check_stmt_expr(stmt)?;
+                }
+                BlockItem::Expr(expr) => {
+                    self.type_check_expr(expr)?;
+                }
+            }
         }
-        Ok(last_type)
+
+        match tail {
+            Some(expr) => self.type_check_expr(expr),
+            None => Ok(Type::Unit),
+        }
     }
 
     fn type_check_pattern(
@@ -848,39 +864,31 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         let cond_type = self.type_check_expr(cond)?;
         if cond_type != Type::Bool {
-            Err(TypeCheckError::CondNotBoolean(cond_type, cond.span))
-        } else {
-            let then_type = self.type_check_expr(then_body)?;
-            let else_type = self.type_check_expr(else_body)?;
-            if then_type != else_type {
-                // create a span that covers both the then and else bodies so the
-                // diagnostic highlights the whole region
-                let then_span = match &then_body.kind {
-                    ExprKind::Block(body) => body.last().unwrap().span,
-                    _ => then_body.span,
-                };
-                let else_span = match &else_body.kind {
-                    ExprKind::Block(body) => body.last().unwrap().span,
-                    _ => else_body.span,
-                };
-                let span = Span::merge_all(vec![then_span, else_span]);
-                Err(TypeCheckError::ThenElseTypeMismatch(
-                    then_type, else_type, span,
-                ))
-            } else {
-                Ok(then_type)
-            }
+            return Err(TypeCheckError::CondNotBoolean(cond_type, cond.span));
         }
+
+        let then_type = self.type_check_expr(then_body)?;
+        let else_type = self.type_check_expr(else_body)?;
+        if then_type != else_type {
+            // create a span that covers both the then and else bodies so the
+            // diagnostic highlights the whole region
+            let span = Span::merge_all(vec![then_body.span, else_body.span]);
+            return Err(TypeCheckError::ThenElseTypeMismatch(
+                then_type, else_type, span,
+            ));
+        }
+
+        Ok(then_type)
     }
 
     fn type_check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
         let cond_type = self.type_check_expr(cond)?;
         if cond_type != Type::Bool {
-            Err(TypeCheckError::CondNotBoolean(cond_type, cond.span))
-        } else {
-            let _ = self.type_check_expr(body)?;
-            Ok(Type::Unit)
+            return Err(TypeCheckError::CondNotBoolean(cond_type, cond.span));
         }
+
+        let _ = self.type_check_expr(body)?;
+        Ok(Type::Unit)
     }
 
     fn type_check_for(
@@ -1069,6 +1077,35 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
+    fn type_check_stmt_expr(&mut self, stmt: &StmtExpr) -> Result<Type, TypeCheckError> {
+        let ty = match &stmt.kind {
+            StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value,
+            } => self.type_check_binding(pattern, decl_ty, value)?,
+
+            StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+            } => self.type_check_binding(pattern, decl_ty, value)?,
+
+            StmtExprKind::Assign { assignee, value } => self.type_check_assign(assignee, value)?,
+
+            StmtExprKind::While { cond, body } => self.type_check_while(cond, body)?,
+
+            StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => self.type_check_for(pattern, iter, body)?,
+        };
+
+        self.builder.record_node_type(stmt.id, ty.clone());
+        Ok(ty)
+    }
+
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
         let result = match &expr.kind {
             ExprKind::UInt64Lit(_) => Ok(Type::UInt64),
@@ -1123,20 +1160,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::UnaryOp { expr, .. } => self.type_check_expr(expr),
 
-            ExprKind::Block(body) => self.type_check_block(body),
-
-            ExprKind::LetBind {
-                pattern,
-                decl_ty,
-                value,
-            }
-            | ExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value,
-            } => self.type_check_binding(pattern, decl_ty, value),
-
-            ExprKind::Assign { value, assignee } => self.type_check_assign(assignee, value),
+            ExprKind::Block { items, tail } => self.type_check_block(items, &tail.as_deref()),
 
             ExprKind::Var(_) => self.type_check_var_ref(expr),
 
@@ -1147,14 +1171,6 @@ impl<'c, 'b> Checker<'c, 'b> {
                 then_body,
                 else_body,
             } => self.type_check_if(cond, then_body, else_body),
-
-            ExprKind::While { cond, body } => self.type_check_while(cond, body),
-
-            ExprKind::For {
-                pattern,
-                iter,
-                body,
-            } => self.type_check_for(pattern, iter, body),
 
             ExprKind::Range { start, end } => {
                 if start >= end {

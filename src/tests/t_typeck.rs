@@ -678,7 +678,7 @@ fn test_match_target_not_enum() {
 fn test_for_range_typechecks() {
     let source = r#"
         fn test() -> u64 {
-            for i in 0..3 { i; };
+            for i in 0..3 { i; }
             0
         }
     "#;
@@ -690,7 +690,7 @@ fn test_for_range_typechecks() {
 fn test_for_range_invalid_bounds() {
     let source = r#"
         fn test() -> u64 {
-            for i in 5..5 { i; };
+            for i in 5..5 { i; }
             0
         }
     "#;
@@ -716,7 +716,7 @@ fn test_for_array_typechecks() {
         fn test() -> u64 {
             let arr = [1, 2, 3];
             var acc = 0;
-            for x in arr { acc = acc + x; };
+            for x in arr { acc = acc + x; }
             acc
         }
     "#;
@@ -728,7 +728,7 @@ fn test_for_array_typechecks() {
 fn test_for_non_iterable_rejected() {
     let source = r#"
         fn test() -> u64 {
-            for x in 0 { x; };
+            for x in 0 { x; }
             0
         }
     "#;

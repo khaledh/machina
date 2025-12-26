@@ -88,88 +88,25 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn advance(&mut self) {
-        if self.pos + 1 < self.tokens.len() {
-            self.pos += 1;
-            self.curr_token = &self.tokens[self.pos];
+    pub fn parse(&mut self) -> Result<Module, ParseError> {
+        let mut decls = Vec::new();
+        while self.curr_token.kind != TK::Eof {
+            decls.push(self.parse_decl()?);
+        }
+        Ok(Module { decls })
+    }
+
+    // --- Top-level ---
+
+    fn parse_decl(&mut self) -> Result<Decl, ParseError> {
+        match &self.curr_token.kind {
+            TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeDecl),
+            TK::Ident(name) if name == "fn" => self.parse_function().map(Decl::Function),
+            _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }
     }
 
-    fn peek(&self) -> Option<&Token> {
-        if self.pos + 1 < self.tokens.len() {
-            Some(&self.tokens[self.pos + 1])
-        } else {
-            None
-        }
-    }
-
-    fn mark(&self) -> Marker {
-        Marker {
-            pos: self.curr_token.span.start,
-        }
-    }
-
-    fn close(&self, marker: Marker) -> Span {
-        Span::new(marker.pos, self.curr_token.span.end)
-    }
-
-    fn consume(&mut self, expected: &TokenKind) -> Result<(), ParseError> {
-        if self.curr_token.kind == *expected {
-            self.advance();
-            Ok(())
-        } else {
-            Err(ParseError::ExpectedToken(
-                expected.clone(),
-                self.curr_token.clone(),
-            ))
-        }
-    }
-
-    fn consume_keyword(&mut self, expected: &str) -> Result<(), ParseError> {
-        if self.curr_token.kind == TK::Ident(expected.to_string()) {
-            self.advance();
-            Ok(())
-        } else {
-            Err(ParseError::ExpectedKeyword(
-                expected.to_string(),
-                self.curr_token.clone(),
-            ))
-        }
-    }
-
-    fn parse_ident(&mut self) -> Result<String, ParseError> {
-        if let TK::Ident(name) = &self.curr_token.kind {
-            self.advance();
-            Ok(name.clone())
-        } else {
-            Err(ParseError::ExpectedIdent(self.curr_token.clone()))
-        }
-    }
-
-    fn parse_int_lit(&mut self) -> Result<u64, ParseError> {
-        if let TK::IntLit(value) = &self.curr_token.kind {
-            self.advance();
-            Ok(*value)
-        } else {
-            Err(ParseError::ExpectedIntLit(self.curr_token.clone()))
-        }
-    }
-
-    fn parse_list<T>(
-        &mut self,
-        sep_token: TokenKind,
-        end_token: TokenKind,
-        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParseError>,
-    ) -> Result<Vec<T>, ParseError> {
-        let mut items = vec![];
-        while self.curr_token.kind != end_token {
-            items.push(parse_item(self)?);
-            if self.curr_token.kind == sep_token {
-                self.advance();
-            }
-        }
-        Ok(items)
-    }
+    // --- Type declarations ---
 
     fn parse_type_decl(&mut self) -> Result<TypeDecl, ParseError> {
         // Expect 'type'
@@ -289,55 +226,7 @@ impl<'a> Parser<'a> {
         Ok(TypeDeclKind::Enum { variants })
     }
 
-    fn parse_function(&mut self) -> Result<Function, ParseError> {
-        // Expect 'fn'
-        self.consume_keyword("fn")?;
-
-        // Expect function name
-        let name = self.parse_ident()?;
-
-        // Parse function params
-        self.consume(&TK::LParen)?;
-        let params = self.parse_func_params()?;
-        self.consume(&TK::RParen)?;
-
-        // Parse return type (default to unit if not specified)
-        let return_type = match self.curr_token.kind {
-            TK::Arrow => {
-                self.advance();
-                self.parse_type_expr()?
-            }
-            _ => TypeExpr {
-                id: self.id_gen.new_id(),
-                kind: TypeExprKind::Named("()".to_string()),
-                span: self.close(self.mark()),
-            },
-        };
-
-        // Parse function body
-        let body = self.parse_block()?;
-
-        Ok(Function {
-            id: self.id_gen.new_id(),
-            name,
-            params,
-            return_type,
-            body,
-        })
-    }
-
-    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParseError> {
-        self.parse_list(TK::Comma, TK::RParen, |parser| {
-            let name = parser.parse_ident()?;
-            parser.consume(&TK::Colon)?;
-            let typ = parser.parse_type_expr()?;
-            Ok(FunctionParam {
-                id: parser.id_gen.new_id(),
-                name,
-                typ,
-            })
-        })
-    }
+    // --- Type expressions ---
 
     fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
         // Check for range type first, then tuple, then named type
@@ -462,37 +351,274 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // --- Functions ---
+
+    fn parse_function(&mut self) -> Result<Function, ParseError> {
+        // Expect 'fn'
+        self.consume_keyword("fn")?;
+
+        // Expect function name
+        let name = self.parse_ident()?;
+
+        // Parse function params
+        self.consume(&TK::LParen)?;
+        let params = self.parse_func_params()?;
+        self.consume(&TK::RParen)?;
+
+        // Parse return type (default to unit if not specified)
+        let return_type = match self.curr_token.kind {
+            TK::Arrow => {
+                self.advance();
+                self.parse_type_expr()?
+            }
+            _ => TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Named("()".to_string()),
+                span: self.close(self.mark()),
+            },
+        };
+
+        // Parse function body
+        let body = self.parse_block()?;
+
+        Ok(Function {
+            id: self.id_gen.new_id(),
+            name,
+            params,
+            return_type,
+            body,
+        })
+    }
+
+    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParseError> {
+        self.parse_list(TK::Comma, TK::RParen, |parser| {
+            let name = parser.parse_ident()?;
+            parser.consume(&TK::Colon)?;
+            let typ = parser.parse_type_expr()?;
+            Ok(FunctionParam {
+                id: parser.id_gen.new_id(),
+                name,
+                typ,
+            })
+        })
+    }
+
+    // --- Blocks / Statement Expressions ---
+
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
+
+        // Consume '{'
         self.consume(&TK::LBrace)?;
 
         let mut items = Vec::new();
+        let mut tail = None;
+
+        // Parse block items
         while self.curr_token.kind != TK::RBrace {
-            let expr = match &self.curr_token.kind {
-                TK::Ident(name) if name == "let" => self.parse_let()?,
-                TK::Ident(name) if name == "var" => self.parse_var()?,
+            match &self.curr_token.kind {
+                TK::Ident(name) if name == "let" => {
+                    let stmt = self.parse_let()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
+                TK::Ident(name) if name == "var" => {
+                    let stmt = self.parse_var()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
+                TK::Ident(name) if name == "while" => {
+                    let stmt = self.parse_while()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
+                TK::Ident(name) if name == "for" => {
+                    let stmt = self.parse_for()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
                 _ => {
                     let expr = self.parse_expr(0)?;
-                    if self.curr_token.kind == TK::Equals {
-                        self.parse_assign(expr)?
-                    } else {
-                        expr
+                    match self.curr_token.kind {
+                        TK::Equals => {
+                            // Assignment
+                            let stmt = self.parse_assign(expr)?;
+                            items.push(BlockItem::Stmt(stmt));
+                        }
+                        TK::Semicolon => {
+                            // Expression with trailing semicolon
+                            self.advance();
+                            items.push(BlockItem::Expr(expr));
+                        }
+                        _ => {
+                            // No semicolon -> last expression in the block
+                            tail = Some(Box::new(expr));
+                            break;
+                        }
                     }
                 }
-            };
-            items.push(expr);
-            if self.curr_token.kind == TK::Semicolon {
-                self.advance();
             }
         }
 
+        // Consume '}'
         self.consume(&TK::RBrace)?;
+
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::Block(items),
+            kind: ExprKind::Block { items, tail },
             span: self.close(marker),
         })
     }
+
+    fn parse_let(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        // Expect 'let'
+        self.consume_keyword("let")?;
+        let pattern = self.parse_pattern()?;
+
+        // Parse declaration type (optional)
+        let decl_ty = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        // Expect '='
+        self.consume(&TK::Equals)?;
+
+        // Parse value
+        let value = self.parse_expr(0)?;
+
+        // Consume ';'
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value: Box::new(value),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_var(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        // Expect 'var'
+        self.consume_keyword("var")?;
+
+        // Parse pattern
+        let pattern = self.parse_pattern()?;
+
+        // Parse declaration type (optional)
+        let decl_ty = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+        self.consume(&TK::Equals)?;
+
+        // Parse value
+        let value = self.parse_expr(0)?;
+
+        // Consume ';'
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value: Box::new(value),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_assign(&mut self, assignee: Expr) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        // Consume '='
+        self.consume(&TK::Equals)?;
+
+        // Parse value
+        let value = self.parse_expr(0)?;
+
+        // Consume ';'
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::Assign {
+                assignee: Box::new(assignee),
+                value: Box::new(value),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_while(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        // Consume 'while'
+        self.consume_keyword("while")?;
+
+        // Parse condition
+        let cond = self.parse_expr(0)?;
+
+        // Parse body
+        let body = self.parse_block()?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::While {
+                cond: Box::new(cond),
+                body: Box::new(body),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_for(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        // Consume 'for'
+        self.consume_keyword("for")?;
+
+        // Parse pattern
+        let pattern = self.parse_pattern()?;
+
+        // Consume 'in'
+        self.consume_keyword("in")?;
+
+        // Parse range literal or general iterator expression
+        // (disallow struct literals to avoid ambiguity with the loop body block)
+        self.allow_struct_lit = false;
+        let iter = if matches!(self.curr_token.kind, TK::IntLit(_))
+            && matches!(self.peek().map(|t| &t.kind), Some(TK::DotDot))
+        {
+            self.parse_range_expr()?
+        } else {
+            self.parse_expr(0)?
+        };
+        self.allow_struct_lit = true;
+
+        // Parse body
+        let body = self.parse_block()?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::For {
+                pattern,
+                iter: Box::new(iter),
+                body: Box::new(body),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    // --- Patterns ---
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
         let marker = self.mark();
@@ -608,83 +734,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_let(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-
-        // Expect 'let'
-        self.consume_keyword("let")?;
-        let pattern = self.parse_pattern()?;
-
-        // Parse declaration type (optional)
-        let decl_ty = if self.curr_token.kind == TK::Colon {
-            self.advance();
-            Some(self.parse_type_expr()?)
-        } else {
-            None
-        };
-
-        // Expect '='
-        self.consume(&TK::Equals)?;
-
-        // Parse value
-        let value = self.parse_expr(0)?;
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::LetBind {
-                pattern,
-                decl_ty,
-                value: Box::new(value),
-            },
-            span: self.close(marker),
-        })
-    }
-
-    fn parse_var(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-
-        // Expect 'var'
-        self.consume_keyword("var")?;
-
-        // Parse pattern
-        let pattern = self.parse_pattern()?;
-
-        // Parse declaration type (optional)
-        let decl_ty = if self.curr_token.kind == TK::Colon {
-            self.advance();
-            Some(self.parse_type_expr()?)
-        } else {
-            None
-        };
-        self.consume(&TK::Equals)?;
-
-        // Parse value
-        let value = self.parse_expr(0)?;
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value: Box::new(value),
-            },
-            span: self.close(marker),
-        })
-    }
-
-    fn parse_assign(&mut self, assignee: Expr) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        self.consume(&TK::Equals)?;
-        let value = self.parse_expr(0)?;
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::Assign {
-                assignee: Box::new(assignee),
-                value: Box::new(value),
-            },
-            span: self.close(marker),
-        })
-    }
+    // --- Control flow (If) ---
 
     fn parse_if(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
@@ -726,59 +776,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_while(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        self.consume_keyword("while")?;
-        let cond = self.parse_expr(0)?;
-        let body = self.parse_expr(0)?;
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::While {
-                cond: Box::new(cond),
-                body: Box::new(body),
-            },
-            span: self.close(marker),
-        })
-    }
-
-    fn parse_for(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-
-        // Expect 'for'
-        self.consume_keyword("for")?;
-
-        // Parse pattern
-        let pattern = self.parse_pattern()?;
-
-        // Expect 'in'
-        self.consume_keyword("in")?;
-
-        // Parse range literal or general iterator expression
-        // (disallow struct literals to avoid ambiguity with the loop body block)
-        self.allow_struct_lit = false;
-        let iter = if matches!(self.curr_token.kind, TK::IntLit(_))
-            && matches!(self.peek().map(|t| &t.kind), Some(TK::DotDot))
-        {
-            self.parse_range_expr()?
-        } else {
-            self.parse_expr(0)?
-        };
-        self.allow_struct_lit = true;
-
-        // Parse body
-        let body = self.parse_expr(0)?;
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::For {
-                pattern,
-                iter: Box::new(iter),
-                body: Box::new(body),
-            },
-            span: self.close(marker),
-        })
-    }
-
     fn parse_range_expr(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
 
@@ -793,278 +790,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        let mut expr = self.parse_primary()?;
-
-        loop {
-            match self.curr_token.kind {
-                TK::LParen => {
-                    // Call expression
-                    self.advance();
-                    let args =
-                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
-                    self.consume(&TK::RParen)?;
-                    expr = Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::Call {
-                            callee: Box::new(expr),
-                            args,
-                        },
-                        span: self.close(marker.clone()),
-                    };
-                }
-                TK::LBracket => {
-                    // ArrayIndex expression
-                    self.advance(); // consume '['
-
-                    let indices =
-                        self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
-
-                    self.consume(&TK::RBracket)?; // consume ']'
-
-                    expr = Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::ArrayIndex {
-                            target: Box::new(expr),
-                            indices,
-                        },
-                        span: self.close(marker.clone()),
-                    };
-                }
-                TK::Dot => {
-                    // Field access expression
-                    self.consume(&TK::Dot)?;
-
-                    match &self.curr_token.kind {
-                        TK::IntLit(index) => {
-                            // Tuple field access: .0, .1, etc.
-                            self.advance();
-                            expr = Expr {
-                                id: self.id_gen.new_id(),
-                                kind: ExprKind::TupleField {
-                                    target: Box::new(expr),
-                                    index: *index as usize,
-                                },
-                                span: self.close(marker.clone()),
-                            };
-                        }
-                        TK::Ident(name) => {
-                            // Struct field access: .name
-                            self.advance();
-                            expr = Expr {
-                                id: self.id_gen.new_id(),
-                                kind: ExprKind::StructField {
-                                    target: Box::new(expr),
-                                    field: name.clone(),
-                                },
-                                span: self.close(marker.clone()),
-                            };
-                        }
-                        _ => return Err(ParseError::ExpectedStructField(self.curr_token.clone())),
-                    }
-                }
-                _ => break,
-            }
-        }
-
-        Ok(expr)
-    }
-
-    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
-        match &self.curr_token.kind {
-            TK::IntLit(value) => {
-                let span = self.curr_token.span;
-                self.advance();
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::UInt64Lit(*value),
-                    span,
-                })
-            }
-            TK::CharLit(value) => {
-                let span = self.curr_token.span;
-                self.advance();
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::CharLit(*value),
-                    span,
-                })
-            }
-            TK::StringLit(s) => {
-                let span = self.curr_token.span;
-                self.advance();
-                let tag = if s.is_ascii() {
-                    StringTag::Ascii
-                } else {
-                    StringTag::Utf8
-                };
-                Ok(Expr {
-                    id: self.id_gen.new_id(),
-                    kind: ExprKind::StringLit {
-                        value: s.clone(),
-                        tag,
-                    },
-                    span,
-                })
-            }
-            TK::Ident(name) if name == "if" => self.parse_if(),
-            TK::Ident(name) if name == "while" => self.parse_while(),
-            TK::Ident(name) if name == "for" => self.parse_for(),
-            TK::Ident(name) if name == "match" => self.parse_match_expr(),
-            TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
-                // Enum variant: Ident :: Variant
-                self.parse_enum_variant(name.clone())
-            }
-            TK::Ident(name) => {
-                let marker = self.mark();
-                let name = name.clone();
-                self.advance();
-
-                match name.as_str() {
-                    "true" => Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::BoolLit(true),
-                        span: self.close(marker),
-                    }),
-                    "false" => Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::BoolLit(false),
-                        span: self.close(marker),
-                    }),
-                    _ => {
-                        // Check for struct literal: Ident { ....}
-                        if self.allow_struct_lit && self.curr_token.kind == TK::LBrace {
-                            self.parse_struct_lit(marker, name)
-                        } else {
-                            // Regular variable reference
-                            Ok(Expr {
-                                id: self.id_gen.new_id(),
-                                kind: ExprKind::Var(name.clone()),
-                                span: self.close(marker),
-                            })
-                        }
-                    }
-                }
-            }
-            TK::LParen => self.parse_paren_or_tuple(),
-            TK::LBrace if self.looks_like_struct_update() => self.parse_struct_update(),
-            TK::LBrace => self.parse_block(),
-            TK::LBracket => self.parse_array_lit(),
-            _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
-        }
-    }
-
-    fn parse_struct_lit(&mut self, marker: Marker, name: String) -> Result<Expr, ParseError> {
-        self.consume(&TK::LBrace)?; // consume '{'
-
-        // Parse struct literal fields
-        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
-            let field_marker = parser.mark();
-            // Parse field name
-            let name = parser.parse_ident()?;
-
-            // Expect ':'
-            parser.consume(&TK::Colon)?;
-
-            // Parse field value
-            let value = parser.parse_expr(0)?;
-
-            Ok(StructLitField {
-                id: parser.id_gen.new_id(),
-                name,
-                value,
-                span: parser.close(field_marker),
-            })
-        })?;
-
-        self.consume(&TK::RBrace)?;
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::StructLit { name, fields },
-            span: self.close(marker),
-        })
-    }
-
-    fn parse_struct_update(&mut self) -> Result<Expr, ParseError> {
-        // "{ base | field: expr, ... }"
-        let marker = self.mark();
-
-        // Consume opening brace
-        self.consume(&TK::LBrace)?;
-
-        // Parse base expression
-        let base = self.parse_expr(0)?;
-
-        // Expect pipe
-        self.consume(&TK::Pipe)?;
-
-        // Parse field updates
-        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
-            let field_marker = parser.mark();
-            let name = parser.parse_ident()?;
-            parser.consume(&TK::Colon)?;
-            let value = parser.parse_expr(0)?;
-            Ok(StructUpdateField {
-                id: parser.id_gen.new_id(),
-                name,
-                value,
-                span: parser.close(field_marker),
-            })
-        })?;
-
-        // Consume closing brace
-        self.consume(&TK::RBrace)?;
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::StructUpdate {
-                target: Box::new(base),
-                fields,
-            },
-            span: self.close(marker),
-        })
-    }
-
-    fn parse_array_lit(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        self.advance(); // consume '['
-        let elems = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
-        self.consume(&TK::RBracket)?; // consume ']'
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::ArrayLit(elems),
-            span: self.close(marker),
-        })
-    }
-
-    fn parse_enum_variant(&mut self, enum_name: String) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        self.advance(); // ident
-        self.consume(&TK::DoubleColon)?;
-        let variant = self.parse_ident()?;
-
-        // Parse payload (if any)
-        let payload = if self.curr_token.kind == TK::LParen {
-            self.advance();
-            let payload = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
-            self.consume(&TK::RParen)?;
-            payload
-        } else {
-            vec![]
-        };
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::EnumVariant {
-                enum_name,
-                variant,
-                payload,
-            },
-            span: self.close(marker),
-        })
-    }
+    // --- Control flow (Match) ---
 
     fn parse_match_expr(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
@@ -1169,6 +895,44 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // --- Expressions ---
+
+    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        let mut lhs = if self.curr_token.kind == TK::Minus {
+            self.advance();
+            let operand = self.parse_expr(10)?; // highest binding power
+            Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::UnaryOp {
+                    op: UnaryOp::Neg,
+                    expr: Box::new(operand),
+                },
+                span: self.close(marker.clone()),
+            }
+        } else {
+            self.parse_postfix()?
+        };
+
+        while let Some((op, bp)) = Self::bin_op_from_token(&self.curr_token.kind) {
+            if bp < min_bp {
+                break;
+            }
+            self.advance();
+            let rhs = self.parse_expr(bp + 1)?;
+            lhs = Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::BinOp {
+                    left: Box::new(lhs),
+                    op,
+                    right: Box::new(rhs),
+                },
+                span: self.close(marker.clone()),
+            };
+        }
+        Ok(lhs)
+    }
+
     fn parse_paren_or_tuple(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.advance();
@@ -1212,40 +976,13 @@ impl<'a> Parser<'a> {
         Ok(first_expr)
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        let mut lhs = if self.curr_token.kind == TK::Minus {
+    fn parse_ident(&mut self) -> Result<String, ParseError> {
+        if let TK::Ident(name) = &self.curr_token.kind {
             self.advance();
-            let operand = self.parse_expr(10)?; // highest binding power
-            Expr {
-                id: self.id_gen.new_id(),
-                kind: ExprKind::UnaryOp {
-                    op: UnaryOp::Neg,
-                    expr: Box::new(operand),
-                },
-                span: self.close(marker.clone()),
-            }
+            Ok(name.clone())
         } else {
-            self.parse_postfix()?
-        };
-
-        while let Some((op, bp)) = Self::bin_op_from_token(&self.curr_token.kind) {
-            if bp < min_bp {
-                break;
-            }
-            self.advance();
-            let rhs = self.parse_expr(bp + 1)?;
-            lhs = Expr {
-                id: self.id_gen.new_id(),
-                kind: ExprKind::BinOp {
-                    left: Box::new(lhs),
-                    op,
-                    right: Box::new(rhs),
-                },
-                span: self.close(marker.clone()),
-            };
+            Err(ParseError::ExpectedIdent(self.curr_token.clone()))
         }
-        Ok(lhs)
     }
 
     fn bin_op_from_token(token: &TokenKind) -> Option<(BinaryOp, u8)> {
@@ -1302,20 +1039,374 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn parse_decl(&mut self) -> Result<Decl, ParseError> {
+    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            match self.curr_token.kind {
+                TK::LParen => {
+                    // Call expression
+                    self.advance();
+                    let args =
+                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
+                    self.consume(&TK::RParen)?;
+                    expr = Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::Call {
+                            callee: Box::new(expr),
+                            args,
+                        },
+                        span: self.close(marker.clone()),
+                    };
+                }
+                TK::LBracket => {
+                    // ArrayIndex expression
+                    self.advance(); // consume '['
+
+                    let indices =
+                        self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+
+                    self.consume(&TK::RBracket)?; // consume ']'
+
+                    expr = Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::ArrayIndex {
+                            target: Box::new(expr),
+                            indices,
+                        },
+                        span: self.close(marker.clone()),
+                    };
+                }
+                TK::Dot => {
+                    // Field access expression
+                    self.consume(&TK::Dot)?;
+
+                    match &self.curr_token.kind {
+                        TK::IntLit(index) => {
+                            // Tuple field access: .0, .1, etc.
+                            self.advance();
+                            expr = Expr {
+                                id: self.id_gen.new_id(),
+                                kind: ExprKind::TupleField {
+                                    target: Box::new(expr),
+                                    index: *index as usize,
+                                },
+                                span: self.close(marker.clone()),
+                            };
+                        }
+                        TK::Ident(name) => {
+                            // Struct field access: .name
+                            self.advance();
+                            expr = Expr {
+                                id: self.id_gen.new_id(),
+                                kind: ExprKind::StructField {
+                                    target: Box::new(expr),
+                                    field: name.clone(),
+                                },
+                                span: self.close(marker.clone()),
+                            };
+                        }
+                        _ => return Err(ParseError::ExpectedStructField(self.curr_token.clone())),
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match &self.curr_token.kind {
-            TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeDecl),
-            TK::Ident(name) if name == "fn" => self.parse_function().map(Decl::Function),
-            _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
+            TK::IntLit(value) => {
+                let span = self.curr_token.span;
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::UInt64Lit(*value),
+                    span,
+                })
+            }
+
+            TK::CharLit(value) => {
+                let span = self.curr_token.span;
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::CharLit(*value),
+                    span,
+                })
+            }
+
+            TK::StringLit(s) => {
+                let span = self.curr_token.span;
+                self.advance();
+                let tag = if s.is_ascii() {
+                    StringTag::Ascii
+                } else {
+                    StringTag::Utf8
+                };
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::StringLit {
+                        value: s.clone(),
+                        tag,
+                    },
+                    span,
+                })
+            }
+
+            // Boolean literal
+            TK::Ident(name) if name == "true" || name == "false" => {
+                let span = self.curr_token.span;
+                let value = name == "true";
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::BoolLit(value),
+                    span,
+                })
+            }
+
+            // If expression
+            TK::Ident(name) if name == "if" => self.parse_if(),
+
+            // Match expression
+            TK::Ident(name) if name == "match" => self.parse_match_expr(),
+
+            // Enum variant expression
+            TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
+                self.parse_enum_variant(name.clone())
+            }
+
+            // Struct literal
+            TK::Ident(name)
+                if self.allow_struct_lit && self.peek().map(|t| &t.kind) == Some(&TK::LBrace) =>
+            {
+                self.parse_struct_lit(name.clone())
+            }
+
+            // Variable reference
+            TK::Ident(name) => {
+                let marker = self.mark();
+                self.advance();
+
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::Var(name.clone()),
+                    span: self.close(marker),
+                })
+            }
+
+            // Parenthesized expression or tuple literal
+            TK::LParen => self.parse_paren_or_tuple(),
+
+            // Struct update expression
+            TK::LBrace if self.looks_like_struct_update() => self.parse_struct_update(),
+
+            // Block expression
+            TK::LBrace => self.parse_block(),
+
+            // Array literal expression
+            TK::LBracket => self.parse_array_lit(),
+
+            _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
     }
 
-    pub fn parse(&mut self) -> Result<Module, ParseError> {
-        let mut decls = Vec::new();
-        while self.curr_token.kind != TK::Eof {
-            decls.push(self.parse_decl()?);
+    // --- Literals ---
+
+    fn parse_int_lit(&mut self) -> Result<u64, ParseError> {
+        if let TK::IntLit(value) = &self.curr_token.kind {
+            self.advance();
+            Ok(*value)
+        } else {
+            Err(ParseError::ExpectedIntLit(self.curr_token.clone()))
         }
-        Ok(Module { decls })
+    }
+
+    fn parse_array_lit(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.advance(); // consume '['
+        let elems = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+        self.consume(&TK::RBracket)?; // consume ']'
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::ArrayLit(elems),
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_enum_variant(&mut self, enum_name: String) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.advance(); // ident
+        self.consume(&TK::DoubleColon)?;
+        let variant = self.parse_ident()?;
+
+        // Parse payload (if any)
+        let payload = if self.curr_token.kind == TK::LParen {
+            self.advance();
+            let payload = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
+            self.consume(&TK::RParen)?;
+            payload
+        } else {
+            vec![]
+        };
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::EnumVariant {
+                enum_name,
+                variant,
+                payload,
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_struct_lit(&mut self, name: String) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+
+        self.advance(); // consume struct name
+
+        // Consume '{'
+        self.consume(&TK::LBrace)?;
+
+        // Parse struct literal fields
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            let field_marker = parser.mark();
+            // Parse field name
+            let name = parser.parse_ident()?;
+
+            // Expect ':'
+            parser.consume(&TK::Colon)?;
+
+            // Parse field value
+            let value = parser.parse_expr(0)?;
+
+            Ok(StructLitField {
+                id: parser.id_gen.new_id(),
+                name,
+                value,
+                span: parser.close(field_marker),
+            })
+        })?;
+
+        self.consume(&TK::RBrace)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::StructLit { name, fields },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_struct_update(&mut self) -> Result<Expr, ParseError> {
+        // "{ base | field: expr, ... }"
+        let marker = self.mark();
+
+        // Consume opening brace
+        self.consume(&TK::LBrace)?;
+
+        // Parse base expression
+        let base = self.parse_expr(0)?;
+
+        // Expect pipe
+        self.consume(&TK::Pipe)?;
+
+        // Parse field updates
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            let field_marker = parser.mark();
+            let name = parser.parse_ident()?;
+            parser.consume(&TK::Colon)?;
+            let value = parser.parse_expr(0)?;
+            Ok(StructUpdateField {
+                id: parser.id_gen.new_id(),
+                name,
+                value,
+                span: parser.close(field_marker),
+            })
+        })?;
+
+        // Consume closing brace
+        self.consume(&TK::RBrace)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::StructUpdate {
+                target: Box::new(base),
+                fields,
+            },
+            span: self.close(marker),
+        })
+    }
+
+    // --- Utility methods ---
+
+    fn advance(&mut self) {
+        if self.pos + 1 < self.tokens.len() {
+            self.pos += 1;
+            self.curr_token = &self.tokens[self.pos];
+        }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        if self.pos + 1 < self.tokens.len() {
+            Some(&self.tokens[self.pos + 1])
+        } else {
+            None
+        }
+    }
+
+    fn mark(&self) -> Marker {
+        Marker {
+            pos: self.curr_token.span.start,
+        }
+    }
+
+    fn close(&self, marker: Marker) -> Span {
+        Span::new(marker.pos, self.curr_token.span.end)
+    }
+
+    fn consume(&mut self, expected: &TokenKind) -> Result<(), ParseError> {
+        if self.curr_token.kind == *expected {
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParseError::ExpectedToken(
+                expected.clone(),
+                self.curr_token.clone(),
+            ))
+        }
+    }
+
+    fn consume_keyword(&mut self, expected: &str) -> Result<(), ParseError> {
+        if self.curr_token.kind == TK::Ident(expected.to_string()) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParseError::ExpectedKeyword(
+                expected.to_string(),
+                self.curr_token.clone(),
+            ))
+        }
+    }
+
+    fn parse_list<T>(
+        &mut self,
+        sep_token: TokenKind,
+        end_token: TokenKind,
+        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<Vec<T>, ParseError> {
+        let mut items = vec![];
+        while self.curr_token.kind != end_token {
+            items.push(parse_item(self)?);
+            if self.curr_token.kind == sep_token {
+                self.advance();
+            }
+        }
+        Ok(items)
     }
 }
 

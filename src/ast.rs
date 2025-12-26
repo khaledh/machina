@@ -71,6 +71,8 @@ pub enum Decl {
     Function(Function),
 }
 
+// -- Type Declarations ---
+
 #[derive(Clone, Debug)]
 pub struct TypeDecl {
     pub id: NodeId,
@@ -93,6 +95,41 @@ pub struct StructField {
     pub span: Span,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub id: NodeId,
+    pub name: String,
+    pub payload: Vec<TypeExpr>,
+    pub span: Span,
+}
+
+// -- Type Expressions ---
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeExpr {
+    pub id: NodeId,
+    pub kind: TypeExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TypeExprKind {
+    Named(String),
+    Array {
+        elem_ty: Box<TypeExpr>,
+        dims: Vec<usize>,
+    },
+    Tuple {
+        fields: Vec<TypeExpr>,
+    },
+    Range {
+        min: u64,
+        max: u64,
+    },
+}
+
+// -- Struct Literals ---
+
 #[derive(Clone, Debug)]
 pub struct StructLitField {
     pub id: NodeId,
@@ -109,13 +146,7 @@ pub struct StructUpdateField {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EnumVariant {
-    pub id: NodeId,
-    pub name: String,
-    pub payload: Vec<TypeExpr>,
-    pub span: Span,
-}
+// -- String Literals ---
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StringTag {
@@ -204,28 +235,47 @@ pub struct MatchPatternBinding {
     pub span: Span,
 }
 
-// -- Type Expressions ---
+// --- Blocks ---
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TypeExpr {
+#[derive(Clone, Debug)]
+pub enum BlockItem {
+    Stmt(StmtExpr),
+    Expr(Expr),
+}
+
+// --- Statement Expressions ---
+
+#[derive(Clone, Debug)]
+pub struct StmtExpr {
     pub id: NodeId,
-    pub kind: TypeExprKind,
+    pub kind: StmtExprKind,
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TypeExprKind {
-    Named(String),
-    Array {
-        elem_ty: Box<TypeExpr>,
-        dims: Vec<usize>,
+#[derive(Clone, Debug)]
+pub enum StmtExprKind {
+    LetBind {
+        pattern: Pattern,
+        decl_ty: Option<TypeExpr>,
+        value: Box<Expr>,
     },
-    Tuple {
-        fields: Vec<TypeExpr>,
+    VarBind {
+        pattern: Pattern,
+        decl_ty: Option<TypeExpr>,
+        value: Box<Expr>,
     },
-    Range {
-        min: u64,
-        max: u64,
+    Assign {
+        assignee: Box<Expr>,
+        value: Box<Expr>,
+    },
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+    },
+    For {
+        pattern: Pattern,
+        iter: Box<Expr>, // For now this must be ExprKind::Range
+        body: Box<Expr>,
     },
 }
 
@@ -240,7 +290,10 @@ pub struct Expr {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
-    Block(Vec<Expr>),
+    Block {
+        items: Vec<BlockItem>,
+        tail: Option<Box<Expr>>,
+    },
 
     // Literals (scalar)
     UInt64Lit(u64),
@@ -282,26 +335,6 @@ pub enum ExprKind {
         expr: Box<Expr>,
     },
 
-    // Bindings
-    LetBind {
-        // immutable binding
-        pattern: Pattern,
-        decl_ty: Option<TypeExpr>,
-        value: Box<Expr>,
-    },
-    VarBind {
-        // mutable binding
-        pattern: Pattern,
-        decl_ty: Option<TypeExpr>,
-        value: Box<Expr>,
-    },
-
-    // Assignment
-    Assign {
-        assignee: Box<Expr>,
-        value: Box<Expr>,
-    },
-
     // Var, array index, tuple field, struct field
     Var(String),
     ArrayIndex {
@@ -323,15 +356,8 @@ pub enum ExprKind {
         then_body: Box<Expr>,
         else_body: Box<Expr>,
     },
-    While {
-        cond: Box<Expr>,
-        body: Box<Expr>,
-    },
-    For {
-        pattern: Pattern,
-        iter: Box<Expr>, // For now this must be ExprKind::Range
-        body: Box<Expr>,
-    },
+
+    // Range
     Range {
         start: u64,
         end: u64, // exclusive
@@ -622,6 +648,83 @@ impl MatchPatternBinding {
     }
 }
 
+impl BlockItem {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        match self {
+            BlockItem::Stmt(stmt) => stmt.fmt_with_indent(f, level),
+            BlockItem::Expr(expr) => expr.fmt_with_indent(f, level),
+        }
+    }
+}
+
+impl StmtExpr {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match &self.kind {
+            StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Let [{}]", pad, self.id)?;
+                pattern.fmt_with_indent(f, level + 2)?;
+                if let Some(decl_ty) = decl_ty {
+                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+                }
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Var [{}]", pad, self.id)?;
+                writeln!(f, "{}Pattern:", pad1)?;
+                pattern.fmt_with_indent(f, level + 2)?;
+                if let Some(decl_ty) = decl_ty {
+                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+                }
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            StmtExprKind::Assign { assignee, value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Assign [{}]", pad, self.id)?;
+                writeln!(f, "{}Assignee:", pad1)?;
+                assignee.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            StmtExprKind::While { cond, body } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}While [{}]", pad, self.id)?;
+                writeln!(f, "{}Cond:", pad1)?;
+                cond.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Body:", pad1)?;
+                body.fmt_with_indent(f, level + 2)?;
+            }
+            StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}For [{}]", pad, self.id)?;
+                writeln!(f, "{}Pattern:", pad1)?;
+                pattern.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Iter:", pad1)?;
+                iter.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Body:", pad1)?;
+                body.fmt_with_indent(f, level + 2)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Expr {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
@@ -722,9 +825,9 @@ impl Expr {
             ExprKind::BinOp { left, op, right } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}BinOp [{}]", pad, self.id)?;
+                writeln!(f, "{}Op: {}", pad1, op)?;
                 writeln!(f, "{}Left:", pad1)?;
                 left.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Op: {}", pad1, op)?;
                 writeln!(f, "{}Right:", pad1)?;
                 right.fmt_with_indent(f, level + 2)?;
             }
@@ -735,47 +838,14 @@ impl Expr {
                 writeln!(f, "{}Operand:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
             }
-            ExprKind::Block(body) => {
+            ExprKind::Block { items, tail } => {
                 writeln!(f, "{}Block [{}]", pad, self.id)?;
-                for expr in body {
-                    expr.fmt_with_indent(f, level + 1)?;
+                for item in items {
+                    item.fmt_with_indent(f, level + 1)?;
                 }
-            }
-            ExprKind::LetBind {
-                pattern,
-                decl_ty,
-                value,
-            } => {
-                let pad1 = indent(level + 1);
-                writeln!(f, "{}Let [{}]", pad, self.id)?;
-                pattern.fmt_with_indent(f, level + 2)?;
-                if let Some(decl_ty) = decl_ty {
-                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+                if let Some(tail) = tail {
+                    tail.fmt_with_indent(f, level + 1)?;
                 }
-                writeln!(f, "{}Value:", pad1)?;
-                value.fmt_with_indent(f, level + 2)?;
-            }
-            ExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value,
-            } => {
-                let pad1 = indent(level + 1);
-                writeln!(f, "{}Var [{}]", pad, self.id)?;
-                pattern.fmt_with_indent(f, level + 2)?;
-                if let Some(decl_ty) = decl_ty {
-                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
-                }
-                writeln!(f, "{}Value:", pad1)?;
-                value.fmt_with_indent(f, level + 2)?;
-            }
-            ExprKind::Assign { assignee, value } => {
-                let pad1 = indent(level + 1);
-                writeln!(f, "{}Assign [{}]", pad, self.id)?;
-                writeln!(f, "{}Assignee:", pad1)?;
-                assignee.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Value:", pad1)?;
-                value.fmt_with_indent(f, level + 2)?;
             }
             ExprKind::Var(name) => {
                 writeln!(f, "{}Var({}) [{}]", pad, name, self.id)?;
@@ -793,14 +863,6 @@ impl Expr {
                 then_body.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Else:", pad1)?;
                 else_body.fmt_with_indent(f, level + 2)?;
-            }
-            ExprKind::While { cond, body } => {
-                let pad1 = indent(level + 1);
-                writeln!(f, "{}While [{}]", pad, self.id)?;
-                writeln!(f, "{}Cond:", pad1)?;
-                cond.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Body:", pad1)?;
-                body.fmt_with_indent(f, level + 2)?;
             }
             ExprKind::Call { callee: name, args } => {
                 let pad1 = indent(level + 1);
@@ -820,20 +882,6 @@ impl Expr {
                 for arm in arms {
                     arm.fmt_with_indent(f, level + 2)?;
                 }
-            }
-            ExprKind::For {
-                pattern,
-                iter,
-                body,
-            } => {
-                let pad1 = indent(level + 1);
-                writeln!(f, "{}For [{}]", pad, self.id)?;
-                writeln!(f, "{}Pattern:", pad1)?;
-                pattern.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Iter:", pad1)?;
-                iter.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Body:", pad1)?;
-                body.fmt_with_indent(f, level + 2)?;
             }
             ExprKind::Range { start, end } => {
                 let pad1 = indent(level + 1);

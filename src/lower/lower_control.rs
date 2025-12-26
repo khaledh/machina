@@ -154,13 +154,16 @@ impl<'a> FuncLowerer<'a> {
     /// Lower a loop/body expression for side effects only.
     pub(super) fn lower_stmt_body(&mut self, body: &Expr) -> Result<(), LowerError> {
         match &body.kind {
-            EK::Block(exprs) => {
-                for expr in exprs {
-                    self.lower_block_item(expr)?;
+            EK::Block { items, tail } => {
+                for item in items {
+                    self.lower_block_item(item)?;
+                }
+                if let Some(expr) = tail {
+                    self.lower_expr_value(expr)?;
                 }
             }
             _ => {
-                self.lower_block_item(body)?;
+                self.lower_expr_value(body)?;
             }
         }
         Ok(())

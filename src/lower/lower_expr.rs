@@ -8,14 +8,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an expression in value position into a scalar operand or aggregate place.
     pub(super) fn lower_expr_value(&mut self, expr: &Expr) -> Result<ExprValue, LowerError> {
         match &expr.kind {
-            // These are only allowed as block items.
-            EK::LetBind { .. }
-            | EK::VarBind { .. }
-            | EK::Assign { .. }
-            | EK::While { .. }
-            | EK::For { .. } => Err(LowerError::ExprNotAllowedInValueContext(expr.id)),
-
-            EK::Block(exprs) => self.lower_block_expr(exprs),
+            EK::Block { items, tail } => self.lower_block_expr(items, tail.as_deref()),
 
             EK::If {
                 cond,
@@ -131,7 +124,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Function calls, conditionals, blocks
-            EK::Call { .. } | EK::If { .. } | EK::Block(..) => {
+            EK::Call { .. } | EK::If { .. } | EK::Block { .. } => {
                 match self.lower_expr_value(expr)? {
                     ExprValue::Scalar(op) => Ok(op),
                     ExprValue::Aggregate(_) => Err(LowerError::UnsupportedOperandExpr(expr.id)),
@@ -202,10 +195,11 @@ impl<'a> FuncLowerer<'a> {
             }
             EK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.
-                self.emit_call_into(PlaceAny::Aggregate(dst), callee, args)?;
-                Ok(())
+                self.emit_call_into(PlaceAny::Aggregate(dst), callee, args)
             }
-            EK::Block(exprs) => self.lower_block_into(dst, exprs, expr.id),
+            EK::Block { items, tail } => {
+                self.lower_block_into(dst, items, tail.as_deref(), expr.id)
+            }
             EK::If {
                 cond,
                 then_body,

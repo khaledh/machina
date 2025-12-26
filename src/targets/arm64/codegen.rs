@@ -94,7 +94,7 @@ impl<'a> Arm64Codegen<'a> {
         let mut asm = String::new();
 
         let global_labels = self.emit_globals(&mut asm);
-        self.emit_funcs(&mut asm, &global_labels);
+        let _ = self.emit_funcs(&mut asm, &global_labels);
 
         Ok(asm)
     }
