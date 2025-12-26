@@ -27,6 +27,7 @@ use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
 use crate::resolve::def_map::DefId;
+use crate::types::Type;
 
 pub(super) enum ExprValue {
     Scalar(Operand),
@@ -96,6 +97,12 @@ impl<'a> FuncLowerer<'a> {
                 Some(param.name.clone()),
             );
             self.locals.insert(def_id, local_id);
+
+            if matches!(ty, Type::Range { .. }) {
+                let param_place = Place::<Scalar>::new(local_id, ty_id, vec![]);
+                let op = Operand::Copy(param_place);
+                self.emit_conversion_check(&Type::UInt64, &ty, &op);
+            }
         }
 
         // Lower the body into the return local (scalar vs aggregate).
@@ -107,6 +114,8 @@ impl<'a> FuncLowerer<'a> {
             let ret_place = Place::<Scalar>::new(ret_id, ret_ty, vec![]);
             let body_value = self.lower_expr_value(&self.func.body)?;
             if let ExprValue::Scalar(op) = body_value {
+                let ret_ast_ty = self.ty_for_node(self.func.id)?;
+                self.emit_conversion_check(&body_ty, &ret_ast_ty, &op);
                 self.emit_copy_scalar(ret_place, Rvalue::Use(op));
             }
         } else {

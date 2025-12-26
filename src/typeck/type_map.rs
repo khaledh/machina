@@ -141,6 +141,10 @@ impl TypeMap {
     pub fn lookup_node_type(&self, node: NodeId) -> Option<Type> {
         self.node_type.get(&node).cloned()
     }
+
+    pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
+        self.def_type.get(def).cloned()
+    }
 }
 
 impl<'a> IntoIterator for &'a TypeMap {

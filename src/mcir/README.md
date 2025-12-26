@@ -60,6 +60,7 @@ Blocks end in:
 - `Trap { kind }`, where `kind` is a `CheckKind`:
    - `Bounds { index, len }`
    - `DivByZero`
+   - `Range { value, min, max }`
 - `Unterminated` (placeholder during building)
 
 ## Control Flow

@@ -34,43 +34,55 @@ static void write_u64(uint64_t value) {
  * - kind: check kind discriminator
  * - arg0: payload slot 0
  * - arg1: payload slot 1
+ * - arg2: payload slot 2
  */
-void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1) {
-    const char *fallback = "unknown trap";
-
+void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
     // common prefix and suffix
     const char *prefix = "Runtime error: ";
-    const char *suffix = ")";
     const char *line_end = "\n";
 
-    // bounds check
-    const char *bounds_prefix = "Index out of bounds (index=";
-    const char *bounds_mid = ", len=";
-
     // division by zero
-    const char *div_prefix = "Division by zero";
+    const char *divbyzero_msg = "Division by zero";
 
+    // bounds check
+    const char *bounds_msg_1 = "Index out of bounds: index=";
+    const char *bounds_msg_2 = ", len=";
+
+    // range check
+    const char *range_msg_1 = "Value out of range: value=";
+    const char *range_msg_2 = ", min(incl)=";
+    const char *range_msg_3 = ", max(excl)=";
+
+    // unknown trap
+    const char *fallback_msg = "Unknown trap";
+
+    write_msg(prefix);
     switch (kind) {
-        case 0:
-            write_msg(prefix);
-            write_msg(bounds_prefix);
+        case 0: // division by zero
+            write_msg(divbyzero_msg);
+            break;
+
+        case 1: // bounds check
+            write_msg(bounds_msg_1);
             write_u64(arg0);
-            write_msg(bounds_mid);
+            write_msg(bounds_msg_2);
             write_u64(arg1);
-            write_msg(suffix);
-            write_msg(line_end);
             break;
-        case 1:
-            write_msg(prefix);
-            write_msg(div_prefix);
-            write_msg(line_end);
+
+        case 2: // range check
+            write_msg(range_msg_1);
+            write_u64(arg0);
+            write_msg(range_msg_2);
+            write_u64(arg1);
+            write_msg(range_msg_3);
+            write_u64(arg2);
             break;
-        default:
-            write_msg(prefix);
-            write_msg(fallback);
-            write_msg(line_end);
+
+        default: // unknown trap
+            write_msg(fallback_msg);
             break;
     }
+    write_msg(line_end);
 
     _exit((int)(100 + kind));
 }

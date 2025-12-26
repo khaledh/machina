@@ -198,19 +198,24 @@ impl<'c, 'b> Checker<'c, 'b> {
         };
 
         // check return type
-        if ret_ty != func_sig.return_type {
-            // get the span of the last expression in the body
-            let span = match &function.body.kind {
-                ExprKind::Block {
-                    tail: Some(tail), ..
-                } => tail.span,
-                _ => function.body.span,
-            };
-            self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
-                func_sig.return_type.clone(),
-                ret_ty.clone(),
-                span,
-            ));
+        let ret_expr = match &function.body.kind {
+            ExprKind::Block {
+                tail: Some(tail), ..
+            } => tail.as_ref(),
+            _ => &function.body,
+        };
+        match self.check_assignable_to(ret_expr, &ret_ty, &func_sig.return_type) {
+            Ok(()) => {}
+            Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => {
+                self.errors.push(err);
+            }
+            Err(_) => {
+                self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
+                    func_sig.return_type.clone(),
+                    ret_ty.clone(),
+                    ret_expr.span,
+                ));
+            }
         }
 
         // record return type
@@ -765,17 +770,15 @@ impl<'c, 'b> Checker<'c, 'b> {
                             from_value.span,
                         ));
                     }
-                    Ok(())
-                } else {
-                    // Block assigning non-uint64 literals to range types
-                    // until we support runtime checking
-                    Err(TypeCheckError::DeclTypeMismatch(
-                        to_ty.clone(),
-                        from_ty.clone(),
-                        from_value.span,
-                    ))
                 }
+                Ok(())
             }
+            (Type::Range { .. }, Type::UInt64) => Ok(()),
+            (Type::Range { .. }, Type::Range { .. }) => Err(TypeCheckError::DeclTypeMismatch(
+                to_ty.clone(),
+                from_ty.clone(),
+                from_value.span,
+            )),
             _ => Err(TypeCheckError::DeclTypeMismatch(
                 to_ty.clone(),
                 from_ty.clone(),
@@ -788,15 +791,15 @@ impl<'c, 'b> Checker<'c, 'b> {
         let lhs_type = self.type_check_expr(assignee)?;
         let rhs_type = self.type_check_expr(value)?;
 
-        if lhs_type != rhs_type {
-            return Err(TypeCheckError::AssignTypeMismatch(
+        match self.check_assignable_to(value, &rhs_type, &lhs_type) {
+            Ok(()) => Ok(Type::Unit),
+            Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => Err(err),
+            Err(_) => Err(TypeCheckError::AssignTypeMismatch(
                 lhs_type,
                 rhs_type,
                 assignee.span,
-            ));
+            )),
         }
-
-        Ok(Type::Unit)
     }
 
     fn type_check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
@@ -843,14 +846,19 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
         // Check argument types
         for (i, arg_type) in arg_types.iter().enumerate() {
-            if arg_type != &func_sig.params[i] {
-                let span = args[i].span;
-                return Err(TypeCheckError::ArgTypeMismatch(
-                    i + 1,
-                    func_sig.params[i].clone(),
-                    arg_type.clone(),
-                    span,
-                ));
+            let param_ty = &func_sig.params[i];
+            match self.check_assignable_to(&args[i], arg_type, param_ty) {
+                Ok(()) => continue,
+                Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => return Err(err),
+                Err(_) => {
+                    let span = args[i].span;
+                    return Err(TypeCheckError::ArgTypeMismatch(
+                        i + 1,
+                        param_ty.clone(),
+                        arg_type.clone(),
+                        span,
+                    ));
+                }
             }
         }
         Ok(func_sig.return_type.clone())

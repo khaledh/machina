@@ -16,6 +16,9 @@ development. The compiler currently targets only ARM64 assembly.
 **Basic types**
 - `u64`, `bool`, `char`, `()`
 
+**Strings**
+- `string` literals (not useful yet)
+
 **Arrays**
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`
 - Multi-dimensional: `u64[M, N]`, `let a = [[1, 2], [3, 4]]`
@@ -41,13 +44,12 @@ development. The compiler currently targets only ARM64 assembly.
 
 **Range types**
 - `range(max)` and `range(min, max)` (half-open, `[min, max)`)
-- Compile-time validation for integer literals (runtime checks coming later)
 
 ### Control flow
 
 - `if`/`else`
 - `while`
-- `for <pattern> in <start>..<end> { ... }` (range literals)
+- `for <pattern> in <start>..<end> { ... }` (range)
 - `for <pattern> in <expr> { ... }` where `<expr>` is an array
 
 ### Functions
@@ -59,6 +61,12 @@ development. The compiler currently targets only ARM64 assembly.
 ### Code generation
 
 - Code generation to ARM64 assembly
+
+### Runtime checks
+
+- Division by zero
+- Index out of bounds
+- Value out of range
 
 ## Example
 

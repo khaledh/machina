@@ -72,6 +72,8 @@ impl<'a> FuncLowerer<'a> {
             // Scalar assignment.
             let assignee_place = self.lower_place_scalar(assignee)?;
             let value_operand = self.lower_scalar_expr(value)?;
+            let target_ty = self.ty_for_node(assignee.id)?;
+            self.emit_conversion_check(&value_ty, &target_ty, &value_operand);
 
             self.emit_copy_scalar(assignee_place, Rvalue::Use(value_operand));
         } else {

@@ -23,7 +23,9 @@ impl<'a> FuncLowerer<'a> {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
             let op = self.lower_scalar_expr(value)?;
-            let ty_id = self.ty_lowerer.lower_ty(&value_ty);
+            let target_ty = self.def_ty_for_node(pattern.id)?;
+            self.emit_conversion_check(&value_ty, &target_ty, &op);
+            let ty_id = self.ty_lowerer.lower_ty(&target_ty);
             let def_id = self.def_for_node(pattern.id)?.id;
             self.bind_ident_operand(def_id, name.clone(), ty_id, op)?;
         } else {

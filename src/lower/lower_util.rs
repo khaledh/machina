@@ -45,6 +45,15 @@ impl<'a> FuncLowerer<'a> {
             .ok_or(LowerError::ExprTypeNotFound(node_id))
     }
 
+    /// Lookup the AST type for a definition bound to a node id.
+    pub(super) fn def_ty_for_node(&self, node_id: NodeId) -> Result<Type, LowerError> {
+        let def = self.def_for_node(node_id)?;
+        self.ctx
+            .type_map
+            .lookup_def_type(def)
+            .ok_or(LowerError::ExprTypeNotFound(node_id))
+    }
+
     /// Check whether a lowered type is scalar.
     pub(super) fn is_scalar(&self, ty_id: TyId) -> bool {
         self.ty_lowerer.table.get(ty_id).is_scalar()
@@ -77,6 +86,68 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn new_temp_aggregate(&mut self, ty_id: TyId) -> Place<Aggregate> {
         let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
         Place::new(temp_id, ty_id, vec![])
+    }
+
+    pub(super) fn emit_conversion_check(
+        &mut self,
+        from_ty: &Type,
+        to_ty: &Type,
+        value_op: &Operand,
+    ) {
+        match (from_ty, to_ty) {
+            (Type::UInt64, Type::Range { min, max }) => {
+                self.emit_range_conversion_check(value_op, *min, *max);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn emit_range_conversion_check(&mut self, value_op: &Operand, min: u64, max: u64) {
+        let min_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: min as i128,
+        });
+        let max_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: max as i128,
+        });
+        let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+
+        let ge_min = self.emit_scalar_rvalue(
+            bool_ty_id,
+            Rvalue::BinOp {
+                op: BinOp::GtEq,
+                lhs: value_op.clone(),
+                rhs: min_op.clone(),
+            },
+        );
+        self.emit_runtime_check(
+            ge_min,
+            CheckKind::Range {
+                value: value_op.clone(),
+                min: min_op.clone(),
+                max: max_op.clone(),
+            },
+        );
+
+        let lt_max = self.emit_scalar_rvalue(
+            bool_ty_id,
+            Rvalue::BinOp {
+                op: BinOp::Lt,
+                lhs: value_op.clone(),
+                rhs: max_op.clone(),
+            },
+        );
+        self.emit_runtime_check(
+            lt_max,
+            CheckKind::Range {
+                value: value_op.clone(),
+                min: min_op,
+                max: max_op,
+            },
+        );
     }
 
     pub(super) fn emit_runtime_check(&mut self, cond: Operand, kind: CheckKind) {

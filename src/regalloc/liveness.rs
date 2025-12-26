@@ -150,6 +150,11 @@ pub fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
                     collect_operand_uses(len, &mut uses);
                 }
                 CheckKind::DivByZero => {}
+                CheckKind::Range { value, min, max } => {
+                    collect_operand_uses(value, &mut uses);
+                    collect_operand_uses(min, &mut uses);
+                    collect_operand_uses(max, &mut uses);
+                }
             }
             for u in uses {
                 if !kill_set.contains(&u) {

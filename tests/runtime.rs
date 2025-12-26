@@ -1,60 +1,125 @@
 #![cfg(target_arch = "aarch64")]
 
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use machina::compile::{CompileOptions, compile};
 use machina::targets::TargetKind;
 
-#[test]
-fn test_bounds_check_traps_with_message_and_exit_code() {
+static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn run_program(name: &str, source: &str) -> Output {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let temp_dir =
-        std::env::temp_dir().join(format!("machina_runtime_test_{}", std::process::id()));
+    let run_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_runtime_test_{}_{}_{}",
+        name,
+        std::process::id(),
+        run_id
+    ));
     std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
-    let source_path = temp_dir.join("bounds_check.mc");
-    let source = r#"
-        fn main() -> u64 {
-            let arr = [1, 2, 3];
-            arr[5]
-        }
-    "#;
+    let source_path = temp_dir.join(format!("{name}.mc"));
     std::fs::write(&source_path, source).expect("failed to write temp source");
-    let source = std::fs::read_to_string(&source_path).expect("failed to read temp source");
 
+    let output = compile_source(&source_path);
+
+    let asm_path = temp_dir.join(format!("{name}.s"));
+    let exe_path = temp_dir.join(name);
+    std::fs::write(&asm_path, output.asm).expect("failed to write asm");
+
+    let runtime_path = repo_root.join("runtime").join("trap.c");
+    link_exe(&exe_path, &asm_path, &runtime_path);
+
+    let run = Command::new(&exe_path)
+        .output()
+        .expect("failed to run executable");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    run
+}
+
+fn compile_source(source_path: &Path) -> machina::compile::CompileOutput {
+    let source = std::fs::read_to_string(source_path).expect("failed to read temp source");
     let opts = CompileOptions {
         dump: None,
         target: TargetKind::Arm64,
         emit_mcir: false,
     };
-    let output = compile(&source, &opts).expect("compile failed");
+    compile(&source, &opts).expect("compile failed")
+}
 
-    let asm_path = temp_dir.join("bounds_check.s");
-    let exe_path = temp_dir.join("bounds_check");
-    std::fs::write(&asm_path, output.asm).expect("failed to write asm");
-
-    let runtime_path = repo_root.join("runtime").join("trap.c");
-
+fn link_exe(exe_path: &Path, asm_path: &Path, runtime_path: &Path) {
     let status = Command::new("cc")
         .arg("-o")
-        .arg(&exe_path)
-        .arg(&asm_path)
-        .arg(&runtime_path)
+        .arg(exe_path)
+        .arg(asm_path)
+        .arg(runtime_path)
         .status()
         .expect("failed to invoke cc");
     assert!(status.success(), "cc failed with status {status}");
+}
 
-    let run = Command::new(&exe_path)
-        .output()
-        .expect("failed to run executable");
+#[test]
+fn test_bounds_check_traps_with_message_and_exit_code() {
+    let run = run_program(
+        "bounds_check",
+        r#"
+            fn main() -> u64 {
+                let arr = [1, 2, 3];
+                arr[5]
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(101));
+
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        stderr, "Runtime error: Index out of bounds: index=5, len=3\n",
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_div_by_zero_traps_with_message_and_exit_code() {
+    let run = run_program(
+        "div_by_zero",
+        r#"
+            fn main() -> u64 {
+                let z = 0;
+                10 / z
+            }
+        "#,
+    );
     assert_eq!(run.status.code(), Some(100));
 
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(
-        stderr, "Machina runtime error: bounds check failed (index=5, len=3)\n",
+        stderr, "Runtime error: Division by zero\n",
         "unexpected stderr: {stderr}"
     );
+}
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
+#[test]
+fn test_range_check_traps_with_message_and_exit_code() {
+    let run = run_program(
+        "range_check",
+        r#"
+            type MidRange = range(50, 100);
+
+            fn main() -> u64 {
+                let x = 42;
+                let y: MidRange = x;
+                y
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(102));
+
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        stderr,
+        "Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100\n",
+        "unexpected stderr: {stderr}"
+    );
 }
