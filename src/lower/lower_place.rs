@@ -2,6 +2,7 @@ use crate::ast::{Expr, ExprKind as EK};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
+use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
     // --- Place (Lvalue) ---
@@ -62,11 +63,37 @@ impl<'a> FuncLowerer<'a> {
         indices: &[Expr],
     ) -> Result<PlaceAny, LowerError> {
         let target_place = self.lower_place_agg(target)?;
+        let target_ty = self.ty_for_node(target.id)?;
 
-        // Lower each index expression to an operand.
-        let mut index_operands = Vec::new();
-        for idx in indices {
-            let idx_op = self.lower_scalar_expr(idx)?;
+        let Type::Array { dims, .. } = target_ty else {
+            panic!("compiler bug: non-array target (type checker should catch this)");
+        };
+        if indices.len() > dims.len() {
+            panic!("compiler bug: too many indices for array (type checker should catch this)");
+        }
+
+        let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+
+        // Lower each index expression to an operand + emit bounds checks.
+        let mut index_operands = Vec::with_capacity(indices.len());
+        for (idx_expr, dim) in indices.iter().zip(dims) {
+            let idx_op = self.lower_scalar_expr(idx_expr)?;
+            let dim_op = Operand::Const(Const::Int {
+                signed: false,
+                bits: 64,
+                value: dim as i128,
+            });
+
+            let cond_op = self.emit_scalar_rvalue(
+                bool_ty_id,
+                Rvalue::BinOp {
+                    op: BinOp::Lt,
+                    lhs: idx_op.clone(),
+                    rhs: dim_op,
+                },
+            );
+            self.emit_runtime_check(cond_op, CheckKind::Bounds);
+
             index_operands.push(idx_op);
         }
 

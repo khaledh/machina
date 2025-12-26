@@ -274,7 +274,7 @@ pub enum StmtExprKind {
     },
     For {
         pattern: Pattern,
-        iter: Box<Expr>, // For now this must be ExprKind::Range
+        iter: Box<Expr>,
         body: Box<Expr>,
     },
 }

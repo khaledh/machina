@@ -20,6 +20,7 @@ development. The compiler currently targets only ARM64 assembly.
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`
 - Multi-dimensional: `u64[M, N]`, `let a = [[1, 2], [3, 4]]`
 - Array destructuring: `let [a, b, c] = [1, 2, 3]`
+- Array indexing includes runtime bounds checks (traps on failure)
 
 **Tuples** (fixed-size, homogeneous)
 - Tuples: `(u64, bool)`, `let t = (10, true)`

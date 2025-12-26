@@ -220,3 +220,56 @@ fn test_local_simplify_consts_and_terminators() {
         _ => panic!("expected If to be folded to Goto"),
     }
 }
+
+#[test]
+fn test_local_simplify_folds_if_const_temp() {
+    let mut types = TyTable::new();
+    let bool_ty = types.add(TyKind::Bool);
+
+    let locals = vec![Local {
+        ty: bool_ty,
+        kind: LocalKind::Temp,
+        name: None,
+    }];
+
+    let place = Place::new(LocalId(0), bool_ty, vec![]);
+
+    let blocks = vec![
+        BasicBlock {
+            stmts: vec![Statement::CopyScalar {
+                dst: place.clone(),
+                src: Rvalue::Use(Operand::Const(Const::Bool(true))),
+            }],
+            terminator: Terminator::If {
+                cond: Operand::Copy(place.clone()),
+                then_bb: BlockId(1),
+                else_bb: BlockId(2),
+            },
+        },
+        BasicBlock {
+            stmts: vec![],
+            terminator: Terminator::Return,
+        },
+        BasicBlock {
+            stmts: vec![],
+            terminator: Terminator::Return,
+        },
+    ];
+
+    let mut body = FuncBody {
+        locals,
+        blocks,
+        entry: BlockId(0),
+        ret_local: LocalId(0),
+        types,
+    };
+
+    let mut pass = LocalSimplify;
+    let changed = pass.run(&mut body);
+    assert!(changed);
+
+    match &body.blocks[0].terminator {
+        Terminator::Goto(target) => assert_eq!(*target, BlockId(1)),
+        _ => panic!("expected If to be folded to Goto"),
+    }
+}

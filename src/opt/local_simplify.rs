@@ -24,7 +24,7 @@ impl Pass for LocalSimplify {
             }
 
             // Fold trivial terminators (no CFG rewrite here).
-            let new_term = simplify_terminator(&block.terminator);
+            let new_term = simplify_terminator(&block.terminator, &block.stmts);
             if block.terminator != new_term {
                 block.terminator = new_term;
                 changed = true;
@@ -65,13 +65,21 @@ fn simplify_rvalue(rvalue: &Rvalue) -> Rvalue {
     }
 }
 
-fn simplify_terminator(term: &Terminator) -> Terminator {
+fn simplify_terminator(term: &Terminator, stmts: &[Statement]) -> Terminator {
     match term {
         Terminator::If {
-            cond: _,
+            cond,
             then_bb,
             else_bb,
-        } if then_bb == else_bb => Terminator::Goto(*then_bb),
+        } => {
+            if let Some(value) = const_bool_from_last_assign(cond, stmts) {
+                return Terminator::Goto(if value { *then_bb } else { *else_bb });
+            }
+            if then_bb == else_bb {
+                return Terminator::Goto(*then_bb);
+            }
+            term.clone()
+        }
         Terminator::Switch {
             discr: _,
             cases,
@@ -221,6 +229,29 @@ fn const_int_zero_from(op: &Operand) -> Option<Const> {
             signed: *signed,
             bits: *bits,
         }),
+        _ => None,
+    }
+}
+
+fn const_bool_from_last_assign(cond: &Operand, stmts: &[Statement]) -> Option<bool> {
+    // Condition must be a copy or move
+    let (Operand::Copy(place) | Operand::Move(place)) = cond else {
+        return None;
+    };
+
+    // Last statement must be a copy scalar
+    let Statement::CopyScalar { dst, src } = stmts.last()? else {
+        return None;
+    };
+
+    // Destination must be the same as the condition operand
+    if dst.base() != place.base() || dst.projections() != place.projections() {
+        return None;
+    }
+
+    // Source must be a constant boolean
+    match src {
+        Rvalue::Use(Operand::Const(Const::Bool(value))) => Some(*value),
         _ => None,
     }
 }

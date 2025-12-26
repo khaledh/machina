@@ -142,7 +142,10 @@ pub fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
                 }
             }
         }
-        Terminator::Return | Terminator::Goto(_) | Terminator::Unterminated => {}
+        Terminator::Return
+        | Terminator::Goto(_)
+        | Terminator::Trap { .. }
+        | Terminator::Unterminated => {}
     }
 
     GenKillSet { gen_set, kill_set }
@@ -185,7 +188,7 @@ fn compute_succs(body: &FuncBody) -> Vec<Vec<BlockId>> {
                 }
                 v.push(*default);
             }
-            Terminator::Return | Terminator::Unterminated => {}
+            Terminator::Return | Terminator::Trap { .. } | Terminator::Unterminated => {}
         }
     }
     succs

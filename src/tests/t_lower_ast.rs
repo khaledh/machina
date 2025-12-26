@@ -725,3 +725,28 @@ fn test_lower_for_array_loop() {
 
     assert!(saw_index, "expected indexed array access in loop body");
 }
+
+#[test]
+fn test_lower_array_index_emits_bounds_check() {
+    let source = r#"
+        fn main() -> u64 {
+            let arr = [1, 2, 3];
+            arr[1]
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let saw_trap = body.blocks.iter().any(|block| {
+        matches!(
+            block.terminator,
+            Terminator::Trap {
+                kind: CheckKind::Bounds
+            }
+        )
+    });
+
+    assert!(saw_trap, "expected bounds check trap terminator");
+}

@@ -56,6 +56,8 @@ Blocks end in:
 - `Return`
 - `Goto`
 - `If { cond, then_bb, else_bb }`
+- `Switch { discr, cases, default }`
+- `Trap { kind }`
 - `Unterminated` (placeholder during building)
 
 ## Control Flow

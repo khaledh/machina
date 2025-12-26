@@ -363,6 +363,9 @@ pub enum Terminator {
         cases: Vec<SwitchCase>,
         default: BlockId,
     },
+    Trap {
+        kind: CheckKind,
+    },
     Unterminated,
 }
 
@@ -386,6 +389,15 @@ pub struct FuncBody {
     pub ret_local: LocalId,
     pub types: TyTable,
 }
+
+// --- Runtime Checks ---
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckKind {
+    Bounds,
+}
+
+// --- Display ---
 
 impl fmt::Display for TyId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -552,6 +564,7 @@ impl fmt::Display for Terminator {
                 write!(f, "  default: goto {}", default)?;
                 write!(f, "}}")
             }
+            Terminator::Trap { kind } => write!(f, "trap ({})", kind),
             Terminator::Unterminated => write!(f, "unterminated"),
         }
     }
@@ -593,5 +606,13 @@ impl fmt::Display for FuncBody {
             }
         }
         write!(f, "}}")
+    }
+}
+
+impl fmt::Display for CheckKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CheckKind::Bounds => write!(f, "bounds"),
+        }
     }
 }

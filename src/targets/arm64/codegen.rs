@@ -529,6 +529,10 @@ impl<'a> FuncCodegen<'a> {
                 // Branch to defautlt block if no case matches.
                 asm.push_str(&format!("  b {}\n", self.block_labels[default]));
             }
+            Terminator::Trap { kind } => {
+                asm.push_str(&format!("  // trap {}\n", kind));
+                asm.push_str(&format!("  brk #0\n"));
+            }
             Terminator::Unterminated => {
                 // Should not happen in well-formed IR.
                 let label = self

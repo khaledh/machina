@@ -78,4 +78,28 @@ impl<'a> FuncLowerer<'a> {
         let temp_id = self.fb.new_local(ty_id, LocalKind::Temp, None);
         Place::new(temp_id, ty_id, vec![])
     }
+
+    pub(super) fn emit_runtime_check(&mut self, cond: Operand, kind: CheckKind) {
+        // Create blocks
+        let ok_bb = self.fb.new_block();
+        let fail_bb = self.fb.new_block();
+
+        // Add a conditional branch to the ok or fail block
+        self.fb.set_terminator(
+            self.curr_block,
+            Terminator::If {
+                cond,
+                then_bb: ok_bb,
+                else_bb: fail_bb,
+            },
+        );
+
+        // Set the fail block terminator to trap
+        self.curr_block = fail_bb;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Trap { kind });
+
+        // Continue with the ok block
+        self.curr_block = ok_bb;
+    }
 }
