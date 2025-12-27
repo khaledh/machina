@@ -29,8 +29,8 @@ fn run_program(name: &str, source: &str) -> Output {
     let exe_path = temp_dir.join(name);
     std::fs::write(&asm_path, output.asm).expect("failed to write asm");
 
-    let runtime_path = repo_root.join("runtime").join("trap.c");
-    link_exe(&exe_path, &asm_path, &runtime_path);
+    let runtime_sources = runtime_sources(&repo_root);
+    link_exe(&exe_path, &asm_path, &runtime_sources);
 
     let run = Command::new(&exe_path)
         .output()
@@ -49,14 +49,20 @@ fn compile_source(source_path: &Path) -> machina::compile::CompileOutput {
     compile(&source, &opts).expect("compile failed")
 }
 
-fn link_exe(exe_path: &Path, asm_path: &Path, runtime_path: &Path) {
-    let status = Command::new("cc")
-        .arg("-o")
-        .arg(exe_path)
-        .arg(asm_path)
-        .arg(runtime_path)
-        .status()
-        .expect("failed to invoke cc");
+fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
+    vec![
+        repo_root.join("runtime").join("trap.c"),
+        repo_root.join("runtime").join("print.c"),
+    ]
+}
+
+fn link_exe(exe_path: &Path, asm_path: &Path, runtime_sources: &[PathBuf]) {
+    let mut cmd = Command::new("cc");
+    cmd.arg("-o").arg(exe_path).arg(asm_path);
+    for runtime_path in runtime_sources {
+        cmd.arg(runtime_path);
+    }
+    let status = cmd.status().expect("failed to invoke cc");
     assert!(status.success(), "cc failed with status {status}");
 }
 
@@ -121,4 +127,22 @@ fn test_range_check_traps_with_message_and_exit_code() {
         stderr, "Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100\n",
         "unexpected stderr: {stderr}"
     );
+}
+
+#[test]
+fn test_print_outputs_string() {
+    let run = run_program(
+        "print_str",
+        r#"
+            fn main() -> u64 {
+                print("hello");
+                println();
+                0
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "hello\n", "unexpected stdout: {stdout}");
 }

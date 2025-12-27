@@ -6,8 +6,8 @@ use crate::resolve::symbols::SymbolKind;
 
 #[derive(Clone, Debug, Error)]
 pub enum ResolveError {
-    #[error("Variable already defined in current scope: {0}")]
-    VarAlreadyDefined(String, Span),
+    #[error("Symbol already defined in current scope: {0}")]
+    SymbolAlreadyDefined(String, Span),
 
     #[error("Undefined variable: {0}")]
     VarUndefined(String, Span),
@@ -43,7 +43,7 @@ pub enum ResolveError {
 impl ResolveError {
     pub fn span(&self) -> Span {
         match self {
-            ResolveError::VarAlreadyDefined(_, span) => *span,
+            ResolveError::SymbolAlreadyDefined(_, span) => *span,
             ResolveError::VarUndefined(_, span) => *span,
             ResolveError::VarImmutable(_, span) => *span,
             ResolveError::FuncUndefined(_, span) => *span,

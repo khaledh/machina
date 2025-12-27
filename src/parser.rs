@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
     fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match &self.curr_token.kind {
             TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeDecl),
-            TK::Ident(name) if name == "fn" => self.parse_function().map(Decl::Function),
+            TK::Ident(name) if name == "fn" => self.parse_func(),
             _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }
     }
@@ -109,6 +109,8 @@ impl<'a> Parser<'a> {
     // --- Type declarations ---
 
     fn parse_type_decl(&mut self) -> Result<TypeDecl, ParseError> {
+        let marker = self.mark();
+
         // Expect 'type'
         self.consume_keyword("type")?;
 
@@ -144,6 +146,7 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             name,
             kind,
+            span: self.close(marker),
         })
     }
 
@@ -353,7 +356,9 @@ impl<'a> Parser<'a> {
 
     // --- Functions ---
 
-    fn parse_function(&mut self) -> Result<Function, ParseError> {
+    fn parse_function_sig(&mut self) -> Result<FunctionSig, ParseError> {
+        let marker = self.mark();
+
         // Expect 'fn'
         self.consume_keyword("fn")?;
 
@@ -378,29 +383,60 @@ impl<'a> Parser<'a> {
             },
         };
 
-        // Parse function body
-        let body = self.parse_block()?;
-
-        Ok(Function {
-            id: self.id_gen.new_id(),
+        Ok(FunctionSig {
             name,
             params,
             return_type,
-            body,
+            span: self.close(marker),
         })
     }
 
     fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParseError> {
         self.parse_list(TK::Comma, TK::RParen, |parser| {
+            let marker = parser.mark();
+
+            // Parse parameter name
             let name = parser.parse_ident()?;
+
+            // Expect ':'
             parser.consume(&TK::Colon)?;
+
+            // Parse parameter type
             let typ = parser.parse_type_expr()?;
+
             Ok(FunctionParam {
                 id: parser.id_gen.new_id(),
                 name,
                 typ,
+                span: parser.close(marker),
             })
         })
+    }
+
+    fn parse_func(&mut self) -> Result<Decl, ParseError> {
+        let marker = self.mark();
+
+        // Parse function signature
+        let sig = self.parse_function_sig()?;
+
+        if self.curr_token.kind == TK::Semicolon {
+            // Function declaration
+            self.advance();
+            Ok(Decl::FunctionDecl(FunctionDecl {
+                id: self.id_gen.new_id(),
+                sig,
+                span: self.close(marker),
+            }))
+        } else {
+            // Function definition
+            let body = self.parse_block()?;
+            Ok(Decl::Function(Function {
+                id: self.id_gen.new_id(),
+                sig,
+                body,
+                span: self.close(marker),
+            }))
+        }
     }
 
     // --- Blocks / Statement Expressions ---

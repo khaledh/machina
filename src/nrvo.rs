@@ -43,7 +43,7 @@ impl NrvoAnalyzer {
         // Step 1: Check if function return type is compound
         let ret_ty = type_map
             .lookup_node_type(func.id)
-            .unwrap_or_else(|| panic!("Function {} not found in type_map", func.name));
+            .unwrap_or_else(|| panic!("Function {} not found in type_map", func.sig.name));
 
         if !ret_ty.is_compound() {
             return;

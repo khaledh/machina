@@ -1,6 +1,7 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, ExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
+use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 
 impl<'a> FuncLowerer<'a> {
@@ -36,8 +37,29 @@ impl<'a> FuncLowerer<'a> {
         callee: &Expr,
         args: &[Expr],
     ) -> Result<(), LowerError> {
-        let callee_def = self.def_for_node(callee.id)?;
-        let callee_id = callee_def.id;
+        // Resolve the callee to a runtime function or a function definition.
+        let callee = match &callee.kind {
+            ExprKind::Var(name) if name == "print" => Callee::Runtime(RuntimeFn::PrintStr),
+            ExprKind::Var(name) if name == "println" => Callee::Runtime(RuntimeFn::PrintLn),
+            _ => {
+                let callee_def = self.def_for_node(callee.id)?;
+                Callee::Def(callee_def.id)
+            }
+        };
+
+        if let Callee::Runtime(runtime_fn) = &callee {
+            if runtime_fn.sig().arg_count != args.len() as u8 {
+                panic!(
+                    concat!(
+                        "compiler bug: runtime func {} takes {} arguments, but {} were provided. ",
+                        "This should have been caught by the type checker."
+                    ),
+                    runtime_fn.sig().name,
+                    runtime_fn.sig().arg_count,
+                    args.len()
+                );
+            }
+        }
 
         let arg_vals = args
             .iter()
@@ -48,7 +70,7 @@ impl<'a> FuncLowerer<'a> {
             self.curr_block,
             Statement::Call {
                 dst: Some(dst),
-                callee: Callee::Def(callee_id),
+                callee,
                 args: arg_vals,
             },
         );

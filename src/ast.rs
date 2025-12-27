@@ -36,12 +36,12 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn funcs(&self) -> Vec<&Function> {
+    pub fn type_decls(&self) -> Vec<&TypeDecl> {
         self.decls
             .iter()
             .filter_map(|decl| {
-                if let Decl::Function(function) = decl {
-                    Some(function)
+                if let Decl::TypeDecl(type_decl) = decl {
+                    Some(type_decl)
                 } else {
                     None
                 }
@@ -49,12 +49,33 @@ impl Module {
             .collect()
     }
 
-    pub fn type_decls(&self) -> Vec<&TypeDecl> {
+    pub fn func_sigs(&self) -> Vec<&FunctionSig> {
+        self.decls
+            .iter()
+            .filter_map(|decl| match decl {
+                Decl::FunctionDecl(func_decl) => Some(&func_decl.sig),
+                Decl::Function(func) => Some(&func.sig),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn func_decls(&self) -> Vec<&FunctionDecl> {
+        self.decls
+            .iter()
+            .filter_map(|decl| match decl {
+                Decl::FunctionDecl(func_decl) => Some(func_decl),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn funcs(&self) -> Vec<&Function> {
         self.decls
             .iter()
             .filter_map(|decl| {
-                if let Decl::TypeDecl(type_decl) = decl {
-                    Some(type_decl)
+                if let Decl::Function(function) = decl {
+                    Some(function)
                 } else {
                     None
                 }
@@ -68,7 +89,8 @@ impl Module {
 #[derive(Clone, Debug)]
 pub enum Decl {
     TypeDecl(TypeDecl),
-    Function(Function),
+    Function(Function),         // function definition
+    FunctionDecl(FunctionDecl), // function declaration
 }
 
 // -- Type Declarations ---
@@ -78,6 +100,7 @@ pub struct TypeDecl {
     pub id: NodeId,
     pub name: String,
     pub kind: TypeDeclKind,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -157,12 +180,26 @@ pub enum StringTag {
 // -- Functions ---
 
 #[derive(Clone, Debug)]
+pub struct FunctionSig {
+    pub name: String,
+    pub params: Vec<FunctionParam>,
+    pub return_type: TypeExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct FunctionDecl {
+    pub id: NodeId,
+    pub sig: FunctionSig,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct Function {
     pub id: NodeId,
-    pub name: String,
-    pub return_type: TypeExpr,
-    pub params: Vec<FunctionParam>,
+    pub sig: FunctionSig,
     pub body: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -170,6 +207,7 @@ pub struct FunctionParam {
     pub id: NodeId,
     pub name: String,
     pub typ: TypeExpr,
+    pub span: Span,
 }
 
 // -- Patterns ---
@@ -408,6 +446,7 @@ impl fmt::Display for Module {
             match decl {
                 Decl::TypeDecl(type_decl) => type_decl.fmt_with_indent(f, 0)?,
                 Decl::Function(func) => func.fmt_with_indent(f, 0)?,
+                Decl::FunctionDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
             }
             if i + 1 != self.decls.len() {
                 writeln!(f, "--------------------------------")?;
@@ -493,23 +532,34 @@ impl StructUpdateField {
     }
 }
 
+impl FunctionSig {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}Name: {}", pad, self.name)?;
+        writeln!(f, "{}Return Type: {}", pad, self.return_type)?;
+        writeln!(f, "{}Params:", pad)?;
+        for param in &self.params {
+            writeln!(f, "{}{}", indent(level + 2), param)?;
+        }
+        Ok(())
+    }
+}
+
+impl FunctionDecl {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}FunctionDecl [{}]", pad, self.id)?;
+        self.sig.fmt_with_indent(f, level + 1)?;
+        Ok(())
+    }
+}
+
 impl Function {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        let pad1 = indent(level + 1);
         writeln!(f, "{}Function [{}]", pad, self.id)?;
-        writeln!(f, "{}Name: {}", pad1, self.name)?;
-        writeln!(f, "{}Return Type: {}", pad1, self.return_type)?;
-        if !self.params.is_empty() {
-            writeln!(f, "{}Params:", pad1)?;
-            for param in &self.params {
-                writeln!(f, "{}{}", indent(level + 2), param)?;
-            }
-        } else {
-            writeln!(f, "{}Params: none", pad1)?;
-        }
-        self.body.fmt_with_indent(f, level + 1)?;
-        Ok(())
+        self.sig.fmt_with_indent(f, level + 1)?;
+        self.body.fmt_with_indent(f, level + 1)
     }
 }
 

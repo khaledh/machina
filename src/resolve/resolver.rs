@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::ast::NodeId;
 use crate::ast::{
-    BlockItem, Decl, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExprKind, TypeDecl,
-    TypeDeclKind, TypeExpr, TypeExprKind,
+    BlockItem, Decl, ExprKind, Function, FunctionDecl, MatchPattern, Module, PatternKind,
+    StmtExprKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
@@ -13,6 +13,8 @@ use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::SymbolKind;
 use crate::resolve::symbols::{Scope, Symbol};
 use crate::types::BUILTIN_TYPES;
+
+const BUILTIN_FUNCS: &[&str] = &["print", "println"];
 
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
@@ -52,7 +54,14 @@ impl SymbolResolver {
         self.exit_scope();
     }
 
-    fn insert_symbol(&mut self, name: &str, symbol: Symbol) {
+    fn insert_symbol(&mut self, name: &str, symbol: Symbol, span: Span) {
+        // Check for duplicate symbols
+        if self.lookup_symbol_direct(name).is_some() {
+            self.errors
+                .push(ResolveError::SymbolAlreadyDefined(name.to_string(), span));
+            return;
+        }
+
         self.scopes
             .last_mut()
             .unwrap()
@@ -100,11 +109,13 @@ impl SymbolResolver {
                 name: name.to_string(),
                 kind,
             },
+            Span::default(),
         );
     }
 
     fn populate_decls(&mut self, module: &Module) {
         self.populate_type_decls(&module.type_decls());
+        self.populate_func_decls(&module.func_decls());
         self.populate_funcs(&module.funcs());
     }
 
@@ -158,6 +169,28 @@ impl SymbolResolver {
                     name: type_decl.name.clone(),
                     kind: symbol_kind,
                 },
+                type_decl.span,
+            );
+        }
+    }
+
+    fn populate_func_decls(&mut self, func_decls: &[&FunctionDecl]) {
+        for &func_decl in func_decls {
+            let def_id = self.def_id_gen.new_id();
+            let def = Def {
+                id: def_id,
+                name: func_decl.sig.name.clone(),
+                kind: DefKind::Func,
+            };
+            self.def_map_builder.record_def(def, func_decl.id);
+            self.insert_symbol(
+                &func_decl.sig.name,
+                Symbol {
+                    def_id,
+                    name: func_decl.sig.name.clone(),
+                    kind: SymbolKind::Func,
+                },
+                func_decl.span,
             );
         }
     }
@@ -167,27 +200,29 @@ impl SymbolResolver {
             let def_id = self.def_id_gen.new_id();
             let def = Def {
                 id: def_id,
-                name: func.name.clone(),
+                name: func.sig.name.clone(),
                 kind: DefKind::Func,
             };
             self.def_map_builder.record_def(def, func.id);
             self.insert_symbol(
-                &func.name,
+                &func.sig.name,
                 Symbol {
                     def_id,
-                    name: func.name.clone(),
+                    name: func.sig.name.clone(),
                     kind: SymbolKind::Func,
                 },
+                func.span,
             );
         }
     }
 
     pub fn resolve(&mut self, module: &Module) -> Result<DefMap, Vec<ResolveError>> {
-        self.with_scope(|checker| {
+        self.with_scope(|resolver| {
             // global scope
+
             // add built-in types
             for ty in BUILTIN_TYPES {
-                checker.add_built_in_symbol(
+                resolver.add_built_in_symbol(
                     &ty.to_string(),
                     SymbolKind::TypeAlias {
                         ty_expr: TypeExpr {
@@ -198,11 +233,19 @@ impl SymbolResolver {
                     },
                 );
             }
-            checker.populate_decls(module);
+
+            // add built-in functions
+            for func_name in BUILTIN_FUNCS {
+                resolver.add_built_in_symbol(func_name, SymbolKind::Func);
+            }
+
+            resolver.populate_decls(module);
+
             for decl in &module.decls {
                 match decl {
-                    Decl::TypeDecl(type_decl) => checker.check_type_decl(type_decl),
-                    Decl::Function(function) => checker.check_function(function),
+                    Decl::TypeDecl(type_decl) => resolver.check_type_decl(type_decl),
+                    Decl::FunctionDecl(func_decl) => resolver.check_function_decl(func_decl),
+                    Decl::Function(function) => resolver.check_function(function),
                 }
             }
         });
@@ -239,16 +282,28 @@ impl SymbolResolver {
         }
     }
 
-    fn check_function(&mut self, function: &ast::Function) {
+    fn check_function_decl(&mut self, func_decl: &ast::FunctionDecl) {
         // resolve return type
-        self.check_type_expr(&function.return_type);
+        self.check_type_expr(&func_decl.sig.return_type);
 
+        // resolve param types
+        for param in &func_decl.sig.params {
+            self.check_type_expr(&param.typ);
+        }
+    }
+
+    fn check_function(&mut self, func: &ast::Function) {
+        // resolve return type
+        self.check_type_expr(&func.sig.return_type);
+
+        // Enter a new scope for the function body
         self.with_scope(|checker| {
             // add parameters to scope
-            for (index, param) in function.params.iter().enumerate() {
+            for (index, param) in func.sig.params.iter().enumerate() {
                 // resolve param type
                 checker.check_type_expr(&param.typ);
 
+                // record the param def
                 let def_id = checker.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -265,10 +320,12 @@ impl SymbolResolver {
                         name: param.name.clone(),
                         kind: SymbolKind::Var { is_mutable: false },
                     },
+                    param.span,
                 );
             }
+
             // check function body
-            checker.check_expr(&function.body);
+            checker.check_expr(&func.body);
         });
     }
 
@@ -323,30 +380,24 @@ impl SymbolResolver {
     fn check_pattern(&mut self, pattern: &ast::Pattern, is_mutable: bool) {
         match &pattern.kind {
             PatternKind::Ident { name } => {
-                if self.lookup_symbol_direct(name).is_some() {
-                    self.errors.push(ResolveError::VarAlreadyDefined(
-                        name.to_string(),
-                        pattern.span,
-                    ));
-                } else {
-                    let def_id = self.def_id_gen.new_id();
-                    let def = Def {
-                        id: def_id,
+                let def_id = self.def_id_gen.new_id();
+                let def = Def {
+                    id: def_id,
+                    name: name.to_string(),
+                    kind: DefKind::LocalVar {
+                        nrvo_eligible: false,
+                    },
+                };
+                self.def_map_builder.record_def(def, pattern.id);
+                self.insert_symbol(
+                    name,
+                    Symbol {
+                        def_id,
                         name: name.to_string(),
-                        kind: DefKind::LocalVar {
-                            nrvo_eligible: false,
-                        },
-                    };
-                    self.def_map_builder.record_def(def, pattern.id);
-                    self.insert_symbol(
-                        name,
-                        Symbol {
-                            def_id,
-                            name: name.to_string(),
-                            kind: SymbolKind::Var { is_mutable },
-                        },
-                    );
-                }
+                        kind: SymbolKind::Var { is_mutable },
+                    },
+                    pattern.span,
+                );
             }
             PatternKind::Array { patterns } => {
                 // Recursively check each sub-pattern
@@ -418,13 +469,6 @@ impl SymbolResolver {
 
                 // Bind each binding's sub-pattern
                 for binding in bindings {
-                    // Check for duplicate bindings
-                    if self.lookup_symbol_direct(&binding.name).is_some() {
-                        self.errors
-                            .push(ResolveError::VarAlreadyDefined(binding.name.clone(), *span));
-                        return;
-                    }
-
                     // Create a new def
                     let def_id = self.def_id_gen.new_id();
                     let def = Def {
@@ -442,6 +486,7 @@ impl SymbolResolver {
                             name: binding.name.clone(),
                             kind: SymbolKind::Var { is_mutable: false },
                         },
+                        binding.span,
                     );
                 }
             }

@@ -17,7 +17,7 @@ development. The compiler currently targets only ARM64 assembly.
 - `u64`, `bool`, `char`, `()`
 
 **Strings**
-- `string` literals (not useful yet)
+- `string` values (literals + variables) and `print` / `println` builtins
 
 **Arrays**
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`

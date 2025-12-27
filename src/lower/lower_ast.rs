@@ -87,7 +87,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lower the function AST into MCIR.
     pub fn lower(&mut self) -> Result<FuncBody, LowerError> {
         // Create locals for params.
-        for (i, param) in self.func.params.iter().enumerate() {
+        for (i, param) in self.func.sig.params.iter().enumerate() {
             let ty = self.ty_for_node(param.id)?;
             let ty_id = self.ty_lowerer.lower_ty(&ty);
             let def_id = self.def_for_node(param.id)?.id;

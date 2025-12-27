@@ -3,6 +3,15 @@
 ## ABI
 - Symbol: `__mc_trap`
 - Signature: `void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2)`
+  
+- Symbol: `__mc_print_str`
+- Signature: `void __mc_print_str(const mc_string_t *str)`
+
+- Symbol: `__mc_print_ln`
+- Signature: `void __mc_print_ln()`
+
+## Types
+- `mc_string_t` matches Machina's `string` layout: `{ ptr: u64, len: u32, tag: u8, padding: [u8; 3] }`
 
 ## CheckKind mapping
 - 0: DivByZero (arg0/arg1/arg2 unused)

@@ -145,7 +145,7 @@ fn test_lower_call_emits_arg_temp() {
         .module
         .funcs()
         .iter()
-        .find(|f| f.name == "main")
+        .find(|f| f.sig.name == "main")
         .expect("main not found");
     let (body, _) = lower_body_with_globals(&analyzed, func);
 
@@ -206,7 +206,7 @@ fn test_lower_call_emits_arg_temp() {
         .module
         .funcs()
         .iter()
-        .find(|f| f.name == "id")
+        .find(|f| f.sig.name == "id")
         .expect("id not found");
     let (body, _) = lower_body_with_globals(&analyzed, id_func);
 
@@ -323,7 +323,7 @@ fn test_lower_struct_pattern_binding() {
         .module
         .funcs()
         .iter()
-        .find(|f| f.name == "main")
+        .find(|f| f.sig.name == "main")
         .copied()
         .expect("main not found");
     let (body, _) = lower_body_with_globals(&analyzed, func);
@@ -499,7 +499,7 @@ fn test_lower_match_switch_payload_binding() {
         .module
         .funcs()
         .iter()
-        .find(|f| f.name == "main")
+        .find(|f| f.sig.name == "main")
         .expect("main not found");
     let (body, _) = lower_body_with_globals(&analyzed, func);
 

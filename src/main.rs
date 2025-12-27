@@ -290,10 +290,12 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
     Ok(status.code().unwrap_or(1))
 }
 
+const RUNTIME_SOURCE_FILES: &[&str] = &["trap.c", "print.c"];
+
 fn runtime_source_paths() -> Vec<PathBuf> {
-    vec![
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("runtime")
-            .join("trap.c"),
-    ]
+    let runtime_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+    RUNTIME_SOURCE_FILES
+        .iter()
+        .map(|f| runtime_dir.join(f))
+        .collect()
 }

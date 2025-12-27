@@ -3,7 +3,7 @@
 # Top-level
 Module             ::= Decl*
 
-Decl               ::= TypeDecl | Function
+Decl               ::= TypeDecl | FunctionDecl | Function
 
 # Type Declarations
 TypeDecl           ::= "type" Identifier "=" TypeDeclBody
@@ -33,7 +33,11 @@ TypeExprList       ::= TypeExpr ( "," TypeExpr )* ","?
 IntLitList         ::= IntLit ("," IntLit)* ","?
 
 # Functions
-Function           ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )? Block
+FunctionSig        ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )?
+
+FunctionDecl       ::= FunctionSig ";"
+
+Function           ::= FunctionSig Block
 FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
 FunctionParam      ::= Identifier ":" TypeExpr
 

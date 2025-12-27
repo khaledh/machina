@@ -62,7 +62,24 @@ impl TypeChecker {
     }
 
     fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for function in self.context.module.funcs() {
+        // Add built-in functions
+        self.func_sigs.insert(
+            "print".to_string(),
+            FuncSig {
+                params: vec![Type::String],
+                return_type: Type::Unit,
+            },
+        );
+        self.func_sigs.insert(
+            "println".to_string(),
+            FuncSig {
+                params: vec![],
+                return_type: Type::Unit,
+            },
+        );
+
+        // Add user-defined functions
+        for function in self.context.module.func_sigs() {
             let params = function
                 .params
                 .iter()
@@ -81,6 +98,7 @@ impl TypeChecker {
                 },
             );
         }
+
         Ok(())
     }
 
@@ -174,11 +192,11 @@ impl<'c, 'b> Checker<'c, 'b> {
         // Get the resolved function signature
         let func_sig = self
             .func_sigs
-            .get(&function.name)
+            .get(&function.sig.name)
             .expect("Function not found in func_sigs");
 
         // Record param types
-        for (param, param_ty) in function.params.iter().zip(func_sig.params.iter()) {
+        for (param, param_ty) in function.sig.params.iter().zip(func_sig.params.iter()) {
             match self.context.def_map.lookup_def(param.id) {
                 Some(def) => {
                     self.builder.record_def_type(def.clone(), param_ty.clone());

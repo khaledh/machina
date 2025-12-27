@@ -19,7 +19,7 @@ impl SymbolTable {
                 def_map
                     .lookup_def(func.id)
                     .unwrap_or_else(|| {
-                        panic!("Function {} not found in def_map", func.name);
+                        panic!("Function {} not found in def_map", func.sig.name);
                     })
                     .id
             })
