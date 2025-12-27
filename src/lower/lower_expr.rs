@@ -57,7 +57,7 @@ impl<'a> FuncLowerer<'a> {
             EK::CharLit(value) => {
                 let c = Const::Int {
                     signed: false,
-                    bits: 8,
+                    bits: 32,
                     value: *value as i128,
                 };
                 Ok(Operand::Const(c))

@@ -25,7 +25,7 @@ pub enum TokenKind {
     #[display("IntLit({0})")]
     IntLit(u64),
     #[display("CharLit({0})")]
-    CharLit(u8),
+    CharLit(char),
     #[display("StringLit({0})")]
     StringLit(String),
     #[display("[")]
@@ -181,10 +181,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_char_lit(&mut self, start: Position) -> Result<TokenKind, LexError> {
-        // Accept exactly one ASCII codepoint after escapes.
+        // Accept exactly one Unicode scalar value after escapes.
         // Escapes: \n, \r, \t, \\, \', \0, \xNN.
         // Reject empty ' or multi‑char.
-        // Reject non‑ASCII in either raw or \xNN > 0x7F.
         let next_char = |lexer: &mut Lexer<'a>| -> Result<char, LexError> {
             match lexer.source.peek().copied() {
                 Some(ch) => {
@@ -208,16 +207,9 @@ impl<'a> Lexer<'a> {
         }
 
         let value = if ch == '\\' {
-            let esc = self.parse_escape(start, /*allow_non_ascii=*/ false)?;
-            esc as u8
+            self.parse_escape(start)?
         } else {
-            if !ch.is_ascii() {
-                return Err(LexError::InvalidEscapeSequence(
-                    format!("{}", ch),
-                    Span::new(start, self.pos),
-                ));
-            }
-            ch as u8
+            ch
         };
 
         // expect closing quote
@@ -254,7 +246,7 @@ impl<'a> Lexer<'a> {
             match ch {
                 '"' => break,
                 '\\' => {
-                    let unescaped = self.parse_escape(start, /*allow_non_ascii=*/ true)?;
+                    let unescaped = self.parse_escape(start)?;
                     buf.push(unescaped);
                 }
                 _ => buf.push(ch),
@@ -264,7 +256,7 @@ impl<'a> Lexer<'a> {
         Ok(TokenKind::StringLit(buf))
     }
 
-    fn parse_escape(&mut self, start: Position, allow_non_ascii: bool) -> Result<char, LexError> {
+    fn parse_escape(&mut self, start: Position) -> Result<char, LexError> {
         let esc = match self.source.peek().copied() {
             Some(c) => c,
             None => return Err(LexError::UnterminatedString(Span::new(start, self.pos))),
@@ -295,12 +287,6 @@ impl<'a> Lexer<'a> {
                     let byte = u8::from_str_radix(&hex, 16).map_err(|_| {
                         LexError::InvalidEscapeSequence(hex.clone(), Span::new(start, self.pos))
                     })?;
-                    if !allow_non_ascii && byte > 0x7F {
-                        return Err(LexError::InvalidEscapeSequence(
-                            hex,
-                            Span::new(start, self.pos),
-                        ));
-                    }
                     char::from(byte)
                 }
                 _ => {

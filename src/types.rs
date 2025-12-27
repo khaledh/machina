@@ -208,7 +208,7 @@ impl Type {
             Type::UInt32 => 4,
             Type::UInt8 => 1,
             Type::Bool => 1,
-            Type::Char => 1,
+            Type::Char => 4,
             Type::Range { .. } => 8,
             Type::String => 16,
             Type::Array { elem_ty, dims } => {
@@ -238,7 +238,7 @@ impl Type {
             Type::UInt32 => 4,
             Type::UInt8 => 1,
             Type::Bool => 1,
-            Type::Char => 1,
+            Type::Char => 4,
             Type::Range { .. } => 8,
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),

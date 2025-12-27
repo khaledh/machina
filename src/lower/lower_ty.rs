@@ -28,7 +28,7 @@ impl TyLowerer {
             Type::Unit => self.table.add(TyKind::Unit),
             Type::Bool => self.table.add(TyKind::Bool),
             Type::Char => self.table.add(TyKind::Int {
-                bits: 8,
+                bits: 32,
                 signed: false,
             }),
             Type::UInt64 => self.table.add(TyKind::Int {

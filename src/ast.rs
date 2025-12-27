@@ -298,7 +298,7 @@ pub enum ExprKind {
     // Literals (scalar)
     UInt64Lit(u64),
     BoolLit(bool),
-    CharLit(u8),
+    CharLit(char),
     StringLit {
         value: String,
         tag: StringTag,
@@ -931,16 +931,11 @@ fn indent(level: usize) -> String {
     "  ".repeat(level)
 }
 
-fn fmt_char(value: u8) -> String {
-    match value {
-        b'\n' => "'\\n'".to_string(),
-        b'\r' => "'\\r'".to_string(),
-        b'\t' => "'\\t'".to_string(),
-        b'\\' => "'\\\\'".to_string(),
-        b'\'' => "'\\''".to_string(),
-        b'\0' => "'\\0'".to_string(),
-        0..=31 => format!("'\\x{:02X}'", value),
-        32..=126 => format!("'{}'", value as char),
-        127..=255 => format!("'\\x{:02X}'", value),
+fn fmt_char(value: char) -> String {
+    let mut out = String::from("'");
+    for ch in value.escape_default() {
+        out.push(ch);
     }
+    out.push('\'');
+    out
 }

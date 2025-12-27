@@ -814,7 +814,7 @@ fn test_parse_char_literal() {
 
     let tail = block_tail(&func.body);
     match &tail.kind {
-        ExprKind::CharLit(value) => assert_eq!(*value, b'a'),
+        ExprKind::CharLit(value) => assert_eq!(*value, 'a'),
         _ => panic!("Expected CharLit"),
     }
 }

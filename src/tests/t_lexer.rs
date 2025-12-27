@@ -60,11 +60,11 @@ fn test_lex_comment_at_end() {
 }
 
 #[test]
-fn test_lex_char_literal_ascii() {
+fn test_lex_char_literal() {
     let mut lexer = Lexer::new("'a'");
     let token = lexer.next_token().unwrap();
 
-    assert_eq!(token.kind, TokenKind::CharLit(b'a'));
+    assert_eq!(token.kind, TokenKind::CharLit('a'));
     assert_span_eq(token.span, (1, 1), (1, 4));
 }
 
@@ -73,7 +73,7 @@ fn test_lex_char_literal_escape() {
     let mut lexer = Lexer::new("'\\n'");
     let token = lexer.next_token().unwrap();
 
-    assert_eq!(token.kind, TokenKind::CharLit(b'\n'));
+    assert_eq!(token.kind, TokenKind::CharLit('\n'));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn test_lex_char_literal_hex_escape() {
     let mut lexer = Lexer::new("'\\x41'");
     let token = lexer.next_token().unwrap();
 
-    assert_eq!(token.kind, TokenKind::CharLit(b'A'));
+    assert_eq!(token.kind, TokenKind::CharLit('A'));
 }
 
 #[test]
@@ -101,11 +101,12 @@ fn test_lex_char_literal_multi_char() {
 }
 
 #[test]
-fn test_lex_char_literal_non_ascii() {
+fn test_lex_char_literal_utf8() {
     let mut lexer = Lexer::new("'é'");
-    let result = lexer.next_token();
+    let token = lexer.next_token().unwrap();
 
-    assert!(matches!(result, Err(LexError::InvalidEscapeSequence(_, _))));
+    assert_eq!(token.kind, TokenKind::CharLit('é'));
+    assert_span_eq(token.span, (1, 1), (1, 4));
 }
 
 #[test]
