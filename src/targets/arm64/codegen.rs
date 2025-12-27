@@ -646,6 +646,10 @@ impl<'a> FuncCodegen<'a> {
                 }
                 Ok(R::X16)
             }
+            Rvalue::AddrOf(place) => {
+                let addr_reg = self.emit_place_addr_any(place, asm)?;
+                Ok(addr_reg)
+            }
         }
     }
 

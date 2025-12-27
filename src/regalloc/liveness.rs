@@ -57,6 +57,7 @@ fn collect_rvalue_uses(rv: &Rvalue, out: &mut HashSet<LocalId>) {
             collect_operand_uses(rhs, out);
         }
         Rvalue::UnOp { arg, .. } => collect_operand_uses(arg, out),
+        Rvalue::AddrOf(place) => collect_place_any_uses(place, out),
     }
 }
 

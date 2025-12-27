@@ -10,8 +10,19 @@
 - Symbol: `__mc_print_ln`
 - Signature: `void __mc_print_ln()`
 
+- Symbol: `__mc_u64_to_dec`
+- Signature: `uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value)`
+
 ## Types
-- `mc_string_t` matches Machina's `string` layout: `{ ptr: u64, len: u32, tag: u8, padding: [u8; 3] }`
+- `mc_string_t` matches Machina's `string` layout:
+  ```
+  { ptr: u64, len: u32, tag: u8, padding: [u8; 3] }
+  ```
+
+- `mc_slice_t` is a simple pointer and length:
+  ```
+  { ptr: u64, len: u64 }
+  ```
 
 ## CheckKind mapping
 - 0: DivByZero (arg0/arg1/arg2 unused)

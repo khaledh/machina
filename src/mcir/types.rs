@@ -326,6 +326,7 @@ pub enum Rvalue {
         op: UnOp,
         arg: Operand,
     },
+    AddrOf(PlaceAny),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -520,6 +521,7 @@ impl fmt::Display for Rvalue {
             Rvalue::Use(op) => write!(f, "{}", op),
             Rvalue::BinOp { op, lhs, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
             Rvalue::UnOp { op, arg } => write!(f, "({}{})", op, arg),
+            Rvalue::AddrOf(place) => write!(f, "addr_of {}", place),
         }
     }
 }

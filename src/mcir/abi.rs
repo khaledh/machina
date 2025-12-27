@@ -3,6 +3,7 @@ pub enum RuntimeFn {
     Trap,
     PrintStr,
     PrintLn,
+    U64ToDec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +49,12 @@ impl RuntimeFn {
                 arg_count: 0,
                 ret: None,
                 effect: CallEffect::ReadOnly,
+            },
+            RuntimeFn::U64ToDec => RuntimeFnSig {
+                name: "__mc_u64_to_dec",
+                arg_count: 2,
+                ret: Some(RuntimeRet::Scalar),
+                effect: CallEffect::ReadWrite,
             },
         }
     }

@@ -53,6 +53,7 @@ fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
     vec![
         repo_root.join("runtime").join("trap.c"),
         repo_root.join("runtime").join("print.c"),
+        repo_root.join("runtime").join("conv.c"),
     ]
 }
 

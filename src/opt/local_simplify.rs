@@ -61,7 +61,8 @@ fn simplify_rvalue(rvalue: &Rvalue) -> Rvalue {
             }
             rvalue.clone()
         }
-        _ => rvalue.clone(),
+        Rvalue::Use(_) => rvalue.clone(),
+        Rvalue::AddrOf(_) => rvalue.clone(),
     }
 }
 

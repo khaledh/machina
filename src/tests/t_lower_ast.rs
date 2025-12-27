@@ -698,6 +698,7 @@ fn test_lower_for_array_loop() {
             Rvalue::Use(op) => operand_has_index(op),
             Rvalue::BinOp { lhs, rhs, .. } => operand_has_index(lhs) || operand_has_index(rhs),
             Rvalue::UnOp { arg, .. } => operand_has_index(arg),
+            Rvalue::AddrOf(_) => false,
         }
     }
 

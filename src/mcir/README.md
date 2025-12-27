@@ -40,7 +40,8 @@ path (fields/indices). Places are typed, with a marker `K`:
 ### Operands and Rvalues
 
 - `Operand` represents a scalar value: `Copy(place)`, `Move(place)`, or `Const`.
-- `Rvalue` represents computed scalar values: `Use`, `BinOp`, or `UnOp`.
+- `Rvalue` represents computed scalar values: `Use`, `BinOp`, `UnOp`, or
+  `AddrOf` (produces a `u64` pointer-like scalar).
   `Const::GlobalAddr` is treated as an address-sized `u64` constant.
 
 ### Statements
