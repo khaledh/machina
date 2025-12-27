@@ -48,7 +48,7 @@ path (fields/indices). Places are typed, with a marker `K`:
 Statements encode side effects and writes:
 - `CopyScalar { dst, src }`
 - `CopyAggregate { dst, src }`
-- `Call { dst, callee, args }`
+- `Call { dst, callee, args }` (`dst` is optional for void/noreturn calls)
 
 ### Terminators
 
@@ -57,10 +57,7 @@ Blocks end in:
 - `Goto`
 - `If { cond, then_bb, else_bb }`
 - `Switch { discr, cases, default }`
-- `Trap { kind }`, where `kind` is a `CheckKind`:
-   - `Bounds { index, len }`
-   - `DivByZero`
-   - `Range { value, min, max }`
+- `Unreachable`
 - `Unterminated` (placeholder during building)
 
 ## Control Flow
@@ -80,4 +77,7 @@ structure explicit.
 ## Calls
 
 Calls use a `Callee::Def(DefId)` so codegen can resolve symbol names via the
-symbol table (DefId -> name mapping).
+symbol table (DefId -> name mapping). Runtime entry points use
+`Callee::Runtime(RuntimeFn)`; see `src/mcir/abi.rs` for the runtime ABI table.
+Runtime checks are emitted as a runtime call (e.g. `__mc_trap`) followed by
+`Unreachable`.

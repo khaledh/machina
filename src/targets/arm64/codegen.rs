@@ -476,6 +476,7 @@ impl<'a> FuncCodegen<'a> {
                 .cloned()
                 .ok_or(*def_id)
                 .map_err(CodegenError::CalleeNameNotFound)?,
+            Callee::Runtime(func) => func.sig().name.to_string(),
         };
 
         // Emit branch to callee.
@@ -529,7 +530,7 @@ impl<'a> FuncCodegen<'a> {
                 // Branch to default block if no case matches.
                 asm.push_str(&format!("  b {}\n", self.block_labels[default]));
             }
-            Terminator::Trap { kind } => self.emit_runtime_check(kind, &mut asm)?,
+            Terminator::Unreachable => {}
             Terminator::Unterminated => {
                 // Should not happen in well-formed IR.
                 let label = self
@@ -721,19 +722,6 @@ impl<'a> FuncCodegen<'a> {
                 Ok(scratch)
             }
         }
-    }
-
-    fn materialize_operand_into(
-        &mut self,
-        op: &Operand,
-        asm: &mut String,
-        dst: R,
-    ) -> Result<(), CodegenError> {
-        let src = self.materialize_operand(op, asm, dst)?;
-        if src != dst {
-            asm.push_str(&format!("  mov {}, {}\n", dst, src));
-        }
-        Ok(())
     }
 
     fn load_place_value(
@@ -1307,63 +1295,6 @@ impl<'a> FuncCodegen<'a> {
         };
         asm.push_str(&inst);
         Ok(asm)
-    }
-
-    fn emit_runtime_check(
-        &mut self,
-        kind: &CheckKind,
-        asm: &mut String,
-    ) -> Result<(), CodegenError> {
-        let zero_op = Operand::Const(Const::Int {
-            value: 0,
-            signed: false,
-            bits: 64,
-        });
-        // Load payloads first because materializing kind into x0 may clobber a
-        // value that currently lives in x0 (e.g. from a temp/reg allocation).
-        match kind {
-            CheckKind::DivByZero => {
-                let kind_op = Operand::Const(Const::Int {
-                    value: 0 as i128,
-                    signed: false,
-                    bits: 64,
-                });
-                self.materialize_operand_into(&zero_op, asm, R::X1)?;
-                self.materialize_operand_into(&zero_op, asm, R::X2)?;
-                self.materialize_operand_into(&zero_op, asm, R::X3)?;
-                // Set kind last to preserve any payload that used x0.
-                self.materialize_operand_into(&kind_op, asm, R::X0)?;
-            }
-            CheckKind::Bounds { index, len } => {
-                let kind_op = Operand::Const(Const::Int {
-                    value: 1 as i128,
-                    signed: false,
-                    bits: 64,
-                });
-                self.materialize_operand_into(&index, asm, R::X1)?;
-                self.materialize_operand_into(&len, asm, R::X2)?;
-                self.materialize_operand_into(&zero_op, asm, R::X3)?;
-                // Set kind last to preserve any payload that used x0.
-                self.materialize_operand_into(&kind_op, asm, R::X0)?;
-            }
-            CheckKind::Range { value, min, max } => {
-                let kind_op = Operand::Const(Const::Int {
-                    value: 2 as i128,
-                    signed: false,
-                    bits: 64,
-                });
-                self.materialize_operand_into(&value, asm, R::X1)?;
-                self.materialize_operand_into(&min, asm, R::X2)?;
-                self.materialize_operand_into(&max, asm, R::X3)?;
-                self.materialize_operand_into(&kind_op, asm, R::X0)?;
-            }
-        };
-
-        // On Mach-O, external symbols are referenced with a leading underscore.
-        // __mc_trap (C symbol) => ___mc_trap in asm.
-        asm.push_str("  bl ___mc_trap\n");
-
-        Ok(())
     }
 
     fn get_stack_offset(&self, slot: &StackSlotId) -> Result<u32, CodegenError> {

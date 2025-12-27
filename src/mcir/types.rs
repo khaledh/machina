@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Write as _;
 use std::marker::PhantomData;
 
+use crate::mcir::abi::RuntimeFn;
 use crate::resolve::def_map::DefId;
 
 // --- IR Type System ---
@@ -338,7 +339,7 @@ pub enum Statement {
         src: Place<Aggregate>,
     },
     Call {
-        dst: PlaceAny,
+        dst: Option<PlaceAny>,
         callee: Callee,
         args: Vec<PlaceAny>,
     },
@@ -347,6 +348,7 @@ pub enum Statement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callee {
     Def(DefId),
+    Runtime(RuntimeFn),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,9 +365,7 @@ pub enum Terminator {
         cases: Vec<SwitchCase>,
         default: BlockId,
     },
-    Trap {
-        kind: CheckKind,
-    },
+    Unreachable,
     Unterminated,
 }
 
@@ -528,6 +528,7 @@ impl fmt::Display for Callee {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Callee::Def(def_id) => write!(f, "def#{}", def_id),
+            Callee::Runtime(func) => write!(f, "runtime::{}", func.sig().name),
         }
     }
 }
@@ -538,7 +539,11 @@ impl fmt::Display for Statement {
             Statement::CopyScalar { dst, src } => write!(f, "{} = {}", dst, src),
             Statement::CopyAggregate { dst, src } => write!(f, "{} = copy {}", dst, src),
             Statement::Call { dst, callee, args } => {
-                write!(f, "{} = call {}(", dst, callee)?;
+                if let Some(dst) = dst {
+                    write!(f, "{} = call {}(", dst, callee)?;
+                } else {
+                    write!(f, "call {}(", callee)?;
+                }
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -573,7 +578,7 @@ impl fmt::Display for Terminator {
                 write!(f, "  default: goto {}", default)?;
                 write!(f, "}}")
             }
-            Terminator::Trap { kind } => write!(f, "trap: {}", kind),
+            Terminator::Unreachable => write!(f, "unreachable"),
             Terminator::Unterminated => write!(f, "unterminated"),
         }
     }

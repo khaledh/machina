@@ -118,8 +118,7 @@ fn test_range_check_traps_with_message_and_exit_code() {
 
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(
-        stderr,
-        "Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100\n",
+        stderr, "Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100\n",
         "unexpected stderr: {stderr}"
     );
 }

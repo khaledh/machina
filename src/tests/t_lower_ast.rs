@@ -1,6 +1,7 @@
 use super::*;
 use crate::context::AstContext;
 use crate::lexer::{LexError, Lexer, Token};
+use crate::mcir::abi::RuntimeFn;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::{GlobalItem, GlobalPayload, GlobalSection};
 use crate::nrvo::NrvoAnalyzer;
@@ -168,7 +169,11 @@ fn test_lower_call_emits_arg_temp() {
     }
 
     match &entry_block.stmts[1] {
-        Statement::Call { dst, args, .. } => {
+        Statement::Call {
+            dst: Some(dst),
+            args,
+            ..
+        } => {
             match dst {
                 PlaceAny::Scalar(place) => assert_eq!(place.base(), LocalId(1)),
                 _ => panic!("unexpected call dst"),
@@ -711,7 +716,11 @@ fn test_lower_for_array_loop() {
                         saw_index = true;
                     }
                 }
-                Statement::Call { dst, args, .. } => {
+                Statement::Call {
+                    dst: Some(dst),
+                    args,
+                    ..
+                } => {
                     if place_any_has_index(dst) {
                         saw_index = true;
                     }
@@ -719,6 +728,7 @@ fn test_lower_for_array_loop() {
                         saw_index = true;
                     }
                 }
+                Statement::Call { dst: None, .. } => {}
             }
         }
     }
@@ -739,14 +749,19 @@ fn test_lower_array_index_emits_bounds_check() {
     let func = analyzed.module.funcs()[0];
     let (body, _) = lower_body_with_globals(&analyzed, func);
 
-    let saw_trap = body.blocks.iter().any(|block| {
-        matches!(
-            block.terminator,
-            Terminator::Trap {
-                kind: CheckKind::Bounds { .. }
-            }
-        )
+    let saw_trap_call = body.blocks.iter().any(|block| {
+        let has_trap_call = block.stmts.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::Trap),
+                    ..
+                }
+            )
+        });
+        let is_unreachable = matches!(block.terminator, Terminator::Unreachable);
+        has_trap_call && is_unreachable
     });
 
-    assert!(saw_trap, "expected bounds check trap terminator");
+    assert!(saw_trap_call, "expected bounds check runtime trap call");
 }

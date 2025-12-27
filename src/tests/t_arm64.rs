@@ -158,7 +158,7 @@ fn test_call_emits_bl() {
     let ret = LocalId(0);
     let blocks = vec![BasicBlock {
         stmts: vec![Statement::Call {
-            dst: crate::mcir::types::PlaceAny::Scalar(Place::new(ret, u64_ty, vec![])),
+            dst: Some(PlaceAny::Scalar(Place::new(ret, u64_ty, vec![]))),
             callee: Callee::Def(DefId(7)),
             args: Vec::new(),
         }],
@@ -206,11 +206,7 @@ fn test_enum_payload_stores_to_return_slot() {
     let blocks = vec![BasicBlock {
         stmts: vec![
             Statement::CopyScalar {
-                dst: Place::new(
-                    ret,
-                    u64_ty,
-                    vec![crate::mcir::types::Projection::Field { index: 0 }],
-                ),
+                dst: Place::new(ret, u64_ty, vec![Projection::Field { index: 0 }]),
                 src: Rvalue::Use(Operand::Const(Const::Int {
                     value: 1,
                     signed: false,
@@ -222,8 +218,8 @@ fn test_enum_payload_stores_to_return_slot() {
                     ret,
                     u64_ty,
                     vec![
-                        crate::mcir::types::Projection::Field { index: 1 },
-                        crate::mcir::types::Projection::ByteOffset { offset: 0 },
+                        Projection::Field { index: 1 },
+                        Projection::ByteOffset { offset: 0 },
                     ],
                 ),
                 src: Rvalue::Use(Operand::Const(Const::Int {
@@ -237,8 +233,8 @@ fn test_enum_payload_stores_to_return_slot() {
                     ret,
                     bool_ty,
                     vec![
-                        crate::mcir::types::Projection::Field { index: 1 },
-                        crate::mcir::types::Projection::ByteOffset { offset: 8 },
+                        Projection::Field { index: 1 },
+                        Projection::ByteOffset { offset: 8 },
                     ],
                 ),
                 src: Rvalue::Use(Operand::Const(Const::Bool(true))),

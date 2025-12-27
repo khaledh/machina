@@ -230,7 +230,7 @@ fn test_call_constraints_scalar_and_aggregate_args() {
 
     let stmts = vec![
         Statement::Call {
-            dst: PlaceAny::Scalar(p3.clone()),
+            dst: Some(PlaceAny::Scalar(p3.clone())),
             callee: Callee::Def(DefId(0)),
             args: vec![
                 PlaceAny::Scalar(p1.clone()),
@@ -293,7 +293,7 @@ fn test_call_constraints_sret() {
     let p2 = Place::new(l2, tup_ty, vec![]);
 
     let stmts = vec![Statement::Call {
-        dst: PlaceAny::Aggregate(p2.clone()),
+        dst: Some(PlaceAny::Aggregate(p2.clone())),
         callee: Callee::Def(DefId(1)),
         args: vec![PlaceAny::Scalar(p1.clone())],
     }];

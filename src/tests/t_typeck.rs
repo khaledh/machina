@@ -809,26 +809,18 @@ fn test_range_invalid_bounds() {
 }
 
 #[test]
-fn test_range_non_literal_assignment_rejected() {
+fn test_range_non_literal_assignment() {
     let source = r#"
         fn test() -> u64 {
             let y = 5;
-            let x: range(100) = y;
+            let x: range(100) = y;  // allowed at compile-time; checked at runtime
             0
         }
     "#;
 
     let result = type_check_source(source);
-    assert!(result.is_err());
-
-    if let Err(errors) = result {
-        assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            TypeCheckError::DeclTypeMismatch(expected, found, _) => {
-                assert_eq!(*expected, Type::Range { min: 0, max: 100 });
-                assert_eq!(*found, Type::UInt64);
-            }
-            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
-        }
-    }
+    assert!(
+        result.is_ok(),
+        "expected successful type check for non-literal range assignment"
+    );
 }

@@ -1,6 +1,7 @@
 use crate::ast::{self, NodeId};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
+use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::resolve::def_map::Def;
 use crate::types::Type;
@@ -165,12 +166,63 @@ impl<'a> FuncLowerer<'a> {
             },
         );
 
-        // Set the fail block terminator to trap
+        // Emit the runtime trap call and terminate the fail block.
         self.curr_block = fail_bb;
+        self.emit_runtime_trap_call(kind);
         self.fb
-            .set_terminator(self.curr_block, Terminator::Trap { kind });
+            .set_terminator(self.curr_block, Terminator::Unreachable);
 
         // Continue with the ok block
         self.curr_block = ok_bb;
     }
+
+    // --- Runtime Calls ---
+
+    /// Convert a runtime argument operand to a u64-sized place.
+    pub(super) fn runtime_arg_place(&mut self, op: Operand) -> PlaceAny {
+        match op {
+            Operand::Copy(place) | Operand::Move(place) => PlaceAny::Scalar(place),
+            Operand::Const(_) => {
+                let ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+                let temp = self.new_temp_scalar(ty_id);
+                self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
+                PlaceAny::Scalar(temp)
+            }
+        }
+    }
+
+    fn emit_runtime_trap_call(&mut self, kind: CheckKind) {
+        let zero_op = u64_const(0);
+
+        let (kind_op, arg0, arg1, arg2) = match kind {
+            CheckKind::DivByZero => (u64_const(0), zero_op.clone(), zero_op.clone(), zero_op),
+            CheckKind::Bounds { index, len } => (u64_const(1), index, len, zero_op),
+            CheckKind::Range { value, min, max } => (u64_const(2), value, min, max),
+        };
+
+        let args = vec![
+            self.runtime_arg_place(kind_op),
+            self.runtime_arg_place(arg0),
+            self.runtime_arg_place(arg1),
+            self.runtime_arg_place(arg2),
+        ];
+
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst: None,
+                callee: Callee::Runtime(RuntimeFn::Trap),
+                args,
+            },
+        );
+    }
+}
+
+#[inline]
+pub(super) fn u64_const(value: u64) -> Operand {
+    Operand::Const(Const::Int {
+        signed: false,
+        bits: 64,
+        value: value as i128,
+    })
 }

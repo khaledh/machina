@@ -255,15 +255,20 @@ fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), String> {
 }
 
 fn link_executable(asm_path: &Path, exe_path: &Path) -> Result<(), String> {
-    let runtime_path = runtime_trap_path();
-    if !runtime_path.exists() {
-        return Err(format!("runtime not found at {}", runtime_path.display()));
+    let runtime_paths = runtime_source_paths();
+    for runtime_path in &runtime_paths {
+        if !runtime_path.exists() {
+            return Err(format!(
+                "runtime source file not found at {}",
+                runtime_path.display()
+            ));
+        }
     }
     let status = ProcessCommand::new("cc")
         .arg("-o")
         .arg(exe_path)
         .arg(asm_path)
-        .arg(runtime_path)
+        .args(&runtime_paths)
         .status()
         .map_err(|e| format!("failed to invoke cc: {e}"))?;
     if status.success() {
@@ -285,8 +290,10 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
     Ok(status.code().unwrap_or(1))
 }
 
-fn runtime_trap_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("runtime")
-        .join("trap.c")
+fn runtime_source_paths() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("runtime")
+            .join("trap.c"),
+    ]
 }

@@ -47,7 +47,7 @@ impl<'a> FuncLowerer<'a> {
         self.fb.push_stmt(
             self.curr_block,
             Statement::Call {
-                dst,
+                dst: Some(dst),
                 callee: Callee::Def(callee_id),
                 args: arg_vals,
             },

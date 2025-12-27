@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::mcir::types::{
-    BasicBlock, BlockId, CheckKind, FuncBody, LocalId, Operand, Place, PlaceAny, Projection,
-    Rvalue, Statement, Terminator,
+    BasicBlock, BlockId, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue,
+    Statement, Terminator,
 };
 
 // --- Def/use extraction ---
@@ -69,10 +69,12 @@ fn stmt_defs(stmt: &Statement, out: &mut HashSet<LocalId>) {
             out.insert(dst.base());
         }
         Statement::Call { dst, .. } => {
-            out.insert(match dst {
-                PlaceAny::Scalar(p) => p.base(),
-                PlaceAny::Aggregate(p) => p.base(),
-            });
+            if let Some(dst) = dst {
+                out.insert(match dst {
+                    PlaceAny::Scalar(p) => p.base(),
+                    PlaceAny::Aggregate(p) => p.base(),
+                });
+            }
         }
     }
 }
@@ -88,7 +90,9 @@ fn stmt_uses(stmt: &Statement, out: &mut HashSet<LocalId>) {
             collect_place_uses(src, out);
         }
         Statement::Call { dst, args, .. } => {
-            collect_place_any_lhs_uses(dst, out);
+            if let Some(dst) = dst {
+                collect_place_any_lhs_uses(dst, out);
+            }
             for arg in args {
                 collect_place_any_uses(arg, out);
             }
@@ -142,27 +146,10 @@ pub fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
                 }
             }
         }
-        Terminator::Trap { kind } => {
-            let mut uses = HashSet::new();
-            match &kind {
-                CheckKind::Bounds { index, len } => {
-                    collect_operand_uses(index, &mut uses);
-                    collect_operand_uses(len, &mut uses);
-                }
-                CheckKind::DivByZero => {}
-                CheckKind::Range { value, min, max } => {
-                    collect_operand_uses(value, &mut uses);
-                    collect_operand_uses(min, &mut uses);
-                    collect_operand_uses(max, &mut uses);
-                }
-            }
-            for u in uses {
-                if !kill_set.contains(&u) {
-                    gen_set.insert(u);
-                }
-            }
-        }
-        Terminator::Return | Terminator::Goto(_) | Terminator::Unterminated => {}
+        Terminator::Return
+        | Terminator::Goto(_)
+        | Terminator::Unreachable
+        | Terminator::Unterminated => {}
     }
 
     GenKillSet { gen_set, kill_set }
@@ -205,7 +192,7 @@ fn compute_succs(body: &FuncBody) -> Vec<Vec<BlockId>> {
                 }
                 v.push(*default);
             }
-            Terminator::Return | Terminator::Trap { .. } | Terminator::Unterminated => {}
+            Terminator::Return | Terminator::Unreachable | Terminator::Unterminated => {}
         }
     }
     succs

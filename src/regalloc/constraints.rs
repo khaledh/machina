@@ -131,28 +131,30 @@ pub fn analyze_calls(body: &FuncBody, target: &dyn TargetSpec) -> Vec<CallConstr
                 });
             }
 
-            let dst_ty = dst.ty();
-            let result = if body.types.get(dst_ty).is_aggregate() {
-                // aggregate result: add implicit indirect result arg constraint
-                arg_constraints.push(CallArgConstraint {
-                    place: dst.clone(),
-                    reg: target
-                        .indirect_result_reg()
-                        .unwrap_or_else(|| panic!("Missing indirect result register")),
-                    kind: CallArgKind::Addr,
-                });
-                None
-            } else {
-                // scalar result: add explicit result constraint
-                let local = match dst {
-                    PlaceAny::Scalar(p) => p.base(),
-                    PlaceAny::Aggregate(p) => p.base(),
-                };
-                Some(CallResultConstraint {
-                    local,
-                    reg: target.result_reg(),
-                })
-            };
+            let result = dst.as_ref().and_then(|dst| {
+                let dst_ty = dst.ty();
+                if body.types.get(dst_ty).is_aggregate() {
+                    // aggregate result: add implicit indirect result arg constraint
+                    arg_constraints.push(CallArgConstraint {
+                        place: dst.clone(),
+                        reg: target
+                            .indirect_result_reg()
+                            .unwrap_or_else(|| panic!("Missing indirect result register")),
+                        kind: CallArgKind::Addr,
+                    });
+                    None
+                } else {
+                    // scalar result: add explicit result constraint
+                    let local = match dst {
+                        PlaceAny::Scalar(p) => p.base(),
+                        PlaceAny::Aggregate(p) => p.base(),
+                    };
+                    Some(CallResultConstraint {
+                        local,
+                        reg: target.result_reg(),
+                    })
+                }
+            });
 
             constraints.push(CallConstraint {
                 pos: InstPos::new(BlockId(b_idx as u32), i_idx),
