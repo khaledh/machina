@@ -34,6 +34,11 @@ pub enum Type {
         name: String,
         variants: Vec<EnumVariant>,
     },
+
+    // Internal Types
+    Slice {
+        elem_ty: Box<Type>,
+    },
 }
 
 impl PartialEq for Type {
@@ -68,6 +73,7 @@ impl PartialEq for Type {
             (Type::Tuple { fields: f1 }, Type::Tuple { fields: f2 }) => f1 == f2,
             (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
             (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
+            (Type::Slice { elem_ty: e1 }, Type::Slice { elem_ty: e2 }) => e1 == e2,
             _ => false,
         }
     }
@@ -123,6 +129,10 @@ impl Hash for Type {
                 // Nominal type: only hash the name
                 12u8.hash(state);
                 name.hash(state);
+            }
+            Type::Slice { elem_ty } => {
+                13u8.hash(state);
+                elem_ty.hash(state);
             }
         }
     }
@@ -196,6 +206,9 @@ impl fmt::Display for Type {
                     .collect::<Vec<_>>();
                 write!(f, "{} = {}", name, variant_names.join(" | "))
             }
+            Type::Slice { elem_ty } => {
+                write!(f, "{}[]", elem_ty)
+            }
         }
     }
 }
@@ -227,6 +240,10 @@ impl Type {
                 // 8 bytes for the scalar tag + max payload size
                 8 + self.enum_max_payload_size()
             }
+            Type::Slice { .. } => {
+                // 8 bytes for the pointer + 8 bytes for the length
+                16
+            }
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -255,6 +272,7 @@ impl Type {
                     .unwrap_or(0);
                 max_payload_align.max(8)
             }
+            Type::Slice { .. } => 8,
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -262,7 +280,11 @@ impl Type {
     pub fn is_compound(&self) -> bool {
         let is_compound = matches!(
             self,
-            Type::Array { .. } | Type::Tuple { .. } | Type::Struct { .. } | Type::String
+            Type::Array { .. }
+                | Type::Tuple { .. }
+                | Type::Struct { .. }
+                | Type::String
+                | Type::Slice { .. }
         );
 
         // if it's an enum, check if it has a payload

@@ -120,25 +120,38 @@ impl TyLowerer {
                 let u32_id = self.lower_ty(&Type::UInt32);
                 let u8_id = self.lower_ty(&Type::UInt8);
 
-                self.table.add_named(
-                    TyKind::Struct {
-                        fields: vec![
-                            StructField {
-                                name: "ptr".to_string(),
-                                ty: u64_id,
-                            },
-                            StructField {
-                                name: "len".to_string(),
-                                ty: u32_id,
-                            },
-                            StructField {
-                                name: "tag".to_string(),
-                                ty: u8_id,
-                            },
-                        ],
-                    },
-                    "string".to_string(),
-                )
+                self.table.add(TyKind::Struct {
+                    fields: vec![
+                        StructField {
+                            name: "ptr".to_string(),
+                            ty: u64_id,
+                        },
+                        StructField {
+                            name: "len".to_string(),
+                            ty: u32_id,
+                        },
+                        StructField {
+                            name: "tag".to_string(),
+                            ty: u8_id,
+                        },
+                    ],
+                })
+            }
+
+            Type::Slice { .. } => {
+                let u64_id = self.lower_ty(&Type::UInt64);
+                self.table.add(TyKind::Struct {
+                    fields: vec![
+                        StructField {
+                            name: "ptr".to_string(),
+                            ty: u64_id,
+                        },
+                        StructField {
+                            name: "len".to_string(),
+                            ty: u64_id,
+                        },
+                    ],
+                })
             }
 
             Type::Unknown => panic!("Cannot lower unknown type"),
