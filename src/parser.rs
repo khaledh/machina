@@ -43,6 +43,9 @@ pub enum ParseError {
 
     #[error("Expected match pattern, found: {0}")]
     ExpectedMatchPattern(Token),
+
+    #[error("Expected array index or slice range, found: {0}")]
+    ExpectedArrayIndexOrRange(Token),
 }
 
 impl ParseError {
@@ -60,6 +63,7 @@ impl ParseError {
             ParseError::ExpectedStructField(token) => token.span,
             ParseError::ExpectedMatchArm(token) => token.span,
             ParseError::ExpectedMatchPattern(token) => token.span,
+            ParseError::ExpectedArrayIndexOrRange(token) => token.span,
         }
     }
 }
@@ -319,6 +323,18 @@ impl<'a> Parser<'a> {
         let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
         self.consume(&TK::RBracket)?; // consume ']'
 
+        if dims.is_empty() {
+            // Slice type
+            return Ok(TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Slice {
+                    elem_ty: Box::new(elem_ty),
+                },
+                span: self.close(marker),
+            });
+        }
+
+        // Array type
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
             kind: TypeExprKind::Array {
@@ -1037,38 +1053,55 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn looks_like_struct_update(&self) -> bool {
-        if self.curr_token.kind != TK::LBrace {
-            return false;
-        }
+    fn lookahead_for(&self, target: TokenKind) -> bool {
+        let open = match self.curr_token.kind {
+            TK::LBrace | TK::LBracket | TK::LParen => self.curr_token.kind.clone(),
+            _ => return false,
+        };
 
-        // Lookahead to find a struct update pipe token at the current level of nesting
-
-        let mut brace_level = 0usize;
-        let mut paren_level = 0usize;
-        let mut bracket_level = 0usize;
+        let mut brace = 0usize;
+        let mut bracket = 0usize;
+        let mut paren = 0usize;
 
         let mut idx = self.pos;
         while idx < self.tokens.len() {
             match self.tokens[idx].kind {
-                TK::LBrace => brace_level += 1,
+                TK::LBrace => brace += 1,
                 TK::RBrace => {
-                    brace_level = brace_level.saturating_sub(1);
-                    if brace_level == 0 {
+                    brace = brace.saturating_sub(1);
+                    if open == TK::LBrace && brace == 0 {
                         return false;
                     }
                 }
-                TK::LParen => paren_level += 1,
-                TK::RParen => paren_level = paren_level.saturating_sub(1),
-                TK::LBracket => bracket_level += 1,
-                TK::RBracket => bracket_level = bracket_level.saturating_sub(1),
-                TK::Pipe => {
-                    if brace_level == 1 && paren_level == 0 && bracket_level == 0 {
-                        return true;
+                TK::LBracket => bracket += 1,
+                TK::RBracket => {
+                    bracket = bracket.saturating_sub(1);
+                    if open == TK::LBracket && bracket == 0 {
+                        return false;
+                    }
+                }
+                TK::LParen => paren += 1,
+                TK::RParen => {
+                    paren = paren.saturating_sub(1);
+                    if open == TK::LParen && paren == 0 {
+                        return false;
                     }
                 }
                 _ => {}
             }
+
+            if self.tokens[idx].kind == target {
+                let top_level = match open {
+                    TK::LBrace => brace == 1 && paren == 0 && bracket == 0,
+                    TK::LBracket => bracket == 1 && paren == 0 && brace == 0,
+                    TK::LParen => paren == 1 && brace == 0 && bracket == 0,
+                    _ => false,
+                };
+                if top_level {
+                    return true;
+                }
+            }
+
             idx += 1;
         }
 
@@ -1097,22 +1130,63 @@ impl<'a> Parser<'a> {
                     };
                 }
                 TK::LBracket => {
-                    // ArrayIndex expression
+                    // ArrayIndex or Slice expression
+
+                    let is_slice = self.lookahead_for(TK::DotDot);
                     self.advance(); // consume '['
 
-                    let indices =
-                        self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+                    // Check if no index or range is provided
+                    if self.curr_token.kind == TK::RBracket {
+                        return Err(ParseError::ExpectedArrayIndexOrRange(
+                            self.curr_token.clone(),
+                        ));
+                    }
 
-                    self.consume(&TK::RBracket)?; // consume ']'
+                    if is_slice {
+                        // Slice expression
+                        let mut start = None;
+                        let mut end = None;
 
-                    expr = Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::ArrayIndex {
-                            target: Box::new(expr),
-                            indices,
-                        },
-                        span: self.close(marker.clone()),
-                    };
+                        // Parse start (if any)
+                        if self.curr_token.kind != TK::DotDot {
+                            start = Some(Box::new(self.parse_expr(0)?));
+                        }
+
+                        // Consume '..'
+                        self.consume(&TK::DotDot)?;
+
+                        // Parse end (if any)
+                        if self.curr_token.kind != TK::RBracket {
+                            end = Some(Box::new(self.parse_expr(0)?));
+                        }
+
+                        self.consume(&TK::RBracket)?; // consume ']'
+
+                        expr = Expr {
+                            id: self.id_gen.new_id(),
+                            kind: ExprKind::Slice {
+                                target: Box::new(expr),
+                                start,
+                                end,
+                            },
+                            span: self.close(marker.clone()),
+                        };
+                    } else {
+                        // ArrayIndex expression
+                        let indices = self
+                            .parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+
+                        self.consume(&TK::RBracket)?; // consume ']'
+
+                        expr = Expr {
+                            id: self.id_gen.new_id(),
+                            kind: ExprKind::ArrayIndex {
+                                target: Box::new(expr),
+                                indices,
+                            },
+                            span: self.close(marker.clone()),
+                        };
+                    }
                 }
                 TK::Dot => {
                     // Field access expression
@@ -1239,7 +1313,7 @@ impl<'a> Parser<'a> {
             TK::LParen => self.parse_paren_or_tuple(),
 
             // Struct update expression
-            TK::LBrace if self.looks_like_struct_update() => self.parse_struct_update(),
+            TK::LBrace if self.lookahead_for(TK::Pipe) => self.parse_struct_update(),
 
             // Block expression
             TK::LBrace => self.parse_block(),

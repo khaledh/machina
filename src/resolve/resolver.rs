@@ -567,6 +567,9 @@ impl SymbolResolver {
                 }
             }
             TypeExprKind::Range { .. } => { /* nothing to resolve */ }
+            TypeExprKind::Slice { elem_ty } => {
+                self.check_type_expr(elem_ty);
+            }
         }
     }
 
@@ -692,6 +695,16 @@ impl SymbolResolver {
                 self.check_expr(target);
                 for index in indices {
                     self.check_expr(index);
+                }
+            }
+
+            ExprKind::Slice { target, start, end } => {
+                self.check_expr(target);
+                if let Some(start) = start {
+                    self.check_expr(start);
+                }
+                if let Some(end) = end {
+                    self.check_expr(end);
                 }
             }
 

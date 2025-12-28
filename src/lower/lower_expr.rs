@@ -212,6 +212,7 @@ impl<'a> FuncLowerer<'a> {
                 self.emit_copy_aggregate(dst, src);
                 Ok(())
             }
+            EK::Slice { target, start, end } => self.lower_slice_into(&dst, target, start, end),
             EK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.
                 self.lower_call_into(Some(PlaceAny::Aggregate(dst.clone())), expr, callee, args)

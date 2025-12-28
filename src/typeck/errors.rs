@@ -146,6 +146,12 @@ pub enum TypeCheckError {
 
     #[error("Function overload is ambiguous: {0}")]
     FuncOverloadAmbiguous(String, Span),
+
+    #[error("Slice target is not an array: {0}")]
+    SliceTargetNotArray(Type, Span),
+
+    #[error("Slice target is not a 1-D array: {0}")]
+    SliceTargetNot1DArray(Type, Span),
 }
 
 impl TypeCheckError {
@@ -198,6 +204,8 @@ impl TypeCheckError {
             TypeCheckError::DivisionByZero(span) => *span,
             TypeCheckError::FuncOverloadNoMatch(_, span) => *span,
             TypeCheckError::FuncOverloadAmbiguous(_, span) => *span,
+            TypeCheckError::SliceTargetNotArray(_, span) => *span,
+            TypeCheckError::SliceTargetNot1DArray(_, span) => *span,
         }
     }
 }

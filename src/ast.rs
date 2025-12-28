@@ -149,6 +149,9 @@ pub enum TypeExprKind {
         min: u64,
         max: u64,
     },
+    Slice {
+        elem_ty: Box<TypeExpr>,
+    },
 }
 
 // -- Struct Literals ---
@@ -401,6 +404,13 @@ pub enum ExprKind {
         end: u64, // exclusive
     },
 
+    // Slice
+    Slice {
+        target: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    },
+
     // Match
     Match {
         scrutinee: Box<Expr>,
@@ -605,6 +615,9 @@ impl fmt::Display for TypeExprKind {
             }
             TypeExprKind::Range { min, max } => {
                 write!(f, "Range({}, {})", min, max)?;
+            }
+            TypeExprKind::Slice { elem_ty } => {
+                write!(f, "Slice({})", elem_ty)?;
             }
         }
         Ok(())
@@ -938,6 +951,24 @@ impl Expr {
                 writeln!(f, "{}Range [{}]", pad, self.id)?;
                 writeln!(f, "{}Start: {}", pad1, start)?;
                 writeln!(f, "{}End: {}", pad1, end)?;
+            }
+            ExprKind::Slice { target, start, end } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Slice [{}]", pad, self.id)?;
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                if let Some(start) = start {
+                    writeln!(f, "{}Start:", pad1)?;
+                    start.fmt_with_indent(f, level + 2)?;
+                } else {
+                    writeln!(f, "{}Start: None", pad1)?;
+                }
+                if let Some(end) = end {
+                    writeln!(f, "{}End:", pad1)?;
+                    end.fmt_with_indent(f, level + 2)?;
+                } else {
+                    writeln!(f, "{}End: None", pad1)?;
+                }
             }
         }
         Ok(())

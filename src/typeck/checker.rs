@@ -343,6 +343,43 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
+    fn type_check_slice(
+        &mut self,
+        target: &Expr,
+        start: &Option<Box<Expr>>,
+        end: &Option<Box<Expr>>,
+    ) -> Result<Type, TypeCheckError> {
+        let target_ty = self.type_check_expr(target)?;
+        let (elem_ty, dims) = match target_ty {
+            Type::Array { elem_ty, dims } => (elem_ty, dims),
+            other => return Err(TypeCheckError::SliceTargetNotArray(other, target.span)),
+        };
+
+        // Restrict slices to 1-D arrays (for now)
+        if dims.len() != 1 {
+            return Err(TypeCheckError::SliceTargetNot1DArray(
+                Type::Array { elem_ty, dims },
+                target.span,
+            ));
+        }
+
+        // Type check start and end (must be u64)
+        if let Some(start) = start {
+            let ty = self.type_check_expr(start)?;
+            if ty != Type::UInt64 {
+                return Err(TypeCheckError::IndexTypeNotInt(ty, start.span));
+            }
+        }
+        if let Some(end) = end {
+            let ty = self.type_check_expr(end)?;
+            if ty != Type::UInt64 {
+                return Err(TypeCheckError::IndexTypeNotInt(ty, end.span));
+            }
+        }
+
+        Ok(Type::Slice { elem_ty })
+    }
+
     fn type_check_string_index(
         &mut self,
         target: &Expr,
@@ -1297,6 +1334,8 @@ impl<'c, 'b> Checker<'c, 'b> {
                     max: *end,
                 })
             }
+
+            ExprKind::Slice { target, start, end } => self.type_check_slice(target, start, end),
 
             ExprKind::Match { scrutinee, arms } => {
                 self.type_check_match(scrutinee, arms, expr.span)

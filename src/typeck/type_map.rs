@@ -95,6 +95,12 @@ pub(crate) fn resolve_type_expr(
                 max: *max,
             })
         }
+        TypeExprKind::Slice { elem_ty } => {
+            let elem_ty = resolve_type_expr(def_map, elem_ty)?;
+            Ok(Type::Slice {
+                elem_ty: Box::new(elem_ty),
+            })
+        }
     }
 }
 

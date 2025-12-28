@@ -199,6 +199,20 @@ impl<'a> NrvoSafetyChecker<'a> {
                 target_ok && index_ok
             }
 
+            ExprKind::Slice { target, start, end } => {
+                let target_ok = match &target.kind {
+                    ExprKind::Var(_) if self.is_target_var(target) => true,
+                    _ => self.check_expr(target, false),
+                };
+                let start_ok = start
+                    .as_deref()
+                    .is_none_or(|expr| self.check_expr(expr, false));
+                let end_ok = end
+                    .as_deref()
+                    .is_none_or(|expr| self.check_expr(expr, false));
+                target_ok && start_ok && end_ok
+            }
+
             ExprKind::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
             ExprKind::TupleField { target, .. } => match &target.kind {
