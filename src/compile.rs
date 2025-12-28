@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+
+use crate::ast::{Module, NodeIdGen};
 use crate::context::AstContext;
 use crate::diagnostics::CompileError;
 use crate::lexer::{LexError, Lexer, Token};
@@ -58,15 +61,15 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         }
     }
 
-    // --- Lex ---
-
-    let lexer = Lexer::new(source);
-    let tokens = lexer
-        .tokenize()
-        .collect::<Result<Vec<Token>, LexError>>()
-        .map_err(|e| vec![e.into()])?;
+    // --- Lex (optional dump) ---
 
     if dump_tokens {
+        let lexer = Lexer::new(source);
+        let tokens = lexer
+            .tokenize()
+            .collect::<Result<Vec<Token>, LexError>>()
+            .map_err(|e| vec![e.into()])?;
+
         println!("Tokens:");
         println!("--------------------------------");
         for (i, token) in tokens.iter().enumerate() {
@@ -77,8 +80,23 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- Parse ---
 
-    let mut parser = Parser::new(&tokens);
-    let module = parser.parse().map_err(|e| vec![e.into()])?;
+    let id_gen = NodeIdGen::new();
+
+    // load stdlib/prelude.mc
+    let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("prelude.mc");
+    let prelude_src = std::fs::read_to_string(&prelude_path)
+        .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
+
+    let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
+    let (user_module, _id_gen) = parse_with_id_gen(source, id_gen)?;
+
+    // combine decls: prelude first, then user
+    let mut decls = Vec::new();
+    decls.extend(prelude_module.decls);
+    decls.extend(user_module.decls);
+    let module = Module { decls };
 
     if dump_ast {
         println!("AST:");
@@ -219,6 +237,29 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     Ok(CompileOutput { asm, mcir })
 }
+
+// --- stdlib AST injection ---
+
+fn parse_with_id_gen(
+    source: &str,
+    id_gen: NodeIdGen,
+) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
+    // Lex
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .map_err(|e| vec![e.into()])?;
+
+    // Parse with the given id_gen
+    let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
+    let module = parser.parse().map_err(|e| vec![e.into()])?;
+    let id_gen = parser.into_id_gen();
+
+    Ok((module, id_gen))
+}
+
+// --- Formatting ---
 
 fn format_mcir_body(body: &mcir::FuncBody, name: &str) -> String {
     use crate::mcir::LocalKind;

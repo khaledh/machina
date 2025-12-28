@@ -92,6 +92,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn new_with_id_gen(tokens: &'a [Token], id_gen: NodeIdGen) -> Self {
+        Parser {
+            tokens,
+            pos: 0,
+            curr_token: &tokens[0],
+            id_gen,
+            allow_struct_lit: true,
+        }
+    }
+
+    pub fn into_id_gen(self) -> NodeIdGen {
+        self.id_gen
+    }
+
     pub fn parse(&mut self) -> Result<Module, ParseError> {
         let mut decls = Vec::new();
         while self.curr_token.kind != TK::Eof {

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::lexer::LexError;
 use crate::lower::errors::LowerError;
 use crate::parser::ParseError;
@@ -26,6 +28,9 @@ pub enum CompileError {
 
     #[error(transparent)]
     Codegen(#[from] CodegenError),
+
+    #[error("IO error: {0}")]
+    Io(PathBuf, std::io::Error),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

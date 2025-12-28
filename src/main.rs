@@ -215,6 +215,9 @@ fn main() {
                     CompileError::Codegen(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
+                    CompileError::Io(path, e) => {
+                        println!("{}: {}", path.display(), e);
+                    }
                 }
             }
         }
