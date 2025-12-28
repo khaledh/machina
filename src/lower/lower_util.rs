@@ -4,6 +4,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::resolve::def_map::Def;
+use crate::type_rel::{TypeAssignability, type_assignable};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -112,9 +113,9 @@ impl<'a> FuncLowerer<'a> {
         to_ty: &Type,
         value_op: &Operand,
     ) {
-        match (from_ty, to_ty) {
-            (Type::UInt64, Type::Range { min, max }) => {
-                self.emit_range_conversion_check(value_op, *min, *max);
+        match type_assignable(from_ty, to_ty) {
+            TypeAssignability::UInt64ToRange { min, max } => {
+                self.emit_range_conversion_check(value_op, min, max);
             }
             _ => {}
         }

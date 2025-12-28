@@ -2,6 +2,7 @@ use crate::ast::{Expr, ExprKind};
 use crate::lower::{errors::LowerError, lower_ast::FuncLowerer};
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
+use crate::type_rel::{PrintArgKind, print_arg_kind};
 use crate::types::Type;
 
 const BUF_SIZE: usize = 20;
@@ -42,11 +43,17 @@ impl<'a> FuncLowerer<'a> {
 
     fn lower_print_arg(&mut self, arg: &Expr, newline: bool) -> Result<(), LowerError> {
         let arg_ty = self.ty_for_node(arg.id)?;
-        if arg_ty == Type::UInt64 {
-            self.lower_print_u64(arg, newline)?;
-        } else {
-            let string_place = self.lower_call_arg_place(arg)?;
-            self.emit_print_call(string_place, newline)?;
+        match print_arg_kind(&arg_ty) {
+            Some(PrintArgKind::UInt64Like) => {
+                self.lower_print_u64(arg, newline)?;
+            }
+            Some(PrintArgKind::String) => {
+                let string_place = self.lower_call_arg_place(arg)?;
+                self.emit_print_call(string_place, newline)?;
+            }
+            None => {
+                unreachable!("compiler bug: invalid print arg type {:?}", arg_ty);
+            }
         }
         Ok(())
     }

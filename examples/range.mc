@@ -9,10 +9,8 @@ fn main() {
     // let bad: MidRange = 42; // out of range
 
     if mid < midhigh {
-        // println(mid);
-        println("mid < midhigh");
+        println(mid);
     } else {
-        // println(midhigh);
-        println("mid >= midhigh");
+        println(midhigh);
     }
 }

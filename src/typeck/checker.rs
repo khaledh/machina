@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
+use crate::type_rel::{PrintArgKind, ValueAssignability, print_arg_kind, value_assignable};
 use crate::types::{EnumVariant, StructField, Type};
 
 use super::errors::TypeCheckError;
@@ -756,31 +757,12 @@ impl<'c, 'b> Checker<'c, 'b> {
         from_ty: &Type,
         to_ty: &Type,
     ) -> Result<(), TypeCheckError> {
-        if from_ty == to_ty {
-            return Ok(());
-        }
-
-        match (from_ty, to_ty) {
-            (Type::UInt64, Type::Range { min, max }) => {
-                if let ExprKind::UInt64Lit(val) = from_value.kind {
-                    if val < *min || val >= *max {
-                        return Err(TypeCheckError::ValueOutOfRange(
-                            val,
-                            *min,
-                            *max,
-                            from_value.span,
-                        ));
-                    }
-                }
-                Ok(())
-            }
-            (Type::Range { .. }, Type::UInt64) => Ok(()),
-            (Type::Range { .. }, Type::Range { .. }) => Err(TypeCheckError::DeclTypeMismatch(
-                to_ty.clone(),
-                from_ty.clone(),
-                from_value.span,
-            )),
-            _ => Err(TypeCheckError::DeclTypeMismatch(
+        match value_assignable(from_value, from_ty, to_ty) {
+            ValueAssignability::Assignable(_) => Ok(()),
+            ValueAssignability::ValueOutOfRange { value, min, max } => Err(
+                TypeCheckError::ValueOutOfRange(value, min, max, from_value.span),
+            ),
+            ValueAssignability::Incompatible => Err(TypeCheckError::DeclTypeMismatch(
                 to_ty.clone(),
                 from_ty.clone(),
                 from_value.span,
@@ -898,15 +880,14 @@ impl<'c, 'b> Checker<'c, 'b> {
                     ));
                 }
                 let arg_type = self.type_check_expr(&args[0])?;
-                // allowed arg types: string, u64
-                if arg_type != Type::String && arg_type != Type::UInt64 {
-                    return Err(TypeCheckError::DeclTypeMismatchMulti(
+                match print_arg_kind(&arg_type) {
+                    Some(PrintArgKind::String) | Some(PrintArgKind::UInt64Like) => Ok(Type::Unit),
+                    None => Err(TypeCheckError::DeclTypeMismatchMulti(
                         vec![Type::String, Type::UInt64],
                         arg_type,
                         args[0].span,
-                    ));
+                    )),
                 }
-                Ok(Type::Unit)
             }
             "println" => {
                 if args.len() > 1 {
@@ -921,14 +902,14 @@ impl<'c, 'b> Checker<'c, 'b> {
                     return Ok(Type::Unit);
                 }
                 let arg_type = self.type_check_expr(&args[0])?;
-                if arg_type != Type::String && arg_type != Type::UInt64 {
-                    return Err(TypeCheckError::DeclTypeMismatchMulti(
+                match print_arg_kind(&arg_type) {
+                    Some(PrintArgKind::String) | Some(PrintArgKind::UInt64Like) => Ok(Type::Unit),
+                    None => Err(TypeCheckError::DeclTypeMismatchMulti(
                         vec![Type::String, Type::UInt64],
                         arg_type,
                         args[0].span,
-                    ));
+                    )),
                 }
-                Ok(Type::Unit)
             }
             _ => unreachable!("compiler bug: unknown builtin function: {}", name),
         }

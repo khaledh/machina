@@ -12,5 +12,6 @@ pub mod regalloc;
 pub mod resolve;
 pub mod symtab;
 pub mod targets;
+pub mod type_rel;
 pub mod typeck;
 pub mod types;
