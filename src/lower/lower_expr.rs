@@ -214,7 +214,7 @@ impl<'a> FuncLowerer<'a> {
             }
             EK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.
-                self.lower_call_into(PlaceAny::Aggregate(dst), callee, args)
+                self.lower_call_into(Some(PlaceAny::Aggregate(dst.clone())), callee, args)
             }
             EK::Block { items, tail } => {
                 self.lower_block_into(dst, items, tail.as_deref(), expr.id)

@@ -3,6 +3,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
+use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
     // --- Calls ---
@@ -17,15 +18,20 @@ impl<'a> FuncLowerer<'a> {
         let result_ty = self.ty_for_node(call.id)?;
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
+        if result_ty == Type::Unit {
+            self.lower_call_into(None, callee, args)?;
+            return Ok(ExprValue::Scalar(Operand::Const(Const::Unit)));
+        }
+
         if result_ty.is_scalar() {
             // Scalar call: capture result into a temp.
             let temp_place = self.new_temp_scalar(result_ty_id);
-            self.lower_call_into(PlaceAny::Scalar(temp_place.clone()), callee, args)?;
+            self.lower_call_into(Some(PlaceAny::Scalar(temp_place.clone())), callee, args)?;
             Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
         } else {
             // Aggregate call: capture result into a temp place.
             let temp_place = self.new_temp_aggregate(result_ty_id);
-            self.lower_call_into(PlaceAny::Aggregate(temp_place.clone()), callee, args)?;
+            self.lower_call_into(Some(PlaceAny::Aggregate(temp_place.clone())), callee, args)?;
             Ok(ExprValue::Aggregate(temp_place))
         }
     }
@@ -33,7 +39,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lower a call into the given destination place.
     pub(super) fn lower_call_into(
         &mut self,
-        dst: PlaceAny,
+        dst: Option<PlaceAny>,
         callee: &Expr,
         args: &[Expr],
     ) -> Result<(), LowerError> {
@@ -69,7 +75,7 @@ impl<'a> FuncLowerer<'a> {
         self.fb.push_stmt(
             self.curr_block,
             Statement::Call {
-                dst: Some(dst),
+                dst,
                 callee,
                 args: arg_vals,
             },
