@@ -16,7 +16,8 @@ as addressable places, with explicit control flow.
 ### Types
 
 Types are stored in a per-function `TyTable`. Each `TyId` refers to a `TyKind`:
-`Unit`, `Bool`, `Int`, `Tuple`, `Array`, and user-defined structs.
+`Unit`, `Bool`, `Int`, `Tuple`, `Array`, and user-defined structs and enums.
+Internal slice types are lowered to a struct `{ ptr: u64, len: u64 }`.
 
 ### Locals
 

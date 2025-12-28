@@ -15,7 +15,7 @@ type Point = {
   color: Color,
 }
 
-fn main() -> u64 {
+fn main() {
     // Struct literals
     let a = Point { x: 10, y: 20, color: Color::Red(Shade::Light) };
     let b = Point { x: 5, y: 40, color: Color::Blue(20, Shade::Dark, true) };
@@ -29,9 +29,9 @@ fn main() -> u64 {
     let (dx, dy) = delta(c, d);
 
     if is_blue(d) {
-        42
+        println(42);
     } else {
-        21
+        println(21);
     }
 }
 

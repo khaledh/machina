@@ -60,6 +60,9 @@ pub enum TypeCheckError {
     #[error("Declaration type mismatch: declared type {0}, found type {1}")]
     DeclTypeMismatch(Type, Type, Span),
 
+    #[error("Declaration type mismatch: expected one of {0:?}, found type {1}")]
+    DeclTypeMismatchMulti(Vec<Type>, Type, Span),
+
     #[error("Array pattern length mismatch: expected {0}, found {1}")]
     ArrayPatternLengthMismatch(usize, usize, Span),
 
@@ -160,6 +163,7 @@ impl TypeCheckError {
             TypeCheckError::UnknownType(span) => *span,
             TypeCheckError::PatternTypeMismatch(_, _, span) => *span,
             TypeCheckError::DeclTypeMismatch(_, _, span) => *span,
+            TypeCheckError::DeclTypeMismatchMulti(_, _, span) => *span,
             TypeCheckError::ArrayPatternLengthMismatch(_, _, span) => *span,
             TypeCheckError::EmptyTupleLiteral(span) => *span,
             TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,

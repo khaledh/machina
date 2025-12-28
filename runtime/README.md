@@ -4,11 +4,9 @@
 - Symbol: `__mc_trap`
 - Signature: `void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2)`
   
-- Symbol: `__mc_print_str`
-- Signature: `void __mc_print_str(const mc_string_t *str)`
-
-- Symbol: `__mc_print_ln`
-- Signature: `void __mc_print_ln()`
+- Symbol: `__mc_print`
+- Signature: `void __mc_print(const mc_string_t *str, uint64_t newline)`
+  - `newline`: non-zero to append a trailing "\n"
 
 - Symbol: `__mc_u64_to_dec`
 - Signature: `uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value)`

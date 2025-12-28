@@ -1,7 +1,6 @@
-use crate::ast::{Expr, ExprKind};
+use crate::ast::Expr;
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
-use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::types::Type;
 
@@ -43,14 +42,13 @@ impl<'a> FuncLowerer<'a> {
         callee: &Expr,
         args: &[Expr],
     ) -> Result<(), LowerError> {
-        // Resolve the callee to a runtime function or a function definition.
-        let callee = match &callee.kind {
-            ExprKind::Var(name) if name == "print" => Callee::Runtime(RuntimeFn::PrintStr),
-            ExprKind::Var(name) if name == "println" => Callee::Runtime(RuntimeFn::PrintLn),
-            _ => {
-                let callee_def = self.def_for_node(callee.id)?;
-                Callee::Def(callee_def.id)
-            }
+        if self.lower_builtin_call(callee, args)? {
+            return Ok(());
+        }
+
+        let callee = {
+            let callee_def = self.def_for_node(callee.id)?;
+            Callee::Def(callee_def.id)
         };
 
         if let Callee::Runtime(runtime_fn) = &callee {

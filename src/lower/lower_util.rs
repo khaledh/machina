@@ -89,6 +89,23 @@ impl<'a> FuncLowerer<'a> {
         Place::new(temp_id, ty_id, vec![])
     }
 
+    /// Emit a slice value into a destination place (from source base and len)
+    pub(super) fn emit_slice_value(&mut self, dst: Place<Aggregate>, base: PlaceAny, len: Operand) {
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+
+        // field 0: ptr = &base
+        let mut ptr_projs = dst.projections().to_vec();
+        ptr_projs.push(Projection::Field { index: 0 });
+        let ptr_place = Place::new(dst.base(), u64_ty_id, ptr_projs);
+        self.emit_copy_scalar(ptr_place, Rvalue::AddrOf(base));
+
+        // field 1: len = <len>
+        let mut len_projs = dst.projections().to_vec();
+        len_projs.push(Projection::Field { index: 1 });
+        let len_place = Place::new(dst.base(), u64_ty_id, len_projs);
+        self.emit_copy_scalar(len_place, Rvalue::Use(len));
+    }
+
     pub(super) fn emit_conversion_check(
         &mut self,
         from_ty: &Type,

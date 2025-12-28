@@ -1,10 +1,9 @@
-// Print strings (literal and via helper functions)
+// Print strings
 
-fn main() -> u64 {
-    output(greeting());
+fn main() {
+    let s = greeting();
+    print(s);
     output("Machina!");
-    println();
-    0
 }
 
 fn greeting() -> string {
@@ -12,5 +11,5 @@ fn greeting() -> string {
 }
 
 fn output(s: string) {
-    print(s);
+    println(s);
 }

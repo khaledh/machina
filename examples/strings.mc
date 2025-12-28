@@ -1,6 +1,6 @@
 // String literals
 
-fn main() -> u64 {
+fn main() {
   // Literal string
   let literal = "I'm a string literal";
 
@@ -9,12 +9,12 @@ fn main() -> u64 {
 
   // Pass string to function
    consume(message);
-
-    0
 }
 
 fn greeting() -> string {
     "Hello, Machina!"
 }
 
-fn consume(s: string) {}
+fn consume(s: string) {
+  println(s);
+}

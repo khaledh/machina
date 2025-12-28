@@ -62,23 +62,6 @@ impl TypeChecker {
     }
 
     fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        // Add built-in functions
-        self.func_sigs.insert(
-            "print".to_string(),
-            FuncSig {
-                params: vec![Type::String],
-                return_type: Type::Unit,
-            },
-        );
-        self.func_sigs.insert(
-            "println".to_string(),
-            FuncSig {
-                params: vec![],
-                return_type: Type::Unit,
-            },
-        );
-
-        // Add user-defined functions
         for function in self.context.module.func_sigs() {
             let params = function
                 .params
@@ -833,6 +816,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         callee: &Expr,
         args: &[Expr],
     ) -> Result<Type, TypeCheckError> {
+        // Check if the callee is a builtin function
+        if let ExprKind::Var(name) = &callee.kind {
+            if name == "print" || name == "println" {
+                return self.type_check_builtin_call(call_expr, callee, args);
+            }
+        }
+
         let name = match &callee.kind {
             ExprKind::Var(name) => name,
             _ => {
@@ -880,6 +870,68 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         }
         Ok(func_sig.return_type.clone())
+    }
+
+    // TODO: Remove this once we have (a) prelude support and (b) function overload resolution.
+    fn type_check_builtin_call(
+        &mut self,
+        call_expr: &Expr,
+        callee: &Expr,
+        args: &[Expr],
+    ) -> Result<Type, TypeCheckError> {
+        let Expr {
+            kind: ExprKind::Var(name),
+            ..
+        } = callee
+        else {
+            unreachable!("compiler bug: builtin callee is not a variable");
+        };
+        match name.as_str() {
+            "print" => {
+                // 1 arg: string
+                if args.len() != 1 {
+                    return Err(TypeCheckError::ArgCountMismatch(
+                        name.clone(),
+                        1,
+                        args.len(),
+                        call_expr.span,
+                    ));
+                }
+                let arg_type = self.type_check_expr(&args[0])?;
+                // allowed arg types: string, u64
+                if arg_type != Type::String && arg_type != Type::UInt64 {
+                    return Err(TypeCheckError::DeclTypeMismatchMulti(
+                        vec![Type::String, Type::UInt64],
+                        arg_type,
+                        args[0].span,
+                    ));
+                }
+                Ok(Type::Unit)
+            }
+            "println" => {
+                if args.len() > 1 {
+                    return Err(TypeCheckError::ArgCountMismatch(
+                        name.clone(),
+                        1,
+                        args.len(),
+                        call_expr.span,
+                    ));
+                }
+                if args.is_empty() {
+                    return Ok(Type::Unit);
+                }
+                let arg_type = self.type_check_expr(&args[0])?;
+                if arg_type != Type::String && arg_type != Type::UInt64 {
+                    return Err(TypeCheckError::DeclTypeMismatchMulti(
+                        vec![Type::String, Type::UInt64],
+                        arg_type,
+                        args[0].span,
+                    ));
+                }
+                Ok(Type::Unit)
+            }
+            _ => unreachable!("compiler bug: unknown builtin function: {}", name),
+        }
     }
 
     fn type_check_if(

@@ -1,9 +1,9 @@
 // For-loop over a range
 
-fn main() -> u64 {
+fn main() {
     var acc = 0;
     for i in 0..10 {
         acc = acc + i;
     }
-    acc
+    println(acc);
 }

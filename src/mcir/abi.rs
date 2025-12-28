@@ -1,8 +1,7 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeFn {
     Trap,
-    PrintStr,
-    PrintLn,
+    Print,
     U64ToDec,
 }
 
@@ -38,15 +37,9 @@ impl RuntimeFn {
                 ret: None,
                 effect: CallEffect::NoReturn,
             },
-            RuntimeFn::PrintStr => RuntimeFnSig {
-                name: "__mc_print_str",
-                arg_count: 1,
-                ret: None,
-                effect: CallEffect::ReadOnly,
-            },
-            RuntimeFn::PrintLn => RuntimeFnSig {
-                name: "__mc_print_ln",
-                arg_count: 0,
+            RuntimeFn::Print => RuntimeFnSig {
+                name: "__mc_print",
+                arg_count: 2,
                 ret: None,
                 effect: CallEffect::ReadOnly,
             },

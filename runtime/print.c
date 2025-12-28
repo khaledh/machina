@@ -5,7 +5,7 @@
 
 #define STDOUT_FILENO 1
 
-void __mc_print_str(const mc_string_t *s) {
+void __mc_print(const mc_string_t *s, uint64_t newline) {
     uint64_t offset = 0;
     while (offset < s->len) {
         ssize_t n = write(
@@ -18,8 +18,7 @@ void __mc_print_str(const mc_string_t *s) {
         }
         offset += (uint64_t)n;
     }
-}
-
-void __mc_print_ln() {
-    (void)write(STDOUT_FILENO, "\n", 1);
+    if (newline != 0) {
+        (void)write(STDOUT_FILENO, "\n", 1);
+    }
 }
