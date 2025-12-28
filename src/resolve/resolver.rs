@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 use crate::ast::NodeId;
@@ -8,7 +8,7 @@ use crate::ast::{
 };
 use crate::context::{AstContext, ResolvedContext};
 use crate::diagnostics::Span;
-use crate::resolve::def_map::{Def, DefIdGen, DefKind, DefMap, DefMapBuilder};
+use crate::resolve::def_map::{Def, DefId, DefIdGen, DefKind, DefMap, DefMapBuilder};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::SymbolKind;
 use crate::resolve::symbols::{Scope, Symbol};
@@ -21,6 +21,7 @@ pub struct SymbolResolver {
     errors: Vec<ResolveError>,
     def_id_gen: DefIdGen,
     def_map_builder: DefMapBuilder,
+    func_decl_names: HashSet<String>,
 }
 
 impl SymbolResolver {
@@ -32,6 +33,7 @@ impl SymbolResolver {
             errors: Vec::new(),
             def_id_gen: DefIdGen::new(),
             def_map_builder: DefMapBuilder::new(),
+            func_decl_names: HashSet::new(),
         }
     }
 
@@ -55,18 +57,26 @@ impl SymbolResolver {
     }
 
     fn insert_symbol(&mut self, name: &str, symbol: Symbol, span: Span) {
-        // Check for duplicate symbols
-        if self.lookup_symbol_direct(name).is_some() {
-            self.errors
-                .push(ResolveError::SymbolAlreadyDefined(name.to_string(), span));
-            return;
+        let scope = self.scopes.last_mut().unwrap();
+        match scope.defs.get_mut(name) {
+            None => {
+                scope.defs.insert(name.to_string(), symbol);
+            }
+            Some(existing) => match (&mut existing.kind, symbol.kind) {
+                (
+                    SymbolKind::Func { overloads },
+                    SymbolKind::Func {
+                        overloads: new_overloads,
+                    },
+                ) => {
+                    overloads.extend(new_overloads);
+                }
+                _ => {
+                    self.errors
+                        .push(ResolveError::SymbolAlreadyDefined(name.to_string(), span));
+                }
+            },
         }
-
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .defs
-            .insert(name.to_string(), symbol);
     }
 
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
@@ -78,34 +88,39 @@ impl SymbolResolver {
         None
     }
 
-    fn lookup_symbol_direct(&self, name: &str) -> Option<&Symbol> {
-        self.scopes.last().unwrap().defs.get(name)
-    }
-
-    fn map_symbol_kind_to_def_kind(kind: SymbolKind) -> DefKind {
+    fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::TypeAlias { ty_expr } => DefKind::TypeAlias { ty_expr },
-            SymbolKind::StructDef { fields } => DefKind::StructDef { fields },
-            SymbolKind::Func => DefKind::Func,
+            SymbolKind::TypeAlias { ty_expr, .. } => DefKind::TypeAlias {
+                ty_expr: ty_expr.clone(),
+            },
+            SymbolKind::StructDef { fields, .. } => DefKind::StructDef {
+                fields: fields.clone(),
+            },
+            SymbolKind::Func { .. } => DefKind::Func,
             SymbolKind::Var { .. } => DefKind::LocalVar {
                 nrvo_eligible: false,
             },
-            SymbolKind::EnumDef { variants } => DefKind::EnumDef { variants },
+            SymbolKind::EnumDef { variants, .. } => DefKind::EnumDef {
+                variants: variants.clone(),
+            },
         }
     }
 
-    fn add_built_in_symbol(&mut self, name: &str, kind: SymbolKind) {
+    fn add_built_in_symbol<F>(&mut self, name: &str, kind_fn: F)
+    where
+        F: FnOnce(DefId) -> SymbolKind,
+    {
         let def_id = self.def_id_gen.new_id();
+        let kind = kind_fn(def_id);
         let def = Def {
             id: def_id,
             name: name.to_string(),
-            kind: Self::map_symbol_kind_to_def_kind(kind.clone()),
+            kind: Self::map_symbol_kind_to_def_kind(&kind),
         };
         self.def_map_builder.record_def(def, NodeId(0));
         self.insert_symbol(
             name,
             Symbol {
-                def_id,
                 name: name.to_string(),
                 kind,
             },
@@ -130,6 +145,7 @@ impl SymbolResolver {
                         ty_expr: aliased_ty.clone(),
                     },
                     SymbolKind::TypeAlias {
+                        def_id,
                         ty_expr: aliased_ty.clone(),
                     },
                 ),
@@ -138,6 +154,7 @@ impl SymbolResolver {
                         fields: fields.clone(),
                     },
                     SymbolKind::StructDef {
+                        def_id,
                         fields: fields.clone(),
                     },
                 ),
@@ -146,6 +163,7 @@ impl SymbolResolver {
                         variants: variants.clone(),
                     },
                     SymbolKind::EnumDef {
+                        def_id,
                         variants: variants.clone(),
                     },
                 ),
@@ -165,7 +183,6 @@ impl SymbolResolver {
             self.insert_symbol(
                 &type_decl.name,
                 Symbol {
-                    def_id,
                     name: type_decl.name.clone(),
                     kind: symbol_kind,
                 },
@@ -176,19 +193,30 @@ impl SymbolResolver {
 
     fn populate_func_decls(&mut self, func_decls: &[&FunctionDecl]) {
         for &func_decl in func_decls {
+            // Check if the function decl name is already defined
+            let name = func_decl.sig.name.clone();
+            if self.lookup_symbol(&name).is_some() || self.func_decl_names.contains(&name) {
+                self.errors
+                    .push(ResolveError::SymbolAlreadyDefined(name, func_decl.span));
+                continue;
+            }
+            self.func_decl_names.insert(name);
+
+            // Create and record the def
             let def_id = self.def_id_gen.new_id();
             let def = Def {
                 id: def_id,
                 name: func_decl.sig.name.clone(),
-                kind: DefKind::Func,
+                kind: DefKind::ExternFunc,
             };
             self.def_map_builder.record_def(def, func_decl.id);
             self.insert_symbol(
                 &func_decl.sig.name,
                 Symbol {
-                    def_id,
                     name: func_decl.sig.name.clone(),
-                    kind: SymbolKind::Func,
+                    kind: SymbolKind::Func {
+                        overloads: vec![def_id],
+                    },
                 },
                 func_decl.span,
             );
@@ -197,6 +225,16 @@ impl SymbolResolver {
 
     fn populate_funcs(&mut self, funcs: &[&Function]) {
         for &func in funcs {
+            // Check if the function name is already defined as a function decl
+            if self.func_decl_names.contains(&func.sig.name) {
+                self.errors.push(ResolveError::SymbolAlreadyDefined(
+                    func.sig.name.clone(),
+                    func.span,
+                ));
+                continue;
+            }
+
+            // Create and record the def
             let def_id = self.def_id_gen.new_id();
             let def = Def {
                 id: def_id,
@@ -207,9 +245,10 @@ impl SymbolResolver {
             self.insert_symbol(
                 &func.sig.name,
                 Symbol {
-                    def_id,
                     name: func.sig.name.clone(),
-                    kind: SymbolKind::Func,
+                    kind: SymbolKind::Func {
+                        overloads: vec![def_id],
+                    },
                 },
                 func.span,
             );
@@ -222,21 +261,22 @@ impl SymbolResolver {
 
             // add built-in types
             for ty in BUILTIN_TYPES {
-                resolver.add_built_in_symbol(
-                    &ty.to_string(),
-                    SymbolKind::TypeAlias {
-                        ty_expr: TypeExpr {
-                            id: NodeId(0),
-                            kind: TypeExprKind::Named(ty.to_string()),
-                            span: Span::default(),
-                        },
+                let ty_name = ty.to_string();
+                resolver.add_built_in_symbol(&ty_name, |def_id| SymbolKind::TypeAlias {
+                    def_id,
+                    ty_expr: TypeExpr {
+                        id: NodeId(0),
+                        kind: TypeExprKind::Named(ty_name.clone()),
+                        span: Span::default(),
                     },
-                );
+                });
             }
 
             // add built-in functions
             for func_name in BUILTIN_FUNCS {
-                resolver.add_built_in_symbol(func_name, SymbolKind::Func);
+                resolver.add_built_in_symbol(func_name, |def_id| SymbolKind::Func {
+                    overloads: vec![def_id],
+                });
             }
 
             resolver.populate_decls(module);
@@ -316,9 +356,11 @@ impl SymbolResolver {
                 checker.insert_symbol(
                     &param.name,
                     Symbol {
-                        def_id,
                         name: param.name.clone(),
-                        kind: SymbolKind::Var { is_mutable: false },
+                        kind: SymbolKind::Var {
+                            def_id,
+                            is_mutable: false,
+                        },
                     },
                     param.span,
                 );
@@ -333,14 +375,18 @@ impl SymbolResolver {
         match &expr.kind {
             ExprKind::Var(name) => {
                 match self.lookup_symbol(name) {
-                    Some(symbol) => match symbol.kind {
-                        SymbolKind::Var { is_mutable: true } => {
+                    Some(symbol) => match &symbol.kind {
+                        SymbolKind::Var {
+                            is_mutable: true, ..
+                        } => {
                             // Mutable: ok
-                            self.def_map_builder.record_use(expr.id, symbol.def_id);
+                            self.def_map_builder.record_use(expr.id, symbol.def_id());
                         }
-                        SymbolKind::Var { is_mutable: false } => {
+                        SymbolKind::Var {
+                            is_mutable: false, ..
+                        } => {
                             // Immutable: error
-                            self.def_map_builder.record_use(expr.id, symbol.def_id);
+                            self.def_map_builder.record_use(expr.id, symbol.def_id());
                             self.errors
                                 .push(ResolveError::VarImmutable(name.clone(), expr.span));
                         }
@@ -392,9 +438,8 @@ impl SymbolResolver {
                 self.insert_symbol(
                     name,
                     Symbol {
-                        def_id,
                         name: name.to_string(),
-                        kind: SymbolKind::Var { is_mutable },
+                        kind: SymbolKind::Var { def_id, is_mutable },
                     },
                     pattern.span,
                 );
@@ -415,8 +460,7 @@ impl SymbolResolver {
                 // Resolve struct type name
                 match self.lookup_symbol(name) {
                     Some(Symbol {
-                        def_id,
-                        kind: SymbolKind::StructDef { .. },
+                        kind: SymbolKind::StructDef { def_id, .. },
                         ..
                     }) => {
                         self.def_map_builder.record_use(pattern.id, *def_id);
@@ -453,8 +497,7 @@ impl SymbolResolver {
                 // Resolve the enum name if present
                 if let Some(enum_name) = enum_name {
                     let Some(Symbol {
-                        def_id,
-                        kind: SymbolKind::EnumDef { .. },
+                        kind: SymbolKind::EnumDef { def_id, .. },
                         ..
                     }) = self.lookup_symbol(enum_name)
                     else {
@@ -482,9 +525,11 @@ impl SymbolResolver {
                     self.insert_symbol(
                         &binding.name,
                         Symbol {
-                            def_id,
                             name: binding.name.clone(),
-                            kind: SymbolKind::Var { is_mutable: false },
+                            kind: SymbolKind::Var {
+                                def_id,
+                                is_mutable: false,
+                            },
                         },
                         binding.span,
                     );
@@ -500,7 +545,8 @@ impl SymbolResolver {
                     SymbolKind::TypeAlias { .. }
                     | SymbolKind::StructDef { .. }
                     | SymbolKind::EnumDef { .. } => {
-                        self.def_map_builder.record_use(type_expr.id, symbol.def_id);
+                        self.def_map_builder
+                            .record_use(type_expr.id, symbol.def_id());
                     }
                     other => self.errors.push(ResolveError::ExpectedType(
                         name.clone(),
@@ -618,8 +664,7 @@ impl SymbolResolver {
                 // Resolve the struct name
                 match self.lookup_symbol(name) {
                     Some(Symbol {
-                        def_id,
-                        kind: SymbolKind::StructDef { .. },
+                        kind: SymbolKind::StructDef { def_id, .. },
                         ..
                     }) => {
                         self.def_map_builder.record_use(expr.id, *def_id);
@@ -637,7 +682,7 @@ impl SymbolResolver {
 
             // Accessors
             ExprKind::Var(name) => match self.lookup_symbol(name) {
-                Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id),
+                Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id()),
                 None => self
                     .errors
                     .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
@@ -678,8 +723,7 @@ impl SymbolResolver {
             } => {
                 // Resolve the enum name
                 let Some(Symbol {
-                    def_id,
-                    kind: SymbolKind::EnumDef { variants },
+                    kind: SymbolKind::EnumDef { def_id, variants },
                     ..
                 }) = self.lookup_symbol(enum_name)
                 else {
@@ -746,8 +790,8 @@ impl SymbolResolver {
                 // In the future, this can be generalized.
                 match &callee.kind {
                     ExprKind::Var(name) => match self.lookup_symbol(name) {
-                        Some(symbol) if symbol.kind == SymbolKind::Func => {
-                            self.def_map_builder.record_use(callee.id, symbol.def_id);
+                        Some(symbol) if matches!(&symbol.kind, SymbolKind::Func { .. }) => {
+                            self.def_map_builder.record_use(callee.id, symbol.def_id());
                             for arg in args {
                                 self.check_expr(arg);
                             }

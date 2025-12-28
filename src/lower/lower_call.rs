@@ -18,19 +18,29 @@ impl<'a> FuncLowerer<'a> {
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
         if result_ty == Type::Unit {
-            self.lower_call_into(None, callee, args)?;
+            self.lower_call_into(None, call, callee, args)?;
             return Ok(ExprValue::Scalar(Operand::Const(Const::Unit)));
         }
 
         if result_ty.is_scalar() {
             // Scalar call: capture result into a temp.
             let temp_place = self.new_temp_scalar(result_ty_id);
-            self.lower_call_into(Some(PlaceAny::Scalar(temp_place.clone())), callee, args)?;
+            self.lower_call_into(
+                Some(PlaceAny::Scalar(temp_place.clone())),
+                call,
+                callee,
+                args,
+            )?;
             Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
         } else {
             // Aggregate call: capture result into a temp place.
             let temp_place = self.new_temp_aggregate(result_ty_id);
-            self.lower_call_into(Some(PlaceAny::Aggregate(temp_place.clone())), callee, args)?;
+            self.lower_call_into(
+                Some(PlaceAny::Aggregate(temp_place.clone())),
+                call,
+                callee,
+                args,
+            )?;
             Ok(ExprValue::Aggregate(temp_place))
         }
     }
@@ -39,6 +49,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_call_into(
         &mut self,
         dst: Option<PlaceAny>,
+        call: &Expr,
         callee: &Expr,
         args: &[Expr],
     ) -> Result<(), LowerError> {
@@ -46,9 +57,12 @@ impl<'a> FuncLowerer<'a> {
             return Ok(());
         }
 
-        let callee = {
-            let callee_def = self.def_for_node(callee.id)?;
-            Callee::Def(callee_def.id)
+        let callee = match self.ctx.type_map.lookup_call_def(call.id) {
+            Some(def_id) => Callee::Def(def_id),
+            None => {
+                let callee_def = self.def_for_node(callee.id)?;
+                Callee::Def(callee_def.id)
+            }
         };
 
         if let Callee::Runtime(runtime_fn) = &callee {

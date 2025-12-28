@@ -67,3 +67,26 @@ fn test_resolve_enum_variant_undefined() {
         }
     }
 }
+
+#[test]
+fn test_resolve_function_decl_conflicts_with_def() {
+    let source = r#"
+        fn foo(x: u64) -> u64;
+
+        fn foo(x: u64) -> u64 {
+            x
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ResolveError::SymbolAlreadyDefined(_, _))),
+            "Expected SymbolAlreadyDefined, got {errors:?}"
+        );
+    }
+}

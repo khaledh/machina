@@ -1,5 +1,5 @@
 use crate::ast::{NodeId, TypeExpr, TypeExprKind};
-use crate::resolve::def_map::{Def, DefKind, DefMap};
+use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::TypeCheckError;
 use crate::types::{EnumVariant, StructField, Type};
 use std::collections::HashMap;
@@ -99,8 +99,9 @@ pub(crate) fn resolve_type_expr(
 }
 
 pub struct TypeMapBuilder {
-    node_type: HashMap<NodeId, Type>,
-    def_type: HashMap<Def, Type>,
+    node_type: HashMap<NodeId, Type>, // maps node to its type
+    def_type: HashMap<Def, Type>,     // maps def to its type
+    call_def: HashMap<NodeId, DefId>, // maps call expr node id to func def id (overload-resolved)
 }
 
 impl TypeMapBuilder {
@@ -108,6 +109,7 @@ impl TypeMapBuilder {
         Self {
             node_type: HashMap::new(),
             def_type: HashMap::new(),
+            call_def: HashMap::new(),
         }
     }
 
@@ -119,6 +121,10 @@ impl TypeMapBuilder {
         self.node_type.insert(node_id, typ);
     }
 
+    pub fn record_call_def(&mut self, node_id: NodeId, def_id: DefId) {
+        self.call_def.insert(node_id, def_id);
+    }
+
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
         self.def_type.get(def).cloned()
     }
@@ -127,6 +133,7 @@ impl TypeMapBuilder {
         TypeMap {
             def_type: self.def_type,
             node_type: self.node_type,
+            call_def: self.call_def,
         }
     }
 }
@@ -135,6 +142,7 @@ impl TypeMapBuilder {
 pub struct TypeMap {
     def_type: HashMap<Def, Type>,
     node_type: HashMap<NodeId, Type>,
+    call_def: HashMap<NodeId, DefId>,
 }
 
 impl TypeMap {
@@ -144,6 +152,10 @@ impl TypeMap {
 
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
         self.def_type.get(def).cloned()
+    }
+
+    pub fn lookup_call_def(&self, node: NodeId) -> Option<DefId> {
+        self.call_def.get(&node).cloned()
     }
 }
 

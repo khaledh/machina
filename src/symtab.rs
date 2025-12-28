@@ -25,12 +25,42 @@ impl SymbolTable {
             })
             .collect();
 
-        let def_names = def_map
-            .clone()
-            .into_iter()
-            .filter(|def| matches!(def.kind, DefKind::Func))
-            .map(|def| (def.id, def.name))
-            .collect();
+        let mut func_defs = Vec::new();
+        let mut extern_defs = Vec::new();
+
+        // Split into func and extern defs
+        for def in def_map.clone().into_iter() {
+            match def.kind {
+                DefKind::Func => func_defs.push(def),
+                DefKind::ExternFunc => extern_defs.push(def),
+                _ => {}
+            }
+        }
+
+        // Collect overloads
+        let mut overloads: HashMap<String, Vec<DefId>> = HashMap::new();
+        for def in &func_defs {
+            overloads.entry(def.name.clone()).or_default().push(def.id);
+        }
+
+        let mut def_names = HashMap::new();
+
+        // externs: always plain
+        for def in &extern_defs {
+            def_names.insert(def.id, def.name.clone());
+        }
+
+        // defs: suffix only if overloaded
+        for (name, def_ids) in overloads {
+            if def_ids.len() == 1 {
+                def_names.insert(def_ids[0], name);
+            } else {
+                // Overloads get a stable in-module suffix so codegen emits unique symbols.
+                for (index, def_id) in def_ids.iter().enumerate() {
+                    def_names.insert(*def_id, format!("{name}${index}"));
+                }
+            }
+        }
 
         Self {
             func_ids,

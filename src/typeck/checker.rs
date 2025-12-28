@@ -3,21 +3,18 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
+use crate::resolve::def_map::DefId;
 use crate::type_rel::{PrintArgKind, ValueAssignability, print_arg_kind, value_assignable};
 use crate::types::{EnumVariant, StructField, Type};
 
 use super::errors::TypeCheckError;
+use super::overloads::{FuncOverloadResolver, FuncOverloadSig, FuncParamSig};
 use super::type_map::{TypeMap, TypeMapBuilder, resolve_type_expr};
-
-struct FuncSig {
-    params: Vec<Type>,
-    return_type: Type,
-}
 
 pub struct TypeChecker {
     context: ResolvedContext,
     type_map_builder: TypeMapBuilder,
-    func_sigs: HashMap<String, FuncSig>,
+    func_sigs: HashMap<String, Vec<FuncOverloadSig>>,
     type_decls: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
 }
@@ -62,25 +59,56 @@ impl TypeChecker {
         }
     }
 
+    fn insert_func_overload(
+        &mut self,
+        def_id: DefId,
+        sig: FunctionSig,
+    ) -> Result<(), Vec<TypeCheckError>> {
+        let params = sig
+            .params
+            .iter()
+            .map(|p| {
+                let ty = resolve_type_expr(&self.context.def_map, &p.typ)?;
+                Ok(FuncParamSig {
+                    name: p.name.clone(),
+                    ty,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| vec![e])?;
+
+        let return_type =
+            resolve_type_expr(&self.context.def_map, &sig.return_type).map_err(|e| vec![e])?;
+
+        self.func_sigs
+            .entry(sig.name.clone())
+            .or_default()
+            .push(FuncOverloadSig {
+                def_id,
+                params,
+                return_type,
+            });
+
+        Ok(())
+    }
+
     fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for function in self.context.module.func_sigs() {
-            let params = function
-                .params
-                .iter()
-                .map(|p| resolve_type_expr(&self.context.def_map, &p.typ))
-                .collect::<Result<Vec<Type>, _>>()
-                .map_err(|e| vec![e])?;
+        let mut overloads = Vec::new();
 
-            let return_type = resolve_type_expr(&self.context.def_map, &function.return_type)
-                .map_err(|e| vec![e])?;
+        // Func decls
+        for decl in self.context.module.func_decls() {
+            let def_id = self.context.def_map.lookup_def(decl.id).unwrap().id;
+            overloads.push((def_id, decl.sig.clone()));
+        }
 
-            self.func_sigs.insert(
-                function.name.clone(),
-                FuncSig {
-                    params,
-                    return_type,
-                },
-            );
+        // Funcs
+        for func in self.context.module.funcs() {
+            let def_id = self.context.def_map.lookup_def(func.id).unwrap().id;
+            overloads.push((def_id, func.sig.clone()));
+        }
+
+        for (def_id, sig) in overloads {
+            self.insert_func_overload(def_id, sig)?;
         }
 
         Ok(())
@@ -158,7 +186,7 @@ impl TypeChecker {
 // context (previous mem::take workaround) and keeps borrow scopes minimal.
 struct Checker<'c, 'b> {
     context: &'c ResolvedContext,
-    func_sigs: &'c HashMap<String, FuncSig>,
+    func_sigs: &'c HashMap<String, Vec<FuncOverloadSig>>,
     type_decls: &'c HashMap<String, Type>,
     builder: &'b mut TypeMapBuilder,
     errors: &'b mut Vec<TypeCheckError>,
@@ -173,18 +201,28 @@ impl<'c, 'b> Checker<'c, 'b> {
     }
 
     fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
-        // Get the resolved function signature
-        let func_sig = self
-            .func_sigs
-            .get(&function.sig.name)
-            .expect("Function not found in func_sigs");
+        // Lookup the function by def id and find the matching overload
+        let func_def_id = self.context.def_map.lookup_def(function.id).unwrap().id;
+        let overloads = self.func_sigs.get(&function.sig.name).expect(&format!(
+            "Function {} not found in func_sigs",
+            function.sig.name
+        ));
+        let func_sig = overloads
+            .iter()
+            .find(|sig| sig.def_id == func_def_id)
+            .expect(&format!(
+                "Overload for function {} not found",
+                function.sig.name
+            ));
 
         // Record param types
-        for (param, param_ty) in function.sig.params.iter().zip(func_sig.params.iter()) {
+        for (param, param_sig) in function.sig.params.iter().zip(func_sig.params.iter()) {
             match self.context.def_map.lookup_def(param.id) {
                 Some(def) => {
-                    self.builder.record_def_type(def.clone(), param_ty.clone());
-                    self.builder.record_node_type(param.id, param_ty.clone());
+                    self.builder
+                        .record_def_type(def.clone(), param_sig.ty.clone());
+                    self.builder
+                        .record_node_type(param.id, param_sig.ty.clone());
                 }
                 None => panic!("Parameter {} not found in def_map", param.name),
             }
@@ -821,22 +859,38 @@ impl<'c, 'b> Checker<'c, 'b> {
             let ty = self.type_check_expr(arg)?;
             arg_types.push(ty);
         }
-        // Get function signature
-        let Some(func_sig) = self.func_sigs.get(name) else {
+        // Get overload set for the function
+        let Some(overloads) = self.func_sigs.get(name) else {
             return Err(TypeCheckError::UnknownType(callee.span));
         };
-        // Check number of arguments
-        if arg_types.len() != func_sig.params.len() {
-            return Err(TypeCheckError::ArgCountMismatch(
-                name.to_string(),
-                func_sig.params.len(),
-                arg_types.len(),
-                call_expr.span,
-            ));
+        // If no overload matches the arity and all overloads share the same arity,
+        // report a count mismatch instead of a generic overload error.
+        if !overloads
+            .iter()
+            .any(|sig| sig.params.len() == arg_types.len())
+        {
+            let mut counts = HashSet::new();
+            for sig in overloads {
+                counts.insert(sig.params.len());
+            }
+            if counts.len() == 1 {
+                let expected = *counts.iter().next().unwrap();
+                return Err(TypeCheckError::ArgCountMismatch(
+                    name.to_string(),
+                    expected,
+                    arg_types.len(),
+                    call_expr.span,
+                ));
+            }
         }
+
+        let resolved =
+            FuncOverloadResolver::new(name, &arg_types, call_expr.span).resolve(overloads)?;
+
+        self.builder.record_call_def(call_expr.id, resolved.def_id);
         // Check argument types
         for (i, arg_type) in arg_types.iter().enumerate() {
-            let param_ty = &func_sig.params[i];
+            let param_ty = &resolved.sig.params[i].ty;
             match self.check_assignable_to(&args[i], arg_type, param_ty) {
                 Ok(()) => continue,
                 Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => return Err(err),
@@ -851,7 +905,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                 }
             }
         }
-        Ok(func_sig.return_type.clone())
+        Ok(resolved.sig.return_type.clone())
     }
 
     // TODO: Remove this once we have (a) prelude support and (b) function overload resolution.

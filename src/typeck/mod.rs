@@ -2,6 +2,7 @@ pub mod type_map;
 
 mod checker;
 mod errors;
+mod overloads;
 
 pub use errors::TypeCheckError;
 

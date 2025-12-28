@@ -55,8 +55,10 @@ development. The compiler currently targets only ARM64 assembly.
 ### Functions
 
 - `fn foo(arg: arg_type, ...) -> return_type { body }`
+- `fn foo(arg: arg_type, ...) -> return_type;` declares an external function
 - Recursion
 - Pass and return by value (optimized)
+- Function overloading (internal symbols use `name$n`, may change)
 
 ### Code generation
 

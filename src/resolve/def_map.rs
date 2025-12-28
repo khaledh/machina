@@ -35,6 +35,7 @@ pub enum DefKind {
     StructDef { fields: Vec<StructField> },
     EnumDef { variants: Vec<EnumVariant> },
     Func,
+    ExternFunc,
     LocalVar { nrvo_eligible: bool },
     Param { index: u32 },
 }
@@ -58,6 +59,7 @@ impl fmt::Display for DefKind {
                 write!(f, "EnumDef[{}]", variant_names.join(", "))
             }
             DefKind::Func => write!(f, "Func"),
+            DefKind::ExternFunc => write!(f, "ExternFunc"),
             DefKind::LocalVar { nrvo_eligible } => {
                 if *nrvo_eligible {
                     write!(f, "LocalVar (NRVO eligible)")

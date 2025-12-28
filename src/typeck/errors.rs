@@ -140,6 +140,12 @@ pub enum TypeCheckError {
 
     #[error("Division by zero: {0}")]
     DivisionByZero(Span),
+
+    #[error("Function overload not found: {0}")]
+    FuncOverloadNoMatch(String, Span),
+
+    #[error("Function overload is ambiguous: {0}")]
+    FuncOverloadAmbiguous(String, Span),
 }
 
 impl TypeCheckError {
@@ -190,6 +196,8 @@ impl TypeCheckError {
             TypeCheckError::ValueOutOfRange(_, _, _, span) => *span,
             TypeCheckError::ForIterNotIterable(_, span) => *span,
             TypeCheckError::DivisionByZero(span) => *span,
+            TypeCheckError::FuncOverloadNoMatch(_, span) => *span,
+            TypeCheckError::FuncOverloadAmbiguous(_, span) => *span,
         }
     }
 }
