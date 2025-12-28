@@ -180,10 +180,14 @@ impl<'a> RegAlloc<'a> {
     }
 
     fn initial_free_regs(&self) -> Vec<PhysReg> {
-        let mut regs = self.target.allocatable_regs().to_vec();
         let scratch = self.target.scratch_regs();
-        regs.retain(|r| !scratch.contains(r));
-        regs
+        debug_assert!(
+            self.target
+                .allocatable_regs()
+                .iter()
+                .all(|r| !scratch.contains(r))
+        );
+        self.target.allocatable_regs().to_vec()
     }
 
     fn local_class(&self, local: LocalId) -> LocalClass {
@@ -543,6 +547,10 @@ impl<'a> RegAlloc<'a> {
         let callee_saved_size = used_callee_saved.len() * 8;
         let stack_alloc_size = self.stack_alloc.frame_size_bytes();
         let frame_size = callee_saved_size as u32 + stack_alloc_size;
+
+        // Ensure that moves are ordered correctly to avoid clobbering source registers.
+        self.moves
+            .resolve_parallel_moves(self.target.scratch_regs());
 
         AllocationResult {
             alloc_map: self.alloc_map.clone(),

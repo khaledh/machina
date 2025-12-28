@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::mcir::types::{BlockId, Place, PlaceAny, Scalar};
@@ -89,4 +89,71 @@ impl FnMoveList {
     pub fn get_return_move(&self, block_id: BlockId) -> Option<&Move> {
         self.return_moves.get(&block_id)
     }
+
+    pub fn resolve_parallel_moves(&mut self, scratch_regs: &[PhysReg]) {
+        if scratch_regs.is_empty() {
+            return;
+        }
+        let scratch = scratch_regs[0];
+        for inst_moves in self.inst_moves.values_mut() {
+            resolve_move_list(&mut inst_moves.before_moves, scratch);
+            resolve_move_list(&mut inst_moves.after_moves, scratch);
+        }
+    }
+}
+
+fn resolve_move_list(moves: &mut Vec<Move>, scratch: PhysReg) {
+    if moves.len() <= 1 {
+        return;
+    }
+
+    let mut pending = std::mem::take(moves);
+    let mut ordered = Vec::with_capacity(pending.len());
+
+    while !pending.is_empty() {
+        let mut src_regs = HashSet::new();
+        for mov in &pending {
+            if let Location::Reg(reg) = mov.from {
+                src_regs.insert(reg);
+            }
+        }
+
+        let mut ready_idx = None;
+        for (idx, mov) in pending.iter().enumerate() {
+            match &mov.to {
+                Location::Reg(reg) => {
+                    if !src_regs.contains(reg) {
+                        ready_idx = Some(idx);
+                        break;
+                    }
+                }
+                _ => {
+                    ready_idx = Some(idx);
+                    break;
+                }
+            }
+        }
+
+        if let Some(idx) = ready_idx {
+            ordered.push(pending.remove(idx));
+            continue;
+        }
+
+        let cycle_idx = pending
+            .iter()
+            .position(|mov| matches!((&mov.from, &mov.to), (Location::Reg(_), Location::Reg(_))))
+            .expect("cycle detection requires a reg-to-reg move");
+        let mut mov = pending.remove(cycle_idx);
+        let Location::Reg(from_reg) = mov.from else {
+            unreachable!("cycle candidate must be reg -> reg");
+        };
+        ordered.push(Move {
+            from: Location::Reg(from_reg),
+            to: Location::Reg(scratch),
+        });
+        mov.from = Location::Reg(scratch);
+        pending.push(mov);
+    }
+
+    *moves = ordered;
 }

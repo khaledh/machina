@@ -143,7 +143,7 @@ impl Arm64Target {
     }
 }
 
-const ALLOCATABLE: [PhysReg; 26] = [
+const ALLOCATABLE: [PhysReg; 24] = [
     phys(Arm64Reg::X0),
     phys(Arm64Reg::X1),
     phys(Arm64Reg::X2),
@@ -158,8 +158,6 @@ const ALLOCATABLE: [PhysReg; 26] = [
     phys(Arm64Reg::X11),
     phys(Arm64Reg::X12),
     phys(Arm64Reg::X13),
-    phys(Arm64Reg::X14),
-    phys(Arm64Reg::X15),
     phys(Arm64Reg::X19),
     phys(Arm64Reg::X20),
     phys(Arm64Reg::X21),
@@ -204,7 +202,13 @@ const CALLEE_SAVED: [PhysReg; 10] = [
     phys(Arm64Reg::X28),
 ];
 
-const SCRATCH: [PhysReg; 2] = [phys(Arm64Reg::X14), phys(Arm64Reg::X15)];
+// Registers reserved for codegen temps and ABI-specified scratch.
+const SCRATCH: [PhysReg; 4] = [
+    phys(Arm64Reg::X14),
+    phys(Arm64Reg::X15),
+    phys(Arm64Reg::X16),
+    phys(Arm64Reg::X17),
+];
 
 impl TargetSpec for Arm64Target {
     fn allocatable_regs(&self) -> &[PhysReg] {
