@@ -1260,9 +1260,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::Slice { target, start, end } => self.type_check_slice(target, start, end),
 
-            ExprKind::Match { scrutinee, arms } => {
-                self.type_check_match(scrutinee, arms)
-            }
+            ExprKind::Match { scrutinee, arms } => self.type_check_match(scrutinee, arms),
         };
 
         result.map(|ty| {
