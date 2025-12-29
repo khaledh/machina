@@ -120,7 +120,7 @@ Primary            ::= Literal
 Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit
                      | ArrayLit | TupleLit | StructLit
 
-ArrayLit           ::= "[" ExprList "]"
+ArrayLit           ::= TypeExpr? "[" ExprList "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"

@@ -306,6 +306,46 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(array_ty)
     }
 
+    fn type_check_typed_array_lit(
+        &mut self,
+        elem_ty_expr: &TypeExpr,
+        elems: &[Expr],
+    ) -> Result<Type, TypeCheckError> {
+        let elem_ty = resolve_type_expr(&self.context.def_map, elem_ty_expr)?;
+
+        if elems.is_empty() {
+            return Err(TypeCheckError::EmptyArrayLiteral(elem_ty_expr.span));
+        }
+
+        // Type check each element against the declared element type
+        for elem in elems {
+            let this_ty = self.type_check_expr(elem)?;
+            self.check_assignable_to(elem, &this_ty, &elem_ty)?;
+        }
+
+        // Build dimensions vector
+        let array_ty = match &elem_ty {
+            // If elements are arrays, prepend this dimension to their dimensions
+            Type::Array {
+                elem_ty: inner_elem_ty,
+                dims: inner_dims,
+            } => {
+                let mut new_dims = vec![elems.len()];
+                new_dims.extend(inner_dims);
+                Type::Array {
+                    elem_ty: inner_elem_ty.clone(),
+                    dims: new_dims,
+                }
+            }
+            _ => Type::Array {
+                elem_ty: Box::new(elem_ty),
+                dims: vec![elems.len()],
+            },
+        };
+
+        Ok(array_ty)
+    }
+
     fn type_check_array_index(
         &mut self,
         elem_ty: &Type,
@@ -1272,6 +1312,10 @@ impl<'c, 'b> Checker<'c, 'b> {
             ExprKind::UnitLit => Ok(Type::Unit),
 
             ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),
+
+            ExprKind::TypedArrayLit { elem_ty, elems } => {
+                self.type_check_typed_array_lit(elem_ty, elems)
+            }
 
             ExprKind::ArrayIndex { target, indices } => {
                 let target_ty = self.type_check_expr(target)?;

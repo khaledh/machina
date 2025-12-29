@@ -25,6 +25,7 @@ development. The compiler currently targets only ARM64 assembly.
 - Array destructuring: `let [a, b, c] = [1, 2, 3]`
 - Array indexing includes runtime bounds checks (traps on failure)
 - Array slicing: `let s: u64[] = a[1..3]`, `a[..]` (produces a slice)
+- Typed array literals: `let a = u8[1, 2, 3]` (only for primitive types)
 
 **Tuples** (fixed-size, homogeneous)
 - Tuples: `(u64, bool)`, `let t = (10, true)`

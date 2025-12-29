@@ -57,6 +57,8 @@ impl PartialEq for Type {
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
             (Type::UInt64, Type::UInt64) => true,
+            (Type::UInt32, Type::UInt32) => true,
+            (Type::UInt8, Type::UInt8) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::Char, Type::Char) => true,
             (Type::String, Type::String) => true,
@@ -159,6 +161,13 @@ pub const BUILTIN_TYPES: &[Type] = &[
     Type::Char,
     Type::String,
 ];
+
+pub fn is_builtin_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "()" | "u8" | "u32" | "u64" | "bool" | "char" | "string"
+    )
+}
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

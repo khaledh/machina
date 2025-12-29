@@ -4,6 +4,7 @@ use crate::ast::NodeIdGen;
 use crate::ast::*;
 use crate::diagnostics::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
+use crate::types::is_builtin_type_name;
 
 #[derive(Debug, Error)]
 #[allow(clippy::enum_variant_names)]
@@ -1281,6 +1282,14 @@ impl<'a> Parser<'a> {
                 })
             }
 
+            // Typed array literal
+            TK::Ident(name)
+                if is_builtin_type_name(name)
+                    && self.peek().map(|t| &t.kind) == Some(&TK::LBracket) =>
+            {
+                self.parse_typed_array_lit(name.clone())
+            }
+
             // Boolean literal
             TK::Ident(name) if name == "true" || name == "false" => {
                 let span = self.curr_token.span;
@@ -1358,6 +1367,33 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::ArrayLit(elems),
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_typed_array_lit(&mut self, type_name: String) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.advance(); // consume ident
+
+        // Create the named type expression for the element type
+        let elem_ty = TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Named(type_name),
+            span: self.close(marker.clone()),
+        };
+
+        // Consume '['
+        self.consume(&TK::LBracket)?;
+
+        // Parse elements
+        let elems = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+
+        // Consume ']'
+        self.consume(&TK::RBracket)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::TypedArrayLit { elem_ty, elems },
             span: self.close(marker),
         })
     }

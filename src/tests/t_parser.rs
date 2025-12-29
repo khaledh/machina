@@ -165,6 +165,39 @@ fn test_parse_nested_array_literal() {
 }
 
 #[test]
+fn test_parse_typed_array_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = u8[1, 2, 3];
+            arr[0]
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::TypedArrayLit { elem_ty, elems } = &value.kind {
+            match &elem_ty.kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u8"),
+                _ => panic!("Expected named type"),
+            }
+            assert_eq!(elems.len(), 3);
+            for elem in elems {
+                assert!(matches!(elem.kind, ExprKind::UInt64Lit(_)));
+            }
+        } else {
+            panic!("Expected TypedArrayLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
 fn test_parse_tuple_type() {
     let source = r#"
         fn test() -> (u64, bool) {

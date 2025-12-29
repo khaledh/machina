@@ -34,6 +34,31 @@ fn test_multidim_array_literal_type() {
 }
 
 #[test]
+fn test_typed_array_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = u8[1, 2, 3];
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_typed_array_literal_type_mismatch() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = u8[1, true];
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_multidim_array_type_inference() {
     let source = r#"
         fn test() -> u64[2, 2] {

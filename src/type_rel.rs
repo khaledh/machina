@@ -9,7 +9,6 @@
 //! How to use:
 //! - Call `type_assignable(from, to)` to decide if a conversion is allowed.
 //! - Call `value_assignable(expr, from, to)` to validate value-sensitive rules.
-//! - Call `print_arg_kind(ty)` to classify types accepted by print/println.
 //! - When adding a new conversion, add a rule in `type_rules_for` and a small
 //!   helper like `foo_to_bar`. If it has value-dependent behavior, add a rule
 //!   in `value_rules_for` as well.
@@ -21,6 +20,8 @@ use crate::types::Type;
 pub enum TypeAssignability {
     Exact,
     UInt64ToRange { min: u64, max: u64 },
+    UInt64ToUInt8,
+    UInt64ToUInt32,
     RangeToUInt64,
     Incompatible,
 }
@@ -33,13 +34,9 @@ pub enum ValueAssignability {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrintArgKind {
-    String,
-    UInt64Like,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
+    UInt8,
+    UInt32,
     UInt64,
     Range,
     String,
@@ -90,25 +87,17 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
     match assignability {
         TypeAssignability::Exact
         | TypeAssignability::RangeToUInt64
-        | TypeAssignability::UInt64ToRange { .. } => ValueAssignability::Assignable(assignability),
+        | TypeAssignability::UInt64ToRange { .. }
+        | TypeAssignability::UInt64ToUInt8
+        | TypeAssignability::UInt64ToUInt32 => ValueAssignability::Assignable(assignability),
         TypeAssignability::Incompatible => ValueAssignability::Incompatible,
-    }
-}
-
-pub fn print_arg_kind(ty: &Type) -> Option<PrintArgKind> {
-    if type_tag(ty) == TypeTag::String {
-        return Some(PrintArgKind::String);
-    }
-    match type_assignable(ty, &Type::UInt64) {
-        TypeAssignability::Exact | TypeAssignability::RangeToUInt64 => {
-            Some(PrintArgKind::UInt64Like)
-        }
-        _ => None,
     }
 }
 
 fn type_tag(ty: &Type) -> TypeTag {
     match ty {
+        Type::UInt8 => TypeTag::UInt8,
+        Type::UInt32 => TypeTag::UInt32,
         Type::UInt64 => TypeTag::UInt64,
         Type::Range { .. } => TypeTag::Range,
         Type::String => TypeTag::String,
@@ -152,10 +141,20 @@ fn range_to_u64(_from: &Type, to: &Type) -> Option<TypeAssignability> {
 
 // --- Value Rules ---
 
-const U64_VALUE_RULES: &[ValueRule] = &[ValueRule {
-    target: TypeTag::Range,
-    apply: value_u64_to_range,
-}];
+const U64_VALUE_RULES: &[ValueRule] = &[
+    ValueRule {
+        target: TypeTag::Range,
+        apply: value_u64_to_range,
+    },
+    ValueRule {
+        target: TypeTag::UInt8,
+        apply: value_u64_to_u8,
+    },
+    ValueRule {
+        target: TypeTag::UInt32,
+        apply: value_u64_to_u32,
+    },
+];
 
 fn value_rules_for(tag: TypeTag) -> &'static [ValueRule] {
     match tag {
@@ -186,5 +185,53 @@ fn value_u64_to_range(
             min: *min,
             max: *max,
         },
+    ))
+}
+
+fn value_u64_to_u8(
+    from_value: &Expr,
+    _from_ty: &Type,
+    to_ty: &Type,
+) -> Option<ValueAssignability> {
+    if !matches!(to_ty, Type::UInt8) {
+        return None;
+    }
+    let ExprKind::UInt64Lit(value) = from_value.kind else {
+        return Some(ValueAssignability::Incompatible);
+    };
+    let max = u8::MAX as u64 + 1;
+    if value >= max {
+        return Some(ValueAssignability::ValueOutOfRange {
+            value,
+            min: 0,
+            max,
+        });
+    }
+    Some(ValueAssignability::Assignable(
+        TypeAssignability::UInt64ToUInt8,
+    ))
+}
+
+fn value_u64_to_u32(
+    from_value: &Expr,
+    _from_ty: &Type,
+    to_ty: &Type,
+) -> Option<ValueAssignability> {
+    if !matches!(to_ty, Type::UInt32) {
+        return None;
+    }
+    let ExprKind::UInt64Lit(value) = from_value.kind else {
+        return Some(ValueAssignability::Incompatible);
+    };
+    let max = u32::MAX as u64 + 1;
+    if value >= max {
+        return Some(ValueAssignability::ValueOutOfRange {
+            value,
+            min: 0,
+            max,
+        });
+    }
+    Some(ValueAssignability::Assignable(
+        TypeAssignability::UInt64ToUInt32,
     ))
 }

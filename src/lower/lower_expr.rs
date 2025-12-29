@@ -196,6 +196,7 @@ impl<'a> FuncLowerer<'a> {
         match &expr.kind {
             EK::StringLit { .. }
             | EK::ArrayLit(..)
+            | EK::TypedArrayLit { .. }
             | EK::TupleLit(..)
             | EK::StructLit { .. }
             | EK::StructUpdate { .. }
@@ -386,6 +387,30 @@ impl<'a> FuncLowerer<'a> {
                         }),
                     };
 
+                    self.lower_expr_into_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
+                }
+                Ok(())
+            }
+
+            EK::TypedArrayLit { elems, .. } => {
+                // Same as ArrayLit branch, but iterate `elems`
+                let elem_ty = {
+                    let dst_ty = self.ty_for_node(expr.id)?;
+                    match dst_ty {
+                        Type::Array { elem_ty, .. } => elem_ty,
+                        _ => panic!("Expected array type"),
+                    }
+                };
+                let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
+
+                for (i, elem_expr) in elems.iter().enumerate() {
+                    let index_proj = Projection::Index {
+                        index: Operand::Const(Const::Int {
+                            signed: false,
+                            bits: 64,
+                            value: i as i128,
+                        }),
+                    };
                     self.lower_expr_into_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
                 }
                 Ok(())

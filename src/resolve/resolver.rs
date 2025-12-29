@@ -657,6 +657,14 @@ impl SymbolResolver {
                 }
             }
 
+            // Typed array literal
+            ExprKind::TypedArrayLit { elem_ty, elems } => {
+                self.check_type_expr(elem_ty);
+                for elem in elems {
+                    self.check_expr(elem);
+                }
+            }
+
             ExprKind::TupleLit(fields) => {
                 for field in fields {
                     self.check_expr(field);

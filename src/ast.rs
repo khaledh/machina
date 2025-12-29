@@ -348,6 +348,10 @@ pub enum ExprKind {
 
     // Literals (compound)
     ArrayLit(Vec<Expr>),
+    TypedArrayLit {
+        elem_ty: TypeExpr,
+        elems: Vec<Expr>,
+    },
     TupleLit(Vec<Expr>),
     StructLit {
         name: String,
@@ -817,6 +821,14 @@ impl Expr {
             }
             ExprKind::ArrayLit(elems) => {
                 writeln!(f, "{}ArrayLit [{}]", pad, self.id)?;
+                for elem in elems {
+                    elem.fmt_with_indent(f, level + 1)?;
+                }
+            }
+            ExprKind::TypedArrayLit { elem_ty, elems } => {
+                writeln!(f, "{}TypedArrayLit [{}]", pad, self.id)?;
+                writeln!(f, "{}Elem Type: {}", pad, elem_ty)?;
+                writeln!(f, "{}Elems:", pad)?;
                 for elem in elems {
                     elem.fmt_with_indent(f, level + 1)?;
                 }
