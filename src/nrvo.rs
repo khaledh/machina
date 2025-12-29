@@ -188,11 +188,7 @@ impl<'a> NrvoSafetyChecker<'a> {
                 callee_ok && args_ok
             }
 
-            ExprKind::ArrayLit(elems) => elems.iter().all(|e| self.check_expr(e, false)),
-
-            ExprKind::TypedArrayLit { elems, .. } => {
-                elems.iter().all(|e| self.check_expr(e, false))
-            }
+            ExprKind::ArrayLit { elems, .. } => elems.iter().all(|e| self.check_expr(e, false)),
 
             ExprKind::ArrayIndex { target, indices } => {
                 let target_ok = match &target.kind {

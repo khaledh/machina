@@ -144,13 +144,20 @@ fn test_parse_nested_array_literal() {
 
     if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
         // Value should be an ArrayLit
-        if let ExprKind::ArrayLit(outer_elems) = &value.kind {
+        if let ExprKind::ArrayLit {
+            elem_ty: None,
+            elems: outer_elems,
+        } = &value.kind
+        {
             assert_eq!(outer_elems.len(), 2);
 
             // Each element should be an ArrayLit
             for elem in outer_elems {
                 match &elem.kind {
-                    ExprKind::ArrayLit(inner_elems) => {
+                    ExprKind::ArrayLit {
+                        elem_ty: None,
+                        elems: inner_elems,
+                    } => {
                         assert_eq!(inner_elems.len(), 3);
                     }
                     _ => panic!("Expected nested ArrayLit"),
@@ -180,7 +187,11 @@ fn test_parse_typed_array_literal() {
     let stmt = block_stmt_at(items, 0);
 
     if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
-        if let ExprKind::TypedArrayLit { elem_ty, elems } = &value.kind {
+        if let ExprKind::ArrayLit {
+            elem_ty: Some(elem_ty),
+            elems,
+        } = &value.kind
+        {
             match &elem_ty.kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u8"),
                 _ => panic!("Expected named type"),
@@ -190,7 +201,7 @@ fn test_parse_typed_array_literal() {
                 assert!(matches!(elem.kind, ExprKind::IntLit(_)));
             }
         } else {
-            panic!("Expected TypedArrayLit");
+            panic!("Expected typed ArrayLit");
         }
     } else {
         panic!("Expected Let");
@@ -918,7 +929,7 @@ fn test_parse_for_array_loop() {
             PatternKind::Ident { name } => assert_eq!(name, "x"),
             _ => panic!("Expected ident pattern"),
         }
-        assert!(matches!(iter.kind, ExprKind::ArrayLit(_)));
+        assert!(matches!(iter.kind, ExprKind::ArrayLit { .. }));
         assert!(matches!(body.kind, ExprKind::Block { .. }));
     } else {
         panic!("Expected for loop");

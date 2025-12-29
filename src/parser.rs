@@ -1366,7 +1366,10 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBracket)?; // consume ']'
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::ArrayLit(elems),
+            kind: ExprKind::ArrayLit {
+                elem_ty: None,
+                elems,
+            },
             span: self.close(marker),
         })
     }
@@ -1393,7 +1396,10 @@ impl<'a> Parser<'a> {
 
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::TypedArrayLit { elem_ty, elems },
+            kind: ExprKind::ArrayLit {
+                elem_ty: Some(elem_ty),
+                elems,
+            },
             span: self.close(marker),
         })
     }

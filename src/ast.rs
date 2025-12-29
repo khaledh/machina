@@ -347,9 +347,8 @@ pub enum ExprKind {
     UnitLit,
 
     // Literals (compound)
-    ArrayLit(Vec<Expr>),
-    TypedArrayLit {
-        elem_ty: TypeExpr,
+    ArrayLit {
+        elem_ty: Option<TypeExpr>,
         elems: Vec<Expr>,
     },
     TupleLit(Vec<Expr>),
@@ -819,15 +818,11 @@ impl Expr {
             ExprKind::UnitLit => {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;
             }
-            ExprKind::ArrayLit(elems) => {
+            ExprKind::ArrayLit { elem_ty, elems } => {
                 writeln!(f, "{}ArrayLit [{}]", pad, self.id)?;
-                for elem in elems {
-                    elem.fmt_with_indent(f, level + 1)?;
+                if let Some(elem_ty) = elem_ty {
+                    writeln!(f, "{}Elem Type: {}", pad, elem_ty)?;
                 }
-            }
-            ExprKind::TypedArrayLit { elem_ty, elems } => {
-                writeln!(f, "{}TypedArrayLit [{}]", pad, self.id)?;
-                writeln!(f, "{}Elem Type: {}", pad, elem_ty)?;
                 writeln!(f, "{}Elems:", pad)?;
                 for elem in elems {
                     elem.fmt_with_indent(f, level + 1)?;

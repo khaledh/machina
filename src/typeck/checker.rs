@@ -273,21 +273,36 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_array_lit(&mut self, elems: &[Expr]) -> Result<Type, TypeCheckError> {
+    fn type_check_array_lit(
+        &mut self,
+        elem_ty_expr: Option<&TypeExpr>,
+        elems: &[Expr],
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
         if elems.is_empty() {
-            return Err(TypeCheckError::EmptyArrayLiteral(elems[0].span));
+            return Err(TypeCheckError::EmptyArrayLiteral(span));
         }
 
-        // all elements must have the same type
-        let elem_ty = self.type_check_expr(&elems[0])?;
-        for elem in &elems[1..] {
-            let this_ty = self.type_check_expr(elem)?;
-            if this_ty != elem_ty {
-                return Err(TypeCheckError::ArrayElementTypeMismatch(
-                    elem_ty, this_ty, elem.span,
-                ));
+        let elem_ty = if let Some(elem_ty_expr) = elem_ty_expr {
+            let elem_ty = resolve_type_expr(&self.context.def_map, elem_ty_expr)?;
+            for elem in elems {
+                let this_ty = self.type_check_expr_with_expected(elem, Some(&elem_ty))?;
+                self.check_assignable_to(elem, &this_ty, &elem_ty)?;
             }
-        }
+            elem_ty
+        } else {
+            // all elements must have the same type
+            let elem_ty = self.type_check_expr(&elems[0])?;
+            for elem in &elems[1..] {
+                let this_ty = self.type_check_expr(elem)?;
+                if this_ty != elem_ty {
+                    return Err(TypeCheckError::ArrayElementTypeMismatch(
+                        elem_ty, this_ty, elem.span,
+                    ));
+                }
+            }
+            elem_ty
+        };
 
         // Build dimensions vector
         let array_ty = match elem_ty {
@@ -312,46 +327,6 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(array_ty)
     }
 
-    fn type_check_typed_array_lit(
-        &mut self,
-        elem_ty_expr: &TypeExpr,
-        elems: &[Expr],
-    ) -> Result<Type, TypeCheckError> {
-        let elem_ty = resolve_type_expr(&self.context.def_map, elem_ty_expr)?;
-
-        if elems.is_empty() {
-            return Err(TypeCheckError::EmptyArrayLiteral(elem_ty_expr.span));
-        }
-
-        // Type check each element against the declared element type
-        for elem in elems {
-            let this_ty = self.type_check_expr_with_expected(elem, Some(&elem_ty))?;
-            self.check_assignable_to(elem, &this_ty, &elem_ty)?;
-        }
-
-        // Build dimensions vector
-        let array_ty = match &elem_ty {
-            // If elements are arrays, prepend this dimension to their dimensions
-            Type::Array {
-                elem_ty: inner_elem_ty,
-                dims: inner_dims,
-            } => {
-                let mut new_dims = vec![elems.len()];
-                new_dims.extend(inner_dims);
-                Type::Array {
-                    elem_ty: inner_elem_ty.clone(),
-                    dims: new_dims,
-                }
-            }
-            _ => Type::Array {
-                elem_ty: Box::new(elem_ty),
-                dims: vec![elems.len()],
-            },
-        };
-
-        Ok(array_ty)
-    }
-
     fn type_check_array_lit_with_expected(
         &mut self,
         elems: &[Expr],
@@ -367,7 +342,7 @@ impl<'c, 'b> Checker<'c, 'b> {
             dims: expected_dims,
         } = expected
         else {
-            return self.type_check_array_lit(elems);
+            return self.type_check_array_lit(None, elems, span);
         };
 
         // When the expected array has multiple dimensions, each element is itself
@@ -926,10 +901,8 @@ impl<'c, 'b> Checker<'c, 'b> {
         if let Some(decl_ty) = &expected_ty {
             self.check_assignable_to(value, &value_ty, decl_ty)?;
             value_ty = decl_ty.clone();
-            if matches!(
-                &value.kind,
-                ExprKind::ArrayLit(_) | ExprKind::TypedArrayLit { .. }
-            ) && matches!(value_ty, Type::Array { .. })
+            if matches!(&value.kind, ExprKind::ArrayLit { .. })
+                && matches!(value_ty, Type::Array { .. })
             {
                 self.builder.record_node_type(value.id, value_ty.clone());
             }
@@ -1332,7 +1305,13 @@ impl<'c, 'b> Checker<'c, 'b> {
                 self.builder.record_node_type(expr.id, expected_ty.clone());
                 Ok(expected_ty.clone())
             }
-            (ExprKind::ArrayLit(elems), Some(expected_ty @ Type::Array { .. })) => {
+            (
+                ExprKind::ArrayLit {
+                    elem_ty: None,
+                    elems,
+                },
+                Some(expected_ty @ Type::Array { .. }),
+            ) => {
                 let ty = self.type_check_array_lit_with_expected(elems, expected_ty, expr.span)?;
                 self.builder.record_node_type(expr.id, ty.clone());
                 Ok(ty)
@@ -1353,10 +1332,8 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::UnitLit => Ok(Type::Unit),
 
-            ExprKind::ArrayLit(elems) => self.type_check_array_lit(elems),
-
-            ExprKind::TypedArrayLit { elem_ty, elems } => {
-                self.type_check_typed_array_lit(elem_ty, elems)
+            ExprKind::ArrayLit { elem_ty, elems } => {
+                self.type_check_array_lit(elem_ty.as_ref(), elems, expr.span)
             }
 
             ExprKind::ArrayIndex { target, indices } => {

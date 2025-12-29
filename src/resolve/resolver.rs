@@ -642,15 +642,10 @@ impl SymbolResolver {
             | ExprKind::UnitLit => {}
 
             // Compound literals
-            ExprKind::ArrayLit(elems) => {
-                for elem in elems {
-                    self.check_expr(elem);
+            ExprKind::ArrayLit { elem_ty, elems } => {
+                if let Some(elem_ty) = elem_ty {
+                    self.check_type_expr(elem_ty);
                 }
-            }
-
-            // Typed array literal
-            ExprKind::TypedArrayLit { elem_ty, elems } => {
-                self.check_type_expr(elem_ty);
                 for elem in elems {
                     self.check_expr(elem);
                 }
