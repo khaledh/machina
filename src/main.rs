@@ -209,6 +209,9 @@ fn main() {
                     CompileError::TypeCheck(e) => {
                         println!("{}", format_error(&source, e.span(), e));
                     }
+                    CompileError::SemCheck(e) => {
+                        println!("{}", format_error(&source, e.span(), e));
+                    }
                     CompileError::Lower(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }

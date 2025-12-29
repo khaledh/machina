@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
 use crate::resolve::def_map::DefId;
-use crate::type_rel::{ValueAssignability, value_assignable};
+use crate::type_rel::{TypeAssignability, type_assignable};
 use crate::types::{EnumVariant, StructField, Type};
 
 use super::errors::TypeCheckError;
@@ -252,9 +252,6 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match self.check_assignable_to(ret_expr, &ret_ty, &func_sig.return_type) {
             Ok(()) => {}
-            Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => {
-                self.errors.push(err);
-            }
             Err(_) => {
                 self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
                     func_sig.return_type.clone(),
@@ -462,7 +459,6 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn type_check_string_index(
         &mut self,
-        target: &Expr,
         indices: &[Expr],
         span: Span,
     ) -> Result<Type, TypeCheckError> {
@@ -476,14 +472,7 @@ impl<'c, 'b> Checker<'c, 'b> {
             return Err(TypeCheckError::IndexTypeNotInt(index_ty, indices[0].span));
         }
 
-        // We only support indexing ASCII strings for now
-        match &target.kind {
-            ExprKind::StringLit {
-                tag: StringTag::Ascii,
-                ..
-            } => Ok(Type::Char),
-            _ => Err(TypeCheckError::StringIndexNonAscii(target.span)),
-        }
+        Ok(Type::Char)
     }
 
     fn type_check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
@@ -532,67 +521,38 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn type_check_struct_lit(
         &mut self,
-        expr: &Expr,
         name: &String,
         fields: &[StructLitField],
     ) -> Result<Type, TypeCheckError> {
-        // Lookup the struct type
-        let struct_ty = self
-            .type_decls
-            .get(name)
-            .ok_or_else(|| TypeCheckError::UnknownStructType(name.clone(), expr.span))?;
+        let Some(struct_ty) = self.type_decls.get(name) else {
+            for field in fields {
+                let _ = self.type_check_expr(&field.value)?;
+            }
+            return Ok(Type::Unknown);
+        };
+        let Type::Struct {
+            fields: struct_fields,
+            ..
+        } = struct_ty
+        else {
+            for field in fields {
+                let _ = self.type_check_expr(&field.value)?;
+            }
+            return Ok(Type::Unknown);
+        };
 
-        let mut seen_fields = HashSet::new();
-
-        // Type check each field
         for field in fields {
-            // Check that the field is defined in the struct
-            if !struct_ty.has_field(&field.name) {
-                return Err(TypeCheckError::UnknownStructField(
-                    field.name.clone(),
-                    expr.span,
-                ));
-            }
-
-            // Check for duplicate fields
-            if !seen_fields.insert(&field.name) {
-                return Err(TypeCheckError::DuplicateStructField(
-                    field.name.clone(),
-                    expr.span,
-                ));
-            }
-
-            // Type check the field
-            let expected_ty = struct_ty.struct_field_type(&field.name);
             let actual_ty = self.type_check_expr(&field.value)?;
-
-            if actual_ty != expected_ty {
-                return Err(TypeCheckError::StructFieldTypeMismatch(
-                    field.name.clone(),
-                    expected_ty,
-                    actual_ty,
-                    field.span,
-                ));
-            }
-        }
-
-        // Check for missing fields
-        let mut missing_fields = Vec::new();
-        match struct_ty {
-            Type::Struct { fields, .. } => {
-                for field in fields {
-                    if !seen_fields.contains(&field.name) {
-                        missing_fields.push(field.name.clone());
-                    }
+            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name) {
+                if actual_ty != expected.ty {
+                    return Err(TypeCheckError::StructFieldTypeMismatch(
+                        field.name.clone(),
+                        expected.ty.clone(),
+                        actual_ty,
+                        field.span,
+                    ));
                 }
             }
-            _ => panic!("Expected struct type"),
-        }
-        if !missing_fields.is_empty() {
-            return Err(TypeCheckError::StructFieldsMissing(
-                missing_fields.join(", "),
-                expr.span,
-            ));
         }
 
         Ok(struct_ty.clone())
@@ -608,10 +568,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         match target_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
                 Some(field) => Ok(field.ty.clone()),
-                None => Err(TypeCheckError::UnknownStructField(
-                    field.to_string(),
-                    target.span,
-                )),
+                None => Ok(Type::Unknown),
             },
             _ => Err(TypeCheckError::InvalidStructFieldTarget(
                 target_ty,
@@ -625,35 +582,35 @@ impl<'c, 'b> Checker<'c, 'b> {
         enum_name: &String,
         variant_name: &String,
         payload: &[Expr],
-        span: Span,
     ) -> Result<Type, TypeCheckError> {
         // Lookup the type
-        let enum_ty = self
-            .type_decls
-            .get(enum_name)
-            .ok_or_else(|| TypeCheckError::UnknownEnumType(enum_name.clone(), span))?;
+        let Some(enum_ty) = self.type_decls.get(enum_name) else {
+            for expr in payload {
+                let _ = self.type_check_expr(expr)?;
+            }
+            return Ok(Type::Unknown);
+        };
 
-        // Check that the type is an enum
         let Type::Enum { variants, .. } = enum_ty else {
-            return Err(TypeCheckError::UnknownEnumType(enum_name.clone(), span));
+            for expr in payload {
+                let _ = self.type_check_expr(expr)?;
+            }
+            return Ok(Type::Unknown);
         };
 
         // Get the variant
-        let variant_ty = variants
-            .iter()
-            .find(|v| v.name == *variant_name)
-            .ok_or_else(|| {
-                TypeCheckError::UnknownEnumVariant(enum_name.clone(), variant_name.clone(), span)
-            })?;
+        let Some(variant_ty) = variants.iter().find(|v| v.name == *variant_name) else {
+            for expr in payload {
+                let _ = self.type_check_expr(expr)?;
+            }
+            return Ok(enum_ty.clone());
+        };
 
-        // Check that the payload has the right number of elements
         if payload.len() != variant_ty.payload.len() {
-            return Err(TypeCheckError::EnumVariantPayloadArityMismatch(
-                variant_name.clone(),
-                variant_ty.payload.len(),
-                payload.len(),
-                span,
-            ));
+            for expr in payload {
+                let _ = self.type_check_expr(expr)?;
+            }
+            return Ok(enum_ty.clone());
         }
 
         // Type check each payload element
@@ -692,29 +649,25 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         };
 
-        let mut seen_fields = HashSet::new();
+        let Type::Struct {
+            fields: struct_fields,
+            ..
+        } = &struct_ty
+        else {
+            return Ok(Type::Unknown);
+        };
+
         for field in fields {
-            if !struct_ty.has_field(&field.name) {
-                return Err(TypeCheckError::UnknownStructField(
-                    field.name.clone(),
-                    field.span,
-                ));
-            }
-            if !seen_fields.insert(&field.name) {
-                return Err(TypeCheckError::DuplicateStructField(
-                    field.name.clone(),
-                    field.span,
-                ));
-            }
-            let expected_ty = struct_ty.struct_field_type(&field.name);
             let actual_ty = self.type_check_expr(&field.value)?;
-            if actual_ty != expected_ty {
-                return Err(TypeCheckError::StructFieldTypeMismatch(
-                    field.name.clone(),
-                    expected_ty,
-                    actual_ty,
-                    field.span,
-                ));
+            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name) {
+                if actual_ty != expected.ty {
+                    return Err(TypeCheckError::StructFieldTypeMismatch(
+                        field.name.clone(),
+                        expected.ty.clone(),
+                        actual_ty,
+                        field.span,
+                    ));
+                }
             }
         }
 
@@ -840,43 +793,16 @@ impl<'c, 'b> Checker<'c, 'b> {
                     ));
                 }
 
-                let mut seen_fields = HashSet::new();
-
                 // Check each field pattern
                 for field in fields {
-                    // Check that the field is defined in the struct
-                    if !value_ty.has_field(&field.name) {
-                        return Err(TypeCheckError::UnknownStructField(
-                            field.name.clone(),
-                            field.span,
-                        ));
-                    }
-
-                    // Check for duplicate fields
-                    if !seen_fields.insert(&field.name) {
-                        return Err(TypeCheckError::DuplicateStructField(
-                            field.name.clone(),
-                            field.span,
-                        ));
-                    }
-
                     // Type check the field
-                    let expected_ty = value_ty.struct_field_type(&field.name);
-                    self.type_check_pattern(&field.pattern, &expected_ty)?;
-                }
-
-                // Check for missing fields
-                let mut missing_fields = Vec::new();
-                for field in struct_fields {
-                    if !seen_fields.contains(&field.name) {
-                        missing_fields.push(field.name.clone());
+                    if let Some(expected_ty) = struct_fields
+                        .iter()
+                        .find(|f| f.name == field.name)
+                        .map(|f| &f.ty)
+                    {
+                        self.type_check_pattern(&field.pattern, expected_ty)?;
                     }
-                }
-                if !missing_fields.is_empty() {
-                    return Err(TypeCheckError::StructFieldsMissing(
-                        missing_fields.join(", "),
-                        pattern.span,
-                    ));
                 }
 
                 Ok(())
@@ -919,16 +845,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         from_ty: &Type,
         to_ty: &Type,
     ) -> Result<(), TypeCheckError> {
-        match value_assignable(from_value, from_ty, to_ty) {
-            ValueAssignability::Assignable(_) => Ok(()),
-            ValueAssignability::ValueOutOfRange { value, min, max } => Err(
-                TypeCheckError::ValueOutOfRange(value, min, max, from_value.span),
-            ),
-            ValueAssignability::Incompatible => Err(TypeCheckError::DeclTypeMismatch(
+        match type_assignable(from_ty, to_ty) {
+            TypeAssignability::Incompatible => Err(TypeCheckError::DeclTypeMismatch(
                 to_ty.clone(),
                 from_ty.clone(),
                 from_value.span,
             )),
+            _ => Ok(()),
         }
     }
 
@@ -938,7 +861,6 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match self.check_assignable_to(value, &rhs_type, &lhs_type) {
             Ok(()) => Ok(Type::Unit),
-            Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => Err(err),
             Err(_) => Err(TypeCheckError::AssignTypeMismatch(
                 lhs_type,
                 rhs_type,
@@ -963,10 +885,10 @@ impl<'c, 'b> Checker<'c, 'b> {
         let name = match &callee.kind {
             ExprKind::Var(name) => name,
             _ => {
-                return Err(TypeCheckError::InvalidCallee(
-                    callee.kind.clone(),
-                    callee.span,
-                ));
+                for arg in args {
+                    let _ = self.type_check_expr(arg)?;
+                }
+                return Ok(Type::Unknown);
             }
         };
 
@@ -1005,18 +927,18 @@ impl<'c, 'b> Checker<'c, 'b> {
             FuncOverloadResolver::new(name, args, &arg_types, call_expr.span).resolve(overloads)?;
 
         self.builder.record_call_def(call_expr.id, resolved.def_id);
-        // Check argument types
-        for (i, arg_type) in arg_types.iter().enumerate() {
+        // Check argument types against the resolved overload, re-typing with expectations
+        for (i, arg) in args.iter().enumerate() {
             let param_ty = &resolved.sig.params[i].ty;
-            match self.check_assignable_to(&args[i], arg_type, param_ty) {
+            let arg_ty = self.type_check_expr_with_expected(arg, Some(param_ty))?;
+            match self.check_assignable_to(arg, &arg_ty, param_ty) {
                 Ok(()) => continue,
-                Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => return Err(err),
                 Err(_) => {
-                    let span = args[i].span;
+                    let span = arg.span;
                     return Err(TypeCheckError::ArgTypeMismatch(
                         i + 1,
                         param_ty.clone(),
-                        arg_type.clone(),
+                        arg_ty.clone(),
                         span,
                     ));
                 }
@@ -1082,43 +1004,19 @@ impl<'c, 'b> Checker<'c, 'b> {
         &mut self,
         scrutinee: &Expr,
         arms: &[MatchArm],
-        span: Span,
     ) -> Result<Type, TypeCheckError> {
         let scrutinee_ty = self.type_check_expr(scrutinee)?;
 
         let (enum_name, variants) = match scrutinee_ty {
-            Type::Enum { name, variants } => (name.clone(), variants),
-            _ => {
-                return Err(TypeCheckError::MatchTargetNotEnum(
-                    scrutinee_ty,
-                    scrutinee.span,
-                ));
-            }
+            Type::Enum { name, variants } => (Some(name.clone()), variants),
+            _ => (None, Vec::new()),
         };
-
-        let mut seen_variants = HashSet::new();
-        let mut has_wildcard = false;
         let mut arm_ty: Option<Type> = None;
 
         for arm in arms {
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {
-                    has_wildcard = true;
-                }
-                MatchPattern::EnumVariant {
-                    variant_name, span, ..
-                } => {
-                    // check for duplicate variants
-                    if !seen_variants.insert(variant_name.clone()) {
-                        return Err(TypeCheckError::DuplicateMatchVariant(
-                            variant_name.clone(),
-                            *span,
-                        ));
-                    }
-                }
+            if let Some(enum_name) = &enum_name {
+                self.type_check_match_pattern(enum_name, &variants, &arm.pattern)?;
             }
-
-            self.type_check_match_pattern(&enum_name, &variants, &arm.pattern)?;
 
             let body_ty = self.type_check_expr(&arm.body)?;
             if let Some(expected_ty) = &arm_ty {
@@ -1132,10 +1030,6 @@ impl<'c, 'b> Checker<'c, 'b> {
             } else {
                 arm_ty = Some(body_ty);
             }
-        }
-
-        if !has_wildcard {
-            return Err(TypeCheckError::NonExhaustiveMatch(span));
         }
 
         Ok(arm_ty.unwrap_or(Type::Unit))
@@ -1154,52 +1048,42 @@ impl<'c, 'b> Checker<'c, 'b> {
                 enum_name: pat_enum_name,
                 variant_name,
                 bindings,
-                span,
+                ..
             } => {
-                // Check that the enum name matches
-                if let Some(pat_enum_name) = pat_enum_name {
-                    if pat_enum_name != enum_name {
-                        return Err(TypeCheckError::MatchPatternEnumMismatch(
-                            enum_name.clone(),
-                            pat_enum_name.clone(),
-                            *span,
-                        ));
-                    }
+                if let Some(pat_enum_name) = pat_enum_name
+                    && pat_enum_name != enum_name
+                {
+                    return Ok(());
                 }
 
-                // Get the variant
-                let variant = variants
-                    .iter()
-                    .find(|v| v.name == *variant_name)
-                    .ok_or_else(|| {
-                        TypeCheckError::UnknownEnumVariant(
-                            enum_name.clone(),
-                            variant_name.clone(),
-                            *span,
-                        )
-                    })?;
-
-                // Check that the payload has the right number of elements
-                if bindings.len() != variant.payload.len() {
-                    return Err(TypeCheckError::EnumVariantPayloadArityMismatch(
-                        variant_name.clone(),
-                        variant.payload.len(),
-                        bindings.len(),
-                        *span,
-                    ));
-                }
-
-                // Type check each binding
-                for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
-                    match self.context.def_map.lookup_def(binding.id) {
-                        Some(def) => {
-                            self.builder.record_def_type(def.clone(), ty.clone());
-                            self.builder.record_node_type(binding.id, ty.clone());
+                if let Some(variant) = variants.iter().find(|v| v.name == *variant_name) {
+                    if bindings.len() == variant.payload.len() {
+                        for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
+                            match self.context.def_map.lookup_def(binding.id) {
+                                Some(def) => {
+                                    self.builder.record_def_type(def.clone(), ty.clone());
+                                    self.builder.record_node_type(binding.id, ty.clone());
+                                }
+                                None => panic!(
+                                    "compiler bug: binding [{}] not found in def_map",
+                                    binding.id
+                                ),
+                            }
                         }
-                        None => panic!(
-                            "compiler bug: binding [{}] not found in def_map",
-                            binding.id
-                        ),
+                    } else {
+                        for binding in bindings {
+                            if let Some(def) = self.context.def_map.lookup_def(binding.id) {
+                                self.builder.record_def_type(def.clone(), Type::Unknown);
+                                self.builder.record_node_type(binding.id, Type::Unknown);
+                            }
+                        }
+                    }
+                } else {
+                    for binding in bindings {
+                        if let Some(def) = self.context.def_map.lookup_def(binding.id) {
+                            self.builder.record_def_type(def.clone(), Type::Unknown);
+                            self.builder.record_node_type(binding.id, Type::Unknown);
+                        }
                     }
                 }
 
@@ -1224,10 +1108,6 @@ impl<'c, 'b> Checker<'c, 'b> {
                     return Err(TypeCheckError::ArithTypeMismatch(
                         left_type, right_type, span,
                     ));
-                }
-                // Check for division by zero
-                if op == &BinaryOp::Div && matches!(right.kind, ExprKind::IntLit(0)) {
-                    return Err(TypeCheckError::DivisionByZero(right.span));
                 }
                 Ok(Type::UInt64)
             }
@@ -1284,24 +1164,9 @@ impl<'c, 'b> Checker<'c, 'b> {
         expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
         match (&expr.kind, expected) {
-            (ExprKind::IntLit(value), Some(expected_ty))
+            (ExprKind::IntLit(_), Some(expected_ty))
                 if matches!(expected_ty, Type::UInt8 | Type::UInt32 | Type::UInt64) =>
             {
-                let max_excl = match expected_ty {
-                    Type::UInt8 => u8::MAX as u64 + 1,
-                    Type::UInt32 => u32::MAX as u64 + 1,
-                    Type::UInt64 => {
-                        self.builder.record_node_type(expr.id, expected_ty.clone());
-                        return Ok(expected_ty.clone());
-                    }
-                    _ => unreachable!("expected integer type"),
-                };
-
-                if *value >= max_excl {
-                    return Err(TypeCheckError::ValueOutOfRange(
-                        *value, 0, max_excl, expr.span,
-                    ));
-                }
                 self.builder.record_node_type(expr.id, expected_ty.clone());
                 Ok(expected_ty.clone())
             }
@@ -1342,7 +1207,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                     Type::Array { elem_ty, dims } => {
                         self.type_check_array_index(&elem_ty, &dims, indices, target.span)
                     }
-                    Type::String => self.type_check_string_index(target, indices, target.span),
+                    Type::String => self.type_check_string_index(indices, target.span),
                     _ => {
                         return Err(TypeCheckError::InvalidIndexTargetType(
                             target_ty,
@@ -1358,7 +1223,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                 self.type_check_tuple_field_access(target, *index)
             }
 
-            ExprKind::StructLit { name, fields } => self.type_check_struct_lit(expr, name, fields),
+            ExprKind::StructLit { name, fields } => self.type_check_struct_lit(name, fields),
 
             ExprKind::StructField { target, field } => self.type_check_field_access(target, field),
 
@@ -1370,7 +1235,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                 enum_name,
                 variant,
                 payload,
-            } => self.type_check_enum_variant(enum_name, variant, payload, expr.span),
+            } => self.type_check_enum_variant(enum_name, variant, payload),
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 
@@ -1388,20 +1253,15 @@ impl<'c, 'b> Checker<'c, 'b> {
                 else_body,
             } => self.type_check_if(cond, then_body, else_body),
 
-            ExprKind::Range { start, end } => {
-                if start >= end {
-                    return Err(TypeCheckError::InvalidRangeBounds(*start, *end, expr.span));
-                }
-                Ok(Type::Range {
-                    min: *start,
-                    max: *end,
-                })
-            }
+            ExprKind::Range { start, end } => Ok(Type::Range {
+                min: *start,
+                max: *end,
+            }),
 
             ExprKind::Slice { target, start, end } => self.type_check_slice(target, start, end),
 
             ExprKind::Match { scrutinee, arms } => {
-                self.type_check_match(scrutinee, arms, expr.span)
+                self.type_check_match(scrutinee, arms)
             }
         };
 

@@ -1,5 +1,10 @@
-use crate::diagnostics::Span;
+mod visit;
+
+pub use visit::{Visitor, walk_block_item, walk_expr, walk_function, walk_stmt_expr};
+
 use std::fmt;
+
+use crate::diagnostics::Span;
 
 // -- Nodes ---
 

@@ -10,6 +10,7 @@ pub mod opt;
 pub mod parser;
 pub mod regalloc;
 pub mod resolve;
+pub mod semck;
 pub mod symtab;
 pub mod targets;
 pub mod type_rel;

@@ -12,6 +12,7 @@ use crate::opt;
 use crate::parser::Parser;
 use crate::regalloc;
 use crate::resolve::resolve;
+use crate::semck::sem_check;
 use crate::targets;
 use crate::targets::TargetKind;
 use crate::typeck::type_check;
@@ -136,6 +137,14 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("{}", type_checked_context.type_map);
         println!("--------------------------------");
     }
+
+    // --- Semantic Check ---
+
+    sem_check(&type_checked_context).map_err(|errs| {
+        errs.into_iter()
+            .map(|e| e.into())
+            .collect::<Vec<CompileError>>()
+    })?;
 
     // --- NRVO Analysis ---
 

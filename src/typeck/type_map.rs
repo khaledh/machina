@@ -82,19 +82,10 @@ pub(crate) fn resolve_type_expr(
                 fields: field_types,
             })
         }
-        TypeExprKind::Range { min, max } => {
-            if *min >= *max {
-                return Err(TypeCheckError::InvalidRangeBounds(
-                    *min,
-                    *max,
-                    type_expr.span,
-                ));
-            }
-            Ok(Type::Range {
-                min: *min,
-                max: *max,
-            })
-        }
+        TypeExprKind::Range { min, max } => Ok(Type::Range {
+            min: *min,
+            max: *max,
+        }),
         TypeExprKind::Slice { elem_ty } => {
             let elem_ty = resolve_type_expr(def_map, elem_ty)?;
             Ok(Type::Slice {

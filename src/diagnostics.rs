@@ -4,6 +4,7 @@ use crate::lexer::LexError;
 use crate::lower::errors::LowerError;
 use crate::parser::ParseError;
 use crate::resolve::ResolveError;
+use crate::semck::SemCheckError;
 use crate::targets::CodegenError;
 use crate::typeck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
@@ -22,6 +23,9 @@ pub enum CompileError {
 
     #[error(transparent)]
     TypeCheck(#[from] TypeCheckError),
+
+    #[error(transparent)]
+    SemCheck(#[from] SemCheckError),
 
     #[error(transparent)]
     Lower(#[from] LowerError),
