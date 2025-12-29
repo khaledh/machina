@@ -5,7 +5,7 @@ pub use visit::{Visitor, walk_block_item, walk_expr, walk_function, walk_stmt_ex
 
 use std::fmt;
 
-use crate::diagnostics::Span;
+use crate::diag::Span;
 
 // -- Nodes ---
 

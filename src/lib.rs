@@ -1,7 +1,7 @@
 pub mod ast;
 pub mod compile;
 pub mod context;
-pub mod diagnostics;
+pub mod diag;
 pub mod lexer;
 pub mod lower;
 pub mod mcir;

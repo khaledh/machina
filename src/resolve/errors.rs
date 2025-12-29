@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::ast::ExprKind;
-use crate::diagnostics::Span;
+use crate::diag::Span;
 use crate::resolve::symbols::SymbolKind;
 
 #[derive(Clone, Debug, Error)]

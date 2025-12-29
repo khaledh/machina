@@ -7,7 +7,7 @@ use crate::ast::{
     StmtExprKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
-use crate::diagnostics::Span;
+use crate::diag::Span;
 use crate::resolve::def_map::{Def, DefId, DefIdGen, DefKind, DefMap, DefMapBuilder};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::SymbolKind;

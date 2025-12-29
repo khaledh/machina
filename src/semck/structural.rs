@@ -77,7 +77,7 @@ impl<'a> StructuralChecker<'a> {
         &mut self,
         name: &str,
         fields: &[StructLitField],
-        span: crate::diagnostics::Span,
+        span: crate::diag::Span,
     ) {
         // Enforce struct field existence, duplicates, and missing fields.
         let Some(struct_fields) = self.struct_fields.get(name) else {
@@ -193,7 +193,7 @@ impl<'a> StructuralChecker<'a> {
         enum_name: &str,
         variant_name: &str,
         payload_len: usize,
-        span: crate::diagnostics::Span,
+        span: crate::diag::Span,
     ) {
         // Verify enum existence, variant existence, and payload arity.
         let Some(variants) = self.enum_variants.get(enum_name) else {
@@ -222,7 +222,7 @@ impl<'a> StructuralChecker<'a> {
         }
     }
 
-    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm], span: crate::diagnostics::Span) {
+    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm], span: crate::diag::Span) {
         // Enforce match target enum shape, arm uniqueness, and exhaustiveness.
         let Some(scrutinee_ty) = self.ctx.type_map.lookup_node_type(scrutinee.id) else {
             return;

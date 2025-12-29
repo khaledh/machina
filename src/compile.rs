@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::ast::{Module, NodeIdGen};
 use crate::context::AstContext;
-use crate::diagnostics::CompileError;
+use crate::diag::CompileError;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::lower;
 use crate::mcir;

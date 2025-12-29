@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::context::ResolvedContext;
-use crate::diagnostics::Span;
+use crate::diag::Span;
 use crate::resolve::def_map::DefId;
 use crate::types::{EnumVariant, StructField, Type};
 use crate::types::{TypeAssignability, type_assignable};

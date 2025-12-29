@@ -1,6 +1,6 @@
 use clap::Parser as ClapParser;
 use machina::compile::{CompileOptions, compile};
-use machina::diagnostics::{CompileError, Span, format_error};
+use machina::diag::{CompileError, Span, format_error};
 use machina::targets::TargetKind;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

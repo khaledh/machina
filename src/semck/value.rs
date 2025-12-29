@@ -52,7 +52,7 @@ impl<'a> ValueChecker<'a> {
         value: u64,
         min: u64,
         max_excl: u64,
-        span: crate::diagnostics::Span,
+        span: crate::diag::Span,
     ) {
         if value < min || value >= max_excl {
             self.errors
@@ -65,7 +65,7 @@ impl<'a> ValueChecker<'a> {
         value: u64,
         min: u64,
         max: u64,
-        span: crate::diagnostics::Span,
+        span: crate::diag::Span,
     ) {
         if value < min || value >= max {
             self.errors

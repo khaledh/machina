@@ -1,4 +1,4 @@
-use crate::diagnostics::{Position, Span};
+use crate::diag::{Position, Span};
 use enum_display::EnumDisplay;
 use std::fmt::{Display, Formatter};
 use std::iter::Peekable;

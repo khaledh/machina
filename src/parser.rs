@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::ast::NodeIdGen;
 use crate::ast::*;
-use crate::diagnostics::{Position, Span};
+use crate::diag::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 use crate::types::is_builtin_type_name;
 
