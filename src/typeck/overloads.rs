@@ -1,9 +1,8 @@
 use crate::ast::Expr;
 use crate::diagnostics::Span;
 use crate::resolve::def_map::DefId;
-use crate::type_rel::{TypeAssignability, ValueAssignability, value_assignable};
 use crate::typeck::errors::TypeCheckError;
-use crate::types::Type;
+use crate::types::{Type, TypeAssignability, ValueAssignability, value_assignable};
 
 pub(super) struct FuncParamSig {
     #[allow(dead_code)]

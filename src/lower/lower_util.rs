@@ -4,8 +4,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::resolve::def_map::Def;
-use crate::type_rel::{TypeAssignability, type_assignable};
-use crate::types::Type;
+use crate::types::{Type, TypeAssignability, type_assignable};
 
 impl<'a> FuncLowerer<'a> {
     /// Map AST binary op to MCIR binary op.

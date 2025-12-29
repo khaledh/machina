@@ -4,8 +4,8 @@ use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
 use crate::resolve::def_map::DefId;
-use crate::type_rel::{TypeAssignability, type_assignable};
 use crate::types::{EnumVariant, StructField, Type};
+use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::TypeCheckError;
 use super::overloads::{FuncOverloadResolver, FuncOverloadSig, FuncParamSig};
