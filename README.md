@@ -17,7 +17,7 @@ development. The compiler currently targets only ARM64 assembly.
 - `u64`, `bool`, `char`, `()`
 
 **Strings**
-- `string` values (literals + variables) and `print` / `println` builtins
+- `string` values (literals + variables)
 
 **Arrays**
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`
@@ -90,7 +90,7 @@ type Point = {
   color: Color,
 }
 
-fn main() -> u64 {
+fn main() {
     // Struct literals
     let a = Point { x: 10, y: 20, color: Color::Red(Shade::Light) };
     let b = Point { x: 5, y: 40, color: Color::Blue(20, Shade::Dark, true) };
@@ -104,9 +104,9 @@ fn main() -> u64 {
     let (dx, dy) = delta(c, d);
 
     if is_blue(d) {
-        42
+        println(42);
     } else {
-        21
+        println(21);
     }
 }
 

@@ -14,8 +14,6 @@ use crate::resolve::symbols::SymbolKind;
 use crate::resolve::symbols::{Scope, Symbol};
 use crate::types::BUILTIN_TYPES;
 
-const BUILTIN_FUNCS: &[&str] = &["print", "println"];
-
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
@@ -269,13 +267,6 @@ impl SymbolResolver {
                         kind: TypeExprKind::Named(ty_name.clone()),
                         span: Span::default(),
                     },
-                });
-            }
-
-            // add built-in functions
-            for func_name in BUILTIN_FUNCS {
-                resolver.add_built_in_symbol(func_name, |def_id| SymbolKind::Func {
-                    overloads: vec![def_id],
                 });
             }
 

@@ -11,6 +11,9 @@
 - Symbol: `__mc_u64_to_dec`
 - Signature: `uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value)`
 
+- Symbol: `__mc_string_from_bytes`
+- Signature: `void __mc_string_from_bytes(mc_string_t *out, const mc_slice_t *s)`
+
 ## Types
 - `mc_string_t` matches Machina's `string` layout:
   ```

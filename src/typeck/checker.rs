@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diagnostics::Span;
 use crate::resolve::def_map::DefId;
-use crate::type_rel::{PrintArgKind, ValueAssignability, print_arg_kind, value_assignable};
+use crate::type_rel::{ValueAssignability, value_assignable};
 use crate::types::{EnumVariant, StructField, Type};
 
 use super::errors::TypeCheckError;
@@ -913,13 +913,6 @@ impl<'c, 'b> Checker<'c, 'b> {
         callee: &Expr,
         args: &[Expr],
     ) -> Result<Type, TypeCheckError> {
-        // Check if the callee is a builtin function
-        if let ExprKind::Var(name) = &callee.kind {
-            if name == "print" || name == "println" {
-                return self.type_check_builtin_call(call_expr, callee, args);
-            }
-        }
-
         let name = match &callee.kind {
             ExprKind::Var(name) => name,
             _ => {
@@ -983,67 +976,6 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         }
         Ok(resolved.sig.return_type.clone())
-    }
-
-    // TODO: Remove this once we have (a) prelude support and (b) function overload resolution.
-    fn type_check_builtin_call(
-        &mut self,
-        call_expr: &Expr,
-        callee: &Expr,
-        args: &[Expr],
-    ) -> Result<Type, TypeCheckError> {
-        let Expr {
-            kind: ExprKind::Var(name),
-            ..
-        } = callee
-        else {
-            unreachable!("compiler bug: builtin callee is not a variable");
-        };
-        match name.as_str() {
-            "print" => {
-                // 1 arg: string
-                if args.len() != 1 {
-                    return Err(TypeCheckError::ArgCountMismatch(
-                        name.clone(),
-                        1,
-                        args.len(),
-                        call_expr.span,
-                    ));
-                }
-                let arg_type = self.type_check_expr(&args[0])?;
-                match print_arg_kind(&arg_type) {
-                    Some(PrintArgKind::String) | Some(PrintArgKind::UInt64Like) => Ok(Type::Unit),
-                    None => Err(TypeCheckError::DeclTypeMismatchMulti(
-                        vec![Type::String, Type::UInt64],
-                        arg_type,
-                        args[0].span,
-                    )),
-                }
-            }
-            "println" => {
-                if args.len() > 1 {
-                    return Err(TypeCheckError::ArgCountMismatch(
-                        name.clone(),
-                        1,
-                        args.len(),
-                        call_expr.span,
-                    ));
-                }
-                if args.is_empty() {
-                    return Ok(Type::Unit);
-                }
-                let arg_type = self.type_check_expr(&args[0])?;
-                match print_arg_kind(&arg_type) {
-                    Some(PrintArgKind::String) | Some(PrintArgKind::UInt64Like) => Ok(Type::Unit),
-                    None => Err(TypeCheckError::DeclTypeMismatchMulti(
-                        vec![Type::String, Type::UInt64],
-                        arg_type,
-                        args[0].span,
-                    )),
-                }
-            }
-            _ => unreachable!("compiler bug: unknown builtin function: {}", name),
-        }
     }
 
     fn type_check_if(

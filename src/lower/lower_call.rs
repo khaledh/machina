@@ -53,10 +53,6 @@ impl<'a> FuncLowerer<'a> {
         callee: &Expr,
         args: &[Expr],
     ) -> Result<(), LowerError> {
-        if self.lower_builtin_call(callee, args)? {
-            return Ok(());
-        }
-
         let callee = match self.ctx.type_map.lookup_call_def(call.id) {
             Some(def_id) => Callee::Def(def_id),
             None => {
