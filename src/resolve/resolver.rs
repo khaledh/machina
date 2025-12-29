@@ -635,7 +635,7 @@ impl SymbolResolver {
             }
 
             // Scalar literals
-            ExprKind::UInt64Lit(_)
+            ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }

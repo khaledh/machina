@@ -229,13 +229,10 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
 
         // type check body
-        let ret_ty = match self.type_check_expr(&function.body) {
-            Ok(ty) => ty,
-            Err(e) => {
-                self.errors.push(e);
-                return Err(self.errors.clone());
-            }
-        };
+        if let Err(e) = self.type_check_expr(&function.body) {
+            self.errors.push(e);
+            return Err(self.errors.clone());
+        }
 
         // check return type
         let ret_expr = match &function.body.kind {
@@ -244,6 +241,15 @@ impl<'c, 'b> Checker<'c, 'b> {
             } => tail.as_ref(),
             _ => &function.body,
         };
+        let ret_ty = match self.type_check_expr_with_expected(ret_expr, Some(&func_sig.return_type))
+        {
+            Ok(ty) => ty,
+            Err(e) => {
+                self.errors.push(e);
+                return Err(self.errors.clone());
+            }
+        };
+
         match self.check_assignable_to(ret_expr, &ret_ty, &func_sig.return_type) {
             Ok(()) => {}
             Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => {
@@ -319,7 +325,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         // Type check each element against the declared element type
         for elem in elems {
-            let this_ty = self.type_check_expr(elem)?;
+            let this_ty = self.type_check_expr_with_expected(elem, Some(&elem_ty))?;
             self.check_assignable_to(elem, &this_ty, &elem_ty)?;
         }
 
@@ -339,6 +345,65 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
             _ => Type::Array {
                 elem_ty: Box::new(elem_ty),
+                dims: vec![elems.len()],
+            },
+        };
+
+        Ok(array_ty)
+    }
+
+    fn type_check_array_lit_with_expected(
+        &mut self,
+        elems: &[Expr],
+        expected: &Type,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        if elems.is_empty() {
+            return Err(TypeCheckError::EmptyArrayLiteral(span));
+        }
+
+        let Type::Array {
+            elem_ty: expected_elem_ty,
+            dims: expected_dims,
+        } = expected
+        else {
+            return self.type_check_array_lit(elems);
+        };
+
+        // When the expected array has multiple dimensions, each element is itself
+        // an array of the remaining dimensions. Use that as the expected element type.
+        let elem_expected_ty = if expected_dims.len() > 1 {
+            Type::Array {
+                elem_ty: expected_elem_ty.clone(),
+                dims: expected_dims[1..].to_vec(),
+            }
+        } else {
+            expected_elem_ty.as_ref().clone()
+        };
+
+        // Check each element against the expected element type; we don't infer
+        // element type from the first element when a declared type exists.
+        for elem in elems {
+            let this_ty = self.type_check_expr_with_expected(elem, Some(&elem_expected_ty))?;
+            self.check_assignable_to(elem, &this_ty, &elem_expected_ty)?;
+        }
+
+        // Build dimensions vector
+        let array_ty = match &elem_expected_ty {
+            // If elements are arrays, prepend this dimension to their dimensions
+            Type::Array {
+                elem_ty: inner_elem_ty,
+                dims: inner_dims,
+            } => {
+                let mut new_dims = vec![elems.len()];
+                new_dims.extend(inner_dims);
+                Type::Array {
+                    elem_ty: inner_elem_ty.clone(),
+                    dims: new_dims,
+                }
+            }
+            _ => Type::Array {
+                elem_ty: Box::new(elem_expected_ty),
                 dims: vec![elems.len()],
             },
         };
@@ -850,17 +915,26 @@ impl<'c, 'b> Checker<'c, 'b> {
         decl_ty: &Option<TypeExpr>,
         value: &Expr,
     ) -> Result<Type, TypeCheckError> {
-        // type check value
-        let mut value_ty = self.type_check_expr(value)?;
+        // resolve the declaration type (if present)
+        let expected_ty = decl_ty
+            .as_ref()
+            .map(|ty_expr| resolve_type_expr(&self.context.def_map, ty_expr))
+            .transpose()?;
 
-        // check declaration type (if present)
-        if let Some(decl_ty_expr) = decl_ty {
-            let decl_ty = resolve_type_expr(&self.context.def_map, decl_ty_expr)?;
-            self.check_assignable_to(value, &value_ty, &decl_ty)?;
-            value_ty = decl_ty;
+        let mut value_ty = self.type_check_expr_with_expected(value, expected_ty.as_ref())?;
+
+        if let Some(decl_ty) = &expected_ty {
+            self.check_assignable_to(value, &value_ty, decl_ty)?;
+            value_ty = decl_ty.clone();
+            if matches!(
+                &value.kind,
+                ExprKind::ArrayLit(_) | ExprKind::TypedArrayLit { .. }
+            ) && matches!(value_ty, Type::Array { .. })
+            {
+                self.builder.record_node_type(value.id, value_ty.clone());
+            }
         }
 
-        // type check pattern
         self.type_check_pattern(pattern, &value_ty)?;
 
         Ok(Type::Unit)
@@ -887,7 +961,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn type_check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
         let lhs_type = self.type_check_expr(assignee)?;
-        let rhs_type = self.type_check_expr(value)?;
+        let rhs_type = self.type_check_expr_with_expected(value, Some(&lhs_type))?;
 
         match self.check_assignable_to(value, &rhs_type, &lhs_type) {
             Ok(()) => Ok(Type::Unit),
@@ -955,7 +1029,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
 
         let resolved =
-            FuncOverloadResolver::new(name, &arg_types, call_expr.span).resolve(overloads)?;
+            FuncOverloadResolver::new(name, args, &arg_types, call_expr.span).resolve(overloads)?;
 
         self.builder.record_call_def(call_expr.id, resolved.def_id);
         // Check argument types
@@ -1179,7 +1253,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                     ));
                 }
                 // Check for division by zero
-                if op == &BinaryOp::Div && matches!(right.kind, ExprKind::UInt64Lit(0)) {
+                if op == &BinaryOp::Div && matches!(right.kind, ExprKind::IntLit(0)) {
                     return Err(TypeCheckError::DivisionByZero(right.span));
                 }
                 Ok(Type::UInt64)
@@ -1231,9 +1305,45 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(ty)
     }
 
+    fn type_check_expr_with_expected(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&Type>,
+    ) -> Result<Type, TypeCheckError> {
+        match (&expr.kind, expected) {
+            (ExprKind::IntLit(value), Some(expected_ty))
+                if matches!(expected_ty, Type::UInt8 | Type::UInt32 | Type::UInt64) =>
+            {
+                let max_excl = match expected_ty {
+                    Type::UInt8 => u8::MAX as u64 + 1,
+                    Type::UInt32 => u32::MAX as u64 + 1,
+                    Type::UInt64 => {
+                        self.builder.record_node_type(expr.id, expected_ty.clone());
+                        return Ok(expected_ty.clone());
+                    }
+                    _ => unreachable!("expected integer type"),
+                };
+
+                if *value >= max_excl {
+                    return Err(TypeCheckError::ValueOutOfRange(
+                        *value, 0, max_excl, expr.span,
+                    ));
+                }
+                self.builder.record_node_type(expr.id, expected_ty.clone());
+                Ok(expected_ty.clone())
+            }
+            (ExprKind::ArrayLit(elems), Some(expected_ty @ Type::Array { .. })) => {
+                let ty = self.type_check_array_lit_with_expected(elems, expected_ty, expr.span)?;
+                self.builder.record_node_type(expr.id, ty.clone());
+                Ok(ty)
+            }
+            _ => self.type_check_expr(expr),
+        }
+    }
+
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
         let result = match &expr.kind {
-            ExprKind::UInt64Lit(_) => Ok(Type::UInt64),
+            ExprKind::IntLit(_) => Ok(Type::UInt64),
 
             ExprKind::BoolLit(_) => Ok(Type::Bool),
 

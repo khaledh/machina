@@ -1249,7 +1249,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expr {
                     id: self.id_gen.new_id(),
-                    kind: ExprKind::UInt64Lit(*value),
+                    kind: ExprKind::IntLit(*value),
                     span,
                 })
             }

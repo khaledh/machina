@@ -20,8 +20,8 @@ use crate::types::Type;
 pub enum TypeAssignability {
     Exact,
     UInt64ToRange { min: u64, max: u64 },
-    UInt64ToUInt8,
-    UInt64ToUInt32,
+    IntLitToUInt8,
+    IntLitToUInt32,
     RangeToUInt64,
     Incompatible,
 }
@@ -88,8 +88,8 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
         TypeAssignability::Exact
         | TypeAssignability::RangeToUInt64
         | TypeAssignability::UInt64ToRange { .. }
-        | TypeAssignability::UInt64ToUInt8
-        | TypeAssignability::UInt64ToUInt32 => ValueAssignability::Assignable(assignability),
+        | TypeAssignability::IntLitToUInt8
+        | TypeAssignability::IntLitToUInt32 => ValueAssignability::Assignable(assignability),
         TypeAssignability::Incompatible => ValueAssignability::Incompatible,
     }
 }
@@ -107,7 +107,7 @@ fn type_tag(ty: &Type) -> TypeTag {
 
 // --- Type Rules ---
 
-const U64_TYPE_RULES: &[TypeRule] = &[TypeRule {
+const UINT64_TYPE_RULES: &[TypeRule] = &[TypeRule {
     target: TypeTag::Range,
     apply: u64_to_range,
 }];
@@ -119,7 +119,7 @@ const RANGE_TYPE_RULES: &[TypeRule] = &[TypeRule {
 
 fn type_rules_for(tag: TypeTag) -> &'static [TypeRule] {
     match tag {
-        TypeTag::UInt64 => U64_TYPE_RULES,
+        TypeTag::UInt64 => UINT64_TYPE_RULES,
         TypeTag::Range => RANGE_TYPE_RULES,
         _ => &[],
     }
@@ -141,24 +141,26 @@ fn range_to_u64(_from: &Type, to: &Type) -> Option<TypeAssignability> {
 
 // --- Value Rules ---
 
-const U64_VALUE_RULES: &[ValueRule] = &[
+// Literal-only narrowing: integer literals may narrow to smaller integer types
+// when the value fits (no non-literal narrowing).
+const INT_LIT_VALUE_RULES: &[ValueRule] = &[
     ValueRule {
         target: TypeTag::Range,
         apply: value_u64_to_range,
     },
     ValueRule {
         target: TypeTag::UInt8,
-        apply: value_u64_to_u8,
+        apply: value_int_lit_to_u8,
     },
     ValueRule {
         target: TypeTag::UInt32,
-        apply: value_u64_to_u32,
+        apply: value_int_lit_to_u32,
     },
 ];
 
 fn value_rules_for(tag: TypeTag) -> &'static [ValueRule] {
     match tag {
-        TypeTag::UInt64 => U64_VALUE_RULES,
+        TypeTag::UInt64 => INT_LIT_VALUE_RULES,
         _ => &[],
     }
 }
@@ -171,7 +173,7 @@ fn value_u64_to_range(
     let Type::Range { min, max } = to_ty else {
         return None;
     };
-    if let ExprKind::UInt64Lit(value) = from_value.kind {
+    if let ExprKind::IntLit(value) = from_value.kind {
         if value < *min || value >= *max {
             return Some(ValueAssignability::ValueOutOfRange {
                 value,
@@ -188,7 +190,7 @@ fn value_u64_to_range(
     ))
 }
 
-fn value_u64_to_u8(
+fn value_int_lit_to_u8(
     from_value: &Expr,
     _from_ty: &Type,
     to_ty: &Type,
@@ -196,23 +198,19 @@ fn value_u64_to_u8(
     if !matches!(to_ty, Type::UInt8) {
         return None;
     }
-    let ExprKind::UInt64Lit(value) = from_value.kind else {
+    let ExprKind::IntLit(value) = from_value.kind else {
         return Some(ValueAssignability::Incompatible);
     };
     let max = u8::MAX as u64 + 1;
     if value >= max {
-        return Some(ValueAssignability::ValueOutOfRange {
-            value,
-            min: 0,
-            max,
-        });
+        return Some(ValueAssignability::ValueOutOfRange { value, min: 0, max });
     }
     Some(ValueAssignability::Assignable(
-        TypeAssignability::UInt64ToUInt8,
+        TypeAssignability::IntLitToUInt8,
     ))
 }
 
-fn value_u64_to_u32(
+fn value_int_lit_to_u32(
     from_value: &Expr,
     _from_ty: &Type,
     to_ty: &Type,
@@ -220,18 +218,14 @@ fn value_u64_to_u32(
     if !matches!(to_ty, Type::UInt32) {
         return None;
     }
-    let ExprKind::UInt64Lit(value) = from_value.kind else {
+    let ExprKind::IntLit(value) = from_value.kind else {
         return Some(ValueAssignability::Incompatible);
     };
     let max = u32::MAX as u64 + 1;
     if value >= max {
-        return Some(ValueAssignability::ValueOutOfRange {
-            value,
-            min: 0,
-            max,
-        });
+        return Some(ValueAssignability::ValueOutOfRange { value, min: 0, max });
     }
     Some(ValueAssignability::Assignable(
-        TypeAssignability::UInt64ToUInt32,
+        TypeAssignability::IntLitToUInt32,
     ))
 }

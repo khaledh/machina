@@ -1,6 +1,7 @@
+use crate::ast::Expr;
 use crate::diagnostics::Span;
 use crate::resolve::def_map::DefId;
-use crate::type_rel::{TypeAssignability, type_assignable};
+use crate::type_rel::{TypeAssignability, ValueAssignability, value_assignable};
 use crate::typeck::errors::TypeCheckError;
 use crate::types::Type;
 
@@ -17,7 +18,7 @@ pub(super) struct FuncOverloadSig {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub(super) enum OverloadRank {
+pub(super) enum ArgOverloadRank {
     Exact = 0,
     Assignable = 1,
 }
@@ -25,26 +26,33 @@ pub(super) enum OverloadRank {
 pub(super) struct ResolvedOverload<'a> {
     pub(super) def_id: DefId,
     pub(super) sig: &'a FuncOverloadSig,
-    pub(super) ranks: Vec<OverloadRank>,
+    pub(super) arg_ranks: Vec<ArgOverloadRank>,
 }
 
 impl ResolvedOverload<'_> {
     fn score(&self) -> u32 {
-        self.ranks.iter().map(|r| *r as u32).sum()
+        self.arg_ranks.iter().map(|r| *r as u32).sum()
     }
 }
 
 pub(super) struct FuncOverloadResolver<'a> {
     call_span: Span,
     name: &'a str,
+    args: &'a [Expr],
     arg_types: &'a [Type],
 }
 
 impl<'a> FuncOverloadResolver<'a> {
-    pub(super) fn new(name: &'a str, arg_types: &'a [Type], call_span: Span) -> Self {
+    pub(super) fn new(
+        name: &'a str,
+        args: &'a [Expr],
+        arg_types: &'a [Type],
+        call_span: Span,
+    ) -> Self {
         Self {
             call_span,
             name,
+            args,
             arg_types,
         }
     }
@@ -53,30 +61,39 @@ impl<'a> FuncOverloadResolver<'a> {
         self,
         overloads: &'a [FuncOverloadSig],
     ) -> Result<ResolvedOverload<'a>, TypeCheckError> {
+        // Score each candidate by per-arg assignability; keep the best score.
+        // If only out-of-range errors are seen, surface that instead of "no match."
         let mut candidates = Vec::new();
+        let mut range_err: Option<TypeCheckError> = None;
 
         for cand in overloads {
-            if let Some(ranks) = self.rank_overload(cand) {
-                candidates.push(ResolvedOverload {
+            match self.rank_overload(cand) {
+                Ok(Some(ranks)) => candidates.push(ResolvedOverload {
                     def_id: cand.def_id,
                     sig: cand,
-                    ranks,
-                });
+                    arg_ranks: ranks,
+                }),
+                Ok(None) => {}
+                Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => {
+                    range_err.get_or_insert(err);
+                }
+                Err(err) => return Err(err),
             }
         }
 
         if candidates.is_empty() {
-            return Err(TypeCheckError::FuncOverloadNoMatch(
-                self.name.to_string(),
-                self.call_span,
-            ));
+            return Err(range_err.unwrap_or_else(|| {
+                TypeCheckError::FuncOverloadNoMatch(self.name.to_string(), self.call_span)
+            }));
         }
 
+        // Lower score wins (Exact < Assignable); ties are ambiguous.
         let best_score = candidates.iter().map(|c| c.score()).min().unwrap();
         let mut best: Vec<_> = candidates
             .into_iter()
             .filter(|c| c.score() == best_score)
             .collect();
+
         if best.len() != 1 {
             return Err(TypeCheckError::FuncOverloadAmbiguous(
                 self.name.to_string(),
@@ -87,20 +104,36 @@ impl<'a> FuncOverloadResolver<'a> {
         Ok(best.pop().unwrap())
     }
 
-    fn rank_overload(&self, sig: &FuncOverloadSig) -> Option<Vec<OverloadRank>> {
+    fn rank_overload(
+        &self,
+        sig: &FuncOverloadSig,
+    ) -> Result<Option<Vec<ArgOverloadRank>>, TypeCheckError> {
+        // Reject wrong arity; otherwise classify each argument against its param.
         if sig.params.len() != self.arg_types.len() {
-            return None;
+            return Ok(None);
         }
 
         let mut ranks = Vec::with_capacity(self.arg_types.len());
-        for (arg_ty, param) in self.arg_types.iter().zip(sig.params.iter()) {
-            match type_assignable(arg_ty, &param.ty) {
-                TypeAssignability::Exact => ranks.push(OverloadRank::Exact),
-                TypeAssignability::Incompatible => return None,
-                _ => ranks.push(OverloadRank::Assignable),
+        for ((arg, arg_ty), param) in self
+            .args
+            .iter()
+            .zip(self.arg_types.iter())
+            .zip(sig.params.iter())
+        {
+            // Use value-aware assignability for literal narrowing and range checks.
+            match value_assignable(arg, arg_ty, &param.ty) {
+                ValueAssignability::Assignable(assignability) => match assignability {
+                    TypeAssignability::Exact => ranks.push(ArgOverloadRank::Exact),
+                    TypeAssignability::Incompatible => return Ok(None),
+                    _ => ranks.push(ArgOverloadRank::Assignable),
+                },
+                ValueAssignability::ValueOutOfRange { value, min, max } => {
+                    return Err(TypeCheckError::ValueOutOfRange(value, min, max, arg.span));
+                }
+                ValueAssignability::Incompatible => return Ok(None),
             }
         }
 
-        Some(ranks)
+        Ok(Some(ranks))
     }
 }

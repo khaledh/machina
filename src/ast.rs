@@ -337,7 +337,7 @@ pub enum ExprKind {
     },
 
     // Literals (scalar)
-    UInt64Lit(u64),
+    IntLit(u64),
     BoolLit(bool),
     CharLit(char),
     StringLit {
@@ -796,8 +796,8 @@ impl Expr {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
-            ExprKind::UInt64Lit(value) => {
-                writeln!(f, "{}UInt64Lit({}) [{}]", pad, value, self.id)?;
+            ExprKind::IntLit(value) => {
+                writeln!(f, "{}IntLit({}) [{}]", pad, value, self.id)?;
             }
             ExprKind::BoolLit(value) => {
                 writeln!(f, "{}BoolLit({}) [{}]", pad, value, self.id)?;

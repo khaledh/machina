@@ -405,4 +405,26 @@ impl Type {
         }
         offsets
     }
+
+    pub fn min_value(&self) -> u64 {
+        match self {
+            Type::UInt64 => 0,
+            Type::UInt32 => 0,
+            Type::UInt8 => 0,
+            _ => panic!("Expected integer type"),
+        }
+    }
+
+    pub fn max_value(&self) -> u64 {
+        match self {
+            Type::UInt64 => u64::MAX,
+            Type::UInt32 => u32::MAX as u64,
+            Type::UInt8 => u8::MAX as u64,
+            _ => panic!("Expected integer type"),
+        }
+    }
+
+    pub fn is_int_in_range(&self, value: u64) -> bool {
+        value >= self.min_value() && value <= self.max_value()
+    }
 }

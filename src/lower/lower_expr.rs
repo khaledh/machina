@@ -42,7 +42,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_scalar_expr(&mut self, expr: &Expr) -> Result<Operand, LowerError> {
         match &expr.kind {
             // Literals
-            EK::UInt64Lit(value) => {
+            EK::IntLit(value) => {
                 let c = Const::Int {
                     signed: false,
                     bits: 64,

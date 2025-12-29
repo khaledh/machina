@@ -115,12 +115,12 @@ fn test_parse_multi_index_expr() {
 
         // Check indices are literals 1 and 0
         match &indices[0].kind {
-            ExprKind::UInt64Lit(val) => assert_eq!(*val, 1),
-            _ => panic!("Expected UInt64Lit"),
+            ExprKind::IntLit(val) => assert_eq!(*val, 1),
+            _ => panic!("Expected IntLit"),
         }
         match &indices[1].kind {
-            ExprKind::UInt64Lit(val) => assert_eq!(*val, 0),
-            _ => panic!("Expected UInt64Lit"),
+            ExprKind::IntLit(val) => assert_eq!(*val, 0),
+            _ => panic!("Expected IntLit"),
         }
     } else {
         panic!("Expected ArrayIndex expression");
@@ -187,7 +187,7 @@ fn test_parse_typed_array_literal() {
             }
             assert_eq!(elems.len(), 3);
             for elem in elems {
-                assert!(matches!(elem.kind, ExprKind::UInt64Lit(_)));
+                assert!(matches!(elem.kind, ExprKind::IntLit(_)));
             }
         } else {
             panic!("Expected TypedArrayLit");
@@ -371,7 +371,7 @@ fn test_parse_enum_variant_expr_with_payload() {
             assert_eq!(variant, "Some");
             assert_eq!(payload.len(), 1);
             match &payload[0].kind {
-                ExprKind::UInt64Lit(value) => assert_eq!(*value, 42),
+                ExprKind::IntLit(value) => assert_eq!(*value, 42),
                 _ => panic!("Expected integer payload"),
             }
         }
@@ -439,8 +439,8 @@ fn test_parse_tuple_literal() {
         assert_eq!(fields.len(), 2);
 
         match &fields[0].kind {
-            ExprKind::UInt64Lit(val) => assert_eq!(*val, 42),
-            _ => panic!("Expected UInt64Lit"),
+            ExprKind::IntLit(val) => assert_eq!(*val, 42),
+            _ => panic!("Expected IntLit"),
         }
 
         match &fields[1].kind {
@@ -890,7 +890,7 @@ fn test_parse_for_range_loop() {
     }
 
     let tail = tail.expect("Expected block to have a tail expr");
-    assert!(matches!(tail.kind, ExprKind::UInt64Lit(0)));
+    assert!(matches!(tail.kind, ExprKind::IntLit(0)));
 }
 
 #[test]
@@ -925,5 +925,5 @@ fn test_parse_for_array_loop() {
     }
 
     let tail = tail.expect("Expected block to have a tail expr");
-    assert!(matches!(tail.kind, ExprKind::UInt64Lit(0)));
+    assert!(matches!(tail.kind, ExprKind::IntLit(0)));
 }
