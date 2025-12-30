@@ -141,25 +141,25 @@ fn delta(p1: Point, p2: Point) -> (u64, u64) {
 
 During development, run the compiler via cargo (prefix `cargo mcc` or `cargo run --`):
 ```
-cargo mcc build examples/for_array.mc
+cargo mcc run examples/for_array.mc
 ```
 
 The compiler supports three modes:
 ```
-mcc compile input.mc          # produces input.o
-mcc build input.mc            # produces input (executable)
-mcc run input.mc              # builds + runs input
+cargo mcc compile input.mc          # produces input.o
+cargo mcc build input.mc            # produces input (executable)
+cargo mcc run input.mc              # builds + runs input
 ```
 
 You can override outputs with `-o`:
 ```
-mcc compile -o output.o input.mc
-mcc build -o output input.mc
+cargo mcc compile -o output.o input.mc
+cargo mcc build -o output input.mc
 ```
 
 Use `--emit` to keep intermediate artifacts (otherwise `.s` is a temp file):
 ```
-mcc build --emit asm,mcir input.mc
+cargo mcc build --emit asm,mcir input.mc
 ```
 
 ## Testing
@@ -173,3 +173,48 @@ Integration tests only:
 ```
 cargo test --test '*'
 ```
+
+## Compiler Design
+
+The compiler is a multi-stage pipeline written in Rust:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Frontend                                                        │
+│   Source → Lexer → Parser → Resolver → Type Check → Sem Check   │
+└────────────────────────────────────┬────────────────────────────┘
+┌────────────────────────────────────▼────────────────────────────┐
+│ Middle End                                                      │
+│   MCIR Lowering → Optimizer → Liveness                          │
+└────────────────────────────────────┬────────────────────────────┘
+┌────────────────────────────────────▼────────────────────────────┐
+│ Backend                                                         │
+│   Register Allocation → Code Generation → ARM64                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Frontend** produces progressively richer context:
+
+- **Lexer/Parser**: Hand-written recursive descent with Pratt parsing for
+  operators
+- **Resolver**: Builds scope tree, records definitions and uses
+- **Type Checker**: Infers and validates types across expressions
+- **Semantic Check**: Enforces value rules (mutability, pattern completeness,
+  range bounds)
+
+**Middle End** operates on MCIR (Machina IR), a typed, place-based
+representation:
+
+- Scalars as SSA-like temporaries, aggregates as addressable places
+- Explicit control flow graphs with basic blocks and terminators
+- **Optimizer**: Constant folding, identity simplification, constant branch
+  elimination, self-copy removal, last-use copy elision, NRVO
+- **Liveness**: Computes live-in/live-out sets per basic block
+
+**Backend** allocates registers and emits machine code:
+
+- **Register Allocation**: Linear scan with AAPCS calling convention
+- **Code Generation**: ARM64 assembly with prologue/epilogue handling
+
+Use `--dump` flags to inspect any stage: `tokens`, `ast`, `defmap`, `typemap`,
+`nrvo`, `ir`, `liveness`, `intervals`, `regalloc`, `asm`.
