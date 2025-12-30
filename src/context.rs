@@ -1,4 +1,5 @@
 use crate::ast::Module;
+use crate::liveness::LiveMap;
 use crate::mcir::{FuncBody, GlobalItem};
 use crate::regalloc::AllocationResult;
 use crate::resolve::def_map::DefMap;
@@ -120,6 +121,37 @@ pub struct OptimizedMcirContext {
 }
 
 impl OptimizedMcirContext {
+    pub fn with_liveness(self, live_maps: Vec<LiveMap>) -> LivenessContext {
+        LivenessContext {
+            func_bodies: self.func_bodies,
+            live_maps,
+            symbols: self.symbols,
+            globals: self.globals,
+        }
+    }
+
+    pub fn with_alloc_results(self, alloc_results: Vec<AllocationResult>) -> RegAllocatedContext {
+        RegAllocatedContext {
+            func_bodies: self.func_bodies,
+            alloc_results,
+            symbols: self.symbols,
+            globals: self.globals,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Liveness Context
+// -----------------------------------------------------------------------------
+#[derive(Clone)]
+pub struct LivenessContext {
+    pub func_bodies: Vec<FuncBody>,
+    pub live_maps: Vec<LiveMap>,
+    pub symbols: SymbolTable,
+    pub globals: Vec<GlobalItem>,
+}
+
+impl LivenessContext {
     pub fn with_alloc_results(self, alloc_results: Vec<AllocationResult>) -> RegAllocatedContext {
         RegAllocatedContext {
             func_bodies: self.func_bodies,

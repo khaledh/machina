@@ -1,3 +1,4 @@
+use crate::liveness::LivenessAnalysis;
 use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place,
     PlaceAny, Rvalue, Statement, Terminator, TyKind, TyTable,
@@ -91,7 +92,8 @@ fn test_alloc_stack_addr_for_aggregate() {
     let body = mk_body(types, locals, blocks, l0);
     let target = arm64_target();
     let constraints = analyze_constraints(&body, &target);
-    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
+    let live_map = LivenessAnalysis::new(&body).analyze();
+    let alloc = RegAlloc::new(&body, &constraints, &target, &live_map).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l1),
@@ -137,7 +139,8 @@ fn test_param_aggregate_is_address_value() {
     let body = mk_body(types, locals, blocks, l0);
     let target = arm64_target();
     let constraints = analyze_constraints(&body, &target);
-    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
+    let live_map = LivenessAnalysis::new(&body).analyze();
+    let alloc = RegAlloc::new(&body, &constraints, &target, &live_map).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l1),
@@ -181,7 +184,8 @@ fn test_aggregate_return_uses_indirect_reg() {
     let body = mk_body(types, locals, blocks, l0);
     let target = arm64_target();
     let constraints = analyze_constraints(&body, &target);
-    let alloc = RegAlloc::new(&body, &constraints, &target).alloc();
+    let live_map = LivenessAnalysis::new(&body).analyze();
+    let alloc = RegAlloc::new(&body, &constraints, &target, &live_map).alloc();
 
     assert!(matches!(
         alloc.alloc_map.get(&l0),

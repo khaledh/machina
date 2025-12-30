@@ -7,7 +7,7 @@ pub mod target;
 
 use std::collections::HashMap;
 
-use crate::context::{OptimizedMcirContext, RegAllocatedContext};
+use crate::context::{LivenessContext, RegAllocatedContext};
 use crate::mcir::types::LocalId;
 use crate::regalloc::target::PhysReg;
 use stack::StackSlotId;
@@ -41,18 +41,19 @@ pub struct AllocationResult {
 }
 
 /// Run register allocation for a lowered MCIR context.
-pub fn regalloc(ctx: OptimizedMcirContext, target: &dyn target::TargetSpec) -> RegAllocatedContext {
-    let OptimizedMcirContext {
+pub fn regalloc(ctx: LivenessContext, target: &dyn target::TargetSpec) -> RegAllocatedContext {
+    let LivenessContext {
         func_bodies,
+        live_maps,
         globals,
         ..
     } = ctx;
 
     let mut alloc_results = Vec::new();
 
-    for body in &func_bodies {
+    for (body, live_map) in func_bodies.iter().zip(live_maps.iter()) {
         let constraints = analyze_constraints(&body, target);
-        let alloc_result = RegAlloc::new(&body, &constraints, target).alloc();
+        let alloc_result = RegAlloc::new(&body, &constraints, target, live_map).alloc();
         alloc_results.push(alloc_result);
     }
 

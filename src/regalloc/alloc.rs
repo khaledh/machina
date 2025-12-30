@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::liveness::LiveMap;
 use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, TyId, TyKind, TyTable};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
-use crate::regalloc::liveness::{
-    LiveInterval, LiveIntervalMap, LivenessAnalysis, build_live_intervals,
-};
+use crate::regalloc::liveness::{LiveInterval, LiveIntervalMap, build_live_intervals};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::pos::{InstPos, RelInstPos};
 use crate::regalloc::stack::{StackAllocator, StackSlotId};
@@ -133,6 +132,7 @@ pub struct RegAlloc<'a> {
     body: &'a FuncBody,
     constraints: &'a ConstraintMap,
     target: &'a dyn TargetSpec,
+    live_map: &'a LiveMap,
     local_classes: Vec<LocalClass>,
     pos_map: PosIndexMap,
     active_set: ActiveSet,
@@ -148,11 +148,13 @@ impl<'a> RegAlloc<'a> {
         body: &'a FuncBody,
         constraints: &'a ConstraintMap,
         target: &'a dyn TargetSpec,
+        live_map: &'a LiveMap,
     ) -> Self {
         Self {
             body,
             constraints,
             target,
+            live_map,
             local_classes: classify_locals(body),
             pos_map: Self::build_pos_map(body),
             active_set: ActiveSet::new(),
@@ -518,8 +520,7 @@ impl<'a> RegAlloc<'a> {
             "RegAlloc::alloc_into called with an empty register list"
         );
 
-        let live_map = LivenessAnalysis::new(self.body).analyze();
-        let intervals = build_live_intervals(self.body, &live_map);
+        let intervals = build_live_intervals(self.body, self.live_map);
         let ret_local = self.body.ret_local;
         let ret_ty = self.body.locals[ret_local.index()].ty;
         if self.body.types.get(ret_ty).is_scalar() {

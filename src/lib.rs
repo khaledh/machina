@@ -3,6 +3,7 @@ pub mod compile;
 pub mod context;
 pub mod diag;
 pub mod lexer;
+pub mod liveness;
 pub mod lower;
 pub mod mcir;
 pub mod nrvo;
