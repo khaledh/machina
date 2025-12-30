@@ -36,7 +36,8 @@ impl<'a> FuncLowerer<'a> {
                     let eligible = matches!(
                         def.kind,
                         DefKind::LocalVar {
-                            nrvo_eligible: true
+                            nrvo_eligible: true,
+                            ..
                         }
                     );
                     (def.id, eligible)

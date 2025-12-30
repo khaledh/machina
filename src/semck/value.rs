@@ -4,6 +4,7 @@ use crate::ast::{
 };
 use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
+use crate::semck::util::lookup_call_sig;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 
@@ -42,31 +43,19 @@ impl<'a> ValueChecker<'a> {
         }
         for func in self.ctx.module.funcs() {
             self.check_function_sig(&func.sig);
-            self.visit_function(func);
+            self.visit_func(func);
         }
     }
 
     /// Validate that a literal fits within a target integer type's bounds.
-    fn check_int_range(
-        &mut self,
-        value: u64,
-        min: u64,
-        max_excl: u64,
-        span: crate::diag::Span,
-    ) {
+    fn check_int_range(&mut self, value: u64, min: u64, max_excl: u64, span: crate::diag::Span) {
         if value < min || value >= max_excl {
             self.errors
                 .push(SemCheckError::ValueOutOfRange(value, min, max_excl, span));
         }
     }
 
-    fn check_range_value(
-        &mut self,
-        value: u64,
-        min: u64,
-        max: u64,
-        span: crate::diag::Span,
-    ) {
+    fn check_range_value(&mut self, value: u64, min: u64, max: u64, span: crate::diag::Span) {
         if value < min || value >= max {
             self.errors
                 .push(SemCheckError::ValueOutOfRange(value, min, max, span));
@@ -129,27 +118,10 @@ impl<'a> ValueChecker<'a> {
             self.check_range_value(lit_value, *min, *max, value.span);
         }
     }
-
-    fn lookup_call_sig(&self, call_expr: &Expr) -> Option<&crate::ast::FunctionSig> {
-        let def_id = self.ctx.type_map.lookup_call_def(call_expr.id)?;
-        for func in self.ctx.module.funcs() {
-            let def = self.ctx.def_map.lookup_def(func.id)?;
-            if def.id == def_id {
-                return Some(&func.sig);
-            }
-        }
-        for decl in self.ctx.module.func_decls() {
-            let def = self.ctx.def_map.lookup_def(decl.id)?;
-            if def.id == def_id {
-                return Some(&decl.sig);
-            }
-        }
-        None
-    }
 }
 
 impl Visitor for ValueChecker<'_> {
-    fn visit_function(&mut self, func: &Function) {
+    fn visit_func(&mut self, func: &Function) {
         self.current_return_ty = self.resolve_type(&func.sig.return_type);
         walk_expr(self, &func.body);
 
@@ -249,14 +221,14 @@ impl Visitor for ValueChecker<'_> {
                 self.check_type_expr(elem_ty);
             }
             ExprKind::Call { args, .. } => {
-                let param_tys = self.lookup_call_sig(expr).map(|sig| {
+                let param_tys = lookup_call_sig(expr, self.ctx).map(|sig| {
                     sig.params
                         .iter()
                         .map(|param| self.resolve_type(&param.typ))
                         .collect::<Vec<_>>()
                 });
                 if let Some(param_tys) = param_tys {
-                    for (arg, param_ty) in args.iter().zip(param_tys.into_iter()) {
+                    for (arg, param_ty) in args.iter().zip(param_tys) {
                         if let Some(param_ty) = param_ty {
                             self.check_range_binding_value(arg, &param_ty);
                         }

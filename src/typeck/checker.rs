@@ -72,6 +72,7 @@ impl TypeChecker {
                 Ok(FuncParamSig {
                     name: p.name.clone(),
                     ty,
+                    mode: p.mode.clone(),
                 })
             })
             .collect::<Result<Vec<_>, _>>()

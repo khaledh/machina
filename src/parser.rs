@@ -426,6 +426,14 @@ impl<'a> Parser<'a> {
         self.parse_list(TK::Comma, TK::RParen, |parser| {
             let marker = parser.mark();
 
+            // Parse an optional param mode
+            let mode = if matches!(&parser.curr_token.kind, TK::Ident(name) if name == "inout") {
+                parser.advance();
+                FunctionParamMode::Inout
+            } else {
+                FunctionParamMode::In
+            };
+
             // Parse parameter name
             let name = parser.parse_ident()?;
 
@@ -439,6 +447,7 @@ impl<'a> Parser<'a> {
                 id: parser.id_gen.new_id(),
                 name,
                 typ,
+                mode,
                 span: parser.close(marker),
             })
         })

@@ -2,8 +2,7 @@
 fn __mc_print(s: string, newline: u64);
 fn __mc_u64_to_dec(buf: u8[], value: u64) -> u64;
 // NOTE: caller allocates the string value; the runtime mutates it in place.
-// When `inout` lands this should use it.
-fn __mc_string_from_bytes(dst: string, bytes: u8[]);
+fn __mc_string_from_bytes(inout dst: string, bytes: u8[]);
 
 // String helpers
 fn string_from_bytes(bytes: u8[]) -> string {

@@ -31,13 +31,25 @@ impl DefIdGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
-    TypeAlias { ty_expr: TypeExpr },
-    StructDef { fields: Vec<StructField> },
-    EnumDef { variants: Vec<EnumVariant> },
+    TypeAlias {
+        ty_expr: TypeExpr,
+    },
+    StructDef {
+        fields: Vec<StructField>,
+    },
+    EnumDef {
+        variants: Vec<EnumVariant>,
+    },
     Func,
     ExternFunc,
-    LocalVar { nrvo_eligible: bool },
-    Param { index: u32 },
+    LocalVar {
+        nrvo_eligible: bool,
+        is_mutable: bool,
+    },
+    Param {
+        index: u32,
+        is_mutable: bool,
+    },
 }
 
 impl fmt::Display for DefKind {
@@ -60,14 +72,27 @@ impl fmt::Display for DefKind {
             }
             DefKind::Func => write!(f, "Func"),
             DefKind::ExternFunc => write!(f, "ExternFunc"),
-            DefKind::LocalVar { nrvo_eligible } => {
+            DefKind::LocalVar {
+                nrvo_eligible,
+                is_mutable,
+            } => {
                 if *nrvo_eligible {
-                    write!(f, "LocalVar (NRVO eligible)")
+                    write!(f, "LocalVar (NRVO eligible)")?;
                 } else {
-                    write!(f, "LocalVar")
+                    write!(f, "LocalVar")?;
                 }
+                if *is_mutable {
+                    write!(f, " (mutable)")?;
+                }
+                Ok(())
             }
-            DefKind::Param { index } => write!(f, "Param[{}]", index),
+            DefKind::Param { index, is_mutable } => {
+                write!(f, "Param[{}]", index)?;
+                if *is_mutable {
+                    write!(f, " (mutable)")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -151,7 +176,7 @@ impl DefMap {
 
     pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
         if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id)
-            && let DefKind::LocalVar { nrvo_eligible } = &mut def.kind
+            && let DefKind::LocalVar { nrvo_eligible, .. } = &mut def.kind
         {
             *nrvo_eligible = true;
         }
@@ -164,7 +189,8 @@ impl DefMap {
                 matches!(
                     def.kind,
                     DefKind::LocalVar {
-                        nrvo_eligible: true
+                        nrvo_eligible: true,
+                        ..
                     }
                 )
             })

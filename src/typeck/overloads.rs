@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, FunctionParamMode};
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
 use crate::typeck::errors::TypeCheckError;
@@ -8,6 +8,8 @@ pub(super) struct FuncParamSig {
     #[allow(dead_code)]
     pub(super) name: String,
     pub(super) ty: Type,
+    #[allow(dead_code)]
+    pub(super) mode: FunctionParamMode,
 }
 
 pub(super) struct FuncOverloadSig {

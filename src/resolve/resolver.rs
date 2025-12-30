@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::ast;
 use crate::ast::NodeId;
 use crate::ast::{
-    BlockItem, Decl, ExprKind, Function, FunctionDecl, MatchPattern, Module, PatternKind,
-    StmtExprKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
+    BlockItem, Decl, ExprKind, Function, FunctionDecl, FunctionParamMode, MatchPattern, Module,
+    PatternKind, StmtExprKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
 };
 use crate::context::{AstContext, ResolvedContext};
 use crate::diag::Span;
@@ -95,8 +95,9 @@ impl SymbolResolver {
                 fields: fields.clone(),
             },
             SymbolKind::Func { .. } => DefKind::Func,
-            SymbolKind::Var { .. } => DefKind::LocalVar {
+            SymbolKind::Var { is_mutable, .. } => DefKind::LocalVar {
                 nrvo_eligible: false,
+                is_mutable: *is_mutable,
             },
             SymbolKind::EnumDef { variants, .. } => DefKind::EnumDef {
                 variants: variants.clone(),
@@ -335,12 +336,14 @@ impl SymbolResolver {
                 checker.check_type_expr(&param.typ);
 
                 // record the param def
+                let is_mutable = param.mode == FunctionParamMode::Inout;
                 let def_id = checker.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
                     name: param.name.clone(),
                     kind: DefKind::Param {
                         index: index as u32,
+                        is_mutable,
                     },
                 };
                 checker.def_map_builder.record_def(def, param.id);
@@ -348,10 +351,7 @@ impl SymbolResolver {
                     &param.name,
                     Symbol {
                         name: param.name.clone(),
-                        kind: SymbolKind::Var {
-                            def_id,
-                            is_mutable: false,
-                        },
+                        kind: SymbolKind::Var { def_id, is_mutable },
                     },
                     param.span,
                 );
@@ -423,6 +423,7 @@ impl SymbolResolver {
                     name: name.to_string(),
                     kind: DefKind::LocalVar {
                         nrvo_eligible: false,
+                        is_mutable,
                     },
                 };
                 self.def_map_builder.record_def(def, pattern.id);
@@ -510,6 +511,7 @@ impl SymbolResolver {
                         name: binding.name.clone(),
                         kind: DefKind::LocalVar {
                             nrvo_eligible: false,
+                            is_mutable: false,
                         },
                     };
                     self.def_map_builder.record_def(def, binding.id);

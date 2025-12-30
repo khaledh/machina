@@ -57,6 +57,7 @@ development. The compiler currently targets only ARM64 assembly.
 ### Functions
 
 - `fn foo(arg: arg_type, ...) -> return_type { body }`
+- `inout` parameters for aggregate types (args must be mutable lvalues)
 - `fn foo(arg: arg_type, ...) -> return_type;` declares an external function
 - Recursion
 - Pass and return by value (optimized)

@@ -1,7 +1,7 @@
 mod format;
 mod visit;
 
-pub use visit::{Visitor, walk_block_item, walk_expr, walk_function, walk_stmt_expr};
+pub use visit::*;
 
 use std::fmt;
 
@@ -216,7 +216,14 @@ pub struct FunctionParam {
     pub id: NodeId,
     pub name: String,
     pub typ: TypeExpr,
+    pub mode: FunctionParamMode,
     pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FunctionParamMode {
+    In,
+    Inout,
 }
 
 // -- Patterns ---

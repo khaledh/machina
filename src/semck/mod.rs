@@ -1,5 +1,6 @@
 mod errors;
 mod structural;
+mod util;
 mod value;
 
 pub use errors::SemCheckError;

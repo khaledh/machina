@@ -1,9 +1,12 @@
 use crate::ast::{
-    Expr, ExprKind, MatchArm, MatchPattern, Pattern, PatternKind, StructLitField,
-    StructUpdateField, Visitor, walk_expr, walk_stmt_expr,
+    Expr, ExprKind, FunctionParamMode, MatchArm, MatchPattern, Pattern, PatternKind,
+    StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
+use crate::resolve::def_map::DefKind;
 use crate::semck::SemCheckError;
+use crate::semck::util::lookup_call_sig;
+use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
@@ -67,18 +70,10 @@ impl<'a> StructuralChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        // Visit function bodies only; type decls are handled via cached maps.
-        for func in self.ctx.module.funcs() {
-            self.visit_expr(&func.body);
-        }
+        self.visit_module(&self.ctx.module);
     }
 
-    fn check_struct_lit(
-        &mut self,
-        name: &str,
-        fields: &[StructLitField],
-        span: crate::diag::Span,
-    ) {
+    fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: crate::diag::Span) {
         // Enforce struct field existence, duplicates, and missing fields.
         let Some(struct_fields) = self.struct_fields.get(name) else {
             self.errors
@@ -292,9 +287,42 @@ impl<'a> StructuralChecker<'a> {
             self.errors.push(SemCheckError::NonExhaustiveMatch(span));
         }
     }
+
+    fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {
+        match &expr.kind {
+            ExprKind::Var(_) => {
+                let def = self.ctx.def_map.lookup_def(expr.id)?;
+                match def.kind {
+                    DefKind::LocalVar { is_mutable, .. } | DefKind::Param { is_mutable, .. } => {
+                        Some(is_mutable)
+                    }
+                    _ => None,
+                }
+            }
+            ExprKind::ArrayIndex { target, .. }
+            | ExprKind::TupleField { target, .. }
+            | ExprKind::StructField { target, .. } => self.is_mutable_lvalue(target),
+            _ => None,
+        }
+    }
 }
 
 impl Visitor for StructuralChecker<'_> {
+    fn visit_func_sig(&mut self, func_sig: &crate::ast::FunctionSig) {
+        // Only aggregate types can be inout parameters.
+        for param in &func_sig.params {
+            if param.mode == FunctionParamMode::Inout {
+                if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
+                    if !ty.is_compound() {
+                        self.errors
+                            .push(SemCheckError::InoutParamNotAggregate(ty, param.span));
+                    }
+                }
+            }
+        }
+        walk_func_sig(self, func_sig);
+    }
+
     fn visit_stmt_expr(&mut self, stmt: &crate::ast::StmtExpr) {
         // Struct patterns are validated here before walking child expressions.
         match &stmt.kind {
@@ -337,13 +365,31 @@ impl Visitor for StructuralChecker<'_> {
             ExprKind::Match { scrutinee, arms } => {
                 self.check_match(scrutinee, arms, expr.span);
             }
-            ExprKind::Call { callee, .. } => {
+            ExprKind::Call { callee, args } => {
                 // Only plain identifiers are valid callees at the AST level for now.
                 if !matches!(callee.kind, ExprKind::Var(_)) {
                     self.errors.push(SemCheckError::InvalidCallee(
                         callee.kind.clone(),
                         callee.span,
                     ));
+                }
+
+                // Validate that any inout arguments are mutable lvalues.
+                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                    for (param, arg) in sig.params.iter().zip(args) {
+                        if param.mode == FunctionParamMode::Inout {
+                            match self.is_mutable_lvalue(arg) {
+                                None => {
+                                    self.errors.push(SemCheckError::InoutArgNotLvalue(arg.span));
+                                }
+                                Some(false) => {
+                                    self.errors
+                                        .push(SemCheckError::InoutArgNotMutable(arg.span));
+                                }
+                                Some(true) => {}
+                            }
+                        }
+                    }
                 }
             }
             _ => {}

@@ -53,6 +53,15 @@ pub enum SemCheckError {
 
     #[error("Duplicate match arm variant: {0}")]
     DuplicateMatchVariant(String, Span),
+
+    #[error("inout requires an aggregate parameter type, found {0}")]
+    InoutParamNotAggregate(Type, Span),
+
+    #[error("inout argument must be an assignable lvalue")]
+    InoutArgNotLvalue(Span),
+
+    #[error("inout argument must be mutable")]
+    InoutArgNotMutable(Span),
 }
 
 impl SemCheckError {
@@ -74,6 +83,9 @@ impl SemCheckError {
             SemCheckError::MatchPatternEnumMismatch(_, _, span) => *span,
             SemCheckError::NonExhaustiveMatch(span) => *span,
             SemCheckError::DuplicateMatchVariant(_, span) => *span,
+            SemCheckError::InoutParamNotAggregate(_, span) => *span,
+            SemCheckError::InoutArgNotLvalue(span) => *span,
+            SemCheckError::InoutArgNotMutable(span) => *span,
         }
     }
 }

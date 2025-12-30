@@ -133,6 +133,9 @@ impl fmt::Display for Function {
 
 impl fmt::Display for FunctionParam {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.mode == FunctionParamMode::Inout {
+            write!(f, "inout ")?;
+        }
         write!(f, "{}: {} [{}]", self.name, self.typ, self.id)?;
         Ok(())
     }
