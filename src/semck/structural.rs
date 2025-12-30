@@ -301,7 +301,8 @@ impl<'a> StructuralChecker<'a> {
             }
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
-            | ExprKind::StructField { target, .. } => self.is_mutable_lvalue(target),
+            | ExprKind::StructField { target, .. }
+            | ExprKind::Slice { target, .. } => self.is_mutable_lvalue(target),
             _ => None,
         }
     }
