@@ -160,6 +160,14 @@ pub enum TypeExprKind {
     },
 }
 
+// -- Array Literals ---
+
+#[derive(Clone, Debug)]
+pub enum ArrayLitInit {
+    Elems(Vec<Expr>),
+    Repeat(Box<Expr>, u64),
+}
+
 // -- Struct Literals ---
 
 #[derive(Clone, Debug)]
@@ -362,7 +370,7 @@ pub enum ExprKind {
     // Literals (compound)
     ArrayLit {
         elem_ty: Option<TypeExpr>,
-        elems: Vec<Expr>,
+        init: ArrayLitInit,
     },
     TupleLit(Vec<Expr>),
     StructLit {

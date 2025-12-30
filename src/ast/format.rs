@@ -70,6 +70,26 @@ impl TypeDeclKind {
     }
 }
 
+impl ArrayLitInit {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match self {
+            ArrayLitInit::Elems(elems) => {
+                let elems_str = elems
+                    .iter()
+                    .map(|e| format!("{}", e))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                writeln!(f, "{}[{}]", pad, elems_str)?;
+            }
+            ArrayLitInit::Repeat(expr, count) => {
+                writeln!(f, "{}[{}; {}]", pad, expr, count)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl StructField {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
@@ -370,15 +390,13 @@ impl Expr {
             ExprKind::UnitLit => {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;
             }
-            ExprKind::ArrayLit { elem_ty, elems } => {
+            ExprKind::ArrayLit { elem_ty, init } => {
                 writeln!(f, "{}ArrayLit [{}]", pad, self.id)?;
+                let pad1 = indent(level + 1);
                 if let Some(elem_ty) = elem_ty {
-                    writeln!(f, "{}Elem Type: {}", pad, elem_ty)?;
+                    writeln!(f, "{}Elem Type: {}", pad1, elem_ty)?;
                 }
-                writeln!(f, "{}Elems:", pad)?;
-                for elem in elems {
-                    elem.fmt_with_indent(f, level + 1)?;
-                }
+                init.fmt_with_indent(f, level + 1)?;
             }
             ExprKind::ArrayIndex { target, indices } => {
                 writeln!(f, "{}ArrayIndex [{}]", pad, self.id)?;

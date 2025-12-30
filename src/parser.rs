@@ -1296,6 +1296,7 @@ impl<'a> Parser<'a> {
                 if is_builtin_type_name(name)
                     && self.peek().map(|t| &t.kind) == Some(&TK::LBracket) =>
             {
+                self.advance(); // consume ident
                 self.parse_typed_array_lit(name.clone())
             }
 
@@ -1369,23 +1370,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_array_lit(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        self.advance(); // consume '['
-        let elems = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
-        self.consume(&TK::RBracket)?; // consume ']'
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::ArrayLit {
-                elem_ty: None,
-                elems,
-            },
-            span: self.close(marker),
-        })
+        self.parse_array_lit_common(None)
     }
 
     fn parse_typed_array_lit(&mut self, type_name: String) -> Result<Expr, ParseError> {
         let marker = self.mark();
-        self.advance(); // consume ident
 
         // Create the named type expression for the element type
         let elem_ty = TypeExpr {
@@ -1394,21 +1383,62 @@ impl<'a> Parser<'a> {
             span: self.close(marker.clone()),
         };
 
+        self.parse_array_lit_common(Some(elem_ty))
+    }
+
+    fn parse_array_lit_common(&mut self, elem_ty: Option<TypeExpr>) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+
         // Consume '['
-        self.consume(&TK::LBracket)?;
+        self.advance();
 
-        // Parse elements
-        let elems = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+        // Case 1: Empty array literal: []
+        if self.curr_token.kind == TK::RBracket {
+            self.advance();
+            return Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::ArrayLit {
+                    elem_ty,
+                    init: ArrayLitInit::Elems(Vec::new()),
+                },
+                span: self.close(marker),
+            });
+        }
 
-        // Consume ']'
-        self.consume(&TK::RBracket)?;
+        let first = self.parse_expr(0)?;
+        let init = if self.curr_token.kind == TK::Semicolon {
+            // Case 2: Repeat initializer: [expr; count]
+
+            // Consume ';'
+            self.advance();
+
+            // Parse count
+            let count = self.parse_int_lit()?;
+
+            // Consume ']'
+            self.consume(&TK::RBracket)?;
+
+            ArrayLitInit::Repeat(Box::new(first), count)
+        } else {
+            // Case 3: Elements initializer: [elem1, elem2, ...]
+            let mut elems = vec![first];
+
+            // Parse remaining elements
+            if self.curr_token.kind == TK::Comma {
+                self.advance();
+                let rest = self.parse_list(TK::Comma, TK::RBracket, |p| p.parse_expr(0))?;
+                elems.extend(rest);
+            }
+
+            // Consume ']'
+            self.consume(&TK::RBracket)?;
+
+            ArrayLitInit::Elems(elems)
+        };
 
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::ArrayLit {
-                elem_ty: Some(elem_ty),
-                elems,
-            },
+            kind: ExprKind::ArrayLit { elem_ty, init },
             span: self.close(marker),
         })
     }

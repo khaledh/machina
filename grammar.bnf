@@ -122,6 +122,7 @@ Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit
                      | ArrayLit | TupleLit | StructLit
 
 ArrayLit           ::= TypeExpr? "[" ExprList "]"
+                     | TypeExpr? "[" Expr ";" IntLit "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"

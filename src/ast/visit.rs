@@ -216,11 +216,16 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         | ExprKind::UnitLit
         | ExprKind::Var(_)
         | ExprKind::Range { .. } => {}
-        ExprKind::ArrayLit { elems, .. } => {
-            for elem in elems {
-                v.visit_expr(elem);
+        ExprKind::ArrayLit { init, .. } => match init {
+            ArrayLitInit::Elems(elems) => {
+                for elem in elems {
+                    v.visit_expr(elem);
+                }
             }
-        }
+            ArrayLitInit::Repeat(expr, _) => {
+                v.visit_expr(expr);
+            }
+        },
         ExprKind::TupleLit(fields) => {
             for field in fields {
                 v.visit_expr(field);

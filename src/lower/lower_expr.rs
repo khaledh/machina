@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expr, ExprKind as EK, StringTag, StructLitField};
+use crate::ast::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StringTag, StructLitField};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -366,9 +366,7 @@ impl<'a> FuncLowerer<'a> {
                 Ok(())
             }
 
-            EK::ArrayLit {
-                elems: elem_exprs, ..
-            } => {
+            EK::ArrayLit { init, .. } => {
                 // Lower each element into its index.
                 let elem_ty = {
                     let dst_ty = self.ty_for_node(expr.id)?;
@@ -379,16 +377,57 @@ impl<'a> FuncLowerer<'a> {
                 };
                 let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
 
-                for (i, elem_expr) in elem_exprs.iter().enumerate() {
-                    let index_proj = Projection::Index {
-                        index: Operand::Const(Const::Int {
-                            signed: false,
-                            bits: 64,
-                            value: i as i128,
-                        }),
-                    };
+                match init {
+                    ArrayLitInit::Elems(elems) => {
+                        for (i, elem) in elems.iter().enumerate() {
+                            let index_proj = Projection::Index {
+                                index: Operand::Const(Const::Int {
+                                    signed: false,
+                                    bits: 64,
+                                    value: i as i128,
+                                }),
+                            };
 
-                    self.lower_expr_into_agg_projection(&dst, elem_ty_id, elem_expr, index_proj)?;
+                            self.lower_expr_into_agg_projection(
+                                &dst, elem_ty_id, elem, index_proj,
+                            )?;
+                        }
+                    }
+                    ArrayLitInit::Repeat(expr, count) => {
+                        // Evaluate the repeat expression once and copy to each element
+                        let count = *count as usize;
+                        if self.is_scalar(elem_ty_id) {
+                            let value_op = self.lower_scalar_expr(expr)?;
+                            for i in 0..count {
+                                let index_proj = Projection::Index {
+                                    index: Operand::Const(Const::Int {
+                                        signed: false,
+                                        bits: 64,
+                                        value: i as i128,
+                                    }),
+                                };
+                                let mut projs = dst.projections().to_vec();
+                                projs.push(index_proj);
+                                let field_place = Place::new(dst.base(), elem_ty_id, projs);
+                                self.emit_copy_scalar(field_place, Rvalue::Use(value_op.clone()));
+                            }
+                        } else {
+                            let value_place = self.lower_agg_expr_to_temp(expr)?;
+                            for i in 0..count {
+                                let index_proj = Projection::Index {
+                                    index: Operand::Const(Const::Int {
+                                        signed: false,
+                                        bits: 64,
+                                        value: i as i128,
+                                    }),
+                                };
+                                let mut projs = dst.projections().to_vec();
+                                projs.push(index_proj);
+                                let field_place = Place::new(dst.base(), elem_ty_id, projs);
+                                self.emit_copy_aggregate(field_place, value_place.clone());
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }

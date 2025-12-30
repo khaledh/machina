@@ -1,4 +1,4 @@
-use crate::ast::{BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind};
+use crate::ast::{ArrayLitInit, BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind};
 use crate::context::{AnalyzedContext, TypeCheckedContext};
 use crate::resolve::def_map::DefId;
 use crate::resolve::def_map::DefMap;
@@ -188,7 +188,10 @@ impl<'a> NrvoSafetyChecker<'a> {
                 callee_ok && args_ok
             }
 
-            ExprKind::ArrayLit { elems, .. } => elems.iter().all(|e| self.check_expr(e, false)),
+            ExprKind::ArrayLit { init, .. } => match init {
+                ArrayLitInit::Elems(elems) => elems.iter().all(|e| self.check_expr(e, false)),
+                ArrayLitInit::Repeat(expr, _) => self.check_expr(expr, false),
+            },
 
             ExprKind::ArrayIndex { target, indices } => {
                 let target_ok = match &target.kind {

@@ -274,74 +274,43 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_array_lit(
         &mut self,
         elem_ty_expr: Option<&TypeExpr>,
-        elems: &[Expr],
+        init: &ArrayLitInit,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
-        if elems.is_empty() {
-            return Err(TypeCheckError::EmptyArrayLiteral(span));
-        }
+        let len = self.array_lit_len(init, span)?;
 
+        // Resolve the element type
         let elem_ty = if let Some(elem_ty_expr) = elem_ty_expr {
-            let elem_ty = resolve_type_expr(&self.context.def_map, elem_ty_expr)?;
-            for elem in elems {
-                let this_ty = self.type_check_expr_with_expected(elem, Some(&elem_ty))?;
-                self.check_assignable_to(elem, &this_ty, &elem_ty)?;
-            }
-            elem_ty
+            resolve_type_expr(&self.context.def_map, elem_ty_expr)?
         } else {
-            // all elements must have the same type
-            let elem_ty = self.type_check_expr(&elems[0])?;
-            for elem in &elems[1..] {
-                let this_ty = self.type_check_expr(elem)?;
-                if this_ty != elem_ty {
-                    return Err(TypeCheckError::ArrayElementTypeMismatch(
-                        elem_ty, this_ty, elem.span,
-                    ));
-                }
+            match init {
+                ArrayLitInit::Elems(elems) => self.type_check_expr(&elems[0])?,
+                ArrayLitInit::Repeat(expr, _) => self.type_check_expr(expr)?,
             }
-            elem_ty
         };
 
-        // Build dimensions vector
-        let array_ty = match elem_ty {
-            // If elements are arrays, prepend this dimension to their dimensions
-            Type::Array {
-                elem_ty: inner_elem_ty,
-                dims: inner_dims,
-            } => {
-                let mut new_dims = vec![elems.len()];
-                new_dims.extend(inner_dims);
-                Ok(Type::Array {
-                    elem_ty: inner_elem_ty,
-                    dims: new_dims,
-                })
-            }
-            _ => Ok(Type::Array {
-                elem_ty: Box::new(elem_ty),
-                dims: vec![elems.len()],
-            }),
-        }?;
+        // Type check the elements
+        self.type_check_array_lit_init(init, &elem_ty)?;
 
-        Ok(array_ty)
+        // Build the array type
+        Ok(self.build_array_type_from_elem(len, elem_ty))
     }
 
     fn type_check_array_lit_with_expected(
         &mut self,
-        elems: &[Expr],
+        init: &ArrayLitInit,
         expected: &Type,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
-        if elems.is_empty() {
-            return Err(TypeCheckError::EmptyArrayLiteral(span));
-        }
-
         let Type::Array {
             elem_ty: expected_elem_ty,
             dims: expected_dims,
         } = expected
         else {
-            return self.type_check_array_lit(None, elems, span);
+            return self.type_check_array_lit(None, init, span);
         };
+
+        let len = self.array_lit_len(init, span)?;
 
         // When the expected array has multiple dimensions, each element is itself
         // an array of the remaining dimensions. Use that as the expected element type.
@@ -356,32 +325,62 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         // Check each element against the expected element type; we don't infer
         // element type from the first element when a declared type exists.
-        for elem in elems {
-            let this_ty = self.type_check_expr_with_expected(elem, Some(&elem_expected_ty))?;
-            self.check_assignable_to(elem, &this_ty, &elem_expected_ty)?;
-        }
+        self.type_check_array_lit_init(init, &elem_expected_ty)?;
 
-        // Build dimensions vector
-        let array_ty = match &elem_expected_ty {
-            // If elements are arrays, prepend this dimension to their dimensions
+        // Build the array type
+        Ok(self.build_array_type_from_elem(len, elem_expected_ty))
+    }
+
+    fn array_lit_len(&self, init: &ArrayLitInit, span: Span) -> Result<usize, TypeCheckError> {
+        match init {
+            ArrayLitInit::Elems(elems) if elems.is_empty() => {
+                Err(TypeCheckError::EmptyArrayLiteral(span))
+            }
+            ArrayLitInit::Repeat(_, 0) => Err(TypeCheckError::EmptyArrayLiteral(span)),
+            ArrayLitInit::Elems(elems) => Ok(elems.len()),
+            ArrayLitInit::Repeat(_, count) => Ok(*count as usize),
+        }
+    }
+
+    fn type_check_array_lit_init(
+        &mut self,
+        init: &ArrayLitInit,
+        elem_ty: &Type,
+    ) -> Result<(), TypeCheckError> {
+        match init {
+            ArrayLitInit::Elems(elems) => {
+                for elem in elems {
+                    let this_ty = self.type_check_expr_with_expected(elem, Some(elem_ty))?;
+                    self.check_assignable_to(elem, &this_ty, elem_ty)?;
+                }
+            }
+            ArrayLitInit::Repeat(expr, _) => {
+                let this_ty = self.type_check_expr_with_expected(expr, Some(elem_ty))?;
+                self.check_assignable_to(expr, &this_ty, elem_ty)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn build_array_type_from_elem(&self, len: usize, elem_ty: Type) -> Type {
+        // Build the array type, flattening nested array dimensions.
+        match elem_ty {
             Type::Array {
                 elem_ty: inner_elem_ty,
                 dims: inner_dims,
             } => {
-                let mut new_dims = vec![elems.len()];
+                let mut new_dims = vec![len];
                 new_dims.extend(inner_dims);
                 Type::Array {
-                    elem_ty: inner_elem_ty.clone(),
+                    elem_ty: inner_elem_ty,
                     dims: new_dims,
                 }
             }
             _ => Type::Array {
-                elem_ty: Box::new(elem_expected_ty),
-                dims: vec![elems.len()],
+                elem_ty: Box::new(elem_ty),
+                dims: vec![len],
             },
-        };
-
-        Ok(array_ty)
+        }
     }
 
     fn type_check_array_index(
@@ -1174,11 +1173,11 @@ impl<'c, 'b> Checker<'c, 'b> {
             (
                 ExprKind::ArrayLit {
                     elem_ty: None,
-                    elems,
+                    init,
                 },
                 Some(expected_ty @ Type::Array { .. }),
             ) => {
-                let ty = self.type_check_array_lit_with_expected(elems, expected_ty, expr.span)?;
+                let ty = self.type_check_array_lit_with_expected(init, expected_ty, expr.span)?;
                 self.builder.record_node_type(expr.id, ty.clone());
                 Ok(ty)
             }
@@ -1198,8 +1197,8 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::UnitLit => Ok(Type::Unit),
 
-            ExprKind::ArrayLit { elem_ty, elems } => {
-                self.type_check_array_lit(elem_ty.as_ref(), elems, expr.span)
+            ExprKind::ArrayLit { elem_ty, init } => {
+                self.type_check_array_lit(elem_ty.as_ref(), init, expr.span)
             }
 
             ExprKind::ArrayIndex { target, indices } => {

@@ -59,6 +59,31 @@ fn test_typed_array_literal_type_mismatch() {
 }
 
 #[test]
+fn test_array_repeat_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1; 4];
+            arr[0]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_typed_array_repeat_literal_type_mismatch() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = u8[true; 4];
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_multidim_array_type_inference() {
     let source = r#"
         fn test() -> u64[2, 2] {
@@ -136,10 +161,10 @@ fn test_array_dimension_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match &errors[0] {
-            TypeCheckError::ArrayElementTypeMismatch(_, _, _) => {
+            TypeCheckError::DeclTypeMismatch(_, _, _) => {
                 // Expected error
             }
-            e => panic!("Expected ArrayElementTypeMismatch error, got {:?}", e),
+            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
         }
     }
 }

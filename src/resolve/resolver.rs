@@ -1,11 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast;
-use crate::ast::NodeId;
-use crate::ast::{
-    BlockItem, Decl, ExprKind, Function, FunctionDecl, FunctionParamMode, MatchPattern, Module,
-    PatternKind, StmtExprKind, TypeDecl, TypeDeclKind, TypeExpr, TypeExprKind,
-};
+use crate::ast::*;
 use crate::context::{AstContext, ResolvedContext};
 use crate::diag::Span;
 use crate::resolve::def_map::{Def, DefId, DefIdGen, DefKind, DefMap, DefMapBuilder};
@@ -644,12 +640,19 @@ impl SymbolResolver {
             | ExprKind::UnitLit => {}
 
             // Compound literals
-            ExprKind::ArrayLit { elem_ty, elems } => {
+            ExprKind::ArrayLit { elem_ty, init } => {
                 if let Some(elem_ty) = elem_ty {
                     self.check_type_expr(elem_ty);
                 }
-                for elem in elems {
-                    self.check_expr(elem);
+                match init {
+                    ArrayLitInit::Elems(elems) => {
+                        for elem in elems {
+                            self.check_expr(elem);
+                        }
+                    }
+                    ArrayLitInit::Repeat(expr, _) => {
+                        self.check_expr(expr);
+                    }
                 }
             }
 

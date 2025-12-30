@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::{
-    BlockItem, Expr, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExpr, StmtExprKind,
-    StringTag, TypeDeclKind, TypeExprKind,
+    ArrayLitInit, BlockItem, Expr, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExpr,
+    StmtExprKind, StringTag, TypeDeclKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -146,7 +146,7 @@ fn test_parse_nested_array_literal() {
         // Value should be an ArrayLit
         if let ExprKind::ArrayLit {
             elem_ty: None,
-            elems: outer_elems,
+            init: ArrayLitInit::Elems(outer_elems),
         } = &value.kind
         {
             assert_eq!(outer_elems.len(), 2);
@@ -156,7 +156,7 @@ fn test_parse_nested_array_literal() {
                 match &elem.kind {
                     ExprKind::ArrayLit {
                         elem_ty: None,
-                        elems: inner_elems,
+                        init: ArrayLitInit::Elems(inner_elems),
                     } => {
                         assert_eq!(inner_elems.len(), 3);
                     }
@@ -189,7 +189,7 @@ fn test_parse_typed_array_literal() {
     if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
         if let ExprKind::ArrayLit {
             elem_ty: Some(elem_ty),
-            elems,
+            init: ArrayLitInit::Elems(elems),
         } = &value.kind
         {
             match &elem_ty.kind {
@@ -202,6 +202,41 @@ fn test_parse_typed_array_literal() {
             }
         } else {
             panic!("Expected typed ArrayLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
+fn test_parse_array_repeat_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = u8[0; 4];
+            arr[0]
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::ArrayLit {
+            elem_ty: Some(elem_ty),
+            init: ArrayLitInit::Repeat(expr, count),
+        } = &value.kind
+        {
+            match &elem_ty.kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u8"),
+                _ => panic!("Expected named type"),
+            }
+            assert_eq!(*count, 4);
+            assert!(matches!(expr.kind, ExprKind::IntLit(_)));
+        } else {
+            panic!("Expected typed repeat ArrayLit");
         }
     } else {
         panic!("Expected Let");

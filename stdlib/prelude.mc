@@ -26,24 +26,14 @@ fn println() {
 
 // Stdlib wrappers for u64
 fn print(value: u64) {
-  var buf = u8[
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-  ];
+  var buf = u8[0; 32];
   let len = __mc_u64_to_dec(buf[..], value);
   let s = string_from_bytes(buf[..len]);
   __mc_print(s, 0);
 }
 
 fn println(value: u64) {
-  var buf = u8[
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-  ];
+  var buf = u8[0; 32];
   let len = __mc_u64_to_dec(buf[..], value);
   let s = string_from_bytes(buf[..len]);
   __mc_print(s, 1);
