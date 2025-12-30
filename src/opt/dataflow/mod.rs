@@ -1,5 +1,4 @@
 pub mod copy_elide;
-pub mod solver;
 
 use crate::context::{LivenessContext, OptimizedMcirContext};
 

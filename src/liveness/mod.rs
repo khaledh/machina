@@ -4,10 +4,12 @@
 
 use std::collections::HashSet;
 
+use crate::analysis::dataflow::solve_backward;
 use crate::context::{LivenessContext, OptimizedMcirContext};
+use crate::mcir::cfg::McirCfg;
 use crate::mcir::types::{
-    BasicBlock, BlockId, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue,
-    Statement, Terminator,
+    BasicBlock, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue, Statement,
+    Terminator,
 };
 
 /// Run liveness analysis for an optimized MCIR context.
@@ -198,30 +200,6 @@ impl LiveSet {
 
 pub type LiveMap = Vec<LiveSet>;
 
-fn compute_succs(body: &FuncBody) -> Vec<Vec<BlockId>> {
-    let mut succs: Vec<Vec<BlockId>> = vec![vec![]; body.blocks.len()];
-    for (i, block) in body.blocks.iter().enumerate() {
-        let v = &mut succs[i];
-        match &block.terminator {
-            Terminator::Goto(target) => v.push(*target),
-            Terminator::If {
-                then_bb, else_bb, ..
-            } => {
-                v.push(*then_bb);
-                v.push(*else_bb);
-            }
-            Terminator::Switch { cases, default, .. } => {
-                for case in cases {
-                    v.push(case.target);
-                }
-                v.push(*default);
-            }
-            Terminator::Return | Terminator::Unreachable | Terminator::Unterminated => {}
-        }
-    }
-    succs
-}
-
 pub struct LivenessAnalysis<'a> {
     pub body: &'a FuncBody,
 }
@@ -237,36 +215,36 @@ impl<'a> LivenessAnalysis<'a> {
             gen_kill.push(gen_kill_for_block(block));
         }
 
-        let mut live_map = vec![LiveSet::new(); self.body.blocks.len()];
-        let succs = compute_succs(self.body);
+        let cfg = McirCfg::new(self.body);
 
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for i in 0..self.body.blocks.len() {
-                let mut new_live_out = HashSet::new();
-                for succ in &succs[i] {
-                    new_live_out.extend(live_map[succ.index()].live_in.iter().cloned());
+        let empty = HashSet::new();
+        let result = solve_backward(
+            &cfg,
+            empty.clone(), // entry_state for exits: live_out = {}
+            empty,         // bottom = {}
+            |states| {
+                let mut out = HashSet::new();
+                for s in states {
+                    out.extend(s.iter().cloned());
                 }
+                out
+            },
+            |block_id, out_state| {
+                let idx = block_id.index();
+                let gen_set = &gen_kill[idx].gen_set;
+                let kill_set = &gen_kill[idx].kill_set;
 
-                if live_map[i].live_out != new_live_out {
-                    live_map[i].live_out = new_live_out;
-                    changed = true;
-                }
+                let diff = out_state.difference(kill_set).cloned().collect();
+                gen_set.union(&diff).cloned().collect()
+            },
+        );
 
-                let gen_set = &gen_kill[i].gen_set;
-                let kill_set = &gen_kill[i].kill_set;
-                let diff = live_map[i].live_out.difference(kill_set).cloned().collect();
-                let new_live_in = gen_set.union(&diff).cloned().collect();
-
-                if live_map[i].live_in != new_live_in {
-                    live_map[i].live_in = new_live_in;
-                    changed = true;
-                }
-            }
-        }
-
-        live_map
+        result
+            .in_map
+            .into_iter()
+            .zip(result.out_map.into_iter())
+            .map(|(live_in, live_out)| LiveSet { live_in, live_out })
+            .collect()
     }
 }
 
@@ -288,10 +266,6 @@ pub fn format_liveness_map(live_map: &LiveMap, func_name: &str) -> String {
     out
 }
 
-#[cfg(test)]
-#[path = "../tests/t_liveness.rs"]
-mod tests;
-
 fn format_live_set(set: &HashSet<LocalId>) -> String {
     let mut ids: Vec<_> = set.iter().map(|l| l.0).collect();
     ids.sort();
@@ -306,3 +280,7 @@ fn format_live_set(set: &HashSet<LocalId>) -> String {
     out.push(']');
     out
 }
+
+#[cfg(test)]
+#[path = "../tests/t_liveness.rs"]
+mod tests;

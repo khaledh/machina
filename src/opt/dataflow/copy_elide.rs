@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::analysis::dataflow::{DataflowResult, solve_forward};
 use crate::context::{LivenessContext, OptimizedMcirContext};
 use crate::liveness::{LiveMap, collect_operand_uses, stmt_defs, stmt_uses};
+use crate::mcir::cfg::McirCfg;
 use crate::mcir::types::{
     BasicBlock, FuncBody, LocalId, Operand, Place, PlaceAny, Rvalue, Statement, Terminator,
 };
-use crate::opt::dataflow::solver::{DataflowResult, solve_forward};
 
 /// Elide aggregate copies when the source is dead and we can safely reuse its storage.
 ///
@@ -115,12 +116,16 @@ fn analyze_renames(
     addr_taken: &HashSet<LocalId>,
 ) -> DataflowResult<RenameMap> {
     // Forward must-analysis: a rename is available only if all preds agree.
+    let cfg = McirCfg::new(body);
+
     solve_forward(
-        body,
-        RenameMap::new(),
-        RenameMap::new(),
+        &cfg,
+        body.entry,
+        RenameMap::new(), // entry state
+        RenameMap::new(), // bottom
         meet_rename_maps,
-        |block, in_map, block_id| {
+        |block_id, in_map| {
+            let block = &body.blocks[block_id.index()];
             transfer_block(
                 block,
                 in_map,
