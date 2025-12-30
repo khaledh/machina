@@ -3,18 +3,102 @@
 Machina is a modern systems programming language that is still in early
 development. The compiler currently targets only ARM64 assembly.
 
-## Current features
+## Vision
 
+Machina is exploring how to make **state machines** and **typestate**
+first-class concepts in a systems language. The end goal: describe a system as a
+composition of state machines with well-defined transitions, and have the
+compiler verify that your code respects those constraints.
+
+### What this might look like
+
+*Envisioned future syntax — not yet implemented*
+
+```
+protocol ConnectionOps {
+    state Disconnected;
+    state Connecting;
+    state Connected;
+
+    // Commands (caller-initiated)
+    fn connect(self: Disconnected, addr: Address) -> Connecting;
+    fn send(self: inout Connected, data: u8[]);
+    fn disconnect(self: Connected) -> Disconnected;
+
+    // Events (environment-initiated)
+    on Established(self: Connecting) -> Connected;
+    on Received(self: inout Connected, data: u8[]);
+    on Lost(self: Connected) -> Disconnected;
+}
+
+type TcpClient: ConnectionOps {
+    state Disconnected
+    state Connecting { addr: Address }
+    state Connected { socket: Socket }
+
+    fn new() -> Disconnected {
+        Disconnected
+    }
+
+    fn connect(self: Disconnected, addr: Address) -> Connecting {
+        sys_connect(addr);
+        Connecting { addr }
+    }
+
+    fn send(self: inout Connected, data: u8[]) {
+        sys_send(self.socket, data);
+    }
+
+    fn disconnect(self: Connected) -> Disconnected {
+        sys_close(self.socket);
+        Disconnected
+    }
+
+    on Established(self: Connecting, socket: Socket) -> Connected {
+        Connected { socket }
+    }
+
+    on Received(self: inout Connected, data: u8[]) {
+        // handle incoming data
+    }
+
+    on Lost(self: Connected) -> Disconnected {
+        Disconnected
+    }
+}
+```
+
+The protocol defines the state machine contract: states, commands (`fn`), and
+events (`on`). The type implements it with concrete data per state. The compiler
+verifies that transitions only happen from valid states, and that all events are
+handled.
+
+## Today
+
+The vision above is the destination. Today, Machina is a working compiler with
+foundational features: expression-oriented syntax, algebraic data types, pattern
+matching, and mutable value semantics—building blocks for the stateful
+abstractions to come.
+
+### Features
+
+- Mutable value semantics
 - Expression oriented syntax
 - Bindings: `let` (immutable), `var` (mutable)
 - Arithmetic and comparison operators
 - Blocks (last expression is the block value)
-- Lexical scoping
+- Pattern matching
+- Function overloading
+- `inout` parameters for aggregate types
+- Runtime safety checks
 
 ### Types
 
 **Basic types**
-- `u64`, `bool`, `char`, `()`
+- Integers: `u8`, `u32`, `u64`
+- Booleans: `bool`
+- Characters: `char`
+- Unit: `()`
 
 **Strings**
 - `string` values (literals + variables)
@@ -23,10 +107,11 @@ development. The compiler currently targets only ARM64 assembly.
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`
 - Multi-dimensional: `u64[M, N]`, `let a = [[1, 2], [3, 4]]`
 - Array destructuring: `let [a, b, c] = [1, 2, 3]`
-- Array indexing includes runtime bounds checks (traps on failure)
 - Array slicing: `let s: u64[] = a[1..3]`, `a[..]` (produces a slice)
 - Typed array literals: `let a = u8[1, 2, 3]` (only for primitive types)
 - Array repeat literals: `let a = [0; 32]`, `let a = u8[0; 32]`
+- Array indexing is bounds-checked at runtime (compile time for constant
+  indices)
 
 **Tuples** (fixed-size, homogeneous)
 - Tuples: `(u64, bool)`, `let t = (10, true)`
@@ -47,6 +132,8 @@ development. The compiler currently targets only ARM64 assembly.
 
 **Range types**
 - `range(max)` and `range(min, max)` (half-open, `[min, max)`)
+- Range expressions are bounds-checked at runtime (compile time for constant
+  ranges)
 
 ### Control flow
 
@@ -61,8 +148,8 @@ development. The compiler currently targets only ARM64 assembly.
 - `inout` parameters for aggregate types (args must be mutable lvalues)
 - `fn foo(arg: arg_type, ...) -> return_type;` declares an external function
 - Recursion
-- Pass and return by value (optimized)
-- Function overloading (internal symbols use `name$n`, may change)
+- Pass and return by value (optimized where possible)
+- Function overloading
 
 ### Code generation
 
@@ -139,7 +226,8 @@ fn delta(p1: Point, p2: Point) -> (u64, u64) {
 
 ## Compiling and running
 
-During development, run the compiler via cargo (prefix `cargo mcc` or `cargo run --`):
+During development, run the compiler via cargo (prefix `cargo mcc` or
+`cargo run --`):
 ```
 cargo mcc run examples/for_array.mc
 ```
@@ -198,9 +286,9 @@ The compiler is a multi-stage pipeline written in Rust:
 - **Lexer/Parser**: Hand-written recursive descent with Pratt parsing for
   operators
 - **Resolver**: Builds scope tree, records definitions and uses
-- **Type Checker**: Infers and validates types across expressions
-- **Semantic Check**: Enforces value rules (mutability, pattern completeness,
-  range bounds)
+- **Type Checker**: Infers and validates types across expressions, resolves
+  function overloading
+- **Semantic Check**: Enforces value-based rules and structural rules
 
 **Middle End** operates on MCIR (Machina IR), a typed, place-based
 representation:
