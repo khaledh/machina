@@ -237,6 +237,7 @@ fn def_local_full(stmt: &Statement) -> Option<LocalId> {
         Statement::Comment(_) => None,
         Statement::CopyScalar { dst, .. } => def_place_full(dst),
         Statement::CopyAggregate { dst, .. } => def_place_full(dst),
+        Statement::MemSet { dst, .. } => def_place_full(dst),
         Statement::Call { dst, .. } => dst.as_ref().and_then(def_place_any_full),
     }
 }
@@ -246,6 +247,7 @@ fn def_local_base(stmt: &Statement) -> Option<LocalId> {
         Statement::Comment(_) => None,
         Statement::CopyScalar { dst, .. } => Some(dst.base()),
         Statement::CopyAggregate { dst, .. } => Some(dst.base()),
+        Statement::MemSet { dst, .. } => Some(dst.base()),
         Statement::Call { dst, .. } => dst.as_ref().map(place_any_base),
     }
 }
@@ -337,6 +339,11 @@ fn rewrite_stmt_uses(stmt: &Statement, rename: &HashMap<LocalId, LocalId>) -> St
         Statement::CopyAggregate { dst, src } => Statement::CopyAggregate {
             dst: rewrite_place_for_def(dst, rename),
             src: rewrite_place_for_use(src, rename),
+        },
+        Statement::MemSet { dst, value, len } => Statement::MemSet {
+            dst: rewrite_place_for_def(dst, rename),
+            value: rewrite_operand(value, rename),
+            len: *len,
         },
         Statement::Call { dst, callee, args } => Statement::Call {
             dst: dst.as_ref().map(|p| rewrite_place_any_for_def(p, rename)),

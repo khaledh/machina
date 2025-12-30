@@ -296,7 +296,7 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
     Ok(status.code().unwrap_or(1))
 }
 
-const RUNTIME_SOURCE_FILES: &[&str] = &["trap.c", "print.c", "conv.c"];
+const RUNTIME_SOURCE_FILES: &[&str] = &["trap.c", "print.c", "conv.c", "mem.c"];
 
 fn runtime_source_paths() -> Vec<PathBuf> {
     let runtime_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");

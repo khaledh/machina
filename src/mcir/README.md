@@ -48,9 +48,15 @@ path (fields/indices). Places are typed, with a marker `K`:
 ### Statements
 
 Statements encode side effects and writes:
+- `Comment { comment }` (for debugging)
 - `CopyScalar { dst, src }`
 - `CopyAggregate { dst, src }`
 - `Call { dst, callee, args }` (`dst` is optional for void/noreturn calls)
+- `MemSet { dst, value, len }` (byte-fill `dst` with `value` for `len` bytes)
+
+`MemSet` is a lowering helper and is removed by the cfg-free memops pass
+(`opt/cfg_free/memops_lower.rs`) before codegen; it becomes either inline
+stores or a runtime `__mc_memset` call.
 
 ### Terminators
 

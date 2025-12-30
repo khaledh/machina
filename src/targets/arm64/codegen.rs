@@ -361,6 +361,7 @@ impl<'a> FuncCodegen<'a> {
             Statement::Comment(_) => Ok(String::new()),
             Statement::CopyScalar { dst, src } => self.emit_copy_scalar(dst, src),
             Statement::CopyAggregate { dst, src } => self.emit_copy_aggregate(dst, src),
+            Statement::MemSet { .. } => panic!("MemSet must be lowered before codegen"),
             Statement::Call { callee, .. } => self.emit_call(callee),
         }
     }

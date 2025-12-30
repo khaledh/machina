@@ -1,7 +1,7 @@
 // Runtime externs: implemented in runtime/*
 fn __mc_print(s: string, newline: u64);
 fn __mc_u64_to_dec(inout buf: u8[], value: u64) -> u64;
-// NOTE: caller allocates the string value; the runtime mutates it in place.
+fn __mc_memset(inout buf: u8[], value: u8);
 fn __mc_string_from_bytes(inout dst: string, bytes: u8[]);
 
 // String helpers

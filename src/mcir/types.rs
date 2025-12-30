@@ -340,6 +340,11 @@ pub enum Statement {
         dst: Place<Aggregate>,
         src: Place<Aggregate>,
     },
+    MemSet {
+        dst: Place<Aggregate>,
+        value: Operand,
+        len: u64,
+    },
     Call {
         dst: Option<PlaceAny>,
         callee: Callee,
@@ -542,6 +547,9 @@ impl fmt::Display for Statement {
             Statement::Comment(comment) => write!(f, "// {comment}"),
             Statement::CopyScalar { dst, src } => write!(f, "{} = {}", dst, src),
             Statement::CopyAggregate { dst, src } => write!(f, "{} = copy {}", dst, src),
+            Statement::MemSet { dst, value, len } => {
+                write!(f, "memset {}, {}, {}", dst, value, len)
+            }
             Statement::Call { dst, callee, args } => {
                 if let Some(dst) = dst {
                     write!(f, "{} = call {}(", dst, callee)?;

@@ -3,6 +3,7 @@ pub enum RuntimeFn {
     Trap,
     Print,
     U64ToDec,
+    MemSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +48,12 @@ impl RuntimeFn {
                 name: "__mc_u64_to_dec",
                 arg_count: 2,
                 ret: Some(RuntimeRet::Scalar),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::MemSet => RuntimeFnSig {
+                name: "__mc_memset",
+                arg_count: 2,
+                ret: None,
                 effect: CallEffect::ReadWrite,
             },
         }

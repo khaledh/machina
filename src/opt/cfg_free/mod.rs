@@ -1,5 +1,6 @@
 pub mod const_branch_elim;
 pub mod local_simplify;
+pub mod memops_lower;
 pub mod self_copy_elim;
 
 use crate::context::{LoweredMcirContext, OptimizedMcirContext};
@@ -7,6 +8,7 @@ use crate::mcir::FuncBody;
 
 use const_branch_elim::ConstBranchElim;
 use local_simplify::LocalSimplify;
+use memops_lower::MemOpsLower;
 use self_copy_elim::RemoveSelfCopies;
 
 /// Run all CFG-free MCIR optimizations.
@@ -45,6 +47,7 @@ impl PassManager {
                 Box::new(LocalSimplify),
                 Box::new(ConstBranchElim),
                 Box::new(RemoveSelfCopies),
+                Box::new(MemOpsLower),
             ],
         }
     }

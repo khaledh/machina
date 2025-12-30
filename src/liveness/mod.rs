@@ -84,6 +84,9 @@ pub(crate) fn stmt_defs(stmt: &Statement, out: &mut HashSet<LocalId>) {
         Statement::CopyAggregate { dst, .. } => {
             out.insert(dst.base());
         }
+        Statement::MemSet { dst, .. } => {
+            out.insert(dst.base());
+        }
         Statement::Call { dst, .. } => {
             if let Some(dst) = dst {
                 out.insert(match dst {
@@ -105,6 +108,10 @@ pub(crate) fn stmt_uses(stmt: &Statement, out: &mut HashSet<LocalId>) {
         Statement::CopyAggregate { dst, src } => {
             collect_place_lhs_uses(dst, out);
             collect_place_uses(src, out);
+        }
+        Statement::MemSet { dst, value, .. } => {
+            collect_place_lhs_uses(dst, out);
+            collect_operand_uses(value, out);
         }
         Statement::Call { dst, args, .. } => {
             if let Some(dst) = dst {

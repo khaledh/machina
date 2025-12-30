@@ -379,6 +379,7 @@ impl<'a> FuncLowerer<'a> {
 
                 match init {
                     ArrayLitInit::Elems(elems) => {
+                        // Lower each element into its index.
                         for (i, elem) in elems.iter().enumerate() {
                             let index_proj = Projection::Index {
                                 index: Operand::Const(Const::Int {
@@ -394,9 +395,21 @@ impl<'a> FuncLowerer<'a> {
                         }
                     }
                     ArrayLitInit::Repeat(expr, count) => {
-                        // Evaluate the repeat expression once and copy to each element
+                        // Evaluate the repeat expression once and copy to each element.
                         let count = *count as usize;
-                        if self.is_scalar(elem_ty_id) {
+                        if *elem_ty == Type::UInt8 {
+                            // Special case: for u8 arrays -> use memset intrinsic.
+                            let value_op = self.lower_scalar_expr(expr)?;
+                            self.fb.push_stmt(
+                                self.curr_block,
+                                Statement::MemSet {
+                                    dst: dst.clone(),
+                                    value: value_op,
+                                    len: count as u64,
+                                },
+                            );
+                        } else if self.is_scalar(elem_ty_id) {
+                            // Non u8 scalar: copy each element.
                             let value_op = self.lower_scalar_expr(expr)?;
                             for i in 0..count {
                                 let index_proj = Projection::Index {
@@ -412,6 +425,7 @@ impl<'a> FuncLowerer<'a> {
                                 self.emit_copy_scalar(field_place, Rvalue::Use(value_op.clone()));
                             }
                         } else {
+                            // Aggregate: copy each element.
                             let value_place = self.lower_agg_expr_to_temp(expr)?;
                             for i in 0..count {
                                 let index_proj = Projection::Index {

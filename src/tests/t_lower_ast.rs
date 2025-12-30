@@ -718,6 +718,11 @@ fn test_lower_for_array_loop() {
                         saw_index = true;
                     }
                 }
+                Statement::MemSet { dst, value, .. } => {
+                    if place_has_index(dst) || operand_has_index(value) {
+                        saw_index = true;
+                    }
+                }
                 Statement::Call {
                     dst: Some(dst),
                     args,
@@ -766,4 +771,35 @@ fn test_lower_array_index_emits_bounds_check() {
     });
 
     assert!(saw_trap_call, "expected bounds check runtime trap call");
+}
+
+#[test]
+fn test_lower_u8_repeat_literal_emits_memset() {
+    let source = r#"
+        fn main() -> u64 {
+            let buf = u8[0; 8];
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let mut saw_memset = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::MemSet { value, len, .. } = stmt {
+                if *len == 8 {
+                    if let Operand::Const(Const::Int { value, .. }) = value {
+                        if *value == 0 {
+                            saw_memset = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(saw_memset, "expected MemSet for u8 repeat literal");
 }

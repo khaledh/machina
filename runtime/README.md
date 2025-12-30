@@ -14,6 +14,9 @@
 - Symbol: `__mc_string_from_bytes`
 - Signature: `void __mc_string_from_bytes(mc_string_t *out, const mc_slice_t *s)`
 
+- Symbol: `__mc_memset`
+- Signature: `void __mc_memset(mc_slice_t *dst, uint8_t value)`
+
 ## Types
 - `mc_string_t` matches Machina's `string` layout:
   ```
