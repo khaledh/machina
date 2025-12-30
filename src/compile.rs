@@ -174,7 +174,9 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     }
 
     // --- Optimize MCIR ---
-    let optimized_context = opt::optimize(lowered_context);
+    let optimized_context = opt::cfg_free::run(lowered_context);
+    let liveness_context = liveness::analyze(optimized_context);
+    let optimized_context = opt::dataflow::run(liveness_context);
     let liveness_context = liveness::analyze(optimized_context);
 
     let mcir = if opts.emit_mcir {

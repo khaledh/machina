@@ -3,9 +3,9 @@ use crate::mcir::{
     BasicBlock, BlockId, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place, Rvalue,
     Statement, Terminator, TyKind, TyTable,
 };
-use crate::opt::const_branch_elim::ConstBranchElim;
-use crate::opt::local_simplify::LocalSimplify;
-use crate::opt::self_copy_elim::RemoveSelfCopies;
+use crate::opt::cfg_free::const_branch_elim::ConstBranchElim;
+use crate::opt::cfg_free::local_simplify::LocalSimplify;
+use crate::opt::cfg_free::self_copy_elim::RemoveSelfCopies;
 
 #[test]
 fn test_remove_self_copies() {

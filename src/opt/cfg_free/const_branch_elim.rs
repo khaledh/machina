@@ -1,6 +1,6 @@
+use super::Pass;
 use crate::mcir::Const;
 use crate::mcir::{FuncBody, Operand, Terminator};
-use crate::opt::Pass;
 
 /// Fold constant branch terminators into direct gotos.
 pub struct ConstBranchElim;

@@ -1,5 +1,5 @@
+use super::Pass;
 use crate::mcir::{BinOp, Const, FuncBody, Operand, Rvalue, Statement, Terminator, UnOp};
-use crate::opt::Pass;
 
 /// Perform local statement/terminator simplifications without CFG or dataflow.
 pub struct LocalSimplify;

@@ -1,5 +1,5 @@
+use super::Pass;
 use crate::mcir::{FuncBody, Operand, Rvalue, Statement};
-use crate::opt::Pass;
 
 /// Remove trivial self-copies like `dst = copy dst`.
 pub struct RemoveSelfCopies;
