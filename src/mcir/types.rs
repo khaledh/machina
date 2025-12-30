@@ -331,6 +331,7 @@ pub enum Rvalue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
+    Comment(String),
     CopyScalar {
         dst: Place<Scalar>,
         src: Rvalue,
@@ -538,6 +539,7 @@ impl fmt::Display for Callee {
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Statement::Comment(comment) => write!(f, "// {comment}"),
             Statement::CopyScalar { dst, src } => write!(f, "{} = {}", dst, src),
             Statement::CopyAggregate { dst, src } => write!(f, "{} = copy {}", dst, src),
             Statement::Call { dst, callee, args } => {

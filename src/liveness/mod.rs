@@ -77,6 +77,7 @@ fn collect_rvalue_uses(rv: &Rvalue, out: &mut HashSet<LocalId>) {
 
 pub(crate) fn stmt_defs(stmt: &Statement, out: &mut HashSet<LocalId>) {
     match stmt {
+        Statement::Comment(_) => {}
         Statement::CopyScalar { dst, .. } => {
             out.insert(dst.base());
         }
@@ -96,6 +97,7 @@ pub(crate) fn stmt_defs(stmt: &Statement, out: &mut HashSet<LocalId>) {
 
 pub(crate) fn stmt_uses(stmt: &Statement, out: &mut HashSet<LocalId>) {
     match stmt {
+        Statement::Comment(_) => {}
         Statement::CopyScalar { dst, src } => {
             collect_place_lhs_uses(dst, out);
             collect_rvalue_uses(src, out);

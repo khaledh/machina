@@ -358,6 +358,7 @@ impl<'a> FuncCodegen<'a> {
 
     fn emit_stmt(&mut self, stmt: &Statement) -> Result<String, CodegenError> {
         match stmt {
+            Statement::Comment(_) => Ok(String::new()),
             Statement::CopyScalar { dst, src } => self.emit_copy_scalar(dst, src),
             Statement::CopyAggregate { dst, src } => self.emit_copy_aggregate(dst, src),
             Statement::Call { callee, .. } => self.emit_call(callee),

@@ -194,7 +194,10 @@ impl<'a> FuncLowerer<'a> {
     fn emit_runtime_trap_call(&mut self, kind: CheckKind) {
         let zero_op = u64_const(0);
 
-        let (kind_op, arg0, arg1, arg2) = match kind {
+        self.fb
+            .push_comment(self.curr_block, format!("runtime check: {}", kind));
+
+        let (kind_op, arg0, arg1, arg2) = match kind.clone() {
             CheckKind::DivByZero => (u64_const(0), zero_op.clone(), zero_op.clone(), zero_op),
             CheckKind::Bounds { index, len } => (u64_const(1), index, len, zero_op),
             CheckKind::Range { value, min, max } => (u64_const(2), value, min, max),

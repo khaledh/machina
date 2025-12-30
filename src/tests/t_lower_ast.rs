@@ -707,6 +707,7 @@ fn test_lower_for_array_loop() {
     for block in &body.blocks {
         for stmt in &block.stmts {
             match stmt {
+                Statement::Comment(_) => {}
                 Statement::CopyScalar { dst, src } => {
                     if place_has_index(dst) || rvalue_has_index(src) {
                         saw_index = true;

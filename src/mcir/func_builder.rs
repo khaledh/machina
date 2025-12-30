@@ -47,6 +47,12 @@ impl FuncBuilder {
         id
     }
 
+    pub fn push_comment(&mut self, bb: BlockId, comment: String) {
+        self.body.blocks[bb.index()]
+            .stmts
+            .push(Statement::Comment(comment));
+    }
+
     pub fn push_stmt(&mut self, bb: BlockId, stmt: Statement) {
         self.body.blocks[bb.index()].stmts.push(stmt);
     }
