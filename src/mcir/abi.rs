@@ -3,6 +3,9 @@ pub enum RuntimeFn {
     Trap,
     Print,
     U64ToDec,
+    U64ToBin,
+    U64ToOct,
+    U64ToHex,
     MemSet,
     MemCopy,
 }
@@ -47,6 +50,24 @@ impl RuntimeFn {
             },
             RuntimeFn::U64ToDec => RuntimeFnSig {
                 name: "__mc_u64_to_dec",
+                arg_count: 2,
+                ret: Some(RuntimeRet::Scalar),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::U64ToBin => RuntimeFnSig {
+                name: "__mc_u64_to_bin",
+                arg_count: 2,
+                ret: Some(RuntimeRet::Scalar),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::U64ToOct => RuntimeFnSig {
+                name: "__mc_u64_to_oct",
+                arg_count: 2,
+                ret: Some(RuntimeRet::Scalar),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::U64ToHex => RuntimeFnSig {
+                name: "__mc_u64_to_hex",
                 arg_count: 2,
                 ret: Some(RuntimeRet::Scalar),
                 effect: CallEffect::ReadWrite,

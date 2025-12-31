@@ -1,19 +1,33 @@
 # Machina Runtime (dev)
 
 ## ABI
+### Traps
 - Symbol: `__mc_trap`
 - Signature: `void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2)`
   
+### Printing
 - Symbol: `__mc_print`
 - Signature: `void __mc_print(const mc_string_t *str, uint64_t newline)`
   - `newline`: non-zero to append a trailing "\n"
 
+### Integer conversion
 - Symbol: `__mc_u64_to_dec`
 - Signature: `uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value)`
 
+- Symbol: `__mc_u64_to_bin`
+- Signature: `uint64_t __mc_u64_to_bin(const mc_slice_t *s, uint64_t value)`
+
+- Symbol: `__mc_u64_to_oct`
+- Signature: `uint64_t __mc_u64_to_oct(const mc_slice_t *s, uint64_t value)`
+
+- Symbol: `__mc_u64_to_hex`
+- Signature: `uint64_t __mc_u64_to_hex(const mc_slice_t *s, uint64_t value)`
+
+### String helpers
 - Symbol: `__mc_string_from_bytes`
 - Signature: `void __mc_string_from_bytes(mc_string_t *out, const mc_slice_t *s)`
 
+### Memory
 - Symbol: `__mc_memset`
 - Signature: `void __mc_memset(mc_slice_t *dst, uint8_t value)`
 
