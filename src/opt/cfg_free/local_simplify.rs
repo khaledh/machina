@@ -139,6 +139,45 @@ fn fold_binop(op: BinOp, lhs: &Operand, rhs: &Operand) -> Option<Const> {
                     })
                 }
             }
+            BinOp::BitOr => Some(Const::Int {
+                value: l | r,
+                signed: *ls,
+                bits: *lb,
+            }),
+            BinOp::BitXor => Some(Const::Int {
+                value: l ^ r,
+                signed: *ls,
+                bits: *lb,
+            }),
+            BinOp::BitAnd => Some(Const::Int {
+                value: l & r,
+                signed: *ls,
+                bits: *lb,
+            }),
+            BinOp::Shl => {
+                let shift: u32 = (*r).try_into().ok()?;
+                if shift >= 128 {
+                    None
+                } else {
+                    Some(Const::Int {
+                        value: l << shift,
+                        signed: *ls,
+                        bits: *lb,
+                    })
+                }
+            }
+            BinOp::Shr => {
+                let shift: u32 = (*r).try_into().ok()?;
+                if shift >= 128 {
+                    None
+                } else {
+                    Some(Const::Int {
+                        value: l >> shift,
+                        signed: *ls,
+                        bits: *lb,
+                    })
+                }
+            }
             BinOp::Eq => Some(Const::Bool(l == r)),
             BinOp::Ne => Some(Const::Bool(l != r)),
             BinOp::Lt => Some(Const::Bool(l < r)),
@@ -167,6 +206,18 @@ fn fold_unop(op: UnOp, val: &Const) -> Option<Const> {
         ) => Some(Const::Int {
             value: -*value,
             signed: true,
+            bits: *bits,
+        }),
+        (
+            UnOp::BitNot,
+            Const::Int {
+                value,
+                signed,
+                bits,
+            },
+        ) => Some(Const::Int {
+            value: !value,
+            signed: *signed,
             bits: *bits,
         }),
         _ => None,

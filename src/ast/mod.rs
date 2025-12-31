@@ -481,6 +481,13 @@ pub enum BinaryOp {
     LtEq,
     GtEq,
 
+    // Bitwise operators
+    BitOr,
+    BitXor,
+    BitAnd,
+    Shl,
+    Shr,
+
     // Logical operators
     LogicalAnd,
     LogicalOr,
@@ -490,4 +497,5 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Neg,
     LogicalNot,
+    BitNot,
 }

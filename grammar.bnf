@@ -90,20 +90,28 @@ IdentList          ::= Identifier ("," Identifier)* ","?
 # Operator Precedence (Lowest to Highest)
 # 0. Logical OR (||)
 # 1. Logical AND (&&)
-# 2. Comparison (==, !=, <, <=, >, >=)
-# 3. Additive (+, -)
-# 4. Multiplicative (*, /, %)
-# 5. Unary (-, !)
-# 6. Postfix
+# 2. Bitwise OR (|)
+# 3. Bitwise XOR (^)
+# 4. Bitwise AND (&)
+# 5. Comparison (==, !=, <, <=, >, >=)
+# 6. Shift (<<, >>)
+# 7. Additive (+, -)
+# 8. Multiplicative (*, /, %)
+# 9. Unary (-, !, ~)
+# 10. Postfix
 
 InfixExpr          ::= OrExpr
 
 OrExpr             ::= AndExpr ( "||" AndExpr )*
-AndExpr            ::= CompareExpr ( "&&" CompareExpr )*
-CompareExpr        ::= AddExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) AddExpr )*
+AndExpr            ::= BitOrExpr ( "&&" BitOrExpr )*
+BitOrExpr          ::= BitXorExpr ( "|" BitXorExpr )*
+BitXorExpr         ::= BitAndExpr ( "^" BitAndExpr )*
+BitAndExpr         ::= CompareExpr ( "&" CompareExpr )*
+CompareExpr        ::= ShiftExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) ShiftExpr )*
+ShiftExpr          ::= AddExpr ( ( "<<" | ">>" ) AddExpr )*
 AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
 MulExpr            ::= UnaryExpr ( ( "*" | "/" | "%" ) UnaryExpr )*
-UnaryExpr          ::= ( "-" | "!" ) UnaryExpr
+UnaryExpr          ::= ( "-" | "!" | "~" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 

@@ -1117,7 +1117,16 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match op {
             // Arithmetic operators
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+            BinaryOp::Add
+            | BinaryOp::Sub
+            | BinaryOp::Mul
+            | BinaryOp::Div
+            | BinaryOp::Mod
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::BitAnd
+            | BinaryOp::Shl
+            | BinaryOp::Shr => {
                 if !left_type.is_int() {
                     return Err(TypeCheckErrorKind::ArithOperandNotInt(left_type, left.span).into());
                 }
@@ -1315,6 +1324,14 @@ impl<'c, 'b> Checker<'c, 'b> {
                             .into());
                         }
                         Ok(Type::Bool)
+                    }
+                    UnaryOp::BitNot => {
+                        if !ty.is_int() {
+                            return Err(
+                                TypeCheckErrorKind::ArithOperandNotInt(ty, expr.span).into()
+                            );
+                        }
+                        Ok(ty)
                     }
                 }
             }

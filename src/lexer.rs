@@ -86,6 +86,18 @@ pub enum TokenKind {
     #[display("%")]
     Percent,
 
+    // Bitwise operators
+    #[display("&")]
+    Ampersand,
+    #[display("^")]
+    Caret,
+    #[display("~")]
+    Tilde,
+    #[display("<<")]
+    ShiftLeft,
+    #[display(">>")]
+    ShiftRight,
+
     // Assignment operator
     #[display("=")]
     Equals,
@@ -482,20 +494,30 @@ impl<'a> Lexer<'a> {
             }
             Some(&'<') => {
                 self.advance();
-                if matches!(self.source.peek(), Some(&'=')) {
-                    self.advance();
-                    Ok(TokenKind::LessThanEq)
-                } else {
-                    Ok(TokenKind::LessThan)
+                match self.source.peek() {
+                    Some(&'<') => {
+                        self.advance();
+                        Ok(TokenKind::ShiftLeft)
+                    }
+                    Some(&'=') => {
+                        self.advance();
+                        Ok(TokenKind::LessThanEq)
+                    }
+                    _ => Ok(TokenKind::LessThan),
                 }
             }
             Some(&'>') => {
                 self.advance();
-                if matches!(self.source.peek(), Some(&'=')) {
-                    self.advance();
-                    Ok(TokenKind::GreaterThanEq)
-                } else {
-                    Ok(TokenKind::GreaterThan)
+                match self.source.peek() {
+                    Some(&'>') => {
+                        self.advance();
+                        Ok(TokenKind::ShiftRight)
+                    }
+                    Some(&'=') => {
+                        self.advance();
+                        Ok(TokenKind::GreaterThanEq)
+                    }
+                    _ => Ok(TokenKind::GreaterThan),
                 }
             }
             Some(&'&') => {
@@ -504,11 +526,16 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(TokenKind::LogicalAnd)
                 } else {
-                    Err(LexError::UnexpectedCharacter(
-                        '&',
-                        Span::new(start, self.pos),
-                    ))
+                    Ok(TokenKind::Ampersand)
                 }
+            }
+            Some(&'^') => {
+                self.advance();
+                Ok(TokenKind::Caret)
+            }
+            Some(&'~') => {
+                self.advance();
+                Ok(TokenKind::Tilde)
             }
             Some(&ch) => Err(LexError::UnexpectedCharacter(
                 ch,

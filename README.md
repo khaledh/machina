@@ -146,6 +146,7 @@ abstractions to come.
 
 - Arithmetic operators (`+`, `-`, `*`, `/`, `%`)
 - Comparison operators ( `==`, `!=`, `>`, `>=`, `<`, `<=`)
+- Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
 - Logical operators (`&&`, `||`, `!`)
 
 ### Functions

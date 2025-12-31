@@ -539,6 +539,10 @@ impl<'a> FuncCodegen<'a> {
                         asm.push_str(&format!("  neg x16, {}\n", operand_reg));
                         Ok(R::X16)
                     }
+                    UnOp::BitNot => {
+                        asm.push_str(&format!("  mvn x16, {}\n", operand_reg));
+                        Ok(R::X16)
+                    }
                 }
             }
             Rvalue::BinOp { op, lhs, rhs } => {
@@ -602,6 +606,21 @@ impl<'a> FuncCodegen<'a> {
                     }
                     BinOp::Div => {
                         asm.push_str(&format!("  udiv x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::BitOr => {
+                        asm.push_str(&format!("  orr x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::BitXor => {
+                        asm.push_str(&format!("  eor x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::BitAnd => {
+                        asm.push_str(&format!("  and x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::Shl => {
+                        asm.push_str(&format!("  lslv x16, {}, {}\n", lhs_reg, rhs_reg));
+                    }
+                    BinOp::Shr => {
+                        asm.push_str(&format!("  lsrv x16, {}, {}\n", lhs_reg, rhs_reg));
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
                         let cond = match op {

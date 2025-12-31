@@ -17,6 +17,11 @@ impl<'a> FuncLowerer<'a> {
             ast::BinaryOp::Mod => {
                 unreachable!("compiler bug: mod op lowered into div/mul/sub")
             }
+            ast::BinaryOp::BitOr => BinOp::BitOr,
+            ast::BinaryOp::BitXor => BinOp::BitXor,
+            ast::BinaryOp::BitAnd => BinOp::BitAnd,
+            ast::BinaryOp::Shl => BinOp::Shl,
+            ast::BinaryOp::Shr => BinOp::Shr,
             ast::BinaryOp::Eq => BinOp::Eq,
             ast::BinaryOp::Ne => BinOp::Ne,
             ast::BinaryOp::Lt => BinOp::Lt,
@@ -36,6 +41,7 @@ impl<'a> FuncLowerer<'a> {
             ast::UnaryOp::LogicalNot => {
                 unreachable!("compiler bug: logical not lowered via comparison")
             }
+            ast::UnaryOp::BitNot => UnOp::BitNot,
         }
     }
 

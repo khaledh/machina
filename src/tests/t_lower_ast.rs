@@ -952,3 +952,59 @@ fn test_lower_mod_emits_div_mul_sub() {
     assert!(saw_mul, "expected mul op in modulo lowering");
     assert!(saw_sub, "expected sub op in modulo lowering");
 }
+
+#[test]
+fn test_lower_bitwise_ops() {
+    let source = r#"
+        fn main() -> u64 {
+            let a = 1 & 2;
+            let b = 1 | 2;
+            let c = 1 ^ 2;
+            let d = 1 << 3;
+            let e = 8 >> 1;
+            let f = ~1;
+            a + b + c + d + e + f
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let mut saw_and = false;
+    let mut saw_or = false;
+    let mut saw_xor = false;
+    let mut saw_shl = false;
+    let mut saw_shr = false;
+    let mut saw_not = false;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::CopyScalar { src, .. } = stmt {
+                match src {
+                    Rvalue::BinOp { op, .. } => match op {
+                        BinOp::BitAnd => saw_and = true,
+                        BinOp::BitOr => saw_or = true,
+                        BinOp::BitXor => saw_xor = true,
+                        BinOp::Shl => saw_shl = true,
+                        BinOp::Shr => saw_shr = true,
+                        _ => {}
+                    },
+                    Rvalue::UnOp { op, .. } => {
+                        if *op == UnOp::BitNot {
+                            saw_not = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(saw_and, "expected bitwise and op");
+    assert!(saw_or, "expected bitwise or op");
+    assert!(saw_xor, "expected bitwise xor op");
+    assert!(saw_shl, "expected shift left op");
+    assert!(saw_shr, "expected shift right op");
+    assert!(saw_not, "expected bitwise not op");
+}

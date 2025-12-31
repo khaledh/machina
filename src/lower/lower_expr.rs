@@ -131,6 +131,19 @@ impl<'a> FuncLowerer<'a> {
                         );
                         Ok(operand)
                     }
+                    UnaryOp::BitNot => {
+                        let ty = self.ty_for_node(expr.id)?;
+                        let ty_id = self.ty_lowerer.lower_ty(&ty);
+
+                        let operand = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::UnOp {
+                                op: Self::map_unop(*op),
+                                arg: arg_operand,
+                            },
+                        );
+                        Ok(operand)
+                    }
                 }
             }
 
@@ -170,6 +183,31 @@ impl<'a> FuncLowerer<'a> {
                         }
 
                         // Emit the binary operation
+                        let operand = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::BinOp {
+                                op: Self::map_binop(*op),
+                                lhs,
+                                rhs,
+                            },
+                        );
+                        Ok(operand)
+                    }
+                    // Bitwise and shift operators
+                    BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::BitAnd
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => {
+                        let Type::Int { .. } = ty else {
+                            unreachable!(
+                                "compiler bug: bitwise op with non-int type (type checker should have caught this)"
+                            );
+                        };
+
+                        let lhs = self.lower_scalar_expr(left)?;
+                        let rhs = self.lower_scalar_expr(right)?;
+
                         let operand = self.emit_scalar_rvalue(
                             ty_id,
                             Rvalue::BinOp {

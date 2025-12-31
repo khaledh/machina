@@ -578,6 +578,11 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Gt => write!(f, ">")?,
             BinaryOp::LtEq => write!(f, "<=")?,
             BinaryOp::GtEq => write!(f, ">=")?,
+            BinaryOp::BitOr => write!(f, "|")?,
+            BinaryOp::BitXor => write!(f, "^")?,
+            BinaryOp::BitAnd => write!(f, "&")?,
+            BinaryOp::Shl => write!(f, "<<")?,
+            BinaryOp::Shr => write!(f, ">>")?,
             BinaryOp::LogicalAnd => write!(f, "&&")?,
             BinaryOp::LogicalOr => write!(f, "||")?,
         }
@@ -590,6 +595,7 @@ impl fmt::Display for UnaryOp {
         match self {
             UnaryOp::Neg => write!(f, "-")?,
             UnaryOp::LogicalNot => write!(f, "!")?,
+            UnaryOp::BitNot => write!(f, "~")?,
         }
         Ok(())
     }

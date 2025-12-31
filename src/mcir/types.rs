@@ -224,6 +224,13 @@ pub enum BinOp {
     Mul,
     Div,
 
+    // Bitwise operators
+    BitOr,
+    BitXor,
+    BitAnd,
+    Shl,
+    Shr,
+
     // Comparison operators
     Eq,
     Ne,
@@ -236,6 +243,7 @@ pub enum BinOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOp {
     Neg,
+    BitNot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -465,6 +473,11 @@ impl fmt::Display for BinOp {
             BinOp::Sub => "-",
             BinOp::Mul => "*",
             BinOp::Div => "/",
+            BinOp::BitOr => "|",
+            BinOp::BitXor => "^",
+            BinOp::BitAnd => "&",
+            BinOp::Shl => "<<",
+            BinOp::Shr => ">>",
             BinOp::Eq => "==",
             BinOp::Ne => "!=",
             BinOp::Lt => "<",
@@ -480,6 +493,7 @@ impl fmt::Display for UnOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let op = match self {
             UnOp::Neg => "-",
+            UnOp::BitNot => "~",
         };
         write!(f, "{}", op)
     }

@@ -613,6 +613,46 @@ fn test_mod_requires_int() {
 }
 
 #[test]
+fn test_bitwise_ops_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            let _a = 1 & 2;
+            let _b = 1 | 2;
+            let _c = 1 ^ 2;
+            let _d = 1 << 2;
+            let _e = 8 >> 1;
+            let _f = ~1;
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_bitwise_ops_require_int() {
+    let source = r#"
+        fn test() -> u64 {
+            let _x = true & 1;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::ArithOperandNotInt(ty, _) => {
+                assert_eq!(*ty, Type::Bool);
+            }
+            e => panic!("Expected ArithOperandNotInt error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_negation_requires_int() {
     let source = r#"
         fn test() -> u64 {

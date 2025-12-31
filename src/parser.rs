@@ -1012,6 +1012,18 @@ impl<'a> Parser<'a> {
                 },
                 span: self.close(marker.clone()),
             }
+        } else if self.curr_token.kind == TK::Tilde {
+            // Unary bitwise not
+            self.advance();
+            let operand = self.parse_expr(10)?; // highest binding power
+            Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::UnaryOp {
+                    op: UnaryOp::BitNot,
+                    expr: Box::new(operand),
+                },
+                span: self.close(marker.clone()),
+            }
         } else {
             // Postfix expression
             self.parse_postfix()?
@@ -1096,22 +1108,35 @@ impl<'a> Parser<'a> {
             // 1 = Logical AND
             TK::LogicalAnd => Some((BinaryOp::LogicalAnd, 1)),
 
-            // 2 = Comparison
-            TK::EqEq => Some((BinaryOp::Eq, 2)),
-            TK::NotEq => Some((BinaryOp::Ne, 2)),
-            TK::LessThan => Some((BinaryOp::Lt, 2)),
-            TK::GreaterThan => Some((BinaryOp::Gt, 2)),
-            TK::LessThanEq => Some((BinaryOp::LtEq, 2)),
-            TK::GreaterThanEq => Some((BinaryOp::GtEq, 2)),
+            // 2 = Bitwise OR
+            TK::Pipe => Some((BinaryOp::BitOr, 2)),
 
-            // 3 = Additive
-            TK::Plus => Some((BinaryOp::Add, 3)),
-            TK::Minus => Some((BinaryOp::Sub, 3)),
+            // 3 = Bitwise XOR
+            TK::Caret => Some((BinaryOp::BitXor, 3)),
 
-            // 4 = Multiplicative
-            TK::Star => Some((BinaryOp::Mul, 4)),
-            TK::Slash => Some((BinaryOp::Div, 4)),
-            TK::Percent => Some((BinaryOp::Mod, 4)),
+            // 4 = Bitwise AND
+            TK::Ampersand => Some((BinaryOp::BitAnd, 4)),
+
+            // 5 = Comparison
+            TK::EqEq => Some((BinaryOp::Eq, 5)),
+            TK::NotEq => Some((BinaryOp::Ne, 5)),
+            TK::LessThan => Some((BinaryOp::Lt, 5)),
+            TK::GreaterThan => Some((BinaryOp::Gt, 5)),
+            TK::LessThanEq => Some((BinaryOp::LtEq, 5)),
+            TK::GreaterThanEq => Some((BinaryOp::GtEq, 5)),
+
+            // 6 = Shift
+            TK::ShiftLeft => Some((BinaryOp::Shl, 6)),
+            TK::ShiftRight => Some((BinaryOp::Shr, 6)),
+
+            // 7 = Additive
+            TK::Plus => Some((BinaryOp::Add, 7)),
+            TK::Minus => Some((BinaryOp::Sub, 7)),
+
+            // 8 = Multiplicative
+            TK::Star => Some((BinaryOp::Mul, 8)),
+            TK::Slash => Some((BinaryOp::Div, 8)),
+            TK::Percent => Some((BinaryOp::Mod, 8)),
 
             _ => None,
         }
@@ -1555,7 +1580,8 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LBrace)?;
 
         // Parse base expression
-        let base = self.parse_expr(0)?;
+        // Avoid consuming the struct update separator as a bitwise OR operator.
+        let base = self.parse_expr(3)?;
 
         // Expect pipe
         self.consume(&TK::Pipe)?;
