@@ -54,8 +54,8 @@ Statements encode side effects and writes:
 - `Call { dst, callee, args }` (`dst` is optional for void/noreturn calls)
 - `MemSet { dst, value, len }` (byte-fill `dst` with `value` for `len` bytes)
 
-`MemSet` is a lowering helper and is removed by the cfg-free memops pass
-(`opt/cfg_free/memops_lower.rs`) before codegen; it becomes either inline
+`MemSet` is a lowering helper and is removed by the cfg-free memset pass
+(`opt/cfg_free/memset_lower.rs`) before codegen; it becomes either inline
 stores or a runtime `__mc_memset` call.
 
 `CopyAggregate` is lowered by the dataflow memcpy pass

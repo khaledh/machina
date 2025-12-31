@@ -8,11 +8,11 @@ use crate::mcir::{
 const INLINE_THRESHOLD: u64 = 16;
 
 /// Lower MemSet statements to either inline stores or a runtime call.
-pub struct MemOpsLower;
+pub struct MemSetLower;
 
-impl Pass for MemOpsLower {
+impl Pass for MemSetLower {
     fn name(&self) -> &'static str {
-        "memops-lower"
+        "memset-lower"
     }
 
     fn run(&mut self, body: &mut FuncBody) -> bool {

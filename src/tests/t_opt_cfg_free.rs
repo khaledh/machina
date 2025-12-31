@@ -6,7 +6,7 @@ use crate::mcir::{
 };
 use crate::opt::cfg_free::const_branch_elim::ConstBranchElim;
 use crate::opt::cfg_free::local_simplify::LocalSimplify;
-use crate::opt::cfg_free::memops_lower::MemOpsLower;
+use crate::opt::cfg_free::memset_lower::MemSetLower;
 use crate::opt::cfg_free::self_copy_elim::RemoveSelfCopies;
 
 #[test]
@@ -277,7 +277,7 @@ fn test_local_simplify_folds_if_const_temp() {
 }
 
 #[test]
-fn test_memops_lower_inlines_small_memset() {
+fn test_memset_lower_inlines_small_memset() {
     let mut types = TyTable::new();
     let u64_ty = types.add(TyKind::Int {
         signed: false,
@@ -328,7 +328,7 @@ fn test_memops_lower_inlines_small_memset() {
         types,
     };
 
-    let mut pass = MemOpsLower;
+    let mut pass = MemSetLower;
     pass.run(&mut body);
 
     let stmts = &body.blocks[0].stmts;
@@ -349,7 +349,7 @@ fn test_memops_lower_inlines_small_memset() {
 }
 
 #[test]
-fn test_memops_lower_calls_runtime_for_large_memset() {
+fn test_memset_lower_calls_runtime_for_large_memset() {
     let mut types = TyTable::new();
     let u64_ty = types.add(TyKind::Int {
         signed: false,
@@ -400,7 +400,7 @@ fn test_memops_lower_calls_runtime_for_large_memset() {
         types,
     };
 
-    let mut pass = MemOpsLower;
+    let mut pass = MemSetLower;
     pass.run(&mut body);
 
     let stmts = &body.blocks[0].stmts;
