@@ -323,7 +323,7 @@ fn test_match_target_not_enum() {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
             SemCheckError::MatchTargetNotEnum(ty, _) => {
-                assert_eq!(*ty, Type::UInt64);
+                assert_eq!(*ty, Type::uint(64));
             }
             e => panic!("Expected MatchTargetNotEnum error, got {:?}", e),
         }

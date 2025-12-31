@@ -183,7 +183,7 @@ impl<'a> FuncLowerer<'a> {
         match op {
             Operand::Copy(place) | Operand::Move(place) => PlaceAny::Scalar(place),
             Operand::Const(_) => {
-                let ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+                let ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
                 let temp = self.new_temp_scalar(ty_id);
                 self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
                 PlaceAny::Scalar(temp)

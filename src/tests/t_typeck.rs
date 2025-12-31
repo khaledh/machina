@@ -458,7 +458,7 @@ fn test_enum_variant_payload_type_mismatch() {
             TypeCheckError::EnumVariantPayloadTypeMismatch(name, index, expected, found, _) => {
                 assert_eq!(name, "A");
                 assert_eq!(*index, 0);
-                assert_eq!(*expected, Type::UInt64);
+                assert_eq!(*expected, Type::uint(64));
                 assert_eq!(*found, Type::Bool);
             }
             e => panic!("Expected EnumVariantPayloadTypeMismatch error, got {:?}", e),
@@ -525,7 +525,7 @@ fn test_for_non_iterable_rejected() {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
             TypeCheckError::ForIterNotIterable(ty, _) => {
-                assert_eq!(*ty, Type::UInt64);
+                assert_eq!(*ty, Type::uint(64));
             }
             e => panic!("Expected ForIterNotIterable error, got {:?}", e),
         }

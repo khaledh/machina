@@ -7,9 +7,10 @@ impl fmt::Display for Type {
         match self {
             Type::Unknown => write!(f, "unknown"),
             Type::Unit => write!(f, "()"),
-            Type::UInt64 => write!(f, "u64"),
-            Type::UInt32 => write!(f, "u32"),
-            Type::UInt8 => write!(f, "u8"),
+            Type::Int { signed, bits } => {
+                let prefix = if *signed { "i" } else { "u" };
+                write!(f, "{}{}", prefix, bits)
+            }
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
             Type::Range { min, max } => write!(f, "range({}, {})", min, max),

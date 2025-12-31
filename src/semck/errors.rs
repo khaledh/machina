@@ -7,7 +7,7 @@ use crate::types::Type;
 #[derive(Debug, Clone, Error)]
 pub enum SemCheckError {
     #[error("Value out of range: {0} not in range [{1},{2})")]
-    ValueOutOfRange(u64, u64, u64, Span),
+    ValueOutOfRange(i128, i128, i128, Span),
 
     #[error("Invalid range bounds: {0} >= {1}")]
     InvalidRangeBounds(u64, u64, Span),

@@ -402,7 +402,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         // type check each index
         for index in indices {
             let index_type = self.type_check_expr(index)?;
-            if index_type != Type::UInt64 {
+            if index_type != Type::uint(64) {
                 return Err(TypeCheckError::IndexTypeNotInt(index_type, index.span));
             }
         }
@@ -443,13 +443,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         // Type check start and end (must be u64)
         if let Some(start) = start {
             let ty = self.type_check_expr(start)?;
-            if ty != Type::UInt64 {
+            if ty != Type::uint(64) {
                 return Err(TypeCheckError::IndexTypeNotInt(ty, start.span));
             }
         }
         if let Some(end) = end {
             let ty = self.type_check_expr(end)?;
-            if ty != Type::UInt64 {
+            if ty != Type::uint(64) {
                 return Err(TypeCheckError::IndexTypeNotInt(ty, end.span));
             }
         }
@@ -468,7 +468,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
 
         let index_ty = self.type_check_expr(&indices[0])?;
-        if index_ty != Type::UInt64 {
+        if index_ty != Type::uint(64) {
             return Err(TypeCheckError::IndexTypeNotInt(index_ty, indices[0].span));
         }
 
@@ -1103,13 +1103,13 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
-                if left_type != Type::UInt64 || right_type != Type::UInt64 {
+                if !left_type.is_int() || !right_type.is_int() || left_type != right_type {
                     let span = Span::merge_all(vec![left.span, right.span]);
                     return Err(TypeCheckError::ArithTypeMismatch(
                         left_type, right_type, span,
                     ));
                 }
-                Ok(Type::UInt64)
+                Ok(left_type)
             }
             BinaryOp::Eq
             | BinaryOp::Ne
@@ -1164,12 +1164,26 @@ impl<'c, 'b> Checker<'c, 'b> {
         expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
         match (&expr.kind, expected) {
-            (ExprKind::IntLit(_), Some(expected_ty))
-                if matches!(expected_ty, Type::UInt8 | Type::UInt32 | Type::UInt64) =>
-            {
+            // Integer literal: adopt the expected integer type.
+            (ExprKind::IntLit(_), Some(expected_ty)) if expected_ty.is_int() => {
                 self.builder.record_node_type(expr.id, expected_ty.clone());
                 Ok(expected_ty.clone())
             }
+
+            // Unary negation of an integer literal: adopt the expected signed integer type.
+            (
+                ExprKind::UnaryOp {
+                    op: UnaryOp::Neg,
+                    expr: operand,
+                },
+                Some(expected_ty @ Type::Int { signed: true, .. }),
+            ) if matches!(operand.kind, ExprKind::IntLit(_)) => {
+                let _ = self.type_check_expr_with_expected(operand, Some(expected_ty))?;
+                self.builder.record_node_type(expr.id, expected_ty.clone());
+                Ok(expected_ty.clone())
+            }
+
+            // Untyped array literal: use the expected array type to type-check elements.
             (
                 ExprKind::ArrayLit {
                     elem_ty: None,
@@ -1181,13 +1195,15 @@ impl<'c, 'b> Checker<'c, 'b> {
                 self.builder.record_node_type(expr.id, ty.clone());
                 Ok(ty)
             }
+
+            // Fallback: no expected-type shortcut applies.
             _ => self.type_check_expr(expr),
         }
     }
 
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
         let result = match &expr.kind {
-            ExprKind::IntLit(_) => Ok(Type::UInt64),
+            ExprKind::IntLit(_) => Ok(Type::uint(64)),
 
             ExprKind::BoolLit(_) => Ok(Type::Bool),
 
@@ -1275,7 +1291,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn iterable_item_type(&self, iter_ty: &Type, span: Span) -> Result<Type, TypeCheckError> {
         match iter_ty {
-            Type::Range { .. } => Ok(Type::UInt64),
+            Type::Range { .. } => Ok(Type::uint(64)),
             Type::Array { elem_ty, dims } => {
                 if dims.is_empty() {
                     return Err(TypeCheckError::ForIterNotIterable(iter_ty.clone(), span));

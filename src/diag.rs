@@ -134,7 +134,7 @@ fn build_marker(len: usize, single_line: bool) -> String {
 /// ```
 /// Example (multi-line):
 /// ```text
-/// (12:9) Then and else branches have different types: UInt32 != Bool
+/// (12:9) Then and else branches have different types: i32 != bool
 /// │ 11 │     if cond {
 /// │ 12 │         42 / 2
 /// │    │         ------

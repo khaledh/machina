@@ -18,10 +18,15 @@ pub(crate) fn resolve_type_expr(
             // Map built-in type names to Type values
             match name.as_str() {
                 "()" => Ok(Type::Unit),
-                "u64" => Ok(Type::UInt64),
+                "u8" => Ok(Type::uint(8)),
+                "u16" => Ok(Type::uint(16)),
+                "u32" => Ok(Type::uint(32)),
+                "u64" => Ok(Type::uint(64)),
+                "i8" => Ok(Type::sint(8)),
+                "i16" => Ok(Type::sint(16)),
+                "i32" => Ok(Type::sint(32)),
+                "i64" => Ok(Type::sint(64)),
                 "bool" => Ok(Type::Bool),
-                "u32" => Ok(Type::UInt32),
-                "u8" => Ok(Type::UInt8),
                 "char" => Ok(Type::Char),
                 "string" => Ok(Type::String),
                 _ => match &def.kind {

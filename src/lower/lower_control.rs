@@ -186,7 +186,7 @@ impl<'a> FuncLowerer<'a> {
         // }
 
         // Create a temp local for the induction variable
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let idx_place = self.new_temp_scalar(u64_ty_id);
 
         // i = start
@@ -310,7 +310,7 @@ impl<'a> FuncLowerer<'a> {
         };
 
         // induction variable
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let idx_place = self.new_temp_scalar(u64_ty_id);
 
         // idx = 0

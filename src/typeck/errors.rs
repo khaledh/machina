@@ -133,7 +133,7 @@ pub enum TypeCheckError {
     InvalidRangeBounds(u64, u64, Span),
 
     #[error("Value out of range: {0} not in range [{1},{2})")]
-    ValueOutOfRange(u64, u64, u64, Span),
+    ValueOutOfRange(i128, i128, i128, Span),
 
     #[error("For iterator is not iterable: {0}")]
     ForIterNotIterable(Type, Span),

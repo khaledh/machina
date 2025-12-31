@@ -101,7 +101,7 @@ impl<'a> FuncLowerer<'a> {
             if matches!(ty, Type::Range { .. }) {
                 let param_place = Place::<Scalar>::new(local_id, ty_id, vec![]);
                 let op = Operand::Copy(param_place);
-                self.emit_conversion_check(&Type::UInt64, &ty, &op);
+                self.emit_conversion_check(&Type::uint(64), &ty, &op);
             }
         }
 

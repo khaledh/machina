@@ -97,7 +97,7 @@ abstractions to come.
 ### Types
 
 **Basic types**
-- Integers: `u8`, `u32`, `u64`
+- Integers: `u8`/`u16`/`u32`/`u64`, `i8`/`i16`/`i32`/`i64`
 - Booleans: `bool`
 - Characters: `char`
 - Unit: `()`

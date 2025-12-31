@@ -137,7 +137,7 @@ impl<'a> FuncLowerer<'a> {
             "compiler bug: non-1D array target (type checker should catch this)"
         );
 
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
 
         // Evaluate target into a place
         let target_place = self

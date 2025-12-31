@@ -141,7 +141,7 @@ impl<'a> FuncLowerer<'a> {
                 .lower_place_agg(scrutinee)
                 .or_else(|_| self.lower_agg_expr_to_temp(scrutinee))?;
 
-            let tag_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+            let tag_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
             let mut projs = place.projections().to_vec();
             projs.push(Projection::Field { index: 0 });
             let tag_place = Place::new(place.base(), tag_ty_id, projs);

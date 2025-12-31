@@ -45,9 +45,15 @@ impl<'a> FuncLowerer<'a> {
         match &expr.kind {
             // Literals
             EK::IntLit(value) => {
+                let ty = self.ty_for_node(expr.id)?;
+                let Type::Int { signed, bits } = ty else {
+                    unreachable!(
+                        "compiler bug: int literal with non-int type (type checker should have caught this)"
+                    );
+                };
                 let c = Const::Int {
-                    signed: false,
-                    bits: 64,
+                    signed,
+                    bits,
                     value: *value as i128,
                 };
                 Ok(Operand::Const(c))
@@ -110,6 +116,11 @@ impl<'a> FuncLowerer<'a> {
             EK::BinOp { left, op, right } => {
                 let ty = self.ty_for_node(expr.id)?;
                 let ty_id = self.ty_lowerer.lower_ty(&ty);
+                let Type::Int { signed, bits } = ty else {
+                    unreachable!(
+                        "compiler bug: binary op with non-int type (type checker should have caught this)"
+                    );
+                };
 
                 let lhs_operand = self.lower_scalar_expr(left)?;
                 let rhs_operand = self.lower_scalar_expr(right)?;
@@ -118,8 +129,8 @@ impl<'a> FuncLowerer<'a> {
                 if *op == BinaryOp::Div {
                     let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
                     let zero = Operand::Const(Const::Int {
-                        signed: false,
-                        bits: 64,
+                        signed,
+                        bits,
                         value: 0,
                     });
                     let cond_op = self.emit_scalar_rvalue(
@@ -270,7 +281,7 @@ impl<'a> FuncLowerer<'a> {
 
                 // 3) build aggregate temp {ptr, len, tag}
                 // field 0: ptr
-                let ptr_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+                let ptr_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
                 self.emit_operand_into_agg_projection(
                     &dst,
                     Projection::Field { index: 0 },
@@ -278,7 +289,7 @@ impl<'a> FuncLowerer<'a> {
                     ptr_ty_id,
                 )?;
                 // field 1: len
-                let len_ty_id = self.ty_lowerer.lower_ty(&Type::UInt32);
+                let len_ty_id = self.ty_lowerer.lower_ty(&Type::uint(32));
                 self.emit_operand_into_agg_projection(
                     &dst,
                     Projection::Field { index: 1 },
@@ -286,7 +297,7 @@ impl<'a> FuncLowerer<'a> {
                     len_ty_id,
                 )?;
                 // field 2: tag
-                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::UInt8);
+                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::uint(8));
                 self.emit_operand_into_agg_projection(
                     &dst,
                     Projection::Field { index: 2 },
@@ -400,7 +411,7 @@ impl<'a> FuncLowerer<'a> {
                     ArrayLitInit::Repeat(expr, count) => {
                         // Evaluate the repeat expression once and copy to each element.
                         let count = *count as usize;
-                        if *elem_ty == Type::UInt8 {
+                        if *elem_ty == Type::uint(8) {
                             // Special case: for u8 arrays -> use memset intrinsic.
                             let value_op = self.lower_scalar_expr(expr)?;
                             self.fb.push_stmt(
@@ -460,7 +471,7 @@ impl<'a> FuncLowerer<'a> {
                     value: enum_ty.enum_variant_index(variant) as i128,
                 };
 
-                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::UInt64);
+                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
                 let mut tag_proj = dst.projections().to_vec();
                 tag_proj.push(Projection::Field { index: 0 });
                 let tag_place = Place::new(dst.base(), tag_ty_id, tag_proj);

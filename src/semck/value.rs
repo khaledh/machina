@@ -1,6 +1,6 @@
 use crate::ast::{
     BinaryOp, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringTag, TypeExpr, TypeExprKind,
-    Visitor, walk_expr, walk_stmt_expr,
+    UnaryOp, Visitor, walk_expr, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
@@ -48,7 +48,7 @@ impl<'a> ValueChecker<'a> {
     }
 
     /// Validate that a literal fits within a target integer type's bounds.
-    fn check_int_range(&mut self, value: u64, min: u64, max_excl: u64, span: crate::diag::Span) {
+    fn check_int_range(&mut self, value: i128, min: i128, max_excl: i128, span: crate::diag::Span) {
         if value < min || value >= max_excl {
             self.errors
                 .push(SemCheckError::ValueOutOfRange(value, min, max_excl, span));
@@ -57,8 +57,12 @@ impl<'a> ValueChecker<'a> {
 
     fn check_range_value(&mut self, value: u64, min: u64, max: u64, span: crate::diag::Span) {
         if value < min || value >= max {
-            self.errors
-                .push(SemCheckError::ValueOutOfRange(value, min, max, span));
+            self.errors.push(SemCheckError::ValueOutOfRange(
+                value as i128,
+                min as i128,
+                max as i128,
+                span,
+            ));
         }
     }
 
@@ -114,8 +118,17 @@ impl<'a> ValueChecker<'a> {
         let Type::Range { min, max } = ty else {
             return;
         };
-        if let ExprKind::IntLit(lit_value) = value.kind {
-            self.check_range_value(lit_value, *min, *max, value.span);
+        if let Some(lit_value) = int_lit_value(value) {
+            if lit_value < 0 {
+                self.errors.push(SemCheckError::ValueOutOfRange(
+                    lit_value,
+                    *min as i128,
+                    *max as i128,
+                    value.span,
+                ));
+            } else {
+                self.check_range_value(lit_value as u64, *min, *max, value.span);
+            }
         }
     }
 }
@@ -135,8 +148,17 @@ impl Visitor for ValueChecker<'_> {
         if let (Some(Type::Range { min, max }), Some(ret_expr)) =
             (&self.current_return_ty, ret_expr)
         {
-            if let ExprKind::IntLit(value) = ret_expr.kind {
-                self.check_range_value(value, *min, *max, ret_expr.span);
+            if let Some(value) = int_lit_value(ret_expr) {
+                if value < 0 {
+                    self.errors.push(SemCheckError::ValueOutOfRange(
+                        value,
+                        *min as i128,
+                        *max as i128,
+                        ret_expr.span,
+                    ));
+                } else {
+                    self.check_range_value(value as u64, *min, *max, ret_expr.span);
+                }
             }
         }
 
@@ -170,15 +192,18 @@ impl Visitor for ValueChecker<'_> {
             ExprKind::IntLit(value) => {
                 // Enforce integer literal ranges based on the resolved type.
                 if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) {
-                    match ty {
-                        Type::UInt8 => {
-                            self.check_int_range(*value, 0, u8::MAX as u64 + 1, expr.span)
-                        }
-                        Type::UInt32 => {
-                            self.check_int_range(*value, 0, u32::MAX as u64 + 1, expr.span)
-                        }
-                        Type::UInt64 => {}
-                        _ => {}
+                    if let Type::Int { signed, bits } = ty {
+                        let min = if signed {
+                            -(1i128 << (bits as u32 - 1))
+                        } else {
+                            0
+                        };
+                        let max_excl = if signed {
+                            1i128 << (bits as u32 - 1)
+                        } else {
+                            1i128 << (bits as u32)
+                        };
+                        self.check_int_range(*value as i128, min, max_excl, expr.span);
                     }
                 }
             }
@@ -187,6 +212,27 @@ impl Visitor for ValueChecker<'_> {
                 if start >= end {
                     self.errors
                         .push(SemCheckError::InvalidRangeBounds(*start, *end, expr.span));
+                }
+            }
+            ExprKind::UnaryOp {
+                op: UnaryOp::Neg, ..
+            } => {
+                if let Some(lit_value) = int_lit_value(expr) {
+                    if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) {
+                        if let Type::Int { signed, bits } = ty {
+                            let min = if signed {
+                                -(1i128 << (bits as u32 - 1))
+                            } else {
+                                0
+                            };
+                            let max_excl = if signed {
+                                1i128 << (bits as u32 - 1)
+                            } else {
+                                1i128 << (bits as u32)
+                            };
+                            self.check_int_range(lit_value, min, max_excl, expr.span);
+                        }
+                    }
                 }
             }
             ExprKind::BinOp {
@@ -239,5 +285,19 @@ impl Visitor for ValueChecker<'_> {
         }
 
         walk_expr(self, expr);
+    }
+}
+
+fn int_lit_value(expr: &Expr) -> Option<i128> {
+    match &expr.kind {
+        ExprKind::IntLit(value) => Some(*value as i128),
+        ExprKind::UnaryOp {
+            op: UnaryOp::Neg,
+            expr,
+        } => match expr.kind {
+            ExprKind::IntLit(value) => Some(-(value as i128)),
+            _ => None,
+        },
+        _ => None,
     }
 }

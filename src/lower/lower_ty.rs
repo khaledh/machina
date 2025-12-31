@@ -31,19 +31,11 @@ impl TyLowerer {
                 bits: 32,
                 signed: false,
             }),
-            Type::UInt64 => self.table.add(TyKind::Int {
-                bits: 64,
-                signed: false,
+            Type::Int { signed, bits } => self.table.add(TyKind::Int {
+                bits: *bits,
+                signed: *signed,
             }),
-            Type::UInt32 => self.table.add(TyKind::Int {
-                bits: 32,
-                signed: false,
-            }),
-            Type::UInt8 => self.table.add(TyKind::Int {
-                bits: 8,
-                signed: false,
-            }),
-            Type::Range { .. } => self.lower_ty(&Type::UInt64),
+            Type::Range { .. } => self.lower_ty(&Type::uint(64)),
 
             // Aggregate Types
             Type::Array { elem_ty, dims } => {
@@ -116,9 +108,9 @@ impl TyLowerer {
             }
             Type::String => {
                 // Map to a struct { ptr, len, tag }
-                let u64_id = self.lower_ty(&Type::UInt64);
-                let u32_id = self.lower_ty(&Type::UInt32);
-                let u8_id = self.lower_ty(&Type::UInt8);
+                let u64_id = self.lower_ty(&Type::uint(64));
+                let u32_id = self.lower_ty(&Type::uint(32));
+                let u8_id = self.lower_ty(&Type::uint(8));
 
                 self.table.add(TyKind::Struct {
                     fields: vec![
@@ -139,7 +131,7 @@ impl TyLowerer {
             }
 
             Type::Slice { .. } => {
-                let u64_id = self.lower_ty(&Type::UInt64);
+                let u64_id = self.lower_ty(&Type::uint(64));
                 self.table.add(TyKind::Struct {
                     fields: vec![
                         StructField {
