@@ -478,6 +478,12 @@ impl Expr {
                 writeln!(f, "{}Operand:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
             }
+            ExprKind::Move { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Move [{}]", pad, self.id)?;
+                writeln!(f, "{}Operand:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
             ExprKind::Block { items, tail } => {
                 writeln!(f, "{}Block [{}]", pad, self.id)?;
                 for item in items {

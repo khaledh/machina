@@ -1241,6 +1241,8 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::UnaryOp { expr, .. } => self.type_check_expr(expr),
 
+            ExprKind::Move { expr } => self.type_check_expr(expr),
+
             ExprKind::Block { items, tail } => self.type_check_block(items, &tail.as_deref()),
 
             ExprKind::Var(_) => self.type_check_var_ref(expr),

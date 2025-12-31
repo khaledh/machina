@@ -975,7 +975,19 @@ impl<'a> Parser<'a> {
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let marker = self.mark();
-        let mut lhs = if self.curr_token.kind == TK::Minus {
+        let mut lhs = if let TK::Ident(name) = &self.curr_token.kind
+            && name == "move"
+        {
+            self.advance();
+            let operand = self.parse_expr(10)?;
+            Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Move {
+                    expr: Box::new(operand),
+                },
+                span: self.close(marker.clone()),
+            }
+        } else if self.curr_token.kind == TK::Minus {
             self.advance();
             let operand = self.parse_expr(10)?; // highest binding power
             Expr {

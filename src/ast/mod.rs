@@ -1,3 +1,6 @@
+//! Abstract Syntax Tree (AST)
+
+pub mod cfg;
 mod format;
 mod visit;
 
@@ -397,6 +400,11 @@ pub enum ExprKind {
     },
     UnaryOp {
         op: UnaryOp,
+        expr: Box<Expr>,
+    },
+
+    // Move
+    Move {
         expr: Box<Expr>,
     },
 

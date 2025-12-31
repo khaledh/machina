@@ -243,6 +243,8 @@ impl<'a> NrvoSafetyChecker<'a> {
                 target_ok && fields_ok
             }
 
+            ExprKind::Move { expr } => self.check_expr(expr, false),
+
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
 
             ExprKind::BinOp { left, right, .. } => {

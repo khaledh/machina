@@ -254,6 +254,9 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         ExprKind::UnaryOp { expr, .. } => {
             v.visit_expr(expr);
         }
+        ExprKind::Move { expr } => {
+            v.visit_expr(expr);
+        }
         ExprKind::ArrayIndex { target, indices } => {
             v.visit_expr(target);
             for index in indices {

@@ -24,13 +24,13 @@ pub fn solve_forward<T, G, FMeet, FTransfer>(
     entry_state: T,
     bottom: T,
     meet: FMeet,
-    transfer: FTransfer,
+    mut transfer: FTransfer,
 ) -> DataflowResult<T>
 where
     T: Clone + PartialEq,
     G: DataflowGraph,
     FMeet: Fn(&[T]) -> T,
-    FTransfer: Fn(G::Node, &T) -> T,
+    FTransfer: FnMut(G::Node, &T) -> T,
 {
     let num_nodes = graph.num_nodes();
     let mut in_map = vec![bottom.clone(); num_nodes];
@@ -87,13 +87,13 @@ pub fn solve_backward<T, G, FMeet, FTransfer>(
     entry_state: T,
     bottom: T,
     meet: FMeet,
-    transfer: FTransfer,
+    mut transfer: FTransfer,
 ) -> DataflowResult<T>
 where
     T: Clone + PartialEq,
     G: DataflowGraph,
     FMeet: Fn(&[T]) -> T,
-    FTransfer: Fn(G::Node, &T) -> T,
+    FTransfer: FnMut(G::Node, &T) -> T,
 {
     let num_nodes = graph.num_nodes();
     let mut in_map = vec![bottom.clone(); num_nodes];

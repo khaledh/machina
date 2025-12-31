@@ -90,6 +90,8 @@ abstractions to come.
 - Pattern matching
 - Function overloading
 - `inout` parameters for aggregate types
+- Explicit `move` for aggregate ownership transfer (use-after-move is a compile
+  error)
 - Runtime safety checks
 
 ### Types

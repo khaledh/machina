@@ -62,6 +62,12 @@ pub enum SemCheckError {
 
     #[error("inout argument must be mutable")]
     InoutArgNotMutable(Span),
+
+    #[error("Use after move: {0}")]
+    UseAfterMove(String, Span),
+
+    #[error("Invalid move target")]
+    InvalidMoveTarget(Span),
 }
 
 impl SemCheckError {
@@ -86,6 +92,8 @@ impl SemCheckError {
             SemCheckError::InoutParamNotAggregate(_, span) => *span,
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,
+            SemCheckError::UseAfterMove(_, span) => *span,
+            SemCheckError::InvalidMoveTarget(span) => *span,
         }
     }
 }

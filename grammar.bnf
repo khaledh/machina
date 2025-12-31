@@ -100,7 +100,8 @@ CompareExpr        ::= AddExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) AddEx
 AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
 MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
 
-UnaryExpr          ::= ( "-" | "!" ) UnaryExpr 
+UnaryExpr          ::= ( "-" | "!" ) UnaryExpr
+                     | "move" UnaryExpr
                      | PostfixExpr
 
 PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange |TupleField | StructField )*

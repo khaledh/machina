@@ -20,6 +20,8 @@ impl<'a> FuncLowerer<'a> {
 
             EK::Match { scrutinee, arms } => self.lower_match_expr(expr, scrutinee, arms),
 
+            EK::Move { expr } => self.lower_expr_value(expr),
+
             // everything else: decide scalar vs aggregate by type
             _ => {
                 let ty = self.ty_for_node(expr.id)?;
@@ -212,6 +214,7 @@ impl<'a> FuncLowerer<'a> {
                 self.emit_copy_aggregate(dst, src);
                 Ok(())
             }
+            EK::Move { expr } => self.lower_agg_value_into(dst, expr),
             EK::Slice { target, start, end } => self.lower_slice_into(&dst, target, start, end),
             EK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.

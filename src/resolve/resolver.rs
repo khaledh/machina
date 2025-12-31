@@ -773,6 +773,10 @@ impl SymbolResolver {
                 self.check_expr(expr);
             }
 
+            ExprKind::Move { expr } => {
+                self.check_expr(expr);
+            }
+
             // Control flow (If)
             ExprKind::If {
                 cond,
