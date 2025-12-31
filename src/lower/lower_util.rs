@@ -20,6 +20,9 @@ impl<'a> FuncLowerer<'a> {
             ast::BinaryOp::LtEq => BinOp::LtEq,
             ast::BinaryOp::Gt => BinOp::Gt,
             ast::BinaryOp::GtEq => BinOp::GtEq,
+            ast::BinaryOp::LogicalAnd | ast::BinaryOp::LogicalOr => {
+                unreachable!("compiler bug: logical ops lowered via short-circuiting lowering")
+            }
         }
     }
 
@@ -27,6 +30,9 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn map_unop(op: ast::UnaryOp) -> UnOp {
         match op {
             ast::UnaryOp::Neg => UnOp::Neg,
+            ast::UnaryOp::LogicalNot => {
+                unreachable!("compiler bug: logical not lowered via comparison")
+            }
         }
     }
 

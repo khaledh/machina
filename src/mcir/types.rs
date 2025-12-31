@@ -218,10 +218,13 @@ pub struct GlobalItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
+    // Arithmetic operators
     Add,
     Sub,
     Mul,
     Div,
+
+    // Comparison operators
     Eq,
     Ne,
     Lt,

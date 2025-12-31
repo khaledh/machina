@@ -533,6 +533,74 @@ fn test_for_non_iterable_rejected() {
 }
 
 #[test]
+fn test_logical_and_requires_bool() {
+    let source = r#"
+        fn test() -> bool {
+            true && 1
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::LogicalOperandNotBoolean(ty, _) => {
+                assert_eq!(*ty, Type::uint(64));
+            }
+            e => panic!("Expected LogicalOperandNotBoolean error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_logical_not_requires_bool() {
+    let source = r#"
+        fn test() -> u64 {
+            let _x = !1;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::LogicalOperandNotBoolean(ty, _) => {
+                assert_eq!(*ty, Type::uint(64));
+            }
+            e => panic!("Expected LogicalOperandNotBoolean error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_negation_requires_int() {
+    let source = r#"
+        fn test() -> u64 {
+            let _x = -true;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::NegationOperandNotInt(ty, _) => {
+                assert_eq!(*ty, Type::Bool);
+            }
+            e => panic!("Expected NegationOperandNotInt error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_range_non_literal_assignment() {
     let source = r#"
         fn test() -> u64 {

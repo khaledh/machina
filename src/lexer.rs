@@ -20,38 +20,37 @@ impl Display for Token {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, EnumDisplay)]
 pub enum TokenKind {
+    // Identifiers
     #[display("Ident({0})")]
     Ident(String),
+
+    // Literals
     #[display("IntLit({0})")]
     IntLit(u64),
     #[display("CharLit({0})")]
     CharLit(char),
     #[display("StringLit({0})")]
     StringLit(String),
+
+    // Brackets
     #[display("[")]
     LBracket,
     #[display("]")]
     RBracket,
+
+    // Parentheses
     #[display("(")]
     LParen,
     #[display(")")]
     RParen,
+
+    // Braces
     #[display("{{")]
     LBrace,
     #[display("}}")]
     RBrace,
-    #[display("->")]
-    Arrow,
-    #[display("=>")]
-    FatArrow,
-    #[display("+")]
-    Plus,
-    #[display("-")]
-    Minus,
-    #[display("*")]
-    Star,
-    #[display("/")]
-    Slash,
+
+    // Punctuation
     #[display(",")]
     Comma,
     #[display(".")]
@@ -68,8 +67,28 @@ pub enum TokenKind {
     Pipe,
     #[display("_")]
     Underscore,
+
+    // Arrows
+    #[display("->")]
+    Arrow,
+    #[display("=>")]
+    FatArrow,
+
+    // Arithmetic operators
+    #[display("+")]
+    Plus,
+    #[display("-")]
+    Minus,
+    #[display("*")]
+    Star,
+    #[display("/")]
+    Slash,
+
+    // Assignment operator
     #[display("=")]
     Equals,
+
+    // Comparison operators
     #[display("==")]
     EqEq,
     #[display("!=")]
@@ -82,6 +101,16 @@ pub enum TokenKind {
     LessThanEq,
     #[display(">=")]
     GreaterThanEq,
+
+    // Logical operators
+    #[display("&&")]
+    LogicalAnd,
+    #[display("||")]
+    LogicalOr,
+    #[display("!")]
+    LogicalNot,
+
+    // End of file
     #[display("EOF")]
     Eof,
 }
@@ -377,7 +406,12 @@ impl<'a> Lexer<'a> {
             }
             Some(&'|') => {
                 self.advance();
-                Ok(TokenKind::Pipe)
+                if matches!(self.source.peek(), Some(&'|')) {
+                    self.advance();
+                    Ok(TokenKind::LogicalOr)
+                } else {
+                    Ok(TokenKind::Pipe)
+                }
             }
             Some(&'_') => {
                 self.advance();
@@ -437,10 +471,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(TokenKind::NotEq)
                 } else {
-                    Err(LexError::UnexpectedCharacter(
-                        '!',
-                        Span::new(start, self.pos),
-                    ))
+                    Ok(TokenKind::LogicalNot)
                 }
             }
             Some(&'<') => {
@@ -459,6 +490,18 @@ impl<'a> Lexer<'a> {
                     Ok(TokenKind::GreaterThanEq)
                 } else {
                     Ok(TokenKind::GreaterThan)
+                }
+            }
+            Some(&'&') => {
+                self.advance();
+                if matches!(self.source.peek(), Some(&'&')) {
+                    self.advance();
+                    Ok(TokenKind::LogicalAnd)
+                } else {
+                    Err(LexError::UnexpectedCharacter(
+                        '&',
+                        Span::new(start, self.pos),
+                    ))
                 }
             }
             Some(&ch) => Err(LexError::UnexpectedCharacter(

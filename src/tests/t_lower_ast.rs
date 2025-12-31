@@ -803,3 +803,115 @@ fn test_lower_u8_repeat_literal_emits_memset() {
 
     assert!(saw_memset, "expected MemSet for u8 repeat literal");
 }
+
+#[test]
+fn test_lower_logical_and_short_circuits() {
+    let source = r#"
+        fn side() -> bool {
+            true
+        }
+
+        fn main() -> bool {
+            false && side()
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let funcs = analyzed.module.funcs();
+    let func = funcs
+        .iter()
+        .find(|f| f.sig.name == "main")
+        .expect("main not found");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let if_terms: Vec<_> = body
+        .blocks
+        .iter()
+        .filter_map(|block| match block.terminator {
+            Terminator::If {
+                then_bb, else_bb, ..
+            } => Some((then_bb, else_bb)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(if_terms.len(), 1, "expected one short-circuit if");
+
+    let (then_bb, else_bb) = if_terms[0];
+    let then_has_call = body.blocks[then_bb.index()].stmts.iter().any(|stmt| {
+        matches!(
+            stmt,
+            Statement::Call {
+                callee: Callee::Def(_),
+                ..
+            }
+        )
+    });
+    let else_has_call = body.blocks[else_bb.index()].stmts.iter().any(|stmt| {
+        matches!(
+            stmt,
+            Statement::Call {
+                callee: Callee::Def(_),
+                ..
+            }
+        )
+    });
+
+    assert!(then_has_call, "expected call in then branch for &&");
+    assert!(!else_has_call, "expected no call in else branch for &&");
+}
+
+#[test]
+fn test_lower_logical_or_short_circuits() {
+    let source = r#"
+        fn side() -> bool {
+            true
+        }
+
+        fn main() -> bool {
+            true || side()
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let funcs = analyzed.module.funcs();
+    let func = funcs
+        .iter()
+        .find(|f| f.sig.name == "main")
+        .expect("main not found");
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let if_terms: Vec<_> = body
+        .blocks
+        .iter()
+        .filter_map(|block| match block.terminator {
+            Terminator::If {
+                then_bb, else_bb, ..
+            } => Some((then_bb, else_bb)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(if_terms.len(), 1, "expected one short-circuit if");
+
+    let (then_bb, else_bb) = if_terms[0];
+    let then_has_call = body.blocks[then_bb.index()].stmts.iter().any(|stmt| {
+        matches!(
+            stmt,
+            Statement::Call {
+                callee: Callee::Def(_),
+                ..
+            }
+        )
+    });
+    let else_has_call = body.blocks[else_bb.index()].stmts.iter().any(|stmt| {
+        matches!(
+            stmt,
+            Statement::Call {
+                callee: Callee::Def(_),
+                ..
+            }
+        )
+    });
+
+    assert!(!then_has_call, "expected no call in then branch for ||");
+    assert!(else_has_call, "expected call in else branch for ||");
+}

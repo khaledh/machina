@@ -85,7 +85,7 @@ abstractions to come.
 - Mutable value semantics
 - Expression oriented syntax
 - Bindings: `let` (immutable), `var` (mutable)
-- Arithmetic and comparison operators
+- Arithmetic, comparison, and logical operators (`&&`, `||`, `!`)
 - Blocks (last expression is the block value)
 - Pattern matching
 - Function overloading

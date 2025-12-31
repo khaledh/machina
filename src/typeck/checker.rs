@@ -1116,8 +1116,17 @@ impl<'c, 'b> Checker<'c, 'b> {
         let right_type = self.type_check_expr(right)?;
 
         match op {
+            // Arithmetic operators
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
-                if !left_type.is_int() || !right_type.is_int() || left_type != right_type {
+                if !left_type.is_int() {
+                    return Err(TypeCheckErrorKind::ArithOperandNotInt(left_type, left.span).into());
+                }
+                if !right_type.is_int() {
+                    return Err(
+                        TypeCheckErrorKind::ArithOperandNotInt(right_type, right.span).into(),
+                    );
+                }
+                if left_type != right_type {
                     let span = Span::merge_all(vec![left.span, right.span]);
                     return Err(
                         TypeCheckErrorKind::ArithTypeMismatch(left_type, right_type, span).into(),
@@ -1125,20 +1134,37 @@ impl<'c, 'b> Checker<'c, 'b> {
                 }
                 Ok(left_type)
             }
+
+            // Comparison operators
             BinaryOp::Eq
             | BinaryOp::Ne
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::LtEq
             | BinaryOp::GtEq => {
-                let span = Span::merge_all(vec![left.span, right.span]);
-                if left_type != right_type {
-                    Err(TypeCheckErrorKind::CmpTypeMismatch(left_type, right_type, span).into())
-                } else if !left_type.is_scalar() {
-                    Err(TypeCheckErrorKind::CmpNonScalar(left_type, span).into())
-                } else {
-                    Ok(Type::Bool)
+                if !left_type.is_int() {
+                    return Err(TypeCheckErrorKind::CmpOperandNotInt(left_type, left.span).into());
                 }
+                if !right_type.is_int() {
+                    return Err(TypeCheckErrorKind::CmpOperandNotInt(right_type, right.span).into());
+                }
+                Ok(Type::Bool)
+            }
+
+            // Logical operators
+            BinaryOp::LogicalOr | BinaryOp::LogicalAnd => {
+                if left_type != Type::Bool {
+                    return Err(
+                        TypeCheckErrorKind::LogicalOperandNotBoolean(left_type, left.span).into(),
+                    );
+                }
+                if right_type != Type::Bool {
+                    return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
+                        right_type, right.span,
+                    )
+                    .into());
+                }
+                Ok(Type::Bool)
             }
         }
     }
@@ -1270,7 +1296,28 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
 
-            ExprKind::UnaryOp { expr, .. } => self.type_check_expr(expr),
+            ExprKind::UnaryOp { op, expr } => {
+                let ty = self.type_check_expr(expr)?;
+                match op {
+                    UnaryOp::Neg => {
+                        if !ty.is_int() {
+                            return Err(
+                                TypeCheckErrorKind::NegationOperandNotInt(ty, expr.span).into()
+                            );
+                        }
+                        Ok(ty)
+                    }
+                    UnaryOp::LogicalNot => {
+                        if ty != Type::Bool {
+                            return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
+                                ty, expr.span,
+                            )
+                            .into());
+                        }
+                        Ok(Type::Bool)
+                    }
+                }
+            }
 
             ExprKind::Move { expr } => self.type_check_expr(expr),
 

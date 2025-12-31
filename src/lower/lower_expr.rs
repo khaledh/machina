@@ -1,4 +1,6 @@
-use crate::ast::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StringTag, StructLitField};
+use crate::ast::{
+    ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StringTag, StructLitField, UnaryOp,
+};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -100,59 +102,111 @@ impl<'a> FuncLowerer<'a> {
 
             // Unary/Binary ops
             EK::UnaryOp { op, expr: arg_expr } => {
-                let ty = self.ty_for_node(expr.id)?;
-                let ty_id = self.ty_lowerer.lower_ty(&ty);
-
                 let arg_operand = self.lower_scalar_expr(arg_expr)?;
-                let operand = self.emit_scalar_rvalue(
-                    ty_id,
-                    Rvalue::UnOp {
-                        op: Self::map_unop(*op),
-                        arg: arg_operand,
-                    },
-                );
-                Ok(operand)
+
+                match op {
+                    UnaryOp::Neg => {
+                        let ty = self.ty_for_node(expr.id)?;
+                        let ty_id = self.ty_lowerer.lower_ty(&ty);
+
+                        let operand = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::UnOp {
+                                op: Self::map_unop(*op),
+                                arg: arg_operand,
+                            },
+                        );
+                        Ok(operand)
+                    }
+                    UnaryOp::LogicalNot => {
+                        let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+
+                        let operand = self.emit_scalar_rvalue(
+                            bool_ty_id,
+                            Rvalue::BinOp {
+                                op: BinOp::Eq,
+                                lhs: arg_operand,
+                                rhs: Operand::Const(Const::Bool(false)),
+                            },
+                        );
+                        Ok(operand)
+                    }
+                }
             }
+
             EK::BinOp { left, op, right } => {
                 let ty = self.ty_for_node(expr.id)?;
                 let ty_id = self.ty_lowerer.lower_ty(&ty);
-                let Type::Int { signed, bits } = ty else {
-                    unreachable!(
-                        "compiler bug: binary op with non-int type (type checker should have caught this)"
-                    );
-                };
 
-                let lhs_operand = self.lower_scalar_expr(left)?;
-                let rhs_operand = self.lower_scalar_expr(right)?;
+                match op {
+                    // Arithmetic operators
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                        let Type::Int { signed, bits } = ty else {
+                            unreachable!(
+                                "compiler bug: arithmetic op with non-int type (type checker should have caught this)"
+                            );
+                        };
 
-                // Check for division by zero
-                if *op == BinaryOp::Div {
-                    let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
-                    let zero = Operand::Const(Const::Int {
-                        signed,
-                        bits,
-                        value: 0,
-                    });
-                    let cond_op = self.emit_scalar_rvalue(
-                        bool_ty_id,
-                        Rvalue::BinOp {
-                            op: BinOp::Ne,
-                            lhs: rhs_operand.clone(),
-                            rhs: zero,
-                        },
-                    );
-                    self.emit_runtime_check(cond_op, CheckKind::DivByZero);
+                        let lhs = self.lower_scalar_expr(left)?;
+                        let rhs = self.lower_scalar_expr(right)?;
+
+                        // Emit runtime check for division by zero
+                        if *op == BinaryOp::Div {
+                            let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+                            let zero = Operand::Const(Const::Int {
+                                signed,
+                                bits,
+                                value: 0,
+                            });
+                            let cond_op = self.emit_scalar_rvalue(
+                                bool_ty_id,
+                                Rvalue::BinOp {
+                                    op: BinOp::Ne,
+                                    lhs: rhs.clone(),
+                                    rhs: zero,
+                                },
+                            );
+                            self.emit_runtime_check(cond_op, CheckKind::DivByZero);
+                        }
+
+                        // Emit the binary operation
+                        let operand = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::BinOp {
+                                op: Self::map_binop(*op),
+                                lhs,
+                                rhs,
+                            },
+                        );
+                        Ok(operand)
+                    }
+
+                    // Comparison operators
+                    BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::LtEq
+                    | BinaryOp::Gt
+                    | BinaryOp::GtEq => {
+                        let lhs = self.lower_scalar_expr(left)?;
+                        let rhs = self.lower_scalar_expr(right)?;
+
+                        let operand = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::BinOp {
+                                op: Self::map_binop(*op),
+                                lhs,
+                                rhs,
+                            },
+                        );
+                        Ok(operand)
+                    }
+
+                    // Logical operators
+                    BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                        self.lower_logical_binop(*op, left, right)
+                    }
                 }
-
-                let operand = self.emit_scalar_rvalue(
-                    ty_id,
-                    Rvalue::BinOp {
-                        op: Self::map_binop(*op),
-                        lhs: lhs_operand,
-                        rhs: rhs_operand,
-                    },
-                );
-                Ok(operand)
             }
 
             // Function calls, conditionals, blocks
@@ -177,6 +231,59 @@ impl<'a> FuncLowerer<'a> {
 
         // Return a copy of the temp place as an operand
         Operand::Copy(temp_place)
+    }
+
+    fn lower_logical_binop(
+        &mut self,
+        op: BinaryOp,
+        left: &Expr,
+        right: &Expr,
+    ) -> Result<Operand, LowerError> {
+        let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+        let temp = self.new_temp_scalar(bool_ty_id);
+        let lhs = self.lower_scalar_expr(left)?;
+
+        // Lower into short-circuiting if-expr
+        match op {
+            BinaryOp::LogicalAnd => {
+                // If left is false, short-circuit and return false
+                self.lower_if_join(
+                    lhs,
+                    |this| {
+                        let rhs = this.lower_scalar_expr(right)?;
+                        this.emit_copy_scalar(temp.clone(), Rvalue::Use(rhs));
+                        Ok(())
+                    },
+                    |this| {
+                        this.emit_copy_scalar(
+                            temp.clone(),
+                            Rvalue::Use(Operand::Const(Const::Bool(false))),
+                        );
+                        Ok(())
+                    },
+                )?;
+            }
+            BinaryOp::LogicalOr => {
+                // If left is true, short-circuit and return true
+                self.lower_if_join(
+                    lhs,
+                    |this| {
+                        this.emit_copy_scalar(
+                            temp.clone(),
+                            Rvalue::Use(Operand::Const(Const::Bool(true))),
+                        );
+                        Ok(())
+                    },
+                    |this| {
+                        let rhs = this.lower_scalar_expr(right)?;
+                        this.emit_copy_scalar(temp.clone(), Rvalue::Use(rhs));
+                        Ok(())
+                    },
+                )?;
+            }
+            _ => unreachable!("compiler bug: invalid logical binary op"),
+        }
+        Ok(Operand::Copy(temp))
     }
 
     // --- Expression (Aggregate) ---

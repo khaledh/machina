@@ -577,6 +577,8 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Gt => write!(f, ">")?,
             BinaryOp::LtEq => write!(f, "<=")?,
             BinaryOp::GtEq => write!(f, ">=")?,
+            BinaryOp::LogicalAnd => write!(f, "&&")?,
+            BinaryOp::LogicalOr => write!(f, "||")?,
         }
         Ok(())
     }
@@ -586,6 +588,7 @@ impl fmt::Display for UnaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             UnaryOp::Neg => write!(f, "-")?,
+            UnaryOp::LogicalNot => write!(f, "!")?,
         }
         Ok(())
     }

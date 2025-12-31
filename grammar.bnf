@@ -88,23 +88,26 @@ EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" IdentList? ")" )?
 IdentList          ::= Identifier ("," Identifier)* ","?
 
 # Operator Precedence (Lowest to Highest)
-# 1. Comparison (==, !=, <, <=, >, >=)
-# 2. Additive (+, -)
-# 3. Multiplicative (*, /)
-# 4. Unary (-, !)
-# 5. Postfix (Call, ArrayIndex, TupleField, StructField)
+# 0. Logical OR (||)
+# 1. Logical AND (&&)
+# 2. Comparison (==, !=, <, <=, >, >=)
+# 3. Additive (+, -)
+# 4. Multiplicative (*, /)
+# 5. Unary (-, !)
+# 6. Postfix
 
-InfixExpr          ::= CompareExpr
+InfixExpr          ::= OrExpr
 
+OrExpr             ::= AndExpr ( "||" AndExpr )*
+AndExpr            ::= CompareExpr ( "&&" CompareExpr )*
 CompareExpr        ::= AddExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) AddExpr )*
 AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
 MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
-
 UnaryExpr          ::= ( "-" | "!" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange |TupleField | StructField )*
+PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange | TupleField | StructField )*
 
 Call               ::= "(" ExprList? ")"
 ArrayIndex         ::= "[" ExprList "]"

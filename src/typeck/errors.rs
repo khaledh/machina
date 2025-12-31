@@ -16,11 +16,17 @@ pub enum TypeCheckErrorKind {
     #[error("Invalid types for arithmetic operation: {0}, {1}")]
     ArithTypeMismatch(Type, Type, Span),
 
-    #[error("Invalid types for comparison operation: {0} != {1}")]
-    CmpTypeMismatch(Type, Type, Span),
+    #[error("Arithmetic operand must be an integer, found {0}")]
+    ArithOperandNotInt(Type, Span),
 
-    #[error("Comparison of non-scalars types is not supported: {0}")]
-    CmpNonScalar(Type, Span),
+    #[error("Comparison operand must be an integer, found {0}")]
+    CmpOperandNotInt(Type, Span),
+
+    #[error("Negation operand must be an integer, found {0}")]
+    NegationOperandNotInt(Type, Span),
+
+    #[error("Logical operand must be a boolean, found {0}")]
+    LogicalOperandNotBoolean(Type, Span),
 
     #[error("Condition must be a boolean, found {0}")]
     CondNotBoolean(Type, Span),
@@ -171,8 +177,10 @@ impl TypeCheckError {
         match &*self.0 {
             TypeCheckErrorKind::FuncReturnTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ArithTypeMismatch(_, _, span) => *span,
-            TypeCheckErrorKind::CmpTypeMismatch(_, _, span) => *span,
-            TypeCheckErrorKind::CmpNonScalar(_, span) => *span,
+            TypeCheckErrorKind::ArithOperandNotInt(_, span) => *span,
+            TypeCheckErrorKind::CmpOperandNotInt(_, span) => *span,
+            TypeCheckErrorKind::NegationOperandNotInt(_, span) => *span,
+            TypeCheckErrorKind::LogicalOperandNotBoolean(_, span) => *span,
             TypeCheckErrorKind::CondNotBoolean(_, span) => *span,
             TypeCheckErrorKind::ThenElseTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::AssignTypeMismatch(_, _, span) => *span,

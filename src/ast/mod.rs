@@ -479,9 +479,14 @@ pub enum BinaryOp {
     Gt,
     LtEq,
     GtEq,
+
+    // Logical operators
+    LogicalAnd,
+    LogicalOr,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
+    LogicalNot,
 }

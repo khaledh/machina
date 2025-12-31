@@ -978,6 +978,7 @@ impl<'a> Parser<'a> {
         let mut lhs = if let TK::Ident(name) = &self.curr_token.kind
             && name == "move"
         {
+            // Unary move
             self.advance();
             let operand = self.parse_expr(10)?;
             Expr {
@@ -988,6 +989,7 @@ impl<'a> Parser<'a> {
                 span: self.close(marker.clone()),
             }
         } else if self.curr_token.kind == TK::Minus {
+            // Unary minus
             self.advance();
             let operand = self.parse_expr(10)?; // highest binding power
             Expr {
@@ -998,7 +1000,20 @@ impl<'a> Parser<'a> {
                 },
                 span: self.close(marker.clone()),
             }
+        } else if self.curr_token.kind == TK::LogicalNot {
+            // Unary logical not
+            self.advance();
+            let operand = self.parse_expr(10)?; // highest binding power
+            Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::UnaryOp {
+                    op: UnaryOp::LogicalNot,
+                    expr: Box::new(operand),
+                },
+                span: self.close(marker.clone()),
+            }
         } else {
+            // Postfix expression
             self.parse_postfix()?
         };
 
@@ -1075,16 +1090,28 @@ impl<'a> Parser<'a> {
 
     fn bin_op_from_token(token: &TokenKind) -> Option<(BinaryOp, u8)> {
         match token {
-            TK::Plus => Some((BinaryOp::Add, 1)),
-            TK::Minus => Some((BinaryOp::Sub, 1)),
-            TK::Star => Some((BinaryOp::Mul, 2)),
-            TK::Slash => Some((BinaryOp::Div, 2)),
-            TK::EqEq => Some((BinaryOp::Eq, 3)),
-            TK::NotEq => Some((BinaryOp::Ne, 3)),
-            TK::LessThan => Some((BinaryOp::Lt, 3)),
-            TK::GreaterThan => Some((BinaryOp::Gt, 3)),
-            TK::LessThanEq => Some((BinaryOp::LtEq, 3)),
-            TK::GreaterThanEq => Some((BinaryOp::GtEq, 3)),
+            // 0 = Logical OR
+            TK::LogicalOr => Some((BinaryOp::LogicalOr, 0)),
+
+            // 1 = Logical AND
+            TK::LogicalAnd => Some((BinaryOp::LogicalAnd, 1)),
+
+            // 2 = Comparison
+            TK::EqEq => Some((BinaryOp::Eq, 2)),
+            TK::NotEq => Some((BinaryOp::Ne, 2)),
+            TK::LessThan => Some((BinaryOp::Lt, 2)),
+            TK::GreaterThan => Some((BinaryOp::Gt, 2)),
+            TK::LessThanEq => Some((BinaryOp::LtEq, 2)),
+            TK::GreaterThanEq => Some((BinaryOp::GtEq, 2)),
+
+            // 3 = Additive
+            TK::Plus => Some((BinaryOp::Add, 3)),
+            TK::Minus => Some((BinaryOp::Sub, 3)),
+
+            // 4 = Multiplicative
+            TK::Star => Some((BinaryOp::Mul, 4)),
+            TK::Slash => Some((BinaryOp::Div, 4)),
+
             _ => None,
         }
     }
