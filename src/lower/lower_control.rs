@@ -90,7 +90,7 @@ impl<'a> FuncLowerer<'a> {
         self.fb.set_terminator(
             self.curr_block,
             Terminator::If {
-                cond: cond,
+                cond,
                 then_bb,
                 else_bb,
             },
@@ -166,7 +166,7 @@ impl<'a> FuncLowerer<'a> {
         match (&iter.kind, &iter_ty) {
             (EK::Range { start, end }, _) => self.lower_for_range_expr(*start, *end, pattern, body),
             (_, Type::Array { .. }) => self.lower_for_array_expr(pattern, iter, &iter_ty, body),
-            _ => return Err(LowerError::UnsupportedOperandExpr(iter.id)),
+            _ => Err(LowerError::UnsupportedOperandExpr(iter.id)),
         }
     }
 
@@ -256,7 +256,7 @@ impl<'a> FuncLowerer<'a> {
         let one_op = Operand::Const(Const::Int {
             signed: false,
             bits: 64,
-            value: 1 as i128,
+            value: 1_i128,
         });
         self.emit_copy_scalar(
             idx_place.clone(),
@@ -319,7 +319,7 @@ impl<'a> FuncLowerer<'a> {
             Rvalue::Use(Operand::Const(Const::Int {
                 signed: false,
                 bits: 64,
-                value: 0 as i128,
+                value: 0_i128,
             })),
         );
 
@@ -383,7 +383,7 @@ impl<'a> FuncLowerer<'a> {
         let one_op = Operand::Const(Const::Int {
             signed: false,
             bits: 64,
-            value: 1 as i128,
+            value: 1_i128,
         });
         self.emit_copy_scalar(
             idx_place.clone(),

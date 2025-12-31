@@ -103,22 +103,22 @@ impl<'a> Arm64Codegen<'a> {
         let mut global_labels = HashMap::new();
 
         // Mach-O (macOS) uses "__TEXT,__const" for rodata.
-        asm.push_str(&format!(".section __TEXT,__const\n"));
+        asm.push_str(".section __TEXT,__const\n");
 
         for global in self.globals {
             if global.kind != GlobalSection::RoData {
                 panic!("Non-rodata global are not supported yet: {:?}", global);
             }
             let label = self.global_label(global.id, &mut global_labels);
-            asm.push_str(&format!("  .p2align 3\n"));
-            asm.push_str(&format!("  {}:\n", label));
+            asm.push_str("  .p2align 3\n");
+            asm.push_str(&format!("  {label}:\n"));
             match &global.payload {
                 GlobalPayload::Bytes(bytes) => {
-                    asm.push_str(&format!("    .byte "));
+                    asm.push_str("    .byte ");
                     for byte in bytes {
-                        asm.push_str(&format!("0x{:02x}, ", byte));
+                        asm.push_str(&format!("0x{byte:02x}, "));
                     }
-                    asm.push_str(&format!("\n"));
+                    asm.push('\n');
                 }
                 GlobalPayload::String(string) => {
                     asm.push_str(&format!(
@@ -139,11 +139,11 @@ impl<'a> Arm64Codegen<'a> {
         asm: &mut String,
         global_labels: &HashMap<GlobalId, String>,
     ) -> Result<(), CodegenError> {
-        asm.push_str(&format!(".text\n\n"));
+        asm.push_str(".text\n\n");
 
         for func in &self.funcs {
             let mut codegen =
-                FuncCodegen::new(func, self.def_names, &global_labels, self.label_counter)?;
+                FuncCodegen::new(func, self.def_names, global_labels, self.label_counter)?;
             asm.push_str(&codegen.generate()?);
             asm.push('\n');
             self.label_counter = codegen.label_counter;
@@ -710,10 +710,9 @@ impl<'a> FuncCodegen<'a> {
                     }
                     Const::Int { value, .. } => *value as i64,
                     Const::GlobalAddr { id } => {
-                        let label = self
-                            .global_labels
-                            .get(id)
-                            .expect(&format!("Global label not found for id {}", id.index()));
+                        let label = self.global_labels.get(id).unwrap_or_else(|| {
+                            panic!("compiler bug: global label not found for id {}", id.index())
+                        });
 
                         // PC-relative load from the global data section.
                         asm.push_str(&format!("  adrp {}, {}@PAGE\n", scratch, label));

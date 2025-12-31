@@ -113,10 +113,9 @@ impl<'a> FuncLowerer<'a> {
                 bindings,
                 ..
             } = &arm.pattern
+                && let Some(place) = &scrutinee_place
             {
-                if let Some(place) = &scrutinee_place {
-                    self.bind_match_payloads(&scrutinee_ty, place, variant_name, bindings)?;
-                }
+                self.bind_match_payloads(&scrutinee_ty, place, variant_name, bindings)?;
             }
 
             emit_arm_body(self, arm)?;

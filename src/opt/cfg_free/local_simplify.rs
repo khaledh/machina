@@ -198,10 +198,8 @@ fn simplify_binop_identity(op: BinOp, lhs: &Operand, rhs: &Operand) -> Option<Op
                 Some(rhs.clone())
             } else if let Some(int_zero) = const_int_zero_from(lhs) {
                 Some(Operand::Const(int_zero))
-            } else if let Some(int_zero) = const_int_zero_from(rhs) {
-                Some(Operand::Const(int_zero))
             } else {
-                None
+                const_int_zero_from(rhs).map(Operand::Const)
             }
         }
         BinOp::Div => {

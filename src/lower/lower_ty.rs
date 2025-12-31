@@ -10,6 +10,12 @@ pub struct TyLowerer {
     map: HashMap<Type, TyId>,
 }
 
+impl Default for TyLowerer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TyLowerer {
     pub fn new() -> Self {
         Self {

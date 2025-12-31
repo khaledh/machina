@@ -150,7 +150,7 @@ impl<'a> FuncLowerer<'a> {
             None => Operand::Const(Const::Int {
                 signed: false,
                 bits: 64,
-                value: 0 as i128,
+                value: 0_i128,
             }),
         };
 

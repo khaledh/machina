@@ -189,6 +189,12 @@ pub struct LiveSet {
     pub live_out: HashSet<LocalId>,
 }
 
+impl Default for LiveSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LiveSet {
     pub fn new() -> Self {
         Self {
@@ -242,7 +248,7 @@ impl<'a> LivenessAnalysis<'a> {
         result
             .in_map
             .into_iter()
-            .zip(result.out_map.into_iter())
+            .zip(result.out_map)
             .map(|(live_in, live_out)| LiveSet { live_in, live_out })
             .collect()
     }

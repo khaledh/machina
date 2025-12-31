@@ -92,9 +92,9 @@ pub trait Visitor {
 pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
     for decl in &module.decls {
         match decl {
-            Decl::TypeDecl(type_decl) => v.visit_type_decl(&type_decl),
-            Decl::FunctionDecl(func_decl) => v.visit_func_decl(&func_decl),
-            Decl::Function(func) => v.visit_func(&func),
+            Decl::TypeDecl(type_decl) => v.visit_type_decl(type_decl),
+            Decl::FunctionDecl(func_decl) => v.visit_func_decl(func_decl),
+            Decl::Function(func) => v.visit_func(func),
         }
     }
 }

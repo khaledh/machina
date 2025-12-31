@@ -52,8 +52,6 @@ pub struct FuncLowerer<'a> {
 }
 
 impl<'a> FuncLowerer<'a> {
-    /// --- Entry points ---
-
     /// Create a lowering context for one function.
     pub fn new(
         ctx: &'a AnalyzedContext,

@@ -137,6 +137,12 @@ pub fn to_w_reg(reg: Arm64Reg) -> &'static str {
 
 pub struct Arm64Target;
 
+impl Default for Arm64Target {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Arm64Target {
     pub const fn new() -> Self {
         Self

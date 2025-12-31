@@ -14,6 +14,12 @@ pub struct GlobalInterner {
     map: HashMap<GlobalKey, GlobalId>,
 }
 
+impl Default for GlobalInterner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlobalInterner {
     pub fn new() -> Self {
         Self {

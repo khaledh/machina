@@ -14,8 +14,7 @@ use crate::regalloc::{AllocationResult, LocalAllocMap, LocalClass, MappedLocal};
 pub(crate) fn classify_locals(body: &FuncBody) -> Vec<LocalClass> {
     body.locals
         .iter()
-        .enumerate()
-        .map(|(_, local)| {
+        .map(|local| {
             let ty_info = body.types.get(local.ty);
             if (matches!(local.kind, LocalKind::Param { .. })
                 || matches!(local.kind, LocalKind::Return))
@@ -431,23 +430,23 @@ impl<'a> RegAlloc<'a> {
     ) {
         // Optimization: If possible, prevent non-return locals from using the
         // return register if they overlap with the return value interval.
-        if local != self.body.ret_local {
-            if let Some(ret_start) = self.ret_interval_start {
-                // We only care if this local interval overlaps with the ret value interval.
-                if interval.end > ret_start {
-                    let ret_reg = self.target.result_reg();
-                    if free_regs.contains(&ret_reg) {
-                        // Prefer non‑return regs if possible.
-                        if let Some((idx, reg)) = free_regs
-                            .iter()
-                            .enumerate()
-                            .find(|(_, r)| **r != ret_reg)
-                            .map(|(idx, r)| (idx, *r))
-                        {
-                            free_regs.remove(idx);
-                            self.assign_reg(local, interval, reg);
-                            return;
-                        }
+        if local != self.body.ret_local
+            && let Some(ret_start) = self.ret_interval_start
+        {
+            // We only care if this local interval overlaps with the ret value interval.
+            if interval.end > ret_start {
+                let ret_reg = self.target.result_reg();
+                if free_regs.contains(&ret_reg) {
+                    // Prefer non‑return regs if possible.
+                    if let Some((idx, reg)) = free_regs
+                        .iter()
+                        .enumerate()
+                        .find(|(_, r)| **r != ret_reg)
+                        .map(|(idx, r)| (idx, *r))
+                    {
+                        free_regs.remove(idx);
+                        self.assign_reg(local, interval, reg);
+                        return;
                     }
                 }
             }

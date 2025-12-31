@@ -5,7 +5,11 @@ use crate::diag::Span;
 use crate::types::Type;
 
 #[derive(Debug, Clone, Error)]
-pub enum TypeCheckError {
+#[error(transparent)]
+pub struct TypeCheckError(Box<TypeCheckErrorKind>);
+
+#[derive(Debug, Clone, Error)]
+pub enum TypeCheckErrorKind {
     #[error("Function return type mismatch: expected {0}, found {1}")]
     FuncReturnTypeMismatch(Type, Type, Span),
 
@@ -155,57 +159,71 @@ pub enum TypeCheckError {
 }
 
 impl TypeCheckError {
+    pub fn new(kind: TypeCheckErrorKind) -> Self {
+        Self(Box::new(kind))
+    }
+
+    pub fn kind(&self) -> &TypeCheckErrorKind {
+        &self.0
+    }
+
     pub fn span(&self) -> Span {
-        match self {
-            TypeCheckError::FuncReturnTypeMismatch(_, _, span) => *span,
-            TypeCheckError::ArithTypeMismatch(_, _, span) => *span,
-            TypeCheckError::CmpTypeMismatch(_, _, span) => *span,
-            TypeCheckError::CmpNonScalar(_, span) => *span,
-            TypeCheckError::CondNotBoolean(_, span) => *span,
-            TypeCheckError::ThenElseTypeMismatch(_, _, span) => *span,
-            TypeCheckError::AssignTypeMismatch(_, _, span) => *span,
-            TypeCheckError::ArgCountMismatch(_, _, _, span) => *span,
-            TypeCheckError::ArgTypeMismatch(_, _, _, span) => *span,
-            TypeCheckError::InvalidCallee(_, span) => *span,
-            TypeCheckError::EmptyArrayLiteral(span) => *span,
-            TypeCheckError::TooManyIndices(_, _, span) => *span,
-            TypeCheckError::ArrayElementTypeMismatch(_, _, span) => *span,
-            TypeCheckError::IndexTypeNotInt(_, span) => *span,
-            TypeCheckError::InvalidIndexTargetType(_, span) => *span,
-            TypeCheckError::UnknownType(span) => *span,
-            TypeCheckError::PatternTypeMismatch(_, _, span) => *span,
-            TypeCheckError::DeclTypeMismatch(_, _, span) => *span,
-            TypeCheckError::DeclTypeMismatchMulti(_, _, span) => *span,
-            TypeCheckError::ArrayPatternLengthMismatch(_, _, span) => *span,
-            TypeCheckError::EmptyTupleLiteral(span) => *span,
-            TypeCheckError::TupleFieldOutOfBounds(_, _, span) => *span,
-            TypeCheckError::InvalidTupleFieldTarget(_, span) => *span,
-            TypeCheckError::TuplePatternLengthMismatch(_, _, span) => *span,
-            TypeCheckError::UnknownStructType(_, span) => *span,
-            TypeCheckError::DuplicateStructField(_, span) => *span,
-            TypeCheckError::StructFieldTypeMismatch(_, _, _, span) => *span,
-            TypeCheckError::UnknownStructField(_, span) => *span,
-            TypeCheckError::StructFieldsMissing(_, span) => *span,
-            TypeCheckError::InvalidStructFieldTarget(_, span) => *span,
-            TypeCheckError::UnknownEnumType(_, span) => *span,
-            TypeCheckError::UnknownEnumVariant(_, _, span) => *span,
-            TypeCheckError::InvalidStructUpdateTarget(_, span) => *span,
-            TypeCheckError::EnumVariantPayloadArityMismatch(_, _, _, span) => *span,
-            TypeCheckError::EnumVariantPayloadTypeMismatch(_, _, _, _, span) => *span,
-            TypeCheckError::MatchTargetNotEnum(_, span) => *span,
-            TypeCheckError::MatchArmTypeMismatch(_, _, span) => *span,
-            TypeCheckError::MatchPatternEnumMismatch(_, _, span) => *span,
-            TypeCheckError::NonExhaustiveMatch(span) => *span,
-            TypeCheckError::DuplicateMatchVariant(_, span) => *span,
-            TypeCheckError::StringIndexNonAscii(span) => *span,
-            TypeCheckError::InvalidRangeBounds(_, _, span) => *span,
-            TypeCheckError::ValueOutOfRange(_, _, _, span) => *span,
-            TypeCheckError::ForIterNotIterable(_, span) => *span,
-            TypeCheckError::DivisionByZero(span) => *span,
-            TypeCheckError::FuncOverloadNoMatch(_, span) => *span,
-            TypeCheckError::FuncOverloadAmbiguous(_, span) => *span,
-            TypeCheckError::SliceTargetNotArray(_, span) => *span,
-            TypeCheckError::SliceTargetNot1DArray(_, span) => *span,
+        match &*self.0 {
+            TypeCheckErrorKind::FuncReturnTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::ArithTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::CmpTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::CmpNonScalar(_, span) => *span,
+            TypeCheckErrorKind::CondNotBoolean(_, span) => *span,
+            TypeCheckErrorKind::ThenElseTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::AssignTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::ArgCountMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::ArgTypeMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::InvalidCallee(_, span) => *span,
+            TypeCheckErrorKind::EmptyArrayLiteral(span) => *span,
+            TypeCheckErrorKind::TooManyIndices(_, _, span) => *span,
+            TypeCheckErrorKind::ArrayElementTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::IndexTypeNotInt(_, span) => *span,
+            TypeCheckErrorKind::InvalidIndexTargetType(_, span) => *span,
+            TypeCheckErrorKind::UnknownType(span) => *span,
+            TypeCheckErrorKind::PatternTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::DeclTypeMismatchMulti(_, _, span) => *span,
+            TypeCheckErrorKind::ArrayPatternLengthMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::EmptyTupleLiteral(span) => *span,
+            TypeCheckErrorKind::TupleFieldOutOfBounds(_, _, span) => *span,
+            TypeCheckErrorKind::InvalidTupleFieldTarget(_, span) => *span,
+            TypeCheckErrorKind::TuplePatternLengthMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::UnknownStructType(_, span) => *span,
+            TypeCheckErrorKind::DuplicateStructField(_, span) => *span,
+            TypeCheckErrorKind::StructFieldTypeMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::UnknownStructField(_, span) => *span,
+            TypeCheckErrorKind::StructFieldsMissing(_, span) => *span,
+            TypeCheckErrorKind::InvalidStructFieldTarget(_, span) => *span,
+            TypeCheckErrorKind::UnknownEnumType(_, span) => *span,
+            TypeCheckErrorKind::UnknownEnumVariant(_, _, span) => *span,
+            TypeCheckErrorKind::InvalidStructUpdateTarget(_, span) => *span,
+            TypeCheckErrorKind::EnumVariantPayloadArityMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::MatchTargetNotEnum(_, span) => *span,
+            TypeCheckErrorKind::MatchArmTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::MatchPatternEnumMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::NonExhaustiveMatch(span) => *span,
+            TypeCheckErrorKind::DuplicateMatchVariant(_, span) => *span,
+            TypeCheckErrorKind::StringIndexNonAscii(span) => *span,
+            TypeCheckErrorKind::InvalidRangeBounds(_, _, span) => *span,
+            TypeCheckErrorKind::ValueOutOfRange(_, _, _, span) => *span,
+            TypeCheckErrorKind::ForIterNotIterable(_, span) => *span,
+            TypeCheckErrorKind::DivisionByZero(span) => *span,
+            TypeCheckErrorKind::FuncOverloadNoMatch(_, span) => *span,
+            TypeCheckErrorKind::FuncOverloadAmbiguous(_, span) => *span,
+            TypeCheckErrorKind::SliceTargetNotArray(_, span) => *span,
+            TypeCheckErrorKind::SliceTargetNot1DArray(_, span) => *span,
         }
+    }
+}
+
+impl From<TypeCheckErrorKind> for TypeCheckError {
+    fn from(kind: TypeCheckErrorKind) -> Self {
+        Self::new(kind)
     }
 }

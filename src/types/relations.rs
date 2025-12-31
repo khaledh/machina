@@ -60,10 +60,10 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
     let from_tag = type_tag(from);
     let to_tag = type_tag(to);
     for rule in type_rules_for(from_tag) {
-        if rule.target == to_tag {
-            if let Some(assignability) = (rule.apply)(from, to) {
-                return assignability;
-            }
+        if rule.target == to_tag
+            && let Some(assignability) = (rule.apply)(from, to)
+        {
+            return assignability;
         }
     }
     TypeAssignability::Incompatible
@@ -73,10 +73,10 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
     let from_tag = type_tag(from_ty);
     let to_tag = type_tag(to_ty);
     for rule in value_rules_for(from_tag) {
-        if rule.target == to_tag {
-            if let Some(result) = (rule.apply)(from_value, from_ty, to_ty) {
-                return result;
-            }
+        if rule.target == to_tag
+            && let Some(result) = (rule.apply)(from_value, from_ty, to_ty)
+        {
+            return result;
         }
     }
 

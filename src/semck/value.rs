@@ -1,6 +1,6 @@
 use crate::ast::{
-    BinaryOp, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringTag, TypeExpr, TypeExprKind,
-    UnaryOp, Visitor, walk_expr, walk_stmt_expr,
+    BinaryOp, Decl, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringTag, TypeExpr,
+    TypeExprKind, UnaryOp, Visitor, walk_expr, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
@@ -31,9 +31,8 @@ impl<'a> ValueChecker<'a> {
 
     fn check_module(&mut self) {
         for decl in &self.ctx.module.decls {
-            match decl {
-                crate::ast::Decl::TypeDecl(decl) => self.check_type_decl(decl),
-                _ => {}
+            if let Decl::TypeDecl(decl) = decl {
+                self.check_type_decl(decl);
             }
         }
         for decl in &self.ctx.module.decls {
@@ -147,18 +146,17 @@ impl Visitor for ValueChecker<'_> {
         };
         if let (Some(Type::Range { min, max }), Some(ret_expr)) =
             (&self.current_return_ty, ret_expr)
+            && let Some(value) = int_lit_value(ret_expr)
         {
-            if let Some(value) = int_lit_value(ret_expr) {
-                if value < 0 {
-                    self.errors.push(SemCheckError::ValueOutOfRange(
-                        value,
-                        *min as i128,
-                        *max as i128,
-                        ret_expr.span,
-                    ));
-                } else {
-                    self.check_range_value(value as u64, *min, *max, ret_expr.span);
-                }
+            if value < 0 {
+                self.errors.push(SemCheckError::ValueOutOfRange(
+                    value,
+                    *min as i128,
+                    *max as i128,
+                    ret_expr.span,
+                ));
+            } else {
+                self.check_range_value(value as u64, *min, *max, ret_expr.span);
             }
         }
 
@@ -191,20 +189,20 @@ impl Visitor for ValueChecker<'_> {
         match &expr.kind {
             ExprKind::IntLit(value) => {
                 // Enforce integer literal ranges based on the resolved type.
-                if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) {
-                    if let Type::Int { signed, bits } = ty {
-                        let min = if signed {
-                            -(1i128 << (bits as u32 - 1))
-                        } else {
-                            0
-                        };
-                        let max_excl = if signed {
-                            1i128 << (bits as u32 - 1)
-                        } else {
-                            1i128 << (bits as u32)
-                        };
-                        self.check_int_range(*value as i128, min, max_excl, expr.span);
-                    }
+                if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
+                    && let Type::Int { signed, bits } = ty
+                {
+                    let min = if signed {
+                        -(1i128 << (bits as u32 - 1))
+                    } else {
+                        0
+                    };
+                    let max_excl = if signed {
+                        1i128 << (bits as u32 - 1)
+                    } else {
+                        1i128 << (bits as u32)
+                    };
+                    self.check_int_range(*value as i128, min, max_excl, expr.span);
                 }
             }
             ExprKind::Range { start, end } => {
@@ -217,22 +215,21 @@ impl Visitor for ValueChecker<'_> {
             ExprKind::UnaryOp {
                 op: UnaryOp::Neg, ..
             } => {
-                if let Some(lit_value) = int_lit_value(expr) {
-                    if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) {
-                        if let Type::Int { signed, bits } = ty {
-                            let min = if signed {
-                                -(1i128 << (bits as u32 - 1))
-                            } else {
-                                0
-                            };
-                            let max_excl = if signed {
-                                1i128 << (bits as u32 - 1)
-                            } else {
-                                1i128 << (bits as u32)
-                            };
-                            self.check_int_range(lit_value, min, max_excl, expr.span);
-                        }
-                    }
+                if let Some(lit_value) = int_lit_value(expr)
+                    && let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
+                    && let Type::Int { signed, bits } = ty
+                {
+                    let min = if signed {
+                        -(1i128 << (bits as u32 - 1))
+                    } else {
+                        0
+                    };
+                    let max_excl = if signed {
+                        1i128 << (bits as u32 - 1)
+                    } else {
+                        1i128 << (bits as u32)
+                    };
+                    self.check_int_range(lit_value, min, max_excl, expr.span);
                 }
             }
             ExprKind::BinOp {
@@ -247,17 +244,17 @@ impl Visitor for ValueChecker<'_> {
             }
             ExprKind::ArrayIndex { target, .. } => {
                 // String indexing is only allowed on ASCII literals for now.
-                if let Some(Type::String) = self.ctx.type_map.lookup_node_type(target.id) {
-                    if !matches!(
+                if let Some(Type::String) = self.ctx.type_map.lookup_node_type(target.id)
+                    && !matches!(
                         target.kind,
                         ExprKind::StringLit {
                             tag: StringTag::Ascii,
                             ..
                         }
-                    ) {
-                        self.errors
-                            .push(SemCheckError::StringIndexNonAscii(target.span));
-                    }
+                    )
+                {
+                    self.errors
+                        .push(SemCheckError::StringIndexNonAscii(target.span));
                 }
             }
             ExprKind::ArrayLit {

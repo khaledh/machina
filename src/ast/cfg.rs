@@ -37,6 +37,12 @@ pub struct AstCfgBuilder<'a> {
     succs: Vec<Vec<AstBlockId>>,
 }
 
+impl<'a> Default for AstCfgBuilder<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> AstCfgBuilder<'a> {
     pub fn new() -> Self {
         Self {

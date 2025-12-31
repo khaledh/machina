@@ -25,6 +25,12 @@ pub struct NodeIdGen {
     next_id: u32,
 }
 
+impl Default for NodeIdGen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NodeIdGen {
     pub fn new() -> Self {
         Self { next_id: 1 } // NodeId 0 is reserved

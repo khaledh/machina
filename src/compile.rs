@@ -185,7 +185,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         for (i, body) in liveness_context.func_bodies.iter().enumerate() {
             let func_name = liveness_context.symbols.func_name(i).unwrap_or("<unknown>");
             mcir_out.push_str(&format!("{}\n", format_mcir_body(body, func_name)));
-            mcir_out.push_str("\n");
+            mcir_out.push('\n');
         }
         Some(mcir_out)
     } else {

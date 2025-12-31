@@ -4,7 +4,7 @@ mod checker;
 mod errors;
 mod overloads;
 
-pub use errors::TypeCheckError;
+pub use errors::{TypeCheckError, TypeCheckErrorKind};
 
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::typeck::checker::TypeChecker;

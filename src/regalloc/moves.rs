@@ -54,6 +54,12 @@ pub struct FnMoveList {
     return_moves: HashMap<BlockId, Move>,
 }
 
+impl Default for FnMoveList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FnMoveList {
     pub fn new() -> Self {
         Self {

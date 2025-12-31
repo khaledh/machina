@@ -66,10 +66,10 @@ fn elide_in_body(body: &mut FuncBody, live_map: &LiveMap) {
     for (block_idx, block) in rewritten_blocks.iter_mut().enumerate() {
         let mut new_stmts = Vec::with_capacity(block.stmts.len());
         for (idx, stmt) in block.stmts.drain(..).enumerate() {
-            if let Some(dst) = elide_flags[block_idx][idx] {
-                if !used_locals.contains(&dst) {
-                    continue;
-                }
+            if let Some(dst) = elide_flags[block_idx][idx]
+                && !used_locals.contains(&dst)
+            {
+                continue;
             }
             new_stmts.push(stmt);
         }
@@ -190,14 +190,14 @@ fn transfer_block(
 
     for (idx, stmt) in block.stmts.iter().enumerate() {
         // If a last-use copy is safe to elide, add a rename for later uses.
-        if let Statement::CopyAggregate { dst, src } = stmt {
-            if is_elidable_copy(dst, src, &live_after[idx], addr_taken) {
-                let dst_local = dst.base();
-                let src_local = resolve_rename(&rename, src.base());
-                clear_rename_for_def(&mut rename, dst_local);
-                rename.insert(dst_local, src_local);
-                continue;
-            }
+        if let Statement::CopyAggregate { dst, src } = stmt
+            && is_elidable_copy(dst, src, &live_after[idx], addr_taken)
+        {
+            let dst_local = dst.base();
+            let src_local = resolve_rename(&rename, src.base());
+            clear_rename_for_def(&mut rename, dst_local);
+            rename.insert(dst_local, src_local);
+            continue;
         }
 
         // Any full definition kills the mapping for that local.
@@ -295,20 +295,20 @@ fn rewrite_block(
         let stmt = rewrite_stmt_uses(stmt, &rename);
         let mut elide_dst = None;
 
-        if let Statement::CopyAggregate { dst, src } = &stmt {
-            if is_elidable_copy(dst, src, &live_after[idx], addr_taken) {
-                let dst_local = dst.base();
-                let src_local = resolve_rename(&rename, src.base());
-                clear_rename_for_def(&mut rename, dst_local);
-                rename.insert(dst_local, src_local);
-                elide_dst = Some(dst_local);
-            }
+        if let Statement::CopyAggregate { dst, src } = &stmt
+            && is_elidable_copy(dst, src, &live_after[idx], addr_taken)
+        {
+            let dst_local = dst.base();
+            let src_local = resolve_rename(&rename, src.base());
+            clear_rename_for_def(&mut rename, dst_local);
+            rename.insert(dst_local, src_local);
+            elide_dst = Some(dst_local);
         }
 
-        if elide_dst.is_none() {
-            if let Some(def_local) = def_local_full(&stmt) {
-                clear_rename_for_def(&mut rename, def_local);
-            }
+        if elide_dst.is_none()
+            && let Some(def_local) = def_local_full(&stmt)
+        {
+            clear_rename_for_def(&mut rename, def_local);
         }
 
         if let Some(def_local) = def_local_base(&stmt) {
@@ -449,10 +449,11 @@ fn collect_addr_taken(body: &FuncBody) -> HashSet<LocalId> {
         for stmt in &block.stmts {
             match stmt {
                 Statement::Comment(_) => {}
-                Statement::CopyScalar { src, .. } => {
-                    if let Rvalue::AddrOf(place) = src {
-                        addr_taken.insert(place_base(place));
-                    }
+                Statement::CopyScalar {
+                    src: Rvalue::AddrOf(place),
+                    ..
+                } => {
+                    addr_taken.insert(place_base(place));
                 }
                 Statement::Call { args, .. } => {
                     for arg in args {

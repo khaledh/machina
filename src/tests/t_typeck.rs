@@ -135,8 +135,8 @@ fn test_too_many_indices_error() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::TooManyIndices(expected, got, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::TooManyIndices(expected, got, _) => {
                 assert_eq!(*expected, 2);
                 assert_eq!(*got, 3);
             }
@@ -160,8 +160,8 @@ fn test_array_dimension_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::DeclTypeMismatch(_, _, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {
                 // Expected error
             }
             e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
@@ -184,8 +184,8 @@ fn test_index_type_must_be_u64() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::IndexTypeNotInt(ty, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::IndexTypeNotInt(ty, _) => {
                 assert_eq!(*ty, Type::Bool);
             }
             e => panic!("Expected IndexTypeNotInt error, got {:?}", e),
@@ -297,8 +297,8 @@ fn test_tuple_pattern_length_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::TuplePatternLengthMismatch(expected, got, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::TuplePatternLengthMismatch(expected, got, _) => {
                 assert_eq!(*expected, 2);
                 assert_eq!(*got, 3);
             }
@@ -322,8 +322,8 @@ fn test_tuple_pattern_type_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::PatternTypeMismatch(_, _, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::PatternTypeMismatch(_, _, _) => {
                 // Expected error
             }
             e => panic!("Expected PatternTypeMismatch error, got {:?}", e),
@@ -392,8 +392,8 @@ fn test_struct_update_field_type_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::StructFieldTypeMismatch(_, _, _, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::StructFieldTypeMismatch(_, _, _, _) => {
                 // Expected error
             }
             e => panic!("Expected StructFieldTypeMismatch error, got {:?}", e),
@@ -416,8 +416,8 @@ fn test_struct_update_invalid_target() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::InvalidStructUpdateTarget(_, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::InvalidStructUpdateTarget(_, _) => {
                 // Expected error
             }
             e => panic!("Expected InvalidStructUpdateTarget error, got {:?}", e),
@@ -454,8 +454,8 @@ fn test_enum_variant_payload_type_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
 
-        match &errors[0] {
-            TypeCheckError::EnumVariantPayloadTypeMismatch(name, index, expected, found, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(name, index, expected, found, _) => {
                 assert_eq!(name, "A");
                 assert_eq!(*index, 0);
                 assert_eq!(*expected, Type::uint(64));
@@ -523,8 +523,8 @@ fn test_for_non_iterable_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            TypeCheckError::ForIterNotIterable(ty, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::ForIterNotIterable(ty, _) => {
                 assert_eq!(*ty, Type::uint(64));
             }
             e => panic!("Expected ForIterNotIterable error, got {:?}", e),

@@ -61,18 +61,18 @@ impl<'a> FuncLowerer<'a> {
             }
         };
 
-        if let Callee::Runtime(runtime_fn) = &callee {
-            if runtime_fn.sig().arg_count != args.len() as u8 {
-                panic!(
-                    concat!(
-                        "compiler bug: runtime func {} takes {} arguments, but {} were provided. ",
-                        "This should have been caught by the type checker."
-                    ),
-                    runtime_fn.sig().name,
-                    runtime_fn.sig().arg_count,
-                    args.len()
-                );
-            }
+        if let Callee::Runtime(runtime_fn) = &callee
+            && runtime_fn.sig().arg_count != args.len() as u8
+        {
+            panic!(
+                concat!(
+                    "compiler bug: runtime func {} takes {} arguments, but {} were provided. ",
+                    "This should have been caught by the type checker."
+                ),
+                runtime_fn.sig().name,
+                runtime_fn.sig().arg_count,
+                args.len()
+            );
         }
 
         let arg_vals = args

@@ -1,7 +1,7 @@
 use crate::ast::{Expr, FunctionParamMode};
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
-use crate::typeck::errors::TypeCheckError;
+use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{Type, TypeAssignability, ValueAssignability, value_assignable};
 
 pub(super) struct FuncParamSig {
@@ -75,16 +75,23 @@ impl<'a> FuncOverloadResolver<'a> {
                     arg_ranks: ranks,
                 }),
                 Ok(None) => {}
-                Err(err @ TypeCheckError::ValueOutOfRange(_, _, _, _)) => {
-                    range_err.get_or_insert(err);
+                Err(err) => {
+                    if matches!(err.kind(), TypeCheckErrorKind::ValueOutOfRange(_, _, _, _)) {
+                        range_err.get_or_insert(err);
+                    } else {
+                        return Err(err);
+                    }
                 }
-                Err(err) => return Err(err),
             }
         }
 
         if candidates.is_empty() {
             return Err(range_err.unwrap_or_else(|| {
-                TypeCheckError::FuncOverloadNoMatch(self.name.to_string(), self.call_span)
+                TypeCheckErrorKind::FuncOverloadNoMatch(
+                    self.name.to_string(),
+                    self.call_span,
+                )
+                .into()
             }));
         }
 
@@ -96,10 +103,13 @@ impl<'a> FuncOverloadResolver<'a> {
             .collect();
 
         if best.len() != 1 {
-            return Err(TypeCheckError::FuncOverloadAmbiguous(
-                self.name.to_string(),
-                self.call_span,
-            ));
+            return Err(
+                TypeCheckErrorKind::FuncOverloadAmbiguous(
+                    self.name.to_string(),
+                    self.call_span,
+                )
+                .into(),
+            );
         }
 
         Ok(best.pop().unwrap())
@@ -129,7 +139,9 @@ impl<'a> FuncOverloadResolver<'a> {
                     _ => ranks.push(ArgOverloadRank::Assignable),
                 },
                 ValueAssignability::ValueOutOfRange { value, min, max } => {
-                    return Err(TypeCheckError::ValueOutOfRange(value, min, max, arg.span));
+                    return Err(
+                        TypeCheckErrorKind::ValueOutOfRange(value, min, max, arg.span).into(),
+                    );
                 }
                 ValueAssignability::Incompatible => return Ok(None),
             }

@@ -18,6 +18,12 @@ pub struct SymbolResolver {
     func_decl_names: HashSet<String>,
 }
 
+impl Default for SymbolResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SymbolResolver {
     pub fn new() -> Self {
         Self {
@@ -279,8 +285,7 @@ impl SymbolResolver {
         });
 
         if self.errors.is_empty() {
-            let def_map =
-                std::mem::replace(&mut self.def_map_builder, DefMapBuilder::new()).finish();
+            let def_map = std::mem::take(&mut self.def_map_builder).finish();
             Ok(def_map)
         } else {
             Err(self.errors.clone())

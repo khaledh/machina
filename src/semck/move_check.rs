@@ -95,11 +95,11 @@ impl<'a> MoveVisitor<'a> {
     }
 
     fn check_use(&mut self, expr: &Expr) {
-        if let Some(def) = self.ctx.def_map.lookup_def(expr.id) {
-            if self.moved.contains(&def.id) {
-                self.errors
-                    .push(SemCheckError::UseAfterMove(def.name.clone(), expr.span));
-            }
+        if let Some(def) = self.ctx.def_map.lookup_def(expr.id)
+            && self.moved.contains(&def.id)
+        {
+            self.errors
+                .push(SemCheckError::UseAfterMove(def.name.clone(), expr.span));
         }
     }
 
@@ -131,7 +131,6 @@ impl<'a> Visitor for MoveVisitor<'a> {
             | StmtExprKind::VarBind { pattern, value, .. } => {
                 self.visit_expr(value);
                 self.clear_pattern_defs(pattern);
-                return;
             }
             StmtExprKind::Assign { assignee, value } => {
                 self.visit_expr(value);
@@ -142,15 +141,12 @@ impl<'a> Visitor for MoveVisitor<'a> {
                 } else {
                     self.visit_expr(assignee);
                 }
-                return;
             }
             StmtExprKind::While { cond, .. } => {
                 self.visit_expr(cond);
-                return;
             }
             StmtExprKind::For { iter, .. } => {
                 self.visit_expr(iter);
-                return;
             }
         }
     }

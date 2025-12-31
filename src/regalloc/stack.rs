@@ -35,6 +35,12 @@ pub struct StackAllocator {
     next_slot: u32,
 }
 
+impl Default for StackAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StackAllocator {
     pub fn new() -> Self {
         Self { next_slot: 0 }

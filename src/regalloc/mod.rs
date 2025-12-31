@@ -52,8 +52,8 @@ pub fn regalloc(ctx: LivenessContext, target: &dyn target::TargetSpec) -> RegAll
     let mut alloc_results = Vec::new();
 
     for (body, live_map) in func_bodies.iter().zip(live_maps.iter()) {
-        let constraints = analyze_constraints(&body, target);
-        let alloc_result = RegAlloc::new(&body, &constraints, target, live_map).alloc();
+        let constraints = analyze_constraints(body, target);
+        let alloc_result = RegAlloc::new(body, &constraints, target, live_map).alloc();
         alloc_results.push(alloc_result);
     }
 

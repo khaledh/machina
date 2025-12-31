@@ -1,6 +1,6 @@
 use crate::ast::{NodeId, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
-use crate::typeck::errors::TypeCheckError;
+use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, StructField, Type};
 use std::collections::HashMap;
 use std::fmt;
@@ -13,7 +13,7 @@ pub(crate) fn resolve_type_expr(
         TypeExprKind::Named(name) => {
             let def = def_map
                 .lookup_def(type_expr.id)
-                .ok_or(TypeCheckError::UnknownType(type_expr.span))?;
+                .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
 
             // Map built-in type names to Type values
             match name.as_str() {
@@ -42,7 +42,7 @@ pub(crate) fn resolve_type_expr(
                                     ty: field_ty,
                                 })
                             })
-                            .collect::<Result<Vec<StructField>, _>>()?;
+                            .collect::<Result<Vec<StructField>, TypeCheckError>>()?;
                         Ok(Type::Struct {
                             name: def.name.clone(),
                             fields: struct_fields,
@@ -67,7 +67,7 @@ pub(crate) fn resolve_type_expr(
                             variants: enum_variants,
                         })
                     }
-                    _ => Err(TypeCheckError::UnknownType(type_expr.span)),
+                    _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
                 },
             }
         }
@@ -104,6 +104,12 @@ pub struct TypeMapBuilder {
     node_type: HashMap<NodeId, Type>, // maps node to its type
     def_type: HashMap<Def, Type>,     // maps def to its type
     call_def: HashMap<NodeId, DefId>, // maps call expr node id to func def id (overload-resolved)
+}
+
+impl Default for TypeMapBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TypeMapBuilder {

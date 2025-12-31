@@ -244,14 +244,14 @@ impl<'a> StructuralChecker<'a> {
                     bindings,
                     span,
                 } => {
-                    if let Some(pat_enum_name) = pat_enum_name {
-                        if pat_enum_name != &name {
-                            self.errors.push(SemCheckError::MatchPatternEnumMismatch(
-                                name.clone(),
-                                pat_enum_name.clone(),
-                                *span,
-                            ));
-                        }
+                    if let Some(pat_enum_name) = pat_enum_name
+                        && pat_enum_name != &name
+                    {
+                        self.errors.push(SemCheckError::MatchPatternEnumMismatch(
+                            name.clone(),
+                            pat_enum_name.clone(),
+                            *span,
+                        ));
                     }
 
                     if !seen_variants.insert(variant_name.clone()) {
@@ -312,13 +312,12 @@ impl Visitor for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &crate::ast::FunctionSig) {
         // Only aggregate types can be inout parameters.
         for param in &func_sig.params {
-            if param.mode == FunctionParamMode::Inout {
-                if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
-                    if !ty.is_compound() {
-                        self.errors
-                            .push(SemCheckError::InoutParamNotAggregate(ty, param.span));
-                    }
-                }
+            if param.mode == FunctionParamMode::Inout
+                && let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ)
+                && !ty.is_compound()
+            {
+                self.errors
+                    .push(SemCheckError::InoutParamNotAggregate(ty, param.span));
             }
         }
         walk_func_sig(self, func_sig);
@@ -349,11 +348,10 @@ impl Visitor for StructuralChecker<'_> {
                 // Validate struct field access targets early for clearer errors.
                 if let Some(Type::Struct { fields, .. }) =
                     self.ctx.type_map.lookup_node_type(target.id)
+                    && !fields.iter().any(|f| f.name == *field)
                 {
-                    if !fields.iter().any(|f| f.name == *field) {
-                        self.errors
-                            .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
-                    }
+                    self.errors
+                        .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
                 }
             }
             ExprKind::EnumVariant {

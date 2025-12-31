@@ -99,7 +99,7 @@ fn main() {
         },
     };
     let input_path = invocation.input_path.as_path();
-    let source = match std::fs::read_to_string(&input_path) {
+    let source = match std::fs::read_to_string(input_path) {
         Ok(source) => source,
         Err(e) => {
             println!("[ERROR] failed to read {}: {e}", input_path.display());
@@ -127,7 +127,7 @@ fn main() {
             let asm_path = if emit_asm {
                 input_path.with_extension("s")
             } else {
-                temp_asm_path(&input_path)
+                temp_asm_path(input_path)
             };
             if let Err(e) = std::fs::write(&asm_path, output.asm) {
                 println!("[ERROR] failed to write {}: {e}", asm_path.display());
@@ -151,7 +151,7 @@ fn main() {
                     let exe_path = invocation
                         .output
                         .clone()
-                        .unwrap_or_else(|| default_exe_path(&input_path));
+                        .unwrap_or_else(|| default_exe_path(input_path));
                     let result = link_executable(&asm_path, &exe_path);
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
@@ -160,7 +160,7 @@ fn main() {
                     result.map(|_| DriverResult::Success { remove_asm })
                 }
                 DriverKind::Run => {
-                    let exe_path = default_exe_path(&input_path);
+                    let exe_path = default_exe_path(input_path);
                     let link_result = link_executable(&asm_path, &exe_path);
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));

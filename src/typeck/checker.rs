@@ -7,7 +7,7 @@ use crate::resolve::def_map::DefId;
 use crate::types::{EnumVariant, StructField, Type};
 use crate::types::{TypeAssignability, type_assignable};
 
-use super::errors::TypeCheckError;
+use super::errors::{TypeCheckError, TypeCheckErrorKind};
 use super::overloads::{FuncOverloadResolver, FuncOverloadSig, FuncParamSig};
 use super::type_map::{TypeMap, TypeMapBuilder, resolve_type_expr};
 
@@ -52,7 +52,7 @@ impl TypeChecker {
 
         if self.errors.is_empty() {
             // Workaround for moving out of a field: replace with new one, then finish the old
-            let builder = std::mem::replace(&mut self.type_map_builder, TypeMapBuilder::new());
+            let builder = std::mem::take(&mut self.type_map_builder);
             Ok(builder.finish())
         } else {
             Err(std::mem::take(&mut self.errors))
@@ -204,17 +204,21 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
         // Lookup the function by def id and find the matching overload
         let func_def_id = self.context.def_map.lookup_def(function.id).unwrap().id;
-        let overloads = self.func_sigs.get(&function.sig.name).expect(&format!(
-            "Function {} not found in func_sigs",
-            function.sig.name
-        ));
+        let overloads = self.func_sigs.get(&function.sig.name).unwrap_or_else(|| {
+            panic!(
+                "compiler bug: function {} not found in func_sigs",
+                function.sig.name
+            )
+        });
         let func_sig = overloads
             .iter()
             .find(|sig| sig.def_id == func_def_id)
-            .expect(&format!(
-                "Overload for function {} not found",
-                function.sig.name
-            ));
+            .unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: overload for function {} not found",
+                    function.sig.name
+                )
+            });
 
         // Record param types
         for (param, param_sig) in function.sig.params.iter().zip(func_sig.params.iter()) {
@@ -254,11 +258,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         match self.check_assignable_to(ret_expr, &ret_ty, &func_sig.return_type) {
             Ok(()) => {}
             Err(_) => {
-                self.errors.push(TypeCheckError::FuncReturnTypeMismatch(
-                    func_sig.return_type.clone(),
-                    ret_ty.clone(),
-                    ret_expr.span,
-                ));
+                self.errors
+                    .push(TypeCheckErrorKind::FuncReturnTypeMismatch(
+                        func_sig.return_type.clone(),
+                        ret_ty.clone(),
+                        ret_expr.span,
+                    )
+                    .into());
             }
         }
 
@@ -334,9 +340,11 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn array_lit_len(&self, init: &ArrayLitInit, span: Span) -> Result<usize, TypeCheckError> {
         match init {
             ArrayLitInit::Elems(elems) if elems.is_empty() => {
-                Err(TypeCheckError::EmptyArrayLiteral(span))
+                Err(TypeCheckErrorKind::EmptyArrayLiteral(span).into())
             }
-            ArrayLitInit::Repeat(_, 0) => Err(TypeCheckError::EmptyArrayLiteral(span)),
+            ArrayLitInit::Repeat(_, 0) => {
+                Err(TypeCheckErrorKind::EmptyArrayLiteral(span).into())
+            }
             ArrayLitInit::Elems(elems) => Ok(elems.len()),
             ArrayLitInit::Repeat(_, count) => Ok(*count as usize),
         }
@@ -392,18 +400,21 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         // Check we don't have more indices than dimensions
         if indices.len() > dims.len() {
-            return Err(TypeCheckError::TooManyIndices(
+            return Err(TypeCheckErrorKind::TooManyIndices(
                 dims.len(),
                 indices.len(),
                 span,
-            ));
+            )
+            .into());
         }
 
         // type check each index
         for index in indices {
             let index_type = self.type_check_expr(index)?;
             if index_type != Type::uint(64) {
-                return Err(TypeCheckError::IndexTypeNotInt(index_type, index.span));
+                return Err(
+                    TypeCheckErrorKind::IndexTypeNotInt(index_type, index.span).into(),
+                );
             }
         }
 
@@ -429,28 +440,35 @@ impl<'c, 'b> Checker<'c, 'b> {
         let target_ty = self.type_check_expr(target)?;
         let (elem_ty, dims) = match target_ty {
             Type::Array { elem_ty, dims } => (elem_ty, dims),
-            other => return Err(TypeCheckError::SliceTargetNotArray(other, target.span)),
+            other => {
+                return Err(TypeCheckErrorKind::SliceTargetNotArray(
+                    other,
+                    target.span,
+                )
+                .into());
+            }
         };
 
         // Restrict slices to 1-D arrays (for now)
         if dims.len() != 1 {
-            return Err(TypeCheckError::SliceTargetNot1DArray(
+            return Err(TypeCheckErrorKind::SliceTargetNot1DArray(
                 Type::Array { elem_ty, dims },
                 target.span,
-            ));
+            )
+            .into());
         }
 
         // Type check start and end (must be u64)
         if let Some(start) = start {
             let ty = self.type_check_expr(start)?;
             if ty != Type::uint(64) {
-                return Err(TypeCheckError::IndexTypeNotInt(ty, start.span));
+                return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, start.span).into());
             }
         }
         if let Some(end) = end {
             let ty = self.type_check_expr(end)?;
             if ty != Type::uint(64) {
-                return Err(TypeCheckError::IndexTypeNotInt(ty, end.span));
+                return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, end.span).into());
             }
         }
 
@@ -464,12 +482,16 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         // Check we have exactly one index
         if indices.len() > 1 {
-            return Err(TypeCheckError::TooManyIndices(1, indices.len(), span));
+            return Err(
+                TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into(),
+            );
         }
 
         let index_ty = self.type_check_expr(&indices[0])?;
         if index_ty != Type::uint(64) {
-            return Err(TypeCheckError::IndexTypeNotInt(index_ty, indices[0].span));
+            return Err(
+                TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into(),
+            );
         }
 
         Ok(Type::Char)
@@ -477,7 +499,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
     fn type_check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
         if fields.is_empty() {
-            return Err(TypeCheckError::EmptyTupleLiteral(fields[0].span));
+            return Err(TypeCheckErrorKind::EmptyTupleLiteral(fields[0].span).into());
         }
 
         // Type check each field
@@ -503,19 +525,19 @@ impl<'c, 'b> Checker<'c, 'b> {
             Type::Tuple { fields } => {
                 let index_usize = index;
                 if index_usize >= fields.len() {
-                    return Err(TypeCheckError::TupleFieldOutOfBounds(
+                    return Err(TypeCheckErrorKind::TupleFieldOutOfBounds(
                         fields.len(),
                         index,
                         target.span,
-                    ));
+                    )
+                    .into());
                 }
 
                 Ok(fields[index_usize].clone())
             }
-            _ => Err(TypeCheckError::InvalidTupleFieldTarget(
-                target_ty,
-                target.span,
-            )),
+            _ => Err(
+                TypeCheckErrorKind::InvalidTupleFieldTarget(target_ty, target.span).into(),
+            ),
         }
     }
 
@@ -543,15 +565,16 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         for field in fields {
             let actual_ty = self.type_check_expr(&field.value)?;
-            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name) {
-                if actual_ty != expected.ty {
-                    return Err(TypeCheckError::StructFieldTypeMismatch(
-                        field.name.clone(),
-                        expected.ty.clone(),
-                        actual_ty,
-                        field.span,
-                    ));
-                }
+            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
+                && actual_ty != expected.ty
+            {
+                return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
+                    field.name.clone(),
+                    expected.ty.clone(),
+                    actual_ty,
+                    field.span,
+                )
+                .into());
             }
         }
 
@@ -570,10 +593,9 @@ impl<'c, 'b> Checker<'c, 'b> {
                 Some(field) => Ok(field.ty.clone()),
                 None => Ok(Type::Unknown),
             },
-            _ => Err(TypeCheckError::InvalidStructFieldTarget(
-                target_ty,
-                target.span,
-            )),
+            _ => Err(
+                TypeCheckErrorKind::InvalidStructFieldTarget(target_ty, target.span).into(),
+            ),
         }
     }
 
@@ -619,13 +641,14 @@ impl<'c, 'b> Checker<'c, 'b> {
         {
             let actual_ty = self.type_check_expr(payload_expr)?;
             if actual_ty != *payload_ty {
-                return Err(TypeCheckError::EnumVariantPayloadTypeMismatch(
+                return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
                     variant_name.clone(),
                     i,
                     payload_ty.clone(),
                     actual_ty,
                     payload_expr.span,
-                ));
+                )
+                .into());
             }
         }
 
@@ -642,10 +665,11 @@ impl<'c, 'b> Checker<'c, 'b> {
         let struct_ty = match &target_ty {
             Type::Struct { .. } => target_ty.clone(),
             _ => {
-                return Err(TypeCheckError::InvalidStructUpdateTarget(
+                return Err(TypeCheckErrorKind::InvalidStructUpdateTarget(
                     target_ty,
                     target.span,
-                ));
+                )
+                .into());
             }
         };
 
@@ -659,15 +683,16 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         for field in fields {
             let actual_ty = self.type_check_expr(&field.value)?;
-            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name) {
-                if actual_ty != expected.ty {
-                    return Err(TypeCheckError::StructFieldTypeMismatch(
-                        field.name.clone(),
-                        expected.ty.clone(),
-                        actual_ty,
-                        field.span,
-                    ));
-                }
+            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
+                && actual_ty != expected.ty
+            {
+                return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
+                    field.name.clone(),
+                    expected.ty.clone(),
+                    actual_ty,
+                    field.span,
+                )
+                .into());
             }
         }
 
@@ -715,11 +740,12 @@ impl<'c, 'b> Checker<'c, 'b> {
                     Type::Array { elem_ty, dims } => {
                         // Check the pattern has the right number of elements
                         if patterns.len() != dims[0] {
-                            return Err(TypeCheckError::ArrayPatternLengthMismatch(
+                            return Err(TypeCheckErrorKind::ArrayPatternLengthMismatch(
                                 dims[0],
                                 patterns.len(),
                                 pattern.span,
-                            ));
+                            )
+                            .into());
                         }
 
                         // Determine the sub-type for each pattern element
@@ -740,22 +766,24 @@ impl<'c, 'b> Checker<'c, 'b> {
                         }
                         Ok(())
                     }
-                    _ => Err(TypeCheckError::PatternTypeMismatch(
+                    _ => Err(TypeCheckErrorKind::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
                         pattern.span,
-                    )),
+                    )
+                    .into()),
                 }
             }
             PatternKind::Tuple { patterns } => {
                 match value_ty {
                     Type::Tuple { fields } => {
                         if patterns.len() != fields.len() {
-                            return Err(TypeCheckError::TuplePatternLengthMismatch(
+                            return Err(TypeCheckErrorKind::TuplePatternLengthMismatch(
                                 fields.len(),
                                 patterns.len(),
                                 pattern.span,
-                            ));
+                            )
+                            .into());
                         }
 
                         // Recursively type check each sub-pattern
@@ -764,11 +792,12 @@ impl<'c, 'b> Checker<'c, 'b> {
                         }
                         Ok(())
                     }
-                    _ => Err(TypeCheckError::PatternTypeMismatch(
+                    _ => Err(TypeCheckErrorKind::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
                         pattern.span,
-                    )),
+                    )
+                    .into()),
                 }
             }
             PatternKind::Struct { name, fields } => {
@@ -777,20 +806,22 @@ impl<'c, 'b> Checker<'c, 'b> {
                     fields: struct_fields,
                 } = value_ty
                 else {
-                    return Err(TypeCheckError::PatternTypeMismatch(
+                    return Err(TypeCheckErrorKind::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
                         pattern.span,
-                    ));
+                    )
+                    .into());
                 };
 
                 // Check that the struct type name matches
                 if ty_name != name {
-                    return Err(TypeCheckError::PatternTypeMismatch(
+                    return Err(TypeCheckErrorKind::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
                         pattern.span,
-                    ));
+                    )
+                    .into());
                 }
 
                 // Check each field pattern
@@ -846,11 +877,12 @@ impl<'c, 'b> Checker<'c, 'b> {
         to_ty: &Type,
     ) -> Result<(), TypeCheckError> {
         match type_assignable(from_ty, to_ty) {
-            TypeAssignability::Incompatible => Err(TypeCheckError::DeclTypeMismatch(
+            TypeAssignability::Incompatible => Err(TypeCheckErrorKind::DeclTypeMismatch(
                 to_ty.clone(),
                 from_ty.clone(),
                 from_value.span,
-            )),
+            )
+            .into()),
             _ => Ok(()),
         }
     }
@@ -861,18 +893,19 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match self.check_assignable_to(value, &rhs_type, &lhs_type) {
             Ok(()) => Ok(Type::Unit),
-            Err(_) => Err(TypeCheckError::AssignTypeMismatch(
+            Err(_) => Err(TypeCheckErrorKind::AssignTypeMismatch(
                 lhs_type,
                 rhs_type,
                 assignee.span,
-            )),
+            )
+            .into()),
         }
     }
 
     fn type_check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
         match self.lookup_def_type(var_ref_expr.id) {
             Some(def_type) => Ok(def_type.clone()),
-            None => Err(TypeCheckError::UnknownType(var_ref_expr.span)),
+            None => Err(TypeCheckErrorKind::UnknownType(var_ref_expr.span).into()),
         }
     }
 
@@ -900,7 +933,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
         // Get overload set for the function
         let Some(overloads) = self.func_sigs.get(name) else {
-            return Err(TypeCheckError::UnknownType(callee.span));
+            return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
         };
         // If no overload matches the arity and all overloads share the same arity,
         // report a count mismatch instead of a generic overload error.
@@ -914,12 +947,13 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
             if counts.len() == 1 {
                 let expected = *counts.iter().next().unwrap();
-                return Err(TypeCheckError::ArgCountMismatch(
+                return Err(TypeCheckErrorKind::ArgCountMismatch(
                     name.to_string(),
                     expected,
                     arg_types.len(),
                     call_expr.span,
-                ));
+                )
+                .into());
             }
         }
 
@@ -935,12 +969,13 @@ impl<'c, 'b> Checker<'c, 'b> {
                 Ok(()) => continue,
                 Err(_) => {
                     let span = arg.span;
-                    return Err(TypeCheckError::ArgTypeMismatch(
+                    return Err(TypeCheckErrorKind::ArgTypeMismatch(
                         i + 1,
                         param_ty.clone(),
                         arg_ty.clone(),
                         span,
-                    ));
+                    )
+                    .into());
                 }
             }
         }
@@ -955,7 +990,7 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         let cond_type = self.type_check_expr(cond)?;
         if cond_type != Type::Bool {
-            return Err(TypeCheckError::CondNotBoolean(cond_type, cond.span));
+            return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
         let then_type = self.type_check_expr(then_body)?;
@@ -964,9 +999,12 @@ impl<'c, 'b> Checker<'c, 'b> {
             // create a span that covers both the then and else bodies so the
             // diagnostic highlights the whole region
             let span = Span::merge_all(vec![then_body.span, else_body.span]);
-            return Err(TypeCheckError::ThenElseTypeMismatch(
-                then_type, else_type, span,
-            ));
+            return Err(TypeCheckErrorKind::ThenElseTypeMismatch(
+                then_type,
+                else_type,
+                span,
+            )
+            .into());
         }
 
         Ok(then_type)
@@ -975,7 +1013,7 @@ impl<'c, 'b> Checker<'c, 'b> {
     fn type_check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
         let cond_type = self.type_check_expr(cond)?;
         if cond_type != Type::Bool {
-            return Err(TypeCheckError::CondNotBoolean(cond_type, cond.span));
+            return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
         let _ = self.type_check_expr(body)?;
@@ -1021,11 +1059,12 @@ impl<'c, 'b> Checker<'c, 'b> {
             let body_ty = self.type_check_expr(&arm.body)?;
             if let Some(expected_ty) = &arm_ty {
                 if body_ty != *expected_ty {
-                    return Err(TypeCheckError::MatchArmTypeMismatch(
+                    return Err(TypeCheckErrorKind::MatchArmTypeMismatch(
                         expected_ty.clone(),
                         body_ty,
                         arm.span,
-                    ));
+                    )
+                    .into());
                 }
             } else {
                 arm_ty = Some(body_ty);
@@ -1105,9 +1144,12 @@ impl<'c, 'b> Checker<'c, 'b> {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                 if !left_type.is_int() || !right_type.is_int() || left_type != right_type {
                     let span = Span::merge_all(vec![left.span, right.span]);
-                    return Err(TypeCheckError::ArithTypeMismatch(
-                        left_type, right_type, span,
-                    ));
+                    return Err(TypeCheckErrorKind::ArithTypeMismatch(
+                        left_type,
+                        right_type,
+                        span,
+                    )
+                    .into());
                 }
                 Ok(left_type)
             }
@@ -1119,9 +1161,9 @@ impl<'c, 'b> Checker<'c, 'b> {
             | BinaryOp::GtEq => {
                 let span = Span::merge_all(vec![left.span, right.span]);
                 if left_type != right_type {
-                    Err(TypeCheckError::CmpTypeMismatch(left_type, right_type, span))
+                    Err(TypeCheckErrorKind::CmpTypeMismatch(left_type, right_type, span).into())
                 } else if !left_type.is_scalar() {
-                    Err(TypeCheckError::CmpNonScalar(left_type, span))
+                    Err(TypeCheckErrorKind::CmpNonScalar(left_type, span).into())
                 } else {
                     Ok(Type::Bool)
                 }
@@ -1225,10 +1267,11 @@ impl<'c, 'b> Checker<'c, 'b> {
                     }
                     Type::String => self.type_check_string_index(indices, target.span),
                     _ => {
-                        return Err(TypeCheckError::InvalidIndexTargetType(
+                        return Err(TypeCheckErrorKind::InvalidIndexTargetType(
                             target_ty,
                             target.span,
-                        ));
+                        )
+                        .into());
                     }
                 }
             }
@@ -1294,7 +1337,11 @@ impl<'c, 'b> Checker<'c, 'b> {
             Type::Range { .. } => Ok(Type::uint(64)),
             Type::Array { elem_ty, dims } => {
                 if dims.is_empty() {
-                    return Err(TypeCheckError::ForIterNotIterable(iter_ty.clone(), span));
+                    return Err(TypeCheckErrorKind::ForIterNotIterable(
+                        iter_ty.clone(),
+                        span,
+                    )
+                    .into());
                 }
                 if dims.len() == 1 {
                     Ok((**elem_ty).clone())
@@ -1305,7 +1352,9 @@ impl<'c, 'b> Checker<'c, 'b> {
                     })
                 }
             }
-            _ => Err(TypeCheckError::ForIterNotIterable(iter_ty.clone(), span)),
+            _ => Err(
+                TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into(),
+            ),
         }
     }
 }

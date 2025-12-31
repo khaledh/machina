@@ -17,6 +17,12 @@ pub struct DefIdGen {
     next_id: u32,
 }
 
+impl Default for DefIdGen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefIdGen {
     pub fn new() -> Self {
         Self { next_id: 0 }
@@ -132,6 +138,12 @@ pub struct DefMapBuilder {
     defs: Vec<Def>,
     def_node: HashMap<DefId, NodeId>,
     node_def: HashMap<NodeId, DefId>,
+}
+
+impl Default for DefMapBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DefMapBuilder {

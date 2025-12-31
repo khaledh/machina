@@ -95,11 +95,8 @@ impl<'a> FuncLowerer<'a> {
         to_ty: &Type,
         value_op: &Operand,
     ) {
-        match type_assignable(from_ty, to_ty) {
-            TypeAssignability::UInt64ToRange { min, max } => {
-                self.emit_range_conversion_check(value_op, min, max);
-            }
-            _ => {}
+        if let TypeAssignability::UInt64ToRange { min, max } = type_assignable(from_ty, to_ty) {
+            self.emit_range_conversion_check(value_op, min, max);
         }
     }
 

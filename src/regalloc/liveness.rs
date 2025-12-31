@@ -81,10 +81,8 @@ pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveI
         let local_id = LocalId(i as u32);
         let is_param =
             matches!(local.kind, LocalKind::Param { .. }) || (ret_is_agg && local_id == ret_local);
-        if is_param {
-            if let Some(iv) = map.get_mut(&local_id) {
-                iv.start = 0;
-            }
+        if is_param && let Some(iv) = map.get_mut(&local_id) {
+            iv.start = 0;
         }
     }
 
