@@ -571,6 +571,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Sub => write!(f, "-")?,
             BinaryOp::Mul => write!(f, "*")?,
             BinaryOp::Div => write!(f, "/")?,
+            BinaryOp::Mod => write!(f, "%")?,
             BinaryOp::Eq => write!(f, "==")?,
             BinaryOp::Ne => write!(f, "!=")?,
             BinaryOp::Lt => write!(f, "<")?,

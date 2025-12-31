@@ -180,6 +180,61 @@ impl<'a> FuncLowerer<'a> {
                         );
                         Ok(operand)
                     }
+                    BinaryOp::Mod => {
+                        let Type::Int { signed, bits } = ty else {
+                            unreachable!(
+                                "compiler bug: arithmetic op with non-int type (type checker should have caught this)"
+                            );
+                        };
+
+                        let lhs = self.lower_scalar_expr(left)?;
+                        let rhs = self.lower_scalar_expr(right)?;
+
+                        // Emit runtime check for modulo by zero
+                        let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+                        let zero = Operand::Const(Const::Int {
+                            signed,
+                            bits,
+                            value: 0,
+                        });
+                        let cond_op = self.emit_scalar_rvalue(
+                            bool_ty_id,
+                            Rvalue::BinOp {
+                                op: BinOp::Ne,
+                                lhs: rhs.clone(),
+                                rhs: zero,
+                            },
+                        );
+                        self.emit_runtime_check(cond_op, CheckKind::DivByZero);
+
+                        // TODO: consider lowering to a target-specific remainder (e.g., udiv+msub).
+                        // rem = lhs - (lhs / rhs) * rhs
+                        let quot = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::BinOp {
+                                op: BinOp::Div,
+                                lhs: lhs.clone(),
+                                rhs: rhs.clone(),
+                            },
+                        );
+                        let prod = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::BinOp {
+                                op: BinOp::Mul,
+                                lhs: quot,
+                                rhs: rhs.clone(),
+                            },
+                        );
+                        let rem = self.emit_scalar_rvalue(
+                            ty_id,
+                            Rvalue::BinOp {
+                                op: BinOp::Sub,
+                                lhs,
+                                rhs: prod,
+                            },
+                        );
+                        Ok(rem)
+                    }
 
                     // Comparison operators
                     BinaryOp::Eq

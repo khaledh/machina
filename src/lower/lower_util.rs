@@ -14,6 +14,9 @@ impl<'a> FuncLowerer<'a> {
             ast::BinaryOp::Sub => BinOp::Sub,
             ast::BinaryOp::Mul => BinOp::Mul,
             ast::BinaryOp::Div => BinOp::Div,
+            ast::BinaryOp::Mod => {
+                unreachable!("compiler bug: mod op lowered into div/mul/sub")
+            }
             ast::BinaryOp::Eq => BinOp::Eq,
             ast::BinaryOp::Ne => BinOp::Ne,
             ast::BinaryOp::Lt => BinOp::Lt,

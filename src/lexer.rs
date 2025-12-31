@@ -83,6 +83,8 @@ pub enum TokenKind {
     Star,
     #[display("/")]
     Slash,
+    #[display("%")]
+    Percent,
 
     // Assignment operator
     #[display("=")]
@@ -387,6 +389,10 @@ impl<'a> Lexer<'a> {
             Some(&'/') => {
                 self.advance();
                 Ok(TokenKind::Slash)
+            }
+            Some(&'%') => {
+                self.advance();
+                Ok(TokenKind::Percent)
             }
             Some(&'(') => {
                 self.advance();

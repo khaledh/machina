@@ -915,3 +915,40 @@ fn test_lower_logical_or_short_circuits() {
     assert!(!then_has_call, "expected no call in then branch for ||");
     assert!(else_has_call, "expected call in else branch for ||");
 }
+
+#[test]
+fn test_lower_mod_emits_div_mul_sub() {
+    let source = r#"
+        fn main() -> u64 {
+            let x = 10 % 3;
+            x
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let mut saw_div = false;
+    let mut saw_mul = false;
+    let mut saw_sub = false;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::CopyScalar { src, .. } = stmt {
+                if let Rvalue::BinOp { op, .. } = src {
+                    match op {
+                        BinOp::Div => saw_div = true,
+                        BinOp::Mul => saw_mul = true,
+                        BinOp::Sub => saw_sub = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(saw_div, "expected div op in modulo lowering");
+    assert!(saw_mul, "expected mul op in modulo lowering");
+    assert!(saw_sub, "expected sub op in modulo lowering");
+}

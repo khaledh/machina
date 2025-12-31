@@ -92,7 +92,7 @@ IdentList          ::= Identifier ("," Identifier)* ","?
 # 1. Logical AND (&&)
 # 2. Comparison (==, !=, <, <=, >, >=)
 # 3. Additive (+, -)
-# 4. Multiplicative (*, /)
+# 4. Multiplicative (*, /, %)
 # 5. Unary (-, !)
 # 6. Postfix
 
@@ -102,7 +102,7 @@ OrExpr             ::= AndExpr ( "||" AndExpr )*
 AndExpr            ::= CompareExpr ( "&&" CompareExpr )*
 CompareExpr        ::= AddExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) AddExpr )*
 AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
-MulExpr            ::= UnaryExpr ( ( "*" | "/" ) UnaryExpr )*
+MulExpr            ::= UnaryExpr ( ( "*" | "/" | "%" ) UnaryExpr )*
 UnaryExpr          ::= ( "-" | "!" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr

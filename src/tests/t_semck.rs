@@ -84,6 +84,27 @@ fn test_range_literal_out_of_bounds() {
 }
 
 #[test]
+fn test_mod_by_zero_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let _x = 10 % 0;
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::DivisionByZero(_) => {}
+            e => panic!("Expected DivisionByZero error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_range_invalid_bounds() {
     let source = r#"
         fn test() -> u64 {

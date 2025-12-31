@@ -233,7 +233,7 @@ impl Visitor for ValueChecker<'_> {
                 }
             }
             ExprKind::BinOp {
-                op: BinaryOp::Div,
+                op: BinaryOp::Div | BinaryOp::Mod,
                 right,
                 ..
             } => {

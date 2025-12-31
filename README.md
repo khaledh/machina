@@ -85,13 +85,11 @@ abstractions to come.
 - Mutable value semantics
 - Expression oriented syntax
 - Bindings: `let` (immutable), `var` (mutable)
-- Arithmetic, comparison, and logical operators (`&&`, `||`, `!`)
+- Explicit `move` for ownership transfer
+- Mutable parameters via `inout` mode
 - Blocks (last expression is the block value)
 - Pattern matching
 - Function overloading
-- `inout` parameters for aggregate types
-- Explicit `move` for aggregate ownership transfer (use-after-move is a compile
-  error)
 - Runtime safety checks
 
 ### Types
@@ -143,6 +141,12 @@ abstractions to come.
 - `while`
 - `for <pattern> in <start>..<end> { ... }` (range)
 - `for <pattern> in <expr> { ... }` where `<expr>` is an array
+
+### Operators
+
+- Arithmetic operators (`+`, `-`, `*`, `/`, `%`)
+- Comparison operators ( `==`, `!=`, `>`, `>=`, `<`, `<=`)
+- Logical operators (`&&`, `||`, `!`)
 
 ### Functions
 

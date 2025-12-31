@@ -1111,6 +1111,7 @@ impl<'a> Parser<'a> {
             // 4 = Multiplicative
             TK::Star => Some((BinaryOp::Mul, 4)),
             TK::Slash => Some((BinaryOp::Div, 4)),
+            TK::Percent => Some((BinaryOp::Mod, 4)),
 
             _ => None,
         }

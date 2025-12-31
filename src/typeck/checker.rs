@@ -1117,7 +1117,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match op {
             // Arithmetic operators
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 if !left_type.is_int() {
                     return Err(TypeCheckErrorKind::ArithOperandNotInt(left_type, left.span).into());
                 }

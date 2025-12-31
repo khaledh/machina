@@ -17,6 +17,15 @@ fn test_lex_identifier() {
 }
 
 #[test]
+fn test_lex_percent_operator() {
+    let mut lexer = Lexer::new("%");
+    let token = lexer.next_token().unwrap();
+
+    assert_eq!(token.kind, TokenKind::Percent);
+    assert_span_eq(token.span, (1, 1), (1, 2));
+}
+
+#[test]
 fn test_lex_unexpected_character() {
     let mut lexer = Lexer::new("@");
     let result = lexer.next_token();

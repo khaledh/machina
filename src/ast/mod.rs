@@ -471,6 +471,7 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
 
     // Comparison operators
     Eq,
