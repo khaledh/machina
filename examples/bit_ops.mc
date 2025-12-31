@@ -1,8 +1,8 @@
 // Bitwise operators
 
 fn main() {
-    let a = 10;
-    let b = 6;
+    let a = 0b1010;
+    let b = 0b0110;
 
     let and_val = a & b;
     let or_val = a | b;

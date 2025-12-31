@@ -26,6 +26,35 @@ fn test_lex_percent_operator() {
 }
 
 #[test]
+fn test_lex_int_literal_bases() {
+    let mut lexer = Lexer::new("0b1010 0o12 0x1f 42 1_000 0b1010_0110");
+
+    let t1 = lexer.next_token().unwrap();
+    let t2 = lexer.next_token().unwrap();
+    let t3 = lexer.next_token().unwrap();
+    let t4 = lexer.next_token().unwrap();
+    let t5 = lexer.next_token().unwrap();
+    let t6 = lexer.next_token().unwrap();
+    let t7 = lexer.next_token().unwrap();
+
+    assert_eq!(t1.kind, TokenKind::IntLit(10));
+    assert_eq!(t2.kind, TokenKind::IntLit(10));
+    assert_eq!(t3.kind, TokenKind::IntLit(31));
+    assert_eq!(t4.kind, TokenKind::IntLit(42));
+    assert_eq!(t5.kind, TokenKind::IntLit(1000));
+    assert_eq!(t6.kind, TokenKind::IntLit(166));
+    assert_eq!(t7.kind, TokenKind::Eof);
+}
+
+#[test]
+fn test_lex_invalid_binary_literal() {
+    let mut lexer = Lexer::new("0b102");
+    let result = lexer.next_token();
+
+    assert!(matches!(result, Err(LexError::InvalidInteger(_, _))));
+}
+
+#[test]
 fn test_lex_bitwise_operators() {
     let mut lexer = Lexer::new("& | ^ ~ << >>");
 

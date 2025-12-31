@@ -96,6 +96,7 @@ abstractions to come.
 
 **Basic types**
 - Integers: `u8`/`u16`/`u32`/`u64`, `i8`/`i16`/`i32`/`i64`
+- Integer literals: decimal, `0b` (binary), `0o` (octal), `0x` (hex); `_` is allowed for grouping
 - Booleans: `bool`
 - Characters: `char`
 - Unit: `()`

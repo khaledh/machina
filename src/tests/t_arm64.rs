@@ -137,8 +137,10 @@ fn test_assign_const_to_return_reg() {
     let mut codegen = FuncCodegen::new(&func, &def_names, &global_labels, 0).unwrap();
 
     let asm = codegen.generate().unwrap();
-    let direct = asm.contains("  mov x0, #42\n");
-    let via_scratch = asm.contains("  mov x16, #42\n") && asm.contains("  mov x0, x16\n");
+    let direct = asm.contains("  mov x0, #42\n") || asm.contains("  movz x0, #42, lsl #0\n");
+    let via_scratch = (asm.contains("  mov x16, #42\n")
+        || asm.contains("  movz x16, #42, lsl #0\n"))
+        && asm.contains("  mov x0, x16\n");
     assert!(
         direct || via_scratch,
         "expected return reg to be loaded with 42"

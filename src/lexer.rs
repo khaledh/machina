@@ -174,6 +174,15 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn is_digit_for_base(ch: char, base: u32) -> bool {
+        match base {
+            2 => matches!(ch, '0' | '1'),
+            8 => matches!(ch, '0'..='7'),
+            16 => ch.is_ascii_hexdigit(),
+            _ => ch.is_ascii_digit(),
+        }
+    }
+
     fn advance(&mut self) {
         match self.source.next() {
             Some(ch) => {
@@ -343,6 +352,104 @@ impl<'a> Lexer<'a> {
         Ok(ch)
     }
 
+    fn consume_digits_with_separators(
+        &mut self,
+        base: u32,
+        digits: &mut String,
+        saw_digit: &mut bool,
+    ) -> bool {
+        // Collect digits while skipping '_' separators; returns true if the last char was '_'.
+        let mut last_underscore = false;
+        while let Some(&ch) = self.source.peek() {
+            if Self::is_digit_for_base(ch, base) {
+                digits.push(ch);
+                self.advance();
+                *saw_digit = true;
+                last_underscore = false;
+            } else if ch == '_' && *saw_digit {
+                self.advance();
+                last_underscore = true;
+            } else {
+                break;
+            }
+        }
+        last_underscore
+    }
+
+    fn consume_invalid_digits(&mut self, digits: &mut String) {
+        // Consume trailing garbage to surface a single InvalidInteger error.
+        while let Some(&ch) = self.source.peek()
+            && (ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            digits.push(ch);
+            self.advance();
+        }
+    }
+
+    fn lex_int_literal(&mut self, start: Position) -> Result<TokenKind, LexError> {
+        // Parse decimal or base-prefixed integer literals with '_' separators.
+        //   Decimal: <decimal digits>
+        //    Binary: 0b<binary digits> (e.g. 0b10101010)
+        //     Octal: 0o<octal digits> (e.g. 0o474)
+        //       Hex: 0x<hex digits> (e.g. 0x4f)
+        let mut base = 10u32;
+        let mut digits = String::new();
+
+        if matches!(self.source.peek(), Some(&'0')) {
+            digits.push('0');
+            self.advance();
+
+            if let Some(&next) = self.source.peek() {
+                match next {
+                    'b' | 'B' => {
+                        base = 2;
+                        self.advance();
+                        digits.clear();
+                    }
+                    'o' | 'O' => {
+                        base = 8;
+                        self.advance();
+                        digits.clear();
+                    }
+                    'x' | 'X' => {
+                        base = 16;
+                        self.advance();
+                        digits.clear();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let mut saw_digit = !digits.is_empty();
+        let last_underscore =
+            self.consume_digits_with_separators(base, &mut digits, &mut saw_digit);
+
+        if !saw_digit || last_underscore {
+            // Disallow empty literals and trailing underscores.
+            let err = u64::from_str_radix("", base).err().unwrap();
+            return Err(LexError::InvalidInteger(err, Span::new(start, self.pos)));
+        }
+
+        if base != 10
+            && matches!(self.source.peek(), Some(ch) if ch.is_ascii_alphanumeric() || *ch == '_')
+        {
+            // Reject invalid digits after base prefixes (e.g., 0b102).
+            self.consume_invalid_digits(&mut digits);
+            let err = u64::from_str_radix(&digits, base).err().unwrap();
+            return Err(LexError::InvalidInteger(err, Span::new(start, self.pos)));
+        }
+
+        let value = if base == 10 {
+            digits.parse::<u64>()
+        } else {
+            u64::from_str_radix(&digits, base)
+        }
+        .map_err(|e| LexError::InvalidInteger(e, Span::new(start, self.pos)))?;
+
+        Ok(TokenKind::IntLit(value))
+    }
+
     pub fn next_token(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace();
 
@@ -366,19 +473,7 @@ impl<'a> Lexer<'a> {
                     Ok(TokenKind::Ident(ident))
                 }
             }
-            Some(&ch) if ch.is_ascii_digit() => {
-                let mut num_str = String::new();
-                while let Some(&ch) = self.source.peek()
-                    && ch.is_ascii_digit()
-                {
-                    num_str.push(ch);
-                    self.advance();
-                }
-                let value = num_str
-                    .parse::<u64>()
-                    .map_err(|e| LexError::InvalidInteger(e, Span::new(start, self.pos)))?;
-                Ok(TokenKind::IntLit(value))
-            }
+            Some(&ch) if ch.is_ascii_digit() => self.lex_int_literal(start),
             Some('\'') => self.lex_char_lit(start),
             Some('"') => self.lex_string_lit(start),
             Some(&'-') => {

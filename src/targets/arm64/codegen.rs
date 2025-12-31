@@ -724,7 +724,7 @@ impl<'a> FuncCodegen<'a> {
                         return Ok(scratch);
                     }
                 };
-                asm.push_str(&format!("  mov {}, #{}\n", scratch, val));
+                self.emit_mov_imm_str(&scratch.to_string(), val, asm);
                 Ok(scratch)
             }
         }
@@ -1387,9 +1387,35 @@ impl<'a> FuncCodegen<'a> {
                     1 => "x17",
                     _ => "x16",
                 };
-                asm.push_str(&format!("  mov {}, #{}\n", scratch, value));
+                self.emit_mov_imm_str(scratch, value, asm);
                 scratch.to_string()
             }
+        }
+    }
+
+    fn emit_mov_imm_str(&mut self, reg: &str, value: i64, asm: &mut String) {
+        let val = value as u64;
+        if val == 0 {
+            asm.push_str(&format!("  mov {reg}, #0\n"));
+            return;
+        }
+
+        let mut first = true;
+        for shift in [0u32, 16, 32, 48] {
+            let part = (val >> shift) & 0xffff;
+            if part == 0 {
+                continue;
+            }
+            if first {
+                asm.push_str(&format!("  movz {reg}, #{part}, lsl #{shift}\n"));
+                first = false;
+            } else {
+                asm.push_str(&format!("  movk {reg}, #{part}, lsl #{shift}\n"));
+            }
+        }
+
+        if first {
+            asm.push_str(&format!("  movz {reg}, #0\n"));
         }
     }
 
