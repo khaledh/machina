@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use super::regs::{self, Arm64Reg as R, to_w_reg};
 use crate::context::RegAllocatedContext;
+use crate::mcir::layout::size_of_ty;
 use crate::mcir::types::*;
 use crate::regalloc::moves::{Location, Move};
 use crate::regalloc::pos::InstPos;
@@ -360,7 +361,9 @@ impl<'a> FuncCodegen<'a> {
         match stmt {
             Statement::Comment(_) => Ok(String::new()),
             Statement::CopyScalar { dst, src } => self.emit_copy_scalar(dst, src),
-            Statement::CopyAggregate { dst, src } => self.emit_copy_aggregate(dst, src),
+            Statement::CopyAggregate { .. } => {
+                panic!("CopyAggregate must be lowered before codegen")
+            }
             Statement::MemSet { .. } => panic!("MemSet must be lowered before codegen"),
             Statement::Call { callee, .. } => self.emit_call(callee),
         }
@@ -444,27 +447,6 @@ impl<'a> FuncCodegen<'a> {
                 | Rvalue::Use(Operand::Const(Const::Bool(false)))
                 | Rvalue::Use(Operand::Const(Const::Int { value: 0, .. }))
         )
-    }
-
-    fn emit_copy_aggregate(
-        &mut self,
-        dst: &Place<crate::mcir::types::Aggregate>,
-        src: &Place<crate::mcir::types::Aggregate>,
-    ) -> Result<String, CodegenError> {
-        let mut asm = String::new();
-
-        // Destination address
-        let _ = self.emit_place_addr(dst.base(), dst.projections(), &mut asm)?;
-        asm.push_str("  mov x14, x17\n");
-
-        // Source address
-        let _ = self.emit_place_addr(src.base(), src.projections(), &mut asm)?;
-
-        // Copy aggregate using memcpy for now.
-        let size = size_of_ty(&self.body.types, dst.ty());
-        self.emit_memcpy(R::X14, R::X17, size, &mut asm)?;
-
-        Ok(asm)
     }
 
     fn emit_call(&mut self, callee: &Callee) -> Result<String, CodegenError> {
@@ -1188,51 +1170,6 @@ impl<'a> FuncCodegen<'a> {
         scaled <= 4095
     }
 
-    fn emit_memcpy(
-        &mut self,
-        dest_addr: R,
-        src_addr: R,
-        length: usize,
-        asm: &mut String,
-    ) -> Result<(), CodegenError> {
-        // Simple byte-copy loop for aggregates.
-        asm.push_str("  // -- memcpy -- (start)\n");
-        asm.push_str(&format!("  mov x19, {}\n", dest_addr));
-        asm.push_str(&format!("  mov x20, {}\n", src_addr));
-
-        let loop_label = self.next_label();
-        let done_label = self.next_label();
-
-        let count = length / 8;
-        if count > 0 {
-            asm.push_str(&format!("  mov x21, #{count}\n"));
-            asm.push_str(&format!("  cbz x21, {done_label}\n"));
-            asm.push_str(&format!("{loop_label}:\n"));
-            asm.push_str("  ldr x22, [x20], #8\n");
-            asm.push_str("  str x22, [x19], #8\n");
-            asm.push_str("  subs x21, x21, #1\n");
-            asm.push_str(&format!("  b.ne {loop_label}\n"));
-            asm.push_str(&format!("{done_label}:\n"));
-        }
-
-        let rem = length % 8;
-        if rem >= 4 {
-            asm.push_str("  ldr w22, [x20], #4\n");
-            asm.push_str("  str w22, [x19], #4\n");
-        }
-        if rem >= 2 {
-            asm.push_str("  ldrh w22, [x20], #2\n");
-            asm.push_str("  strh w22, [x19], #2\n");
-        }
-        if rem >= 1 {
-            asm.push_str("  ldrb w22, [x20], #1\n");
-            asm.push_str("  strb w22, [x19], #1\n");
-        }
-
-        asm.push_str("  // -- memcpy -- (end)\n");
-        Ok(())
-    }
-
     fn emit_moves(&mut self, moves: &[Move]) -> Result<String, CodegenError> {
         moves.iter().map(|m| self.emit_move(m)).collect()
     }
@@ -1443,21 +1380,6 @@ impl<'a> FuncCodegen<'a> {
         }
         let v = value as u64;
         v < (1 << 12) || (v < (1 << 24) && (v & ((1 << 12) - 1)) == 0)
-    }
-}
-
-fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
-    // Conservative size in bytes for scalar and aggregate types.
-    match types.kind(ty) {
-        TyKind::Unit => 0,
-        TyKind::Bool => 1,
-        TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
-        TyKind::Array { elem_ty, dims } => {
-            let elems: usize = dims.iter().product();
-            elems * size_of_ty(types, *elem_ty)
-        }
-        TyKind::Tuple { field_tys } => field_tys.iter().map(|ty| size_of_ty(types, *ty)).sum(),
-        TyKind::Struct { fields } => fields.iter().map(|field| size_of_ty(types, field.ty)).sum(),
     }
 }
 

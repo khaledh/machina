@@ -7,7 +7,8 @@ use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, GlobalItem, Local, LocalId, LocalKind, Operand,
     Place, PlaceAny, Projection, Rvalue, Statement, Terminator, TyKind, TyTable,
 };
-use crate::opt::dataflow::copy_elide::elide_last_use_copies;
+use crate::opt::dataflow::copy_elide;
+use crate::opt::dataflow::memcpy_lower;
 use crate::symtab::SymbolTable;
 
 fn const_u64(value: u64) -> Operand {
@@ -74,8 +75,14 @@ fn run_elide(body: FuncBody) -> FuncBody {
         globals: Vec::<GlobalItem>::new(),
     };
 
-    let mut optimized = elide_last_use_copies(live_ctx).func_bodies;
+    let mut optimized = copy_elide::run(live_ctx).func_bodies;
     optimized.pop().expect("expected one optimized body")
+}
+
+fn run_memcpy_lower(body: FuncBody) -> FuncBody {
+    let mut bodies = vec![body];
+    memcpy_lower::run(&mut bodies);
+    bodies.pop().expect("expected one optimized body")
 }
 
 #[test]
@@ -526,5 +533,156 @@ fn test_copy_elide_keeps_addr_taken_call_arg() {
             )
         }),
         "expected copy aggregate to remain when source is passed as aggregate call arg"
+    );
+}
+
+#[test]
+fn test_memcpy_lower_inlines_small_copy() {
+    let mut types = TyTable::new();
+    let u64_ty = u64_ty(&mut types);
+    let u8_ty = types.add(TyKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let arr_ty = array_ty(&mut types, u8_ty, vec![8]);
+
+    let locals = vec![
+        Local {
+            ty: u64_ty,
+            kind: LocalKind::Return,
+            name: Some("ret".to_string()),
+        },
+        Local {
+            ty: arr_ty,
+            kind: LocalKind::Temp,
+            name: Some("a1".to_string()),
+        },
+        Local {
+            ty: arr_ty,
+            kind: LocalKind::Temp,
+            name: Some("a2".to_string()),
+        },
+    ];
+
+    let l0 = LocalId(0);
+    let l1 = LocalId(1);
+    let l2 = LocalId(2);
+
+    let p_ret = Place::new(l0, u64_ty, vec![]);
+    let p_a1 = Place::new(l1, arr_ty, vec![]);
+    let p_a2 = Place::new(l2, arr_ty, vec![]);
+
+    let stmts = vec![
+        Statement::CopyAggregate {
+            dst: p_a2,
+            src: p_a1,
+        },
+        ret_zero(p_ret),
+    ];
+
+    let blocks = vec![BasicBlock {
+        stmts,
+        terminator: Terminator::Return,
+    }];
+
+    let body = mk_body(types, locals, blocks, l0);
+    let optimized = run_memcpy_lower(body);
+    let stmts = &optimized.blocks[0].stmts;
+    assert!(
+        stmts
+            .iter()
+            .all(|stmt| !matches!(stmt, Statement::CopyAggregate { .. })),
+        "expected CopyAggregate to be lowered"
+    );
+    assert!(
+        stmts.iter().all(|stmt| {
+            !matches!(
+                stmt,
+                Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::MemCopy),
+                    ..
+                }
+            )
+        }),
+        "expected inline memcpy for small copies"
+    );
+    assert_eq!(
+        stmts
+            .iter()
+            .filter(|stmt| matches!(stmt, Statement::CopyScalar { .. }))
+            .count(),
+        9,
+        "expected 8 inline byte copies plus return store"
+    );
+}
+
+#[test]
+fn test_memcpy_lower_calls_runtime_for_large_copy() {
+    let mut types = TyTable::new();
+    let u64_ty = u64_ty(&mut types);
+    let u8_ty = types.add(TyKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let arr_ty = array_ty(&mut types, u8_ty, vec![32]);
+
+    let locals = vec![
+        Local {
+            ty: u64_ty,
+            kind: LocalKind::Return,
+            name: Some("ret".to_string()),
+        },
+        Local {
+            ty: arr_ty,
+            kind: LocalKind::Temp,
+            name: Some("a1".to_string()),
+        },
+        Local {
+            ty: arr_ty,
+            kind: LocalKind::Temp,
+            name: Some("a2".to_string()),
+        },
+    ];
+
+    let l0 = LocalId(0);
+    let l1 = LocalId(1);
+    let l2 = LocalId(2);
+
+    let p_ret = Place::new(l0, u64_ty, vec![]);
+    let p_a1 = Place::new(l1, arr_ty, vec![]);
+    let p_a2 = Place::new(l2, arr_ty, vec![]);
+
+    let stmts = vec![
+        Statement::CopyAggregate {
+            dst: p_a2,
+            src: p_a1,
+        },
+        ret_zero(p_ret),
+    ];
+
+    let blocks = vec![BasicBlock {
+        stmts,
+        terminator: Terminator::Return,
+    }];
+
+    let body = mk_body(types, locals, blocks, l0);
+    let optimized = run_memcpy_lower(body);
+    let stmts = &optimized.blocks[0].stmts;
+    assert!(
+        stmts
+            .iter()
+            .all(|stmt| !matches!(stmt, Statement::CopyAggregate { .. })),
+        "expected CopyAggregate to be lowered"
+    );
+    assert!(
+        stmts.iter().any(|stmt| matches!(
+            stmt,
+            Statement::Call {
+                callee: Callee::Runtime(RuntimeFn::MemCopy),
+                args,
+                ..
+            } if matches!(args.as_slice(), [PlaceAny::Aggregate(_), PlaceAny::Aggregate(_)])
+        )),
+        "expected runtime __mc_memcpy call for large copy"
     );
 }

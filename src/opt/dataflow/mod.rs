@@ -1,12 +1,17 @@
 pub mod copy_elide;
+pub mod memcpy_lower;
 
 use crate::context::{LivenessContext, OptimizedMcirContext};
 
-use copy_elide::elide_last_use_copies;
-
 /// Run all dataflow-based MCIR optimizations.
 pub fn run(ctx: LivenessContext) -> OptimizedMcirContext {
-    elide_last_use_copies(ctx)
+    // Elide last-use copies.
+    let mut ctx = copy_elide::run(ctx);
+
+    // Lower any remaining mem copies.
+    memcpy_lower::run(&mut ctx.func_bodies);
+
+    ctx
 }
 
 #[cfg(test)]

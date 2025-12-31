@@ -17,6 +17,9 @@
 - Symbol: `__mc_memset`
 - Signature: `void __mc_memset(mc_slice_t *dst, uint8_t value)`
 
+- Symbol: `__mc_memcpy`
+- Signature: `void __mc_memcpy(mc_slice_t *dst, const mc_slice_t *src)`
+
 ## Types
 - `mc_string_t` matches Machina's `string` layout:
   ```

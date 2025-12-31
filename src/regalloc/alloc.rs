@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::liveness::LiveMap;
-use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, TyId, TyKind, TyTable};
+use crate::mcir::layout::size_of_ty;
+use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, TyId, TyTable};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::liveness::{LiveInterval, LiveIntervalMap, build_live_intervals};
 use crate::regalloc::moves::{FnMoveList, Location};
@@ -31,20 +32,6 @@ pub(crate) fn classify_locals(body: &FuncBody) -> Vec<LocalClass> {
 }
 
 // --- Type sizing helpers ---
-
-fn size_of_ty(types: &TyTable, ty: TyId) -> usize {
-    match types.kind(ty) {
-        TyKind::Unit => 0,
-        TyKind::Bool => 1,
-        TyKind::Int { bits, .. } => (*bits as usize).div_ceil(8),
-        TyKind::Array { elem_ty, dims } => {
-            let elems: usize = dims.iter().product();
-            elems * size_of_ty(types, *elem_ty)
-        }
-        TyKind::Tuple { field_tys } => field_tys.iter().map(|ty| size_of_ty(types, *ty)).sum(),
-        TyKind::Struct { fields } => fields.iter().map(|field| size_of_ty(types, field.ty)).sum(),
-    }
-}
 
 fn slots_for_ty(types: &TyTable, ty: TyId) -> u32 {
     let size = size_of_ty(types, ty);

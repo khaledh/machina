@@ -87,11 +87,8 @@ impl<'a> FuncOverloadResolver<'a> {
 
         if candidates.is_empty() {
             return Err(range_err.unwrap_or_else(|| {
-                TypeCheckErrorKind::FuncOverloadNoMatch(
-                    self.name.to_string(),
-                    self.call_span,
-                )
-                .into()
+                TypeCheckErrorKind::FuncOverloadNoMatch(self.name.to_string(), self.call_span)
+                    .into()
             }));
         }
 
@@ -103,13 +100,11 @@ impl<'a> FuncOverloadResolver<'a> {
             .collect();
 
         if best.len() != 1 {
-            return Err(
-                TypeCheckErrorKind::FuncOverloadAmbiguous(
-                    self.name.to_string(),
-                    self.call_span,
-                )
-                .into(),
-            );
+            return Err(TypeCheckErrorKind::FuncOverloadAmbiguous(
+                self.name.to_string(),
+                self.call_span,
+            )
+            .into());
         }
 
         Ok(best.pop().unwrap())

@@ -58,6 +58,10 @@ Statements encode side effects and writes:
 (`opt/cfg_free/memops_lower.rs`) before codegen; it becomes either inline
 stores or a runtime `__mc_memset` call.
 
+`CopyAggregate` is lowered by the dataflow memcpy pass
+(`opt/dataflow/memcpy_lower.rs`) into inline byte copies or a runtime
+`__mc_memcpy` call.
+
 ### Terminators
 
 Blocks end in:

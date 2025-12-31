@@ -258,13 +258,14 @@ impl<'c, 'b> Checker<'c, 'b> {
         match self.check_assignable_to(ret_expr, &ret_ty, &func_sig.return_type) {
             Ok(()) => {}
             Err(_) => {
-                self.errors
-                    .push(TypeCheckErrorKind::FuncReturnTypeMismatch(
+                self.errors.push(
+                    TypeCheckErrorKind::FuncReturnTypeMismatch(
                         func_sig.return_type.clone(),
                         ret_ty.clone(),
                         ret_expr.span,
                     )
-                    .into());
+                    .into(),
+                );
             }
         }
 
@@ -342,9 +343,7 @@ impl<'c, 'b> Checker<'c, 'b> {
             ArrayLitInit::Elems(elems) if elems.is_empty() => {
                 Err(TypeCheckErrorKind::EmptyArrayLiteral(span).into())
             }
-            ArrayLitInit::Repeat(_, 0) => {
-                Err(TypeCheckErrorKind::EmptyArrayLiteral(span).into())
-            }
+            ArrayLitInit::Repeat(_, 0) => Err(TypeCheckErrorKind::EmptyArrayLiteral(span).into()),
             ArrayLitInit::Elems(elems) => Ok(elems.len()),
             ArrayLitInit::Repeat(_, count) => Ok(*count as usize),
         }
@@ -400,21 +399,14 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         // Check we don't have more indices than dimensions
         if indices.len() > dims.len() {
-            return Err(TypeCheckErrorKind::TooManyIndices(
-                dims.len(),
-                indices.len(),
-                span,
-            )
-            .into());
+            return Err(TypeCheckErrorKind::TooManyIndices(dims.len(), indices.len(), span).into());
         }
 
         // type check each index
         for index in indices {
             let index_type = self.type_check_expr(index)?;
             if index_type != Type::uint(64) {
-                return Err(
-                    TypeCheckErrorKind::IndexTypeNotInt(index_type, index.span).into(),
-                );
+                return Err(TypeCheckErrorKind::IndexTypeNotInt(index_type, index.span).into());
             }
         }
 
@@ -441,11 +433,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         let (elem_ty, dims) = match target_ty {
             Type::Array { elem_ty, dims } => (elem_ty, dims),
             other => {
-                return Err(TypeCheckErrorKind::SliceTargetNotArray(
-                    other,
-                    target.span,
-                )
-                .into());
+                return Err(TypeCheckErrorKind::SliceTargetNotArray(other, target.span).into());
             }
         };
 
@@ -482,16 +470,12 @@ impl<'c, 'b> Checker<'c, 'b> {
     ) -> Result<Type, TypeCheckError> {
         // Check we have exactly one index
         if indices.len() > 1 {
-            return Err(
-                TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into(),
-            );
+            return Err(TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into());
         }
 
         let index_ty = self.type_check_expr(&indices[0])?;
         if index_ty != Type::uint(64) {
-            return Err(
-                TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into(),
-            );
+            return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
         }
 
         Ok(Type::Char)
@@ -535,9 +519,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
                 Ok(fields[index_usize].clone())
             }
-            _ => Err(
-                TypeCheckErrorKind::InvalidTupleFieldTarget(target_ty, target.span).into(),
-            ),
+            _ => Err(TypeCheckErrorKind::InvalidTupleFieldTarget(target_ty, target.span).into()),
         }
     }
 
@@ -593,9 +575,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                 Some(field) => Ok(field.ty.clone()),
                 None => Ok(Type::Unknown),
             },
-            _ => Err(
-                TypeCheckErrorKind::InvalidStructFieldTarget(target_ty, target.span).into(),
-            ),
+            _ => Err(TypeCheckErrorKind::InvalidStructFieldTarget(target_ty, target.span).into()),
         }
     }
 
@@ -665,11 +645,9 @@ impl<'c, 'b> Checker<'c, 'b> {
         let struct_ty = match &target_ty {
             Type::Struct { .. } => target_ty.clone(),
             _ => {
-                return Err(TypeCheckErrorKind::InvalidStructUpdateTarget(
-                    target_ty,
-                    target.span,
-                )
-                .into());
+                return Err(
+                    TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty, target.span).into(),
+                );
             }
         };
 
@@ -893,12 +871,12 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         match self.check_assignable_to(value, &rhs_type, &lhs_type) {
             Ok(()) => Ok(Type::Unit),
-            Err(_) => Err(TypeCheckErrorKind::AssignTypeMismatch(
-                lhs_type,
-                rhs_type,
-                assignee.span,
-            )
-            .into()),
+            Err(_) => {
+                Err(
+                    TypeCheckErrorKind::AssignTypeMismatch(lhs_type, rhs_type, assignee.span)
+                        .into(),
+                )
+            }
         }
     }
 
@@ -999,12 +977,9 @@ impl<'c, 'b> Checker<'c, 'b> {
             // create a span that covers both the then and else bodies so the
             // diagnostic highlights the whole region
             let span = Span::merge_all(vec![then_body.span, else_body.span]);
-            return Err(TypeCheckErrorKind::ThenElseTypeMismatch(
-                then_type,
-                else_type,
-                span,
-            )
-            .into());
+            return Err(
+                TypeCheckErrorKind::ThenElseTypeMismatch(then_type, else_type, span).into(),
+            );
         }
 
         Ok(then_type)
@@ -1144,12 +1119,9 @@ impl<'c, 'b> Checker<'c, 'b> {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                 if !left_type.is_int() || !right_type.is_int() || left_type != right_type {
                     let span = Span::merge_all(vec![left.span, right.span]);
-                    return Err(TypeCheckErrorKind::ArithTypeMismatch(
-                        left_type,
-                        right_type,
-                        span,
-                    )
-                    .into());
+                    return Err(
+                        TypeCheckErrorKind::ArithTypeMismatch(left_type, right_type, span).into(),
+                    );
                 }
                 Ok(left_type)
             }
@@ -1337,11 +1309,9 @@ impl<'c, 'b> Checker<'c, 'b> {
             Type::Range { .. } => Ok(Type::uint(64)),
             Type::Array { elem_ty, dims } => {
                 if dims.is_empty() {
-                    return Err(TypeCheckErrorKind::ForIterNotIterable(
-                        iter_ty.clone(),
-                        span,
-                    )
-                    .into());
+                    return Err(
+                        TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into(),
+                    );
                 }
                 if dims.len() == 1 {
                     Ok((**elem_ty).clone())
@@ -1352,9 +1322,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                     })
                 }
             }
-            _ => Err(
-                TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into(),
-            ),
+            _ => Err(TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into()),
         }
     }
 }

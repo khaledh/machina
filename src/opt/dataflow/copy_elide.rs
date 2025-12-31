@@ -15,7 +15,7 @@ use crate::mcir::types::{
 /// - We require the source to be dead immediately after the copy.
 /// - We avoid locals whose address is taken (e.g., slices / aggregate call args).
 /// - Renames are propagated across the CFG using a must-available dataflow.
-pub fn elide_last_use_copies(ctx: LivenessContext) -> OptimizedMcirContext {
+pub fn run(ctx: LivenessContext) -> OptimizedMcirContext {
     let LivenessContext {
         mut func_bodies,
         live_maps,

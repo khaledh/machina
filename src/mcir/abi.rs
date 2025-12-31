@@ -4,6 +4,7 @@ pub enum RuntimeFn {
     Print,
     U64ToDec,
     MemSet,
+    MemCopy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +53,12 @@ impl RuntimeFn {
             },
             RuntimeFn::MemSet => RuntimeFnSig {
                 name: "__mc_memset",
+                arg_count: 2,
+                ret: None,
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::MemCopy => RuntimeFnSig {
+                name: "__mc_memcpy",
                 arg_count: 2,
                 ret: None,
                 effect: CallEffect::ReadWrite,
