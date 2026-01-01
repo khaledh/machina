@@ -966,30 +966,28 @@ fn test_lower_fstring_calls_runtime() {
     let func = analyzed.module.funcs()[0];
     let (body, globals) = lower_body_with_globals(&analyzed, func);
 
-    let mut saw_u64_to_dec = false;
-    let mut saw_memcpy = false;
-    let mut saw_string_from_bytes = false;
+    let mut saw_fmt_init = false;
+    let mut saw_append_bytes = false;
+    let mut saw_append_u64 = false;
+    let mut saw_fmt_finish = false;
     for block in &body.blocks {
         for stmt in &block.stmts {
             if let Statement::Call { callee, .. } = stmt {
                 match callee {
-                    Callee::Runtime(RuntimeFn::U64ToDec) => saw_u64_to_dec = true,
-                    Callee::Runtime(RuntimeFn::MemCopy) => saw_memcpy = true,
-                    Callee::Runtime(RuntimeFn::StringFromBytes) => {
-                        saw_string_from_bytes = true;
-                    }
+                    Callee::Runtime(RuntimeFn::FmtInit) => saw_fmt_init = true,
+                    Callee::Runtime(RuntimeFn::FmtAppendBytes) => saw_append_bytes = true,
+                    Callee::Runtime(RuntimeFn::FmtAppendU64) => saw_append_u64 = true,
+                    Callee::Runtime(RuntimeFn::FmtFinish) => saw_fmt_finish = true,
                     _ => {}
                 }
             }
         }
     }
 
-    assert!(saw_u64_to_dec, "expected __mc_u64_to_dec call");
-    assert!(saw_memcpy, "expected __mc_memcpy call for literals");
-    assert!(
-        saw_string_from_bytes,
-        "expected __mc_string_from_bytes call"
-    );
+    assert!(saw_fmt_init, "expected __mc_fmt_init call");
+    assert!(saw_append_bytes, "expected __mc_fmt_append_bytes call");
+    assert!(saw_append_u64, "expected __mc_fmt_append_u64 call");
+    assert!(saw_fmt_finish, "expected __mc_fmt_finish call");
 
     let mut strings = Vec::new();
     for global in &globals {
@@ -1014,18 +1012,18 @@ fn test_lower_fstring_signed_uses_i64_runtime() {
     let func = analyzed.module.funcs()[0];
     let (body, globals) = lower_body_with_globals(&analyzed, func);
 
-    let saw_i64_to_dec = body.blocks.iter().any(|block| {
+    let saw_append_i64 = body.blocks.iter().any(|block| {
         block.stmts.iter().any(|stmt| {
             matches!(
                 stmt,
                 Statement::Call {
-                    callee: Callee::Runtime(RuntimeFn::I64ToDec),
+                    callee: Callee::Runtime(RuntimeFn::FmtAppendI64),
                     ..
                 }
             )
         })
     });
-    assert!(saw_i64_to_dec, "expected __mc_i64_to_dec call");
+    assert!(saw_append_i64, "expected __mc_fmt_append_i64 call");
 
     let saw_minus = globals
         .iter()
