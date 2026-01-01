@@ -275,13 +275,7 @@ impl SymbolResolver {
 
             resolver.populate_decls(module);
 
-            for decl in &module.decls {
-                match decl {
-                    Decl::TypeDecl(type_decl) => resolver.check_type_decl(type_decl),
-                    Decl::FunctionDecl(func_decl) => resolver.check_function_decl(func_decl),
-                    Decl::Function(function) => resolver.check_function(function),
-                }
-            }
+            resolver.visit_module(module);
         });
 
         if self.errors.is_empty() {
@@ -290,77 +284,6 @@ impl SymbolResolver {
         } else {
             Err(self.errors.clone())
         }
-    }
-
-    fn check_type_decl(&mut self, type_decl: &TypeDecl) {
-        match &type_decl.kind {
-            TypeDeclKind::Alias { aliased_ty } => {
-                // resolve the aliased type expr
-                self.check_type_expr(aliased_ty);
-            }
-            TypeDeclKind::Struct { fields } => {
-                // resolve each struct field type expr
-                for field in fields {
-                    self.check_type_expr(&field.ty);
-                }
-            }
-            TypeDeclKind::Enum { variants } => {
-                // resolve each variant payload type expr
-                for variant in variants {
-                    for payload_ty in &variant.payload {
-                        self.check_type_expr(payload_ty);
-                    }
-                }
-            }
-        }
-    }
-
-    fn check_function_decl(&mut self, func_decl: &ast::FunctionDecl) {
-        // resolve return type
-        self.check_type_expr(&func_decl.sig.return_type);
-
-        // resolve param types
-        for param in &func_decl.sig.params {
-            self.check_type_expr(&param.typ);
-        }
-    }
-
-    fn check_function(&mut self, func: &ast::Function) {
-        // resolve return type
-        self.check_type_expr(&func.sig.return_type);
-
-        // Enter a new scope for the function body
-        self.with_scope(|checker| {
-            // add parameters to scope
-            for (index, param) in func.sig.params.iter().enumerate() {
-                // resolve param type
-                checker.check_type_expr(&param.typ);
-
-                // record the param def
-                let is_mutable = param.mode == FunctionParamMode::Inout;
-                let def_id = checker.def_id_gen.new_id();
-                let def = Def {
-                    id: def_id,
-                    name: param.name.clone(),
-                    kind: DefKind::Param {
-                        index: index as u32,
-                        is_mutable,
-                    },
-                };
-                checker.def_map_builder.record_def(def, param.id);
-                checker.insert_symbol(
-                    &param.name,
-                    Symbol {
-                        name: param.name.clone(),
-                        kind: SymbolKind::Var { def_id, is_mutable },
-                    },
-                    param.span,
-                );
-            }
-
-            // check function body
-            checker.check_expr(&func.body);
-        });
     }
 
     fn check_lvalue_mutability(&mut self, expr: &ast::Expr) {
@@ -397,7 +320,7 @@ impl SymbolResolver {
                 // Recursively check the target. If target is mutable, then target[index] is mutable.
                 self.check_lvalue_mutability(target);
                 for index in indices {
-                    self.check_expr(index);
+                    self.visit_expr(index);
                 }
             }
             ExprKind::TupleField { target, .. } => {
@@ -531,8 +454,10 @@ impl SymbolResolver {
             }
         }
     }
+}
 
-    fn check_type_expr(&mut self, type_expr: &TypeExpr) {
+impl Visitor for SymbolResolver {
+    fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
             TypeExprKind::Named(name) => match self.lookup_symbol(name) {
                 Some(symbol) => match &symbol.kind {
@@ -552,22 +477,46 @@ impl SymbolResolver {
                     .errors
                     .push(ResolveError::TypeUndefined(name.clone(), type_expr.span)),
             },
-            TypeExprKind::Array { elem_ty, .. } => {
-                self.check_type_expr(elem_ty);
-            }
-            TypeExprKind::Tuple { fields } => {
-                for field in fields {
-                    self.check_type_expr(field);
-                }
-            }
-            TypeExprKind::Range { .. } => { /* nothing to resolve */ }
-            TypeExprKind::Slice { elem_ty } => {
-                self.check_type_expr(elem_ty);
-            }
+            _ => walk_type_expr(self, type_expr),
         }
     }
 
-    fn check_stmt_expr(&mut self, stmt: &ast::StmtExpr) {
+    fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
+        self.visit_type_expr(&func_sig.return_type);
+        walk_func_sig(self, func_sig);
+    }
+
+    fn visit_func(&mut self, func: &Function) {
+        self.visit_func_sig(&func.sig);
+
+        self.with_scope(|resolver| {
+            for (index, param) in func.sig.params.iter().enumerate() {
+                let is_mutable = param.mode == FunctionParamMode::Inout;
+                let def_id = resolver.def_id_gen.new_id();
+                let def = Def {
+                    id: def_id,
+                    name: param.name.clone(),
+                    kind: DefKind::Param {
+                        index: index as u32,
+                        is_mutable,
+                    },
+                };
+                resolver.def_map_builder.record_def(def, param.id);
+                resolver.insert_symbol(
+                    &param.name,
+                    Symbol {
+                        name: param.name.clone(),
+                        kind: SymbolKind::Var { def_id, is_mutable },
+                    },
+                    param.span,
+                );
+            }
+
+            resolver.visit_expr(&func.body);
+        });
+    }
+
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind {
                 pattern,
@@ -575,9 +524,9 @@ impl SymbolResolver {
                 value,
             } => {
                 // Check the value first before introducing the lhs symbol(s) into the scope.
-                self.check_expr(value);
+                self.visit_expr(value);
                 if let Some(decl_ty) = decl_ty {
-                    self.check_type_expr(decl_ty);
+                    self.visit_type_expr(decl_ty);
                 }
                 self.check_pattern(pattern, false);
             }
@@ -588,21 +537,21 @@ impl SymbolResolver {
                 value,
             } => {
                 // Check the value first before introducing the lhs symbol(s) into the scope.
-                self.check_expr(value);
+                self.visit_expr(value);
                 if let Some(decl_ty) = decl_ty {
-                    self.check_type_expr(decl_ty);
+                    self.visit_type_expr(decl_ty);
                 }
                 self.check_pattern(pattern, true);
             }
 
             StmtExprKind::Assign { assignee, value } => {
                 self.check_lvalue_mutability(assignee);
-                self.check_expr(value);
+                self.visit_expr(value);
             }
 
             StmtExprKind::While { cond, body } => {
-                self.check_expr(cond);
-                self.check_expr(body);
+                self.visit_expr(cond);
+                self.visit_expr(body);
             }
 
             StmtExprKind::For {
@@ -611,72 +560,44 @@ impl SymbolResolver {
                 body,
             } => {
                 // Resolve iter first (pattern not in scope for it)
-                self.check_expr(iter);
+                self.visit_expr(iter);
                 // Enter a new scope for the pattern + body
-                self.with_scope(|checker| {
-                    checker.check_pattern(pattern, false);
-                    checker.check_expr(body);
+                self.with_scope(|resolver| {
+                    resolver.check_pattern(pattern, false);
+                    resolver.visit_expr(body);
                 });
             }
         }
     }
 
-    fn check_expr(&mut self, expr: &ast::Expr) {
+    fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Block { items, tail } => {
-                self.with_scope(|checker| {
+                self.with_scope(|resolver| {
                     for item in items {
-                        match item {
-                            BlockItem::Stmt(stmt) => checker.check_stmt_expr(stmt),
-                            BlockItem::Expr(expr) => checker.check_expr(expr),
-                        }
+                        resolver.visit_block_item(item);
                     }
                     if let Some(tail) = tail {
-                        checker.check_expr(tail);
+                        resolver.visit_expr(tail);
                     }
                 });
             }
 
-            // Scalar literals
             ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
-            | ExprKind::UnitLit => {}
+            | ExprKind::UnitLit
+            | ExprKind::Range { .. } => {}
 
-            ExprKind::StringFmt { segments } => {
-                for segment in segments {
-                    if let StringFmtSegment::Expr { expr, .. } = segment {
-                        self.check_expr(expr);
-                    }
-                }
-            }
-
-            // Compound literals
-            ExprKind::ArrayLit { elem_ty, init } => {
+            ExprKind::ArrayLit { elem_ty, .. } => {
                 if let Some(elem_ty) = elem_ty {
-                    self.check_type_expr(elem_ty);
+                    self.visit_type_expr(elem_ty);
                 }
-                match init {
-                    ArrayLitInit::Elems(elems) => {
-                        for elem in elems {
-                            self.check_expr(elem);
-                        }
-                    }
-                    ArrayLitInit::Repeat(expr, _) => {
-                        self.check_expr(expr);
-                    }
-                }
+                walk_expr(self, expr);
             }
 
-            ExprKind::TupleLit(fields) => {
-                for field in fields {
-                    self.check_expr(field);
-                }
-            }
-
-            ExprKind::StructLit { name, fields } => {
-                // Resolve the struct name
+            ExprKind::StructLit { name, .. } => {
                 match self.lookup_symbol(name) {
                     Some(Symbol {
                         kind: SymbolKind::StructDef { def_id, .. },
@@ -688,14 +609,9 @@ impl SymbolResolver {
                         .errors
                         .push(ResolveError::StructUndefined(name.clone(), expr.span)),
                 }
-
-                // Resolve each field value
-                for field in fields {
-                    self.check_expr(&field.value);
-                }
+                walk_expr(self, expr);
             }
 
-            // Accessors
             ExprKind::Var(name) => match self.lookup_symbol(name) {
                 Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id()),
                 None => self
@@ -703,48 +619,8 @@ impl SymbolResolver {
                     .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
             },
 
-            ExprKind::ArrayIndex { target, indices } => {
-                self.check_expr(target);
-                for index in indices {
-                    self.check_expr(index);
-                }
-            }
-
-            ExprKind::Slice { target, start, end } => {
-                self.check_expr(target);
-                if let Some(start) = start {
-                    self.check_expr(start);
-                }
-                if let Some(end) = end {
-                    self.check_expr(end);
-                }
-            }
-
-            ExprKind::TupleField { target, .. } => {
-                self.check_expr(target);
-            }
-
-            ExprKind::StructField { target, .. } => {
-                self.check_expr(target);
-            }
-
-            ExprKind::StructUpdate { target, fields } => {
-                // Resolve the target
-                self.check_expr(target);
-                // Resolve each field value
-                for field in fields {
-                    self.check_expr(&field.value);
-                }
-            }
-
-            // Range
-            ExprKind::Range { .. } => { /* nothing to resolve */ }
-
-            // Enum variants
             ExprKind::EnumVariant {
-                enum_name,
-                variant,
-                payload,
+                enum_name, variant, ..
             } => {
                 // Resolve the enum name
                 let Some(Symbol {
@@ -767,74 +643,43 @@ impl SymbolResolver {
                     return;
                 }
 
-                // Record the use
                 self.def_map_builder.record_use(expr.id, *def_id);
-
-                // Resolve each payload expression
-                for payload_expr in payload {
-                    self.check_expr(payload_expr);
-                }
+                walk_expr(self, expr);
             }
 
-            // Operators
-            ExprKind::BinOp { left, right, .. } => {
-                self.check_expr(left);
-                self.check_expr(right);
-            }
-
-            ExprKind::UnaryOp { expr, .. } => {
-                self.check_expr(expr);
-            }
-
-            ExprKind::Move { expr } => {
-                self.check_expr(expr);
-            }
-
-            // Control flow (If)
-            ExprKind::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                self.check_expr(cond);
-                self.check_expr(then_body);
-                self.check_expr(else_body);
-            }
-
-            // Control flow (Match)
+            // Resolve each payload expression
             ExprKind::Match { scrutinee, arms } => {
-                self.check_expr(scrutinee);
+                self.visit_expr(scrutinee);
                 for arm in arms {
-                    // enter a new scope
-                    self.with_scope(|checker| {
-                        checker.check_match_pattern(&arm.pattern, arm.id);
-                        checker.check_expr(&arm.body);
+                    // enter a new scope for the arm body
+                    self.with_scope(|resolver| {
+                        resolver.check_match_pattern(&arm.pattern, arm.id);
+                        resolver.visit_expr(&arm.body);
                     });
                 }
             }
 
-            // Function calls
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args } => match &callee.kind {
                 // For now, callee must be a Var to a function.
                 // In the future, this can be generalized.
-                match &callee.kind {
-                    ExprKind::Var(name) => match self.lookup_symbol(name) {
-                        Some(symbol) if matches!(&symbol.kind, SymbolKind::Func { .. }) => {
-                            self.def_map_builder.record_use(callee.id, symbol.def_id());
-                            for arg in args {
-                                self.check_expr(arg);
-                            }
+                ExprKind::Var(name) => match self.lookup_symbol(name) {
+                    Some(symbol) if matches!(&symbol.kind, SymbolKind::Func { .. }) => {
+                        self.def_map_builder.record_use(callee.id, symbol.def_id());
+                        for arg in args {
+                            self.visit_expr(arg);
                         }
-                        _ => self
-                            .errors
-                            .push(ResolveError::FuncUndefined(name.to_string(), callee.span)),
-                    },
-                    _ => self.errors.push(ResolveError::InvalidCallee(
-                        callee.kind.clone(),
-                        callee.span,
-                    )),
-                }
-            }
+                    }
+                    _ => self
+                        .errors
+                        .push(ResolveError::FuncUndefined(name.to_string(), callee.span)),
+                },
+                _ => self.errors.push(ResolveError::InvalidCallee(
+                    callee.kind.clone(),
+                    callee.span,
+                )),
+            },
+
+            _ => walk_expr(self, expr),
         }
     }
 }
