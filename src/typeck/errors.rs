@@ -10,9 +10,6 @@ pub struct TypeCheckError(Box<TypeCheckErrorKind>);
 
 #[derive(Debug, Clone, Error)]
 pub enum TypeCheckErrorKind {
-    #[error("Function return type mismatch: expected {0}, found {1}")]
-    FuncReturnTypeMismatch(Type, Type, Span),
-
     #[error("Invalid types for arithmetic operation: {0}, {1}")]
     ArithTypeMismatch(Type, Type, Span),
 
@@ -178,7 +175,6 @@ impl TypeCheckError {
 
     pub fn span(&self) -> Span {
         match &*self.0 {
-            TypeCheckErrorKind::FuncReturnTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ArithTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ArithOperandNotInt(_, span) => *span,
             TypeCheckErrorKind::CmpOperandNotInt(_, span) => *span,

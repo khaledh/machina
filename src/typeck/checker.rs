@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::ast::AstFolder;
+use crate::ast::fold::{walk_expr, walk_if};
 use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diag::Span;
@@ -17,6 +19,7 @@ pub struct TypeChecker {
     func_sigs: HashMap<String, Vec<FuncOverloadSig>>,
     type_decls: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
+    halted: bool,
 }
 
 impl TypeChecker {
@@ -27,92 +30,24 @@ impl TypeChecker {
             func_sigs: HashMap::new(),
             type_decls: HashMap::new(),
             errors: Vec::new(),
+            halted: false,
         }
     }
 
     pub fn check(&mut self) -> Result<TypeMap, Vec<TypeCheckError>> {
-        self.populate_function_symbols()?;
         self.populate_type_symbols()?;
+        self.populate_function_symbols()?;
 
-        // Create split borrows so we can iterate immutably over functions while
-        // mutably updating the builder & errors.
-        let mut checker = Checker {
-            context: &self.context,
-            func_sigs: &self.func_sigs,
-            type_decls: &self.type_decls,
-            builder: &mut self.type_map_builder,
-            errors: &mut self.errors,
-        };
-
-        for function in self.context.module.funcs() {
-            if checker.type_check_function(function).is_err() {
-                break;
-            }
-        }
+        self.halted = false;
+        let module = self.context.module.clone();
+        let _ = self.visit_module(&module);
 
         if self.errors.is_empty() {
-            // Workaround for moving out of a field: replace with new one, then finish the old
             let builder = std::mem::take(&mut self.type_map_builder);
             Ok(builder.finish())
         } else {
             Err(std::mem::take(&mut self.errors))
         }
-    }
-
-    fn insert_func_overload(
-        &mut self,
-        def_id: DefId,
-        sig: FunctionSig,
-    ) -> Result<(), Vec<TypeCheckError>> {
-        let params = sig
-            .params
-            .iter()
-            .map(|p| {
-                let ty = resolve_type_expr(&self.context.def_map, &p.typ)?;
-                Ok(FuncParamSig {
-                    name: p.name.clone(),
-                    ty,
-                    mode: p.mode.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| vec![e])?;
-
-        let return_type =
-            resolve_type_expr(&self.context.def_map, &sig.return_type).map_err(|e| vec![e])?;
-
-        self.func_sigs
-            .entry(sig.name.clone())
-            .or_default()
-            .push(FuncOverloadSig {
-                def_id,
-                params,
-                return_type,
-            });
-
-        Ok(())
-    }
-
-    fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        let mut overloads = Vec::new();
-
-        // Func decls
-        for decl in self.context.module.func_decls() {
-            let def_id = self.context.def_map.lookup_def(decl.id).unwrap().id;
-            overloads.push((def_id, decl.sig.clone()));
-        }
-
-        // Funcs
-        for func in self.context.module.funcs() {
-            let def_id = self.context.def_map.lookup_def(func.id).unwrap().id;
-            overloads.push((def_id, func.sig.clone()));
-        }
-
-        for (def_id, sig) in overloads {
-            self.insert_func_overload(def_id, sig)?;
-        }
-
-        Ok(())
     }
 
     fn populate_type_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
@@ -178,76 +113,113 @@ impl TypeChecker {
         }
         Ok(())
     }
-}
 
-// Internal helper used during checking to avoid self-borrow conflicts. It holds
-// split borrows into the owning TypeChecker fields so we can iterate over
-// functions (&context.module.funcs) while still mutably updating the builder
-// and error vec. This removes the need for moving the functions Vec out of the
-// context (previous mem::take workaround) and keeps borrow scopes minimal.
-struct Checker<'c, 'b> {
-    context: &'c ResolvedContext,
-    func_sigs: &'c HashMap<String, Vec<FuncOverloadSig>>,
-    type_decls: &'c HashMap<String, Type>,
-    builder: &'b mut TypeMapBuilder,
-    errors: &'b mut Vec<TypeCheckError>,
-}
+    fn populate_function_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
+        let mut overloads = Vec::new();
 
-impl<'c, 'b> Checker<'c, 'b> {
+        // Func decls
+        for decl in self.context.module.func_decls() {
+            let def_id = self.context.def_map.lookup_def(decl.id).unwrap().id;
+            overloads.push((def_id, decl.sig.clone()));
+        }
+
+        // Funcs
+        for func in self.context.module.funcs() {
+            let def_id = self.context.def_map.lookup_def(func.id).unwrap().id;
+            overloads.push((def_id, func.sig.clone()));
+        }
+
+        for (def_id, sig) in overloads {
+            self.insert_func_overload(def_id, sig)?;
+        }
+
+        Ok(())
+    }
+
+    fn insert_func_overload(
+        &mut self,
+        def_id: DefId,
+        sig: FunctionSig,
+    ) -> Result<(), Vec<TypeCheckError>> {
+        let params = sig
+            .params
+            .iter()
+            .map(|p| {
+                let ty = resolve_type_expr(&self.context.def_map, &p.typ)?;
+                Ok(FuncParamSig {
+                    name: p.name.clone(),
+                    ty,
+                    mode: p.mode.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| vec![e])?;
+
+        let return_type =
+            resolve_type_expr(&self.context.def_map, &sig.return_type).map_err(|e| vec![e])?;
+
+        self.func_sigs
+            .entry(sig.name.clone())
+            .or_default()
+            .push(FuncOverloadSig {
+                def_id,
+                params,
+                return_type,
+            });
+
+        Ok(())
+    }
+
     fn lookup_def_type(&self, node: NodeId) -> Option<Type> {
         self.context
             .def_map
             .lookup_def(node)
-            .and_then(|def| self.builder.lookup_def_type(def))
+            .and_then(|def| self.type_map_builder.lookup_def_type(def))
     }
 
-    fn type_check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
-        // Lookup the function by def id and find the matching overload
+    fn check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
+        // Lookup the function by def id and find the matching overload.
         let func_def_id = self.context.def_map.lookup_def(function.id).unwrap().id;
-        let overloads = self.func_sigs.get(&function.sig.name).unwrap_or_else(|| {
-            panic!(
-                "compiler bug: function {} not found in func_sigs",
-                function.sig.name
-            )
-        });
-        let func_sig = overloads
-            .iter()
-            .find(|sig| sig.def_id == func_def_id)
-            .unwrap_or_else(|| {
+        let (param_types, return_type) = {
+            let overloads = self.func_sigs.get(&function.sig.name).unwrap_or_else(|| {
                 panic!(
-                    "compiler bug: overload for function {} not found",
+                    "compiler bug: function {} not found in func_sigs",
                     function.sig.name
                 )
             });
+            let func_sig = overloads
+                .iter()
+                .find(|sig| sig.def_id == func_def_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "compiler bug: overload for function {} not found",
+                        function.sig.name
+                    )
+                });
+            (
+                func_sig
+                    .params
+                    .iter()
+                    .map(|param| param.ty.clone())
+                    .collect::<Vec<Type>>(),
+                func_sig.return_type.clone(),
+            )
+        };
 
         // Record param types
-        for (param, param_sig) in function.sig.params.iter().zip(func_sig.params.iter()) {
+        for (param, param_ty) in function.sig.params.iter().zip(param_types.iter()) {
             match self.context.def_map.lookup_def(param.id) {
                 Some(def) => {
-                    self.builder
-                        .record_def_type(def.clone(), param_sig.ty.clone());
-                    self.builder
-                        .record_node_type(param.id, param_sig.ty.clone());
+                    self.type_map_builder
+                        .record_def_type(def.clone(), param_ty.clone());
+                    self.type_map_builder
+                        .record_node_type(param.id, param_ty.clone());
                 }
                 None => panic!("Parameter {} not found in def_map", param.name),
             }
         }
 
-        // type check body
-        if let Err(e) = self.type_check_expr(&function.body) {
-            self.errors.push(e);
-            return Err(self.errors.clone());
-        }
-
-        // check return type
-        let ret_expr = match &function.body.kind {
-            ExprKind::Block {
-                tail: Some(tail), ..
-            } => tail.as_ref(),
-            _ => &function.body,
-        };
-        let ret_ty = match self.type_check_expr_with_expected(ret_expr, Some(&func_sig.return_type))
-        {
+        let body_ty = match self.visit_expr(&function.body, Some(&return_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
@@ -255,33 +227,32 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         };
 
-        match self.check_assignable_to(ret_expr, &ret_ty, &func_sig.return_type) {
-            Ok(()) => {}
-            Err(_) => {
-                self.errors.push(
-                    TypeCheckErrorKind::FuncReturnTypeMismatch(
-                        func_sig.return_type.clone(),
-                        ret_ty.clone(),
-                        ret_expr.span,
-                    )
-                    .into(),
-                );
-            }
+        let ret_expr = match &function.body.kind {
+            ExprKind::Block {
+                tail: Some(tail), ..
+            } => tail.as_ref(),
+            _ => &function.body,
+        };
+        if let Err(e) = self.check_assignable_to(ret_expr, &body_ty, &return_type) {
+            self.errors.push(e);
+            return Err(self.errors.clone());
         }
 
         // record return type
-        self.builder.record_node_type(function.id, ret_ty.clone());
+        self.type_map_builder
+            .record_node_type(function.id, body_ty.clone());
         if self.errors.is_empty() {
-            Ok(ret_ty)
+            Ok(body_ty)
         } else {
             Err(self.errors.clone())
         }
     }
 
-    fn type_check_array_lit(
+    fn check_array_lit(
         &mut self,
         elem_ty_expr: Option<&TypeExpr>,
         init: &ArrayLitInit,
+        expected: Option<&Type>,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
         let len = self.array_lit_len(init, span)?;
@@ -289,53 +260,33 @@ impl<'c, 'b> Checker<'c, 'b> {
         // Resolve the element type
         let elem_ty = if let Some(elem_ty_expr) = elem_ty_expr {
             resolve_type_expr(&self.context.def_map, elem_ty_expr)?
+        } else if let Some(Type::Array {
+            elem_ty: expected_elem_ty,
+            dims: expected_dims,
+        }) = expected
+        {
+            // When the expected array has multiple dimensions, each element is itself
+            // an array of the remaining dimensions.
+            if expected_dims.len() > 1 {
+                Type::Array {
+                    elem_ty: expected_elem_ty.clone(),
+                    dims: expected_dims[1..].to_vec(),
+                }
+            } else {
+                expected_elem_ty.as_ref().clone()
+            }
         } else {
             match init {
-                ArrayLitInit::Elems(elems) => self.type_check_expr(&elems[0])?,
-                ArrayLitInit::Repeat(expr, _) => self.type_check_expr(expr)?,
+                ArrayLitInit::Elems(elems) => self.visit_expr(&elems[0], None)?,
+                ArrayLitInit::Repeat(expr, _) => self.visit_expr(expr, None)?,
             }
         };
 
         // Type check the elements
-        self.type_check_array_lit_init(init, &elem_ty)?;
+        self.check_array_lit_init(init, &elem_ty)?;
 
         // Build the array type
         Ok(self.build_array_type_from_elem(len, elem_ty))
-    }
-
-    fn type_check_array_lit_with_expected(
-        &mut self,
-        init: &ArrayLitInit,
-        expected: &Type,
-        span: Span,
-    ) -> Result<Type, TypeCheckError> {
-        let Type::Array {
-            elem_ty: expected_elem_ty,
-            dims: expected_dims,
-        } = expected
-        else {
-            return self.type_check_array_lit(None, init, span);
-        };
-
-        let len = self.array_lit_len(init, span)?;
-
-        // When the expected array has multiple dimensions, each element is itself
-        // an array of the remaining dimensions. Use that as the expected element type.
-        let elem_expected_ty = if expected_dims.len() > 1 {
-            Type::Array {
-                elem_ty: expected_elem_ty.clone(),
-                dims: expected_dims[1..].to_vec(),
-            }
-        } else {
-            expected_elem_ty.as_ref().clone()
-        };
-
-        // Check each element against the expected element type; we don't infer
-        // element type from the first element when a declared type exists.
-        self.type_check_array_lit_init(init, &elem_expected_ty)?;
-
-        // Build the array type
-        Ok(self.build_array_type_from_elem(len, elem_expected_ty))
     }
 
     fn array_lit_len(&self, init: &ArrayLitInit, span: Span) -> Result<usize, TypeCheckError> {
@@ -349,22 +300,19 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_array_lit_init(
+    fn check_array_lit_init(
         &mut self,
         init: &ArrayLitInit,
         elem_ty: &Type,
     ) -> Result<(), TypeCheckError> {
-        match init {
-            ArrayLitInit::Elems(elems) => {
-                for elem in elems {
-                    let this_ty = self.type_check_expr_with_expected(elem, Some(elem_ty))?;
-                    self.check_assignable_to(elem, &this_ty, elem_ty)?;
-                }
-            }
-            ArrayLitInit::Repeat(expr, _) => {
-                let this_ty = self.type_check_expr_with_expected(expr, Some(elem_ty))?;
-                self.check_assignable_to(expr, &this_ty, elem_ty)?;
-            }
+        let exprs: Vec<&Expr> = match init {
+            ArrayLitInit::Elems(elems) => elems.iter().collect(),
+            ArrayLitInit::Repeat(expr, _) => vec![expr],
+        };
+
+        let actual_types = self.visit_array_lit_init(init, Some(elem_ty))?;
+        for (expr, this_ty) in exprs.into_iter().zip(actual_types) {
+            self.check_assignable_to(expr, &this_ty, elem_ty)?;
         }
         Ok(())
     }
@@ -390,7 +338,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_array_index(
+    fn check_array_index(
         &mut self,
         elem_ty: &Type,
         dims: &[usize],
@@ -404,7 +352,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         // type check each index
         for index in indices {
-            let index_type = self.type_check_expr(index)?;
+            let index_type = self.visit_expr(index, None)?;
             if index_type != Type::uint(64) {
                 return Err(TypeCheckErrorKind::IndexTypeNotInt(index_type, index.span).into());
             }
@@ -423,13 +371,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_slice(
+    fn check_slice(
         &mut self,
         target: &Expr,
         start: &Option<Box<Expr>>,
         end: &Option<Box<Expr>>,
     ) -> Result<Type, TypeCheckError> {
-        let target_ty = self.type_check_expr(target)?;
+        let target_ty = self.visit_expr(target, None)?;
         let (elem_ty, dims) = match target_ty {
             Type::Array { elem_ty, dims } => (elem_ty, dims),
             other => {
@@ -448,13 +396,13 @@ impl<'c, 'b> Checker<'c, 'b> {
 
         // Type check start and end (must be u64)
         if let Some(start) = start {
-            let ty = self.type_check_expr(start)?;
+            let ty = self.visit_expr(start, None)?;
             if ty != Type::uint(64) {
                 return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, start.span).into());
             }
         }
         if let Some(end) = end {
-            let ty = self.type_check_expr(end)?;
+            let ty = self.visit_expr(end, None)?;
             if ty != Type::uint(64) {
                 return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, end.span).into());
             }
@@ -463,17 +411,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(Type::Slice { elem_ty })
     }
 
-    fn type_check_string_index(
-        &mut self,
-        indices: &[Expr],
-        span: Span,
-    ) -> Result<Type, TypeCheckError> {
+    fn check_string_index(&mut self, indices: &[Expr], span: Span) -> Result<Type, TypeCheckError> {
         // Check we have exactly one index
         if indices.len() > 1 {
             return Err(TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into());
         }
 
-        let index_ty = self.type_check_expr(&indices[0])?;
+        let index_ty = self.visit_expr(&indices[0], None)?;
         if index_ty != Type::uint(64) {
             return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
         }
@@ -481,30 +425,26 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(Type::Char)
     }
 
-    fn type_check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
+    fn check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
         if fields.is_empty() {
             return Err(TypeCheckErrorKind::EmptyTupleLiteral(fields[0].span).into());
         }
 
         // Type check each field
-        let mut field_types = Vec::new();
-        for field in fields {
-            let field_ty = self.type_check_expr(field)?;
-            field_types.push(field_ty);
-        }
+        let field_types = self.visit_exprs(fields)?;
 
         Ok(Type::Tuple {
             fields: field_types,
         })
     }
 
-    fn type_check_tuple_field_access(
+    fn check_tuple_field_access(
         &mut self,
         target: &Expr,
         index: usize,
     ) -> Result<Type, TypeCheckError> {
         // Type check target
-        let target_ty = self.type_check_expr(target)?;
+        let target_ty = self.visit_expr(target, None)?;
         match target_ty {
             Type::Tuple { fields } => {
                 let index_usize = index;
@@ -523,30 +463,33 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_struct_lit(
+    fn check_struct_lit(
         &mut self,
         name: &String,
         fields: &[StructLitField],
     ) -> Result<Type, TypeCheckError> {
-        let Some(struct_ty) = self.type_decls.get(name) else {
-            for field in fields {
-                let _ = self.type_check_expr(&field.value)?;
+        let struct_ty = match self.type_decls.get(name) {
+            Some(ty) => ty.clone(),
+            None => {
+                for field in fields {
+                    let _ = self.visit_expr(&field.value, None)?;
+                }
+                return Ok(Type::Unknown);
             }
-            return Ok(Type::Unknown);
         };
         let Type::Struct {
             fields: struct_fields,
             ..
-        } = struct_ty
+        } = &struct_ty
         else {
             for field in fields {
-                let _ = self.type_check_expr(&field.value)?;
+                let _ = self.visit_expr(&field.value, None)?;
             }
             return Ok(Type::Unknown);
         };
 
         for field in fields {
-            let actual_ty = self.type_check_expr(&field.value)?;
+            let actual_ty = self.visit_expr(&field.value, None)?;
             if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
                 && actual_ty != expected.ty
             {
@@ -560,16 +503,12 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         }
 
-        Ok(struct_ty.clone())
+        Ok(struct_ty)
     }
 
-    fn type_check_field_access(
-        &mut self,
-        target: &Expr,
-        field: &str,
-    ) -> Result<Type, TypeCheckError> {
+    fn check_field_access(&mut self, target: &Expr, field: &str) -> Result<Type, TypeCheckError> {
         // Type check target
-        let target_ty = self.type_check_expr(target)?;
+        let target_ty = self.visit_expr(target, None)?;
         match target_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
                 Some(field) => Ok(field.ty.clone()),
@@ -579,23 +518,26 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_enum_variant(
+    fn check_enum_variant(
         &mut self,
         enum_name: &String,
         variant_name: &String,
         payload: &[Expr],
     ) -> Result<Type, TypeCheckError> {
         // Lookup the type
-        let Some(enum_ty) = self.type_decls.get(enum_name) else {
-            for expr in payload {
-                let _ = self.type_check_expr(expr)?;
+        let enum_ty = match self.type_decls.get(enum_name) {
+            Some(ty) => ty.clone(),
+            None => {
+                for expr in payload {
+                    let _ = self.visit_expr(expr, None)?;
+                }
+                return Ok(Type::Unknown);
             }
-            return Ok(Type::Unknown);
         };
 
-        let Type::Enum { variants, .. } = enum_ty else {
+        let Type::Enum { variants, .. } = &enum_ty else {
             for expr in payload {
-                let _ = self.type_check_expr(expr)?;
+                let _ = self.visit_expr(expr, None)?;
             }
             return Ok(Type::Unknown);
         };
@@ -603,14 +545,14 @@ impl<'c, 'b> Checker<'c, 'b> {
         // Get the variant
         let Some(variant_ty) = variants.iter().find(|v| v.name == *variant_name) else {
             for expr in payload {
-                let _ = self.type_check_expr(expr)?;
+                let _ = self.visit_expr(expr, None)?;
             }
             return Ok(enum_ty.clone());
         };
 
         if payload.len() != variant_ty.payload.len() {
             for expr in payload {
-                let _ = self.type_check_expr(expr)?;
+                let _ = self.visit_expr(expr, None)?;
             }
             return Ok(enum_ty.clone());
         }
@@ -619,7 +561,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         for (i, (payload_expr, payload_ty)) in
             payload.iter().zip(variant_ty.payload.iter()).enumerate()
         {
-            let actual_ty = self.type_check_expr(payload_expr)?;
+            let actual_ty = self.visit_expr(payload_expr, None)?;
             if actual_ty != *payload_ty {
                 return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
                     variant_name.clone(),
@@ -632,16 +574,16 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         }
 
-        Ok(enum_ty.clone())
+        Ok(enum_ty)
     }
 
-    fn type_check_struct_update(
+    fn check_struct_update(
         &mut self,
         target: &Expr,
         fields: &[StructUpdateField],
     ) -> Result<Type, TypeCheckError> {
         // Type check target
-        let target_ty = self.type_check_expr(target)?;
+        let target_ty = self.visit_expr(target, None)?;
         let struct_ty = match &target_ty {
             Type::Struct { .. } => target_ty.clone(),
             _ => {
@@ -660,7 +602,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         };
 
         for field in fields {
-            let actual_ty = self.type_check_expr(&field.value)?;
+            let actual_ty = self.visit_expr(&field.value, None)?;
             if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
                 && actual_ty != expected.ty
             {
@@ -677,38 +619,13 @@ impl<'c, 'b> Checker<'c, 'b> {
         Ok(struct_ty)
     }
 
-    fn type_check_block(
-        &mut self,
-        items: &Vec<BlockItem>,
-        tail: &Option<&Expr>,
-    ) -> Result<Type, TypeCheckError> {
-        for item in items {
-            match item {
-                BlockItem::Stmt(stmt) => {
-                    self.type_check_stmt_expr(stmt)?;
-                }
-                BlockItem::Expr(expr) => {
-                    self.type_check_expr(expr)?;
-                }
-            }
-        }
-
-        match tail {
-            Some(expr) => self.type_check_expr(expr),
-            None => Ok(Type::Unit),
-        }
-    }
-
-    fn type_check_pattern(
-        &mut self,
-        pattern: &Pattern,
-        value_ty: &Type,
-    ) -> Result<(), TypeCheckError> {
+    fn check_pattern(&mut self, pattern: &Pattern, value_ty: &Type) -> Result<(), TypeCheckError> {
         match &pattern.kind {
             PatternKind::Ident { .. } => {
                 // Record this identifier's type
                 if let Some(def) = self.context.def_map.lookup_def(pattern.id) {
-                    self.builder.record_def_type(def.clone(), value_ty.clone());
+                    self.type_map_builder
+                        .record_def_type(def.clone(), value_ty.clone());
                 }
                 Ok(())
             }
@@ -740,7 +657,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
                         // Recursively type check each sub-pattern
                         for pattern in patterns {
-                            self.type_check_pattern(pattern, &sub_ty)?;
+                            self.check_pattern(pattern, &sub_ty)?;
                         }
                         Ok(())
                     }
@@ -766,7 +683,7 @@ impl<'c, 'b> Checker<'c, 'b> {
 
                         // Recursively type check each sub-pattern
                         for (pattern, field) in patterns.iter().zip(fields) {
-                            self.type_check_pattern(pattern, field)?;
+                            self.check_pattern(pattern, field)?;
                         }
                         Ok(())
                     }
@@ -810,7 +727,7 @@ impl<'c, 'b> Checker<'c, 'b> {
                         .find(|f| f.name == field.name)
                         .map(|f| &f.ty)
                     {
-                        self.type_check_pattern(&field.pattern, expected_ty)?;
+                        self.check_pattern(&field.pattern, expected_ty)?;
                     }
                 }
 
@@ -819,7 +736,7 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_binding(
+    fn check_binding(
         &mut self,
         pattern: &Pattern,
         decl_ty: &Option<TypeExpr>,
@@ -831,7 +748,7 @@ impl<'c, 'b> Checker<'c, 'b> {
             .map(|ty_expr| resolve_type_expr(&self.context.def_map, ty_expr))
             .transpose()?;
 
-        let mut value_ty = self.type_check_expr_with_expected(value, expected_ty.as_ref())?;
+        let mut value_ty = self.visit_expr(value, expected_ty.as_ref())?;
 
         if let Some(decl_ty) = &expected_ty {
             self.check_assignable_to(value, &value_ty, decl_ty)?;
@@ -839,11 +756,12 @@ impl<'c, 'b> Checker<'c, 'b> {
             if matches!(&value.kind, ExprKind::ArrayLit { .. })
                 && matches!(value_ty, Type::Array { .. })
             {
-                self.builder.record_node_type(value.id, value_ty.clone());
+                self.type_map_builder
+                    .record_node_type(value.id, value_ty.clone());
             }
         }
 
-        self.type_check_pattern(pattern, &value_ty)?;
+        self.check_pattern(pattern, &value_ty)?;
 
         Ok(Type::Unit)
     }
@@ -865,9 +783,9 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
-        let lhs_type = self.type_check_expr(assignee)?;
-        let rhs_type = self.type_check_expr_with_expected(value, Some(&lhs_type))?;
+    fn check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
+        let lhs_type = self.visit_expr(assignee, None)?;
+        let rhs_type = self.visit_expr(value, Some(&lhs_type))?;
 
         match self.check_assignable_to(value, &rhs_type, &lhs_type) {
             Ok(()) => Ok(Type::Unit),
@@ -880,14 +798,14 @@ impl<'c, 'b> Checker<'c, 'b> {
         }
     }
 
-    fn type_check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
+    fn check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
         match self.lookup_def_type(var_ref_expr.id) {
             Some(def_type) => Ok(def_type.clone()),
             None => Err(TypeCheckErrorKind::UnknownType(var_ref_expr.span).into()),
         }
     }
 
-    fn type_check_call(
+    fn check_call(
         &mut self,
         call_expr: &Expr,
         callee: &Expr,
@@ -896,53 +814,57 @@ impl<'c, 'b> Checker<'c, 'b> {
         let name = match &callee.kind {
             ExprKind::Var(name) => name,
             _ => {
-                for arg in args {
-                    let _ = self.type_check_expr(arg)?;
-                }
+                let _ = self.visit_call(callee, args)?;
                 return Ok(Type::Unknown);
             }
         };
 
         // Compute argument types first to avoid holding an immutable borrow of self.funcs
-        let mut arg_types = Vec::new();
-        for arg in args {
-            let ty = self.type_check_expr(arg)?;
-            arg_types.push(ty);
-        }
+        let arg_types = self.visit_call_args(args)?;
         // Get overload set for the function
-        let Some(overloads) = self.func_sigs.get(name) else {
-            return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
+        let (def_id, param_types, return_type) = {
+            let Some(overloads) = self.func_sigs.get(name) else {
+                return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
+            };
+            // If no overload matches the arity and all overloads share the same arity,
+            // report a count mismatch instead of a generic overload error.
+            if !overloads
+                .iter()
+                .any(|sig| sig.params.len() == arg_types.len())
+            {
+                let mut counts = HashSet::new();
+                for sig in overloads {
+                    counts.insert(sig.params.len());
+                }
+                if counts.len() == 1 {
+                    let expected = *counts.iter().next().unwrap();
+                    return Err(TypeCheckErrorKind::ArgCountMismatch(
+                        name.to_string(),
+                        expected,
+                        arg_types.len(),
+                        call_expr.span,
+                    )
+                    .into());
+                }
+            }
+
+            let resolved = FuncOverloadResolver::new(name, args, &arg_types, call_expr.span)
+                .resolve(overloads)?;
+            let param_types = resolved
+                .sig
+                .params
+                .iter()
+                .map(|param| param.ty.clone())
+                .collect::<Vec<_>>();
+            let return_type = resolved.sig.return_type.clone();
+            (resolved.def_id, param_types, return_type)
         };
-        // If no overload matches the arity and all overloads share the same arity,
-        // report a count mismatch instead of a generic overload error.
-        if !overloads
-            .iter()
-            .any(|sig| sig.params.len() == arg_types.len())
-        {
-            let mut counts = HashSet::new();
-            for sig in overloads {
-                counts.insert(sig.params.len());
-            }
-            if counts.len() == 1 {
-                let expected = *counts.iter().next().unwrap();
-                return Err(TypeCheckErrorKind::ArgCountMismatch(
-                    name.to_string(),
-                    expected,
-                    arg_types.len(),
-                    call_expr.span,
-                )
-                .into());
-            }
-        }
 
-        let resolved =
-            FuncOverloadResolver::new(name, args, &arg_types, call_expr.span).resolve(overloads)?;
-
-        self.builder.record_call_def(call_expr.id, resolved.def_id);
+        self.type_map_builder.record_call_def(call_expr.id, def_id);
         // Check argument types against the resolved overload, re-typing with expectations
         for (i, arg) in args.iter().enumerate() {
-            let param_ty = &resolved.sig.params[i].ty;
-            let arg_ty = self.type_check_expr_with_expected(arg, Some(param_ty))?;
+            let param_ty = &param_types[i];
+            let arg_ty = self.visit_expr(arg, Some(param_ty))?;
             match self.check_assignable_to(arg, &arg_ty, param_ty) {
                 Ok(()) => continue,
                 Err(_) => {
@@ -957,99 +879,103 @@ impl<'c, 'b> Checker<'c, 'b> {
                 }
             }
         }
-        Ok(resolved.sig.return_type.clone())
+        Ok(return_type)
     }
 
-    fn type_check_if(
-        &mut self,
-        cond: &Expr,
-        then_body: &Expr,
-        else_body: &Expr,
-    ) -> Result<Type, TypeCheckError> {
-        let cond_type = self.type_check_expr(cond)?;
+    fn check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
+        let cond_type = self.visit_expr(cond, None)?;
         if cond_type != Type::Bool {
             return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
-        let then_type = self.type_check_expr(then_body)?;
-        let else_type = self.type_check_expr(else_body)?;
-        if then_type != else_type {
-            // create a span that covers both the then and else bodies so the
-            // diagnostic highlights the whole region
-            let span = Span::merge_all(vec![then_body.span, else_body.span]);
-            return Err(
-                TypeCheckErrorKind::ThenElseTypeMismatch(then_type, else_type, span).into(),
-            );
-        }
-
-        Ok(then_type)
-    }
-
-    fn type_check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
-        let cond_type = self.type_check_expr(cond)?;
-        if cond_type != Type::Bool {
-            return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
-        }
-
-        let _ = self.type_check_expr(body)?;
+        let _ = self.visit_expr(body, None)?;
         Ok(Type::Unit)
     }
 
-    fn type_check_for(
+    fn check_for(
         &mut self,
         pattern: &Pattern,
         iter: &Expr,
         body: &Expr,
     ) -> Result<Type, TypeCheckError> {
-        let iter_ty = self.type_check_expr(iter)?;
+        let iter_ty = self.visit_expr(iter, None)?;
         let item_ty = self.iterable_item_type(&iter_ty, iter.span)?;
 
         // Loop variable's type is the item type of the iterable
-        self.type_check_pattern(pattern, &item_ty)?;
+        self.check_pattern(pattern, &item_ty)?;
 
         // Type check body
-        let _ = self.type_check_expr(body)?;
+        let _ = self.visit_expr(body, None)?;
 
         Ok(Type::Unit)
     }
 
-    fn type_check_match(
-        &mut self,
-        scrutinee: &Expr,
-        arms: &[MatchArm],
-    ) -> Result<Type, TypeCheckError> {
-        let scrutinee_ty = self.type_check_expr(scrutinee)?;
+    fn iterable_item_type(&self, iter_ty: &Type, span: Span) -> Result<Type, TypeCheckError> {
+        match iter_ty {
+            Type::Range { .. } => Ok(Type::uint(64)),
+            Type::Array { elem_ty, dims } => {
+                if dims.is_empty() {
+                    return Err(
+                        TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into(),
+                    );
+                }
+                if dims.len() == 1 {
+                    Ok((**elem_ty).clone())
+                } else {
+                    Ok(Type::Array {
+                        elem_ty: Box::new((**elem_ty).clone()),
+                        dims: dims[1..].to_vec(),
+                    })
+                }
+            }
+            _ => Err(TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into()),
+        }
+    }
 
+    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<Type, TypeCheckError> {
+        let scrutinee_ty = self.visit_expr(scrutinee, None)?;
         let (enum_name, variants) = match scrutinee_ty {
             Type::Enum { name, variants } => (Some(name.clone()), variants),
             _ => (None, Vec::new()),
         };
         let mut arm_ty: Option<Type> = None;
 
-        for arm in arms {
-            if let Some(enum_name) = &enum_name {
-                self.type_check_match_pattern(enum_name, &variants, &arm.pattern)?;
-            }
-
-            let body_ty = self.type_check_expr(&arm.body)?;
-            if let Some(expected_ty) = &arm_ty {
-                if body_ty != *expected_ty {
-                    return Err(TypeCheckErrorKind::MatchArmTypeMismatch(
-                        expected_ty.clone(),
-                        body_ty,
-                        arm.span,
-                    )
-                    .into());
-                }
-            } else {
-                arm_ty = Some(body_ty);
-            }
-        }
+        self.visit_match_arms(arms, |this, arm| {
+            this.check_match_arm(arm, &enum_name, &variants, &mut arm_ty)
+        })?;
 
         Ok(arm_ty.unwrap_or(Type::Unit))
     }
 
-    fn type_check_match_pattern(
+    fn check_match_arm(
+        &mut self,
+        arm: &MatchArm,
+        enum_name: &Option<String>,
+        variants: &[EnumVariant],
+        arm_ty: &mut Option<Type>,
+    ) -> Result<(), TypeCheckError> {
+        if let Some(enum_name) = enum_name {
+            self.check_match_pattern(enum_name, variants, &arm.pattern)?;
+        }
+
+        let body_ty = self.visit_match_arm(arm)?;
+        if let Some(expected_ty) = arm_ty {
+            if body_ty != *expected_ty {
+                return Err(TypeCheckErrorKind::MatchArmTypeMismatch(
+                    expected_ty.clone(),
+                    body_ty,
+                    arm.span,
+                )
+                .into());
+            }
+        } else {
+            *arm_ty = Some(body_ty);
+        }
+
+        Ok(())
+    }
+
+    fn check_match_pattern(
         &mut self,
         enum_name: &String,
         variants: &[EnumVariant],
@@ -1075,8 +1001,10 @@ impl<'c, 'b> Checker<'c, 'b> {
                         for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
                             match self.context.def_map.lookup_def(binding.id) {
                                 Some(def) => {
-                                    self.builder.record_def_type(def.clone(), ty.clone());
-                                    self.builder.record_node_type(binding.id, ty.clone());
+                                    self.type_map_builder
+                                        .record_def_type(def.clone(), ty.clone());
+                                    self.type_map_builder
+                                        .record_node_type(binding.id, ty.clone());
                                 }
                                 None => panic!(
                                     "compiler bug: binding [{}] not found in def_map",
@@ -1087,16 +1015,20 @@ impl<'c, 'b> Checker<'c, 'b> {
                     } else {
                         for binding in bindings {
                             if let Some(def) = self.context.def_map.lookup_def(binding.id) {
-                                self.builder.record_def_type(def.clone(), Type::Unknown);
-                                self.builder.record_node_type(binding.id, Type::Unknown);
+                                self.type_map_builder
+                                    .record_def_type(def.clone(), Type::Unknown);
+                                self.type_map_builder
+                                    .record_node_type(binding.id, Type::Unknown);
                             }
                         }
                     }
                 } else {
                     for binding in bindings {
                         if let Some(def) = self.context.def_map.lookup_def(binding.id) {
-                            self.builder.record_def_type(def.clone(), Type::Unknown);
-                            self.builder.record_node_type(binding.id, Type::Unknown);
+                            self.type_map_builder
+                                .record_def_type(def.clone(), Type::Unknown);
+                            self.type_map_builder
+                                .record_node_type(binding.id, Type::Unknown);
                         }
                     }
                 }
@@ -1105,121 +1037,83 @@ impl<'c, 'b> Checker<'c, 'b> {
             }
         }
     }
+}
 
-    fn type_check_bin_op(
-        &mut self,
-        left: &Expr,
-        op: &BinaryOp,
-        right: &Expr,
-    ) -> Result<Type, TypeCheckError> {
-        let left_type = self.type_check_expr(left)?;
-        let right_type = self.type_check_expr(right)?;
+impl AstFolder for TypeChecker {
+    type Error = TypeCheckError;
+    type Output = Type;
+    type Input = Type;
 
-        match op {
-            // Arithmetic operators
-            BinaryOp::Add
-            | BinaryOp::Sub
-            | BinaryOp::Mul
-            | BinaryOp::Div
-            | BinaryOp::Mod
-            | BinaryOp::BitOr
-            | BinaryOp::BitXor
-            | BinaryOp::BitAnd
-            | BinaryOp::Shl
-            | BinaryOp::Shr => {
-                if !left_type.is_int() {
-                    return Err(TypeCheckErrorKind::ArithOperandNotInt(left_type, left.span).into());
-                }
-                if !right_type.is_int() {
-                    return Err(
-                        TypeCheckErrorKind::ArithOperandNotInt(right_type, right.span).into(),
-                    );
-                }
-                if left_type != right_type {
-                    let span = Span::merge_all(vec![left.span, right.span]);
-                    return Err(
-                        TypeCheckErrorKind::ArithTypeMismatch(left_type, right_type, span).into(),
-                    );
-                }
-                Ok(left_type)
-            }
-
-            // Comparison operators
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Gt
-            | BinaryOp::LtEq
-            | BinaryOp::GtEq => {
-                if !left_type.is_int() {
-                    return Err(TypeCheckErrorKind::CmpOperandNotInt(left_type, left.span).into());
-                }
-                if !right_type.is_int() {
-                    return Err(TypeCheckErrorKind::CmpOperandNotInt(right_type, right.span).into());
-                }
-                Ok(Type::Bool)
-            }
-
-            // Logical operators
-            BinaryOp::LogicalOr | BinaryOp::LogicalAnd => {
-                if left_type != Type::Bool {
-                    return Err(
-                        TypeCheckErrorKind::LogicalOperandNotBoolean(left_type, left.span).into(),
-                    );
-                }
-                if right_type != Type::Bool {
-                    return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
-                        right_type, right.span,
-                    )
-                    .into());
-                }
-                Ok(Type::Bool)
-            }
+    fn visit_func(&mut self, func: &Function) -> Result<Type, TypeCheckError> {
+        if self.halted {
+            return Ok(Type::Unit);
         }
+
+        if self.check_function(func).is_err() {
+            self.halted = true;
+        }
+
+        Ok(Type::Unit)
     }
 
-    fn type_check_stmt_expr(&mut self, stmt: &StmtExpr) -> Result<Type, TypeCheckError> {
+    fn visit_if(
+        &mut self,
+        cond: &Expr,
+        then_body: &Expr,
+        else_body: &Expr,
+    ) -> Result<(Type, Type, Type), TypeCheckError> {
+        let (cond_type, then_type, else_type) = walk_if(self, cond, then_body, else_body)?;
+        if cond_type != Type::Bool {
+            return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
+        }
+
+        if then_type != else_type {
+            // create a span that covers both the then and else bodies so the
+            // diagnostic highlights the whole region
+            let span = Span::merge_all(vec![then_body.span, else_body.span]);
+            return Err(
+                TypeCheckErrorKind::ThenElseTypeMismatch(then_type, else_type, span).into(),
+            );
+        }
+
+        Ok((cond_type, then_type, else_type))
+    }
+
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) -> Result<Type, TypeCheckError> {
         let ty = match &stmt.kind {
             StmtExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
-            } => self.type_check_binding(pattern, decl_ty, value)?,
+            } => self.check_binding(pattern, decl_ty, value)?,
 
             StmtExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
-            } => self.type_check_binding(pattern, decl_ty, value)?,
+            } => self.check_binding(pattern, decl_ty, value)?,
 
-            StmtExprKind::Assign { assignee, value } => self.type_check_assign(assignee, value)?,
+            StmtExprKind::Assign { assignee, value } => self.check_assign(assignee, value)?,
 
-            StmtExprKind::While { cond, body } => self.type_check_while(cond, body)?,
+            StmtExprKind::While { cond, body } => self.check_while(cond, body)?,
 
             StmtExprKind::For {
                 pattern,
                 iter,
                 body,
-            } => self.type_check_for(pattern, iter, body)?,
+            } => self.check_for(pattern, iter, body)?,
         };
 
-        self.builder.record_node_type(stmt.id, ty.clone());
+        self.type_map_builder.record_node_type(stmt.id, ty.clone());
         Ok(ty)
     }
 
-    fn type_check_expr_with_expected(
-        &mut self,
-        expr: &Expr,
-        expected: Option<&Type>,
-    ) -> Result<Type, TypeCheckError> {
-        match (&expr.kind, expected) {
-            // Integer literal: adopt the expected integer type.
+    fn visit_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Result<Type, TypeCheckError> {
+        let result = match (&expr.kind, expected) {
             (ExprKind::IntLit(_), Some(expected_ty)) if expected_ty.is_int() => {
-                self.builder.record_node_type(expr.id, expected_ty.clone());
                 Ok(expected_ty.clone())
             }
 
-            // Unary negation of an integer literal: adopt the expected signed integer type.
             (
                 ExprKind::UnaryOp {
                     op: UnaryOp::Neg,
@@ -1227,181 +1121,226 @@ impl<'c, 'b> Checker<'c, 'b> {
                 },
                 Some(expected_ty @ Type::Int { signed: true, .. }),
             ) if matches!(operand.kind, ExprKind::IntLit(_)) => {
-                let _ = self.type_check_expr_with_expected(operand, Some(expected_ty))?;
-                self.builder.record_node_type(expr.id, expected_ty.clone());
+                let _ = self.visit_expr(operand, Some(expected_ty))?;
                 Ok(expected_ty.clone())
             }
 
-            // Untyped array literal: use the expected array type to type-check elements.
-            (
-                ExprKind::ArrayLit {
-                    elem_ty: None,
-                    init,
-                },
-                Some(expected_ty @ Type::Array { .. }),
-            ) => {
-                let ty = self.type_check_array_lit_with_expected(init, expected_ty, expr.span)?;
-                self.builder.record_node_type(expr.id, ty.clone());
-                Ok(ty)
-            }
+            _ => match &expr.kind {
+                ExprKind::IntLit(_) => Ok(Type::uint(64)),
 
-            // Fallback: no expected-type shortcut applies.
-            _ => self.type_check_expr(expr),
-        }
-    }
+                ExprKind::BoolLit(_) => Ok(Type::Bool),
 
-    fn type_check_expr(&mut self, expr: &Expr) -> Result<Type, TypeCheckError> {
-        let result = match &expr.kind {
-            ExprKind::IntLit(_) => Ok(Type::uint(64)),
+                ExprKind::CharLit(_) => Ok(Type::Char),
 
-            ExprKind::BoolLit(_) => Ok(Type::Bool),
+                ExprKind::StringLit { .. } => Ok(Type::String),
 
-            ExprKind::CharLit(_) => Ok(Type::Char),
+                ExprKind::UnitLit => Ok(Type::Unit),
 
-            ExprKind::StringLit { .. } => Ok(Type::String),
+                ExprKind::StringFmt { segments } => {
+                    for segment in segments {
+                        if let StringFmtSegment::Expr { expr, span } = segment {
+                            let ty = walk_expr(self, expr)?;
+                            if !ty.is_int() && ty != Type::String {
+                                return Err(TypeCheckErrorKind::StringFmtExprUnsupportedType(
+                                    ty, *span,
+                                )
+                                .into());
+                            }
+                        }
+                    }
+                    Ok(Type::String)
+                }
 
-            ExprKind::UnitLit => Ok(Type::Unit),
+                ExprKind::ArrayLit { elem_ty, init } => {
+                    self.check_array_lit(elem_ty.as_ref(), init, expected, expr.span)
+                }
 
-            ExprKind::StringFmt { segments } => {
-                for segment in segments {
-                    if let StringFmtSegment::Expr { expr, span } = segment {
-                        let ty = self.type_check_expr(expr)?;
-                        if !ty.is_int() && ty != Type::String {
-                            return Err(TypeCheckErrorKind::StringFmtExprUnsupportedType(
-                                ty, *span,
+                ExprKind::ArrayIndex { target, indices } => {
+                    let target_ty = self.visit_expr(target, None)?;
+                    match target_ty {
+                        Type::Array { elem_ty, dims } => {
+                            self.check_array_index(&elem_ty, &dims, indices, target.span)
+                        }
+                        Type::String => self.check_string_index(indices, target.span),
+                        _ => {
+                            return Err(TypeCheckErrorKind::InvalidIndexTargetType(
+                                target_ty,
+                                target.span,
                             )
                             .into());
                         }
                     }
                 }
-                Ok(Type::String)
-            }
 
-            ExprKind::ArrayLit { elem_ty, init } => {
-                self.type_check_array_lit(elem_ty.as_ref(), init, expr.span)
-            }
+                ExprKind::TupleLit(fields) => self.check_tuple_lit(fields),
 
-            ExprKind::ArrayIndex { target, indices } => {
-                let target_ty = self.type_check_expr(target)?;
-                match target_ty {
-                    Type::Array { elem_ty, dims } => {
-                        self.type_check_array_index(&elem_ty, &dims, indices, target.span)
-                    }
-                    Type::String => self.type_check_string_index(indices, target.span),
-                    _ => {
-                        return Err(TypeCheckErrorKind::InvalidIndexTargetType(
-                            target_ty,
-                            target.span,
-                        )
-                        .into());
+                ExprKind::TupleField { target, index } => {
+                    self.check_tuple_field_access(target, *index)
+                }
+
+                ExprKind::StructLit { name, fields } => self.check_struct_lit(name, fields),
+
+                ExprKind::StructField { target, field } => self.check_field_access(target, field),
+
+                ExprKind::StructUpdate { target, fields } => {
+                    self.check_struct_update(target, fields)
+                }
+
+                ExprKind::EnumVariant {
+                    enum_name,
+                    variant,
+                    payload,
+                } => self.check_enum_variant(enum_name, variant, payload),
+
+                ExprKind::BinOp { left, op, right } => {
+                    let (left_type, right_type) = self.visit_binary_expr(left, right)?;
+                    match op {
+                        // Arithmetic operators
+                        BinaryOp::Add
+                        | BinaryOp::Sub
+                        | BinaryOp::Mul
+                        | BinaryOp::Div
+                        | BinaryOp::Mod
+                        | BinaryOp::BitOr
+                        | BinaryOp::BitXor
+                        | BinaryOp::BitAnd
+                        | BinaryOp::Shl
+                        | BinaryOp::Shr => {
+                            if !left_type.is_int() {
+                                return Err(TypeCheckErrorKind::ArithOperandNotInt(
+                                    left_type, left.span,
+                                )
+                                .into());
+                            }
+                            if !right_type.is_int() {
+                                return Err(TypeCheckErrorKind::ArithOperandNotInt(
+                                    right_type, right.span,
+                                )
+                                .into());
+                            }
+                            if left_type != right_type {
+                                let span = Span::merge_all(vec![left.span, right.span]);
+                                return Err(TypeCheckErrorKind::ArithTypeMismatch(
+                                    left_type, right_type, span,
+                                )
+                                .into());
+                            }
+                            Ok(left_type)
+                        }
+
+                        // Comparison operators
+                        BinaryOp::Eq
+                        | BinaryOp::Ne
+                        | BinaryOp::Lt
+                        | BinaryOp::Gt
+                        | BinaryOp::LtEq
+                        | BinaryOp::GtEq => {
+                            if !left_type.is_int() {
+                                return Err(TypeCheckErrorKind::CmpOperandNotInt(
+                                    left_type, left.span,
+                                )
+                                .into());
+                            }
+                            if !right_type.is_int() {
+                                return Err(TypeCheckErrorKind::CmpOperandNotInt(
+                                    right_type, right.span,
+                                )
+                                .into());
+                            }
+                            Ok(Type::Bool)
+                        }
+
+                        // Logical operators
+                        BinaryOp::LogicalOr | BinaryOp::LogicalAnd => {
+                            if left_type != Type::Bool {
+                                return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
+                                    left_type, left.span,
+                                )
+                                .into());
+                            }
+                            if right_type != Type::Bool {
+                                return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
+                                    right_type, right.span,
+                                )
+                                .into());
+                            }
+                            Ok(Type::Bool)
+                        }
                     }
                 }
-            }
 
-            ExprKind::TupleLit(fields) => self.type_check_tuple_lit(fields),
-
-            ExprKind::TupleField { target, index } => {
-                self.type_check_tuple_field_access(target, *index)
-            }
-
-            ExprKind::StructLit { name, fields } => self.type_check_struct_lit(name, fields),
-
-            ExprKind::StructField { target, field } => self.type_check_field_access(target, field),
-
-            ExprKind::StructUpdate { target, fields } => {
-                self.type_check_struct_update(target, fields)
-            }
-
-            ExprKind::EnumVariant {
-                enum_name,
-                variant,
-                payload,
-            } => self.type_check_enum_variant(enum_name, variant, payload),
-
-            ExprKind::BinOp { left, op, right } => self.type_check_bin_op(left, op, right),
-
-            ExprKind::UnaryOp { op, expr } => {
-                let ty = self.type_check_expr(expr)?;
-                match op {
-                    UnaryOp::Neg => {
-                        if !ty.is_int() {
-                            return Err(
-                                TypeCheckErrorKind::NegationOperandNotInt(ty, expr.span).into()
-                            );
+                ExprKind::UnaryOp { op, expr } => {
+                    let ty = walk_expr(self, expr)?;
+                    match op {
+                        UnaryOp::Neg => {
+                            if !ty.is_int() {
+                                return Err(TypeCheckErrorKind::NegationOperandNotInt(
+                                    ty, expr.span,
+                                )
+                                .into());
+                            }
+                            Ok(ty)
                         }
-                        Ok(ty)
-                    }
-                    UnaryOp::LogicalNot => {
-                        if ty != Type::Bool {
-                            return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
-                                ty, expr.span,
-                            )
-                            .into());
+                        UnaryOp::LogicalNot => {
+                            if ty != Type::Bool {
+                                return Err(TypeCheckErrorKind::LogicalOperandNotBoolean(
+                                    ty, expr.span,
+                                )
+                                .into());
+                            }
+                            Ok(Type::Bool)
                         }
-                        Ok(Type::Bool)
-                    }
-                    UnaryOp::BitNot => {
-                        if !ty.is_int() {
-                            return Err(
-                                TypeCheckErrorKind::ArithOperandNotInt(ty, expr.span).into()
-                            );
+                        UnaryOp::BitNot => {
+                            if !ty.is_int() {
+                                return Err(
+                                    TypeCheckErrorKind::ArithOperandNotInt(ty, expr.span).into()
+                                );
+                            }
+                            Ok(ty)
                         }
-                        Ok(ty)
                     }
                 }
-            }
 
-            ExprKind::Move { expr } => self.type_check_expr(expr),
+                ExprKind::Move { expr } => walk_expr(self, expr),
 
-            ExprKind::Block { items, tail } => self.type_check_block(items, &tail.as_deref()),
+                ExprKind::Block { items, tail } => {
+                    for item in items {
+                        let _ = self.visit_block_item(item)?;
+                    }
 
-            ExprKind::Var(_) => self.type_check_var_ref(expr),
+                    let tail_ty = self.visit_block_tail(tail.as_deref(), expected)?;
 
-            ExprKind::Call { callee, args } => self.type_check_call(expr, callee, args),
+                    Ok(tail_ty.unwrap_or(Type::Unit))
+                }
 
-            ExprKind::If {
-                cond,
-                then_body,
-                else_body,
-            } => self.type_check_if(cond, then_body, else_body),
+                ExprKind::Var(_) => self.check_var_ref(expr),
 
-            ExprKind::Range { start, end } => Ok(Type::Range {
-                min: *start,
-                max: *end,
-            }),
+                ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
 
-            ExprKind::Slice { target, start, end } => self.type_check_slice(target, start, end),
+                ExprKind::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    let (_cond, then_type, _else_type) =
+                        self.visit_if(cond, then_body, else_body)?;
+                    Ok(then_type)
+                }
 
-            ExprKind::Match { scrutinee, arms } => self.type_check_match(scrutinee, arms),
+                ExprKind::Range { start, end } => Ok(Type::Range {
+                    min: *start,
+                    max: *end,
+                }),
+
+                ExprKind::Slice { target, start, end } => self.check_slice(target, start, end),
+
+                ExprKind::Match { scrutinee, arms } => self.check_match(scrutinee, arms),
+            },
         };
 
         result.map(|ty| {
-            self.builder.record_node_type(expr.id, ty.clone());
+            self.type_map_builder.record_node_type(expr.id, ty.clone());
             ty.clone()
         })
-    }
-
-    // --- Helper functions ---
-
-    fn iterable_item_type(&self, iter_ty: &Type, span: Span) -> Result<Type, TypeCheckError> {
-        match iter_ty {
-            Type::Range { .. } => Ok(Type::uint(64)),
-            Type::Array { elem_ty, dims } => {
-                if dims.is_empty() {
-                    return Err(
-                        TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into(),
-                    );
-                }
-                if dims.len() == 1 {
-                    Ok((**elem_ty).clone())
-                } else {
-                    Ok(Type::Array {
-                        elem_ty: Box::new((**elem_ty).clone()),
-                        dims: dims[1..].to_vec(),
-                    })
-                }
-            }
-            _ => Err(TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into()),
-        }
     }
 }

@@ -1,9 +1,11 @@
 //! Abstract Syntax Tree (AST)
 
 pub mod cfg;
+pub mod fold;
 mod format;
 mod visit;
 
+pub use fold::AstFolder;
 pub use visit::*;
 
 use std::fmt;
