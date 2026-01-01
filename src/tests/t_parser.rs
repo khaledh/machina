@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::{
     ArrayLitInit, BlockItem, Expr, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExpr,
-    StmtExprKind, StringTag, TypeDeclKind, TypeExprKind,
+    StmtExprKind, TypeDeclKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -54,9 +54,8 @@ fn test_parse_fstring_literal_folds_to_string_lit() {
     let tail = tail.expect("Expected block tail");
 
     match &tail.kind {
-        ExprKind::StringLit { value, tag } => {
+        ExprKind::StringLit { value, .. } => {
             assert_eq!(value, "hello {}");
-            assert_eq!(*tag, StringTag::Ascii);
         }
         _ => panic!("Expected folded StringLit"),
     }
@@ -76,9 +75,8 @@ fn test_parse_fstring_string_lit_expr_folds() {
     let tail = tail.expect("Expected block tail");
 
     match &tail.kind {
-        ExprKind::StringLit { value, tag } => {
+        ExprKind::StringLit { value, .. } => {
             assert_eq!(value, "hi");
-            assert_eq!(*tag, StringTag::Ascii);
         }
         _ => panic!("Expected folded StringLit"),
     }
@@ -543,28 +541,7 @@ fn test_parse_tuple_literal() {
 }
 
 #[test]
-fn test_parse_string_literal_ascii() {
-    let source = r#"
-        fn main() {
-            "hello"
-        }
-    "#;
-
-    let funcs = parse_source(source).expect("Failed to parse");
-    let func = &funcs[0];
-
-    let tail = block_tail(&func.body);
-    match &tail.kind {
-        ExprKind::StringLit { value, tag } => {
-            assert_eq!(value, "hello");
-            assert_eq!(*tag, StringTag::Ascii);
-        }
-        _ => panic!("Expected string literal"),
-    }
-}
-
-#[test]
-fn test_parse_string_literal_utf8() {
+fn test_parse_string_literal() {
     let source = r#"
         fn main() {
             "café"
@@ -576,9 +553,8 @@ fn test_parse_string_literal_utf8() {
 
     let tail = block_tail(&func.body);
     match &tail.kind {
-        ExprKind::StringLit { value, tag } => {
+        ExprKind::StringLit { value } => {
             assert_eq!(value, "café");
-            assert_eq!(*tag, StringTag::Utf8);
         }
         _ => panic!("Expected string literal"),
     }

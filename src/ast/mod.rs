@@ -199,12 +199,6 @@ pub struct StructUpdateField {
 
 // -- String Literals ---
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StringTag {
-    Ascii,
-    Utf8,
-}
-
 #[derive(Clone, Debug)]
 pub enum StringFmtSegment {
     Literal { value: String, span: Span },
@@ -381,7 +375,6 @@ pub enum ExprKind {
     CharLit(char),
     StringLit {
         value: String,
-        tag: StringTag,
     },
     StringFmt {
         segments: Vec<StringFmtSegment>,

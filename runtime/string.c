@@ -21,10 +21,7 @@ void __mc_string_from_bytes(mc_string_t *dst, const mc_slice_t *s) {
 
     dst->ptr = s->ptr;
     dst->len = (uint32_t)s->len;
-    dst->tag = 1;
-    dst->_pad[0] = 0;
-    dst->_pad[1] = 0;
-    dst->_pad[2] = 0;
+    dst->cap = 0;
 }
 
 /**

@@ -71,7 +71,7 @@
 ## Types
 - `mc_string_t` matches Machina's `string` layout:
   ```
-  { ptr: u64, len: u32, tag: u8, padding: [u8; 3] }
+  { ptr: u64, len: u32, cap: u32 }
   ```
 
 - `mc_slice_t` is a simple pointer and length:

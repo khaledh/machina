@@ -133,8 +133,8 @@ pub enum TypeCheckErrorKind {
     #[error("Duplicate match arm variant: {0}")]
     DuplicateMatchVariant(String, Span),
 
-    #[error("String index operation on non-ASCII string: {0}")]
-    StringIndexNonAscii(Span),
+    #[error("String index assignment is not supported: {0}")]
+    StringIndexAssign(Span),
 
     #[error("Invalid range bounds: {0} >= {1}")]
     InvalidRangeBounds(u64, u64, Span),
@@ -154,8 +154,8 @@ pub enum TypeCheckErrorKind {
     #[error("Function overload is ambiguous: {0}")]
     FuncOverloadAmbiguous(String, Span),
 
-    #[error("Slice target is not an array: {0}")]
-    SliceTargetNotArray(Type, Span),
+    #[error("Slice target is not an array or string: {0}")]
+    SliceTargetNotArrayOrString(Type, Span),
 
     #[error("Slice target is not a 1-D array: {0}")]
     SliceTargetNot1DArray(Type, Span),
@@ -216,14 +216,14 @@ impl TypeCheckError {
             TypeCheckErrorKind::MatchPatternEnumMismatch(_, _, span) => *span,
             TypeCheckErrorKind::NonExhaustiveMatch(span) => *span,
             TypeCheckErrorKind::DuplicateMatchVariant(_, span) => *span,
-            TypeCheckErrorKind::StringIndexNonAscii(span) => *span,
+            TypeCheckErrorKind::StringIndexAssign(span) => *span,
             TypeCheckErrorKind::InvalidRangeBounds(_, _, span) => *span,
             TypeCheckErrorKind::ValueOutOfRange(_, _, _, span) => *span,
             TypeCheckErrorKind::ForIterNotIterable(_, span) => *span,
             TypeCheckErrorKind::DivisionByZero(span) => *span,
             TypeCheckErrorKind::FuncOverloadNoMatch(_, span) => *span,
             TypeCheckErrorKind::FuncOverloadAmbiguous(_, span) => *span,
-            TypeCheckErrorKind::SliceTargetNotArray(_, span) => *span,
+            TypeCheckErrorKind::SliceTargetNotArrayOrString(_, span) => *span,
             TypeCheckErrorKind::SliceTargetNot1DArray(_, span) => *span,
             TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,
         }

@@ -233,35 +233,6 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn build_u8_slice(
-        &mut self,
-        ptr: Operand,
-        len: Operand,
-    ) -> Result<Place<Aggregate>, LowerError> {
-        // Helper to materialize a slice struct for runtime calls.
-        let slice_ty = Type::Slice {
-            elem_ty: Box::new(Type::uint(8)),
-        };
-        let slice_ty_id = self.ty_lowerer.lower_ty(&slice_ty);
-        let slice = self.new_temp_aggregate(slice_ty_id);
-
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
-        let ptr_field = Place::new(
-            slice.base(),
-            u64_ty_id,
-            vec![Projection::Field { index: 0 }],
-        );
-        let len_field = Place::new(
-            slice.base(),
-            u64_ty_id,
-            vec![Projection::Field { index: 1 }],
-        );
-
-        self.emit_copy_scalar(ptr_field, Rvalue::Use(ptr));
-        self.emit_copy_scalar(len_field, Rvalue::Use(len));
-        Ok(slice)
-    }
-
     fn coerce_int_to_u64(&mut self, expr: &Expr, op: Operand) -> Result<Operand, LowerError> {
         let ty = self.ty_for_node(expr.id)?;
         let Type::Int { signed, bits } = ty else {

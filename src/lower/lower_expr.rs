@@ -1,6 +1,4 @@
-use crate::ast::{
-    ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StringTag, StructLitField, UnaryOp,
-};
+use crate::ast::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -95,9 +93,18 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Place-based reads
-            EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
+            EK::Var(_) | EK::TupleField { .. } | EK::StructField { .. } => {
                 let place = self.lower_place_scalar(expr)?;
                 Ok(Operand::Copy(place))
+            }
+            EK::ArrayIndex { target, indices } => {
+                let target_ty = self.ty_for_node(target.id)?;
+                if matches!(target_ty, Type::String) {
+                    self.lower_string_index(expr, target, indices)
+                } else {
+                    let place = self.lower_place_scalar(expr)?;
+                    Ok(Operand::Copy(place))
+                }
             }
 
             // Unary/Binary ops
@@ -458,7 +465,7 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
-            EK::StringLit { value, tag } => {
+            EK::StringLit { value } => {
                 // 1) intern payload
                 let gid = self
                     .global_interner
@@ -471,16 +478,13 @@ impl<'a> FuncLowerer<'a> {
                     bits: 32,
                     value: value.len() as i128,
                 });
-                let tag_const = Operand::Const(Const::Int {
+                let cap_const = Operand::Const(Const::Int {
                     signed: false,
-                    bits: 8,
-                    value: match tag {
-                        StringTag::Ascii => 0,
-                        StringTag::Utf8 => 1,
-                    },
+                    bits: 32,
+                    value: 0,
                 });
 
-                // 3) build aggregate temp {ptr, len, tag}
+                // 3) build aggregate temp {ptr, len, cap}
                 // field 0: ptr
                 let ptr_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
                 self.emit_operand_into_agg_projection(
@@ -497,13 +501,13 @@ impl<'a> FuncLowerer<'a> {
                     len_const,
                     len_ty_id,
                 )?;
-                // field 2: tag
-                let tag_ty_id = self.ty_lowerer.lower_ty(&Type::uint(8));
+                // field 2: cap
+                let cap_ty_id = self.ty_lowerer.lower_ty(&Type::uint(32));
                 self.emit_operand_into_agg_projection(
                     &dst,
                     Projection::Field { index: 2 },
-                    tag_const,
-                    tag_ty_id,
+                    cap_const,
+                    cap_ty_id,
                 )?;
 
                 Ok(())

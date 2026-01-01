@@ -1,5 +1,6 @@
 mod errors;
 mod move_check;
+mod slice_escape;
 mod structural;
 mod util;
 mod value;
@@ -14,6 +15,7 @@ pub fn sem_check(ctx: &TypeCheckedContext) -> Result<(), Vec<SemCheckError>> {
     errors.extend(value::check(ctx));
     errors.extend(structural::check(ctx));
     errors.extend(move_check::check(ctx));
+    errors.extend(slice_escape::check(ctx));
 
     if errors.is_empty() {
         Ok(())

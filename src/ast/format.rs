@@ -376,16 +376,8 @@ impl Expr {
             ExprKind::CharLit(value) => {
                 writeln!(f, "{}CharLit({}) [{}]", pad, fmt_char(*value), self.id)?;
             }
-            ExprKind::StringLit { value, tag } => {
-                let tag_str = match tag {
-                    StringTag::Ascii => "ascii",
-                    StringTag::Utf8 => "utf8",
-                };
-                writeln!(
-                    f,
-                    "{}StringLit(\"{}\", {}) [{}]",
-                    pad, value, tag_str, self.id
-                )?;
+            ExprKind::StringLit { value } => {
+                writeln!(f, "{}StringLit(\"{value}\") [{}]", pad, self.id)?;
             }
             ExprKind::UnitLit => {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;

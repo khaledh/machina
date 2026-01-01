@@ -113,10 +113,9 @@ impl TyLowerer {
                 }
             }
             Type::String => {
-                // Map to a struct { ptr, len, tag }
+                // Map to a struct { ptr, len, cap }
                 let u64_id = self.lower_ty(&Type::uint(64));
                 let u32_id = self.lower_ty(&Type::uint(32));
-                let u8_id = self.lower_ty(&Type::uint(8));
 
                 self.table.add(TyKind::Struct {
                     fields: vec![
@@ -129,8 +128,8 @@ impl TyLowerer {
                             ty: u32_id,
                         },
                         StructField {
-                            name: "tag".to_string(),
-                            ty: u8_id,
+                            name: "cap".to_string(),
+                            ty: u32_id,
                         },
                     ],
                 })

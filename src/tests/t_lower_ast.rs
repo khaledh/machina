@@ -118,9 +118,9 @@ fn test_lower_string_literal_global() {
         Statement::CopyScalar { src, .. } => match src {
             Rvalue::Use(Operand::Const(Const::Int { value, bits, .. })) => {
                 assert_eq!(*value, 0);
-                assert_eq!(*bits, 8);
+                assert_eq!(*bits, 32);
             }
-            _ => panic!("expected tag const"),
+            _ => panic!("expected cap const"),
         },
         _ => panic!("unexpected stmt[2]"),
     }
@@ -211,6 +211,37 @@ fn test_lower_call_emits_arg_temp() {
     let (body, _) = lower_body_with_globals(&analyzed, id_func);
 
     println!("Lowered body:\n{}", body);
+}
+
+#[test]
+fn test_lower_string_index_emits_memcpy() {
+    let source = r#"
+        fn main() -> u8 {
+            let s = "hi";
+            s[1]
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let mut has_memcpy = false;
+    let mut has_trap = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call { callee, .. } = stmt {
+                match callee {
+                    Callee::Runtime(RuntimeFn::MemCopy) => has_memcpy = true,
+                    Callee::Runtime(RuntimeFn::Trap) => has_trap = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(has_memcpy, "expected string index to emit MemCopy");
+    assert!(has_trap, "expected bounds check to emit Trap call");
 }
 
 #[test]

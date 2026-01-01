@@ -15,9 +15,6 @@ pub enum SemCheckError {
     #[error("Division by zero")]
     DivisionByZero(Span),
 
-    #[error("String index only supported on ASCII literals")]
-    StringIndexNonAscii(Span),
-
     #[error("Invalid callee. Expected a function name, found: {0:?}")]
     InvalidCallee(ExprKind, Span),
 
@@ -68,6 +65,12 @@ pub enum SemCheckError {
 
     #[error("Invalid move target")]
     InvalidMoveTarget(Span),
+
+    #[error("Slice value cannot be returned in v1")]
+    SliceEscapeReturn(Span),
+
+    #[error("Slice value cannot be stored in v1")]
+    SliceEscapeStore(Span),
 }
 
 impl SemCheckError {
@@ -76,7 +79,6 @@ impl SemCheckError {
             SemCheckError::ValueOutOfRange(_, _, _, span) => *span,
             SemCheckError::InvalidRangeBounds(_, _, span) => *span,
             SemCheckError::DivisionByZero(span) => *span,
-            SemCheckError::StringIndexNonAscii(span) => *span,
             SemCheckError::InvalidCallee(_, span) => *span,
             SemCheckError::UnknownStructType(_, span) => *span,
             SemCheckError::DuplicateStructField(_, span) => *span,
@@ -94,6 +96,8 @@ impl SemCheckError {
             SemCheckError::InoutArgNotMutable(span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,
             SemCheckError::InvalidMoveTarget(span) => *span,
+            SemCheckError::SliceEscapeReturn(span) => *span,
+            SemCheckError::SliceEscapeStore(span) => *span,
         }
     }
 }

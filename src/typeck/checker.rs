@@ -378,21 +378,6 @@ impl TypeChecker {
         end: &Option<Box<Expr>>,
     ) -> Result<Type, TypeCheckError> {
         let target_ty = self.visit_expr(target, None)?;
-        let (elem_ty, dims) = match target_ty {
-            Type::Array { elem_ty, dims } => (elem_ty, dims),
-            other => {
-                return Err(TypeCheckErrorKind::SliceTargetNotArray(other, target.span).into());
-            }
-        };
-
-        // Restrict slices to 1-D arrays (for now)
-        if dims.len() != 1 {
-            return Err(TypeCheckErrorKind::SliceTargetNot1DArray(
-                Type::Array { elem_ty, dims },
-                target.span,
-            )
-            .into());
-        }
 
         // Type check start and end (must be u64)
         if let Some(start) = start {
@@ -408,7 +393,25 @@ impl TypeChecker {
             }
         }
 
-        Ok(Type::Slice { elem_ty })
+        // Slices are allowed only for arrays and strings.
+        match target_ty {
+            Type::Array { elem_ty, dims } => {
+                if dims.len() != 1 {
+                    return Err(TypeCheckErrorKind::SliceTargetNot1DArray(
+                        Type::Array { elem_ty, dims },
+                        target.span,
+                    )
+                    .into());
+                }
+                Ok(Type::Slice { elem_ty })
+            }
+            Type::String => Ok(Type::Slice {
+                elem_ty: Box::new(Type::uint(8)),
+            }),
+            other => {
+                Err(TypeCheckErrorKind::SliceTargetNotArrayOrString(other, target.span).into())
+            }
+        }
     }
 
     fn check_string_index(&mut self, indices: &[Expr], span: Span) -> Result<Type, TypeCheckError> {
@@ -422,7 +425,7 @@ impl TypeChecker {
             return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
         }
 
-        Ok(Type::Char)
+        Ok(Type::uint(8))
     }
 
     fn check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
@@ -784,6 +787,14 @@ impl TypeChecker {
     }
 
     fn check_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<Type, TypeCheckError> {
+        // Reject string index assignment (for now)
+        if let ExprKind::ArrayIndex { target, .. } = &assignee.kind {
+            let target_ty = self.visit_expr(target, None)?;
+            if target_ty == Type::String {
+                return Err(TypeCheckErrorKind::StringIndexAssign(assignee.span).into());
+            }
+        }
+
         let lhs_type = self.visit_expr(assignee, None)?;
         let rhs_type = self.visit_expr(value, Some(&lhs_type))?;
 

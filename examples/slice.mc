@@ -1,8 +1,4 @@
 // Slice expressions with optional bounds
-fn id_slice(s: u64[]) -> u64[] {
-    s
-}
-
 fn consume_slice(_s: u64[]) -> u64 {
     0
 }
@@ -16,8 +12,9 @@ fn main() {
     let tail = arr[3..];
     let all = arr[..];
 
-    // Slices with function calls
-    let mid2 = id_slice(mid);
+    // Slices with function calls (no slice returns in v1)
+    consume_slice(mid);
     consume_slice(head);
-    let _all2 = id_slice(all);
+    consume_slice(tail);
+    consume_slice(all);
 }

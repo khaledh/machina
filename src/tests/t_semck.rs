@@ -419,3 +419,52 @@ fn test_inout_arg_not_mutable() {
         }
     }
 }
+
+#[test]
+fn test_slice_return_forbidden() {
+    let source = r#"
+        fn test() -> u64[] {
+            let arr = [1, 2, 3];
+            let s = arr[0..2];
+            s
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::SliceEscapeReturn(_))),
+            "Expected SliceEscapeReturn error"
+        );
+    }
+}
+
+#[test]
+fn test_slice_store_forbidden_in_struct() {
+    let source = r#"
+        type Holder = { s: u64[] }
+
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            let s = arr[0..2];
+            let _h = Holder { s: s };
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::SliceEscapeStore(_))),
+            "Expected SliceEscapeStore error"
+        );
+    }
+}

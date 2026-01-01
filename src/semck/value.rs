@@ -1,6 +1,6 @@
 use crate::ast::{
-    BinaryOp, Decl, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringTag, TypeExpr,
-    TypeExprKind, UnaryOp, Visitor, walk_expr, walk_stmt_expr,
+    BinaryOp, Decl, Expr, ExprKind, Function, StmtExpr, StmtExprKind, TypeExpr, TypeExprKind,
+    UnaryOp, Visitor, walk_expr, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
@@ -240,21 +240,6 @@ impl Visitor for ValueChecker<'_> {
                 // Reject constant division by zero early.
                 if matches!(right.kind, ExprKind::IntLit(0)) {
                     self.errors.push(SemCheckError::DivisionByZero(right.span));
-                }
-            }
-            ExprKind::ArrayIndex { target, .. } => {
-                // String indexing is only allowed on ASCII literals for now.
-                if let Some(Type::String) = self.ctx.type_map.lookup_node_type(target.id)
-                    && !matches!(
-                        target.kind,
-                        ExprKind::StringLit {
-                            tag: StringTag::Ascii,
-                            ..
-                        }
-                    )
-                {
-                    self.errors
-                        .push(SemCheckError::StringIndexNonAscii(target.span));
                 }
             }
             ExprKind::ArrayLit {

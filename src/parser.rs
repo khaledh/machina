@@ -1137,14 +1137,9 @@ impl<'a> Parser<'a> {
         let segments = self.parse_fstring_segments(&value, span)?;
 
         if let Some(value) = Self::fold_constant_fstring(&segments) {
-            let tag = if value.is_ascii() {
-                StringTag::Ascii
-            } else {
-                StringTag::Utf8
-            };
             return Ok(Expr {
                 id: self.id_gen.new_id(),
-                kind: ExprKind::StringLit { value, tag },
+                kind: ExprKind::StringLit { value },
                 span: self.close(marker),
             });
         }
@@ -1604,17 +1599,9 @@ impl<'a> Parser<'a> {
             TK::StringLit(s) => {
                 let span = self.curr_token.span;
                 self.advance();
-                let tag = if s.is_ascii() {
-                    StringTag::Ascii
-                } else {
-                    StringTag::Utf8
-                };
                 Ok(Expr {
                     id: self.id_gen.new_id(),
-                    kind: ExprKind::StringLit {
-                        value: s.clone(),
-                        tag,
-                    },
+                    kind: ExprKind::StringLit { value: s.clone() },
                     span,
                 })
             }
