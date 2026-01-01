@@ -14,6 +14,9 @@
 - Symbol: `__mc_u64_to_dec`
 - Signature: `uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value)`
 
+- Symbol: `__mc_i64_to_dec`
+- Signature: `uint64_t __mc_i64_to_dec(const mc_slice_t *s, int64_t value)`
+
 - Symbol: `__mc_u64_to_bin`
 - Signature: `uint64_t __mc_u64_to_bin(const mc_slice_t *s, uint64_t value)`
 

@@ -209,6 +209,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
                 v.visit_expr(tail);
             }
         }
+
         ExprKind::IntLit(_)
         | ExprKind::BoolLit(_)
         | ExprKind::CharLit(_)
@@ -216,6 +217,15 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         | ExprKind::UnitLit
         | ExprKind::Var(_)
         | ExprKind::Range { .. } => {}
+
+        ExprKind::StringFmt { segments } => {
+            for segment in segments {
+                if let StringFmtSegment::Expr { expr, .. } = segment {
+                    v.visit_expr(expr);
+                }
+            }
+        }
+
         ExprKind::ArrayLit { init, .. } => match init {
             ArrayLitInit::Elems(elems) => {
                 for elem in elems {
@@ -226,49 +236,60 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
                 v.visit_expr(expr);
             }
         },
+
         ExprKind::TupleLit(fields) => {
             for field in fields {
                 v.visit_expr(field);
             }
         }
+
         ExprKind::StructLit { fields, .. } => {
             for field in fields {
                 v.visit_expr(&field.value);
             }
         }
+
         ExprKind::EnumVariant { payload, .. } => {
             for expr in payload {
                 v.visit_expr(expr);
             }
         }
+
         ExprKind::StructUpdate { target, fields } => {
             v.visit_expr(target);
             for field in fields {
                 v.visit_expr(&field.value);
             }
         }
+
         ExprKind::BinOp { left, right, .. } => {
             v.visit_expr(left);
             v.visit_expr(right);
         }
+
         ExprKind::UnaryOp { expr, .. } => {
             v.visit_expr(expr);
         }
+
         ExprKind::Move { expr } => {
             v.visit_expr(expr);
         }
+
         ExprKind::ArrayIndex { target, indices } => {
             v.visit_expr(target);
             for index in indices {
                 v.visit_expr(index);
             }
         }
+
         ExprKind::TupleField { target, .. } => {
             v.visit_expr(target);
         }
+
         ExprKind::StructField { target, .. } => {
             v.visit_expr(target);
         }
+
         ExprKind::If {
             cond,
             then_body,
@@ -278,6 +299,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
             v.visit_expr(then_body);
             v.visit_expr(else_body);
         }
+
         ExprKind::Slice { target, start, end } => {
             v.visit_expr(target);
             if let Some(start) = start {
@@ -287,12 +309,14 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
                 v.visit_expr(end);
             }
         }
+
         ExprKind::Match { scrutinee, arms } => {
             v.visit_expr(scrutinee);
             for arm in arms {
                 v.visit_expr(&arm.body);
             }
         }
+
         ExprKind::Call { callee, args } => {
             v.visit_expr(callee);
             for arg in args {

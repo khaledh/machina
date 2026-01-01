@@ -1262,6 +1262,21 @@ impl<'c, 'b> Checker<'c, 'b> {
 
             ExprKind::UnitLit => Ok(Type::Unit),
 
+            ExprKind::StringFmt { segments } => {
+                for segment in segments {
+                    if let StringFmtSegment::Expr { expr, span } = segment {
+                        let ty = self.type_check_expr(expr)?;
+                        if !ty.is_int() && ty != Type::String {
+                            return Err(TypeCheckErrorKind::StringFmtExprUnsupportedType(
+                                ty, *span,
+                            )
+                            .into());
+                        }
+                    }
+                }
+                Ok(Type::String)
+            }
+
             ExprKind::ArrayLit { elem_ty, init } => {
                 self.type_check_array_lit(elem_ty.as_ref(), init, expr.span)
             }

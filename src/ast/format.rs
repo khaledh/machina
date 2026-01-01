@@ -553,6 +553,12 @@ impl Expr {
                     writeln!(f, "{}End: None", pad1)?;
                 }
             }
+            ExprKind::StringFmt { segments } => {
+                writeln!(f, "{}StringFmt [{}]", pad, self.id)?;
+                for segment in segments {
+                    segment.fmt_with_indent(f, level + 1)?;
+                }
+            }
         }
         Ok(())
     }
@@ -587,6 +593,21 @@ impl fmt::Display for BinaryOp {
             BinaryOp::LogicalOr => write!(f, "||")?,
         }
         Ok(())
+    }
+}
+
+impl StringFmtSegment {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        match self {
+            StringFmtSegment::Literal { value, .. } => {
+                writeln!(f, "{}Literal: {}", pad, value)
+            }
+            StringFmtSegment::Expr { expr, .. } => {
+                writeln!(f, "{}Expr:", pad)?;
+                expr.fmt_with_indent(f, level + 1)
+            }
+        }
     }
 }
 

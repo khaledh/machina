@@ -162,6 +162,9 @@ pub enum TypeCheckErrorKind {
 
     #[error("Slice target is not a 1-D array: {0}")]
     SliceTargetNot1DArray(Type, Span),
+
+    #[error("Format expression must be string or integer, found {0}")]
+    StringFmtExprUnsupportedType(Type, Span),
 }
 
 impl TypeCheckError {
@@ -226,6 +229,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::FuncOverloadAmbiguous(_, span) => *span,
             TypeCheckErrorKind::SliceTargetNotArray(_, span) => *span,
             TypeCheckErrorKind::SliceTargetNot1DArray(_, span) => *span,
+            TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,
         }
     }
 }

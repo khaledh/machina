@@ -103,6 +103,8 @@ abstractions to come.
 
 **Strings**
 - `string` values (literals + variables)
+- Formatted strings: `f"..."` with `{expr}` (integers and string literals for now; string variables are not yet supported)
+- Escape braces in f-strings with `{{` and `}}`
 
 **Arrays**
 - Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`

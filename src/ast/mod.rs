@@ -203,6 +203,12 @@ pub enum StringTag {
     Utf8,
 }
 
+#[derive(Clone, Debug)]
+pub enum StringFmtSegment {
+    Literal { value: String, span: Span },
+    Expr { expr: Box<Expr>, span: Span },
+}
+
 // -- Functions ---
 
 #[derive(Clone, Debug)]
@@ -367,6 +373,7 @@ pub enum ExprKind {
     },
 
     // Literals (scalar)
+    UnitLit,
     IntLit(u64),
     BoolLit(bool),
     CharLit(char),
@@ -374,7 +381,9 @@ pub enum ExprKind {
         value: String,
         tag: StringTag,
     },
-    UnitLit,
+    StringFmt {
+        segments: Vec<StringFmtSegment>,
+    },
 
     // Literals (compound)
     ArrayLit {

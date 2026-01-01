@@ -407,6 +407,7 @@ impl<'a> FuncLowerer<'a> {
         expr: &Expr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
+            EK::StringFmt { segments } => self.lower_string_fmt_into(dst, segments),
             EK::StringLit { .. }
             | EK::ArrayLit { .. }
             | EK::TupleLit(..)

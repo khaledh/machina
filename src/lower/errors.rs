@@ -39,6 +39,9 @@ pub enum LowerError {
     #[error("unsupported aggregate rhs for node {0:?}")]
     UnsupportedAggregateRhs(NodeId),
 
+    #[error("unsupported string format segment for node {0:?}")]
+    UnsupportedStringFmtSegment(NodeId),
+
     #[error("expected block for node {0:?}")]
     ExpectedBlock(NodeId),
 }

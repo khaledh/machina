@@ -6,6 +6,7 @@ mod lower_block;
 mod lower_call;
 mod lower_control;
 mod lower_expr;
+mod lower_fstring;
 mod lower_match;
 mod lower_pattern;
 mod lower_place;

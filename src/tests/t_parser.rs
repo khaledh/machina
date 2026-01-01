@@ -41,6 +41,50 @@ fn block_stmt_at(items: &[BlockItem], index: usize) -> &StmtExpr {
 }
 
 #[test]
+fn test_parse_fstring_literal_folds_to_string_lit() {
+    let source = r#"
+        fn test() -> string {
+            f"hello {{}}"
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (_, tail) = block_parts(&func.body);
+    let tail = tail.expect("Expected block tail");
+
+    match &tail.kind {
+        ExprKind::StringLit { value, tag } => {
+            assert_eq!(value, "hello {}");
+            assert_eq!(*tag, StringTag::Ascii);
+        }
+        _ => panic!("Expected folded StringLit"),
+    }
+}
+
+#[test]
+fn test_parse_fstring_string_lit_expr_folds() {
+    let source = r#"
+        fn test() -> string {
+            f"{\"hi\"}"
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (_, tail) = block_parts(&func.body);
+    let tail = tail.expect("Expected block tail");
+
+    match &tail.kind {
+        ExprKind::StringLit { value, tag } => {
+            assert_eq!(value, "hi");
+            assert_eq!(*tag, StringTag::Ascii);
+        }
+        _ => panic!("Expected folded StringLit"),
+    }
+}
+
+#[test]
 fn test_parse_multidim_array_type() {
     let source = r#"
         fn test() -> u64[2, 3] {

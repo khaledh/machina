@@ -644,6 +644,14 @@ impl SymbolResolver {
             | ExprKind::StringLit { .. }
             | ExprKind::UnitLit => {}
 
+            ExprKind::StringFmt { segments } => {
+                for segment in segments {
+                    if let StringFmtSegment::Expr { expr, .. } = segment {
+                        self.check_expr(expr);
+                    }
+                }
+            }
+
             // Compound literals
             ExprKind::ArrayLit { elem_ty, init } => {
                 if let Some(elem_ty) = elem_ty {

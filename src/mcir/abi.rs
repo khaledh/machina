@@ -2,7 +2,9 @@
 pub enum RuntimeFn {
     Trap,
     Print,
+    StringFromBytes,
     U64ToDec,
+    I64ToDec,
     U64ToBin,
     U64ToOct,
     U64ToHex,
@@ -48,8 +50,20 @@ impl RuntimeFn {
                 ret: None,
                 effect: CallEffect::ReadOnly,
             },
+            RuntimeFn::StringFromBytes => RuntimeFnSig {
+                name: "__mc_string_from_bytes",
+                arg_count: 2,
+                ret: None,
+                effect: CallEffect::ReadWrite,
+            },
             RuntimeFn::U64ToDec => RuntimeFnSig {
                 name: "__mc_u64_to_dec",
+                arg_count: 2,
+                ret: Some(RuntimeRet::Scalar),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::I64ToDec => RuntimeFnSig {
+                name: "__mc_i64_to_dec",
                 arg_count: 2,
                 ret: Some(RuntimeRet::Scalar),
                 effect: CallEffect::ReadWrite,

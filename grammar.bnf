@@ -130,7 +130,7 @@ Primary            ::= Literal
                      | "(" Expr ")"
                      | Block
 
-Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit
+Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
                      | ArrayLit | TupleLit | StructLit
 
 ArrayLit           ::= TypeExpr? "[" ExprList "]"
@@ -155,5 +155,6 @@ BoolLit            ::= "true" | "false"
 IntLit             ::= [0-9]+
 CharLit            ::= '\'' (char | escape) '\''
 StringLit          ::= '"' (string-char | escape)* '"'
+StringFmt          ::= "f" StringLit
 
 Identifier         ::= [a-zA-Z_][a-zA-Z0-9_]*

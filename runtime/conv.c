@@ -54,6 +54,35 @@ uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value) {
 }
 
 /**
+ * Converts an i64 to a decimal string and writes it to a slice.
+ * Returns:
+ * - 0 if the buffer is too small
+ * - otherwise, the number of digits written
+ */
+uint64_t __mc_i64_to_dec(const mc_slice_t *s, int64_t value) {
+    static const char digits[] = "0123456789";
+    if (value < 0) {
+        if (s->len == 0) {
+            return 0;
+        }
+
+        char *buf = (char *)s->ptr;
+        buf[0] = '-';
+
+        // Avoid overflow when value == INT64_MIN.
+        uint64_t mag = (uint64_t)(-(value + 1)) + 1;
+        mc_slice_t tail = { .ptr = (uint64_t)(buf + 1), .len = s->len - 1 };
+        uint64_t written = __mc_u64_to_base(&tail, mag, 10, digits);
+        if (written == 0) {
+            return 0;
+        }
+        return written + 1;
+    }
+
+    return __mc_u64_to_base(s, (uint64_t)value, 10, digits);
+}
+
+/**
  * Converts a u64 to a binary string and writes it to a slice.
  * Returns:
  * - 0 if the buffer is too small

@@ -1,4 +1,6 @@
-use crate::ast::{ArrayLitInit, BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind};
+use crate::ast::{
+    ArrayLitInit, BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringFmtSegment,
+};
 use crate::context::{AnalyzedContext, TypeCheckedContext};
 use crate::resolve::def_map::DefId;
 use crate::resolve::def_map::DefMap;
@@ -242,6 +244,11 @@ impl<'a> NrvoSafetyChecker<'a> {
                     .all(|field| self.check_expr(&field.value, false));
                 target_ok && fields_ok
             }
+
+            ExprKind::StringFmt { segments } => segments.iter().all(|segment| match segment {
+                StringFmtSegment::Literal { .. } => true,
+                StringFmtSegment::Expr { expr, .. } => self.check_expr(expr, false),
+            }),
 
             ExprKind::Move { expr } => self.check_expr(expr, false),
 

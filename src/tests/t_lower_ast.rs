@@ -954,6 +954,89 @@ fn test_lower_mod_emits_div_mul_sub() {
 }
 
 #[test]
+fn test_lower_fstring_calls_runtime() {
+    let source = r#"
+        fn main() -> string {
+            let x: u64 = 42;
+            f"val = {x}!"
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, globals) = lower_body_with_globals(&analyzed, func);
+
+    let mut saw_u64_to_dec = false;
+    let mut saw_memcpy = false;
+    let mut saw_string_from_bytes = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call { callee, .. } = stmt {
+                match callee {
+                    Callee::Runtime(RuntimeFn::U64ToDec) => saw_u64_to_dec = true,
+                    Callee::Runtime(RuntimeFn::MemCopy) => saw_memcpy = true,
+                    Callee::Runtime(RuntimeFn::StringFromBytes) => {
+                        saw_string_from_bytes = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(saw_u64_to_dec, "expected __mc_u64_to_dec call");
+    assert!(saw_memcpy, "expected __mc_memcpy call for literals");
+    assert!(
+        saw_string_from_bytes,
+        "expected __mc_string_from_bytes call"
+    );
+
+    let mut strings = Vec::new();
+    for global in &globals {
+        if let GlobalPayload::String(s) = &global.payload {
+            strings.push(s.as_str());
+        }
+    }
+    assert!(strings.contains(&"val = "), "missing literal segment");
+    assert!(strings.contains(&"!"), "missing trailing literal");
+}
+
+#[test]
+fn test_lower_fstring_signed_uses_i64_runtime() {
+    let source = r#"
+        fn main() -> string {
+            let x: i64 = -5;
+            f"{x}"
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, globals) = lower_body_with_globals(&analyzed, func);
+
+    let saw_i64_to_dec = body.blocks.iter().any(|block| {
+        block.stmts.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::I64ToDec),
+                    ..
+                }
+            )
+        })
+    });
+    assert!(saw_i64_to_dec, "expected __mc_i64_to_dec call");
+
+    let saw_minus = globals
+        .iter()
+        .any(|global| matches!(&global.payload, GlobalPayload::String(s) if s == "-"));
+    assert!(
+        !saw_minus,
+        "did not expect '-' literal for signed formatting"
+    );
+}
+
+#[test]
 fn test_lower_bitwise_ops() {
     let source = r#"
         fn main() -> u64 {
