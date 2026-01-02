@@ -112,6 +112,29 @@ impl<'a> MoveVisitor<'a> {
         }
     }
 
+    // Treat projections as borrowing from the base, so only check use-after-move
+    // on the base variable and avoid requiring an explicit move.
+    fn visit_place_base(&mut self, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Var(_) => {
+                self.check_use(expr);
+            }
+            ExprKind::StructField { target, .. } => {
+                self.visit_place_base(target);
+            }
+            ExprKind::TupleField { target, .. } => {
+                self.visit_place_base(target);
+            }
+            ExprKind::ArrayIndex { target, indices } => {
+                self.visit_place_base(target);
+                for index in indices {
+                    self.visit_expr(index);
+                }
+            }
+            _ => self.visit_expr(expr),
+        }
+    }
+
     fn clear_pattern_defs(&mut self, pattern: &Pattern) {
         match &pattern.kind {
             PatternKind::Ident { .. } => {
@@ -167,14 +190,27 @@ impl<'a> Visitor for MoveVisitor<'a> {
             }
             ExprKind::Var(_) => {
                 self.check_use(expr);
+                // Direct heap usage still requires explicit move for ownership transfer.
                 self.check_heap_move_required(expr);
+            }
+            ExprKind::ArrayIndex { target, indices } => {
+                self.visit_place_base(target);
+                for index in indices {
+                    self.visit_expr(index);
+                }
+            }
+            ExprKind::TupleField { target, .. } => {
+                self.visit_place_base(target);
+            }
+            ExprKind::StructField { target, .. } => {
+                self.visit_place_base(target);
             }
             // If/Match require special treatment at CFG level
             ExprKind::If { cond, .. } => {
                 self.visit_expr(cond);
             }
             ExprKind::Match { scrutinee, .. } => {
-                self.visit_expr(scrutinee);
+                self.visit_place_base(scrutinee);
             }
             _ => walk_expr(self, expr),
         }

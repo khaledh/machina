@@ -103,3 +103,18 @@ fn test_heap_move_ok() {
     let errors = move_check_source(source);
     assert!(errors.is_empty(), "Expected no move-check errors");
 }
+
+#[test]
+fn test_heap_field_access_allows_borrow() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = ^Point { x: 1, y: 2 };
+            p.x
+        }
+    "#;
+
+    let errors = move_check_source(source);
+    assert!(errors.is_empty(), "Expected no move-check errors");
+}

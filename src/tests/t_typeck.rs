@@ -109,6 +109,62 @@ fn test_multi_index_returns_element_type() {
 }
 
 #[test]
+fn test_struct_field_access_through_heap() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = ^Point { x: 1, y: 2 };
+            p.x
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_tuple_field_access_through_heap() {
+    let source = r#"
+        fn test() -> u64 {
+            let t = ^(1, 2);
+            t.0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_array_index_through_heap() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = ^[1, 2, 3];
+            arr[1]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_match_enum_through_heap() {
+    let source = r#"
+        type Msg = Ping(u64) | Pong(u64)
+
+        fn test() -> u64 {
+            let msg = ^Msg::Ping(5);
+            match msg {
+                Msg::Ping(n) => n,
+                Msg::Pong(n) => n,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_3d_array_type() {
     let source = r#"
         fn test() -> u64 {

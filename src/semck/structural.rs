@@ -222,7 +222,12 @@ impl<'a> StructuralChecker<'a> {
         let Some(scrutinee_ty) = self.ctx.type_map.lookup_node_type(scrutinee.id) else {
             return;
         };
-        let Type::Enum { name, variants } = scrutinee_ty else {
+        let mut peeled_ty = scrutinee_ty.clone();
+        while let Type::Heap { elem_ty } = peeled_ty {
+            peeled_ty = *elem_ty;
+        }
+
+        let Type::Enum { name, variants } = peeled_ty else {
             self.errors.push(SemCheckError::MatchTargetNotEnum(
                 scrutinee_ty,
                 scrutinee.span,
@@ -346,12 +351,16 @@ impl Visitor for StructuralChecker<'_> {
             }
             ExprKind::StructField { target, field } => {
                 // Validate struct field access targets early for clearer errors.
-                if let Some(Type::Struct { fields, .. }) =
-                    self.ctx.type_map.lookup_node_type(target.id)
-                    && !fields.iter().any(|f| f.name == *field)
-                {
-                    self.errors
-                        .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
+                if let Some(mut target_ty) = self.ctx.type_map.lookup_node_type(target.id) {
+                    while let Type::Heap { elem_ty } = target_ty {
+                        target_ty = *elem_ty;
+                    }
+                    if let Type::Struct { fields, .. } = target_ty
+                        && !fields.iter().any(|f| f.name == *field)
+                    {
+                        self.errors
+                            .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
+                    }
                 }
             }
             ExprKind::EnumVariant {

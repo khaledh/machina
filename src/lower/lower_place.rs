@@ -62,10 +62,16 @@ impl<'a> FuncLowerer<'a> {
         target: &Expr,
         indices: &[Expr],
     ) -> Result<PlaceAny, LowerError> {
-        let target_place = self.lower_place_agg(target)?;
+        let target_place = self.lower_place(target)?;
         let target_ty = self.ty_for_node(target.id)?;
+        let mut peeled_ty = target_ty;
+        let mut deref_count = 0usize;
+        while let Type::Heap { elem_ty } = peeled_ty {
+            deref_count += 1;
+            peeled_ty = *elem_ty;
+        }
 
-        let Type::Array { dims, .. } = target_ty else {
+        let Type::Array { dims, .. } = peeled_ty else {
             panic!("compiler bug: non-array target (type checker should catch this)");
         };
         if indices.len() > dims.len() {
@@ -107,14 +113,20 @@ impl<'a> FuncLowerer<'a> {
         let result_ty = self.ty_for_node(expr.id)?;
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
-        let mut projs = target_place.projections().to_vec();
+        let (base, mut projs) = match target_place {
+            PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
+            PlaceAny::Aggregate(p) => (p.base(), p.projections().to_vec()),
+        };
+        for _ in 0..deref_count {
+            projs.push(Projection::Deref);
+        }
         projs.extend(
             index_operands
                 .into_iter()
                 .map(|index_place| Projection::Index { index: index_place }),
         );
 
-        let place = self.place_from_ty_id(target_place.base(), result_ty_id, projs);
+        let place = self.place_from_ty_id(base, result_ty_id, projs);
         Ok(place)
     }
 
@@ -230,16 +242,28 @@ impl<'a> FuncLowerer<'a> {
         target: &Expr,
         index: usize,
     ) -> Result<PlaceAny, LowerError> {
-        let target_place = self.lower_place_agg(target)?;
+        let target_place = self.lower_place(target)?;
         let target_ty = self.ty_for_node(target.id)?;
+        let mut peeled_ty = target_ty;
+        let mut deref_count = 0usize;
+        while let Type::Heap { elem_ty } = peeled_ty {
+            deref_count += 1;
+            peeled_ty = *elem_ty;
+        }
 
-        let field_ty = target_ty.tuple_field_type(index);
+        let field_ty = peeled_ty.tuple_field_type(index);
         let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
 
-        let mut projs = target_place.projections().to_vec();
+        let (base, mut projs) = match target_place {
+            PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
+            PlaceAny::Aggregate(p) => (p.base(), p.projections().to_vec()),
+        };
+        for _ in 0..deref_count {
+            projs.push(Projection::Deref);
+        }
         projs.push(Projection::Field { index });
 
-        let place = self.place_from_ty_id(target_place.base(), field_ty_id, projs);
+        let place = self.place_from_ty_id(base, field_ty_id, projs);
 
         Ok(place)
     }
@@ -250,18 +274,31 @@ impl<'a> FuncLowerer<'a> {
         target: &Expr,
         field_name: &str,
     ) -> Result<PlaceAny, LowerError> {
-        let target_place = self.lower_place_agg(target)?;
+        let target_place = self.lower_place(target)?;
         let target_ty = self.ty_for_node(target.id)?;
 
-        let field_ty = target_ty.struct_field_type(field_name);
+        let mut peeled_ty = target_ty.clone();
+        let mut deref_count = 0usize;
+        while let Type::Heap { elem_ty } = peeled_ty {
+            deref_count += 1;
+            peeled_ty = *elem_ty;
+        }
+
+        let field_ty = peeled_ty.struct_field_type(field_name);
         let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
         // Map field name to index
-        let field_index = target_ty.struct_field_index(field_name);
+        let field_index = peeled_ty.struct_field_index(field_name);
 
-        let mut projs = target_place.projections().to_vec();
+        let (base, mut projs) = match target_place {
+            PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
+            PlaceAny::Aggregate(p) => (p.base(), p.projections().to_vec()),
+        };
+        for _ in 0..deref_count {
+            projs.push(Projection::Deref);
+        }
         projs.push(Projection::Field { index: field_index });
 
-        let place = self.place_from_ty_id(target_place.base(), field_ty_id, projs);
+        let place = self.place_from_ty_id(base, field_ty_id, projs);
 
         Ok(place)
     }

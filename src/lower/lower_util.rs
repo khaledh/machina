@@ -223,6 +223,7 @@ impl<'a> FuncLowerer<'a> {
         Operand::Copy(temp)
     }
 
+    #[allow(dead_code)]
     pub(super) fn emit_runtime_realloc(
         &mut self,
         ptr_ty: TyId,

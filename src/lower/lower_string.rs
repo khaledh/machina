@@ -50,18 +50,41 @@ impl<'a> FuncLowerer<'a> {
         let u8_ty_id = self.ty_lowerer.lower_ty(&Type::uint(8));
         let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
 
-        let target_place = self
-            .lower_place_agg(target)
-            .or_else(|_| self.lower_agg_expr_to_temp(target))?;
+        let target_ty = self.ty_for_node(target.id)?;
+        let mut peeled_ty = target_ty.clone();
+        let mut deref_count = 0usize;
+        while let Type::Heap { elem_ty } = peeled_ty {
+            deref_count += 1;
+            peeled_ty = *elem_ty;
+        }
 
-        let mut ptr_proj = target_place.projections().to_vec();
+        let target_place = self
+            .lower_place(target)
+            .or_else(|_| self.lower_agg_expr_to_temp(target).map(PlaceAny::Aggregate))
+            .or_else(|_| {
+                let ty_id = self.ty_lowerer.lower_ty(&target_ty);
+                let temp = self.new_temp_scalar(ty_id);
+                let op = self.lower_scalar_expr(target)?;
+                self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
+                Ok(PlaceAny::Scalar(temp))
+            })?;
+
+        let (base, mut base_projs) = match target_place {
+            PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
+            PlaceAny::Aggregate(p) => (p.base(), p.projections().to_vec()),
+        };
+        for _ in 0..deref_count {
+            base_projs.push(Projection::Deref);
+        }
+
+        let mut ptr_proj = base_projs.clone();
         ptr_proj.push(Projection::Field { index: 0 });
-        let ptr_place = Place::new(target_place.base(), u64_ty_id, ptr_proj);
+        let ptr_place = Place::new(base, u64_ty_id, ptr_proj);
         let ptr_op = Operand::Copy(ptr_place);
 
-        let mut len_proj = target_place.projections().to_vec();
+        let mut len_proj = base_projs;
         len_proj.push(Projection::Field { index: 1 });
-        let len_place = Place::new(target_place.base(), u32_ty_id, len_proj);
+        let len_place = Place::new(base, u32_ty_id, len_proj);
         let len_op = Operand::Copy(len_place);
 
         let index_expr = &indices[0];

@@ -104,7 +104,11 @@ impl<'a> FuncLowerer<'a> {
             }
             EK::ArrayIndex { target, indices } => {
                 let target_ty = self.ty_for_node(target.id)?;
-                if matches!(target_ty, Type::String) {
+                let mut peeled_ty = target_ty;
+                while let Type::Heap { elem_ty } = peeled_ty {
+                    peeled_ty = *elem_ty;
+                }
+                if matches!(peeled_ty, Type::String) {
                     self.lower_string_index(expr, target, indices)
                 } else {
                     let place = self.lower_place_scalar(expr)?;

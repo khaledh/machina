@@ -448,7 +448,12 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.visit_expr(target, None)?;
-        match target_ty {
+        let mut peeled_ty = target_ty.clone();
+        while let Type::Heap { elem_ty } = peeled_ty {
+            peeled_ty = *elem_ty;
+        }
+
+        match peeled_ty {
             Type::Tuple { fields } => {
                 let index_usize = index;
                 if index_usize >= fields.len() {
@@ -512,7 +517,12 @@ impl TypeChecker {
     fn check_field_access(&mut self, target: &Expr, field: &str) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.visit_expr(target, None)?;
-        match target_ty {
+        let mut peeled_ty = target_ty.clone();
+        while let Type::Heap { elem_ty } = peeled_ty {
+            peeled_ty = *elem_ty;
+        }
+
+        match peeled_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
                 Some(field) => Ok(field.ty.clone()),
                 None => Ok(Type::Unknown),
@@ -945,7 +955,11 @@ impl TypeChecker {
 
     fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<Type, TypeCheckError> {
         let scrutinee_ty = self.visit_expr(scrutinee, None)?;
-        let (enum_name, variants) = match scrutinee_ty {
+        let mut peeled_ty = scrutinee_ty;
+        while let Type::Heap { elem_ty } = peeled_ty {
+            peeled_ty = *elem_ty;
+        }
+        let (enum_name, variants) = match peeled_ty {
             Type::Enum { name, variants } => (Some(name.clone()), variants),
             _ => (None, Vec::new()),
         };
@@ -1179,9 +1193,14 @@ impl AstFolder for TypeChecker {
 
                 ExprKind::ArrayIndex { target, indices } => {
                     let target_ty = self.visit_expr(target, None)?;
-                    match target_ty {
+                    let mut peeled_ty = target_ty.clone();
+                    while let Type::Heap { elem_ty } = peeled_ty {
+                        peeled_ty = *elem_ty;
+                    }
+
+                    match peeled_ty {
                         Type::Array { elem_ty, dims } => {
-                            self.check_array_index(&elem_ty, &dims, indices, target.span)
+                            self.check_array_index(elem_ty.as_ref(), &dims, indices, target.span)
                         }
                         Type::String => self.check_string_index(indices, target.span),
                         _ => {

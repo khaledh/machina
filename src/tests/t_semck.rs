@@ -352,6 +352,25 @@ fn test_match_target_not_enum() {
 }
 
 #[test]
+fn test_match_enum_through_heap() {
+    let source = r#"
+        type Msg = Ping(u64) | Pong(u64)
+
+        fn test() -> u64 {
+            let msg = ^Msg::Ping(5);
+            match msg {
+                Msg::Ping(n) => n,
+                Msg::Pong(n) => n,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_ok(), "Expected no semck errors, got {result:?}");
+}
+
+#[test]
 fn test_inout_param_scalar_rejected() {
     let source = r#"
         fn update(inout x: u64) {

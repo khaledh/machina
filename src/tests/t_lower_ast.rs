@@ -839,6 +839,88 @@ fn test_lower_array_index_emits_bounds_check() {
 }
 
 #[test]
+fn test_lower_heap_tuple_field_uses_deref() {
+    let source = r#"
+        fn main() -> u64 {
+            let t = ^(1, 2);
+            t.0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    fn place_has_deref<K>(place: &Place<K>) -> bool {
+        place
+            .projections()
+            .iter()
+            .any(|proj| matches!(proj, Projection::Deref))
+    }
+
+    fn place_any_has_deref(place: &PlaceAny) -> bool {
+        match place {
+            PlaceAny::Scalar(p) => place_has_deref(p),
+            PlaceAny::Aggregate(p) => place_has_deref(p),
+        }
+    }
+
+    fn operand_has_deref(op: &Operand) -> bool {
+        match op {
+            Operand::Copy(p) | Operand::Move(p) => place_has_deref(p),
+            Operand::Const(_) => false,
+        }
+    }
+
+    fn rvalue_has_deref(rv: &Rvalue) -> bool {
+        match rv {
+            Rvalue::Use(op) => operand_has_deref(op),
+            Rvalue::BinOp { lhs, rhs, .. } => operand_has_deref(lhs) || operand_has_deref(rhs),
+            Rvalue::UnOp { arg, .. } => operand_has_deref(arg),
+            Rvalue::AddrOf(_) => false,
+        }
+    }
+
+    let mut saw_deref = false;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            match stmt {
+                Statement::Comment(_) => {}
+                Statement::CopyScalar { dst, src } => {
+                    if place_has_deref(dst) || rvalue_has_deref(src) {
+                        saw_deref = true;
+                    }
+                }
+                Statement::CopyAggregate { dst, src } => {
+                    if place_has_deref(dst) || place_has_deref(src) {
+                        saw_deref = true;
+                    }
+                }
+                Statement::MemSet { dst, value, .. } => {
+                    if place_has_deref(dst) || operand_has_deref(value) {
+                        saw_deref = true;
+                    }
+                }
+                Statement::Call { dst, args, .. } => {
+                    if dst.as_ref().is_some_and(place_any_has_deref) {
+                        saw_deref = true;
+                    }
+                    if args.iter().any(place_any_has_deref) {
+                        saw_deref = true;
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        saw_deref,
+        "expected deref projection for heap tuple field access"
+    );
+}
+
+#[test]
 fn test_lower_u8_repeat_literal_emits_memset() {
     let source = r#"
         fn main() -> u64 {
