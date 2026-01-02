@@ -1,8 +1,9 @@
-use crate::ast::{Expr, ExprKind as EK};
+use crate::ast::{Expr, ExprKind as EK, TypeDeclKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
-use crate::types::Type;
+use crate::typeck::type_map::resolve_type_expr;
+use crate::types::{StructField as TypeStructField, Type};
 
 impl<'a> FuncLowerer<'a> {
     // --- Place (Lvalue) ---
@@ -283,6 +284,7 @@ impl<'a> FuncLowerer<'a> {
             deref_count += 1;
             peeled_ty = *elem_ty;
         }
+        peeled_ty = self.expand_shallow_struct(&peeled_ty);
 
         let field_ty = peeled_ty.struct_field_type(field_name);
         let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
@@ -301,6 +303,40 @@ impl<'a> FuncLowerer<'a> {
         let place = self.place_from_ty_id(base, field_ty_id, projs);
 
         Ok(place)
+    }
+
+    fn expand_shallow_struct(&self, ty: &Type) -> Type {
+        let Type::Struct { name, fields } = ty else {
+            return ty.clone();
+        };
+        if !fields.is_empty() {
+            return ty.clone();
+        }
+
+        let decls = self.ctx.module.type_decls();
+        let decl = decls.iter().find(|decl| decl.name == *name);
+        let Some(decl) = decl else {
+            return ty.clone();
+        };
+        let TypeDeclKind::Struct { fields } = &decl.kind else {
+            return ty.clone();
+        };
+
+        let resolved_fields = fields
+            .iter()
+            .filter_map(|f| {
+                let field_ty = resolve_type_expr(&self.ctx.def_map, &f.ty).ok()?;
+                Some(TypeStructField {
+                    name: f.name.clone(),
+                    ty: field_ty,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Type::Struct {
+            name: name.clone(),
+            fields: resolved_fields,
+        }
     }
 
     /// Create a projected place from an aggregate base.

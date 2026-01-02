@@ -2,77 +2,53 @@ use crate::ast::{NodeId, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, StructField, Type};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+fn builtin_type(name: &str) -> Option<Type> {
+    match name {
+        "()" => Some(Type::Unit),
+        "u8" => Some(Type::uint(8)),
+        "u16" => Some(Type::uint(16)),
+        "u32" => Some(Type::uint(32)),
+        "u64" => Some(Type::uint(64)),
+        "i8" => Some(Type::sint(8)),
+        "i16" => Some(Type::sint(16)),
+        "i32" => Some(Type::sint(32)),
+        "i64" => Some(Type::sint(64)),
+        "bool" => Some(Type::Bool),
+        "char" => Some(Type::Char),
+        "string" => Some(Type::String),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolveDepth {
+    Full,
+    Shallow,
+}
 
 pub(crate) fn resolve_type_expr(
     def_map: &DefMap,
     type_expr: &TypeExpr,
 ) -> Result<Type, TypeCheckError> {
+    let mut in_progress = HashSet::new();
+    resolve_type_expr_impl(def_map, type_expr, &mut in_progress, ResolveDepth::Full)
+}
+
+fn resolve_type_expr_impl(
+    def_map: &DefMap,
+    type_expr: &TypeExpr,
+    in_progress: &mut HashSet<DefId>,
+    depth: ResolveDepth,
+) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
         TypeExprKind::Named(name) => {
-            let def = def_map
-                .lookup_def(type_expr.id)
-                .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
-
-            // Map built-in type names to Type values
-            match name.as_str() {
-                "()" => Ok(Type::Unit),
-                "u8" => Ok(Type::uint(8)),
-                "u16" => Ok(Type::uint(16)),
-                "u32" => Ok(Type::uint(32)),
-                "u64" => Ok(Type::uint(64)),
-                "i8" => Ok(Type::sint(8)),
-                "i16" => Ok(Type::sint(16)),
-                "i32" => Ok(Type::sint(32)),
-                "i64" => Ok(Type::sint(64)),
-                "bool" => Ok(Type::Bool),
-                "char" => Ok(Type::Char),
-                "string" => Ok(Type::String),
-                _ => match &def.kind {
-                    DefKind::TypeAlias { ty_expr } => resolve_type_expr(def_map, ty_expr),
-                    DefKind::StructDef { fields } => {
-                        // Convert AST struct fields to Type struct fields
-                        let struct_fields = fields
-                            .iter()
-                            .map(|f| {
-                                let field_ty = resolve_type_expr(def_map, &f.ty)?;
-                                Ok(StructField {
-                                    name: f.name.clone(),
-                                    ty: field_ty,
-                                })
-                            })
-                            .collect::<Result<Vec<StructField>, TypeCheckError>>()?;
-                        Ok(Type::Struct {
-                            name: def.name.clone(),
-                            fields: struct_fields,
-                        })
-                    }
-                    DefKind::EnumDef { variants } => {
-                        let mut enum_variants = Vec::new();
-                        for variant in variants {
-                            let payload = variant
-                                .payload
-                                .iter()
-                                .map(|p| resolve_type_expr(def_map, p))
-                                .collect::<Result<Vec<Type>, _>>()?;
-                            enum_variants.push(EnumVariant {
-                                name: variant.name.clone(),
-                                payload,
-                            });
-                        }
-
-                        Ok(Type::Enum {
-                            name: def.name.clone(),
-                            variants: enum_variants,
-                        })
-                    }
-                    _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
-                },
-            }
+            resolve_named_type(def_map, type_expr, name, in_progress, depth)
         }
         TypeExprKind::Array { elem_ty, dims } => {
-            let elem_ty = resolve_type_expr(def_map, elem_ty)?;
+            let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
                 dims: dims.clone(),
@@ -81,7 +57,7 @@ pub(crate) fn resolve_type_expr(
         TypeExprKind::Tuple { fields } => {
             let field_types = fields
                 .iter()
-                .map(|f| resolve_type_expr(def_map, f))
+                .map(|f| resolve_type_expr_impl(def_map, f, in_progress, depth))
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple {
                 fields: field_types,
@@ -92,18 +68,155 @@ pub(crate) fn resolve_type_expr(
             max: *max,
         }),
         TypeExprKind::Slice { elem_ty } => {
-            let elem_ty = resolve_type_expr(def_map, elem_ty)?;
+            let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
             })
         }
         TypeExprKind::Heap { elem_ty } => {
-            let elem_ty = resolve_type_expr(def_map, elem_ty)?;
+            let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
             })
         }
     }
+}
+
+fn resolve_named_type(
+    def_map: &DefMap,
+    type_expr: &TypeExpr,
+    name: &str,
+    in_progress: &mut HashSet<DefId>,
+    depth: ResolveDepth,
+) -> Result<Type, TypeCheckError> {
+    let def = def_map
+        .lookup_def(type_expr.id)
+        .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
+
+    if let Some(ty) = builtin_type(name) {
+        return Ok(ty);
+    }
+
+    match &def.kind {
+        DefKind::TypeAlias { ty_expr } => resolve_type_alias(def_map, def, ty_expr, in_progress),
+        DefKind::StructDef { fields } => {
+            resolve_struct_type(def_map, def, fields, in_progress, depth)
+        }
+        DefKind::EnumDef { variants } => {
+            resolve_enum_type(def_map, def, variants, in_progress, depth)
+        }
+        _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
+    }
+}
+
+fn resolve_type_alias(
+    def_map: &DefMap,
+    def: &Def,
+    ty_expr: &TypeExpr,
+    in_progress: &mut HashSet<DefId>,
+) -> Result<Type, TypeCheckError> {
+    if in_progress.contains(&def.id) {
+        return Ok(Type::Unknown);
+    }
+    in_progress.insert(def.id);
+    let ty = resolve_type_expr_impl(def_map, ty_expr, in_progress, ResolveDepth::Full);
+    in_progress.remove(&def.id);
+    ty
+}
+
+fn resolve_struct_type(
+    def_map: &DefMap,
+    def: &Def,
+    fields: &[crate::ast::StructField],
+    in_progress: &mut HashSet<DefId>,
+    depth: ResolveDepth,
+) -> Result<Type, TypeCheckError> {
+    if in_progress.contains(&def.id) {
+        let struct_fields = match depth {
+            ResolveDepth::Full => {
+                resolve_struct_fields(def_map, fields, in_progress, ResolveDepth::Shallow)?
+            }
+            ResolveDepth::Shallow => Vec::new(),
+        };
+        return Ok(Type::Struct {
+            name: def.name.clone(),
+            fields: struct_fields,
+        });
+    }
+    in_progress.insert(def.id);
+    let struct_fields = resolve_struct_fields(def_map, fields, in_progress, depth)?;
+    in_progress.remove(&def.id);
+    Ok(Type::Struct {
+        name: def.name.clone(),
+        fields: struct_fields,
+    })
+}
+
+fn resolve_struct_fields(
+    def_map: &DefMap,
+    fields: &[crate::ast::StructField],
+    in_progress: &mut HashSet<DefId>,
+    depth: ResolveDepth,
+) -> Result<Vec<StructField>, TypeCheckError> {
+    fields
+        .iter()
+        .map(|field| {
+            let field_ty = resolve_type_expr_impl(def_map, &field.ty, in_progress, depth)?;
+            Ok(StructField {
+                name: field.name.clone(),
+                ty: field_ty,
+            })
+        })
+        .collect()
+}
+
+fn resolve_enum_type(
+    def_map: &DefMap,
+    def: &Def,
+    variants: &[crate::ast::EnumVariant],
+    in_progress: &mut HashSet<DefId>,
+    depth: ResolveDepth,
+) -> Result<Type, TypeCheckError> {
+    if in_progress.contains(&def.id) {
+        let enum_variants = match depth {
+            ResolveDepth::Full => {
+                resolve_enum_variants(def_map, variants, in_progress, ResolveDepth::Shallow)?
+            }
+            ResolveDepth::Shallow => Vec::new(),
+        };
+        return Ok(Type::Enum {
+            name: def.name.clone(),
+            variants: enum_variants,
+        });
+    }
+    in_progress.insert(def.id);
+    let enum_variants = resolve_enum_variants(def_map, variants, in_progress, depth)?;
+    in_progress.remove(&def.id);
+    Ok(Type::Enum {
+        name: def.name.clone(),
+        variants: enum_variants,
+    })
+}
+
+fn resolve_enum_variants(
+    def_map: &DefMap,
+    variants: &[crate::ast::EnumVariant],
+    in_progress: &mut HashSet<DefId>,
+    depth: ResolveDepth,
+) -> Result<Vec<EnumVariant>, TypeCheckError> {
+    let mut enum_variants = Vec::new();
+    for variant in variants {
+        let payload = variant
+            .payload
+            .iter()
+            .map(|payload_ty| resolve_type_expr_impl(def_map, payload_ty, in_progress, depth))
+            .collect::<Result<Vec<Type>, _>>()?;
+        enum_variants.push(EnumVariant {
+            name: variant.name.clone(),
+            payload,
+        });
+    }
+    Ok(enum_variants)
 }
 
 pub struct TypeMapBuilder {

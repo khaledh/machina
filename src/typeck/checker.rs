@@ -177,6 +177,22 @@ impl TypeChecker {
             .and_then(|def| self.type_map_builder.lookup_def_type(def))
     }
 
+    fn expand_shallow_type(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Struct { name, fields } if fields.is_empty() => self
+                .type_decls
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ty.clone()),
+            Type::Enum { name, variants } if variants.is_empty() => self
+                .type_decls
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ty.clone()),
+            _ => ty.clone(),
+        }
+    }
+
     fn check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
         // Lookup the function by def id and find the matching overload.
         let func_def_id = self.context.def_map.lookup_def(function.id).unwrap().id;
@@ -452,6 +468,7 @@ impl TypeChecker {
         while let Type::Heap { elem_ty } = peeled_ty {
             peeled_ty = *elem_ty;
         }
+        peeled_ty = self.expand_shallow_type(&peeled_ty);
 
         match peeled_ty {
             Type::Tuple { fields } => {
@@ -521,6 +538,7 @@ impl TypeChecker {
         while let Type::Heap { elem_ty } = peeled_ty {
             peeled_ty = *elem_ty;
         }
+        peeled_ty = self.expand_shallow_type(&peeled_ty);
 
         match peeled_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
@@ -959,6 +977,7 @@ impl TypeChecker {
         while let Type::Heap { elem_ty } = peeled_ty {
             peeled_ty = *elem_ty;
         }
+        let peeled_ty = self.expand_shallow_type(&peeled_ty);
         let (enum_name, variants) = match peeled_ty {
             Type::Enum { name, variants } => (Some(name.clone()), variants),
             _ => (None, Vec::new()),
