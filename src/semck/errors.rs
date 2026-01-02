@@ -66,6 +66,9 @@ pub enum SemCheckError {
     #[error("Invalid move target")]
     InvalidMoveTarget(Span),
 
+    #[error("Cannot move from parameter")]
+    MoveFromParam(Span),
+
     #[error("Owned value must be moved")]
     OwnedMoveRequired(Span),
 
@@ -99,6 +102,7 @@ impl SemCheckError {
             SemCheckError::InoutArgNotMutable(span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,
             SemCheckError::InvalidMoveTarget(span) => *span,
+            SemCheckError::MoveFromParam(span) => *span,
             SemCheckError::OwnedMoveRequired(span) => *span,
             SemCheckError::SliceEscapeReturn(span) => *span,
             SemCheckError::SliceEscapeStore(span) => *span,

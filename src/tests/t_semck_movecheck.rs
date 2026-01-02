@@ -136,3 +136,38 @@ fn test_heap_field_access_allows_borrow() {
     let result = move_check_source(source);
     assert!(result.errors.is_empty(), "Expected no move-check errors");
 }
+
+#[test]
+fn test_move_from_param_rejected() {
+    let source = r#"
+        fn test(p: ^u64) -> u64 {
+            let q = p;
+            0
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
+    assert!(
+        matches!(result.errors[0], SemCheckError::MoveFromParam(_)),
+        "Expected MoveFromParam error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_borrow_param_in_call_ok() {
+    let source = r#"
+        fn foo(p: ^u64) -> u64 {
+            0
+        }
+
+        fn test(p: ^u64) -> u64 {
+            foo(p);
+            0
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(result.errors.is_empty(), "Expected no move-check errors");
+}

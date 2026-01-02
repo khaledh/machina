@@ -112,8 +112,7 @@ impl<'a> FuncLowerer<'a> {
                 Some(param.name.clone()),
             );
             self.locals.insert(def_id, local_id);
-            // Params are owned values inside the function body.
-            self.register_drop(def_id, &ty);
+            // `in`/`inout` params are treated as borrows, not owned values.
 
             if matches!(ty, Type::Range { .. }) {
                 let param_place = Place::<Scalar>::new(local_id, ty_id, vec![]);

@@ -9,11 +9,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
-use crate::ast::{Expr, ExprKind, Function, Pattern, PatternKind, StmtExpr, StmtExprKind};
+use crate::ast::{
+    Expr, ExprKind, Function, FunctionParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
+};
 use crate::ast::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
-use crate::resolve::def_map::DefId;
+use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
+use crate::semck::util::lookup_call_sig;
 use crate::semck::ast_liveness::{self, AstLiveness};
 
 pub struct MoveCheckResult {
@@ -76,6 +79,7 @@ struct MoveVisitor<'a> {
     liveness: &'a AstLiveness,
     current_live_after: Option<HashSet<DefId>>,
     current_use_counts: Option<HashMap<DefId, usize>>,
+    borrow_context: bool,
 }
 
 impl<'a> MoveVisitor<'a> {
@@ -94,6 +98,7 @@ impl<'a> MoveVisitor<'a> {
             liveness,
             current_live_after: None,
             current_use_counts: None,
+            borrow_context: false,
         }
     }
 
@@ -129,6 +134,10 @@ impl<'a> MoveVisitor<'a> {
                 let Some(def) = self.ctx.def_map.lookup_def(expr.id) else {
                     return;
                 };
+                if matches!(def.kind, DefKind::Param { .. }) {
+                    self.errors.push(SemCheckError::MoveFromParam(expr.span));
+                    return;
+                }
                 let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) else {
                     return;
                 };
@@ -140,6 +149,13 @@ impl<'a> MoveVisitor<'a> {
                 .errors
                 .push(SemCheckError::InvalidMoveTarget(expr.span)),
         }
+    }
+
+    fn with_borrow_context(&mut self, f: impl FnOnce(&mut Self)) {
+        let prev = self.borrow_context;
+        self.borrow_context = true;
+        f(self);
+        self.borrow_context = prev;
     }
 
     fn check_use(&mut self, expr: &Expr) {
@@ -158,6 +174,11 @@ impl<'a> MoveVisitor<'a> {
             let Some(def) = self.ctx.def_map.lookup_def(expr.id) else {
                 return;
             };
+            if matches!(def.kind, DefKind::Param { .. }) {
+                self.errors
+                    .push(SemCheckError::MoveFromParam(expr.span));
+                return;
+            }
             let Some(ref live_after) = self.current_live_after else {
                 self.errors
                     .push(SemCheckError::OwnedMoveRequired(expr.span));
@@ -263,7 +284,9 @@ impl<'a> Visitor for MoveVisitor<'a> {
             ExprKind::Var(_) => {
                 self.check_use(expr);
                 // Direct heap usage still requires explicit move for ownership transfer.
-                self.check_heap_move_required(expr);
+                if !self.borrow_context {
+                    self.check_heap_move_required(expr);
+                }
             }
             ExprKind::ArrayIndex { target, indices } => {
                 self.visit_place_base(target);
@@ -283,6 +306,22 @@ impl<'a> Visitor for MoveVisitor<'a> {
             }
             ExprKind::Match { scrutinee, .. } => {
                 self.visit_place_base(scrutinee);
+            }
+            ExprKind::Call { callee, args } => {
+                self.visit_expr(callee);
+                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                    for (param, arg) in sig.params.iter().zip(args) {
+                        match param.mode {
+                            FunctionParamMode::In | FunctionParamMode::Inout => {
+                                self.with_borrow_context(|this| this.visit_expr(arg));
+                            }
+                        }
+                    }
+                } else {
+                    for arg in args {
+                        self.visit_expr(arg);
+                    }
+                }
             }
             _ => walk_expr(self, expr),
         }
