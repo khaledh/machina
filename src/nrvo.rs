@@ -1,7 +1,7 @@
 use crate::ast::{
     ArrayLitInit, BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringFmtSegment,
 };
-use crate::context::{AnalyzedContext, TypeCheckedContext};
+use crate::context::{AnalyzedContext, SemanticCheckedContext};
 use crate::resolve::def_map::DefId;
 use crate::resolve::def_map::DefMap;
 use crate::typeck::type_map::TypeMap;
@@ -11,20 +11,21 @@ use crate::typeck::type_map::TypeMap;
 /// This analyzer checks if the returned value of a function is eligible for NRVO.
 /// If it is, it marks the definition as eligible for NRVO.
 pub struct NrvoAnalyzer {
-    ctx: TypeCheckedContext,
+    ctx: SemanticCheckedContext,
 }
 
 impl NrvoAnalyzer {
-    pub fn new(ctx: TypeCheckedContext) -> Self {
+    pub fn new(ctx: SemanticCheckedContext) -> Self {
         Self { ctx }
     }
 
     pub fn analyze(self) -> AnalyzedContext {
-        let TypeCheckedContext {
+        let SemanticCheckedContext {
             module,
             def_map,
             type_map,
             symbols,
+            implicit_moves,
         } = self.ctx;
 
         let mut def_map = def_map;
@@ -38,6 +39,7 @@ impl NrvoAnalyzer {
             def_map,
             type_map,
             symbols,
+            implicit_moves,
         }
     }
 

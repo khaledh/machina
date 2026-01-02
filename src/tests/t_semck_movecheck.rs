@@ -5,7 +5,7 @@ use crate::resolve::resolve;
 use crate::semck::{SemCheckError, move_check};
 use crate::typeck::type_check;
 
-fn move_check_source(source: &str) -> Vec<SemCheckError> {
+fn move_check_source(source: &str) -> move_check::MoveCheckResult {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -32,11 +32,12 @@ fn test_use_after_move() {
         }
     "#;
 
-    let errors = move_check_source(source);
-    assert!(!errors.is_empty(), "Expected a move-check error");
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(errors[0], SemCheckError::UseAfterMove(_, _)),
-        "Expected UseAfterMove error, got {errors:?}"
+        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        "Expected UseAfterMove error, got {:?}",
+        result.errors
     );
 }
 
@@ -50,8 +51,8 @@ fn test_move_ok() {
         }
     "#;
 
-    let errors = move_check_source(source);
-    assert!(errors.is_empty(), "Expected no move-check errors");
+    let result = move_check_source(source);
+    assert!(result.errors.is_empty(), "Expected no move-check errors");
 }
 
 #[test]
@@ -64,11 +65,12 @@ fn test_invalid_move_target() {
         }
     "#;
 
-    let errors = move_check_source(source);
-    assert!(!errors.is_empty(), "Expected a move-check error");
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(errors[0], SemCheckError::InvalidMoveTarget(_)),
-        "Expected InvalidMoveTarget error, got {errors:?}"
+        matches!(result.errors[0], SemCheckError::InvalidMoveTarget(_)),
+        "Expected InvalidMoveTarget error, got {:?}",
+        result.errors
     );
 }
 
@@ -78,16 +80,32 @@ fn test_heap_move_required() {
         fn test() -> u64 {
             let p = ^1;
             let q = p;
+            let r = p;
             0
         }
     "#;
 
-    let errors = move_check_source(source);
-    assert!(!errors.is_empty(), "Expected a move-check error");
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(errors[0], SemCheckError::OwnedMoveRequired(_)),
-        "Expected OwnedMoveRequired error, got {errors:?}"
+        matches!(result.errors[0], SemCheckError::OwnedMoveRequired(_)),
+        "Expected OwnedMoveRequired error, got {:?}",
+        result.errors
     );
+}
+
+#[test]
+fn test_heap_implicit_move_ok() {
+    let source = r#"
+        fn test() -> u64 {
+            let p = ^1;
+            let q = p;
+            0
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(result.errors.is_empty(), "Expected no move-check errors");
 }
 
 #[test]
@@ -100,8 +118,8 @@ fn test_heap_move_ok() {
         }
     "#;
 
-    let errors = move_check_source(source);
-    assert!(errors.is_empty(), "Expected no move-check errors");
+    let result = move_check_source(source);
+    assert!(result.errors.is_empty(), "Expected no move-check errors");
 }
 
 #[test]
@@ -115,6 +133,6 @@ fn test_heap_field_access_allows_borrow() {
         }
     "#;
 
-    let errors = move_check_source(source);
-    assert!(errors.is_empty(), "Expected no move-check errors");
+    let result = move_check_source(source);
+    assert!(result.errors.is_empty(), "Expected no move-check errors");
 }

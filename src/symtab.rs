@@ -68,6 +68,11 @@ impl SymbolTable {
         }
     }
 
+    pub fn register_generated_def(&mut self, def_id: DefId, name: String) {
+        self.func_ids.push(def_id);
+        self.def_names.insert(def_id, name);
+    }
+
     pub fn func_name(&self, index: usize) -> Option<&str> {
         let def_id = self.func_ids.get(index)?;
         self.def_names.get(def_id).map(|s| s.as_str())

@@ -99,6 +99,9 @@ impl<'a> FuncLowerer<'a> {
 
             // Place-based reads
             EK::Var(_) | EK::TupleField { .. } | EK::StructField { .. } => {
+                if matches!(expr.kind, EK::Var(_)) && self.ctx.implicit_moves.contains(&expr.id) {
+                    self.record_move(expr);
+                }
                 let place = self.lower_place_scalar(expr)?;
                 Ok(Operand::Copy(place))
             }

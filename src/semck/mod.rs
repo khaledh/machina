@@ -1,3 +1,4 @@
+mod ast_liveness;
 mod errors;
 mod move_check;
 mod slice_escape;
@@ -7,18 +8,20 @@ mod value;
 
 pub use errors::SemCheckError;
 
-use crate::context::TypeCheckedContext;
+use crate::context::{SemanticCheckedContext, TypeCheckedContext};
 
-pub fn sem_check(ctx: &TypeCheckedContext) -> Result<(), Vec<SemCheckError>> {
+pub fn sem_check(ctx: TypeCheckedContext) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {
     let mut errors = Vec::new();
 
-    errors.extend(value::check(ctx));
-    errors.extend(structural::check(ctx));
-    errors.extend(move_check::check(ctx));
-    errors.extend(slice_escape::check(ctx));
+    let move_result = move_check::check(&ctx);
+
+    errors.extend(value::check(&ctx));
+    errors.extend(structural::check(&ctx));
+    errors.extend(move_result.errors);
+    errors.extend(slice_escape::check(&ctx));
 
     if errors.is_empty() {
-        Ok(())
+        Ok(ctx.with_implicit_moves(move_result.implicit_moves))
     } else {
         Err(errors)
     }

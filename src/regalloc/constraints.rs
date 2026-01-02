@@ -87,6 +87,10 @@ pub fn analyze_fn_return(
         // for aggregates, return constraints are empty (sret handled via call constraints)
         return HashMap::new();
     }
+    if matches!(body.types.kind(ret_ty), crate::mcir::types::TyKind::Unit) {
+        // Unit returns do not use a return register.
+        return HashMap::new();
+    }
 
     let mut map = HashMap::new();
     for (i, block) in body.blocks.iter().enumerate() {

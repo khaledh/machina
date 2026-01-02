@@ -142,7 +142,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- Semantic Check ---
 
-    sem_check(&type_checked_context).map_err(|errs| {
+    let semantic_checked_context = sem_check(type_checked_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()
@@ -150,7 +150,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- NRVO Analysis ---
 
-    let analyzed_context = NrvoAnalyzer::new(type_checked_context).analyze();
+    let analyzed_context = NrvoAnalyzer::new(semantic_checked_context).analyze();
 
     if dump_nrvo {
         println!("NRVO:");

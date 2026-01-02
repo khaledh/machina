@@ -1,4 +1,4 @@
-use crate::context::AstContext;
+use crate::context::{AstContext, SemanticCheckedContext};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parser::Parser;
 use crate::resolve::resolve;
@@ -6,7 +6,7 @@ use crate::semck::{SemCheckError, sem_check};
 use crate::typeck::type_check;
 use crate::types::Type;
 
-fn sem_check_source(source: &str) -> Result<(), Vec<SemCheckError>> {
+fn sem_check_source(source: &str) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -19,7 +19,7 @@ fn sem_check_source(source: &str) -> Result<(), Vec<SemCheckError>> {
     let ast_context = AstContext::new(module);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
-    sem_check(&type_checked_context)
+    sem_check(type_checked_context)
 }
 
 #[test]

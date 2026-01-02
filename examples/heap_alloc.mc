@@ -12,8 +12,8 @@ fn consume_point(p: ^Point) -> u64 {
 
 fn main() -> u64 {
     let p = make_point(1, 2);
-    let q = move p;
-    consume_point(move q);
+    let q = p;
+    consume_point(q);
 
     var r = ^Point { x: 3, y: 4 };
     r = ^Point { x: 5, y: 6 };

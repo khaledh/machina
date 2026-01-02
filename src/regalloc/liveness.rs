@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::liveness::{LiveMap, collect_operand_uses, stmt_defs, stmt_uses};
-use crate::mcir::types::{FuncBody, LocalId, LocalKind, Terminator};
+use crate::mcir::types::{FuncBody, LocalId, LocalKind, Terminator, TyKind};
 
 // -- Live intervals computation ---
 
@@ -50,6 +50,21 @@ pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveI
             collect_operand_uses(cond, &mut uses);
             for u in uses {
                 map.entry(u)
+                    .and_modify(|iv| iv.end = inst_idx + 1)
+                    .or_insert(LiveInterval {
+                        start: inst_idx,
+                        end: inst_idx + 1,
+                    });
+            }
+        }
+        if matches!(block.terminator, Terminator::Return) {
+            // Treat the return value as used at the terminator so its interval
+            // extends through any final calls (e.g. drop glue) before return.
+            let ret_local = body.ret_local;
+            let ret_ty = body.locals[ret_local.index()].ty;
+            let ret_kind = body.types.kind(ret_ty);
+            if body.types.get(ret_ty).is_scalar() && !matches!(ret_kind, TyKind::Unit) {
+                map.entry(ret_local)
                     .and_modify(|iv| iv.end = inst_idx + 1)
                     .or_insert(LiveInterval {
                         start: inst_idx,

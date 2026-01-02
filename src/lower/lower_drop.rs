@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::ast::{Expr, ExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
-use crate::mcir::types::{Operand, Place};
+use crate::mcir::types::{Callee, Place, PlaceAny, Statement};
 use crate::resolve::def_map::DefId;
 use crate::types::Type;
 
@@ -41,15 +41,15 @@ impl<'a> FuncLowerer<'a> {
             if scope.moved.contains(&info.def_id) {
                 continue;
             }
-            if info.ty.is_heap() {
-                self.emit_drop_heap(info.def_id)?;
+            if info.ty.needs_drop() {
+                self.emit_drop_value(info.def_id, &info.ty)?;
             }
         }
         Ok(())
     }
 
     pub(super) fn register_drop(&mut self, def_id: DefId, ty: &Type) {
-        if !ty.is_heap() {
+        if !ty.needs_drop() {
             return;
         }
 
@@ -73,7 +73,7 @@ impl<'a> FuncLowerer<'a> {
         let Ok(ty) = self.ty_for_node(expr.id) else {
             return;
         };
-        if !ty.is_heap() {
+        if !ty.needs_drop() {
             return;
         }
         // Mark the binding as moved so we skip drop at scope exit.
@@ -102,14 +102,36 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn emit_drop_heap(&mut self, def_id: DefId) -> Result<(), LowerError> {
+    fn emit_drop_value(&mut self, def_id: DefId, ty: &Type) -> Result<(), LowerError> {
         let Some(&local_id) = self.locals.get(&def_id) else {
             return Ok(());
         };
-        // Emit a runtime free for the heap pointer stored in the local.
-        let ty_id = self.fb.body.locals[local_id.index()].ty;
-        let place = Place::new(local_id, ty_id, vec![]);
-        self.emit_runtime_free(Operand::Copy(place));
+
+        let ty_id = self.ty_lowerer.lower_ty(ty);
+        let place = if ty.is_scalar() {
+            PlaceAny::Scalar(Place::new(local_id, ty_id, vec![]))
+        } else {
+            PlaceAny::Aggregate(Place::new(local_id, ty_id, vec![]))
+        };
+
+        self.emit_drop_place(place, ty);
+
         Ok(())
+    }
+
+    pub(super) fn emit_drop_place(&mut self, place: PlaceAny, ty: &Type) {
+        if !ty.needs_drop() {
+            return;
+        }
+
+        let callee_def_id = self.drop_glue.get_or_create(ty);
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst: None,
+                callee: Callee::Def(callee_def_id),
+                args: vec![place],
+            },
+        );
     }
 }

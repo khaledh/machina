@@ -5,7 +5,7 @@
 // - Re‑assigning the var (`x = ...`) clears moved status.
 // - `inout` use counts as use (already checked elsewhere).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
@@ -14,17 +14,35 @@ use crate::ast::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
+use crate::semck::ast_liveness::{self, AstLiveness};
 
-pub fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
-    let mut errors = Vec::new();
-    for func in ctx.module.funcs() {
-        check_func(func, ctx, &mut errors);
-    }
-    errors
+pub struct MoveCheckResult {
+    pub errors: Vec<SemCheckError>,
+    pub implicit_moves: HashSet<crate::ast::NodeId>,
 }
 
-fn check_func(func: &Function, ctx: &TypeCheckedContext, errors: &mut Vec<SemCheckError>) {
+// Run move checking and collect implicit moves for last-use heap values.
+pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
+    let mut errors = Vec::new();
+    let mut implicit_moves = HashSet::new();
+    for func in ctx.module.funcs() {
+        check_func(func, ctx, &mut errors, &mut implicit_moves);
+    }
+    MoveCheckResult {
+        errors,
+        implicit_moves,
+    }
+}
+
+fn check_func(
+    func: &Function,
+    ctx: &TypeCheckedContext,
+    errors: &mut Vec<SemCheckError>,
+    implicit_moves: &mut HashSet<crate::ast::NodeId>,
+) {
     let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
+    // Precompute heap liveness so we can detect last-use sites inside blocks.
+    let liveness = ast_liveness::analyze(&cfg, ctx);
 
     let empty = HashSet::new();
     solve_forward(
@@ -33,6 +51,7 @@ fn check_func(func: &Function, ctx: &TypeCheckedContext, errors: &mut Vec<SemChe
         empty.clone(), // entry state
         empty,         // bottom
         |states| {
+            // Conservative: once moved on any path, treat it as moved.
             let mut out = HashSet::new();
             for s in states {
                 out.extend(s.iter().cloned());
@@ -40,8 +59,10 @@ fn check_func(func: &Function, ctx: &TypeCheckedContext, errors: &mut Vec<SemChe
             out
         },
         |block_id, in_state| {
-            let mut visitor = MoveVisitor::new(ctx, in_state.clone(), errors);
-            visitor.visit_cfg_node(&cfg.nodes[block_id.0]);
+            // Move checking is forward: we need to catch use-after-move in order.
+            let mut visitor =
+                MoveVisitor::new(ctx, in_state.clone(), errors, implicit_moves, &liveness);
+            visitor.visit_cfg_node(&cfg.nodes[block_id.0], block_id);
             visitor.moved
         },
     );
@@ -51,6 +72,10 @@ struct MoveVisitor<'a> {
     ctx: &'a TypeCheckedContext,
     moved: HashSet<DefId>,
     errors: &'a mut Vec<SemCheckError>,
+    implicit_moves: &'a mut HashSet<crate::ast::NodeId>,
+    liveness: &'a AstLiveness,
+    current_live_after: Option<HashSet<DefId>>,
+    current_use_counts: Option<HashMap<DefId, usize>>,
 }
 
 impl<'a> MoveVisitor<'a> {
@@ -58,17 +83,40 @@ impl<'a> MoveVisitor<'a> {
         ctx: &'a TypeCheckedContext,
         moved: HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
+        implicit_moves: &'a mut HashSet<crate::ast::NodeId>,
+        liveness: &'a AstLiveness,
     ) -> Self {
-        Self { ctx, moved, errors }
+        Self {
+            ctx,
+            moved,
+            errors,
+            implicit_moves,
+            liveness,
+            current_live_after: None,
+            current_use_counts: None,
+        }
     }
 
-    fn visit_cfg_node(&mut self, node: &AstCfgNode<'_>) {
-        for item in &node.items {
+    fn visit_cfg_node(&mut self, node: &AstCfgNode<'_>, block_id: AstBlockId) {
+        // Count per-item heap uses so we don't implicitly move if an item
+        // references the same binding multiple times.
+        let item_use_counts = node
+            .items
+            .iter()
+            .map(|item| ast_liveness::heap_use_counts_for_item(item, self.ctx))
+            .collect::<Vec<_>>();
+        let live_after = &self.liveness.live_after[block_id.0];
+
+        for (idx, item) in node.items.iter().enumerate() {
+            self.current_live_after = Some(live_after[idx].clone());
+            self.current_use_counts = Some(item_use_counts[idx].clone());
             match item {
                 AstItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
                 AstItem::Expr(expr) => self.visit_expr(expr),
             }
         }
+        self.current_live_after = None;
+        self.current_use_counts = None;
         match &node.term {
             AstTerminator::If { cond, .. } => self.visit_expr(cond),
             AstTerminator::Goto(_) | AstTerminator::End => {}
@@ -107,8 +155,31 @@ impl<'a> MoveVisitor<'a> {
         if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
             && ty.is_heap()
         {
-            self.errors
-                .push(SemCheckError::OwnedMoveRequired(expr.span));
+            let Some(def) = self.ctx.def_map.lookup_def(expr.id) else {
+                return;
+            };
+            let Some(ref live_after) = self.current_live_after else {
+                self.errors
+                    .push(SemCheckError::OwnedMoveRequired(expr.span));
+                return;
+            };
+            let use_count = self
+                .current_use_counts
+                .as_ref()
+                .and_then(|counts| counts.get(&def.id))
+                .copied()
+                .unwrap_or(0);
+            // If a statement uses the same binding multiple times (e.g., `f(p, p)`),
+            // we require an explicit move to avoid partial-move ambiguity.
+            if use_count > 1 || live_after.contains(&def.id) {
+                self.errors
+                    .push(SemCheckError::OwnedMoveRequired(expr.span));
+                return;
+            }
+
+            // Last-use in this item; record an implicit move.
+            self.implicit_moves.insert(expr.id);
+            self.moved.insert(def.id);
         }
     }
 
@@ -117,6 +188,7 @@ impl<'a> MoveVisitor<'a> {
     fn visit_place_base(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var(_) => {
+                // Place projections are treated as borrows of the base.
                 self.check_use(expr);
             }
             ExprKind::StructField { target, .. } => {

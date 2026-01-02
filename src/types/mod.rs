@@ -336,6 +336,20 @@ impl Type {
         self.is_compound() || self.is_heap()
     }
 
+    pub fn needs_drop(&self) -> bool {
+        match self {
+            Type::Heap { .. } => true,
+            Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
+            Type::Tuple { fields } => fields.iter().any(Type::needs_drop),
+            Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.needs_drop()),
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .any(|v| v.payload.iter().any(Type::needs_drop)),
+            // Note: Keep string/slice as non-dropping for now.
+            _ => false,
+        }
+    }
+
     pub fn is_scalar(&self) -> bool {
         !self.is_compound()
     }

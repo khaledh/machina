@@ -21,6 +21,7 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::context::{AnalyzedContext, LoweredMcirContext};
+use crate::lower::drop_glue::DropGlueRegistry;
 use crate::lower::errors::LowerError;
 use crate::lower::lower_drop::DropScope;
 use crate::lower::lower_ty::TyLowerer;
@@ -51,6 +52,7 @@ pub struct FuncLowerer<'a> {
     pub(super) ty_lowerer: TyLowerer,
     pub(super) curr_block: BlockId,
     pub(super) drop_scopes: Vec<DropScope>,
+    pub(super) drop_glue: &'a mut DropGlueRegistry,
     pub(super) trace_alloc: bool,
 }
 
@@ -60,6 +62,7 @@ impl<'a> FuncLowerer<'a> {
         ctx: &'a AnalyzedContext,
         func: &'a Function,
         global_interner: &'a mut GlobalInterner,
+        drop_glue: &'a mut DropGlueRegistry,
         trace_alloc: bool,
     ) -> Self {
         let mut ty_lowerer = TyLowerer::new();
@@ -84,6 +87,7 @@ impl<'a> FuncLowerer<'a> {
             ty_lowerer,
             curr_block: entry,
             drop_scopes: Vec::new(),
+            drop_glue,
             trace_alloc,
         }
     }
@@ -158,10 +162,28 @@ pub fn lower_ast(
     // Interned globals
     let mut global_interner = GlobalInterner::new();
 
+    // Drop glue registry
+    let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
+
     // Lower all functions
     for func in ctx.module.funcs() {
-        let body = FuncLowerer::new(&ctx, func, &mut global_interner, trace_alloc).lower()?;
+        let body = FuncLowerer::new(
+            &ctx,
+            func,
+            &mut global_interner,
+            &mut drop_glue,
+            trace_alloc,
+        )
+        .lower()?;
         bodies.push(body);
+    }
+
+    // Register generated drop glue functions
+    let mut ctx = ctx;
+    for generated in drop_glue.drain() {
+        ctx.symbols
+            .register_generated_def(generated.def_id, generated.name);
+        bodies.push(generated.body);
     }
 
     Ok(ctx.with_func_bodies(bodies, global_interner.take()))

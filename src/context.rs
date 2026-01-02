@@ -1,4 +1,6 @@
-use crate::ast::Module;
+use std::collections::HashSet;
+
+use crate::ast::{Module, NodeId};
 use crate::liveness::LiveMap;
 use crate::mcir::{FuncBody, GlobalItem};
 use crate::regalloc::AllocationResult;
@@ -61,6 +63,30 @@ pub struct TypeCheckedContext {
     pub symbols: SymbolTable,
 }
 
+impl TypeCheckedContext {
+    pub fn with_implicit_moves(self, implicit_moves: HashSet<NodeId>) -> SemanticCheckedContext {
+        SemanticCheckedContext {
+            module: self.module,
+            def_map: self.def_map,
+            type_map: self.type_map,
+            symbols: self.symbols,
+            implicit_moves,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Semantic Checked Context
+// -----------------------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct SemanticCheckedContext {
+    pub module: Module,
+    pub def_map: DefMap,
+    pub type_map: TypeMap,
+    pub symbols: SymbolTable,
+    pub implicit_moves: HashSet<NodeId>,
+}
+
 // -----------------------------------------------------------------------------
 // Analyzed Context
 // -----------------------------------------------------------------------------
@@ -70,6 +96,7 @@ pub struct AnalyzedContext {
     pub def_map: DefMap,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
+    pub implicit_moves: HashSet<NodeId>,
 }
 
 impl AnalyzedContext {

@@ -12,9 +12,9 @@ fn sum(list: Link) -> u64 {
 
 fn main() -> u64 {
     let c = ^Node { value: 3, next: Link::None };
-    let b = ^Node { value: 2, next: Link::Some(move c) };
-    let a = ^Node { value: 1, next: Link::Some(move b) };
-    let list = Link::Some(move a);
+    let b = ^Node { value: 2, next: Link::Some(c) };
+    let a = ^Node { value: 1, next: Link::Some(b) };
+    let list = Link::Some(a);
 
     let total = sum(list);
     println(total);

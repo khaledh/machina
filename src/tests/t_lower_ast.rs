@@ -1,13 +1,16 @@
 use super::*;
 use crate::context::AstContext;
 use crate::lexer::{LexError, Lexer, Token};
+use crate::lower::drop_glue::{DropGlueRegistry, GeneratedDropGlue};
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::{GlobalItem, GlobalPayload, GlobalSection};
 use crate::nrvo::NrvoAnalyzer;
 use crate::parser::Parser;
 use crate::resolve::resolve;
+use crate::semck::sem_check;
 use crate::typeck::type_check;
+use std::collections::HashSet;
 
 fn analyze(source: &str) -> AnalyzedContext {
     let lexer = Lexer::new(source);
@@ -22,15 +25,28 @@ fn analyze(source: &str) -> AnalyzedContext {
     let ast_context = AstContext::new(module);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
+    let sem_checked_context = sem_check(type_checked_context).expect("Failed to semantic check");
 
-    NrvoAnalyzer::new(type_checked_context).analyze()
+    NrvoAnalyzer::new(sem_checked_context).analyze()
 }
 
 fn lower_body_with_globals(ctx: &AnalyzedContext, func: &Function) -> (FuncBody, Vec<GlobalItem>) {
     let mut interner = GlobalInterner::new();
-    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner, false);
+    let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
+    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, interner.take())
+}
+
+fn lower_body_with_drop_glue(
+    ctx: &AnalyzedContext,
+    func: &Function,
+) -> (FuncBody, Vec<GeneratedDropGlue>) {
+    let mut interner = GlobalInterner::new();
+    let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
+    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner, &mut drop_glue, false);
+    let body = lowerer.lower().expect("Failed to lower function");
+    (body, drop_glue.drain())
 }
 
 #[test]
@@ -78,7 +94,8 @@ fn test_lower_string_literal_global() {
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
     let mut interner = GlobalInterner::new();
-    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner, false);
+    let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
+    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner, &mut drop_glue, false);
 
     let body = lowerer.lower().expect("Failed to lower function");
     let globals = interner.take();
@@ -226,25 +243,134 @@ fn test_lower_heap_alloc_and_free() {
 
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
 
     let mut saw_alloc = false;
+    let mut saw_drop_call = false;
     let mut saw_free = false;
+    let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
 
     for block in &body.blocks {
         for stmt in &block.stmts {
             if let Statement::Call { callee, .. } = stmt {
                 match callee {
                     Callee::Runtime(RuntimeFn::Alloc) => saw_alloc = true,
-                    Callee::Runtime(RuntimeFn::Free) => saw_free = true,
+                    Callee::Def(def_id) if generated_ids.contains(def_id) => saw_drop_call = true,
                     _ => {}
                 }
             }
         }
     }
 
+    for entry in &generated {
+        for block in &entry.body.blocks {
+            for stmt in &block.stmts {
+                if let Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::Free),
+                    ..
+                } = stmt
+                {
+                    saw_free = true;
+                }
+            }
+        }
+    }
+
     assert!(saw_alloc, "Expected runtime alloc call");
-    assert!(saw_free, "Expected runtime free call");
+    assert!(saw_drop_call, "Expected drop glue call");
+    assert!(saw_free, "Expected drop glue to call runtime free");
+}
+
+#[test]
+fn test_lower_drop_glue_emits_free() {
+    let source = r#"
+        type Boxed = { value: ^u64 }
+
+        fn main() -> u64 {
+            let b = Boxed { value: ^1 };
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let mut interner = GlobalInterner::new();
+    let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
+    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner, &mut drop_glue, false);
+    let body = lowerer.lower().expect("Failed to lower function");
+    let generated = drop_glue.drain();
+
+    assert!(
+        generated.len() >= 2,
+        "expected drop glue for Boxed and ^u64"
+    );
+
+    let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
+    let mut saw_drop_call = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call {
+                callee: Callee::Def(def_id),
+                ..
+            } = stmt
+            {
+                if generated_ids.contains(def_id) {
+                    saw_drop_call = true;
+                }
+            }
+        }
+    }
+    assert!(saw_drop_call, "expected main to call drop glue");
+
+    let mut saw_free = false;
+    for entry in &generated {
+        for block in &entry.body.blocks {
+            for stmt in &block.stmts {
+                if let Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::Free),
+                    ..
+                } = stmt
+                {
+                    saw_free = true;
+                }
+            }
+        }
+    }
+    assert!(saw_free, "expected drop glue to call runtime free");
+}
+
+#[test]
+fn test_lower_heap_implicit_move_skips_double_free() {
+    let source = r#"
+        fn main() -> u64 {
+            let p = ^1;
+            let q = p;
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
+
+    let mut alloc_calls = 0;
+    let mut drop_calls = 0;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call { callee, .. } = stmt {
+                match callee {
+                    Callee::Runtime(RuntimeFn::Alloc) => alloc_calls += 1,
+                    Callee::Def(def_id) if generated_ids.contains(def_id) => drop_calls += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert_eq!(alloc_calls, 1, "expected one heap allocation");
+    assert_eq!(drop_calls, 1, "expected one drop glue call");
 }
 
 #[test]

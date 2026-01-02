@@ -89,9 +89,9 @@ impl<'a> FuncLowerer<'a> {
             let target_ty = self.ty_for_node(assignee.id)?;
             self.emit_conversion_check(&value_ty, &target_ty, &value_operand);
 
-            if target_ty.is_heap() {
+            if target_ty.needs_drop() {
                 // Overwrite semantics: free the old heap pointer first.
-                self.emit_runtime_free(Operand::Copy(assignee_place.clone()));
+                self.emit_drop_place(PlaceAny::Scalar(assignee_place.clone()), &target_ty);
                 if let ExprKind::Var(_) = assignee.kind {
                     if let Ok(def) = self.def_for_node(assignee.id) {
                         self.clear_moved(def.id);
@@ -103,6 +103,14 @@ impl<'a> FuncLowerer<'a> {
         } else {
             // Aggregate assignment (value written directly into place).
             let assignee_place = self.lower_place_agg(assignee)?;
+
+            // Overwrite semantics: free the old heap pointer first.
+            let target_ty = self.ty_for_node(assignee.id)?;
+            if target_ty.needs_drop() {
+                self.emit_drop_place(PlaceAny::Aggregate(assignee_place.clone()), &target_ty);
+            }
+
+            // Write the new value into the assignee place.
             self.lower_agg_value_into(assignee_place, value)?;
         }
 

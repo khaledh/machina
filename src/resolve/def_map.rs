@@ -208,6 +208,11 @@ impl DefMap {
             })
             .collect()
     }
+
+    // For registering generated functions
+    pub fn next_def_id(&self) -> DefId {
+        DefId(self.defs.len() as u32)
+    }
 }
 
 impl IntoIterator for DefMap {

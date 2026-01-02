@@ -88,6 +88,7 @@ impl<'a> Arm64Codegen<'a> {
                 McFunction { name, body, alloc }
             })
             .collect();
+
         Self::new(funcs, &ctx.symbols.def_names, &ctx.globals)
     }
 
@@ -95,7 +96,7 @@ impl<'a> Arm64Codegen<'a> {
         let mut asm = String::new();
 
         let global_labels = self.emit_globals(&mut asm);
-        let _ = self.emit_funcs(&mut asm, &global_labels);
+        self.emit_funcs(&mut asm, &global_labels)?;
 
         Ok(asm)
     }
@@ -921,7 +922,8 @@ impl<'a> FuncCodegen<'a> {
             Some(MappedLocal::Reg(reg)) => {
                 let reg = self.reg(*reg);
                 asm.push_str(&format!("  mov x17, {}\n", reg));
-                Ok(false)
+                let ty = self.body.locals[base.index()].ty;
+                Ok(self.body.types.get(ty).is_aggregate())
             }
             Some(MappedLocal::StackAddr(slot)) => {
                 let offset = self.get_stack_offset(slot)?;

@@ -246,18 +246,6 @@ impl<'a> FuncLowerer<'a> {
         Operand::Copy(temp)
     }
 
-    pub(super) fn emit_runtime_free(&mut self, ptr: Operand) {
-        let ptr_arg = self.runtime_arg_place(ptr);
-        self.fb.push_stmt(
-            self.curr_block,
-            Statement::Call {
-                dst: None,
-                callee: Callee::Runtime(RuntimeFn::Free),
-                args: vec![ptr_arg],
-            },
-        );
-    }
-
     pub(super) fn emit_runtime_set_alloc_trace(&mut self, enabled: bool) {
         let arg = self.runtime_arg_place(u64_const(enabled as u64));
         self.fb.push_stmt(

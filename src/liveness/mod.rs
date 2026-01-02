@@ -9,7 +9,7 @@ use crate::context::{LivenessContext, OptimizedMcirContext};
 use crate::mcir::cfg::McirCfg;
 use crate::mcir::types::{
     BasicBlock, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue, Statement,
-    Terminator,
+    Terminator, TyKind,
 };
 
 /// Run liveness analysis for an optimized MCIR context.
@@ -133,7 +133,7 @@ struct GenKillSet {
     kill_set: HashSet<LocalId>,
 }
 
-fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
+fn gen_kill_for_block(block: &BasicBlock, body: &FuncBody) -> GenKillSet {
     let mut gen_set = HashSet::new();
     let mut kill_set = HashSet::new();
 
@@ -172,10 +172,20 @@ fn gen_kill_for_block(block: &BasicBlock) -> GenKillSet {
                 }
             }
         }
-        Terminator::Return
-        | Terminator::Goto(_)
-        | Terminator::Unreachable
-        | Terminator::Unterminated => {}
+        Terminator::Return => {
+            // Return has an implicit use of the return local; keep scalar returns live.
+            let ret_local = body.ret_local;
+            let ret_ty = body.locals[ret_local.index()].ty;
+            let ret_kind = body.types.kind(ret_ty);
+            if body.types.get(ret_ty).is_scalar()
+                && !matches!(ret_kind, TyKind::Unit)
+                && !kill_set.contains(&ret_local)
+            {
+                gen_set.insert(ret_local);
+            }
+        }
+
+        Terminator::Goto(_) | Terminator::Unreachable | Terminator::Unterminated => {}
     }
 
     GenKillSet { gen_set, kill_set }
@@ -218,7 +228,7 @@ impl<'a> LivenessAnalysis<'a> {
     pub fn analyze(&self) -> LiveMap {
         let mut gen_kill = Vec::with_capacity(self.body.blocks.len());
         for block in &self.body.blocks {
-            gen_kill.push(gen_kill_for_block(block));
+            gen_kill.push(gen_kill_for_block(block, self.body));
         }
 
         let cfg = McirCfg::new(self.body);

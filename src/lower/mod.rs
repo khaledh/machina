@@ -1,3 +1,4 @@
+pub mod drop_glue;
 pub mod errors;
 pub mod lower_ast;
 pub mod lower_ty;
