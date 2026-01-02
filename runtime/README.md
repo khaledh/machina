@@ -68,6 +68,25 @@
 - Signature: `void __mc_memcpy(mc_slice_t *dst, const mc_slice_t *src)`
 - Purpose: copies bytes between slices (expected to match in length).
 
+### Allocation
+- Symbol: `__mc_alloc`
+- Signature: `void *__mc_alloc(uint64_t size, uint64_t align)`
+- Purpose: allocates an owned heap block and returns a pointer.
+
+- Symbol: `__mc_realloc`
+- Signature: `void *__mc_realloc(void *ptr, uint64_t size, uint64_t align)`
+- Purpose: reallocates a block to a new size and returns the new pointer.
+
+- Symbol: `__mc_free`
+- Signature: `void __mc_free(void *ptr)`
+- Purpose: frees a block allocated by `__mc_alloc`/`__mc_realloc`.
+
+### Allocation Trace Control
+
+- Symbol: `__mc_set_alloc_trace`
+- Signature: `void __mc_set_alloc_trace(uint8_t enabled)`
+- Purpose: enables (`enabled != 0`) or disables allocation tracing to stderr.
+
 ## Types
 - `mc_string_t` matches Machina's `string` layout:
   ```

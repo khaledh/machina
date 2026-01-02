@@ -1,6 +1,6 @@
 //! Semantics
 // - `move x` only valid if x is a plain variable (no projections).
-// - Move only tracks compound types (`Type::is_compound()`).
+// - Move tracks compound types and heap-owned values (`Type::is_move_tracked()`).
 // - Any use of a moved var is an error.
 // - Re‑assigning the var (`x = ...`) clears moved status.
 // - `inout` use counts as use (already checked elsewhere).
@@ -84,7 +84,7 @@ impl<'a> MoveVisitor<'a> {
                 let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) else {
                     return;
                 };
-                if ty.is_compound() {
+                if ty.is_move_tracked() {
                     self.moved.insert(def.id);
                 }
             }
@@ -100,6 +100,15 @@ impl<'a> MoveVisitor<'a> {
         {
             self.errors
                 .push(SemCheckError::UseAfterMove(def.name.clone(), expr.span));
+        }
+    }
+
+    fn check_heap_move_required(&mut self, expr: &Expr) {
+        if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
+            && ty.is_heap()
+        {
+            self.errors
+                .push(SemCheckError::OwnedMoveRequired(expr.span));
         }
     }
 
@@ -158,6 +167,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
             }
             ExprKind::Var(_) => {
                 self.check_use(expr);
+                self.check_heap_move_required(expr);
             }
             // If/Match require special treatment at CFG level
             ExprKind::If { cond, .. } => {

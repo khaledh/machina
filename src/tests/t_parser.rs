@@ -214,6 +214,35 @@ fn test_parse_nested_array_literal() {
 }
 
 #[test]
+fn test_parse_heap_type_and_alloc_expr() {
+    let source = r#"
+        fn test() -> ^u64 {
+            ^1
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.return_type.kind {
+        TypeExprKind::Heap { elem_ty } => match &elem_ty.kind {
+            TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+            _ => panic!("Expected named element type"),
+        },
+        _ => panic!("Expected heap type"),
+    }
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::HeapAlloc { expr } => match &expr.kind {
+            ExprKind::IntLit(value) => assert_eq!(*value, 1),
+            _ => panic!("Expected int literal"),
+        },
+        _ => panic!("Expected heap alloc expression"),
+    }
+}
+
+#[test]
 fn test_parse_typed_array_literal() {
     let source = r#"
         fn test() -> u64 {

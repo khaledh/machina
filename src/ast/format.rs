@@ -194,6 +194,9 @@ impl fmt::Display for TypeExprKind {
             TypeExprKind::Slice { elem_ty } => {
                 write!(f, "Slice({})", elem_ty)?;
             }
+            TypeExprKind::Heap { elem_ty } => {
+                write!(f, "Heap({})", elem_ty)?;
+            }
         }
         Ok(())
     }
@@ -467,6 +470,12 @@ impl Expr {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}UnaryOp [{}]", pad, self.id)?;
                 writeln!(f, "{}Op: {}", pad1, op)?;
+                writeln!(f, "{}Operand:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::HeapAlloc { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}HeapAlloc [{}]", pad, self.id)?;
                 writeln!(f, "{}Operand:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
             }

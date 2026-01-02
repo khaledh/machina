@@ -169,6 +169,9 @@ pub enum TypeExprKind {
     Slice {
         elem_ty: Box<TypeExpr>,
     },
+    Heap {
+        elem_ty: Box<TypeExpr>,
+    },
 }
 
 // -- Array Literals ---
@@ -410,6 +413,11 @@ pub enum ExprKind {
     },
     UnaryOp {
         op: UnaryOp,
+        expr: Box<Expr>,
+    },
+
+    // Heap allocation
+    HeapAlloc {
         expr: Box<Expr>,
     },
 

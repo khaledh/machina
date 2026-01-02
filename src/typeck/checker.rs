@@ -1147,6 +1147,17 @@ impl AstFolder for TypeChecker {
 
                 ExprKind::UnitLit => Ok(Type::Unit),
 
+                ExprKind::HeapAlloc { expr } => {
+                    let inner_expected = match expected {
+                        Some(Type::Heap { elem_ty }) => Some(elem_ty.as_ref()),
+                        _ => None,
+                    };
+                    let elem_ty = self.visit_expr(expr, inner_expected)?;
+                    Ok(Type::Heap {
+                        elem_ty: Box::new(elem_ty),
+                    })
+                }
+
                 ExprKind::StringFmt { segments } => {
                     for segment in segments {
                         if let StringFmtSegment::Expr { expr, span } = segment {

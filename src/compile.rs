@@ -22,6 +22,7 @@ pub struct CompileOptions {
     pub dump: Option<String>,
     pub target: TargetKind,
     pub emit_mcir: bool,
+    pub trace_alloc: bool,
 }
 
 pub struct CompileOutput {
@@ -161,8 +162,8 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     }
 
     // --- Lower to MCIR ---
-    let lowered_context =
-        lower::lower_ast::lower_ast(analyzed_context).map_err(|e| vec![e.into()])?;
+    let lowered_context = lower::lower_ast::lower_ast(analyzed_context, opts.trace_alloc)
+        .map_err(|e| vec![e.into()])?;
     if dump_ir {
         println!("MCIR:");
         println!("--------------------------------");

@@ -3,6 +3,9 @@ fn __mc_print(s: string, newline: u64);
 fn __mc_u64_to_dec(inout buf: u8[], value: u64) -> u64;
 fn __mc_memset(inout buf: u8[], value: u8);
 fn __mc_string_from_bytes(inout dst: string, bytes: u8[]);
+fn __mc_alloc(size: u64, align: u64) -> u64;
+fn __mc_realloc(ptr: u64, size: u64, align: u64) -> u64;
+fn __mc_free(ptr: u64);
 
 // String helpers
 fn string_from_bytes(bytes: u8[]) -> string {

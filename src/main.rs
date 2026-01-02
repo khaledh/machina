@@ -24,6 +24,10 @@ struct Args {
     /// Comma-separated list of artifacts to emit: [asm, mcir]
     #[clap(long, value_delimiter = ',', global = true)]
     emit: Vec<EmitKind>,
+
+    /// Emit allocation trace messages from the runtime.
+    #[clap(long = "trace-alloc", global = true)]
+    trace_alloc: bool,
 }
 
 #[derive(clap::Subcommand)]
@@ -80,6 +84,7 @@ fn main() {
         dump,
         target,
         emit,
+        trace_alloc,
     } = Args::parse();
     let invocation = match cmd {
         Command::Compile { input, output } => DriverInvocation {
@@ -112,6 +117,7 @@ fn main() {
         dump,
         target,
         emit_mcir,
+        trace_alloc,
     };
     let output = compile(&source, &opts);
 
@@ -296,7 +302,9 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
     Ok(status.code().unwrap_or(1))
 }
 
-const RUNTIME_SOURCE_FILES: &[&str] = &["conv.c", "mem.c", "print.c", "string.c", "trap.c"];
+const RUNTIME_SOURCE_FILES: &[&str] = &[
+    "alloc.c", "conv.c", "mem.c", "print.c", "string.c", "trap.c",
+];
 
 fn runtime_source_paths() -> Vec<PathBuf> {
     let runtime_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");

@@ -21,7 +21,7 @@ EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
 
 # Type Expressions
-TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType | TupleType | RangeType
+TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType | TupleType | RangeType | HeapType
 
 UnitType           ::= "()"
 NamedType          ::= Identifier
@@ -29,6 +29,7 @@ ArrayType          ::= TypeExpr "[" IntLitList "]"
 SliceType          ::= TypeExpr "[" "]"
 TupleType          ::= "(" TypeExpr "," ( TypeExprList )? ")"
 RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
+HeapType           ::= "^" TypeExpr
 
 TypeExprList       ::= TypeExpr ( "," TypeExpr )* ","?
 IntLitList         ::= IntLit ("," IntLit)* ","?
@@ -111,7 +112,7 @@ CompareExpr        ::= ShiftExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) Shi
 ShiftExpr          ::= AddExpr ( ( "<<" | ">>" ) AddExpr )*
 AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
 MulExpr            ::= UnaryExpr ( ( "*" | "/" | "%" ) UnaryExpr )*
-UnaryExpr          ::= ( "-" | "!" | "~" ) UnaryExpr
+UnaryExpr          ::= ( "-" | "!" | "~" | "^" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 

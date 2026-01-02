@@ -66,6 +66,9 @@ pub enum SemCheckError {
     #[error("Invalid move target")]
     InvalidMoveTarget(Span),
 
+    #[error("Owned value must be moved")]
+    OwnedMoveRequired(Span),
+
     #[error("Slice value cannot be returned in v1")]
     SliceEscapeReturn(Span),
 
@@ -96,6 +99,7 @@ impl SemCheckError {
             SemCheckError::InoutArgNotMutable(span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,
             SemCheckError::InvalidMoveTarget(span) => *span,
+            SemCheckError::OwnedMoveRequired(span) => *span,
             SemCheckError::SliceEscapeReturn(span) => *span,
             SemCheckError::SliceEscapeStore(span) => *span,
         }

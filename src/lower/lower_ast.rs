@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::context::{AnalyzedContext, LoweredMcirContext};
 use crate::lower::errors::LowerError;
+use crate::lower::lower_drop::DropScope;
 use crate::lower::lower_ty::TyLowerer;
 use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
@@ -49,6 +50,8 @@ pub struct FuncLowerer<'a> {
     pub(super) locals: HashMap<DefId, LocalId>,
     pub(super) ty_lowerer: TyLowerer,
     pub(super) curr_block: BlockId,
+    pub(super) drop_scopes: Vec<DropScope>,
+    pub(super) trace_alloc: bool,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -57,6 +60,7 @@ impl<'a> FuncLowerer<'a> {
         ctx: &'a AnalyzedContext,
         func: &'a Function,
         global_interner: &'a mut GlobalInterner,
+        trace_alloc: bool,
     ) -> Self {
         let mut ty_lowerer = TyLowerer::new();
 
@@ -79,11 +83,20 @@ impl<'a> FuncLowerer<'a> {
             locals: HashMap::new(),
             ty_lowerer,
             curr_block: entry,
+            drop_scopes: Vec::new(),
+            trace_alloc,
         }
     }
 
     /// Lower the function AST into MCIR.
     pub fn lower(&mut self) -> Result<FuncBody, LowerError> {
+        // Function-level scope for owned locals/params.
+        self.enter_drop_scope();
+
+        if self.trace_alloc && self.func.sig.name == "main" {
+            self.emit_runtime_set_alloc_trace(true);
+        }
+
         // Create locals for params.
         for (i, param) in self.func.sig.params.iter().enumerate() {
             let ty = self.ty_for_node(param.id)?;
@@ -95,6 +108,8 @@ impl<'a> FuncLowerer<'a> {
                 Some(param.name.clone()),
             );
             self.locals.insert(def_id, local_id);
+            // Params are owned values inside the function body.
+            self.register_drop(def_id, &ty);
 
             if matches!(ty, Type::Range { .. }) {
                 let param_place = Place::<Scalar>::new(local_id, ty_id, vec![]);
@@ -121,6 +136,9 @@ impl<'a> FuncLowerer<'a> {
             self.lower_agg_value_into(ret_place, &self.func.body)?;
         }
 
+        // Drop any remaining owned locals before returning.
+        self.exit_drop_scope()?;
+
         // Terminate the entry block
         self.fb.set_terminator(self.curr_block, Terminator::Return);
 
@@ -131,7 +149,10 @@ impl<'a> FuncLowerer<'a> {
 }
 
 /// Lower all functions in a module into MCIR bodies.
-pub fn lower_ast(ctx: AnalyzedContext) -> Result<LoweredMcirContext, LowerError> {
+pub fn lower_ast(
+    ctx: AnalyzedContext,
+    trace_alloc: bool,
+) -> Result<LoweredMcirContext, LowerError> {
     let mut bodies = Vec::new();
 
     // Interned globals
@@ -139,7 +160,7 @@ pub fn lower_ast(ctx: AnalyzedContext) -> Result<LoweredMcirContext, LowerError>
 
     // Lower all functions
     for func in ctx.module.funcs() {
-        let body = FuncLowerer::new(&ctx, func, &mut global_interner).lower()?;
+        let body = FuncLowerer::new(&ctx, func, &mut global_interner, trace_alloc).lower()?;
         bodies.push(body);
     }
 

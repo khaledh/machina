@@ -250,6 +250,8 @@ impl<'a> NrvoSafetyChecker<'a> {
                 StringFmtSegment::Expr { expr, .. } => self.check_expr(expr, false),
             }),
 
+            ExprKind::HeapAlloc { expr } => self.check_expr(expr, false),
+
             ExprKind::Move { expr } => self.check_expr(expr, false),
 
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),

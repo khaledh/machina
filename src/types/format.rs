@@ -52,6 +52,9 @@ impl fmt::Display for Type {
             Type::Slice { elem_ty } => {
                 write!(f, "{}[]", elem_ty)
             }
+            Type::Heap { elem_ty } => {
+                write!(f, "^{}", elem_ty)
+            }
         }
     }
 }

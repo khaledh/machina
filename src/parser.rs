@@ -268,19 +268,7 @@ impl<'a> Parser<'a> {
     // --- Type expressions ---
 
     fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
-        // Check for range type first, then tuple, then named type
-        let mut typ = if let TK::Ident(name) = &self.curr_token.kind
-            && name == "range"
-        {
-            self.parse_range_type()?
-        } else if self.curr_token.kind == TK::LParen
-            && self.peek().map(|t| &t.kind) != Some(&TK::RParen)
-        {
-            self.advance();
-            self.parse_tuple_type()?
-        } else {
-            self.parse_named_type()?
-        };
+        let mut typ = self.parse_type_atom()?;
 
         // Check for array type suffix
         if self.curr_token.kind == TK::LBracket {
@@ -288,6 +276,36 @@ impl<'a> Parser<'a> {
         }
 
         Ok(typ)
+    }
+
+    fn parse_type_atom(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+
+        if self.curr_token.kind == TK::Caret {
+            self.advance();
+            let elem_ty = self.parse_type_atom()?;
+            return Ok(TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Heap {
+                    elem_ty: Box::new(elem_ty),
+                },
+                span: self.close(marker),
+            });
+        }
+
+        // Check for range type first, then tuple, then named type
+        if let TK::Ident(name) = &self.curr_token.kind
+            && name == "range"
+        {
+            return self.parse_range_type();
+        }
+
+        if self.curr_token.kind == TK::LParen && self.peek().map(|t| &t.kind) != Some(&TK::RParen) {
+            self.advance();
+            return self.parse_tuple_type();
+        }
+
+        self.parse_named_type()
     }
 
     fn parse_named_type(&mut self) -> Result<TypeExpr, ParseError> {
@@ -1037,6 +1055,17 @@ impl<'a> Parser<'a> {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::UnaryOp {
                     op: UnaryOp::BitNot,
+                    expr: Box::new(operand),
+                },
+                span: self.close(marker.clone()),
+            }
+        } else if self.curr_token.kind == TK::Caret {
+            // Heap allocation
+            self.advance();
+            let operand = self.parse_expr(10)?; // highest binding power
+            Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::HeapAlloc {
                     expr: Box::new(operand),
                 },
                 span: self.close(marker.clone()),

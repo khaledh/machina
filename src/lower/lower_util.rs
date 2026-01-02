@@ -203,6 +203,68 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    pub(super) fn emit_runtime_alloc(&mut self, size: Operand, align: Operand) -> Operand {
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
+        let temp = self.new_temp_scalar(u64_ty_id);
+        let size_arg = self.runtime_arg_place(size);
+        let align_arg = self.runtime_arg_place(align);
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst: Some(PlaceAny::Scalar(temp.clone())),
+                callee: Callee::Runtime(RuntimeFn::Alloc),
+                args: vec![size_arg, align_arg],
+            },
+        );
+        Operand::Copy(temp)
+    }
+
+    pub(super) fn emit_runtime_realloc(
+        &mut self,
+        ptr: Operand,
+        size: Operand,
+        align: Operand,
+    ) -> Operand {
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
+        let temp = self.new_temp_scalar(u64_ty_id);
+        let ptr_arg = self.runtime_arg_place(ptr);
+        let size_arg = self.runtime_arg_place(size);
+        let align_arg = self.runtime_arg_place(align);
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst: Some(PlaceAny::Scalar(temp.clone())),
+                callee: Callee::Runtime(RuntimeFn::Realloc),
+                args: vec![ptr_arg, size_arg, align_arg],
+            },
+        );
+        Operand::Copy(temp)
+    }
+
+    pub(super) fn emit_runtime_free(&mut self, ptr: Operand) {
+        let ptr_arg = self.runtime_arg_place(ptr);
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst: None,
+                callee: Callee::Runtime(RuntimeFn::Free),
+                args: vec![ptr_arg],
+            },
+        );
+    }
+
+    pub(super) fn emit_runtime_set_alloc_trace(&mut self, enabled: bool) {
+        let arg = self.runtime_arg_place(u64_const(enabled as u64));
+        self.fb.push_stmt(
+            self.curr_block,
+            Statement::Call {
+                dst: None,
+                callee: Callee::Runtime(RuntimeFn::SetAllocTrace),
+                args: vec![arg],
+            },
+        );
+    }
+
     fn emit_runtime_trap_call(&mut self, kind: CheckKind) {
         let zero_op = u64_const(0);
 

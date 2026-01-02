@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stddef.h>
 
 typedef struct mc_string {
   uint64_t ptr;     // address of bytes
@@ -16,3 +17,19 @@ typedef struct mc_fmt {
   uint64_t len;     // bytes written
   uint64_t cap;     // buffer capacity
 } mc_fmt_t;
+
+// Dynamic Memory
+
+typedef struct mc_heap_vtable_t {
+  void *(*alloc)(size_t size);
+  void *(*realloc)(void *ptr, size_t size);
+  void (*free)(void *ptr);
+} mc_heap_vtable_t;
+
+typedef struct mc_heap_t {
+  mc_heap_vtable_t *vtable;
+  void *ctx;
+} mc_heap_t;
+
+// Debug helpers
+void __mc_set_alloc_trace(uint8_t enabled);

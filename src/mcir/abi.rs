@@ -15,6 +15,10 @@ pub enum RuntimeFn {
     U64ToHex,
     MemSet,
     MemCopy,
+    Alloc,
+    Realloc,
+    Free,
+    SetAllocTrace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +134,30 @@ impl RuntimeFn {
             RuntimeFn::MemCopy => RuntimeFnSig {
                 name: "__mc_memcpy",
                 arg_count: 2,
+                ret: None,
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::Alloc => RuntimeFnSig {
+                name: "__mc_alloc",
+                arg_count: 2,
+                ret: Some(RuntimeRet::Addr),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::Realloc => RuntimeFnSig {
+                name: "__mc_realloc",
+                arg_count: 3,
+                ret: Some(RuntimeRet::Addr),
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::Free => RuntimeFnSig {
+                name: "__mc_free",
+                arg_count: 1,
+                ret: None,
+                effect: CallEffect::ReadWrite,
+            },
+            RuntimeFn::SetAllocTrace => RuntimeFnSig {
+                name: "__mc_set_alloc_trace",
+                arg_count: 1,
                 ret: None,
                 effect: CallEffect::ReadWrite,
             },

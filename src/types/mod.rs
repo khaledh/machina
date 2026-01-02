@@ -44,6 +44,9 @@ pub enum Type {
     Slice {
         elem_ty: Box<Type>,
     },
+    Heap {
+        elem_ty: Box<Type>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,6 +103,7 @@ impl PartialEq for Type {
             (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
             (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
             (Type::Slice { elem_ty: e1 }, Type::Slice { elem_ty: e2 }) => e1 == e2,
+            (Type::Heap { elem_ty: e1 }, Type::Heap { elem_ty: e2 }) => e1 == e2,
             _ => false,
         }
     }
@@ -154,6 +158,10 @@ impl Hash for Type {
             }
             Type::Slice { elem_ty } => {
                 11u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::Heap { elem_ty } => {
+                12u8.hash(state);
                 elem_ty.hash(state);
             }
         }
@@ -267,6 +275,7 @@ impl Type {
                 // 8 bytes for the pointer + 8 bytes for the length
                 16
             }
+            Type::Heap { .. } => 8,
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -294,6 +303,7 @@ impl Type {
                 max_payload_align.max(8)
             }
             Type::Slice { .. } => 8,
+            Type::Heap { .. } => 8,
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -316,6 +326,14 @@ impl Type {
         };
 
         is_compound || has_payload
+    }
+
+    pub fn is_heap(&self) -> bool {
+        matches!(self, Type::Heap { .. })
+    }
+
+    pub fn is_move_tracked(&self) -> bool {
+        self.is_compound() || self.is_heap()
     }
 
     pub fn is_scalar(&self) -> bool {

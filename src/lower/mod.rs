@@ -5,6 +5,7 @@ pub mod lower_ty;
 mod lower_block;
 mod lower_call;
 mod lower_control;
+mod lower_drop;
 mod lower_expr;
 mod lower_fstring;
 mod lower_match;

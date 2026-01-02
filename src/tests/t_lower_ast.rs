@@ -28,7 +28,7 @@ fn analyze(source: &str) -> AnalyzedContext {
 
 fn lower_body_with_globals(ctx: &AnalyzedContext, func: &Function) -> (FuncBody, Vec<GlobalItem>) {
     let mut interner = GlobalInterner::new();
-    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner);
+    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, interner.take())
 }
@@ -78,7 +78,7 @@ fn test_lower_string_literal_global() {
     let analyzed = analyze(source);
     let func = analyzed.module.funcs()[0];
     let mut interner = GlobalInterner::new();
-    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner);
+    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner, false);
 
     let body = lowerer.lower().expect("Failed to lower function");
     let globals = interner.take();
@@ -211,6 +211,40 @@ fn test_lower_call_emits_arg_temp() {
     let (body, _) = lower_body_with_globals(&analyzed, id_func);
 
     println!("Lowered body:\n{}", body);
+}
+
+#[test]
+fn test_lower_heap_alloc_and_free() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn main() -> u64 {
+            let p = ^Point { x: 1, y: 2 };
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let mut saw_alloc = false;
+    let mut saw_free = false;
+
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call { callee, .. } = stmt {
+                match callee {
+                    Callee::Runtime(RuntimeFn::Alloc) => saw_alloc = true,
+                    Callee::Runtime(RuntimeFn::Free) => saw_free = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(saw_alloc, "Expected runtime alloc call");
+    assert!(saw_free, "Expected runtime free call");
 }
 
 #[test]

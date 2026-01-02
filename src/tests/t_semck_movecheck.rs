@@ -71,3 +71,35 @@ fn test_invalid_move_target() {
         "Expected InvalidMoveTarget error, got {errors:?}"
     );
 }
+
+#[test]
+fn test_heap_move_required() {
+    let source = r#"
+        fn test() -> u64 {
+            let p = ^1;
+            let q = p;
+            0
+        }
+    "#;
+
+    let errors = move_check_source(source);
+    assert!(!errors.is_empty(), "Expected a move-check error");
+    assert!(
+        matches!(errors[0], SemCheckError::OwnedMoveRequired(_)),
+        "Expected OwnedMoveRequired error, got {errors:?}"
+    );
+}
+
+#[test]
+fn test_heap_move_ok() {
+    let source = r#"
+        fn test() -> u64 {
+            let p = ^1;
+            let q = move p;
+            0
+        }
+    "#;
+
+    let errors = move_check_source(source);
+    assert!(errors.is_empty(), "Expected no move-check errors");
+}

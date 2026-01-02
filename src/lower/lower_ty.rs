@@ -42,6 +42,7 @@ impl TyLowerer {
                 signed: *signed,
             }),
             Type::Range { .. } => self.lower_ty(&Type::uint(64)),
+            Type::Heap { .. } => self.lower_ty(&Type::uint(64)),
 
             // Aggregate Types
             Type::Array { elem_ty, dims } => {
