@@ -203,9 +203,13 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    pub(super) fn emit_runtime_alloc(&mut self, size: Operand, align: Operand) -> Operand {
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
-        let temp = self.new_temp_scalar(u64_ty_id);
+    pub(super) fn emit_runtime_alloc(
+        &mut self,
+        ptr_ty: TyId,
+        size: Operand,
+        align: Operand,
+    ) -> Operand {
+        let temp = self.new_temp_scalar(ptr_ty);
         let size_arg = self.runtime_arg_place(size);
         let align_arg = self.runtime_arg_place(align);
         self.fb.push_stmt(
@@ -221,12 +225,12 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn emit_runtime_realloc(
         &mut self,
+        ptr_ty: TyId,
         ptr: Operand,
         size: Operand,
         align: Operand,
     ) -> Operand {
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
-        let temp = self.new_temp_scalar(u64_ty_id);
+        let temp = self.new_temp_scalar(ptr_ty);
         let ptr_arg = self.runtime_arg_place(ptr);
         let size_arg = self.runtime_arg_place(size);
         let align_arg = self.runtime_arg_place(align);

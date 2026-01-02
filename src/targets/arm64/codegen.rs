@@ -802,12 +802,15 @@ impl<'a> FuncCodegen<'a> {
         asm: &mut String,
     ) -> Result<R, CodegenError> {
         // Compute base address in x17, then walk projections.
-        self.materialize_base_addr(base, asm)?;
+        let mut cur_is_addr = self.materialize_base_addr(base, asm)?;
         let mut cur_kind = self.kind_for_local(base);
 
         for proj in projections {
             match proj {
                 Projection::Field { index } => {
+                    if !cur_is_addr {
+                        return Err(CodegenError::InvalidProjectionType);
+                    }
                     let (offset, next_kind) = match cur_kind {
                         TyKind::Tuple { ref field_tys } => {
                             let off = self.field_offset(field_tys, *index);
@@ -827,6 +830,9 @@ impl<'a> FuncCodegen<'a> {
                     cur_kind = next_kind;
                 }
                 Projection::Index { index } => {
+                    if !cur_is_addr {
+                        return Err(CodegenError::InvalidProjectionType);
+                    }
                     let (elem_ty, dims) = match cur_kind {
                         TyKind::Array { elem_ty, ref dims } => (elem_ty, dims.clone()),
                         _ => return Err(CodegenError::InvalidProjectionType),
@@ -868,9 +874,24 @@ impl<'a> FuncCodegen<'a> {
                     };
                 }
                 Projection::ByteOffset { offset } => {
+                    if !cur_is_addr {
+                        return Err(CodegenError::InvalidProjectionType);
+                    }
                     if *offset != 0 {
                         self.add_to_reg(*offset as i64, asm)?;
                     }
+                }
+                Projection::Deref => {
+                    let elem_ty = match cur_kind {
+                        TyKind::Ptr { elem_ty } => elem_ty,
+                        _ => return Err(CodegenError::InvalidProjectionType),
+                    };
+                    if cur_is_addr {
+                        // Load the pointer value from memory into x17.
+                        asm.push_str("  ldr x17, [x17]\n");
+                    }
+                    cur_is_addr = true;
+                    cur_kind = self.body.types.kind(elem_ty).clone();
                 }
             }
         }
@@ -894,24 +915,26 @@ impl<'a> FuncCodegen<'a> {
         &mut self,
         base: LocalId,
         asm: &mut String,
-    ) -> Result<(), CodegenError> {
+    ) -> Result<bool, CodegenError> {
         // Resolve a base local into an address in x17.
         match self.alloc.alloc_map.get(&base) {
             Some(MappedLocal::Reg(reg)) => {
                 let reg = self.reg(*reg);
                 asm.push_str(&format!("  mov x17, {}\n", reg));
+                Ok(false)
             }
             Some(MappedLocal::StackAddr(slot)) => {
                 let offset = self.get_stack_offset(slot)?;
                 asm.push_str(&format!("  add x17, sp, #{offset}\n"));
+                Ok(true)
             }
             Some(MappedLocal::Stack(slot)) => {
                 let offset = self.get_stack_offset(slot)?;
                 asm.push_str(&format!("  ldr x17, [sp, #{offset}]\n"));
+                Ok(false)
             }
-            None => return Err(CodegenError::LocalNotFound(base.0)),
+            None => Err(CodegenError::LocalNotFound(base.0)),
         }
-        Ok(())
     }
 
     fn add_to_reg(&mut self, offset: i64, asm: &mut String) -> Result<(), CodegenError> {
@@ -1362,6 +1385,9 @@ impl<'a> FuncCodegen<'a> {
                     offset: byte_offset,
                 } => {
                     offset = offset.checked_add(*byte_offset)?;
+                }
+                Projection::Deref => {
+                    return None;
                 }
             }
         }

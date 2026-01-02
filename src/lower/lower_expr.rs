@@ -2,7 +2,6 @@ use crate::ast::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, U
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::lower::lower_util::u64_const;
-use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::types::Type;
 
@@ -351,45 +350,30 @@ impl<'a> FuncLowerer<'a> {
         let elem_ty = self.ty_for_node(expr.id)?;
         let size = elem_ty.size_of() as u64;
         let align = elem_ty.align_of() as u64;
+        let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
+        let heap_ty_id = self.ty_lowerer.lower_ty(&Type::Heap {
+            elem_ty: Box::new(elem_ty.clone()),
+        });
 
-        // Lower the source value so we can copy it into the heap block.
-        let value = self.lower_expr_value(expr)?;
-
-        // Allocate the heap storage (returns a raw pointer as u64).
-        let heap_ptr = self.emit_runtime_alloc(u64_const(size), u64_const(align));
+        // Allocate the heap storage (returns a typed pointer).
+        let heap_ptr = self.emit_runtime_alloc(heap_ty_id, u64_const(size), u64_const(align));
         if size == 0 {
             return Ok(heap_ptr);
         }
 
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
-        let src_ptr = match value {
-            ExprValue::Scalar(op) => {
-                // Materialize scalar into a temp to take its address.
-                let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
-                let temp = self.new_temp_scalar(elem_ty_id);
-                self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
-                self.emit_scalar_rvalue(u64_ty_id, Rvalue::AddrOf(PlaceAny::Scalar(temp)))
-            }
-            ExprValue::Aggregate(place) => {
-                self.emit_scalar_rvalue(u64_ty_id, Rvalue::AddrOf(PlaceAny::Aggregate(place)))
-            }
+        let (Operand::Copy(ptr_place) | Operand::Move(ptr_place)) = heap_ptr.clone() else {
+            return Err(LowerError::UnsupportedOperandExpr(expr.id));
         };
+        let dst_proj = vec![Projection::Deref];
 
-        // Copy bytes from source into the new heap allocation.
-        let dst_slice = self.build_u8_slice(heap_ptr.clone(), u64_const(size))?;
-        let src_slice = self.build_u8_slice(src_ptr, u64_const(size))?;
-
-        self.fb.push_stmt(
-            self.curr_block,
-            Statement::Call {
-                dst: None,
-                callee: Callee::Runtime(RuntimeFn::MemCopy),
-                args: vec![
-                    PlaceAny::Aggregate(dst_slice),
-                    PlaceAny::Aggregate(src_slice),
-                ],
-            },
-        );
+        if elem_ty.is_scalar() {
+            let value_op = self.lower_scalar_expr(expr)?;
+            let dst_place = Place::new(ptr_place.base(), elem_ty_id, dst_proj);
+            self.emit_copy_scalar(dst_place, Rvalue::Use(value_op));
+        } else {
+            let dst_place = Place::new(ptr_place.base(), elem_ty_id, dst_proj);
+            self.lower_agg_value_into(dst_place, expr)?;
+        }
 
         Ok(heap_ptr)
     }

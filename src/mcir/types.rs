@@ -23,6 +23,7 @@ pub enum TyKind {
     Unit,
     Bool,
     Int { signed: bool, bits: u8 },
+    Ptr { elem_ty: TyId },
 
     // Aggregate Types
     Array { elem_ty: TyId, dims: Vec<usize> },
@@ -44,7 +45,10 @@ pub struct TyInfo {
 
 impl TyInfo {
     pub fn is_scalar(&self) -> bool {
-        matches!(self.kind, TyKind::Unit | TyKind::Bool | TyKind::Int { .. })
+        matches!(
+            self.kind,
+            TyKind::Unit | TyKind::Bool | TyKind::Int { .. } | TyKind::Ptr { .. }
+        )
     }
 
     pub fn is_aggregate(&self) -> bool {
@@ -105,6 +109,10 @@ impl TyTable {
             TyKind::Int { signed, bits } => {
                 let prefix = if *signed { "i" } else { "u" };
                 write!(out, "{}{}", prefix, bits)
+            }
+            TyKind::Ptr { elem_ty } => {
+                write!(out, "^")?;
+                self.write_ty(*elem_ty, out)
             }
             TyKind::Array { elem_ty, dims } => {
                 self.write_ty(*elem_ty, out)?;
@@ -257,6 +265,7 @@ pub enum Projection {
     Field { index: usize },
     Index { index: Operand },
     ByteOffset { offset: usize },
+    Deref,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -505,6 +514,7 @@ impl fmt::Display for Projection {
             Projection::Field { index } => write!(f, ".{}", index),
             Projection::Index { index } => write!(f, "[{}]", index),
             Projection::ByteOffset { offset } => write!(f, "+{}", offset),
+            Projection::Deref => write!(f, ".*"),
         }
     }
 }
