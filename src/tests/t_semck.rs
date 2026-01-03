@@ -776,6 +776,31 @@ fn test_overlap_borrow_and_sink_move_rejected() {
 }
 
 #[test]
+fn test_slice_borrow_blocks_mutation() {
+    let source = r#"
+        fn main() {
+            var arr = [1, 2, 3];
+            let s = arr[0..2];
+            arr[0] = 9;
+            s[0];
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::SliceBorrowConflict(_))),
+            "Expected SliceBorrowConflict error"
+        );
+    }
+}
+
+#[test]
 fn test_slice_return_forbidden() {
     let source = r#"
         fn test() -> u64[] {

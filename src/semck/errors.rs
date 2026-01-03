@@ -98,6 +98,9 @@ pub enum SemCheckError {
 
     #[error("Slice value cannot be stored in v1")]
     SliceEscapeStore(Span),
+
+    #[error("Slice borrow conflicts with mutation")]
+    SliceBorrowConflict(Span),
 }
 
 impl SemCheckError {
@@ -134,6 +137,7 @@ impl SemCheckError {
             SemCheckError::OwnedMoveRequired(span) => *span,
             SemCheckError::SliceEscapeReturn(span) => *span,
             SemCheckError::SliceEscapeStore(span) => *span,
+            SemCheckError::SliceBorrowConflict(span) => *span,
         }
     }
 }
