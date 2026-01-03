@@ -394,24 +394,32 @@ fn test_lower_sink_call_skips_caller_drop() {
     let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
     let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
 
-    let mut saw_drop_call = false;
+    let mut drop_calls = 0;
+    let mut saw_flag_clear = false;
     for block in &body.blocks {
         for stmt in &block.stmts {
-            if let Statement::Call {
-                callee: Callee::Def(def_id),
-                ..
-            } = stmt
-            {
-                if generated_ids.contains(def_id) {
-                    saw_drop_call = true;
+            match stmt {
+                Statement::Call {
+                    callee: Callee::Def(def_id),
+                    ..
+                } if generated_ids.contains(def_id) => {
+                    drop_calls += 1;
                 }
+                Statement::CopyScalar {
+                    src: Rvalue::Use(Operand::Const(Const::Bool(false))),
+                    ..
+                } => {
+                    saw_flag_clear = true;
+                }
+                _ => {}
             }
         }
     }
 
+    assert_eq!(drop_calls, 1, "expected one drop glue call");
     assert!(
-        !saw_drop_call,
-        "expected caller to skip drop glue after sink move"
+        saw_flag_clear,
+        "expected drop flag to be cleared after sink move"
     );
 }
 
@@ -432,21 +440,33 @@ fn test_lower_heap_implicit_move_skips_double_free() {
 
     let mut alloc_calls = 0;
     let mut drop_calls = 0;
+    let mut saw_flag_clear = false;
 
     for block in &body.blocks {
         for stmt in &block.stmts {
-            if let Statement::Call { callee, .. } = stmt {
-                match callee {
+            match stmt {
+                Statement::Call { callee, .. } => match callee {
                     Callee::Runtime(RuntimeFn::Alloc) => alloc_calls += 1,
                     Callee::Def(def_id) if generated_ids.contains(def_id) => drop_calls += 1,
                     _ => {}
+                },
+                Statement::CopyScalar {
+                    src: Rvalue::Use(Operand::Const(Const::Bool(false))),
+                    ..
+                } => {
+                    saw_flag_clear = true;
                 }
+                _ => {}
             }
         }
     }
 
     assert_eq!(alloc_calls, 1, "expected one heap allocation");
-    assert_eq!(drop_calls, 1, "expected one drop glue call");
+    assert_eq!(drop_calls, 2, "expected one drop call per binding");
+    assert!(
+        saw_flag_clear,
+        "expected implicit move to clear a drop flag"
+    );
 }
 
 #[test]

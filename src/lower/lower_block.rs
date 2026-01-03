@@ -130,13 +130,18 @@ impl<'a> FuncLowerer<'a> {
         let decl_ty_id = self.ty_lowerer.lower_ty(&decl_ty);
         self.ensure_local_for_def(def_id, decl_ty_id, Some(name.to_string()));
 
-        let is_initialized = self.create_is_initialized(name, &decl_ty);
+        let is_initialized = self.create_is_initialized(name, &decl_ty, false);
         self.register_drop(def_id, &decl_ty, is_initialized);
 
         Ok(())
     }
 
-    fn create_is_initialized(&mut self, name: &str, decl_ty: &Type) -> Option<LocalId> {
+    pub(super) fn create_is_initialized(
+        &mut self,
+        name: &str,
+        decl_ty: &Type,
+        initial: bool,
+    ) -> Option<LocalId> {
         if !decl_ty.needs_drop() {
             return None;
         }
@@ -147,7 +152,10 @@ impl<'a> FuncLowerer<'a> {
             Some(format!("{}$is_initialized", name)),
         );
         let flag_place = Place::new(flag_id, bool_ty_id, vec![]);
-        self.emit_copy_scalar(flag_place, Rvalue::Use(Operand::Const(Const::Bool(false))));
+        self.emit_copy_scalar(
+            flag_place,
+            Rvalue::Use(Operand::Const(Const::Bool(initial))),
+        );
         Some(flag_id)
     }
 
