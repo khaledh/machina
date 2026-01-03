@@ -1,6 +1,7 @@
 mod ast_liveness;
 mod def_init;
 mod errors;
+mod lvalue_overlap;
 mod move_check;
 mod slice_escape;
 mod structural;
@@ -19,6 +20,7 @@ pub fn sem_check(ctx: TypeCheckedContext) -> Result<SemanticCheckedContext, Vec<
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
+    errors.extend(lvalue_overlap::check(&ctx));
     errors.extend(def_init_result.errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));

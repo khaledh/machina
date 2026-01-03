@@ -72,6 +72,9 @@ pub enum SemCheckError {
     #[error("out parameter `{0}` is not initialized on all paths")]
     OutParamNotInitialized(String, Span),
 
+    #[error("lvalue arguments may overlap")]
+    OverlappingLvalueArgs(Span),
+
     #[error("sink requires an owned parameter type, found {0}")]
     SinkParamNotOwned(Type, Span),
 
@@ -122,6 +125,7 @@ impl SemCheckError {
             SemCheckError::OutArgNotLvalue(span) => *span,
             SemCheckError::OutArgNotMutable(span) => *span,
             SemCheckError::OutParamNotInitialized(_, span) => *span,
+            SemCheckError::OverlappingLvalueArgs(span) => *span,
             SemCheckError::SinkParamNotOwned(_, span) => *span,
             SemCheckError::UseBeforeInit(_, span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,
