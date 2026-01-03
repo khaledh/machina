@@ -201,18 +201,14 @@ fn emit_drop_for_type(
             }
         }
 
-        Type::Array { elem_ty, dims } => {
+        Type::Array { dims, .. } => {
             // Unroll fixed-size arrays; recurse on sub-arrays types for multi-dim.
-            let elem_ty = if dims.len() == 1 {
-                (**elem_ty).clone()
-            } else {
-                Type::Array {
-                    elem_ty: elem_ty.clone(),
-                    dims: dims[1..].to_vec(),
-                }
-            };
+            let len = dims[0];
+            let elem_ty = ty
+                .array_item_type()
+                .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
 
-            for i in (0..dims[0]).rev() {
+            for i in (0..len).rev() {
                 if !elem_ty.needs_drop() {
                     continue;
                 }

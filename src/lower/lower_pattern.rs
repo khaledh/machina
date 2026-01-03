@@ -124,18 +124,13 @@ impl<'a> FuncLowerer<'a> {
                     _ => return Err(LowerError::PatternMismatch(pattern.id)),
                 };
 
-                let Type::Array { elem_ty, dims } = src_ty else {
+                let Type::Array { .. } = src_ty else {
                     unreachable!("compiler bug: non-array pattern");
                 };
 
-                let elem_ty = if dims.len() == 1 {
-                    (**elem_ty).clone()
-                } else {
-                    Type::Array {
-                        elem_ty: elem_ty.clone(),
-                        dims: dims[1..].to_vec(),
-                    }
-                };
+                let elem_ty = src_ty
+                    .array_item_type()
+                    .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
 
                 for (i, pat) in patterns.iter().enumerate() {
                     let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);

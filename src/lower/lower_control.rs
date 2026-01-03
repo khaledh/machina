@@ -292,7 +292,7 @@ impl<'a> FuncLowerer<'a> {
         };
 
         // Extract len + item type from array type
-        let Type::Array { elem_ty, dims } = iter_ty else {
+        let Type::Array { dims, .. } = iter_ty else {
             return Err(LowerError::UnsupportedOperandExpr(iter.id));
         };
         if dims.is_empty() {
@@ -300,14 +300,9 @@ impl<'a> FuncLowerer<'a> {
         }
 
         let len = dims[0];
-        let item_ty = if dims.len() == 1 {
-            (**elem_ty).clone()
-        } else {
-            Type::Array {
-                elem_ty: Box::new((**elem_ty).clone()),
-                dims: dims[1..].to_vec(),
-            }
-        };
+        let item_ty = iter_ty
+            .array_item_type()
+            .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
 
         // induction variable
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));

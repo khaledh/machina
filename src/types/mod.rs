@@ -354,6 +354,23 @@ impl Type {
         !self.is_compound()
     }
 
+    pub fn array_item_type(&self) -> Option<Type> {
+        let Type::Array { elem_ty, dims } = self else {
+            return None;
+        };
+        if dims.is_empty() {
+            return None;
+        }
+        if dims.len() == 1 {
+            Some((**elem_ty).clone())
+        } else {
+            Some(Type::Array {
+                elem_ty: elem_ty.clone(),
+                dims: dims[1..].to_vec(),
+            })
+        }
+    }
+
     pub fn tuple_field_offset(&self, index: usize) -> usize {
         let Type::Tuple { fields } = self else {
             panic!("Expected tuple type");

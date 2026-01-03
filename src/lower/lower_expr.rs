@@ -641,20 +641,9 @@ impl<'a> FuncLowerer<'a> {
                 // Lower each element into its index.
                 let elem_ty = {
                     let dst_ty = self.ty_for_node(expr.id)?;
-                    match dst_ty {
-                        Type::Array { elem_ty, dims } => {
-                            if dims.len() == 1 {
-                                *elem_ty
-                            } else {
-                                // Multi-dim arrays store the remaining dimensions in the element type.
-                                Type::Array {
-                                    elem_ty,
-                                    dims: dims[1..].to_vec(),
-                                }
-                            }
-                        }
-                        _ => panic!("Expected array type"),
-                    }
+                    dst_ty
+                        .array_item_type()
+                        .unwrap_or_else(|| panic!("Expected array type"))
                 };
                 let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
 

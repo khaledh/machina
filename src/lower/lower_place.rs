@@ -235,19 +235,16 @@ impl<'a> FuncLowerer<'a> {
                 );
                 let base_ptr_op = Operand::Copy(base_ptr_place);
 
-                let elem_ty = if dims.len() == 1 {
-                    *elem_ty
-                } else {
-                    Type::Array {
-                        elem_ty,
-                        dims: dims[1..].to_vec(),
-                    }
-                };
+                let len = dims[0];
+                let array_ty = Type::Array { elem_ty, dims };
+                let elem_ty = array_ty
+                    .array_item_type()
+                    .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
 
                 let base_len_op = Operand::Const(Const::Int {
                     signed: false,
                     bits: 64,
-                    value: dims[0] as i128,
+                    value: len as i128,
                 });
 
                 (base_ptr_op, base_len_op, elem_ty)

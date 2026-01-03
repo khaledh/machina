@@ -411,22 +411,13 @@ impl TypeChecker {
 
         // Slices are allowed only for arrays and strings.
         match target_ty {
-            Type::Array { elem_ty, dims } => {
-                if dims.is_empty() {
+            Type::Array { .. } => {
+                let Some(slice_elem_ty) = target_ty.array_item_type() else {
                     return Err(TypeCheckErrorKind::SliceTargetZeroDimArray(
-                        Type::Array { elem_ty, dims },
+                        target_ty,
                         target.span,
                     )
                     .into());
-                }
-
-                let slice_elem_ty = if dims.len() == 1 {
-                    *elem_ty
-                } else {
-                    Type::Array {
-                        elem_ty,
-                        dims: dims[1..].to_vec(),
-                    }
                 };
 
                 Ok(Type::Slice {
@@ -695,7 +686,7 @@ impl TypeChecker {
             PatternKind::Array { patterns } => {
                 // Value must be an array
                 match value_ty {
-                    Type::Array { elem_ty, dims } => {
+                    Type::Array { dims, .. } => {
                         // Check the pattern has the right number of elements
                         if patterns.len() != dims[0] {
                             return Err(TypeCheckErrorKind::ArrayPatternLengthMismatch(
@@ -706,17 +697,10 @@ impl TypeChecker {
                             .into());
                         }
 
-                        // Determine the sub-type for each pattern element
-                        let sub_ty = if dims.len() == 1 {
-                            // 1D array: each element has the element type
-                            (**elem_ty).clone()
-                        } else {
-                            // Multi-dim array: each element is an array with the remaining dims
-                            Type::Array {
-                                elem_ty: elem_ty.clone(),
-                                dims: dims[1..].to_vec(),
-                            }
-                        };
+                        // Determine the subtype for each pattern element
+                        let sub_ty = value_ty
+                            .array_item_type()
+                            .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
 
                         // Recursively type check each sub-pattern
                         for pattern in patterns {
@@ -984,20 +968,15 @@ impl TypeChecker {
     fn iterable_item_type(&self, iter_ty: &Type, span: Span) -> Result<Type, TypeCheckError> {
         match iter_ty {
             Type::Range { .. } => Ok(Type::uint(64)),
-            Type::Array { elem_ty, dims } => {
+            Type::Array { dims, .. } => {
                 if dims.is_empty() {
                     return Err(
                         TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into(),
                     );
                 }
-                if dims.len() == 1 {
-                    Ok((**elem_ty).clone())
-                } else {
-                    Ok(Type::Array {
-                        elem_ty: Box::new((**elem_ty).clone()),
-                        dims: dims[1..].to_vec(),
-                    })
-                }
+                Ok(iter_ty
+                    .array_item_type()
+                    .unwrap_or_else(|| panic!("compiler bug: empty array dims")))
             }
             _ => Err(TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into()),
         }
