@@ -315,14 +315,20 @@ impl<'a> StructuralChecker<'a> {
 
 impl Visitor for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &crate::ast::FunctionSig) {
-        // Only aggregate types can be inout parameters.
         for param in &func_sig.params {
-            if param.mode == FunctionParamMode::Inout
-                && let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ)
-                && !ty.is_compound()
-            {
-                self.errors
-                    .push(SemCheckError::InoutParamNotAggregate(ty, param.span));
+            if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
+                if param.mode == FunctionParamMode::Inout && !ty.is_compound() {
+                    // Only aggregate types can be inout parameters.
+                    self.errors.push(SemCheckError::InoutParamNotAggregate(
+                        ty.clone(),
+                        param.span,
+                    ));
+                }
+                if param.mode == FunctionParamMode::Sink && !ty.needs_drop() {
+                    // Sink params are meant only for heap types.
+                    self.errors
+                        .push(SemCheckError::SinkParamNotOwned(ty, param.span));
+                }
             }
         }
         walk_func_sig(self, func_sig);

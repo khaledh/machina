@@ -340,6 +340,82 @@ fn test_lower_drop_glue_emits_free() {
 }
 
 #[test]
+fn test_lower_sink_param_dropped() {
+    let source = r#"
+        fn consume(sink p: ^u64) -> u64 {
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
+
+    let mut saw_drop_call = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call {
+                callee: Callee::Def(def_id),
+                ..
+            } = stmt
+            {
+                if generated_ids.contains(def_id) {
+                    saw_drop_call = true;
+                }
+            }
+        }
+    }
+
+    assert!(saw_drop_call, "expected drop glue call for sink param");
+}
+
+#[test]
+fn test_lower_sink_call_skips_caller_drop() {
+    let source = r#"
+        fn consume(sink p: ^u64) -> u64 {
+            0
+        }
+
+        fn main() -> u64 {
+            let p = ^1;
+            consume(p);
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let funcs = analyzed.module.funcs();
+    let func = funcs
+        .iter()
+        .find(|f| f.sig.name == "main")
+        .copied()
+        .expect("main not found");
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
+
+    let mut saw_drop_call = false;
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::Call {
+                callee: Callee::Def(def_id),
+                ..
+            } = stmt
+            {
+                if generated_ids.contains(def_id) {
+                    saw_drop_call = true;
+                }
+            }
+        }
+    }
+
+    assert!(
+        !saw_drop_call,
+        "expected caller to skip drop glue after sink move"
+    );
+}
+
+#[test]
 fn test_lower_heap_implicit_move_skips_double_free() {
     let source = r#"
         fn main() -> u64 {

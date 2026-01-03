@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::ast::{Expr, ExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -93,6 +93,10 @@ impl<'a> FuncLowerer<'a> {
 
     /// Lower a call argument into a place (or temp if needed).
     pub(super) fn lower_call_arg_place(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
+        if matches!(arg.kind, ExprKind::Var(_)) && self.ctx.implicit_moves.contains(&arg.id) {
+            // Implicitly moved heap args should skip caller drops.
+            self.record_move(arg);
+        }
         let ty = self.ty_for_node(arg.id)?;
         let ty_id = self.ty_lowerer.lower_ty(&ty);
 

@@ -222,6 +222,37 @@ fn test_struct_update_unknown_field() {
 }
 
 #[test]
+fn test_sink_param_requires_owned_type() {
+    let source = r#"
+        fn consume(sink p: u64) -> u64 {
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::SinkParamNotOwned(_, _) => {}
+            e => panic!("Expected SinkParamNotOwned error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_sink_param_owned_type_ok() {
+    let source = r#"
+        fn consume(sink p: ^u64) -> u64 {
+            0
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
 fn test_struct_update_duplicate_field() {
     let source = r#"
         type Point = { x: u64, y: u64 }

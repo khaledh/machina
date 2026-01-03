@@ -10,18 +10,19 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    Expr, ExprKind, Function, FunctionParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
+    Expr, ExprKind, Function, FunctionParamMode, NodeId, Pattern, PatternKind, StmtExpr,
+    StmtExprKind,
 };
 use crate::ast::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
-use crate::semck::util::lookup_call_sig;
 use crate::semck::ast_liveness::{self, AstLiveness};
+use crate::semck::util::lookup_call_sig;
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,
-    pub implicit_moves: HashSet<crate::ast::NodeId>,
+    pub implicit_moves: HashSet<NodeId>,
 }
 
 // Run move checking and collect implicit moves for last-use heap values.
@@ -41,11 +42,21 @@ fn check_func(
     func: &Function,
     ctx: &TypeCheckedContext,
     errors: &mut Vec<SemCheckError>,
-    implicit_moves: &mut HashSet<crate::ast::NodeId>,
+    implicit_moves: &mut HashSet<NodeId>,
 ) {
     let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
     // Precompute heap liveness so we can detect last-use sites inside blocks.
     let liveness = ast_liveness::analyze(&cfg, ctx);
+
+    // Collect sink params so we can allow moving from them.
+    let mut sink_params = HashSet::new();
+    for param in &func.sig.params {
+        if param.mode == FunctionParamMode::Sink {
+            if let Some(def) = ctx.def_map.lookup_def(param.id) {
+                sink_params.insert(def.id);
+            }
+        }
+    }
 
     let empty = HashSet::new();
     solve_forward(
@@ -63,8 +74,14 @@ fn check_func(
         },
         |block_id, in_state| {
             // Move checking is forward: we need to catch use-after-move in order.
-            let mut visitor =
-                MoveVisitor::new(ctx, in_state.clone(), errors, implicit_moves, &liveness);
+            let mut visitor = MoveVisitor::new(
+                ctx,
+                in_state.clone(),
+                sink_params.clone(),
+                errors,
+                implicit_moves,
+                &liveness,
+            );
             visitor.visit_cfg_node(&cfg.nodes[block_id.0], block_id);
             visitor.moved
         },
@@ -74,25 +91,28 @@ fn check_func(
 struct MoveVisitor<'a> {
     ctx: &'a TypeCheckedContext,
     moved: HashSet<DefId>,
-    errors: &'a mut Vec<SemCheckError>,
-    implicit_moves: &'a mut HashSet<crate::ast::NodeId>,
+    sink_params: HashSet<DefId>,
+    implicit_moves: &'a mut HashSet<NodeId>,
     liveness: &'a AstLiveness,
     current_live_after: Option<HashSet<DefId>>,
     current_use_counts: Option<HashMap<DefId, usize>>,
     borrow_context: bool,
+    errors: &'a mut Vec<SemCheckError>,
 }
 
 impl<'a> MoveVisitor<'a> {
     fn new(
         ctx: &'a TypeCheckedContext,
         moved: HashSet<DefId>,
+        sink_params: HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
-        implicit_moves: &'a mut HashSet<crate::ast::NodeId>,
+        implicit_moves: &'a mut HashSet<NodeId>,
         liveness: &'a AstLiveness,
     ) -> Self {
         Self {
             ctx,
             moved,
+            sink_params,
             errors,
             implicit_moves,
             liveness,
@@ -135,8 +155,11 @@ impl<'a> MoveVisitor<'a> {
                     return;
                 };
                 if matches!(def.kind, DefKind::Param { .. }) {
-                    self.errors.push(SemCheckError::MoveFromParam(expr.span));
-                    return;
+                    // Allow moving from sink params only.
+                    if !self.sink_params.contains(&def.id) {
+                        self.errors.push(SemCheckError::MoveFromParam(expr.span));
+                        return;
+                    }
                 }
                 let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) else {
                     return;
@@ -175,9 +198,11 @@ impl<'a> MoveVisitor<'a> {
                 return;
             };
             if matches!(def.kind, DefKind::Param { .. }) {
-                self.errors
-                    .push(SemCheckError::MoveFromParam(expr.span));
-                return;
+                // Allow moving from sink params only.
+                if !self.sink_params.contains(&def.id) {
+                    self.errors.push(SemCheckError::MoveFromParam(expr.span));
+                    return;
+                }
             }
             let Some(ref live_after) = self.current_live_after else {
                 self.errors
@@ -313,7 +338,12 @@ impl<'a> Visitor for MoveVisitor<'a> {
                     for (param, arg) in sig.params.iter().zip(args) {
                         match param.mode {
                             FunctionParamMode::In | FunctionParamMode::Inout => {
+                                // In/Inout params are borrowed.
                                 self.with_borrow_context(|this| this.visit_expr(arg));
+                            }
+                            FunctionParamMode::Sink => {
+                                // Sink params are owned.
+                                self.visit_expr(arg);
                             }
                         }
                     }

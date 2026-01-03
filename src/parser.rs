@@ -465,6 +465,9 @@ impl<'a> Parser<'a> {
             let mode = if matches!(&parser.curr_token.kind, TK::Ident(name) if name == "inout") {
                 parser.advance();
                 FunctionParamMode::Inout
+            } else if matches!(&parser.curr_token.kind, TK::Ident(name) if name == "sink") {
+                parser.advance();
+                FunctionParamMode::Sink
             } else {
                 FunctionParamMode::In
             };

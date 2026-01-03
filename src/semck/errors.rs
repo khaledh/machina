@@ -60,6 +60,9 @@ pub enum SemCheckError {
     #[error("inout argument must be mutable")]
     InoutArgNotMutable(Span),
 
+    #[error("sink requires an owned parameter type, found {0}")]
+    SinkParamNotOwned(Type, Span),
+
     #[error("Use after move: {0}")]
     UseAfterMove(String, Span),
 
@@ -100,6 +103,7 @@ impl SemCheckError {
             SemCheckError::InoutParamNotAggregate(_, span) => *span,
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,
+            SemCheckError::SinkParamNotOwned(_, span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,
             SemCheckError::InvalidMoveTarget(span) => *span,
             SemCheckError::MoveFromParam(span) => *span,

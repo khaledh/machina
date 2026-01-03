@@ -156,6 +156,25 @@ fn test_move_from_param_rejected() {
 }
 
 #[test]
+fn test_move_from_sink_param_marks_moved() {
+    let source = r#"
+        fn test(sink p: ^u64) -> u64 {
+            let q = move p;
+            let r = p;
+            0
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
+    assert!(
+        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        "Expected UseAfterMove error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn test_borrow_param_in_call_ok() {
     let source = r#"
         fn foo(p: ^u64) -> u64 {
@@ -170,4 +189,46 @@ fn test_borrow_param_in_call_ok() {
 
     let result = move_check_source(source);
     assert!(result.errors.is_empty(), "Expected no move-check errors");
+}
+
+#[test]
+fn test_sink_call_implicit_move_ok() {
+    let source = r#"
+        fn consume(sink p: ^u64) -> u64 {
+            0
+        }
+
+        fn test() -> u64 {
+            let p = ^1;
+            consume(p);
+            0
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(result.errors.is_empty(), "Expected no move-check errors");
+}
+
+#[test]
+fn test_sink_call_requires_move_on_reuse() {
+    let source = r#"
+        fn consume(sink p: ^u64) -> u64 {
+            0
+        }
+
+        fn test() -> u64 {
+            let p = ^1;
+            consume(p);
+            p;
+            0
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
+    assert!(
+        matches!(result.errors[0], SemCheckError::OwnedMoveRequired(_)),
+        "Expected OwnedMoveRequired error, got {:?}",
+        result.errors
+    );
 }

@@ -246,6 +246,7 @@ pub struct FunctionParam {
 pub enum FunctionParamMode {
     In,
     Inout,
+    Sink,
 }
 
 // -- Patterns ---
