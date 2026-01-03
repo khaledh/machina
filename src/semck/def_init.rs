@@ -8,15 +8,17 @@
 
 use std::collections::HashSet;
 
-use crate::analysis::dataflow::solve_forward;
+use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    Expr, ExprKind, Function, MatchPattern, MatchPatternBinding, NodeId, Pattern, PatternKind,
-    StmtExpr, StmtExprKind, Visitor, walk_expr,
+    Expr, ExprKind, Function, FunctionParamMode, MatchPattern, MatchPatternBinding, NodeId,
+    Pattern, PatternKind, StmtExpr, StmtExprKind, Visitor, walk_expr,
 };
 use crate::context::TypeCheckedContext;
+use crate::diag::Span;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
+use crate::semck::util::lookup_call_sig;
 
 pub(super) struct DefInitResult {
     pub errors: Vec<SemCheckError>,
@@ -43,14 +45,15 @@ fn check_func(
 ) {
     let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
 
-    // Params are initialized at entry; declared locals (`var x: T;`) are not.
-    let entry_state = collect_param_defs(func, ctx);
+    // Params are initialized at entry, except `out` params which start uninitialized.
+    let entry_state = collect_param_defs(func, ctx, false);
+    let out_params = collect_out_param_defs(func, ctx);
 
     // Bottom = "all defs" so unreachable blocks don't produce spurious errors.
     // (Intersection with "all" is identity, so unreachable blocks inherit from reachable ones.)
     let bottom = collect_all_defs(func, ctx);
 
-    solve_forward(
+    let result = solve_forward(
         &cfg,
         AstBlockId(0),
         entry_state,
@@ -62,11 +65,32 @@ fn check_func(
             checker.initialized
         },
     );
+
+    // Require that all out params are initialized on every exit path.
+    let exit_blocks: Vec<_> = (0..cfg.num_nodes())
+        .map(AstBlockId)
+        .filter(|&block| cfg.succs(block).is_empty())
+        .collect();
+    for (def_id, name, span) in out_params {
+        let initialized_on_all_exits = exit_blocks
+            .iter()
+            .all(|block| result.out_map[block.0].contains(&def_id));
+        if !initialized_on_all_exits {
+            errors.push(SemCheckError::OutParamNotInitialized(name, span));
+        }
+    }
 }
 
-fn collect_param_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId> {
+fn collect_param_defs(
+    func: &Function,
+    ctx: &TypeCheckedContext,
+    include_out: bool,
+) -> HashSet<DefId> {
     let mut defs = HashSet::new();
     for param in &func.sig.params {
+        if !include_out && param.mode == FunctionParamMode::Out {
+            continue;
+        }
         if let Some(def) = ctx.def_map.lookup_def(param.id) {
             defs.insert(def.id);
         }
@@ -74,8 +98,21 @@ fn collect_param_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefI
     defs
 }
 
+fn collect_out_param_defs(func: &Function, ctx: &TypeCheckedContext) -> Vec<(DefId, String, Span)> {
+    let mut defs = Vec::new();
+    for param in &func.sig.params {
+        if param.mode != FunctionParamMode::Out {
+            continue;
+        }
+        if let Some(def) = ctx.def_map.lookup_def(param.id) {
+            defs.push((def.id, def.name.clone(), param.span));
+        }
+    }
+    defs
+}
+
 fn collect_all_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId> {
-    let mut defs = collect_param_defs(func, ctx);
+    let mut defs = collect_param_defs(func, ctx, true);
     let mut collector = DefCollector {
         ctx,
         defs: &mut defs,
@@ -445,8 +482,25 @@ impl<'a> DefInitChecker<'a> {
             }
             ExprKind::Call { callee, args } => {
                 self.check_expr(callee);
-                for arg in args {
-                    self.check_expr(arg);
+                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                    let mut out_defs = Vec::new();
+                    for (param, arg) in sig.params.iter().zip(args) {
+                        if param.mode == FunctionParamMode::Out {
+                            // Out args are write-only and become initialized after the call.
+                            if let Some(def_id) = self.check_out_arg(arg) {
+                                out_defs.push(def_id);
+                            }
+                        } else {
+                            self.check_expr(arg);
+                        }
+                    }
+                    for def_id in out_defs {
+                        self.initialized.insert(def_id);
+                    }
+                } else {
+                    for arg in args {
+                        self.check_expr(arg);
+                    }
                 }
             }
             ExprKind::StructLit { fields, .. } => {
@@ -498,6 +552,35 @@ impl<'a> DefInitChecker<'a> {
             | ExprKind::StringLit { .. }
             | ExprKind::UnitLit
             | ExprKind::Range { .. } => {}
+        }
+    }
+
+    fn check_out_arg(&mut self, arg: &Expr) -> Option<DefId> {
+        match &arg.kind {
+            ExprKind::Var(_) => {
+                let def = self.ctx.def_map.lookup_def(arg.id)?;
+                if matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }) {
+                    if !self.initialized.contains(&def.id) {
+                        // Record the first init through an `out` call so lowering skips drops.
+                        self.init_assigns.insert(arg.id);
+                    }
+                    return Some(def.id);
+                }
+                None
+            }
+            ExprKind::StructField { .. }
+            | ExprKind::TupleField { .. }
+            | ExprKind::ArrayIndex { .. }
+            | ExprKind::Slice { .. } => {
+                // Assignments into projections still require initialized bases
+                // unless the base is an out param.
+                self.check_assignment(arg);
+                None
+            }
+            _ => {
+                self.check_expr(arg);
+                None
+            }
         }
     }
 

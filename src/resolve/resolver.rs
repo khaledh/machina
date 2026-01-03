@@ -491,7 +491,8 @@ impl Visitor for SymbolResolver {
 
         self.with_scope(|resolver| {
             for (index, param) in func.sig.params.iter().enumerate() {
-                let is_mutable = param.mode == FunctionParamMode::Inout;
+                let is_mutable =
+                    param.mode == FunctionParamMode::Inout || param.mode == FunctionParamMode::Out;
                 let def_id = resolver.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,

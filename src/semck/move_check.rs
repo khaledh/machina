@@ -303,6 +303,39 @@ impl<'a> MoveVisitor<'a> {
             }
         }
     }
+
+    fn visit_out_arg(&mut self, arg: &Expr) {
+        match &arg.kind {
+            ExprKind::Var(_) => {
+                if let Some(def) = self.ctx.def_map.lookup_def(arg.id) {
+                    // Out args are reinitialized by the callee.
+                    self.moved.remove(&def.id);
+                }
+            }
+            ExprKind::StructField { target, .. } => {
+                self.visit_place_base(target);
+            }
+            ExprKind::TupleField { target, .. } => {
+                self.visit_place_base(target);
+            }
+            ExprKind::ArrayIndex { target, indices } => {
+                self.visit_place_base(target);
+                for index in indices {
+                    self.visit_expr(index);
+                }
+            }
+            ExprKind::Slice { target, start, end } => {
+                self.visit_place_base(target);
+                if let Some(start) = start {
+                    self.visit_expr(start);
+                }
+                if let Some(end) = end {
+                    self.visit_expr(end);
+                }
+            }
+            _ => self.visit_expr(arg),
+        }
+    }
 }
 
 impl<'a> Visitor for MoveVisitor<'a> {
@@ -376,6 +409,10 @@ impl<'a> Visitor for MoveVisitor<'a> {
                             FunctionParamMode::In | FunctionParamMode::Inout => {
                                 // Borrowed: no move required for heap args.
                                 self.with_borrow_context(|this| this.visit_expr(arg));
+                            }
+                            FunctionParamMode::Out => {
+                                // Out args are write-only: allow reinit after move.
+                                self.visit_out_arg(arg);
                             }
                             FunctionParamMode::Sink => {
                                 // Owned: heap args need move (explicit or implicit).

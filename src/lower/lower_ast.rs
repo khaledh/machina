@@ -17,7 +17,7 @@
 //! - `emit_call_into` centralizes call emission so call sites can reuse it for both
 //!   scalar and aggregate destinations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::context::{AnalyzedContext, LoweredMcirContext};
@@ -49,6 +49,7 @@ pub struct FuncLowerer<'a> {
     pub(super) func: &'a Function,
     pub(super) fb: FuncBuilder,
     pub(super) locals: HashMap<DefId, LocalId>,
+    pub(super) out_param_defs: HashSet<DefId>,
     pub(super) ty_lowerer: TyLowerer,
     pub(super) curr_block: BlockId,
     pub(super) drop_scopes: Vec<DropScope>,
@@ -78,12 +79,24 @@ impl<'a> FuncLowerer<'a> {
         let fb = FuncBuilder::new(ret_ty_id);
         let entry = fb.body.entry;
 
+        // Track `out` params so we can suppress overwrite drops for their assignments.
+        let mut out_param_defs = HashSet::new();
+        for param in &func.sig.params {
+            if param.mode != FunctionParamMode::Out {
+                continue;
+            }
+            if let Some(def) = ctx.def_map.lookup_def(param.id) {
+                out_param_defs.insert(def.id);
+            }
+        }
+
         Self {
             ctx,
             global_interner,
             func,
             fb,
             locals: HashMap::new(),
+            out_param_defs,
             ty_lowerer,
             curr_block: entry,
             drop_scopes: Vec::new(),

@@ -324,6 +324,11 @@ impl Visitor for StructuralChecker<'_> {
                         param.span,
                     ));
                 }
+                if param.mode == FunctionParamMode::Out && !ty.is_compound() {
+                    // Only aggregate types can be out parameters (for now).
+                    self.errors
+                        .push(SemCheckError::OutParamNotAggregate(ty.clone(), param.span));
+                }
                 if param.mode == FunctionParamMode::Sink && !ty.needs_drop() {
                     // Sink params are meant only for heap types.
                     self.errors
@@ -388,21 +393,27 @@ impl Visitor for StructuralChecker<'_> {
                     ));
                 }
 
-                // Validate that any inout arguments are mutable lvalues.
+                // Validate that any inout/out arguments are mutable lvalues.
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     for (param, arg) in sig.params.iter().zip(args) {
-                        if param.mode == FunctionParamMode::Inout {
-                            match self.is_mutable_lvalue(arg) {
-                                None => {
-                                    self.errors.push(SemCheckError::InoutArgNotLvalue(arg.span));
-                                }
-                                Some(false) => {
-                                    self.errors
-                                        .push(SemCheckError::InoutArgNotMutable(arg.span));
-                                }
-                                Some(true) => {}
-                            }
+                        if !matches!(
+                            param.mode,
+                            FunctionParamMode::Inout | FunctionParamMode::Out
+                        ) {
+                            continue;
                         }
+                        let err = match self.is_mutable_lvalue(arg) {
+                            Some(true) => continue,
+                            Some(false) if param.mode == FunctionParamMode::Out => {
+                                SemCheckError::OutArgNotMutable(arg.span)
+                            }
+                            Some(false) => SemCheckError::InoutArgNotMutable(arg.span),
+                            None if param.mode == FunctionParamMode::Out => {
+                                SemCheckError::OutArgNotLvalue(arg.span)
+                            }
+                            None => SemCheckError::InoutArgNotLvalue(arg.span),
+                        };
+                        self.errors.push(err);
                     }
                 }
             }

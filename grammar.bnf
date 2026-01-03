@@ -42,7 +42,7 @@ FunctionDecl       ::= FunctionSig ";"
 Function           ::= FunctionSig Block
 FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
 FunctionParam      ::= FunctionParamMode? Identifier ":" TypeExpr
-FunctionParamMode  ::= "inout" | "sink"
+FunctionParamMode  ::= "inout" | "out" | "sink"
 
 # Blocks
 Block              ::= "{" BlockItem* (Expr ";"?)? "}"

@@ -158,6 +158,9 @@ impl fmt::Display for FunctionParam {
             FunctionParamMode::Inout => {
                 write!(f, "inout ")?;
             }
+            FunctionParamMode::Out => {
+                write!(f, "out ")?;
+            }
             FunctionParamMode::Sink => {
                 write!(f, "sink ")?;
             }

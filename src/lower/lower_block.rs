@@ -2,6 +2,7 @@ use crate::ast::{BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
+use crate::resolve::def_map::DefId;
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -150,7 +151,7 @@ impl<'a> FuncLowerer<'a> {
         Some(flag_id)
     }
 
-    fn emit_overwrite_drop(
+    pub(super) fn emit_overwrite_drop(
         &mut self,
         assignee: &Expr,
         place: PlaceAny,
@@ -158,6 +159,14 @@ impl<'a> FuncLowerer<'a> {
         clear_moved: bool,
     ) {
         if !target_ty.needs_drop() {
+            return;
+        }
+
+        if self.is_out_param_assignee(assignee)
+            && matches!(assignee.kind, ExprKind::Var(_))
+            && self.ctx.init_assigns.contains(&assignee.id)
+        {
+            // First assignment to an out param is a full initialization; skip drop.
             return;
         }
 
@@ -181,7 +190,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn mark_initialized_if_needed(&mut self, assignee: &Expr) {
+    pub(super) fn mark_initialized_if_needed(&mut self, assignee: &Expr) {
         if let Some(flag) = self.is_initialized_for_assignee(assignee) {
             self.set_is_initialized(flag, true);
         }
@@ -193,5 +202,22 @@ impl<'a> FuncLowerer<'a> {
         }
         let def = self.def_for_node(assignee.id).ok()?;
         self.is_initialized_for_def(def.id)
+    }
+
+    fn is_out_param_assignee(&self, assignee: &Expr) -> bool {
+        self.base_def_for_assignee(assignee)
+            .map(|def_id| self.out_param_defs.contains(&def_id))
+            .unwrap_or(false)
+    }
+
+    fn base_def_for_assignee(&self, assignee: &Expr) -> Option<DefId> {
+        match &assignee.kind {
+            ExprKind::Var(_) => self.ctx.def_map.lookup_def(assignee.id).map(|def| def.id),
+            ExprKind::StructField { target, .. }
+            | ExprKind::TupleField { target, .. }
+            | ExprKind::ArrayIndex { target, .. }
+            | ExprKind::Slice { target, .. } => self.base_def_for_assignee(target),
+            _ => None,
+        }
     }
 }

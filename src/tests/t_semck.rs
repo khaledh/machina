@@ -480,6 +480,26 @@ fn test_inout_param_scalar_rejected() {
 }
 
 #[test]
+fn test_out_param_scalar_rejected() {
+    let source = r#"
+        fn update(out x: u64) {
+            x = 1;
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::OutParamNotAggregate(_, _) => {}
+            e => panic!("Expected OutParamNotAggregate error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_inout_arg_not_lvalue() {
     let source = r#"
         fn update(inout arr: u64[3]) {
@@ -499,6 +519,30 @@ fn test_inout_arg_not_lvalue() {
         match &errors[0] {
             SemCheckError::InoutArgNotLvalue(_) => {}
             e => panic!("Expected InoutArgNotLvalue error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_out_arg_not_lvalue() {
+    let source = r#"
+        fn update(out arr: u64[3]) {
+            arr[0] = 10;
+        }
+
+        fn main() {
+            update(u64[1, 2, 3]);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::OutArgNotLvalue(_) => {}
+            e => panic!("Expected OutArgNotLvalue error, got {:?}", e),
         }
     }
 }
@@ -524,6 +568,69 @@ fn test_inout_arg_not_mutable() {
         match &errors[0] {
             SemCheckError::InoutArgNotMutable(_) => {}
             e => panic!("Expected InoutArgNotMutable error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_out_arg_not_mutable() {
+    let source = r#"
+        fn update(out arr: u64[3]) {
+            arr[0] = 10;
+        }
+
+        fn main() {
+            let arr = u64[1, 2, 3];
+            update(arr);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::OutArgNotMutable(_) => {}
+            e => panic!("Expected OutArgNotMutable error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_out_arg_allows_uninit_var() {
+    let source = r#"
+        fn fill(out arr: u64[3]) {
+            arr = u64[1, 2, 3];
+        }
+
+        fn main() {
+            var arr: u64[3];
+            fill(arr);
+            arr[0];
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_out_param_requires_init_on_all_paths() {
+    let source = r#"
+        type Pair = { x: u64, y: u64 }
+
+        fn fill(out p: Pair) {
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::OutParamNotInitialized(_, _) => {}
+            e => panic!("Expected OutParamNotInitialized error, got {:?}", e),
         }
     }
 }

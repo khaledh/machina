@@ -60,6 +60,18 @@ pub enum SemCheckError {
     #[error("inout argument must be mutable")]
     InoutArgNotMutable(Span),
 
+    #[error("out requires an aggregate parameter type, found {0}")]
+    OutParamNotAggregate(Type, Span),
+
+    #[error("out argument must be an assignable lvalue")]
+    OutArgNotLvalue(Span),
+
+    #[error("out argument must be mutable")]
+    OutArgNotMutable(Span),
+
+    #[error("out parameter `{0}` is not initialized on all paths")]
+    OutParamNotInitialized(String, Span),
+
     #[error("sink requires an owned parameter type, found {0}")]
     SinkParamNotOwned(Type, Span),
 
@@ -106,6 +118,10 @@ impl SemCheckError {
             SemCheckError::InoutParamNotAggregate(_, span) => *span,
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,
+            SemCheckError::OutParamNotAggregate(_, span) => *span,
+            SemCheckError::OutArgNotLvalue(span) => *span,
+            SemCheckError::OutArgNotMutable(span) => *span,
+            SemCheckError::OutParamNotInitialized(_, span) => *span,
             SemCheckError::SinkParamNotOwned(_, span) => *span,
             SemCheckError::UseBeforeInit(_, span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,

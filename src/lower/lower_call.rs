@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind};
+use crate::ast::{Expr, ExprKind, FunctionParamMode, FunctionSig};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -75,10 +75,35 @@ impl<'a> FuncLowerer<'a> {
             );
         }
 
-        let arg_vals = args
-            .iter()
-            .map(|a| self.lower_call_arg_place(a))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut out_args = Vec::new();
+        let param_modes = self.lookup_call_sig(call).map(|sig| {
+            sig.params
+                .iter()
+                .map(|p| p.mode.clone())
+                .collect::<Vec<_>>()
+        });
+        let arg_vals = if let Some(param_modes) = param_modes {
+            let mut vals = Vec::with_capacity(args.len());
+            for (mode, arg) in param_modes.iter().zip(args) {
+                if *mode == FunctionParamMode::Out {
+                    // Out args are write-only; skip drop only when the call is the first init.
+                    let place = self.lower_place(arg)?;
+                    let arg_ty = self.ty_for_node(arg.id)?;
+                    if !self.ctx.init_assigns.contains(&arg.id) {
+                        self.emit_overwrite_drop(arg, place.clone(), &arg_ty, true);
+                    }
+                    out_args.push(arg);
+                    vals.push(place);
+                } else {
+                    vals.push(self.lower_call_arg_place(arg)?);
+                }
+            }
+            vals
+        } else {
+            args.iter()
+                .map(|a| self.lower_call_arg_place(a))
+                .collect::<Result<Vec<_>, _>>()?
+        };
 
         self.fb.push_stmt(
             self.curr_block,
@@ -88,6 +113,10 @@ impl<'a> FuncLowerer<'a> {
                 args: arg_vals,
             },
         );
+        for arg in out_args {
+            // Mark out args as initialized after the call.
+            self.mark_initialized_if_needed(arg);
+        }
         Ok(())
     }
 
@@ -119,5 +148,22 @@ impl<'a> FuncLowerer<'a> {
                 Ok(PlaceAny::Aggregate(self.lower_agg_expr_to_temp(arg)?))
             }
         }
+    }
+
+    fn lookup_call_sig(&self, call: &Expr) -> Option<&FunctionSig> {
+        let def_id = self.ctx.type_map.lookup_call_def(call.id)?;
+        for func in self.ctx.module.funcs() {
+            let def = self.ctx.def_map.lookup_def(func.id)?;
+            if def.id == def_id {
+                return Some(&func.sig);
+            }
+        }
+        for decl in self.ctx.module.func_decls() {
+            let def = self.ctx.def_map.lookup_def(decl.id)?;
+            if def.id == def_id {
+                return Some(&decl.sig);
+            }
+        }
+        None
     }
 }
