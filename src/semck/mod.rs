@@ -1,4 +1,5 @@
 mod ast_liveness;
+mod def_init;
 mod errors;
 mod move_check;
 mod slice_escape;
@@ -14,14 +15,16 @@ pub fn sem_check(ctx: TypeCheckedContext) -> Result<SemanticCheckedContext, Vec<
     let mut errors = Vec::new();
 
     let move_result = move_check::check(&ctx);
+    let def_init_result = def_init::check(&ctx);
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
+    errors.extend(def_init_result.errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
 
     if errors.is_empty() {
-        Ok(ctx.with_implicit_moves(move_result.implicit_moves))
+        Ok(ctx.with_sem_results(move_result.implicit_moves, def_init_result.init_assigns))
     } else {
         Err(errors)
     }

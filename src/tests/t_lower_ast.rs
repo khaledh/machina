@@ -831,6 +831,37 @@ fn test_lower_match_switch_payload_binding() {
 }
 
 #[test]
+fn test_lower_var_decl_conditional_drop() {
+    let source = r#"
+        fn main() -> u64 {
+            var p: ^u64;
+            p = ^1;
+            p = ^2;
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func = analyzed.module.funcs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func);
+
+    let has_is_initialized = body
+        .locals
+        .iter()
+        .any(|local| local.name.as_deref() == Some("p$is_initialized"));
+    assert!(
+        has_is_initialized,
+        "expected is_initialized local for var decl"
+    );
+
+    let has_guard = body
+        .blocks
+        .iter()
+        .any(|bb| matches!(bb.terminator, Terminator::If { .. }));
+    assert!(has_guard, "expected conditional drop guarding init flag");
+}
+
+#[test]
 fn test_lower_struct_update() {
     let source = r#"
         type Point = { x: u64, y: u64 }

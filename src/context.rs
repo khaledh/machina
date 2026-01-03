@@ -64,13 +64,18 @@ pub struct TypeCheckedContext {
 }
 
 impl TypeCheckedContext {
-    pub fn with_implicit_moves(self, implicit_moves: HashSet<NodeId>) -> SemanticCheckedContext {
+    pub fn with_sem_results(
+        self,
+        implicit_moves: HashSet<NodeId>,
+        init_assigns: HashSet<NodeId>,
+    ) -> SemanticCheckedContext {
         SemanticCheckedContext {
             module: self.module,
             def_map: self.def_map,
             type_map: self.type_map,
             symbols: self.symbols,
             implicit_moves,
+            init_assigns,
         }
     }
 }
@@ -85,6 +90,7 @@ pub struct SemanticCheckedContext {
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub implicit_moves: HashSet<NodeId>,
+    pub init_assigns: HashSet<NodeId>,
 }
 
 // -----------------------------------------------------------------------------
@@ -97,6 +103,7 @@ pub struct AnalyzedContext {
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub implicit_moves: HashSet<NodeId>,
+    pub init_assigns: HashSet<NodeId>,
 }
 
 impl AnalyzedContext {

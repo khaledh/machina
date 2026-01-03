@@ -341,6 +341,10 @@ pub enum StmtExprKind {
         decl_ty: Option<TypeExpr>,
         value: Box<Expr>,
     },
+    VarDecl {
+        name: String,
+        decl_ty: TypeExpr,
+    },
     Assign {
         assignee: Box<Expr>,
         value: Box<Expr>,

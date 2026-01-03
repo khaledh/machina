@@ -544,6 +544,31 @@ impl Visitor for SymbolResolver {
                 self.check_pattern(pattern, true);
             }
 
+            StmtExprKind::VarDecl { name, decl_ty } => {
+                let def_id = self.def_id_gen.new_id();
+                let def = Def {
+                    id: def_id,
+                    name: name.clone(),
+                    kind: DefKind::LocalVar {
+                        is_mutable: true,
+                        nrvo_eligible: false,
+                    },
+                };
+                self.def_map_builder.record_def(def, stmt.id);
+                self.insert_symbol(
+                    name,
+                    Symbol {
+                        name: name.clone(),
+                        kind: SymbolKind::Var {
+                            def_id,
+                            is_mutable: true,
+                        },
+                    },
+                    stmt.span,
+                );
+                self.visit_type_expr(decl_ty);
+            }
+
             StmtExprKind::Assign { assignee, value } => {
                 self.check_lvalue_mutability(assignee);
                 self.visit_expr(value);

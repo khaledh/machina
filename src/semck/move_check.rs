@@ -1,9 +1,11 @@
-//! Semantics
-// - `move x` only valid if x is a plain variable (no projections).
-// - Move tracks compound types and heap-owned values (`Type::is_move_tracked()`).
-// - Any use of a moved var is an error.
-// - Re‑assigning the var (`x = ...`) clears moved status.
-// - `inout` use counts as use (already checked elsewhere).
+//! Move checking: tracks ownership transfer and prevents use-after-move.
+//!
+//! Semantics:
+//! - `move x` is only valid if x is a plain variable (no projections).
+//! - Move tracking applies to compound types and heap-owned values (`Type::is_move_tracked()`).
+//! - Any use of a moved variable is an error.
+//! - Re-assigning a variable (`x = ...`) clears its moved status.
+//! - Heap values require explicit `move` unless it's their last use (implicit move).
 
 use std::collections::{HashMap, HashSet};
 
@@ -22,10 +24,11 @@ use crate::semck::util::lookup_call_sig;
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,
+    /// Nodes where an implicit move was inserted (last-use of heap values).
     pub implicit_moves: HashSet<NodeId>,
 }
 
-// Run move checking and collect implicit moves for last-use heap values.
+/// Run move checking and collect implicit moves for last-use heap values.
 pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
     let mut errors = Vec::new();
     let mut implicit_moves = HashSet::new();
@@ -45,10 +48,11 @@ fn check_func(
     implicit_moves: &mut HashSet<NodeId>,
 ) {
     let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
-    // Precompute heap liveness so we can detect last-use sites inside blocks.
+
+    // Precompute heap liveness for last-use detection (implicit moves).
     let liveness = ast_liveness::analyze(&cfg, ctx);
 
-    // Collect sink params so we can allow moving from them.
+    // Sink params own their value and can be moved from.
     let mut sink_params = HashSet::new();
     for param in &func.sig.params {
         if param.mode == FunctionParamMode::Sink {
@@ -58,14 +62,17 @@ fn check_func(
         }
     }
 
+    // State = set of DefIds that have been moved.
+    // Entry = empty (nothing moved yet). Bottom = empty (safe default).
     let empty = HashSet::new();
     solve_forward(
         &cfg,
-        AstBlockId(0), // entry block is block 0 in builder
-        empty.clone(), // entry state
-        empty,         // bottom
+        AstBlockId(0),
+        empty.clone(),
+        empty,
         |states| {
-            // Conservative: once moved on any path, treat it as moved.
+            // Meet = union: if moved on ANY path, treat as moved (conservative).
+            // This is the opposite of def_init which uses intersection.
             let mut out = HashSet::new();
             for s in states {
                 out.extend(s.iter().cloned());
@@ -88,14 +95,22 @@ fn check_func(
     );
 }
 
+/// Walks expressions checking for use-after-move and tracking moved variables.
 struct MoveVisitor<'a> {
     ctx: &'a TypeCheckedContext,
+    /// Variables that have been moved and cannot be used.
     moved: HashSet<DefId>,
+    /// Sink params can be moved from (they own the value).
     sink_params: HashSet<DefId>,
+    /// Collects nodes that get implicit moves (last-use of heap values).
     implicit_moves: &'a mut HashSet<NodeId>,
+    /// Precomputed liveness for detecting last-use sites.
     liveness: &'a AstLiveness,
+    /// Live heap vars after the current item (for last-use detection).
     current_live_after: Option<HashSet<DefId>>,
+    /// How many times each heap var is used in the current item.
     current_use_counts: Option<HashMap<DefId, usize>>,
+    /// True when inside a borrow context (in/inout args) - skips move requirements.
     borrow_context: bool,
     errors: &'a mut Vec<SemCheckError>,
 }
@@ -122,9 +137,11 @@ impl<'a> MoveVisitor<'a> {
         }
     }
 
+    /// Process a CFG block: check each item with its liveness context.
     fn visit_cfg_node(&mut self, node: &AstCfgNode<'_>, block_id: AstBlockId) {
-        // Count per-item heap uses so we don't implicitly move if an item
-        // references the same binding multiple times.
+        // Precompute per-item info for implicit move detection:
+        // - use_counts: how many times each heap var is used in each item
+        // - live_after: which heap vars are live after each item
         let item_use_counts = node
             .items
             .iter()
@@ -133,6 +150,7 @@ impl<'a> MoveVisitor<'a> {
         let live_after = &self.liveness.live_after[block_id.0];
 
         for (idx, item) in node.items.iter().enumerate() {
+            // Set context for implicit move detection in this item.
             self.current_live_after = Some(live_after[idx].clone());
             self.current_use_counts = Some(item_use_counts[idx].clone());
             match item {
@@ -142,20 +160,23 @@ impl<'a> MoveVisitor<'a> {
         }
         self.current_live_after = None;
         self.current_use_counts = None;
+
+        // Check terminator condition (if any).
         match &node.term {
             AstTerminator::If { cond, .. } => self.visit_expr(cond),
             AstTerminator::Goto(_) | AstTerminator::End => {}
         }
     }
 
+    /// Process `move x`: validate target and mark as moved.
     fn handle_move_target(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var(_) => {
                 let Some(def) = self.ctx.def_map.lookup_def(expr.id) else {
                     return;
                 };
+                // Params can only be moved if they're sink params (owned).
                 if matches!(def.kind, DefKind::Param { .. }) {
-                    // Allow moving from sink params only.
                     if !self.sink_params.contains(&def.id) {
                         self.errors.push(SemCheckError::MoveFromParam(expr.span));
                         return;
@@ -164,16 +185,20 @@ impl<'a> MoveVisitor<'a> {
                 let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) else {
                     return;
                 };
+                // Only track moves for types that need ownership tracking.
                 if ty.is_move_tracked() {
                     self.moved.insert(def.id);
                 }
             }
+            // `move x.field` or `move arr[i]` not allowed - must move whole variable.
             _ => self
                 .errors
                 .push(SemCheckError::InvalidMoveTarget(expr.span)),
         }
     }
 
+    /// Execute `f` in a borrow context where heap move requirements are relaxed.
+    /// Used for `in`/`inout` arguments which borrow rather than consume.
     fn with_borrow_context(&mut self, f: impl FnOnce(&mut Self)) {
         let prev = self.borrow_context;
         self.borrow_context = true;
@@ -181,6 +206,7 @@ impl<'a> MoveVisitor<'a> {
         self.borrow_context = prev;
     }
 
+    /// Error if using a variable that has already been moved.
     fn check_use(&mut self, expr: &Expr) {
         if let Some(def) = self.ctx.def_map.lookup_def(expr.id)
             && self.moved.contains(&def.id)
@@ -190,6 +216,8 @@ impl<'a> MoveVisitor<'a> {
         }
     }
 
+    /// For heap-owned values: require explicit `move` unless this is the last use.
+    /// Last-use detection: not live after this item AND only used once in this item.
     fn check_heap_move_required(&mut self, expr: &Expr) {
         if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
             && ty.is_heap()
@@ -215,22 +243,23 @@ impl<'a> MoveVisitor<'a> {
                 .and_then(|counts| counts.get(&def.id))
                 .copied()
                 .unwrap_or(0);
-            // If a statement uses the same binding multiple times (e.g., `f(p, p)`),
-            // we require an explicit move to avoid partial-move ambiguity.
+            // Require explicit move if:
+            // - Used multiple times in same item (e.g., `f(p, p)`) - ambiguous which moves
+            // - Live after this item - can't implicitly consume something still needed
             if use_count > 1 || live_after.contains(&def.id) {
                 self.errors
                     .push(SemCheckError::OwnedMoveRequired(expr.span));
                 return;
             }
 
-            // Last-use in this item; record an implicit move.
+            // Last-use and only use in this item: implicit move is safe.
             self.implicit_moves.insert(expr.id);
             self.moved.insert(def.id);
         }
     }
 
-    // Treat projections as borrowing from the base, so only check use-after-move
-    // on the base variable and avoid requiring an explicit move.
+    /// Descend through projections to the base variable, checking use-after-move.
+    /// Projections (field access, indexing) borrow the base, so no move required.
     fn visit_place_base(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var(_) => {
@@ -253,6 +282,8 @@ impl<'a> MoveVisitor<'a> {
         }
     }
 
+    /// Clear moved status for variables bound by a pattern.
+    /// Called on let/var bindings and reassignments to "revive" the variable.
     fn clear_pattern_defs(&mut self, pattern: &Pattern) {
         match &pattern.kind {
             PatternKind::Ident { .. } => {
@@ -282,13 +313,16 @@ impl<'a> Visitor for MoveVisitor<'a> {
                 self.visit_expr(value);
                 self.clear_pattern_defs(pattern);
             }
+            StmtExprKind::VarDecl { .. } => {}
             StmtExprKind::Assign { assignee, value } => {
                 self.visit_expr(value);
                 if let ExprKind::Var(_) = assignee.kind {
+                    // Reassigning a variable clears its moved status.
                     if let Some(def) = self.ctx.def_map.lookup_def(assignee.id) {
                         self.moved.remove(&def.id);
                     }
                 } else {
+                    // For projections (x.field = ...), check the base is usable.
                     self.visit_expr(assignee);
                 }
             }
@@ -308,7 +342,8 @@ impl<'a> Visitor for MoveVisitor<'a> {
             }
             ExprKind::Var(_) => {
                 self.check_use(expr);
-                // Direct heap usage still requires explicit move for ownership transfer.
+                // Heap values need explicit move (or implicit if last-use).
+                // Skip if we're in a borrow context (in/inout arg).
                 if !self.borrow_context {
                     self.check_heap_move_required(expr);
                 }
@@ -325,7 +360,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
             ExprKind::StructField { target, .. } => {
                 self.visit_place_base(target);
             }
-            // If/Match require special treatment at CFG level
+            // If/Match bodies are handled as separate CFG blocks; only check cond/scrutinee here.
             ExprKind::If { cond, .. } => {
                 self.visit_expr(cond);
             }
@@ -334,20 +369,22 @@ impl<'a> Visitor for MoveVisitor<'a> {
             }
             ExprKind::Call { callee, args } => {
                 self.visit_expr(callee);
+                // Check args based on param mode: in/inout borrow, sink consumes.
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     for (param, arg) in sig.params.iter().zip(args) {
                         match param.mode {
                             FunctionParamMode::In | FunctionParamMode::Inout => {
-                                // In/Inout params are borrowed.
+                                // Borrowed: no move required for heap args.
                                 self.with_borrow_context(|this| this.visit_expr(arg));
                             }
                             FunctionParamMode::Sink => {
-                                // Sink params are owned.
+                                // Owned: heap args need move (explicit or implicit).
                                 self.visit_expr(arg);
                             }
                         }
                     }
                 } else {
+                    // Unknown signature: check all args normally.
                     for arg in args {
                         self.visit_expr(arg);
                     }

@@ -175,6 +175,9 @@ impl Visitor for ValueChecker<'_> {
                     }
                 }
             }
+            StmtExprKind::VarDecl { decl_ty, .. } => {
+                self.check_type_expr(decl_ty);
+            }
             StmtExprKind::Assign { assignee, value } => {
                 if let Some(assignee_ty) = self.ctx.type_map.lookup_node_type(assignee.id) {
                     self.check_range_binding_value(value, &assignee_ty);

@@ -115,7 +115,7 @@ impl<'a> FuncLowerer<'a> {
             // `sink` params are treated as owned values; register for drop.
             // (`in`/`inout` params are borrowed)
             if param.mode == FunctionParamMode::Sink {
-                self.register_drop(def_id, &ty);
+                self.register_drop(def_id, &ty, None);
             }
 
             if matches!(ty, Type::Range { .. }) {

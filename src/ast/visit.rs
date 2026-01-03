@@ -185,6 +185,7 @@ pub fn walk_stmt_expr<V: Visitor + ?Sized>(v: &mut V, stmt: &StmtExpr) {
         StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             v.visit_expr(value);
         }
+        StmtExprKind::VarDecl { .. } => {}
         StmtExprKind::Assign { assignee, value } => {
             v.visit_expr(assignee);
             v.visit_expr(value);

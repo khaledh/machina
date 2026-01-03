@@ -1,7 +1,7 @@
 //! AST-based CFG construction.
 
 use crate::analysis::dataflow::DataflowGraph;
-use crate::ast::{BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
+use crate::ast::{BlockItem, Expr, ExprKind, Pattern, StmtExpr, StmtExprKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);
@@ -24,6 +24,7 @@ pub enum AstTerminator<'a> {
 pub struct AstCfgNode<'a> {
     pub items: Vec<AstItem<'a>>,
     pub term: AstTerminator<'a>,
+    pub loop_inits: Vec<&'a Pattern>,
 }
 
 pub struct AstCfg<'a> {
@@ -56,6 +57,7 @@ impl<'a> AstCfgBuilder<'a> {
         self.nodes.push(AstCfgNode {
             items: Vec::new(),
             term: AstTerminator::End,
+            loop_inits: Vec::new(),
         });
         self.succs.push(Vec::new());
         id
@@ -71,6 +73,10 @@ impl<'a> AstCfgBuilder<'a> {
 
     fn push_item(&mut self, block: AstBlockId, item: AstItem<'a>) {
         self.nodes[block.0].items.push(item);
+    }
+
+    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a Pattern) {
+        self.nodes[block.0].loop_inits.push(pattern);
     }
 
     pub fn build_from_expr(self, expr: &'a Expr) -> AstCfg<'a> {
@@ -156,6 +162,11 @@ impl<'a> AstCfgBuilder<'a> {
                 self.set_term(cond_bb, AstTerminator::End);
                 self.push_edge(cond_bb, body_bb);
                 self.push_edge(cond_bb, exit_bb);
+
+                // Loop pattern bindings are initialized at the start of each body iteration.
+                if let StmtExprKind::For { pattern, .. } = &stmt.kind {
+                    self.push_loop_init(body_bb, pattern);
+                }
 
                 self.set_term(body_bb, AstTerminator::Goto(cond_bb));
                 self.push_edge(body_bb, cond_bb);

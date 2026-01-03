@@ -337,6 +337,12 @@ impl StmtExpr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
+            StmtExprKind::VarDecl { name, decl_ty } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}VarDecl [{}]", pad, self.id)?;
+                writeln!(f, "{}Name: {}", pad1, name)?;
+                writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+            }
             StmtExprKind::Assign { assignee, value } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Assign [{}]", pad, self.id)?;

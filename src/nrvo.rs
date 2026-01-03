@@ -26,6 +26,7 @@ impl NrvoAnalyzer {
             type_map,
             symbols,
             implicit_moves,
+            init_assigns,
         } = self.ctx;
 
         let mut def_map = def_map;
@@ -40,6 +41,7 @@ impl NrvoAnalyzer {
             type_map,
             symbols,
             implicit_moves,
+            init_assigns,
         }
     }
 
@@ -112,6 +114,7 @@ impl<'a> NrvoSafetyChecker<'a> {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 self.check_expr(value, false)
             }
+            StmtExprKind::VarDecl { .. } => true,
 
             // Assignment is ok if it's at return position
             StmtExprKind::Assign { assignee, value } => {

@@ -176,6 +176,7 @@ fn collect_stmt_defs_uses(
         StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
             collect_pattern_defs(pattern, ctx, defs);
         }
+        StmtExprKind::VarDecl { .. } => {}
         StmtExprKind::Assign { assignee, .. } => {
             collect_assignee_defs(assignee, ctx, defs);
         }
@@ -236,6 +237,7 @@ fn collect_stmt_uses<A: HeapUseAccumulator>(
         StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             collect_expr_uses(value, ctx, acc);
         }
+        StmtExprKind::VarDecl { .. } => {}
         StmtExprKind::Assign { assignee, value } => {
             collect_expr_uses(value, ctx, acc);
             collect_assignee_uses(assignee, ctx, acc);

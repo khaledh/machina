@@ -621,33 +621,57 @@ impl<'a> Parser<'a> {
         // Expect 'var'
         self.consume_keyword("var")?;
 
-        // Parse pattern
-        let pattern = self.parse_pattern()?;
+        let is_binding = self.lookahead_for(TK::Equals, TK::Semicolon);
 
-        // Parse declaration type (optional)
-        let decl_ty = if self.curr_token.kind == TK::Colon {
-            self.advance();
-            Some(self.parse_type_expr()?)
+        if is_binding {
+            // var <pattern> (":" <type>)? = <expr>;
+            let pattern = self.parse_pattern()?;
+
+            // Parse declaration type (optional)
+            let decl_ty = if self.curr_token.kind == TK::Colon {
+                self.advance();
+                Some(self.parse_type_expr()?)
+            } else {
+                None
+            };
+
+            // Expect '='
+            self.consume(&TK::Equals)?;
+
+            // Parse value
+            let value = self.parse_expr(0)?;
+
+            // Consume ';'
+            self.consume(&TK::Semicolon)?;
+
+            Ok(StmtExpr {
+                id: self.id_gen.new_id(),
+                kind: StmtExprKind::VarBind {
+                    pattern,
+                    decl_ty,
+                    value: Box::new(value),
+                },
+                span: self.close(marker),
+            })
         } else {
-            None
-        };
-        self.consume(&TK::Equals)?;
+            // var <name> ":" <type>;
+            let name = self.parse_ident()?;
 
-        // Parse value
-        let value = self.parse_expr(0)?;
+            // Expect ':'
+            self.consume(&TK::Colon)?;
 
-        // Consume ';'
-        self.consume(&TK::Semicolon)?;
+            // Parse type
+            let decl_ty = self.parse_type_expr()?;
 
-        Ok(StmtExpr {
-            id: self.id_gen.new_id(),
-            kind: StmtExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value: Box::new(value),
-            },
-            span: self.close(marker),
-        })
+            // Consume ';'
+            self.consume(&TK::Semicolon)?;
+
+            Ok(StmtExpr {
+                id: self.id_gen.new_id(),
+                kind: StmtExprKind::VarDecl { name, decl_ty },
+                span: self.close(marker),
+            })
+        }
     }
 
     fn parse_assign(&mut self, assignee: Expr) -> Result<StmtExpr, ParseError> {
@@ -1428,53 +1452,55 @@ impl<'a> Parser<'a> {
 
     // --- Lookahead ---
 
-    fn lookahead_for(&self, target: TokenKind) -> bool {
-        let open = match self.curr_token.kind {
-            TK::LBrace | TK::LBracket | TK::LParen => self.curr_token.kind.clone(),
-            _ => return false,
-        };
-
+    fn lookahead_for(&self, target: TokenKind, stop_at: TokenKind) -> bool {
         let mut brace = 0usize;
         let mut bracket = 0usize;
         let mut paren = 0usize;
 
         let mut idx = self.pos;
         while idx < self.tokens.len() {
-            match self.tokens[idx].kind {
+            let token = &self.tokens[idx].kind;
+
+            match token {
                 TK::LBrace => brace += 1,
                 TK::RBrace => {
                     brace = brace.saturating_sub(1);
-                    if open == TK::LBrace && brace == 0 {
+                    if brace == 0 && stop_at == TK::RBrace {
                         return false;
                     }
                 }
                 TK::LBracket => bracket += 1,
                 TK::RBracket => {
                     bracket = bracket.saturating_sub(1);
-                    if open == TK::LBracket && bracket == 0 {
+                    if bracket == 0 && stop_at == TK::RBracket {
                         return false;
                     }
                 }
                 TK::LParen => paren += 1,
                 TK::RParen => {
                     paren = paren.saturating_sub(1);
-                    if open == TK::LParen && paren == 0 {
+                    if paren == 0 && stop_at == TK::RParen {
                         return false;
                     }
                 }
                 _ => {}
             }
 
-            if self.tokens[idx].kind == target {
-                let top_level = match open {
-                    TK::LBrace => brace == 1 && paren == 0 && bracket == 0,
-                    TK::LBracket => bracket == 1 && paren == 0 && brace == 0,
-                    TK::LParen => paren == 1 && brace == 0 && bracket == 0,
-                    _ => false,
-                };
-                if top_level {
-                    return true;
-                }
+            let at_target_level = match stop_at {
+                TK::RBrace => brace == 1 && bracket == 0 && paren == 0,
+                TK::RBracket => brace == 0 && bracket == 1 && paren == 0,
+                TK::RParen => brace == 0 && bracket == 0 && paren == 1,
+                _ => brace == 0 && bracket == 0 && paren == 0,
+            };
+
+            // Found target at target level -> success
+            if *token == target && at_target_level {
+                return true;
+            }
+
+            // Found stop_at at top level -> failure
+            if *token == stop_at && brace == 0 && bracket == 0 && paren == 0 {
+                return false;
             }
 
             idx += 1;
@@ -1509,7 +1535,7 @@ impl<'a> Parser<'a> {
                 TK::LBracket => {
                     // ArrayIndex or Slice expression
 
-                    let is_slice = self.lookahead_for(TK::DotDot);
+                    let is_slice = self.lookahead_for(TK::DotDot, TK::RBracket);
                     self.advance(); // consume '['
 
                     // Check if no index or range is provided
@@ -1701,7 +1727,7 @@ impl<'a> Parser<'a> {
             TK::LParen => self.parse_paren_or_tuple(),
 
             // Struct update expression
-            TK::LBrace if self.lookahead_for(TK::Pipe) => self.parse_struct_update(),
+            TK::LBrace if self.lookahead_for(TK::Pipe, TK::RBrace) => self.parse_struct_update(),
 
             // Block expression
             TK::LBrace => self.parse_block(),

@@ -28,7 +28,7 @@ impl<'a> FuncLowerer<'a> {
             let ty_id = self.ty_lowerer.lower_ty(&target_ty);
             let def_id = self.def_for_node(pattern.id)?.id;
             // Track owned heap values for drop at scope exit.
-            self.register_drop(def_id, &target_ty);
+            self.register_drop(def_id, &target_ty, None);
             self.bind_ident_operand(def_id, name.clone(), ty_id, op)?;
         } else {
             if let PK::Ident { name } = &pattern.kind {
@@ -49,7 +49,7 @@ impl<'a> FuncLowerer<'a> {
                     let ret_ty = self.fb.body.locals[ret_id.0 as usize].ty;
                     self.locals.insert(def_id, ret_id);
                     // NRVO still needs drop tracking for owned values.
-                    self.register_drop(def_id, &value_ty);
+                    self.register_drop(def_id, &value_ty, None);
                     let dst = Place::new(ret_id, ret_ty, vec![]);
                     self.lower_agg_value_into(dst, value)?;
                     return Ok(());
@@ -57,7 +57,7 @@ impl<'a> FuncLowerer<'a> {
                 let ty_id = self.ty_lowerer.lower_ty(&value_ty);
                 let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name.clone()));
                 // Track owned heap values for drop at scope exit.
-                self.register_drop(def_id, &value_ty);
+                self.register_drop(def_id, &value_ty, None);
                 let dst = Place::new(local_id, ty_id, vec![]);
                 self.lower_agg_value_into(dst, value)?;
                 return Ok(());
@@ -88,7 +88,7 @@ impl<'a> FuncLowerer<'a> {
                 let src_ty_id = self.ty_lowerer.lower_ty(src_ty);
                 let def_id = self.def_for_node(pattern.id)?.id;
                 // Track owned heap values for drop at scope exit.
-                self.register_drop(def_id, src_ty);
+                self.register_drop(def_id, src_ty, None);
                 self.bind_ident(def_id, name.clone(), src_ty_id, src_place)
             }
 

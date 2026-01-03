@@ -253,6 +253,64 @@ fn test_sink_param_owned_type_ok() {
 }
 
 #[test]
+fn test_var_decl_use_before_init_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            var x: u64;
+            x
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::UseBeforeInit(_, _) => {}
+            e => panic!("Expected UseBeforeInit error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_var_decl_init_before_use_ok() {
+    let source = r#"
+        fn test() -> u64 {
+            var x: u64;
+            x = 1;
+            x
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_var_decl_field_write_rejected() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            var p: Point;
+            p.x = 1;
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::UseBeforeInit(_, _) => {}
+            e => panic!("Expected UseBeforeInit error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_struct_update_duplicate_field() {
     let source = r#"
         type Point = { x: u64, y: u64 }

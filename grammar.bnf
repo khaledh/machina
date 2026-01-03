@@ -49,11 +49,12 @@ Block              ::= "{" BlockItem* (Expr ";"?)? "}"
 BlockItem          ::= StmtExpr | Expr ";"
 
 # Statement Expressions
-StmtExpr           ::= LetBind | VarBind | Assign | While | For
+StmtExpr           ::= LetBind | VarBind | VarDecl | Assign | While | For
 
-# Binding
+# Variable Binding/Declaration
 LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr ";"
 VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr ";"
+VarDecl            ::= "var" Identifier ":" TypeExpr ";"
 
 # Assignment
 Assign             ::= PostfixExpr "=" Expr ";"

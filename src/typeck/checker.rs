@@ -1137,6 +1137,14 @@ impl AstFolder for TypeChecker {
                 value,
             } => self.check_binding(pattern, decl_ty, value)?,
 
+            StmtExprKind::VarDecl { decl_ty, .. } => {
+                let ty = resolve_type_expr(&self.context.def_map, decl_ty)?;
+                if let Some(def) = self.context.def_map.lookup_def(stmt.id) {
+                    self.type_map_builder.record_def_type(def.clone(), ty);
+                }
+                Type::Unit
+            }
+
             StmtExprKind::Assign { assignee, value } => self.check_assign(assignee, value)?,
 
             StmtExprKind::While { cond, body } => self.check_while(cond, body)?,

@@ -63,6 +63,9 @@ pub enum SemCheckError {
     #[error("sink requires an owned parameter type, found {0}")]
     SinkParamNotOwned(Type, Span),
 
+    #[error("Use before initialization: {0}")]
+    UseBeforeInit(String, Span),
+
     #[error("Use after move: {0}")]
     UseAfterMove(String, Span),
 
@@ -104,6 +107,7 @@ impl SemCheckError {
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,
             SemCheckError::SinkParamNotOwned(_, span) => *span,
+            SemCheckError::UseBeforeInit(_, span) => *span,
             SemCheckError::UseAfterMove(_, span) => *span,
             SemCheckError::InvalidMoveTarget(span) => *span,
             SemCheckError::MoveFromParam(span) => *span,
