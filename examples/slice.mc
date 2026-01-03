@@ -17,4 +17,12 @@ fn main() {
     consume_slice(head);
     consume_slice(tail);
     consume_slice(all);
+
+    // Two-dimensional array slices
+    let arr2d = [[1, 2, 3], [4, 5, 6]]; //       (array of u64[3] arrays)
+    let s_rows = arr2d[0..2];  // type: u64[3][] (slice of u64[3] arrays)
+    let row = s_rows[0];       // type: u64[3]   (array of u64 elements)
+    let s_elems = row[0..3];   // type: u64[]    (slice of u64 elements)
+    let s_elem = s_elems[0];   // type: u64      (element)
+    println(f"s_elem={s_elem}");
 }

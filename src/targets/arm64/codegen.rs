@@ -831,20 +831,44 @@ impl<'a> FuncCodegen<'a> {
                     cur_kind = next_kind;
                 }
                 Projection::Index { index } => {
-                    if !cur_is_addr {
-                        return Err(CodegenError::InvalidProjectionType);
-                    }
-                    let (elem_ty, dims) = match cur_kind {
-                        TyKind::Array { elem_ty, ref dims } => (elem_ty, dims.clone()),
+                    let (stride, wants_addr, next_kind) = match cur_kind {
+                        TyKind::Array { elem_ty, ref dims } => {
+                            if !cur_is_addr {
+                                return Err(CodegenError::InvalidProjectionType);
+                            }
+                            let elem_size = size_of_ty(&self.body.types, elem_ty);
+                            let stride_elems: usize = if dims.len() > 1 {
+                                dims[1..].iter().product()
+                            } else {
+                                1
+                            };
+                            let next_kind = if dims.len() == 1 {
+                                self.body.types.kind(elem_ty).clone()
+                            } else {
+                                TyKind::Array {
+                                    elem_ty,
+                                    dims: dims[1..].to_vec(),
+                                }
+                            };
+                            ((stride_elems * elem_size) as i64, false, next_kind)
+                        }
+                        TyKind::Ptr { elem_ty } => {
+                            // Indexing through a pointer uses the pointed-to element size.
+                            let elem_size = size_of_ty(&self.body.types, elem_ty);
+                            let next_kind = self.body.types.kind(elem_ty).clone();
+                            (elem_size as i64, true, next_kind)
+                        }
                         _ => return Err(CodegenError::InvalidProjectionType),
                     };
-                    let elem_size = size_of_ty(&self.body.types, elem_ty);
-                    let stride_elems: usize = if dims.len() > 1 {
-                        dims[1..].iter().product()
-                    } else {
-                        1
-                    };
-                    let stride = (stride_elems * elem_size) as i64;
+
+                    if wants_addr {
+                        if cur_is_addr {
+                            // Load the pointer value from memory before applying the index.
+                            asm.push_str("  ldr x17, [x17]\n");
+                        }
+                        cur_is_addr = true;
+                    }
+
                     if let Operand::Const(Const::Int { value, .. }) = index {
                         let offset = (*value as i64) * stride;
                         if offset != 0 {
@@ -865,14 +889,7 @@ impl<'a> FuncCodegen<'a> {
                         }
                     }
 
-                    cur_kind = if dims.len() == 1 {
-                        self.body.types.kind(elem_ty).clone()
-                    } else {
-                        TyKind::Array {
-                            elem_ty,
-                            dims: dims[1..].to_vec(),
-                        }
-                    };
+                    cur_kind = next_kind;
                 }
                 Projection::ByteOffset { offset } => {
                     if !cur_is_addr {

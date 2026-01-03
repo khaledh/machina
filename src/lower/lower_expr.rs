@@ -642,7 +642,17 @@ impl<'a> FuncLowerer<'a> {
                 let elem_ty = {
                     let dst_ty = self.ty_for_node(expr.id)?;
                     match dst_ty {
-                        Type::Array { elem_ty, .. } => elem_ty,
+                        Type::Array { elem_ty, dims } => {
+                            if dims.len() == 1 {
+                                *elem_ty
+                            } else {
+                                // Multi-dim arrays store the remaining dimensions in the element type.
+                                Type::Array {
+                                    elem_ty,
+                                    dims: dims[1..].to_vec(),
+                                }
+                            }
+                        }
                         _ => panic!("Expected array type"),
                     }
                 };
@@ -668,7 +678,7 @@ impl<'a> FuncLowerer<'a> {
                     ArrayLitInit::Repeat(expr, count) => {
                         // Evaluate the repeat expression once and copy to each element.
                         let count = *count as usize;
-                        if *elem_ty == Type::uint(8) {
+                        if elem_ty == Type::uint(8) {
                             // Special case: for u8 arrays -> use memset intrinsic.
                             let value_op = self.lower_scalar_expr(expr)?;
                             self.fb.push_stmt(

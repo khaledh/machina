@@ -147,6 +147,48 @@ fn test_array_index_through_heap() {
 }
 
 #[test]
+fn test_slice_index_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            let s = arr[0..2];
+            s[0]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_slice_of_slice_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            let s = arr[0..3];
+            let t = s[1..3];
+            t[0]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_slice_2d_array_then_slice_row_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [[1, 2, 3], [4, 5, 6]];
+            let s_rows = arr[0..2];
+            let row = s_rows[0];
+            let s_elems = row[0..3];
+            s_elems[0]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_match_enum_through_heap() {
     let source = r#"
         type Msg = Ping(u64) | Pong(u64)

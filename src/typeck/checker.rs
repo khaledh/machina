@@ -412,15 +412,28 @@ impl TypeChecker {
         // Slices are allowed only for arrays and strings.
         match target_ty {
             Type::Array { elem_ty, dims } => {
-                if dims.len() != 1 {
-                    return Err(TypeCheckErrorKind::SliceTargetNot1DArray(
+                if dims.is_empty() {
+                    return Err(TypeCheckErrorKind::SliceTargetZeroDimArray(
                         Type::Array { elem_ty, dims },
                         target.span,
                     )
                     .into());
                 }
-                Ok(Type::Slice { elem_ty })
+
+                let slice_elem_ty = if dims.len() == 1 {
+                    *elem_ty
+                } else {
+                    Type::Array {
+                        elem_ty,
+                        dims: dims[1..].to_vec(),
+                    }
+                };
+
+                Ok(Type::Slice {
+                    elem_ty: Box::new(slice_elem_ty),
+                })
             }
+            Type::Slice { elem_ty } => Ok(Type::Slice { elem_ty }),
             Type::String => Ok(Type::Slice {
                 elem_ty: Box::new(Type::uint(8)),
             }),
@@ -442,6 +455,25 @@ impl TypeChecker {
         }
 
         Ok(Type::uint(8))
+    }
+
+    fn check_slice_index(
+        &mut self,
+        elem_ty: &Type,
+        indices: &[Expr],
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        // Slices are 1D, so only a single index is allowed.
+        if indices.len() != 1 {
+            return Err(TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into());
+        }
+
+        let index_ty = self.visit_expr(&indices[0], None)?;
+        if index_ty != Type::uint(64) {
+            return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
+        }
+
+        Ok(elem_ty.clone())
     }
 
     fn check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
@@ -1228,6 +1260,9 @@ impl AstFolder for TypeChecker {
                     match peeled_ty {
                         Type::Array { elem_ty, dims } => {
                             self.check_array_index(elem_ty.as_ref(), &dims, indices, target.span)
+                        }
+                        Type::Slice { elem_ty } => {
+                            self.check_slice_index(elem_ty.as_ref(), indices, target.span)
                         }
                         Type::String => self.check_string_index(indices, target.span),
                         _ => {
