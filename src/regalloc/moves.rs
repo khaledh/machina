@@ -120,29 +120,45 @@ where
     }
 
     // Move resolution is a topological sort with cycle breaking:
-    // emit any move whose destination is not a source of any pending move,
+    // emit any move whose destination is not a source of any *other* pending move,
     // otherwise break a reg->reg cycle using a scratch register.
     let mut pending = std::mem::take(moves);
+    let mut pending_srcs: Vec<HashSet<PhysReg>> = pending
+        .iter()
+        .map(|mov| {
+            let mut regs = HashSet::new();
+            if let Location::Reg(reg) = mov.from {
+                regs.insert(reg);
+            }
+            for reg in extra_src_regs(mov) {
+                regs.insert(reg);
+            }
+            regs
+        })
+        .collect();
+    let mut src_counts: HashMap<PhysReg, usize> = HashMap::new();
+    for regs in &pending_srcs {
+        for reg in regs {
+            *src_counts.entry(*reg).or_insert(0) += 1;
+        }
+    }
     let mut ordered = Vec::with_capacity(pending.len());
 
     while !pending.is_empty() {
-        // Gather all register sources that are currently needed.
-        let mut src_regs = HashSet::new();
-        for mov in &pending {
-            if let Location::Reg(reg) = mov.from {
-                src_regs.insert(reg);
-            }
-            for reg in extra_src_regs(mov) {
-                src_regs.insert(reg);
-            }
-        }
-
-        // Find a move whose destination doesn't clobber any source reg.
+        // Find a move whose destination doesn't clobber any source reg used by
+        // other pending moves. A move is allowed to use its own destination as
+        // a source (e.g., `PlaceAddr` with base in the same register).
         let mut ready_idx = None;
         for (idx, mov) in pending.iter().enumerate() {
             match &mov.to {
                 Location::Reg(reg) => {
-                    if !src_regs.contains(reg) {
+                    let total = src_counts.get(reg).copied().unwrap_or(0);
+                    let self_uses = if pending_srcs[idx].contains(reg) {
+                        1
+                    } else {
+                        0
+                    };
+                    if total <= self_uses {
                         ready_idx = Some(idx);
                         break;
                     }
@@ -155,7 +171,17 @@ where
         }
 
         if let Some(idx) = ready_idx {
-            ordered.push(pending.remove(idx));
+            let removed = pending.remove(idx);
+            let removed_srcs = pending_srcs.remove(idx);
+            for reg in removed_srcs {
+                if let Some(count) = src_counts.get_mut(&reg) {
+                    *count -= 1;
+                    if *count == 0 {
+                        src_counts.remove(&reg);
+                    }
+                }
+            }
+            ordered.push(removed);
             continue;
         }
 
@@ -165,6 +191,15 @@ where
             .position(|mov| matches!((&mov.from, &mov.to), (Location::Reg(_), Location::Reg(_))))
             .expect("cycle detection requires a reg-to-reg move");
         let mut mov = pending.remove(cycle_idx);
+        let removed_srcs = pending_srcs.remove(cycle_idx);
+        for reg in removed_srcs {
+            if let Some(count) = src_counts.get_mut(&reg) {
+                *count -= 1;
+                if *count == 0 {
+                    src_counts.remove(&reg);
+                }
+            }
+        }
         let Location::Reg(from_reg) = mov.from else {
             unreachable!("cycle candidate must be reg -> reg");
         };
@@ -176,6 +211,21 @@ where
         });
 
         mov.from = Location::Reg(scratch);
+
+        // Recompute source regs for the requeued move so pending_srcs stays in sync,
+        // and update src_counts to reflect the newly added sources.
+        let mut regs = HashSet::new();
+        if let Location::Reg(reg) = mov.from {
+            regs.insert(reg);
+        }
+        for reg in extra_src_regs(&mov) {
+            regs.insert(reg);
+        }
+        for reg in &regs {
+            *src_counts.entry(*reg).or_insert(0) += 1;
+        }
+        pending_srcs.push(regs);
+
         pending.push(mov);
     }
 
