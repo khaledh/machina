@@ -480,6 +480,26 @@ fn test_inout_param_scalar_rejected() {
 }
 
 #[test]
+fn test_inout_param_heap_allowed() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+        type Box = { p: ^Point }
+
+        fn take(inout p: ^Point) {
+            p.x = 3;
+        }
+
+        fn main() {
+            var b = Box { p: ^Point { x: 1, y: 2 } };
+            take(b.p);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_ok(), "Expected no semck errors, got {result:?}");
+}
+
+#[test]
 fn test_out_param_scalar_rejected() {
     let source = r#"
         fn update(out x: u64) {

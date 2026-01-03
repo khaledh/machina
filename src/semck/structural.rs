@@ -317,8 +317,8 @@ impl Visitor for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &crate::ast::FunctionSig) {
         for param in &func_sig.params {
             if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
-                if param.mode == FunctionParamMode::Inout && !ty.is_compound() {
-                    // Only aggregate types can be inout parameters.
+                if param.mode == FunctionParamMode::Inout && !(ty.is_compound() || ty.is_heap()) {
+                    // Only aggregate or heap types can be inout parameters.
                     self.errors.push(SemCheckError::InoutParamNotAggregate(
                         ty.clone(),
                         param.span,
