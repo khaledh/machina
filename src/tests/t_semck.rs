@@ -801,6 +801,74 @@ fn test_slice_borrow_blocks_mutation() {
 }
 
 #[test]
+fn test_slice_borrow_allows_mutation_after_last_use() {
+    let source = r#"
+        fn main() {
+            var arr = [1, 2, 3];
+            let s = arr[0..2];
+            let v = s[0];
+            arr[0] = 9;
+            v;
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_slice_borrow_flow_sensitive_rebind() {
+    let source = r#"
+        fn main() {
+            var a = [1, 2, 3];
+            var b = [4, 5, 6];
+
+            var s = a[0..2];
+            s[0];
+
+            s = b[0..2];
+            a[0] = 9;
+            s[0];
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_slice_borrow_rebind_not_all_paths_rejected() {
+    let source = r#"
+        fn main() {
+            var a = [1, 2, 3];
+            var b = [4, 5, 6];
+            var s = a[0..2];
+
+            if true {
+                s = b[0..2];
+            } else {
+                s[0];
+            };
+
+            a[0] = 9;
+            s[0];
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::SliceBorrowConflict(_)))
+        );
+    }
+}
+
+#[test]
 fn test_slice_return_forbidden() {
     let source = r#"
         fn test() -> u64[] {

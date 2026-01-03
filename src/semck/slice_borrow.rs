@@ -1,271 +1,662 @@
-//! Slice borrow checking: prevents mutation/move of arrays while slices exist.
+//! Slice borrow checking: prevents mutation/move of a base while slices into it exist.
 //!
-//! Conservative rule: once a slice is stored in a local, its base (array/string) cannot
-//! be mutated or moved for the remainder of that local's scope.
-//! 
-//! Note: This is a conservative rule (scope‑based, not last‑use).
+//! Rule: once a slice is stored in a local, its base cannot be mutated or moved
+//! while that slice local is still live.
 //!
 //! Example violation:
-//! ```
+//! ```mc
 //! let s = arr[0..5];  // s borrows arr
 //! arr[0] = 42;        // ERROR: arr is borrowed by s
 //! ```
 
 use std::collections::{HashMap, HashSet};
 
+use crate::analysis::dataflow::{solve_backward, solve_forward};
+use crate::ast::cfg::{AstBlockId, AstCfg, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
     Expr, ExprKind, Function, FunctionParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
-    Visitor, walk_expr, walk_stmt_expr,
+    Visitor, walk_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
 use crate::semck::util::lookup_call_sig;
+use crate::types::Type;
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
-    let mut checker = SliceBorrowChecker::new(ctx);
-    checker.visit_module(&ctx.module);
-    checker.errors
+    let mut errors = Vec::new();
+
+    for func in ctx.module.funcs() {
+        check_func(ctx, func, &mut errors);
+    }
+
+    errors
 }
 
-struct SliceBorrowChecker<'a> {
-    ctx: &'a TypeCheckedContext,
-    errors: Vec<SemCheckError>,
-    /// Stack of scopes, each containing DefIds borrowed in that scope.
-    /// A borrow in scope N is active until scope N exits.
-    borrowed_scopes: Vec<HashSet<DefId>>,
-    /// Maps each local definition to its scope index.
-    def_scopes: HashMap<DefId, usize>,
-    /// Stack of definitions introduced in each scope (for cleanup on exit).
-    defs_in_scope: Vec<Vec<DefId>>,
-}
+/// Two dataflow passes:
+/// 1. Forward: track which bases each slice local borrows from
+/// 2. Backward: compute liveness of slice locals
+///
+/// Then walk each block, checking for conflicts where a borrowed base is
+/// mutated/moved while a slice borrowing it is still live.
+fn check_func(ctx: &TypeCheckedContext, func: &Function, errors: &mut Vec<SemCheckError>) {
+    let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
+    let liveness = analyze_slice_liveness(&cfg, ctx);
+    let bindings = analyze_slice_bindings(&cfg, ctx);
 
-impl<'a> SliceBorrowChecker<'a> {
-    fn new(ctx: &'a TypeCheckedContext) -> Self {
-        Self {
-            ctx,
-            errors: Vec::new(),
-            borrowed_scopes: Vec::new(),
-            def_scopes: HashMap::new(),
-            defs_in_scope: Vec::new(),
+    for (block_idx, node) in cfg.nodes.iter().enumerate() {
+        let mut state = bindings.in_map[block_idx].clone();
+
+        for (item_idx, item) in node.items.iter().enumerate() {
+            // Active slices = live after this item + used in this item.
+            let mut active_slices = liveness.live_after[block_idx][item_idx].clone();
+            collect_item_slice_uses(item, ctx, &mut active_slices);
+
+            if !active_slices.is_empty() {
+                let borrowed_bases = borrowed_bases_for_active(&active_slices, &state);
+                if !borrowed_bases.is_empty() {
+                    check_item_for_conflicts(ctx, item, &borrowed_bases, errors);
+                }
+            }
+
+            // Advance the flow-sensitive binding state for the next item.
+            apply_item_bindings(&mut state, item, ctx);
         }
-    }
 
-    /// Push a new scope onto the stack (called on block entry).
-    fn enter_scope(&mut self) {
-        self.borrowed_scopes.push(HashSet::new());
-        self.defs_in_scope.push(Vec::new());
-    }
+        if let AstTerminator::If { cond, .. } = &node.term {
+            let mut active_slices = liveness.live_out[block_idx].clone();
+            collect_expr_slice_uses(cond, ctx, &mut active_slices);
 
-    /// Pop the current scope, releasing its borrows and definitions.
-    fn exit_scope(&mut self) {
-        if let Some(defs) = self.defs_in_scope.pop() {
-            for def in defs {
-                self.def_scopes.remove(&def);
+            if !active_slices.is_empty() {
+                let borrowed_bases = borrowed_bases_for_active(&active_slices, &state);
+                if !borrowed_bases.is_empty() {
+                    let mut visitor = BorrowConflictVisitor::new(ctx, &borrowed_bases, errors);
+                    visitor.visit_expr(cond);
+                }
             }
         }
-        self.borrowed_scopes.pop();
+    }
+}
+
+fn borrowed_bases_for_active(
+    active_slices: &HashSet<DefId>,
+    state: &SliceBindings,
+) -> HashSet<DefId> {
+    let mut borrowed = HashSet::new();
+    for slice_def in active_slices {
+        if let Some(bases) = state.get(slice_def) {
+            borrowed.extend(bases.iter().copied());
+        }
+    }
+    borrowed
+}
+
+fn check_item_for_conflicts(
+    ctx: &TypeCheckedContext,
+    item: &AstItem<'_>,
+    borrowed_bases: &HashSet<DefId>,
+    errors: &mut Vec<SemCheckError>,
+) {
+    match item {
+        AstItem::Stmt(stmt) => match &stmt.kind {
+            StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
+                let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                visitor.visit_expr(value);
+            }
+            StmtExprKind::VarDecl { .. } => {}
+            StmtExprKind::Assign { assignee, value } => {
+                check_write_target(ctx, assignee, borrowed_bases, errors);
+                let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                visitor.visit_expr(value);
+            }
+            StmtExprKind::While { cond, body } => {
+                let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                visitor.visit_expr(cond);
+                visitor.visit_expr(body);
+            }
+            StmtExprKind::For { iter, body, .. } => {
+                let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                visitor.visit_expr(iter);
+                visitor.visit_expr(body);
+            }
+        },
+        AstItem::Expr(expr) => {
+            let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+            visitor.visit_expr(expr);
+        }
+    }
+}
+
+fn check_write_target(
+    ctx: &TypeCheckedContext,
+    expr: &Expr,
+    borrowed_bases: &HashSet<DefId>,
+    errors: &mut Vec<SemCheckError>,
+) {
+    if let Some(def) = base_def_id(expr, ctx)
+        && borrowed_bases.contains(&def)
+    {
+        errors.push(SemCheckError::SliceBorrowConflict(expr.span));
+    }
+}
+
+// ============================================================================
+// Flow-sensitive slice bindings (slice local -> base defs)
+// ============================================================================
+
+/// Maps each slice local to the set of bases it may borrow from.
+/// A slice can borrow multiple bases if assigned conditionally.
+type SliceBindings = HashMap<DefId, HashSet<DefId>>;
+
+struct SliceBindingAnalysis {
+    in_map: Vec<SliceBindings>,
+}
+
+/// Forward dataflow: track slice -> base bindings through the CFG.
+fn analyze_slice_bindings(cfg: &AstCfg<'_>, ctx: &TypeCheckedContext) -> SliceBindingAnalysis {
+    let entry_state = HashMap::new();
+    let bottom = HashMap::new();
+
+    let analysis = solve_forward(
+        cfg,
+        AstBlockId(0),
+        entry_state,
+        bottom,
+        merge_slice_bindings,
+        |block_id, in_state| apply_block_bindings(&cfg.nodes[block_id.0], in_state, ctx),
+    );
+
+    SliceBindingAnalysis {
+        in_map: analysis.in_map,
+    }
+}
+
+/// Meet = union: if a slice borrows a base on any path, track it.
+fn merge_slice_bindings(states: &[SliceBindings]) -> SliceBindings {
+    let mut merged = HashMap::new();
+    for state in states {
+        for (slice_def, bases) in state {
+            merged
+                .entry(*slice_def)
+                .or_insert_with(HashSet::new)
+                .extend(bases.iter().copied());
+        }
+    }
+    merged
+}
+
+fn apply_block_bindings(
+    node: &AstCfgNode<'_>,
+    in_state: &SliceBindings,
+    ctx: &TypeCheckedContext,
+) -> SliceBindings {
+    let mut state = in_state.clone();
+    for item in &node.items {
+        apply_item_bindings(&mut state, item, ctx);
+    }
+    state
+}
+
+fn apply_item_bindings(state: &mut SliceBindings, item: &AstItem<'_>, ctx: &TypeCheckedContext) {
+    let AstItem::Stmt(stmt) = item else {
+        return;
+    };
+
+    match &stmt.kind {
+        StmtExprKind::LetBind { pattern, value, .. }
+        | StmtExprKind::VarBind { pattern, value, .. } => {
+            if let PatternKind::Ident { .. } = &pattern.kind
+                && let Some(def) = ctx.def_map.lookup_def(pattern.id)
+                && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
+            {
+                let bases = slice_bases_for_value(value, state, ctx);
+                update_slice_binding(state, def.id, bases);
+            }
+        }
+        StmtExprKind::Assign { assignee, value } => {
+            if matches!(assignee.kind, ExprKind::Var(_))
+                && let Some(def) = ctx.def_map.lookup_def(assignee.id)
+                && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
+            {
+                let bases = slice_bases_for_value(value, state, ctx);
+                update_slice_binding(state, def.id, bases);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn update_slice_binding(state: &mut SliceBindings, slice_def: DefId, bases: HashSet<DefId>) {
+    // No known bases means the slice no longer borrows anything we can track.
+    if bases.is_empty() {
+        state.remove(&slice_def);
+    } else {
+        state.insert(slice_def, bases);
+    }
+}
+
+/// Determine which bases a value expression borrows from.
+fn slice_bases_for_value(
+    expr: &Expr,
+    state: &SliceBindings,
+    ctx: &TypeCheckedContext,
+) -> HashSet<DefId> {
+    match &expr.kind {
+        ExprKind::Slice { target, .. } => slice_bases_for_slice_target(target, state, ctx),
+        // Copy of existing slice: inherit its borrowed bases.
+        ExprKind::Var(_) | ExprKind::Move { .. } => {
+            if let Some(slice_def) = slice_def_from_expr(expr, ctx) {
+                return state.get(&slice_def).cloned().unwrap_or_default();
+            }
+            HashSet::new()
+        }
+        ExprKind::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            // Merge bases across branches (flow-sensitive but conservative).
+            let mut bases = slice_bases_for_value(then_body, state, ctx);
+            bases.extend(slice_bases_for_value(else_body, state, ctx));
+            bases
+        }
+        ExprKind::Block { tail, .. } => {
+            // Only the tail expression contributes a value.
+            if let Some(tail) = tail {
+                return slice_bases_for_value(tail, state, ctx);
+            }
+            HashSet::new()
+        }
+        _ => HashSet::new(),
+    }
+}
+
+/// If target is itself a slice, inherit its bases; otherwise use the base variable.
+fn slice_bases_for_slice_target(
+    target: &Expr,
+    state: &SliceBindings,
+    ctx: &TypeCheckedContext,
+) -> HashSet<DefId> {
+    // Subslicing another slice: inherit the original's bases.
+    if let Some(slice_def) = slice_def_from_expr(target, ctx) {
+        return state.get(&slice_def).cloned().unwrap_or_default();
     }
 
-    /// Record a new local definition in the current scope.
-    fn record_def(&mut self, def: DefId) {
-        let scope_idx = self.borrowed_scopes.len().saturating_sub(1);
-        self.def_scopes.insert(def, scope_idx);
-        if let Some(defs) = self.defs_in_scope.last_mut() {
-            defs.push(def);
+    if let Some(base) = base_def_id(target, ctx) {
+        let mut bases = HashSet::new();
+        bases.insert(base);
+        return bases;
+    }
+
+    HashSet::new()
+}
+
+fn slice_def_from_expr(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
+    match &expr.kind {
+        ExprKind::Var(_) => {
+            let ty = ctx.type_map.lookup_node_type(expr.id)?;
+            if !matches!(ty, Type::Slice { .. }) {
+                return None;
+            }
+            let def = ctx.def_map.lookup_def(expr.id)?;
+            Some(def.id)
+        }
+        ExprKind::Move { expr } => slice_def_from_expr(expr, ctx),
+        _ => None,
+    }
+}
+
+// ============================================================================
+// Liveness for slice locals (used for last-use borrow release)
+// ============================================================================
+
+struct SliceLiveness {
+    live_out: Vec<HashSet<DefId>>,
+    live_after: Vec<Vec<HashSet<DefId>>>,
+}
+
+/// Backward dataflow: compute which slice locals are live at each point.
+fn analyze_slice_liveness(cfg: &AstCfg<'_>, ctx: &TypeCheckedContext) -> SliceLiveness {
+    let entry = HashSet::new();
+    let bottom = HashSet::new();
+
+    let analysis = solve_backward(
+        cfg,
+        entry,
+        bottom,
+        |states| {
+            let mut out = HashSet::new();
+            for state in states {
+                out.extend(state.iter().copied());
+            }
+            out
+        },
+        |block_id, out_state| compute_live_in(ctx, &cfg.nodes[block_id.0], out_state),
+    );
+
+    let live_out = analysis.out_map;
+    let live_after = cfg
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(idx, node)| compute_live_after(ctx, node, &live_out[idx]))
+        .collect();
+
+    SliceLiveness {
+        live_out,
+        live_after,
+    }
+}
+
+fn compute_live_in(
+    ctx: &TypeCheckedContext,
+    node: &AstCfgNode<'_>,
+    live_out: &HashSet<DefId>,
+) -> HashSet<DefId> {
+    let mut live = live_out.clone();
+    add_terminator_uses(&node.term, ctx, &mut live);
+    for item in node.items.iter().rev() {
+        apply_item_defs_uses(item, ctx, &mut live);
+    }
+    live
+}
+
+/// Compute live-after for each item in a block.
+fn compute_live_after(
+    ctx: &TypeCheckedContext,
+    node: &AstCfgNode<'_>,
+    live_out: &HashSet<DefId>,
+) -> Vec<HashSet<DefId>> {
+    let mut live = live_out.clone();
+    add_terminator_uses(&node.term, ctx, &mut live);
+    let mut live_after = vec![HashSet::new(); node.items.len()];
+    for (idx, item) in node.items.iter().enumerate().rev() {
+        live_after[idx] = live.clone();
+        apply_item_defs_uses(item, ctx, &mut live);
+    }
+    live_after
+}
+
+/// Liveness transfer: remove defs, add uses.
+fn apply_item_defs_uses(item: &AstItem<'_>, ctx: &TypeCheckedContext, live: &mut HashSet<DefId>) {
+    let mut defs = HashSet::new();
+    let mut uses = HashSet::new();
+    collect_item_defs_uses(item, ctx, &mut defs, &mut uses);
+
+    // Defs kill liveness; uses make it live.
+    for def in defs {
+        live.remove(&def);
+    }
+    live.extend(uses);
+}
+
+/// Add slice uses from the block terminator (if condition).
+fn add_terminator_uses(
+    term: &AstTerminator<'_>,
+    ctx: &TypeCheckedContext,
+    uses: &mut HashSet<DefId>,
+) {
+    if let AstTerminator::If { cond, .. } = term {
+        collect_expr_slice_uses(cond, ctx, uses);
+    }
+}
+
+/// Collect defs and uses of slice locals from an item.
+fn collect_item_defs_uses(
+    item: &AstItem<'_>,
+    ctx: &TypeCheckedContext,
+    defs: &mut HashSet<DefId>,
+    uses: &mut HashSet<DefId>,
+) {
+    match item {
+        AstItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
+        AstItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
+    }
+}
+
+/// Collect defs and uses of slice locals from a statement.
+fn collect_stmt_defs_uses(
+    stmt: &StmtExpr,
+    ctx: &TypeCheckedContext,
+    defs: &mut HashSet<DefId>,
+    uses: &mut HashSet<DefId>,
+) {
+    collect_stmt_slice_uses(stmt, ctx, uses);
+    match &stmt.kind {
+        StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
+            collect_pattern_defs(pattern, ctx, defs);
+        }
+        StmtExprKind::VarDecl { .. } => {}
+        StmtExprKind::Assign { assignee, .. } => {
+            collect_assignee_defs(assignee, ctx, defs);
+        }
+        StmtExprKind::While { .. } | StmtExprKind::For { .. } => {}
+    }
+}
+
+/// Collect slice-typed definitions from a pattern.
+fn collect_pattern_defs(pattern: &Pattern, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
+    match &pattern.kind {
+        PatternKind::Ident { .. } => add_def_if_slice(pattern.id, ctx, defs),
+        PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
+            for pattern in patterns {
+                collect_pattern_defs(pattern, ctx, defs);
+            }
+        }
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                collect_pattern_defs(&field.pattern, ctx, defs);
+            }
+        }
+    }
+}
+
+/// Collect slice-typed definitions from an assignment target.
+fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
+    if matches!(assignee.kind, ExprKind::Var(_)) {
+        add_def_if_slice(assignee.id, ctx, defs);
+    }
+}
+
+/// Add a DefId to the set if it has slice type.
+fn add_def_if_slice(
+    node_id: crate::ast::NodeId,
+    ctx: &TypeCheckedContext,
+    defs: &mut HashSet<DefId>,
+) {
+    let Some(def) = ctx.def_map.lookup_def(node_id) else {
+        return;
+    };
+    let Some(ty) = ctx.type_map.lookup_def_type(def) else {
+        return;
+    };
+    if matches!(ty, Type::Slice { .. }) {
+        defs.insert(def.id);
+    }
+}
+
+/// Collect slice local uses from an item.
+fn collect_item_slice_uses(
+    item: &AstItem<'_>,
+    ctx: &TypeCheckedContext,
+    uses: &mut HashSet<DefId>,
+) {
+    match item {
+        AstItem::Stmt(stmt) => collect_stmt_slice_uses(stmt, ctx, uses),
+        AstItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
+    }
+}
+
+/// Collect slice local uses from a statement.
+fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &TypeCheckedContext, uses: &mut HashSet<DefId>) {
+    match &stmt.kind {
+        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
+            collect_expr_slice_uses(value, ctx, uses);
+        }
+        StmtExprKind::VarDecl { .. } => {}
+        StmtExprKind::Assign { assignee, value } => {
+            collect_expr_slice_uses(value, ctx, uses);
+            collect_assignee_uses(assignee, ctx, uses);
+        }
+        StmtExprKind::While { cond, body } => {
+            collect_expr_slice_uses(cond, ctx, uses);
+            collect_expr_slice_uses(body, ctx, uses);
+        }
+        StmtExprKind::For { iter, body, .. } => {
+            collect_expr_slice_uses(iter, ctx, uses);
+            collect_expr_slice_uses(body, ctx, uses);
+        }
+    }
+}
+
+/// Collect slice uses from an assignment target (not the assigned-to var itself).
+fn collect_assignee_uses(assignee: &Expr, ctx: &TypeCheckedContext, uses: &mut HashSet<DefId>) {
+    match &assignee.kind {
+        // Assigning to a var doesn't use it.
+        ExprKind::Var(_) => {}
+        ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
+            collect_expr_slice_uses(target, ctx, uses);
+        }
+        ExprKind::ArrayIndex { target, indices } => {
+            collect_expr_slice_uses(target, ctx, uses);
+            for index in indices {
+                collect_expr_slice_uses(index, ctx, uses);
+            }
+        }
+        ExprKind::Slice { target, start, end } => {
+            collect_expr_slice_uses(target, ctx, uses);
+            if let Some(start) = start {
+                collect_expr_slice_uses(start, ctx, uses);
+            }
+            if let Some(end) = end {
+                collect_expr_slice_uses(end, ctx, uses);
+            }
+        }
+        _ => collect_expr_slice_uses(assignee, ctx, uses),
+    }
+}
+
+/// Walk an expression and collect all slice-typed variable uses.
+fn collect_expr_slice_uses(expr: &Expr, ctx: &TypeCheckedContext, uses: &mut HashSet<DefId>) {
+    let mut collector = SliceUseCollector { ctx, uses };
+    collector.visit_expr(expr);
+}
+
+/// Visitor that collects slice-typed variable uses.
+struct SliceUseCollector<'a> {
+    ctx: &'a TypeCheckedContext,
+    uses: &'a mut HashSet<DefId>,
+}
+
+impl Visitor for SliceUseCollector<'_> {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if let Some(def_id) = slice_use_def(expr, self.ctx) {
+            self.uses.insert(def_id);
+        }
+        walk_expr(self, expr);
+    }
+}
+
+/// If expr is a slice-typed variable use, return its DefId.
+fn slice_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
+    if !matches!(expr.kind, ExprKind::Var(_)) {
+        return None;
+    }
+    let ty = ctx.type_map.lookup_node_type(expr.id)?;
+    if !matches!(ty, Type::Slice { .. }) {
+        return None;
+    }
+    let def = ctx.def_map.lookup_def(expr.id)?;
+    Some(def.id)
+}
+
+// ============================================================================
+// Borrowed base conflict checks
+// ============================================================================
+
+/// Visitor that reports errors for moves or mutating calls on borrowed bases.
+struct BorrowConflictVisitor<'a> {
+    ctx: &'a TypeCheckedContext,
+    borrowed_bases: &'a HashSet<DefId>,
+    errors: &'a mut Vec<SemCheckError>,
+}
+
+impl<'a> BorrowConflictVisitor<'a> {
+    fn new(
+        ctx: &'a TypeCheckedContext,
+        borrowed_bases: &'a HashSet<DefId>,
+        errors: &'a mut Vec<SemCheckError>,
+    ) -> Self {
+        Self {
+            ctx,
+            borrowed_bases,
+            errors,
         }
     }
 
-    /// Get the scope index where a definition was introduced.
-    fn scope_for_def(&self, def: DefId) -> Option<usize> {
-        self.def_scopes.get(&def).copied()
-    }
-
-    /// Check if a def is currently borrowed (in any active scope).
-    fn is_borrowed(&self, def: DefId) -> bool {
-        self.borrowed_scopes.iter().any(|set| set.contains(&def))
-    }
-
-    /// Mark a def as borrowed in the given scope (borrow lasts until scope exits).
-    fn add_borrow(&mut self, def: DefId, scope_idx: usize) {
-        if let Some(scope) = self.borrowed_scopes.get_mut(scope_idx) {
-            scope.insert(def);
-        }
-    }
-
-    /// When a slice is bound to a local, mark the slice's base as borrowed.
-    /// The borrow scope = the slice holder's scope (so borrow ends when holder goes out of scope).
-    fn record_slice_binding_for_def(&mut self, holder_def: DefId, slice_expr: &Expr) {
-        let ExprKind::Slice { target, .. } = &slice_expr.kind else {
-            return;
-        };
-        let Some(base_def) = self.base_def_id(target) else {
-            return;
-        };
-        // Borrow lasts for the slice holder's scope.
-        let scope_idx = self.scope_for_def(holder_def).unwrap_or_else(|| {
-            self.borrowed_scopes.len().saturating_sub(1)
-        });
-        self.add_borrow(base_def, scope_idx);
-    }
-
-    /// Error if assigning to a borrowed base (mutation conflict).
-    fn check_write_target(&mut self, expr: &Expr) {
-        if let Some(def) = self.base_def_id(expr)
-            && self.is_borrowed(def)
-        {
-            self.errors
-                .push(SemCheckError::SliceBorrowConflict(expr.span));
-        }
-    }
-
-    /// Error if moving a borrowed base.
-    fn check_move_expr(&mut self, expr: &Expr) {
-        let ExprKind::Move { expr: inner } = &expr.kind else {
-            return;
-        };
-        if let Some(def) = self.base_def_id(inner)
-            && self.is_borrowed(def)
-        {
-            self.errors
-                .push(SemCheckError::SliceBorrowConflict(expr.span));
-        }
-    }
-
-    /// Error if passing a borrowed base to a mutating parameter (inout/out/sink).
+    /// Check call arguments: error if passing a borrowed base to inout/out/sink.
     fn check_call(&mut self, call: &Expr, args: &[Expr]) {
         let Some(sig) = lookup_call_sig(call, self.ctx) else {
             return;
         };
 
         for (param, arg) in sig.params.iter().zip(args) {
-            // Explicit move is checked separately by check_move_expr.
+            // Explicit moves are checked separately.
             if matches!(arg.kind, ExprKind::Move { .. }) {
                 continue;
             }
-            // Only mutating modes conflict with borrows.
+            // Only mutating modes conflict.
             if !matches!(
                 param.mode,
                 FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
             ) {
                 continue;
             }
-            if let Some(def) = self.base_def_id(arg)
-                && self.is_borrowed(def)
+            if let Some(def) = base_def_id(arg, self.ctx)
+                && self.borrowed_bases.contains(&def)
             {
                 self.errors
                     .push(SemCheckError::SliceBorrowConflict(arg.span));
             }
         }
     }
+}
 
-    /// Extract the base variable's DefId from an lvalue expression.
-    /// E.g., `base[0].field` -> DefId of `base`.
-    fn base_def_id(&self, expr: &Expr) -> Option<DefId> {
+impl Visitor for BorrowConflictVisitor<'_> {
+    fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Var(_) => self.ctx.def_map.lookup_def(expr.id).map(|def| def.id),
-            ExprKind::ArrayIndex { target, .. }
-            | ExprKind::TupleField { target, .. }
-            | ExprKind::StructField { target, .. }
-            | ExprKind::Slice { target, .. } => self.base_def_id(target),
-            ExprKind::Move { expr } => self.base_def_id(expr),
-            _ => None,
+            // Moving a borrowed base is a conflict.
+            ExprKind::Move { expr: inner } => {
+                if let Some(def) = base_def_id(inner, self.ctx)
+                    && self.borrowed_bases.contains(&def)
+                {
+                    self.errors
+                        .push(SemCheckError::SliceBorrowConflict(expr.span));
+                }
+            }
+            ExprKind::Call { args, .. } => {
+                self.check_call(expr, args);
+            }
+            _ => {}
         }
-    }
-
-    /// Record all definitions introduced by a pattern (for scope tracking).
-    fn record_pattern_defs(&mut self, pattern: &Pattern) {
-        match &pattern.kind {
-            PatternKind::Ident { .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_def(pattern.id) {
-                    self.record_def(def.id);
-                }
-            }
-            PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
-                for pattern in patterns {
-                    self.record_pattern_defs(pattern);
-                }
-            }
-            PatternKind::Struct { fields, .. } => {
-                for field in fields {
-                    self.record_pattern_defs(&field.pattern);
-                }
-            }
-        }
+        walk_expr(self, expr);
     }
 }
 
-impl Visitor for SliceBorrowChecker<'_> {
-    fn visit_func(&mut self, func: &Function) {
-        self.enter_scope();
-        // Record params so slice holders can be tracked.
-        for param in &func.sig.params {
-            if let Some(def) = self.ctx.def_map.lookup_def(param.id) {
-                self.record_def(def.id);
-            }
-        }
-        self.visit_expr(&func.body);
-        self.exit_scope();
-    }
+// ============================================================================
+// Utilities
+// ============================================================================
 
-    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
-        match &stmt.kind {
-            StmtExprKind::LetBind { pattern, value, .. }
-            | StmtExprKind::VarBind { pattern, value, .. } => {
-                self.record_pattern_defs(pattern);
-                // If binding a slice, record the borrow.
-                if matches!(value.kind, ExprKind::Slice { .. }) {
-                    if let Some(def) = self.ctx.def_map.lookup_def(pattern.id) {
-                        self.record_slice_binding_for_def(def.id, value);
-                    }
-                }
-            }
-            StmtExprKind::VarDecl { .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_def(stmt.id) {
-                    self.record_def(def.id);
-                }
-            }
-            StmtExprKind::Assign { assignee, value } => {
-                // Check mutation of borrowed base.
-                self.check_write_target(assignee);
-                // If assigning a slice, record the borrow.
-                if matches!(value.kind, ExprKind::Slice { .. }) {
-                    if let Some(holder_def) = self.base_def_id(assignee) {
-                        self.record_slice_binding_for_def(holder_def, value);
-                    }
-                }
-            }
-            StmtExprKind::While { .. } => {}
-            StmtExprKind::For { pattern, .. } => {
-                self.record_pattern_defs(pattern);
-            }
-        }
-
-        walk_stmt_expr(self, stmt);
-    }
-
-    fn visit_expr(&mut self, expr: &Expr) {
-        match &expr.kind {
-            // Blocks introduce a new scope.
-            ExprKind::Block { items, tail } => {
-                self.enter_scope();
-                for item in items {
-                    self.visit_block_item(item);
-                }
-                if let Some(tail) = tail {
-                    self.visit_expr(tail);
-                }
-                self.exit_scope();
-            }
-            ExprKind::Call { callee: _, args } => {
-                self.check_call(expr, args);
-                walk_expr(self, expr);
-            }
-            ExprKind::Move { .. } => {
-                self.check_move_expr(expr);
-                walk_expr(self, expr);
-            }
-            _ => walk_expr(self, expr),
-        }
+/// Extract the base variable's DefId from an lvalue expression.
+/// E.g., `arr[0].field` -> DefId of `arr`.
+fn base_def_id(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
+    match &expr.kind {
+        ExprKind::Var(_) => ctx.def_map.lookup_def(expr.id).map(|def| def.id),
+        ExprKind::ArrayIndex { target, .. }
+        | ExprKind::TupleField { target, .. }
+        | ExprKind::StructField { target, .. }
+        | ExprKind::Slice { target, .. } => base_def_id(target, ctx),
+        ExprKind::Move { expr } => base_def_id(expr, ctx),
+        _ => None,
     }
 }
