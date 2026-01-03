@@ -748,6 +748,34 @@ fn test_overlap_slices_rejected() {
 }
 
 #[test]
+fn test_overlap_borrow_and_sink_move_rejected() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn take(p: ^Point, sink q: ^Point) {
+        }
+
+        fn main() {
+            let p = ^Point { x: 1, y: 2 };
+            take(p, move p);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::OverlappingLvalueArgs(_))),
+            "Expected OverlappingLvalueArgs error"
+        );
+    }
+}
+
+#[test]
 fn test_slice_return_forbidden() {
     let source = r#"
         fn test() -> u64[] {

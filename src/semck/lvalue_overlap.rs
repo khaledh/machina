@@ -156,6 +156,8 @@ impl<'a> LvalueOverlapChecker<'a> {
                     .push(Projection::Slice(SliceRange { start, end }));
                 Some(path)
             }
+            // Treat move as an lvalue use for overlap detection.
+            ExprKind::Move { expr } => self.lvalue_path(expr),
             _ => None,
         }
     }
