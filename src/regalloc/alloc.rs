@@ -528,16 +528,14 @@ impl<'a> RegAlloc<'a> {
 
         self.add_return_moves();
 
+        self.resolve_parallel_moves();
+
         let mut used_callee_saved: Vec<PhysReg> = self.used_callee_saved.into_iter().collect();
         used_callee_saved.sort_by_key(|r| r.0);
 
         let callee_saved_size = used_callee_saved.len() * 8;
         let stack_alloc_size = self.stack_alloc.frame_size_bytes();
         let frame_size = callee_saved_size as u32 + stack_alloc_size;
-
-        // Ensure that moves are ordered correctly to avoid clobbering source registers.
-        self.moves
-            .resolve_parallel_moves(self.target.scratch_regs());
 
         AllocationResult {
             alloc_map: self.alloc_map.clone(),
@@ -546,5 +544,32 @@ impl<'a> RegAlloc<'a> {
             used_callee_saved,
             stack_slot_count: self.stack_alloc.total_slots(),
         }
+    }
+
+    fn resolve_parallel_moves(&mut self) {
+        // Sort scheduled moves so register-to-register shuffles don't clobber
+        // values that are still needed as implicit sources (e.g., PlaceValue).
+        let alloc_map = &self.alloc_map;
+        self.moves
+            .resolve_parallel_moves(self.target.scratch_regs(), |mov| {
+                // Place-based sources rely on the base local's register value.
+                let base_reg = |local: LocalId| match alloc_map.get(&local) {
+                    Some(MappedLocal::Reg(reg)) => Some(*reg),
+                    _ => None,
+                };
+
+                match &mov.from {
+                    Location::PlaceValue(place) => base_reg(place.base()).into_iter().collect(),
+                    Location::PlaceAddr(place) => {
+                        let base = match place {
+                            PlaceAny::Scalar(p) => p.base(),
+                            PlaceAny::Aggregate(p) => p.base(),
+                        };
+                        base_reg(base).into_iter().collect()
+                    }
+                    Location::Reg(reg) => vec![*reg],
+                    _ => Vec::new(),
+                }
+            });
     }
 }

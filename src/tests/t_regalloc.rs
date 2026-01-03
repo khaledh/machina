@@ -1,11 +1,15 @@
 use crate::liveness::LivenessAnalysis;
 use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, Local, LocalId, LocalKind, Operand, Place,
-    PlaceAny, Rvalue, Statement, Terminator, TyKind, TyTable,
+    PlaceAny, Projection, Rvalue, Statement, Terminator, TyId, TyKind, TyTable,
 };
 use crate::regalloc::MappedLocal;
 use crate::regalloc::alloc::RegAlloc;
 use crate::regalloc::constraints::{CallArgKind, analyze_constraints};
+use crate::regalloc::moves::{FnMoveList, Location};
+use crate::regalloc::pos::{InstPos, RelInstPos};
+use crate::regalloc::stack::StackSlotId;
+use crate::regalloc::target::PhysReg;
 use crate::regalloc::target::TargetSpec;
 use crate::resolve::def_map::DefId;
 use crate::targets::arm64::regs::Arm64Target;
@@ -263,6 +267,57 @@ fn test_call_constraints_scalar_and_aggregate_args() {
     assert_eq!(call.args[1].kind, CallArgKind::Addr);
     assert!(call.result.is_some());
     assert_eq!(call.result.as_ref().unwrap().reg, target.result_reg());
+}
+
+#[test]
+fn test_placevalue_move_orders_before_clobber() {
+    let mut moves = FnMoveList::new();
+    let pos = InstPos::new(BlockId(0), 0);
+    let place = Place::new(LocalId(0), TyId(0), vec![Projection::Deref]);
+
+    // Preserve x0, then clobber it with an arg move.
+    moves.add_inst_move(
+        RelInstPos::Before(pos),
+        Location::Reg(PhysReg(0)),
+        Location::Stack(StackSlotId(0)),
+    );
+    moves.add_inst_move(
+        RelInstPos::Before(pos),
+        Location::Stack(StackSlotId(1)),
+        Location::Reg(PhysReg(0)),
+    );
+    // PlaceValue depends on x0; it should be ordered before the clobber move.
+    moves.add_inst_move(
+        RelInstPos::Before(pos),
+        Location::PlaceValue(place),
+        Location::Reg(PhysReg(1)),
+    );
+
+    moves.resolve_parallel_moves(&[PhysReg(16)], |mov| match &mov.from {
+        Location::PlaceValue(_) => vec![PhysReg(0)],
+        _ => Vec::new(),
+    });
+
+    let list = moves.get_inst_moves(pos).expect("missing moves at inst");
+    let mut place_idx = None;
+    let mut clobber_idx = None;
+    for (idx, mov) in list.before_moves.iter().enumerate() {
+        if matches!(mov.from, Location::PlaceValue(_)) {
+            place_idx = Some(idx);
+        }
+        if matches!(mov.to, Location::Reg(reg) if reg == PhysReg(0)) {
+            clobber_idx = Some(idx);
+        }
+    }
+
+    assert!(
+        place_idx.is_some() && clobber_idx.is_some(),
+        "expected place value and clobber moves"
+    );
+    assert!(
+        place_idx.unwrap() < clobber_idx.unwrap(),
+        "place value move should occur before clobbering its base reg"
+    );
 }
 
 #[test]

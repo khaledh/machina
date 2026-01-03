@@ -96,34 +96,48 @@ impl FnMoveList {
         self.return_moves.get(&block_id)
     }
 
-    pub fn resolve_parallel_moves(&mut self, scratch_regs: &[PhysReg]) {
+    pub fn resolve_parallel_moves<F>(&mut self, scratch_regs: &[PhysReg], mut extra_src_regs: F)
+    where
+        F: FnMut(&Move) -> Vec<PhysReg>,
+    {
         if scratch_regs.is_empty() {
             return;
         }
         let scratch = scratch_regs[0];
         for inst_moves in self.inst_moves.values_mut() {
-            resolve_move_list(&mut inst_moves.before_moves, scratch);
-            resolve_move_list(&mut inst_moves.after_moves, scratch);
+            resolve_move_list(&mut inst_moves.before_moves, scratch, &mut extra_src_regs);
+            resolve_move_list(&mut inst_moves.after_moves, scratch, &mut extra_src_regs);
         }
     }
 }
 
-fn resolve_move_list(moves: &mut Vec<Move>, scratch: PhysReg) {
+fn resolve_move_list<F>(moves: &mut Vec<Move>, scratch: PhysReg, extra_src_regs: &mut F)
+where
+    F: FnMut(&Move) -> Vec<PhysReg>,
+{
     if moves.len() <= 1 {
         return;
     }
 
+    // Move resolution is a topological sort with cycle breaking:
+    // emit any move whose destination is not a source of any pending move,
+    // otherwise break a reg->reg cycle using a scratch register.
     let mut pending = std::mem::take(moves);
     let mut ordered = Vec::with_capacity(pending.len());
 
     while !pending.is_empty() {
+        // Gather all register sources that are currently needed.
         let mut src_regs = HashSet::new();
         for mov in &pending {
             if let Location::Reg(reg) = mov.from {
                 src_regs.insert(reg);
             }
+            for reg in extra_src_regs(mov) {
+                src_regs.insert(reg);
+            }
         }
 
+        // Find a move whose destination doesn't clobber any source reg.
         let mut ready_idx = None;
         for (idx, mov) in pending.iter().enumerate() {
             match &mov.to {
@@ -145,6 +159,7 @@ fn resolve_move_list(moves: &mut Vec<Move>, scratch: PhysReg) {
             continue;
         }
 
+        // Otherwise we have a cycle; break it with a scratch reg.
         let cycle_idx = pending
             .iter()
             .position(|mov| matches!((&mov.from, &mov.to), (Location::Reg(_), Location::Reg(_))))
@@ -153,10 +168,13 @@ fn resolve_move_list(moves: &mut Vec<Move>, scratch: PhysReg) {
         let Location::Reg(from_reg) = mov.from else {
             unreachable!("cycle candidate must be reg -> reg");
         };
+
+        // Save the source reg to scratch, then retry the original move.
         ordered.push(Move {
             from: Location::Reg(from_reg),
             to: Location::Reg(scratch),
         });
+
         mov.from = Location::Reg(scratch);
         pending.push(mov);
     }
