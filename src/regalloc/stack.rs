@@ -33,6 +33,7 @@ impl StackSlotId {
 ///
 pub struct StackAllocator {
     next_slot: u32,
+    free: Vec<FreeRange>,
 }
 
 impl Default for StackAllocator {
@@ -43,7 +44,10 @@ impl Default for StackAllocator {
 
 impl StackAllocator {
     pub fn new() -> Self {
-        Self { next_slot: 0 }
+        Self {
+            next_slot: 0,
+            free: Vec::new(),
+        }
     }
 
     pub fn alloc_slot(&mut self) -> StackSlotId {
@@ -51,9 +55,62 @@ impl StackAllocator {
     }
 
     pub fn alloc_slots(&mut self, count: u32) -> StackSlotId {
+        if let Some((idx, range)) = self
+            .free
+            .iter_mut()
+            .enumerate()
+            .find(|(_, range)| range.count >= count)
+        {
+            let end = range.start + range.count - 1;
+            if range.count == count {
+                self.free.remove(idx);
+            } else {
+                range.count -= count;
+            }
+            return StackSlotId(end);
+        }
+
         let start = self.next_slot + count - 1;
         self.next_slot += count;
         StackSlotId(start)
+    }
+
+    pub fn free_slots(&mut self, start_slot: StackSlotId, count: u32) {
+        let end = start_slot.0;
+        let start = end + 1 - count;
+        let mut new_start = start;
+        let mut new_end = end;
+
+        let mut insert_idx = 0;
+        while insert_idx < self.free.len() && self.free[insert_idx].start < new_start {
+            insert_idx += 1;
+        }
+
+        if insert_idx > 0 {
+            let prev = &self.free[insert_idx - 1];
+            let prev_end = prev.start + prev.count - 1;
+            if prev_end + 1 == new_start {
+                new_start = prev.start;
+                self.free.remove(insert_idx - 1);
+                insert_idx -= 1;
+            }
+        }
+
+        if insert_idx < self.free.len() {
+            let next = &self.free[insert_idx];
+            if new_end + 1 == next.start {
+                new_end = next.start + next.count - 1;
+                self.free.remove(insert_idx);
+            }
+        }
+
+        self.free.insert(
+            insert_idx,
+            FreeRange {
+                start: new_start,
+                count: new_end - new_start + 1,
+            },
+        );
     }
 
     #[inline]
@@ -65,4 +122,10 @@ impl StackAllocator {
     pub fn frame_size_bytes(&self) -> u32 {
         self.total_slots() * 8
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FreeRange {
+    start: u32,
+    count: u32,
 }

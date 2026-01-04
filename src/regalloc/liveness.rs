@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::liveness::{LiveMap, collect_operand_uses, stmt_defs, stmt_uses};
+use crate::liveness::{
+    AliasMap, LiveMap, build_alias_map, collect_operand_uses, stmt_defs, stmt_uses,
+};
 use crate::mcir::types::{FuncBody, LocalId, LocalKind, Terminator, TyKind};
 
 // -- Live intervals computation ---
@@ -17,11 +19,12 @@ pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveI
     let mut map = LiveIntervalMap::new();
     let mut block_last_inst_idx = vec![0u32; body.blocks.len()];
     let mut inst_idx: u32 = 0;
+    let alias_map: AliasMap = build_alias_map(body);
 
     for (i, block) in body.blocks.iter().enumerate() {
         for stmt in &block.stmts {
             let mut uses = HashSet::new();
-            stmt_uses(stmt, &mut uses);
+            stmt_uses(stmt, &mut uses, &alias_map);
             for u in uses {
                 map.entry(u)
                     .and_modify(|iv| iv.end = inst_idx + 1)
@@ -47,7 +50,7 @@ pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveI
 
         if let Terminator::If { cond, .. } = &block.terminator {
             let mut uses = HashSet::new();
-            collect_operand_uses(cond, &mut uses);
+            collect_operand_uses(cond, &mut uses, &alias_map);
             for u in uses {
                 map.entry(u)
                     .and_modify(|iv| iv.end = inst_idx + 1)

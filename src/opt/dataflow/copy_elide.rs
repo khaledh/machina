@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowResult, solve_forward};
 use crate::context::{LivenessContext, OptimizedMcirContext};
-use crate::liveness::{LiveMap, collect_operand_uses, stmt_defs, stmt_uses};
+use crate::liveness::{AliasMap, LiveMap, build_alias_map, collect_operand_uses, stmt_defs, stmt_uses};
 use crate::mcir::cfg::McirCfg;
 use crate::mcir::types::{
     BasicBlock, FuncBody, LocalId, Operand, Place, PlaceAny, Rvalue, Statement, Terminator,
@@ -40,7 +40,8 @@ fn elide_in_body(body: &mut FuncBody, live_map: &LiveMap) {
     let addr_taken = collect_addr_taken(body);
 
     // Per-statement live-after info drives last-use checks.
-    let live_after_by_block = compute_live_after_by_block(body, live_map);
+    let alias_map = build_alias_map(body);
+    let live_after_by_block = compute_live_after_by_block(body, live_map, &alias_map);
     // Compute rename availability across the CFG (must-available on all paths).
     let analysis = analyze_renames(body, &live_after_by_block, &addr_taken);
 
@@ -56,6 +57,7 @@ fn elide_in_body(body: &mut FuncBody, live_map: &LiveMap) {
             &analysis.in_map[block_idx],
             live_after,
             &addr_taken,
+            &alias_map,
             &mut used_locals,
         );
         rewritten_blocks.push(rewritten);
@@ -79,7 +81,11 @@ fn elide_in_body(body: &mut FuncBody, live_map: &LiveMap) {
     body.blocks = rewritten_blocks;
 }
 
-fn compute_live_after(block: &BasicBlock, live_out: &HashSet<LocalId>) -> Vec<HashSet<LocalId>> {
+fn compute_live_after(
+    block: &BasicBlock,
+    live_out: &HashSet<LocalId>,
+    alias_map: &AliasMap,
+) -> Vec<HashSet<LocalId>> {
     // Standard backward dataflow over a single block to compute live-after sets.
     let mut live = live_out.clone();
     let mut live_after = vec![HashSet::new(); block.stmts.len()];
@@ -91,7 +97,7 @@ fn compute_live_after(block: &BasicBlock, live_out: &HashSet<LocalId>) -> Vec<Ha
         stmt_defs(stmt, &mut defs);
 
         let mut uses = HashSet::new();
-        stmt_uses(stmt, &mut uses);
+        stmt_uses(stmt, &mut uses, alias_map);
 
         for def in defs {
             live.remove(&def);
@@ -102,11 +108,15 @@ fn compute_live_after(block: &BasicBlock, live_out: &HashSet<LocalId>) -> Vec<Ha
     live_after
 }
 
-fn compute_live_after_by_block(body: &FuncBody, live_map: &LiveMap) -> Vec<Vec<HashSet<LocalId>>> {
+fn compute_live_after_by_block(
+    body: &FuncBody,
+    live_map: &LiveMap,
+    alias_map: &AliasMap,
+) -> Vec<Vec<HashSet<LocalId>>> {
     body.blocks
         .iter()
         .enumerate()
-        .map(|(idx, block)| compute_live_after(block, &live_map[idx].live_out))
+        .map(|(idx, block)| compute_live_after(block, &live_map[idx].live_out, alias_map))
         .collect()
 }
 
@@ -284,6 +294,7 @@ fn rewrite_block(
     in_map: &RenameMap,
     live_after: &[HashSet<LocalId>],
     addr_taken: &HashSet<LocalId>,
+    alias_map: &AliasMap,
     used_locals: &mut HashSet<LocalId>,
 ) -> (BasicBlock, Vec<Option<LocalId>>) {
     let mut rename = in_map.clone();
@@ -316,13 +327,13 @@ fn rewrite_block(
         }
 
         // Track which locals are still referenced after rewriting.
-        stmt_uses(&stmt, used_locals);
+        stmt_uses(&stmt, used_locals, alias_map);
         new_stmts.push(stmt);
         elide_flags.push(elide_dst);
     }
 
     let terminator = rewrite_terminator(&block.terminator, &rename);
-    collect_terminator_uses(&terminator, used_locals);
+    collect_terminator_uses(&terminator, used_locals, alias_map);
 
     (
         BasicBlock {
@@ -477,10 +488,14 @@ fn place_base(place: &PlaceAny) -> LocalId {
     }
 }
 
-fn collect_terminator_uses(terminator: &Terminator, used: &mut HashSet<LocalId>) {
+fn collect_terminator_uses(
+    terminator: &Terminator,
+    used: &mut HashSet<LocalId>,
+    alias_map: &AliasMap,
+) {
     match terminator {
-        Terminator::If { cond, .. } => collect_operand_uses(cond, used),
-        Terminator::Switch { discr, .. } => collect_operand_uses(discr, used),
+        Terminator::If { cond, .. } => collect_operand_uses(cond, used, alias_map),
+        Terminator::Switch { discr, .. } => collect_operand_uses(discr, used, alias_map),
         Terminator::Return
         | Terminator::Goto(_)
         | Terminator::Unreachable

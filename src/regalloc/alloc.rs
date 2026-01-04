@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::liveness::LiveMap;
 use crate::mcir::layout::size_of_ty;
-use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, TyId, TyTable};
+use crate::mcir::types::{
+    BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Rvalue, Statement, TyId, TyTable,
+};
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::liveness::{LiveInterval, LiveIntervalMap, build_live_intervals};
 use crate::regalloc::moves::{FnMoveList, Location};
@@ -127,6 +129,7 @@ pub struct RegAlloc<'a> {
     moves: FnMoveList,
     used_callee_saved: HashSet<PhysReg>,
     ret_interval_start: Option<u32>,
+    addr_taken: HashSet<LocalId>,
 }
 
 impl<'a> RegAlloc<'a> {
@@ -149,6 +152,7 @@ impl<'a> RegAlloc<'a> {
             moves: FnMoveList::new(),
             used_callee_saved: HashSet::new(),
             ret_interval_start: None,
+            addr_taken: collect_addr_taken(body),
         }
     }
 
@@ -273,6 +277,8 @@ impl<'a> RegAlloc<'a> {
         if let Some(expired) = self.active_set.remove(&local) {
             free_regs.push_front(expired.reg);
         }
+
+        self.free_stack_slots(local);
     }
 
     fn loc_for_value(&self, local: LocalId) -> Location {
@@ -379,6 +385,24 @@ impl<'a> RegAlloc<'a> {
                 Location::Stack(stack_slot),
                 Location::Reg(reg),
             );
+            self.stack_alloc.free_slots(stack_slot, 1);
+        }
+    }
+
+    fn free_stack_slots(&mut self, local: LocalId) {
+        if self.addr_taken.contains(&local) {
+            return;
+        }
+        let ty = self.body.locals[local.index()].ty;
+        match self.alloc_map.get(&local) {
+            Some(MappedLocal::Stack(slot)) => {
+                self.stack_alloc.free_slots(*slot, 1);
+            }
+            Some(MappedLocal::StackAddr(slot)) => {
+                let count = slots_for_ty(&self.body.types, ty);
+                self.stack_alloc.free_slots(*slot, count);
+            }
+            _ => {}
         }
     }
 
@@ -572,4 +596,24 @@ impl<'a> RegAlloc<'a> {
                 }
             });
     }
+}
+
+fn collect_addr_taken(body: &FuncBody) -> HashSet<LocalId> {
+    let mut out = HashSet::new();
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            let Statement::CopyScalar { src, .. } = stmt else {
+                continue;
+            };
+            let Rvalue::AddrOf(place) = src else {
+                continue;
+            };
+            let base = match place {
+                PlaceAny::Scalar(p) => p.base(),
+                PlaceAny::Aggregate(p) => p.base(),
+            };
+            out.insert(base);
+        }
+    }
+    out
 }
