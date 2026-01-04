@@ -12,7 +12,7 @@ fn fill_b(out b: Boxed) {
 
 fn main() {
     var p: Pair;
-    fill_a(p.a);
-    fill_b(p.b);
+    fill_a(out p.a);
+    fill_b(out p.b);
     println(p.a.p.x + p.b.p.x);
 }

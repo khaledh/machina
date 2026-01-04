@@ -532,7 +532,24 @@ impl Expr {
                 name.fmt_with_indent(f, level + 1)?;
                 writeln!(f, "{}Args:", pad1)?;
                 for arg in args {
-                    arg.fmt_with_indent(f, level + 2)?;
+                    let pad2 = indent(level + 2);
+                    match arg.mode {
+                        CallArgMode::Default => {
+                            arg.expr.fmt_with_indent(f, level + 2)?;
+                        }
+                        CallArgMode::Inout => {
+                            writeln!(f, "{}InoutArg:", pad2)?;
+                            arg.expr.fmt_with_indent(f, level + 3)?;
+                        }
+                        CallArgMode::Out => {
+                            writeln!(f, "{}OutArg:", pad2)?;
+                            arg.expr.fmt_with_indent(f, level + 3)?;
+                        }
+                        CallArgMode::Move => {
+                            writeln!(f, "{}MoveArg:", pad2)?;
+                            arg.expr.fmt_with_indent(f, level + 3)?;
+                        }
+                    }
                 }
             }
             ExprKind::Match { scrutinee, arms } => {

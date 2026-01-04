@@ -864,7 +864,7 @@ impl TypeChecker {
         &mut self,
         call_expr: &Expr,
         callee: &Expr,
-        args: &[Expr],
+        args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
         let name = match &callee.kind {
             ExprKind::Var(name) => name,
@@ -919,8 +919,8 @@ impl TypeChecker {
         // Check argument types against the resolved overload, re-typing with expectations
         for (i, arg) in args.iter().enumerate() {
             let param_ty = &param_types[i];
-            let arg_ty = self.visit_expr(arg, Some(param_ty))?;
-            match self.check_assignable_to(arg, &arg_ty, param_ty) {
+            let arg_ty = self.visit_expr(&arg.expr, Some(param_ty))?;
+            match self.check_assignable_to(&arg.expr, &arg_ty, param_ty) {
                 Ok(()) => continue,
                 Err(_) => {
                     let span = arg.span;

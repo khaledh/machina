@@ -1,5 +1,5 @@
 use crate::ast::{
-    Expr, ExprKind, FunctionParamMode, MatchArm, MatchPattern, Pattern, PatternKind,
+    CallArgMode, Expr, ExprKind, FunctionParamMode, MatchArm, MatchPattern, Pattern, PatternKind,
     StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
@@ -416,29 +416,87 @@ impl Visitor for StructuralChecker<'_> {
                     ));
                 }
 
-                // Validate that any inout/out arguments are mutable lvalues.
+                // Validate call-site argument modes and lvalue requirements.
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     for (param, arg) in sig.params.iter().zip(args) {
-                        if !matches!(
-                            param.mode,
-                            FunctionParamMode::Inout | FunctionParamMode::Out
-                        ) {
-                            continue;
+                        let arg_mode = arg.mode;
+                        let arg_expr = &arg.expr;
+                        match param.mode {
+                            FunctionParamMode::In => match arg_mode {
+                                CallArgMode::Default => {}
+                                CallArgMode::Inout => {
+                                    self.errors
+                                        .push(SemCheckError::InoutArgUnexpected(arg.span));
+                                }
+                                CallArgMode::Out => {
+                                    self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                                }
+                                CallArgMode::Move => {
+                                    self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                                }
+                            },
+                            FunctionParamMode::Inout => match arg_mode {
+                                CallArgMode::Inout => {
+                                    let err = match self.is_mutable_lvalue(arg_expr) {
+                                        Some(true) => continue,
+                                        Some(false) => SemCheckError::InoutArgNotMutable(arg.span),
+                                        None => SemCheckError::InoutArgNotLvalue(arg.span),
+                                    };
+                                    self.errors.push(err);
+                                }
+                                CallArgMode::Default => {
+                                    self.errors
+                                        .push(SemCheckError::InoutArgMissingMode(arg.span));
+                                }
+                                CallArgMode::Out => {
+                                    self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                                }
+                                CallArgMode::Move => {
+                                    self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                                }
+                            },
+                            FunctionParamMode::Out => match arg_mode {
+                                CallArgMode::Out => {
+                                    let err = match self.is_mutable_lvalue(arg_expr) {
+                                        Some(true) => continue,
+                                        Some(false) => SemCheckError::OutArgNotMutable(arg.span),
+                                        None => SemCheckError::OutArgNotLvalue(arg.span),
+                                    };
+                                    self.errors.push(err);
+                                }
+                                CallArgMode::Default => {
+                                    self.errors.push(SemCheckError::OutArgMissingMode(arg.span));
+                                }
+                                CallArgMode::Inout => {
+                                    self.errors
+                                        .push(SemCheckError::InoutArgUnexpected(arg.span));
+                                }
+                                CallArgMode::Move => {
+                                    self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                                }
+                            },
+                            FunctionParamMode::Sink => match arg_mode {
+                                CallArgMode::Move => {}
+                                CallArgMode::Default => {
+                                    self.errors
+                                        .push(SemCheckError::SinkArgMissingMove(arg.span));
+                                }
+                                CallArgMode::Inout => {
+                                    self.errors
+                                        .push(SemCheckError::InoutArgUnexpected(arg.span));
+                                }
+                                CallArgMode::Out => {
+                                    self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                                }
+                            },
                         }
-                        let err = match self.is_mutable_lvalue(arg) {
-                            Some(true) => continue,
-                            Some(false) if param.mode == FunctionParamMode::Out => {
-                                SemCheckError::OutArgNotMutable(arg.span)
-                            }
-                            Some(false) => SemCheckError::InoutArgNotMutable(arg.span),
-                            None if param.mode == FunctionParamMode::Out => {
-                                SemCheckError::OutArgNotLvalue(arg.span)
-                            }
-                            None => SemCheckError::InoutArgNotLvalue(arg.span),
-                        };
-                        self.errors.push(err);
                     }
                 }
+                self.visit_expr(callee);
+                for arg in args {
+                    self.visit_expr(&arg.expr);
+                }
+                return;
             }
             _ => {}
         }

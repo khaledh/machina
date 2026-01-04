@@ -15,7 +15,7 @@ fn main() {
       p2: ^Point { x: 3, y: 4 },
     };
 
-    update(b.p1, b.p2);
+    update(inout b.p1, inout b.p2);
 
     println(f"b.p1 = {b.p1.x}, {b.p1.y}");
     println(f"b.p2 = {b.p2.x}, {b.p2.y}");

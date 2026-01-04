@@ -253,6 +253,31 @@ fn test_sink_param_owned_type_ok() {
 }
 
 #[test]
+fn test_sink_arg_missing_move() {
+    let source = r#"
+        fn consume(sink p: ^u64) -> u64 {
+            0
+        }
+
+        fn main() {
+            let p = ^1;
+            consume(p);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::SinkArgMissingMove(_) => {}
+            e => panic!("Expected SinkArgMissingMove error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_var_decl_use_before_init_rejected() {
     let source = r#"
         fn test() -> u64 {
@@ -491,7 +516,7 @@ fn test_inout_param_heap_allowed() {
 
         fn main() {
             var b = Box { p: ^Point { x: 1, y: 2 } };
-            take(b.p);
+            take(inout b.p);
         }
     "#;
 
@@ -527,7 +552,7 @@ fn test_inout_arg_not_lvalue() {
         }
 
         fn main() {
-            update(u64[1, 2, 3]);
+            update(inout u64[1, 2, 3]);
         }
     "#;
 
@@ -544,6 +569,31 @@ fn test_inout_arg_not_lvalue() {
 }
 
 #[test]
+fn test_inout_arg_missing_mode() {
+    let source = r#"
+        fn update(inout arr: u64[3]) {
+            arr[0] = 10;
+        }
+
+        fn main() {
+            var arr = u64[1, 2, 3];
+            update(arr);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::InoutArgMissingMode(_) => {}
+            e => panic!("Expected InoutArgMissingMode error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_out_arg_not_lvalue() {
     let source = r#"
         fn update(out arr: u64[3]) {
@@ -551,7 +601,7 @@ fn test_out_arg_not_lvalue() {
         }
 
         fn main() {
-            update(u64[1, 2, 3]);
+            update(out u64[1, 2, 3]);
         }
     "#;
 
@@ -568,6 +618,31 @@ fn test_out_arg_not_lvalue() {
 }
 
 #[test]
+fn test_out_arg_missing_mode() {
+    let source = r#"
+        fn update(out arr: u64[3]) {
+            arr[0] = 10;
+        }
+
+        fn main() {
+            var arr = u64[1, 2, 3];
+            update(arr);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::OutArgMissingMode(_) => {}
+            e => panic!("Expected OutArgMissingMode error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_inout_arg_not_mutable() {
     let source = r#"
         fn update(inout arr: u64[3]) {
@@ -576,7 +651,7 @@ fn test_inout_arg_not_mutable() {
 
         fn main() {
             let arr = u64[1, 2, 3];
-            update(arr);
+            update(inout arr);
         }
     "#;
 
@@ -601,7 +676,7 @@ fn test_out_arg_not_mutable() {
 
         fn main() {
             let arr = u64[1, 2, 3];
-            update(arr);
+            update(out arr);
         }
     "#;
 
@@ -626,7 +701,7 @@ fn test_out_arg_allows_uninit_var() {
 
         fn main() {
             var arr: u64[3];
-            fill(arr);
+            fill(out arr);
             arr[0];
         }
     "#;
@@ -649,8 +724,8 @@ fn test_out_arg_allows_partial_init_via_subfields() {
 
         fn main() -> u64 {
             var p: Pair;
-            fill_a(p.a);
-            fill_b(p.b);
+            fill_a(out p.a);
+            fill_b(out p.b);
             p.a[0] + p.b[0]
         }
     "#;
@@ -671,7 +746,7 @@ fn test_partial_init_local_without_full_init_rejected() {
 
         fn main() {
             var p: Pair;
-            fill_a(p.a);
+            fill_a(out p.a);
         }
     "#;
 
@@ -767,7 +842,7 @@ fn test_overlap_inout_same_base_rejected() {
 
         fn main() {
             var arr = u64[0, 0];
-            update(arr, arr);
+            update(inout arr, inout arr);
         }
     "#;
 
@@ -812,7 +887,7 @@ fn test_overlap_disjoint_bases_ok() {
         fn main() {
             var a = u64[1, 2];
             var b = u64[3, 4];
-            update(a, b);
+            update(inout a, inout b);
         }
     "#;
 
@@ -836,7 +911,7 @@ fn test_overlap_disjoint_fields_after_dynamic_index_ok() {
             ];
             let i = 0;
             let j = 1;
-            update(arr[i].x, arr[j].y);
+            update(inout arr[i].x, inout arr[j].y);
         }
     "#;
 
@@ -851,7 +926,7 @@ fn test_overlap_slices_rejected() {
 
         fn main() {
             var arr = [1, 2, 3, 4];
-            update(arr[0..3], arr[1..4]);
+            update(inout arr[0..3], inout arr[1..4]);
         }
     "#;
 

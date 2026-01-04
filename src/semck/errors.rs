@@ -60,6 +60,12 @@ pub enum SemCheckError {
     #[error("inout argument must be mutable")]
     InoutArgNotMutable(Span),
 
+    #[error("inout parameter requires `inout` argument")]
+    InoutArgMissingMode(Span),
+
+    #[error("inout argument provided for non-inout parameter")]
+    InoutArgUnexpected(Span),
+
     #[error("out requires an aggregate parameter type, found {0}")]
     OutParamNotAggregate(Type, Span),
 
@@ -69,8 +75,20 @@ pub enum SemCheckError {
     #[error("out argument must be mutable")]
     OutArgNotMutable(Span),
 
+    #[error("out parameter requires `out` argument")]
+    OutArgMissingMode(Span),
+
+    #[error("out argument provided for non-out parameter")]
+    OutArgUnexpected(Span),
+
     #[error("out parameter `{0}` is not initialized on all paths")]
     OutParamNotInitialized(String, Span),
+
+    #[error("sink parameter requires `move` argument")]
+    SinkArgMissingMove(Span),
+
+    #[error("move argument provided for non-sink parameter")]
+    MoveArgUnexpected(Span),
 
     #[error("Partially initialized local `{0}` must be fully initialized")]
     PartialInitNotAllowed(String, Span),
@@ -130,10 +148,16 @@ impl SemCheckError {
             SemCheckError::InoutParamNotAggregate(_, span) => *span,
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,
+            SemCheckError::InoutArgMissingMode(span) => *span,
+            SemCheckError::InoutArgUnexpected(span) => *span,
             SemCheckError::OutParamNotAggregate(_, span) => *span,
             SemCheckError::OutArgNotLvalue(span) => *span,
             SemCheckError::OutArgNotMutable(span) => *span,
+            SemCheckError::OutArgMissingMode(span) => *span,
+            SemCheckError::OutArgUnexpected(span) => *span,
             SemCheckError::OutParamNotInitialized(_, span) => *span,
+            SemCheckError::SinkArgMissingMove(span) => *span,
+            SemCheckError::MoveArgUnexpected(span) => *span,
             SemCheckError::PartialInitNotAllowed(_, span) => *span,
             SemCheckError::OverlappingLvalueArgs(span) => *span,
             SemCheckError::SinkParamNotOwned(_, span) => *span,

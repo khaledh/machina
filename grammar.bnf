@@ -119,7 +119,10 @@ UnaryExpr          ::= ( "-" | "!" | "~" | "^" ) UnaryExpr
 
 PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange | TupleField | StructField )*
 
-Call               ::= "(" ExprList? ")"
+Call               ::= "(" CallArgList? ")"
+CallArgList        ::= CallArg ("," CallArg)* ","?
+CallArg            ::= ( "inout" | "out" | "move" )? Expr
+
 ArrayIndex         ::= "[" ExprList "]"
 SliceRange         ::= "[" Expr? ".." Expr? "]"
 TupleField         ::= "." IntLit

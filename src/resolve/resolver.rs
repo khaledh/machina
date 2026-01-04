@@ -694,7 +694,7 @@ impl Visitor for SymbolResolver {
                     Some(symbol) if matches!(&symbol.kind, SymbolKind::Func { .. }) => {
                         self.def_map_builder.record_use(callee.id, symbol.def_id());
                         for arg in args {
-                            self.visit_expr(arg);
+                            self.visit_expr(&arg.expr);
                         }
                     }
                     _ => self

@@ -405,25 +405,26 @@ impl<'a> Visitor for MoveVisitor<'a> {
                 // Check args based on param mode: in/inout borrow, sink consumes.
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     for (param, arg) in sig.params.iter().zip(args) {
+                        let arg_expr = &arg.expr;
                         match param.mode {
                             FunctionParamMode::In | FunctionParamMode::Inout => {
                                 // Borrowed: no move required for heap args.
-                                self.with_borrow_context(|this| this.visit_expr(arg));
+                                self.with_borrow_context(|this| this.visit_expr(arg_expr));
                             }
                             FunctionParamMode::Out => {
                                 // Out args are write-only: allow reinit after move.
-                                self.visit_out_arg(arg);
+                                self.visit_out_arg(arg_expr);
                             }
                             FunctionParamMode::Sink => {
-                                // Owned: heap args need move (explicit or implicit).
-                                self.visit_expr(arg);
+                                // Owned: explicit move required at call-site.
+                                self.handle_move_target(arg_expr);
                             }
                         }
                     }
                 } else {
                     // Unknown signature: check all args normally.
                     for arg in args {
-                        self.visit_expr(arg);
+                        self.visit_expr(&arg.expr);
                     }
                 }
             }

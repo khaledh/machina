@@ -11,17 +11,17 @@ fn make_boxed_inner(out b: Boxed) {
 }
 
 fn make_boxed(out b: Boxed) {
-    make_boxed_inner(b);
+    make_boxed_inner(out b);
     b = Boxed { p: ^Point { x: 5, y: 6 } };
 }
 
 fn main() {
     var p: Pair;
-    make_pair(p);
+    make_pair(out p);
     let sum = p.x + p.y;
     println(f"sum = {sum}");
 
     var b: Boxed;
-    make_boxed(b);
+    make_boxed(out b);
     println(f"boxed: b.p.x = {b.p.x}, b.p.y = {b.p.y}");
 }

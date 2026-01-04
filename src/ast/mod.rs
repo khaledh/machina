@@ -250,6 +250,23 @@ pub enum FunctionParamMode {
     Sink,
 }
 
+// -- Call Args --
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallArgMode {
+    Default,
+    Inout,
+    Out,
+    Move,
+}
+
+#[derive(Clone, Debug)]
+pub struct CallArg {
+    pub mode: CallArgMode,
+    pub expr: Expr,
+    pub span: Span,
+}
+
 // -- Patterns ---
 
 #[derive(Clone, Debug)]
@@ -476,7 +493,7 @@ pub enum ExprKind {
     // Function call
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>,
+        args: Vec<CallArg>,
     },
 }
 

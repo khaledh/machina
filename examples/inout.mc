@@ -4,6 +4,6 @@ fn update(inout arr: u64[3]) {
 
 fn main() {
     var arr = u64[1, 2, 3];
-    update(arr);
+    update(inout arr);
     println(arr[0]);
 }

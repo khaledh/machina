@@ -379,7 +379,7 @@ fn test_lower_sink_call_skips_caller_drop() {
 
         fn main() -> u64 {
             let p = ^1;
-            consume(p);
+            consume(move p);
             0
         }
     "#;

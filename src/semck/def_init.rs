@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    Expr, ExprKind, Function, FunctionParamMode, MatchPattern, MatchPatternBinding, NodeId,
-    Pattern, PatternKind, StmtExpr, StmtExprKind, Visitor, walk_expr,
+    CallArgMode, Expr, ExprKind, Function, FunctionParamMode, MatchPattern, MatchPatternBinding,
+    NodeId, Pattern, PatternKind, StmtExpr, StmtExprKind, Visitor, walk_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
@@ -154,15 +154,14 @@ fn check_func(
         bottom,
         |states| intersect_states(states),
         |block_id, in_state| {
-            let mut checker =
-                DefInitChecker::new(
-                    ctx,
-                    in_state.clone(),
-                    &out_param_defs,
-                    errors,
-                    init_assigns,
-                    full_init_assigns,
-                );
+            let mut checker = DefInitChecker::new(
+                ctx,
+                in_state.clone(),
+                &out_param_defs,
+                errors,
+                init_assigns,
+                full_init_assigns,
+            );
             checker.visit_cfg_node(&cfg.nodes[block_id.0]);
             checker.initialized
         },
@@ -200,10 +199,7 @@ fn check_func(
         });
         if has_partial_on_any_exit && reported.insert(def_id) {
             let span = def_spans.get(&def_id).cloned().unwrap_or_default();
-            errors.push(SemCheckError::PartialInitNotAllowed(
-                def.name.clone(),
-                span,
-            ));
+            errors.push(SemCheckError::PartialInitNotAllowed(def.name.clone(), span));
         }
     }
 }
@@ -267,7 +263,10 @@ fn collect_def_spans(func: &Function, ctx: &TypeCheckedContext) -> HashMap<DefId
             spans.insert(def.id, param.span);
         }
     }
-    let mut collector = DefSpanCollector { ctx, spans: &mut spans };
+    let mut collector = DefSpanCollector {
+        ctx,
+        spans: &mut spans,
+    };
     collector.collect_expr(&func.body);
     spans
 }
@@ -990,13 +989,13 @@ impl<'a> DefInitChecker<'a> {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     let mut out_defs = Vec::new();
                     for (param, arg) in sig.params.iter().zip(args) {
-                        if param.mode == FunctionParamMode::Out {
+                        if param.mode == FunctionParamMode::Out && arg.mode == CallArgMode::Out {
                             // Out args are write-only and become initialized after the call.
-                            if let Some(def_id) = self.check_out_arg(arg) {
+                            if let Some(def_id) = self.check_out_arg(&arg.expr) {
                                 out_defs.push(def_id);
                             }
                         } else {
-                            self.check_expr(arg);
+                            self.check_expr(&arg.expr);
                         }
                     }
                     for def_id in out_defs {
@@ -1004,7 +1003,7 @@ impl<'a> DefInitChecker<'a> {
                     }
                 } else {
                     for arg in args {
-                        self.check_expr(arg);
+                        self.check_expr(&arg.expr);
                     }
                 }
             }

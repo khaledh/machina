@@ -5,14 +5,14 @@ fn sum_point(sink p: ^Point, q: ^Point) -> u64 {
 }
 
 fn forward_sum(sink p: ^Point, q: ^Point) -> u64 {
-    sum_point(p, q)
+    sum_point(move p, q)
 }
 
 fn main() {
     let p = ^Point { x: 1, y: 2 };
     let q = ^Point { x: 3, y: 4 };
 
-    let total = forward_sum(p, q);
+    let total = forward_sum(move p, q);
 
     println(f"total: {total}");
 

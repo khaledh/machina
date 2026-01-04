@@ -95,7 +95,7 @@ pub trait AstFolder {
     fn visit_call(
         &mut self,
         callee: &Expr,
-        args: &[Expr],
+        args: &[CallArg],
     ) -> Result<Vec<Self::Output>, Self::Error> {
         walk_call(self, callee, args)
     }
@@ -133,7 +133,7 @@ pub trait AstFolder {
 
     // --- Calls ---
 
-    fn visit_call_args(&mut self, args: &[Expr]) -> Result<Vec<Self::Output>, Self::Error> {
+    fn visit_call_args(&mut self, args: &[CallArg]) -> Result<Vec<Self::Output>, Self::Error> {
         walk_call_args(self, args)
     }
 }
@@ -225,11 +225,11 @@ pub fn walk_binary_expr<F: AstFolder + ?Sized>(
 pub fn walk_call<F: AstFolder + ?Sized>(
     f: &mut F,
     callee: &Expr,
-    args: &[Expr],
+    args: &[CallArg],
 ) -> Result<Vec<F::Output>, F::Error> {
     let mut outputs = Vec::with_capacity(args.len() + 1);
     outputs.push(walk_expr(f, callee)?);
-    outputs.extend(walk_exprs(f, args)?);
+    outputs.extend(walk_call_args(f, args)?);
     Ok(outputs)
 }
 
@@ -288,7 +288,7 @@ pub fn walk_match_arm<F: AstFolder + ?Sized>(
 /// Visit a call's arguments (callee handling is left to the caller).
 pub fn walk_call_args<F: AstFolder + ?Sized>(
     f: &mut F,
-    args: &[Expr],
+    args: &[CallArg],
 ) -> Result<Vec<F::Output>, F::Error> {
-    walk_exprs(f, args)
+    args.iter().map(|arg| walk_expr(f, &arg.expr)).collect()
 }

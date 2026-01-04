@@ -200,7 +200,7 @@ fn test_sink_call_implicit_move_ok() {
 
         fn test() -> u64 {
             let p = ^1;
-            consume(p);
+            consume(move p);
             0
         }
     "#;
@@ -218,7 +218,7 @@ fn test_sink_call_requires_move_on_reuse() {
 
         fn test() -> u64 {
             let p = ^1;
-            consume(p);
+            consume(move p);
             p;
             0
         }
@@ -227,8 +227,8 @@ fn test_sink_call_requires_move_on_reuse() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::OwnedMoveRequired(_)),
-        "Expected OwnedMoveRequired error, got {:?}",
+        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        "Expected UseAfterMove error, got {:?}",
         result.errors
     );
 }

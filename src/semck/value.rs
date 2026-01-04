@@ -262,7 +262,7 @@ impl Visitor for ValueChecker<'_> {
                 if let Some(param_tys) = param_tys {
                     for (arg, param_ty) in args.iter().zip(param_tys) {
                         if let Some(param_ty) = param_ty {
-                            self.check_range_binding_value(arg, &param_ty);
+                            self.check_range_binding_value(&arg.expr, &param_ty);
                         }
                     }
                 }

@@ -4,7 +4,7 @@
 //! when at least one argument is mutated (inout/out/sink mode).
 //! Read-only aliasing (`in` mode) is allowed.
 
-use crate::ast::{Expr, ExprKind, Function, FunctionParamMode, Visitor, walk_expr};
+use crate::ast::{CallArg, Expr, ExprKind, Function, FunctionParamMode, Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
@@ -77,7 +77,7 @@ impl<'a> LvalueOverlapChecker<'a> {
     }
 
     /// Check a function call for overlapping lvalue arguments.
-    fn check_call(&mut self, call: &Expr, args: &[Expr]) {
+    fn check_call(&mut self, call: &Expr, args: &[CallArg]) {
         let Some(sig) = lookup_call_sig(call, self.ctx) else {
             return;
         };
@@ -85,7 +85,7 @@ impl<'a> LvalueOverlapChecker<'a> {
         // Extract lvalue paths from arguments (non-lvalues like literals are ignored).
         let mut accesses = Vec::new();
         for (param, arg) in sig.params.iter().zip(args) {
-            if let Some(path) = self.lvalue_path(arg) {
+            if let Some(path) = self.lvalue_path(&arg.expr) {
                 accesses.push(ArgAccess {
                     mode: param.mode.clone(),
                     path,

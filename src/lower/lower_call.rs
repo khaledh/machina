@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, FunctionParamMode, FunctionSig};
+use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, FunctionParamMode, FunctionSig};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -12,7 +12,7 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         call: &Expr,
         callee: &Expr,
-        args: &[Expr],
+        args: &[CallArg],
     ) -> Result<ExprValue, LowerError> {
         let result_ty = self.ty_for_node(call.id)?;
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
@@ -51,7 +51,7 @@ impl<'a> FuncLowerer<'a> {
         dst: Option<PlaceAny>,
         call: &Expr,
         callee: &Expr,
-        args: &[Expr],
+        args: &[CallArg],
     ) -> Result<(), LowerError> {
         let callee = match self.ctx.type_map.lookup_call_def(call.id) {
             Some(def_id) => Callee::Def(def_id),
@@ -85,23 +85,27 @@ impl<'a> FuncLowerer<'a> {
         let arg_vals = if let Some(param_modes) = param_modes {
             let mut vals = Vec::with_capacity(args.len());
             for (mode, arg) in param_modes.iter().zip(args) {
+                let arg_expr = &arg.expr;
                 if *mode == FunctionParamMode::Out {
                     // Out args are write-only; skip drop only when the call is the first init.
-                    let place = self.lower_place(arg)?;
-                    let arg_ty = self.ty_for_node(arg.id)?;
-                    if !self.ctx.init_assigns.contains(&arg.id) {
-                        self.emit_overwrite_drop(arg, place.clone(), &arg_ty, true);
+                    let place = self.lower_place(arg_expr)?;
+                    let arg_ty = self.ty_for_node(arg_expr.id)?;
+                    if !self.ctx.init_assigns.contains(&arg_expr.id) {
+                        self.emit_overwrite_drop(arg_expr, place.clone(), &arg_ty, true);
                     }
-                    out_args.push(arg);
+                    out_args.push(arg_expr);
                     vals.push(place);
                 } else {
-                    vals.push(self.lower_call_arg_place(arg)?);
+                    vals.push(self.lower_call_arg_place(arg_expr)?);
+                }
+                if *mode == FunctionParamMode::Sink && arg.mode == CallArgMode::Move {
+                    self.record_move(arg_expr);
                 }
             }
             vals
         } else {
             args.iter()
-                .map(|a| self.lower_call_arg_place(a))
+                .map(|a| self.lower_call_arg_place(&a.expr))
                 .collect::<Result<Vec<_>, _>>()?
         };
 

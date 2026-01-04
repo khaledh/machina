@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfg, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    Expr, ExprKind, Function, FunctionParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
-    Visitor, walk_expr,
+    CallArg, Expr, ExprKind, Function, FunctionParamMode, Pattern, PatternKind, StmtExpr,
+    StmtExprKind, Visitor, walk_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefId;
@@ -595,16 +595,13 @@ impl<'a> BorrowConflictVisitor<'a> {
     }
 
     /// Check call arguments: error if passing a borrowed base to inout/out/sink.
-    fn check_call(&mut self, call: &Expr, args: &[Expr]) {
+    fn check_call(&mut self, call: &Expr, args: &[CallArg]) {
         let Some(sig) = lookup_call_sig(call, self.ctx) else {
             return;
         };
 
         for (param, arg) in sig.params.iter().zip(args) {
-            // Explicit moves are checked separately.
-            if matches!(arg.kind, ExprKind::Move { .. }) {
-                continue;
-            }
+            let arg_expr = &arg.expr;
             // Only mutating modes conflict.
             if !matches!(
                 param.mode,
@@ -612,7 +609,7 @@ impl<'a> BorrowConflictVisitor<'a> {
             ) {
                 continue;
             }
-            if let Some(def) = base_def_id(arg, self.ctx)
+            if let Some(def) = base_def_id(arg_expr, self.ctx)
                 && self.borrowed_bases.contains(&def)
             {
                 self.errors

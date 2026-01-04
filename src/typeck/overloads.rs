@@ -1,4 +1,4 @@
-use crate::ast::{Expr, FunctionParamMode};
+use crate::ast::{CallArg, FunctionParamMode};
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -39,14 +39,14 @@ impl ResolvedOverload<'_> {
 pub(super) struct FuncOverloadResolver<'a> {
     call_span: Span,
     name: &'a str,
-    args: &'a [Expr],
+    args: &'a [CallArg],
     arg_types: &'a [Type],
 }
 
 impl<'a> FuncOverloadResolver<'a> {
     pub(super) fn new(
         name: &'a str,
-        args: &'a [Expr],
+        args: &'a [CallArg],
         arg_types: &'a [Type],
         call_span: Span,
     ) -> Self {
@@ -127,7 +127,7 @@ impl<'a> FuncOverloadResolver<'a> {
             .zip(sig.params.iter())
         {
             // Use value-aware assignability for literal narrowing and range checks.
-            match value_assignable(arg, arg_ty, &param.ty) {
+            match value_assignable(&arg.expr, arg_ty, &param.ty) {
                 ValueAssignability::Assignable(assignability) => match assignability {
                     TypeAssignability::Exact => ranks.push(ArgOverloadRank::Exact),
                     TypeAssignability::Incompatible => return Ok(None),

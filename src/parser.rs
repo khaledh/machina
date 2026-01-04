@@ -1124,6 +1124,37 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
+    fn parse_call_arg(&mut self) -> Result<CallArg, ParseError> {
+        let marker = self.mark();
+        let mode = if let TK::Ident(name) = &self.curr_token.kind {
+            match name.as_str() {
+                "inout" => {
+                    self.advance();
+                    CallArgMode::Inout
+                }
+                "out" => {
+                    self.advance();
+                    CallArgMode::Out
+                }
+                "move" => {
+                    self.advance();
+                    CallArgMode::Move
+                }
+                _ => CallArgMode::Default,
+            }
+        } else {
+            CallArgMode::Default
+        };
+
+        let expr = self.parse_expr(0)?;
+
+        Ok(CallArg {
+            mode,
+            expr,
+            span: self.close(marker),
+        })
+    }
+
     fn parse_paren_or_tuple(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.advance();
@@ -1524,7 +1555,7 @@ impl<'a> Parser<'a> {
                     // Call expression
                     self.advance();
                     let args =
-                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;
+                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
                     self.consume(&TK::RParen)?;
                     expr = Expr {
                         id: self.id_gen.new_id(),
