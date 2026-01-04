@@ -257,7 +257,7 @@ impl<'a> FuncCodegen<'a> {
         let frame_size = self.alloc.frame_size;
         if frame_size > 0 {
             let padded_frame_size = frame_size + self.stack_padding;
-            asm.push_str(&format!("  sub sp, sp, #{padded_frame_size}\n"));
+            self.emit_sp_adjust(padded_frame_size, false, &mut asm);
         }
 
         // Save any callee-saved registers used by this function.
@@ -269,11 +269,21 @@ impl<'a> FuncCodegen<'a> {
                     offset -= 16;
                     let r0 = self.reg(pair[0]);
                     let r1 = self.reg(pair[1]);
-                    asm.push_str(&format!("  stp {}, {}, [sp, #{}]\n", r0, r1, offset));
+                    if Self::stp_offset_fits(offset) {
+                        asm.push_str(&format!("  stp {}, {}, [sp, #{}]\n", r0, r1, offset));
+                    } else {
+                        self.emit_sp_offset_addr(offset as u32, &mut asm);
+                        asm.push_str(&format!("  stp {}, {}, [x17]\n", r0, r1));
+                    }
                 } else {
                     offset -= 8;
                     let r0 = self.reg(pair[0]);
-                    asm.push_str(&format!("  str {}, [sp, #{}]\n", r0, offset));
+                    if self.can_use_imm_offset_size(8, offset as usize) {
+                        asm.push_str(&format!("  str {}, [sp, #{}]\n", r0, offset));
+                    } else {
+                        self.emit_sp_offset_addr(offset as u32, &mut asm);
+                        asm.push_str(&format!("  str {}, [x17]\n", r0));
+                    }
                 }
             }
         }
@@ -293,11 +303,21 @@ impl<'a> FuncCodegen<'a> {
                     offset -= 16;
                     let r0 = self.reg(pair[0]);
                     let r1 = self.reg(pair[1]);
-                    asm.push_str(&format!("  ldp {}, {}, [sp, #{}]\n", r0, r1, offset));
+                    if Self::stp_offset_fits(offset) {
+                        asm.push_str(&format!("  ldp {}, {}, [sp, #{}]\n", r0, r1, offset));
+                    } else {
+                        self.emit_sp_offset_addr(offset as u32, &mut asm);
+                        asm.push_str(&format!("  ldp {}, {}, [x17]\n", r0, r1));
+                    }
                 } else {
                     offset -= 8;
                     let r0 = self.reg(pair[0]);
-                    asm.push_str(&format!("  ldr {}, [sp, #{}]\n", r0, offset));
+                    if self.can_use_imm_offset_size(8, offset as usize) {
+                        asm.push_str(&format!("  ldr {}, [sp, #{}]\n", r0, offset));
+                    } else {
+                        self.emit_sp_offset_addr(offset as u32, &mut asm);
+                        asm.push_str(&format!("  ldr {}, [x17]\n", r0));
+                    }
                 }
             }
         }
@@ -305,7 +325,7 @@ impl<'a> FuncCodegen<'a> {
         // Pop the stack frame.
         if self.alloc.frame_size > 0 {
             let padded_frame_size = self.alloc.frame_size + self.stack_padding;
-            asm.push_str(&format!("  add sp, sp, #{padded_frame_size}\n"));
+            self.emit_sp_adjust(padded_frame_size, true, &mut asm);
         }
 
         // Restore frame pointer and link register.
@@ -944,12 +964,17 @@ impl<'a> FuncCodegen<'a> {
             }
             Some(MappedLocal::StackAddr(slot)) => {
                 let offset = self.get_stack_offset(slot)?;
-                asm.push_str(&format!("  add x17, sp, #{offset}\n"));
+                self.emit_sp_offset_addr(offset, asm);
                 Ok(true)
             }
             Some(MappedLocal::Stack(slot)) => {
                 let offset = self.get_stack_offset(slot)?;
-                asm.push_str(&format!("  ldr x17, [sp, #{offset}]\n"));
+                if self.can_use_imm_offset_size(8, offset as usize) {
+                    asm.push_str(&format!("  ldr x17, [sp, #{offset}]\n"));
+                } else {
+                    self.emit_add_sp_to_reg(R::X16, offset, asm);
+                    asm.push_str("  ldr x17, [x16]\n");
+                }
                 Ok(false)
             }
             None => Err(CodegenError::LocalNotFound(base.0)),
@@ -961,13 +986,52 @@ impl<'a> FuncCodegen<'a> {
             return Ok(());
         }
         // Prefer immediate offsets when possible.
-        if Self::int_fits_add_sub_imm(offset) {
+        if offset >= 0 && offset <= 4095 {
             asm.push_str(&format!("  add x17, x17, #{offset}\n"));
         } else {
-            asm.push_str(&format!("  mov x16, #{offset}\n"));
+            self.emit_mov_imm_str("x16", offset, asm);
             asm.push_str("  add x17, x17, x16\n");
         }
         Ok(())
+    }
+
+    fn emit_sp_adjust(&mut self, amount: u32, add: bool, asm: &mut String) {
+        if amount == 0 {
+            return;
+        }
+        if amount <= 4095 {
+            let op = if add { "add" } else { "sub" };
+            asm.push_str(&format!("  {op} sp, sp, #{amount}\n"));
+            return;
+        }
+        self.emit_mov_imm_str("x16", amount as i64, asm);
+        let op = if add { "add" } else { "sub" };
+        asm.push_str(&format!("  {op} sp, sp, x16\n"));
+    }
+
+    fn emit_add_sp_to_reg(&mut self, dst: R, offset: u32, asm: &mut String) {
+        if offset == 0 {
+            asm.push_str(&format!("  mov {dst}, sp\n"));
+            return;
+        }
+        if offset <= 4095 {
+            asm.push_str(&format!("  add {dst}, sp, #{offset}\n"));
+            return;
+        }
+        self.emit_mov_imm_str(&dst.to_string(), offset as i64, asm);
+        asm.push_str(&format!("  add {dst}, sp, {dst}\n"));
+    }
+
+    fn emit_sp_offset_addr(&mut self, offset: u32, asm: &mut String) {
+        self.emit_sp_offset_addr_reg(R::X17, offset, asm);
+    }
+
+    fn emit_sp_offset_addr_reg(&mut self, dst: R, offset: u32, asm: &mut String) {
+        self.emit_add_sp_to_reg(dst, offset, asm);
+    }
+
+    fn stp_offset_fits(offset: i32) -> bool {
+        offset % 8 == 0 && (-512..=504).contains(&offset)
     }
 
     fn load_stack(
@@ -992,7 +1056,7 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<(), CodegenError> {
         // StackAddr holds an address; load through it.
         let offset = self.get_stack_offset(&slot)?;
-        asm.push_str(&format!("  add x17, sp, #{offset}\n"));
+        self.emit_sp_offset_addr(offset, asm);
         self.emit_load_at_addr_reg(R::X17, ty, dest_reg, asm)?;
         Ok(())
     }
@@ -1018,8 +1082,9 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<(), CodegenError> {
         // StackAddr holds an address; store through it.
         let offset = self.get_stack_offset(&slot)?;
-        asm.push_str(&format!("  add x17, sp, #{offset}\n"));
-        self.emit_store_at_addr_reg(R::X17, ty, src_reg, asm)
+        let addr_reg = if src_reg == R::X17 { R::X16 } else { R::X17 };
+        self.emit_sp_offset_addr_reg(addr_reg, offset, asm);
+        self.emit_store_at_addr_reg(addr_reg, ty, src_reg, asm)
     }
 
     fn load_at_addr(
@@ -1061,6 +1126,10 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<(), CodegenError> {
         // Load a scalar from [sp + offset] based on size.
         let size = size_of_ty(&self.body.types, ty);
+        if !self.can_use_imm_offset(ty, offset as usize) {
+            self.emit_sp_offset_addr(offset, asm);
+            return self.emit_load_at_addr_reg(R::X17, ty, dest_reg, asm);
+        }
         match size {
             1 => asm.push_str(&format!(
                 "  ldrb {}, [sp, #{}]\n",
@@ -1092,6 +1161,11 @@ impl<'a> FuncCodegen<'a> {
     ) -> Result<(), CodegenError> {
         // Store a scalar to [sp + offset] based on size.
         let size = size_of_ty(&self.body.types, ty);
+        if !self.can_use_imm_offset(ty, offset as usize) {
+            let addr_reg = if src_reg == R::X17 { R::X16 } else { R::X17 };
+            self.emit_sp_offset_addr_reg(addr_reg, offset, asm);
+            return self.emit_store_at_addr_reg(addr_reg, ty, src_reg, asm);
+        }
         match size {
             1 => asm.push_str(&format!(
                 "  strb {}, [sp, #{}]\n",
@@ -1224,6 +1298,10 @@ impl<'a> FuncCodegen<'a> {
     fn can_use_imm_offset(&self, ty: TyId, offset: usize) -> bool {
         // AArch64 scaled offsets are in units of the access size.
         let size = size_of_ty(&self.body.types, ty);
+        self.can_use_imm_offset_size(size, offset)
+    }
+
+    fn can_use_imm_offset_size(&self, size: usize, offset: usize) -> bool {
         if size == 0 || !offset.is_multiple_of(size) {
             return false;
         }
@@ -1250,18 +1328,30 @@ impl<'a> FuncCodegen<'a> {
                 let _ = self.load_place_value(place, &mut asm, to_reg)?;
                 return Ok(asm);
             }
-            (Location::Reg(from_reg), Location::Stack(to_slot)) => format!(
-                "  str {}, [sp, #{}]\n",
-                self.reg(*from_reg),
-                self.get_stack_offset(to_slot)?
-            ),
+            (Location::Reg(from_reg), Location::Stack(to_slot)) => {
+                let offset = self.get_stack_offset(to_slot)?;
+                if self.can_use_imm_offset_size(8, offset as usize) {
+                    format!("  str {}, [sp, #{}]\n", self.reg(*from_reg), offset)
+                } else {
+                    let addr_reg = if self.reg(*from_reg) == R::X17 {
+                        R::X16
+                    } else {
+                        R::X17
+                    };
+                    self.emit_sp_offset_addr_reg(addr_reg, offset, &mut asm);
+                    format!("  str {}, [{}]\n", self.reg(*from_reg), addr_reg)
+                }
+            }
             (Location::Imm(value), Location::Stack(to_slot)) => {
                 let scratch =
                     self.operand_for_int_with_policy(*value, ImmPolicy::RegOnly, &mut asm, 0);
-                format!(
-                    "  str {scratch}, [sp, #{}]\n",
-                    self.get_stack_offset(to_slot)?
-                )
+                let offset = self.get_stack_offset(to_slot)?;
+                if self.can_use_imm_offset_size(8, offset as usize) {
+                    format!("  str {scratch}, [sp, #{}]\n", offset)
+                } else {
+                    self.emit_sp_offset_addr(offset, &mut asm);
+                    format!("  str {scratch}, [x17]\n")
+                }
             }
             (src, Location::Reg(to_reg)) => match src {
                 Location::Imm(value) => {
@@ -1272,16 +1362,20 @@ impl<'a> FuncCodegen<'a> {
                     let to_reg = self.reg(*to_reg);
                     format!("  mov {to_reg}, {}\n", self.reg(*from_reg))
                 }
-                Location::Stack(from_slot) => format!(
-                    "  ldr {}, [sp, #{}]\n",
-                    self.reg(*to_reg),
-                    self.get_stack_offset(from_slot)?
-                ),
-                Location::StackAddr(from_slot) => format!(
-                    "  add {}, sp, #{}\n",
-                    self.reg(*to_reg),
-                    self.get_stack_offset(from_slot)?
-                ),
+                Location::Stack(from_slot) => {
+                    let offset = self.get_stack_offset(from_slot)?;
+                    if self.can_use_imm_offset_size(8, offset as usize) {
+                        format!("  ldr {}, [sp, #{}]\n", self.reg(*to_reg), offset)
+                    } else {
+                        self.emit_sp_offset_addr(offset, &mut asm);
+                        format!("  ldr {}, [x17]\n", self.reg(*to_reg))
+                    }
+                }
+                Location::StackAddr(from_slot) => {
+                    let offset = self.get_stack_offset(from_slot)?;
+                    self.emit_add_sp_to_reg(self.reg(*to_reg), offset, &mut asm);
+                    String::new()
+                }
                 Location::PlaceAddr(_) | Location::PlaceValue(_) => {
                     return Err(CodegenError::UnsupportedMove(
                         mov.from.clone(),
