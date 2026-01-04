@@ -89,6 +89,7 @@ impl ParseError {
 #[derive(Clone, Debug)]
 struct Marker {
     pos: Position,
+    token_index: usize,
 }
 
 pub struct Parser<'a> {
@@ -560,7 +561,12 @@ impl<'a> Parser<'a> {
                         }
                         TK::Semicolon => {
                             // Expression with trailing semicolon
+                            let semi_span = self.curr_token.span;
                             self.advance();
+                            let expr = Expr {
+                                span: Span::new(expr.span.start, semi_span.end),
+                                ..expr
+                            };
                             items.push(BlockItem::Expr(expr));
                         }
                         _ => {
@@ -1983,11 +1989,17 @@ impl<'a> Parser<'a> {
     fn mark(&self) -> Marker {
         Marker {
             pos: self.curr_token.span.start,
+            token_index: self.pos,
         }
     }
 
     fn close(&self, marker: Marker) -> Span {
-        Span::new(marker.pos, self.curr_token.span.end)
+        let end = if self.pos == marker.token_index {
+            self.curr_token.span.end
+        } else {
+            self.tokens[self.pos - 1].span.end
+        };
+        Span::new(marker.pos, end)
     }
 
     fn consume(&mut self, expected: &TokenKind) -> Result<(), ParseError> {

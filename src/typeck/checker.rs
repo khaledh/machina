@@ -243,14 +243,19 @@ impl TypeChecker {
             }
         };
 
-        let ret_expr = match &function.body.kind {
-            ExprKind::Block {
-                tail: Some(tail), ..
-            } => tail.as_ref(),
-            _ => &function.body,
-        };
-        if let Err(e) = self.check_assignable_to(ret_expr, &body_ty, &return_type) {
-            self.errors.push(e);
+        let return_span = self.function_return_span(&function.body);
+        if matches!(
+            type_assignable(&body_ty, &return_type),
+            TypeAssignability::Incompatible
+        ) {
+            self.errors.push(
+                TypeCheckErrorKind::DeclTypeMismatch(
+                    return_type.clone(),
+                    body_ty.clone(),
+                    return_span,
+                )
+                .into(),
+            );
             return Err(self.errors.clone());
         }
 
@@ -261,6 +266,24 @@ impl TypeChecker {
             Ok(body_ty)
         } else {
             Err(self.errors.clone())
+        }
+    }
+
+    fn function_return_span(&self, body: &Expr) -> Span {
+        match &body.kind {
+            ExprKind::Block { items, tail } => {
+                if let Some(tail) = tail {
+                    return tail.span;
+                }
+                if let Some(last) = items.last() {
+                    return match last {
+                        BlockItem::Stmt(stmt) => stmt.span,
+                        BlockItem::Expr(expr) => expr.span,
+                    };
+                }
+                body.span
+            }
+            _ => body.span,
         }
     }
 
