@@ -186,6 +186,10 @@ impl DefMap {
             .map(|def_id| &self.defs[def_id.0 as usize])
     }
 
+    pub fn lookup_def_by_id(&self, def_id: DefId) -> Option<&Def> {
+        self.defs.get(def_id.0 as usize)
+    }
+
     pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
         if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id)
             && let DefKind::LocalVar { nrvo_eligible, .. } = &mut def.kind

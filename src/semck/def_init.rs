@@ -2,7 +2,7 @@
 //!
 //! This pass rejects use-before-init for `var x: T;` declarations. It is a
 //! forward dataflow analysis over the AST CFG:
-//! - State: set of definitely-initialized defs.
+//! - State: fully-initialized defs + initialized projection paths.
 //! - Meet: intersection (must be initialized on all paths).
 //! - Transfer: update the set as statements initialize variables.
 
@@ -19,10 +19,83 @@ use crate::diag::Span;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::util::lookup_call_sig;
+use crate::types::Type;
 
 pub(super) struct DefInitResult {
     pub errors: Vec<SemCheckError>,
     pub init_assigns: HashSet<NodeId>,
+}
+
+/// Tracks which definitions are initialized: either fully (the whole variable)
+/// or partially (specific sub-paths like `x.a` or `arr[0]`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InitState {
+    full: HashSet<DefId>,
+    partial: HashSet<InitPath>,
+}
+
+impl InitState {
+    fn new(full: HashSet<DefId>) -> Self {
+        Self {
+            full,
+            partial: HashSet::new(),
+        }
+    }
+
+    fn is_full(&self, def_id: DefId) -> bool {
+        self.full.contains(&def_id)
+    }
+
+    fn mark_full(&mut self, def_id: DefId) {
+        self.full.insert(def_id);
+        self.partial.retain(|path| path.base != def_id);
+    }
+
+    fn clear_def(&mut self, def_id: DefId) {
+        self.full.remove(&def_id);
+        self.partial.retain(|path| path.base != def_id);
+    }
+
+    fn add_partial(&mut self, path: InitPath) {
+        if self.is_full(path.base) {
+            return;
+        }
+        self.partial.insert(path);
+    }
+
+    /// A path is initialized if: (1) the base is fully init, (2) the exact path
+    /// is in partial, or (3) any prefix is in partial (e.g., `x.a` covers `x.a.b`).
+    fn is_path_initialized(&self, path: &InitPath) -> bool {
+        if self.is_full(path.base) {
+            return true;
+        }
+        if self.partial.contains(path) {
+            return true;
+        }
+        for prefix_len in 1..path.projections.len() {
+            let prefix = InitPath {
+                base: path.base,
+                projections: path.projections[..prefix_len].to_vec(),
+            };
+            if self.partial.contains(&prefix) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct InitPath {
+    base: DefId,
+    projections: Vec<InitProj>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum InitProj {
+    Field(String),
+    TupleField(usize),
+    Index(u64),
 }
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
@@ -46,21 +119,23 @@ fn check_func(
     let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
 
     // Params are initialized at entry, except `out` params which start uninitialized.
-    let entry_state = collect_param_defs(func, ctx, false);
+    let entry_state = InitState::new(collect_param_defs(func, ctx, false));
     let out_params = collect_out_param_defs(func, ctx);
+    let out_param_defs: HashSet<_> = out_params.iter().map(|(def_id, _, _)| *def_id).collect();
 
     // Bottom = "all defs" so unreachable blocks don't produce spurious errors.
     // (Intersection with "all" is identity, so unreachable blocks inherit from reachable ones.)
-    let bottom = collect_all_defs(func, ctx);
+    let bottom = InitState::new(collect_all_defs(func, ctx));
 
     let result = solve_forward(
         &cfg,
         AstBlockId(0),
         entry_state,
         bottom,
-        |states| intersect_sets(states),
+        |states| intersect_states(states),
         |block_id, in_state| {
-            let mut checker = DefInitChecker::new(ctx, in_state.clone(), errors, init_assigns);
+            let mut checker =
+                DefInitChecker::new(ctx, in_state.clone(), &out_param_defs, errors, init_assigns);
             checker.visit_cfg_node(&cfg.nodes[block_id.0]);
             checker.initialized
         },
@@ -74,7 +149,7 @@ fn check_func(
     for (def_id, name, span) in out_params {
         let initialized_on_all_exits = exit_blocks
             .iter()
-            .all(|block| result.out_map[block.0].contains(&def_id));
+            .all(|block| result.out_map[block.0].is_full(def_id));
         if !initialized_on_all_exits {
             errors.push(SemCheckError::OutParamNotInitialized(name, span));
         }
@@ -121,17 +196,36 @@ fn collect_all_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId>
     defs
 }
 
-/// Meet operation: a def is initialized only if initialized on ALL incoming paths.
-fn intersect_sets(states: &[HashSet<DefId>]) -> HashSet<DefId> {
+/// Meet operation: a def (or sub-path) is initialized only if initialized on ALL paths.
+fn intersect_states(states: &[InitState]) -> InitState {
     let mut iter = states.iter();
     let Some(first) = iter.next() else {
-        return HashSet::new();
+        return InitState::new(HashSet::new());
     };
-    let mut out = first.clone();
-    for s in iter {
-        out.retain(|d| s.contains(d));
+
+    let mut full = first.full.clone();
+    for state in iter {
+        full.retain(|def| state.full.contains(def));
     }
-    out
+
+    // Collect all partial paths from any state, then keep only those initialized
+    // on ALL paths (may be via full init of base, exact partial, or a prefix).
+    let mut partial_candidates = HashSet::new();
+    for state in states {
+        partial_candidates.extend(state.partial.iter().cloned());
+    }
+
+    let mut partial = HashSet::new();
+    for path in partial_candidates {
+        if full.contains(&path.base) {
+            continue;
+        }
+        if states.iter().all(|state| state.is_path_initialized(&path)) {
+            partial.insert(path);
+        }
+    }
+
+    InitState { full, partial }
 }
 
 /// Collects all local definitions in a function (params, let/var bindings, match bindings).
@@ -255,7 +349,8 @@ impl<'a> Visitor for DefCollector<'a> {
 /// updating the initialized set as assignments occur.
 struct DefInitChecker<'a> {
     ctx: &'a TypeCheckedContext,
-    initialized: HashSet<DefId>,
+    initialized: InitState,
+    out_param_defs: &'a HashSet<DefId>,
     errors: &'a mut Vec<SemCheckError>,
     init_assigns: &'a mut HashSet<NodeId>,
 }
@@ -263,13 +358,15 @@ struct DefInitChecker<'a> {
 impl<'a> DefInitChecker<'a> {
     fn new(
         ctx: &'a TypeCheckedContext,
-        initialized: HashSet<DefId>,
+        initialized: InitState,
+        out_param_defs: &'a HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
         init_assigns: &'a mut HashSet<NodeId>,
     ) -> Self {
         Self {
             ctx,
             initialized,
+            out_param_defs,
             errors,
             init_assigns,
         }
@@ -300,9 +397,11 @@ impl<'a> DefInitChecker<'a> {
                 self.mark_pattern_initialized(pattern);
             }
             StmtExprKind::VarDecl { .. } => {
-                // Declaration without initializer: ensure it's NOT in the initialized set.
+                // Declaration without initializer: clear any inherited init from a
+                // dominating path (e.g., the variable might shadow one from an outer
+                // scope or be re-declared after a conditional init).
                 if let Some(def) = self.ctx.def_map.lookup_def(stmt.id) {
-                    self.initialized.remove(&def.id);
+                    self.initialized.clear_def(def.id);
                 }
             }
             StmtExprKind::Assign { assignee, value } => {
@@ -322,28 +421,30 @@ impl<'a> DefInitChecker<'a> {
 
     /// Handle the left-hand side of an assignment.
     /// - Bare variable: marks it initialized (this is the initializing assignment).
-    /// - Projections (field, index): the base must already be initialized.
+    /// - Projections (field, index): allow partial init for out params, otherwise
+    ///   require a fully-initialized base.
     fn check_assignment(&mut self, assignee: &Expr) {
         match &assignee.kind {
             ExprKind::Var(_) => {
                 // Assigning to a variable initializes it. Track the first
                 // assignment so lowering can skip dropping uninitialized memory.
                 if let Some(def) = self.ctx.def_map.lookup_def(assignee.id)
-                    && !self.initialized.contains(&def.id)
+                    && !self.initialized.is_full(def.id)
                 {
                     self.init_assigns.insert(assignee.id);
                 }
                 self.mark_var_initialized(assignee);
             }
-            ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
-                // Assigning to a field requires the base to be initialized.
-                self.check_place_base_initialized(target);
-            }
             ExprKind::ArrayIndex { target, indices } => {
-                self.check_place_base_initialized(target);
+                let allow_partial = self.allow_partial_for_assignment(assignee);
+                self.check_projection_assignment(assignee, target, allow_partial);
                 for index in indices {
                     self.check_expr(index);
                 }
+            }
+            ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
+                let allow_partial = self.allow_partial_for_assignment(assignee);
+                self.check_projection_assignment(assignee, target, allow_partial);
             }
             ExprKind::Slice { target, start, end } => {
                 self.check_place_base_initialized(target);
@@ -374,11 +475,177 @@ impl<'a> DefInitChecker<'a> {
         }
     }
 
+    fn check_projection_assignment(&mut self, assignee: &Expr, target: &Expr, allow_partial: bool) {
+        let Some(_) = self.lookup_tracked_def(assignee) else {
+            self.check_expr(assignee);
+            return;
+        };
+
+        if allow_partial {
+            if let Some(path) = self.init_path_from_lvalue(assignee) {
+                self.mark_partial_init(path, assignee.id);
+                return;
+            }
+        }
+
+        // For non-out params we still require a fully-initialized base.
+        self.check_place_base_initialized(target);
+    }
+
+    fn check_lvalue_use(&mut self, expr: &Expr) {
+        if matches!(expr.kind, ExprKind::Var(_)) {
+            self.check_var_use(expr);
+            return;
+        }
+
+        let Some(base_def) = self.lookup_tracked_def(expr) else {
+            self.check_expr(expr);
+            return;
+        };
+
+        if let Some(path) = self.init_path_from_lvalue(expr) {
+            if !self.initialized.is_path_initialized(&path) {
+                self.report_use_before_init(base_def, expr.span);
+            }
+            return;
+        }
+
+        if !self.initialized.is_full(base_def) {
+            self.report_use_before_init(base_def, expr.span);
+        }
+    }
+
+    /// Out params can be initialized field-by-field (partial init allowed).
+    fn allow_partial_for_assignment(&self, assignee: &Expr) -> bool {
+        let Some(base_def) = self.lookup_tracked_def(assignee) else {
+            return false;
+        };
+        self.out_param_defs.contains(&base_def)
+    }
+
+    fn mark_partial_init(&mut self, path: InitPath, node_id: NodeId) {
+        if !self.initialized.is_path_initialized(&path) {
+            self.init_assigns.insert(node_id);
+        }
+        self.initialized.add_partial(path.clone());
+        self.try_promote_full(path.base);
+    }
+
+    /// When all fields/elements of an aggregate are individually initialized,
+    /// promote it to fully-initialized (e.g., after `x.a = ...; x.b = ...`).
+    fn try_promote_full(&mut self, base: DefId) {
+        if self.initialized.is_full(base) {
+            return;
+        }
+        let Some(ty) = self.def_type(base) else {
+            return;
+        };
+        if self.is_fully_initialized_via_partials(base, &ty) {
+            self.initialized.mark_full(base);
+        }
+    }
+
+    /// Check if every top-level field/element of `base` is in the partial set.
+    /// Only checks one level deep (no recursive descent into nested types).
+    fn is_fully_initialized_via_partials(&self, base: DefId, ty: &Type) -> bool {
+        match ty {
+            Type::Struct { fields, .. } => fields.iter().all(|field| {
+                self.initialized.partial.contains(&InitPath {
+                    base,
+                    projections: vec![InitProj::Field(field.name.clone())],
+                })
+            }),
+            Type::Tuple { fields } => fields.iter().enumerate().all(|(index, _)| {
+                self.initialized.partial.contains(&InitPath {
+                    base,
+                    projections: vec![InitProj::TupleField(index)],
+                })
+            }),
+            Type::Array { dims, .. } => {
+                let Some(&len) = dims.first() else {
+                    return false;
+                };
+                (0..len as u64).all(|index| {
+                    self.initialized.partial.contains(&InitPath {
+                        base,
+                        projections: vec![InitProj::Index(index)],
+                    })
+                })
+            }
+            _ => false,
+        }
+    }
+
+    fn init_path_from_lvalue(&self, expr: &Expr) -> Option<InitPath> {
+        let mut projections = Vec::new();
+        let base = self.collect_lvalue_path(expr, &mut projections)?;
+        if projections.is_empty() {
+            return None;
+        }
+        Some(InitPath { base, projections })
+    }
+
+    fn collect_lvalue_path(&self, expr: &Expr, projections: &mut Vec<InitProj>) -> Option<DefId> {
+        match &expr.kind {
+            ExprKind::Var(_) => self.ctx.def_map.lookup_def(expr.id).map(|def| def.id),
+            ExprKind::StructField { target, field } => {
+                let base = self.collect_lvalue_path(target, projections)?;
+                projections.push(InitProj::Field(field.clone()));
+                Some(base)
+            }
+            ExprKind::TupleField { target, index } => {
+                let base = self.collect_lvalue_path(target, projections)?;
+                projections.push(InitProj::TupleField(*index));
+                Some(base)
+            }
+            ExprKind::ArrayIndex { target, indices } => {
+                let base = self.collect_lvalue_path(target, projections)?;
+                for index in indices {
+                    let ExprKind::IntLit(value) = index.kind else {
+                        return None;
+                    };
+                    projections.push(InitProj::Index(value));
+                }
+                Some(base)
+            }
+            _ => None,
+        }
+    }
+
+    fn def_type(&self, def_id: DefId) -> Option<Type> {
+        let def = self.ctx.def_map.lookup_def_by_id(def_id)?;
+        self.ctx.type_map.lookup_def_type(def)
+    }
+
+    /// Traverse projections to find the base variable, returning its DefId only
+    /// if it's a local or param (we don't track init for globals/functions).
+    fn lookup_tracked_def(&self, expr: &Expr) -> Option<DefId> {
+        let def_id = match &expr.kind {
+            ExprKind::Var(_) => self.ctx.def_map.lookup_def(expr.id).map(|def| def.id),
+            ExprKind::StructField { target, .. }
+            | ExprKind::TupleField { target, .. }
+            | ExprKind::ArrayIndex { target, .. }
+            | ExprKind::Slice { target, .. } => self.lookup_tracked_def(target),
+            _ => None,
+        }?;
+
+        let def = self.ctx.def_map.lookup_def_by_id(def_id)?;
+        matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }).then_some(def_id)
+    }
+
+    fn report_use_before_init(&mut self, def_id: DefId, span: Span) {
+        let Some(def) = self.ctx.def_map.lookup_def_by_id(def_id) else {
+            return;
+        };
+        self.errors
+            .push(SemCheckError::UseBeforeInit(def.name.clone(), span));
+    }
+
     fn mark_pattern_initialized(&mut self, pattern: &Pattern) {
         match &pattern.kind {
             PatternKind::Ident { .. } => {
                 if let Some(def) = self.ctx.def_map.lookup_def(pattern.id) {
-                    self.initialized.insert(def.id);
+                    self.initialized.mark_full(def.id);
                 }
             }
             PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
@@ -396,7 +663,7 @@ impl<'a> DefInitChecker<'a> {
 
     fn mark_var_initialized(&mut self, expr: &Expr) {
         if let Some(def) = self.ctx.def_map.lookup_def(expr.id) {
-            self.initialized.insert(def.id);
+            self.initialized.mark_full(def.id);
         }
     }
 
@@ -409,7 +676,7 @@ impl<'a> DefInitChecker<'a> {
         if !matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }) {
             return;
         }
-        if !self.initialized.contains(&def.id) {
+        if !self.initialized.is_full(def.id) {
             self.errors
                 .push(SemCheckError::UseBeforeInit(def.name.clone(), expr.span));
         }
@@ -418,17 +685,17 @@ impl<'a> DefInitChecker<'a> {
     fn check_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var(_) => self.check_var_use(expr),
-            ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
-                self.check_place_base_initialized(target);
+            ExprKind::StructField { .. } | ExprKind::TupleField { .. } => {
+                self.check_lvalue_use(expr);
             }
-            ExprKind::ArrayIndex { target, indices } => {
-                self.check_place_base_initialized(target);
+            ExprKind::ArrayIndex { indices, .. } => {
+                self.check_lvalue_use(expr);
                 for index in indices {
                     self.check_expr(index);
                 }
             }
-            ExprKind::Slice { target, start, end } => {
-                self.check_place_base_initialized(target);
+            ExprKind::Slice { start, end, .. } => {
+                self.check_lvalue_use(expr);
                 if let Some(start) = start {
                     self.check_expr(start);
                 }
@@ -450,7 +717,7 @@ impl<'a> DefInitChecker<'a> {
                     this.check_expr(else_body);
                 });
                 // After the if: only defs initialized in BOTH branches are safe.
-                self.initialized = intersect_sets(&[then_state, else_state]);
+                self.initialized = intersect_states(&[then_state, else_state]);
             }
             ExprKind::Match { scrutinee, arms } => {
                 self.check_expr(scrutinee);
@@ -466,7 +733,7 @@ impl<'a> DefInitChecker<'a> {
                 }
                 // After match: intersect all arm results.
                 if !arm_states.is_empty() {
-                    self.initialized = intersect_sets(&arm_states);
+                    self.initialized = intersect_states(&arm_states);
                 }
             }
             ExprKind::Block { items, tail } => {
@@ -495,7 +762,7 @@ impl<'a> DefInitChecker<'a> {
                         }
                     }
                     for def_id in out_defs {
-                        self.initialized.insert(def_id);
+                        self.initialized.mark_full(def_id);
                     }
                 } else {
                     for arg in args {
@@ -560,7 +827,7 @@ impl<'a> DefInitChecker<'a> {
             ExprKind::Var(_) => {
                 let def = self.ctx.def_map.lookup_def(arg.id)?;
                 if matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }) {
-                    if !self.initialized.contains(&def.id) {
+                    if !self.initialized.is_full(def.id) {
                         // Record the first init through an `out` call so lowering skips drops.
                         self.init_assigns.insert(arg.id);
                     }
@@ -568,13 +835,25 @@ impl<'a> DefInitChecker<'a> {
                 }
                 None
             }
-            ExprKind::StructField { .. }
-            | ExprKind::TupleField { .. }
-            | ExprKind::ArrayIndex { .. }
-            | ExprKind::Slice { .. } => {
-                // Assignments into projections still require initialized bases
-                // unless the base is an out param.
-                self.check_assignment(arg);
+            ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
+                self.check_projection_assignment(arg, target, true);
+                None
+            }
+            ExprKind::ArrayIndex { target, indices } => {
+                self.check_projection_assignment(arg, target, true);
+                for index in indices {
+                    self.check_expr(index);
+                }
+                None
+            }
+            ExprKind::Slice { target, start, end } => {
+                self.check_place_base_initialized(target);
+                if let Some(start) = start {
+                    self.check_expr(start);
+                }
+                if let Some(end) = end {
+                    self.check_expr(end);
+                }
                 None
             }
             _ => {
@@ -584,15 +863,11 @@ impl<'a> DefInitChecker<'a> {
         }
     }
 
-    fn mark_match_pattern_initialized(
-        &mut self,
-        init: &mut HashSet<DefId>,
-        pattern: &MatchPattern,
-    ) {
+    fn mark_match_pattern_initialized(&mut self, init: &mut InitState, pattern: &MatchPattern) {
         if let MatchPattern::EnumVariant { bindings, .. } = pattern {
             for MatchPatternBinding { id, .. } in bindings {
                 if let Some(def) = self.ctx.def_map.lookup_def(*id) {
-                    init.insert(def.id);
+                    init.mark_full(def.id);
                 }
             }
         }
@@ -600,7 +875,7 @@ impl<'a> DefInitChecker<'a> {
 
     /// Run `f` with a temporary initialized set, then restore the original and return
     /// the resulting state. Used to analyze branches without polluting the outer state.
-    fn with_init<F>(&mut self, init: HashSet<DefId>, f: F) -> HashSet<DefId>
+    fn with_init<F>(&mut self, init: InitState, f: F) -> InitState
     where
         F: FnOnce(&mut Self),
     {

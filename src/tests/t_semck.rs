@@ -635,6 +635,30 @@ fn test_out_arg_allows_uninit_var() {
 }
 
 #[test]
+fn test_out_arg_allows_partial_init_via_subfields() {
+    let source = r#"
+        type Pair = { a: u64[2], b: u64[2] }
+
+        fn fill_a(out a: u64[2]) {
+            a = u64[1, 2];
+        }
+
+        fn fill_b(out b: u64[2]) {
+            b = u64[3, 4];
+        }
+
+        fn main() -> u64 {
+            var p: Pair;
+            fill_a(p.a);
+            fill_b(p.b);
+            p.a[0] + p.b[0]
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
 fn test_out_param_requires_init_on_all_paths() {
     let source = r#"
         type Pair = { x: u64, y: u64 }
@@ -653,6 +677,55 @@ fn test_out_param_requires_init_on_all_paths() {
             e => panic!("Expected OutParamNotInitialized error, got {:?}", e),
         }
     }
+}
+
+#[test]
+fn test_out_param_struct_fields_ok() {
+    let source = r#"
+        type Pair = { x: u64, y: u64 }
+
+        fn fill(out p: Pair) {
+            p.x = 1;
+            p.y = 2;
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_out_param_struct_field_use_before_init_rejected() {
+    let source = r#"
+        type Pair = { x: u64, y: u64 }
+
+        fn fill(out p: Pair) -> u64 {
+            p.x = 1;
+            p.y
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::UseBeforeInit(_, _) => {}
+            e => panic!("Expected UseBeforeInit error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_out_param_array_indices_ok() {
+    let source = r#"
+        fn fill(out arr: u64[2]) {
+            arr[0] = 1;
+            arr[1] = 2;
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
 }
 
 #[test]

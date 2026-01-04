@@ -183,8 +183,7 @@ impl<'a> FuncLowerer<'a> {
             return;
         }
 
-        if matches!(assignee.kind, ExprKind::Var(_)) && self.ctx.init_assigns.contains(&assignee.id)
-        {
+        if self.ctx.init_assigns.contains(&assignee.id) {
             return;
         }
 
