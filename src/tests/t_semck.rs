@@ -659,6 +659,35 @@ fn test_out_arg_allows_partial_init_via_subfields() {
 }
 
 #[test]
+fn test_partial_init_local_without_full_init_rejected() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+        type Boxed = { p: ^Point }
+        type Pair = { a: Boxed, b: Boxed }
+
+        fn fill_a(out a: Boxed) {
+            a = Boxed { p: ^Point { x: 1, y: 2 } };
+        }
+
+        fn main() {
+            var p: Pair;
+            fill_a(p.a);
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::PartialInitNotAllowed(_, _) => {}
+            e => panic!("Expected PartialInitNotAllowed error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_out_param_requires_init_on_all_paths() {
     let source = r#"
         type Pair = { x: u64, y: u64 }

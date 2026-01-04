@@ -28,7 +28,11 @@ pub fn sem_check(ctx: TypeCheckedContext) -> Result<SemanticCheckedContext, Vec<
     errors.extend(slice_escape::check(&ctx));
 
     if errors.is_empty() {
-        Ok(ctx.with_sem_results(move_result.implicit_moves, def_init_result.init_assigns))
+        Ok(ctx.with_sem_results(
+            move_result.implicit_moves,
+            def_init_result.init_assigns,
+            def_init_result.full_init_assigns,
+        ))
     } else {
         Err(errors)
     }

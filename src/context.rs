@@ -68,6 +68,7 @@ impl TypeCheckedContext {
         self,
         implicit_moves: HashSet<NodeId>,
         init_assigns: HashSet<NodeId>,
+        full_init_assigns: HashSet<NodeId>,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
             module: self.module,
@@ -76,6 +77,7 @@ impl TypeCheckedContext {
             symbols: self.symbols,
             implicit_moves,
             init_assigns,
+            full_init_assigns,
         }
     }
 }
@@ -91,6 +93,7 @@ pub struct SemanticCheckedContext {
     pub symbols: SymbolTable,
     pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
+    pub full_init_assigns: HashSet<NodeId>,
 }
 
 // -----------------------------------------------------------------------------
@@ -104,6 +107,7 @@ pub struct AnalyzedContext {
     pub symbols: SymbolTable,
     pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
+    pub full_init_assigns: HashSet<NodeId>,
 }
 
 impl AnalyzedContext {

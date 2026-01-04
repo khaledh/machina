@@ -6,7 +6,7 @@
 //! - Meet: intersection (must be initialized on all paths).
 //! - Transfer: update the set as statements initialize variables.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
@@ -24,6 +24,7 @@ use crate::types::Type;
 pub(super) struct DefInitResult {
     pub errors: Vec<SemCheckError>,
     pub init_assigns: HashSet<NodeId>,
+    pub full_init_assigns: HashSet<NodeId>,
 }
 
 /// Tracks which definitions are initialized: either fully (the whole variable)
@@ -32,6 +33,7 @@ pub(super) struct DefInitResult {
 struct InitState {
     full: HashSet<DefId>,
     partial: HashSet<InitPath>,
+    maybe_partial: HashSet<InitPath>,
 }
 
 impl InitState {
@@ -39,6 +41,7 @@ impl InitState {
         Self {
             full,
             partial: HashSet::new(),
+            maybe_partial: HashSet::new(),
         }
     }
 
@@ -49,18 +52,21 @@ impl InitState {
     fn mark_full(&mut self, def_id: DefId) {
         self.full.insert(def_id);
         self.partial.retain(|path| path.base != def_id);
+        self.maybe_partial.retain(|path| path.base != def_id);
     }
 
     fn clear_def(&mut self, def_id: DefId) {
         self.full.remove(&def_id);
         self.partial.retain(|path| path.base != def_id);
+        self.maybe_partial.retain(|path| path.base != def_id);
     }
 
     fn add_partial(&mut self, path: InitPath) {
         if self.is_full(path.base) {
             return;
         }
-        self.partial.insert(path);
+        self.partial.insert(path.clone());
+        self.maybe_partial.insert(path);
     }
 
     /// A path is initialized if: (1) the base is fully init, (2) the exact path
@@ -83,6 +89,10 @@ impl InitState {
         }
         false
     }
+
+    fn has_maybe_partial_for(&self, def_id: DefId) -> bool {
+        self.maybe_partial.iter().any(|path| path.base == def_id)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -101,12 +111,20 @@ enum InitProj {
 pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
     let mut errors = Vec::new();
     let mut init_assigns = HashSet::new();
+    let mut full_init_assigns = HashSet::new();
     for func in ctx.module.funcs() {
-        check_func(func, ctx, &mut errors, &mut init_assigns);
+        check_func(
+            func,
+            ctx,
+            &mut errors,
+            &mut init_assigns,
+            &mut full_init_assigns,
+        );
     }
     DefInitResult {
         errors,
         init_assigns,
+        full_init_assigns,
     }
 }
 
@@ -115,6 +133,7 @@ fn check_func(
     ctx: &TypeCheckedContext,
     errors: &mut Vec<SemCheckError>,
     init_assigns: &mut HashSet<NodeId>,
+    full_init_assigns: &mut HashSet<NodeId>,
 ) {
     let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
 
@@ -126,6 +145,7 @@ fn check_func(
     // Bottom = "all defs" so unreachable blocks don't produce spurious errors.
     // (Intersection with "all" is identity, so unreachable blocks inherit from reachable ones.)
     let bottom = InitState::new(collect_all_defs(func, ctx));
+    let def_spans = collect_def_spans(func, ctx);
 
     let result = solve_forward(
         &cfg,
@@ -135,7 +155,14 @@ fn check_func(
         |states| intersect_states(states),
         |block_id, in_state| {
             let mut checker =
-                DefInitChecker::new(ctx, in_state.clone(), &out_param_defs, errors, init_assigns);
+                DefInitChecker::new(
+                    ctx,
+                    in_state.clone(),
+                    &out_param_defs,
+                    errors,
+                    init_assigns,
+                    full_init_assigns,
+                );
             checker.visit_cfg_node(&cfg.nodes[block_id.0]);
             checker.initialized
         },
@@ -152,6 +179,31 @@ fn check_func(
             .all(|block| result.out_map[block.0].is_full(def_id));
         if !initialized_on_all_exits {
             errors.push(SemCheckError::OutParamNotInitialized(name, span));
+        }
+    }
+
+    let local_defs = collect_local_defs(func, ctx);
+    let mut reported = HashSet::new();
+    for def_id in local_defs {
+        let Some(def) = ctx.def_map.lookup_def_by_id(def_id) else {
+            continue;
+        };
+        let Some(ty) = ctx.type_map.lookup_def_type(def) else {
+            continue;
+        };
+        if !ty.needs_drop() {
+            continue;
+        }
+        let has_partial_on_any_exit = exit_blocks.iter().any(|block| {
+            let state = &result.out_map[block.0];
+            !state.is_full(def_id) && state.has_maybe_partial_for(def_id)
+        });
+        if has_partial_on_any_exit && reported.insert(def_id) {
+            let span = def_spans.get(&def_id).cloned().unwrap_or_default();
+            errors.push(SemCheckError::PartialInitNotAllowed(
+                def.name.clone(),
+                span,
+            ));
         }
     }
 }
@@ -196,6 +248,30 @@ fn collect_all_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId>
     defs
 }
 
+fn collect_local_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId> {
+    collect_all_defs(func, ctx)
+        .into_iter()
+        .filter(|def_id| {
+            matches!(
+                ctx.def_map.lookup_def_by_id(*def_id).map(|def| &def.kind),
+                Some(DefKind::LocalVar { .. })
+            )
+        })
+        .collect()
+}
+
+fn collect_def_spans(func: &Function, ctx: &TypeCheckedContext) -> HashMap<DefId, Span> {
+    let mut spans = HashMap::new();
+    for param in &func.sig.params {
+        if let Some(def) = ctx.def_map.lookup_def(param.id) {
+            spans.insert(def.id, param.span);
+        }
+    }
+    let mut collector = DefSpanCollector { ctx, spans: &mut spans };
+    collector.collect_expr(&func.body);
+    spans
+}
+
 /// Meet operation: a def (or sub-path) is initialized only if initialized on ALL paths.
 fn intersect_states(states: &[InitState]) -> InitState {
     let mut iter = states.iter();
@@ -211,8 +287,10 @@ fn intersect_states(states: &[InitState]) -> InitState {
     // Collect all partial paths from any state, then keep only those initialized
     // on ALL paths (may be via full init of base, exact partial, or a prefix).
     let mut partial_candidates = HashSet::new();
+    let mut maybe_partial = HashSet::new();
     for state in states {
         partial_candidates.extend(state.partial.iter().cloned());
+        maybe_partial.extend(state.maybe_partial.iter().cloned());
     }
 
     let mut partial = HashSet::new();
@@ -225,7 +303,11 @@ fn intersect_states(states: &[InitState]) -> InitState {
         }
     }
 
-    InitState { full, partial }
+    InitState {
+        full,
+        partial,
+        maybe_partial,
+    }
 }
 
 /// Collects all local definitions in a function (params, let/var bindings, match bindings).
@@ -345,6 +427,120 @@ impl<'a> Visitor for DefCollector<'a> {
     }
 }
 
+struct DefSpanCollector<'a> {
+    ctx: &'a TypeCheckedContext,
+    spans: &'a mut std::collections::HashMap<DefId, Span>,
+}
+
+impl<'a> DefSpanCollector<'a> {
+    fn collect_expr(&mut self, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Block { items, tail } => {
+                for item in items {
+                    match item {
+                        crate::ast::BlockItem::Stmt(stmt) => self.collect_stmt(stmt),
+                        crate::ast::BlockItem::Expr(expr) => self.collect_expr(expr),
+                    }
+                }
+                if let Some(tail) = tail {
+                    self.collect_expr(tail);
+                }
+            }
+            ExprKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.collect_expr(cond);
+                self.collect_expr(then_body);
+                self.collect_expr(else_body);
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                self.collect_expr(scrutinee);
+                for arm in arms {
+                    self.collect_match_pattern(&arm.pattern);
+                    self.collect_expr(&arm.body);
+                }
+            }
+            _ => {
+                walk_expr(self, expr);
+            }
+        }
+    }
+
+    fn collect_stmt(&mut self, stmt: &StmtExpr) {
+        match &stmt.kind {
+            StmtExprKind::LetBind { pattern, value, .. }
+            | StmtExprKind::VarBind { pattern, value, .. } => {
+                self.collect_pattern(pattern);
+                self.collect_expr(value);
+            }
+            StmtExprKind::VarDecl { .. } => {
+                if let Some(def) = self.ctx.def_map.lookup_def(stmt.id) {
+                    self.spans.entry(def.id).or_insert(stmt.span);
+                }
+            }
+            StmtExprKind::Assign { assignee, value } => {
+                self.collect_expr(assignee);
+                self.collect_expr(value);
+            }
+            StmtExprKind::While { cond, body } => {
+                self.collect_expr(cond);
+                self.collect_expr(body);
+            }
+            StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                self.collect_pattern(pattern);
+                self.collect_expr(iter);
+                self.collect_expr(body);
+            }
+        }
+    }
+
+    fn collect_pattern(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Ident { .. } => {
+                if let Some(def) = self.ctx.def_map.lookup_def(pattern.id) {
+                    self.spans.entry(def.id).or_insert(pattern.span);
+                }
+            }
+            PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
+                for pat in patterns {
+                    self.collect_pattern(pat);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                for field in fields {
+                    self.collect_pattern(&field.pattern);
+                }
+            }
+        }
+    }
+
+    fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
+        if let MatchPattern::EnumVariant { bindings, .. } = pattern {
+            for MatchPatternBinding { id, span, .. } in bindings {
+                if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                    self.spans.entry(def.id).or_insert(*span);
+                }
+            }
+        }
+    }
+}
+
+impl<'a> Visitor for DefSpanCollector<'a> {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+        self.collect_stmt(stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        self.collect_expr(expr);
+    }
+}
+
 /// Walks a CFG block, checking for uses of uninitialized variables and
 /// updating the initialized set as assignments occur.
 struct DefInitChecker<'a> {
@@ -353,6 +549,7 @@ struct DefInitChecker<'a> {
     out_param_defs: &'a HashSet<DefId>,
     errors: &'a mut Vec<SemCheckError>,
     init_assigns: &'a mut HashSet<NodeId>,
+    full_init_assigns: &'a mut HashSet<NodeId>,
 }
 
 impl<'a> DefInitChecker<'a> {
@@ -362,6 +559,7 @@ impl<'a> DefInitChecker<'a> {
         out_param_defs: &'a HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
         init_assigns: &'a mut HashSet<NodeId>,
+        full_init_assigns: &'a mut HashSet<NodeId>,
     ) -> Self {
         Self {
             ctx,
@@ -369,6 +567,7 @@ impl<'a> DefInitChecker<'a> {
             out_param_defs,
             errors,
             init_assigns,
+            full_init_assigns,
         }
     }
 
@@ -524,25 +723,31 @@ impl<'a> DefInitChecker<'a> {
     }
 
     fn mark_partial_init(&mut self, path: InitPath, node_id: NodeId) {
+        let was_full = self.initialized.is_full(path.base);
         if !self.initialized.is_path_initialized(&path) {
             self.init_assigns.insert(node_id);
         }
         self.initialized.add_partial(path.clone());
-        self.try_promote_full(path.base);
+        let promoted = self.try_promote_full(path.base);
+        if promoted && !was_full && self.is_local_var(path.base) {
+            self.full_init_assigns.insert(node_id);
+        }
     }
 
     /// When all fields/elements of an aggregate are individually initialized,
     /// promote it to fully-initialized (e.g., after `x.a = ...; x.b = ...`).
-    fn try_promote_full(&mut self, base: DefId) {
+    fn try_promote_full(&mut self, base: DefId) -> bool {
         if self.initialized.is_full(base) {
-            return;
+            return false;
         }
         let Some(ty) = self.def_type(base) else {
-            return;
+            return false;
         };
         if self.is_fully_initialized_via_partials(base, &ty) {
             self.initialized.mark_full(base);
+            return true;
         }
+        false
     }
 
     /// Check if every top-level field/element of `base` is in the partial set.
@@ -631,6 +836,13 @@ impl<'a> DefInitChecker<'a> {
 
         let def = self.ctx.def_map.lookup_def_by_id(def_id)?;
         matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }).then_some(def_id)
+    }
+
+    fn is_local_var(&self, def_id: DefId) -> bool {
+        let Some(def) = self.ctx.def_map.lookup_def_by_id(def_id) else {
+            return false;
+        };
+        matches!(def.kind, DefKind::LocalVar { .. })
     }
 
     fn report_use_before_init(&mut self, def_id: DefId, span: Span) {

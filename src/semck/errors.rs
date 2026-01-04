@@ -72,6 +72,9 @@ pub enum SemCheckError {
     #[error("out parameter `{0}` is not initialized on all paths")]
     OutParamNotInitialized(String, Span),
 
+    #[error("Partially initialized local `{0}` must be fully initialized")]
+    PartialInitNotAllowed(String, Span),
+
     #[error("lvalue arguments may overlap")]
     OverlappingLvalueArgs(Span),
 
@@ -128,6 +131,7 @@ impl SemCheckError {
             SemCheckError::OutArgNotLvalue(span) => *span,
             SemCheckError::OutArgNotMutable(span) => *span,
             SemCheckError::OutParamNotInitialized(_, span) => *span,
+            SemCheckError::PartialInitNotAllowed(_, span) => *span,
             SemCheckError::OverlappingLvalueArgs(span) => *span,
             SemCheckError::SinkParamNotOwned(_, span) => *span,
             SemCheckError::UseBeforeInit(_, span) => *span,

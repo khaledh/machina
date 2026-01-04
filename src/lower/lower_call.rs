@@ -116,6 +116,7 @@ impl<'a> FuncLowerer<'a> {
         for arg in out_args {
             // Mark out args as initialized after the call.
             self.mark_initialized_if_needed(arg);
+            self.mark_full_init_if_needed(arg);
         }
         Ok(())
     }

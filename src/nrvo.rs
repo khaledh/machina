@@ -27,6 +27,7 @@ impl NrvoAnalyzer {
             symbols,
             implicit_moves,
             init_assigns,
+            full_init_assigns,
         } = self.ctx;
 
         let mut def_map = def_map;
@@ -42,6 +43,7 @@ impl NrvoAnalyzer {
             symbols,
             implicit_moves,
             init_assigns,
+            full_init_assigns,
         }
     }
 

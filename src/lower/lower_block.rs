@@ -101,6 +101,7 @@ impl<'a> FuncLowerer<'a> {
 
             self.emit_copy_scalar(assignee_place, Rvalue::Use(value_operand));
             self.mark_initialized_if_needed(assignee);
+            self.mark_full_init_if_needed(assignee);
         } else {
             // Aggregate assignment (value written directly into place).
             let assignee_place = self.lower_place_agg(assignee)?;
@@ -117,6 +118,7 @@ impl<'a> FuncLowerer<'a> {
             // Write the new value into the assignee place.
             self.lower_agg_value_into(assignee_place, value)?;
             self.mark_initialized_if_needed(assignee);
+            self.mark_full_init_if_needed(assignee);
         }
 
         Ok(())
@@ -201,6 +203,19 @@ impl<'a> FuncLowerer<'a> {
         if let Some(flag) = self.is_initialized_for_assignee(assignee) {
             self.set_is_initialized(flag, true);
         }
+    }
+
+    pub(super) fn mark_full_init_if_needed(&mut self, assignee: &Expr) {
+        if !self.ctx.full_init_assigns.contains(&assignee.id) {
+            return;
+        }
+        let Some(def_id) = self.base_def_for_assignee(assignee) else {
+            return;
+        };
+        let Some(flag) = self.is_initialized_for_def(def_id) else {
+            return;
+        };
+        self.set_is_initialized(flag, true);
     }
 
     fn is_initialized_for_assignee(&mut self, assignee: &Expr) -> Option<LocalId> {
