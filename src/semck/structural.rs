@@ -311,6 +311,23 @@ impl<'a> StructuralChecker<'a> {
             _ => None,
         }
     }
+
+    fn is_lvalue(&self, expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Var(_) => {
+                if let Some(def) = self.ctx.def_map.lookup_def(expr.id) {
+                    matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
+                } else {
+                    false
+                }
+            }
+            ExprKind::ArrayIndex { target, .. }
+            | ExprKind::TupleField { target, .. }
+            | ExprKind::StructField { target, .. }
+            | ExprKind::Slice { target, .. } => self.is_lvalue(target),
+            _ => false,
+        }
+    }
 }
 
 impl Visitor for StructuralChecker<'_> {
@@ -372,6 +389,12 @@ impl Visitor for StructuralChecker<'_> {
                         self.errors
                             .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
                     }
+                }
+            }
+            ExprKind::Slice { target, .. } => {
+                if !self.is_lvalue(target) {
+                    self.errors
+                        .push(SemCheckError::SliceTargetNotLvalue(expr.span));
                 }
             }
             ExprKind::EnumVariant {

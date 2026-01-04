@@ -1038,3 +1038,39 @@ fn test_slice_store_forbidden_in_struct() {
         );
     }
 }
+
+#[test]
+fn test_slice_target_requires_lvalue() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = [1, 2, 3][0..2];
+            s[0]
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::SliceTargetNotLvalue(_))),
+            "Expected SliceTargetNotLvalue error"
+        );
+    }
+}
+
+#[test]
+fn test_slice_target_lvalue_allowed() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            let s = arr[0..2];
+            s[0]
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_ok());
+}

@@ -698,7 +698,7 @@ impl<'a> DefInitChecker<'a> {
         }
 
         let Some(base_def) = self.lookup_tracked_def(expr) else {
-            self.check_expr(expr);
+            self.check_untracked_lvalue(expr);
             return;
         };
 
@@ -843,6 +843,32 @@ impl<'a> DefInitChecker<'a> {
             return false;
         };
         matches!(def.kind, DefKind::LocalVar { .. })
+    }
+
+    fn check_untracked_lvalue(&mut self, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
+                self.check_expr(target);
+            }
+            ExprKind::ArrayIndex { target, indices } => {
+                self.check_expr(target);
+                for index in indices {
+                    self.check_expr(index);
+                }
+            }
+            ExprKind::Slice { target, start, end } => {
+                self.check_expr(target);
+                if let Some(start) = start {
+                    self.check_expr(start);
+                }
+                if let Some(end) = end {
+                    self.check_expr(end);
+                }
+            }
+            _ => {
+                self.check_expr(expr);
+            }
+        }
     }
 
     fn report_use_before_init(&mut self, def_id: DefId, span: Span) {

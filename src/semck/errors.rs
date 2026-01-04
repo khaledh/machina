@@ -104,6 +104,9 @@ pub enum SemCheckError {
 
     #[error("Slice borrow conflicts with mutation")]
     SliceBorrowConflict(Span),
+
+    #[error("Slice target must be an lvalue")]
+    SliceTargetNotLvalue(Span),
 }
 
 impl SemCheckError {
@@ -142,6 +145,7 @@ impl SemCheckError {
             SemCheckError::SliceEscapeReturn(span) => *span,
             SemCheckError::SliceEscapeStore(span) => *span,
             SemCheckError::SliceBorrowConflict(span) => *span,
+            SemCheckError::SliceTargetNotLvalue(span) => *span,
         }
     }
 }
