@@ -435,6 +435,7 @@ impl SymbolResolver {
             MatchPattern::Wildcard { .. } => {}
             MatchPattern::BoolLit { .. } => {}
             MatchPattern::IntLit { .. } => {}
+            MatchPattern::Tuple { bindings, .. } => self.bind_match_bindings(bindings),
             MatchPattern::EnumVariant {
                 enum_name,
                 bindings,
@@ -458,32 +459,35 @@ impl SymbolResolver {
                 // Note: We delegate to the type checker to validate the variant.
 
                 // Bind each binding's sub-pattern
-                for binding in bindings {
-                    if let MatchPatternBinding::Named { id, name, span } = binding {
-                        // Create a new def
-                        let def_id = self.def_id_gen.new_id();
-                        let def = Def {
-                            id: def_id,
-                            name: name.clone(),
-                            kind: DefKind::LocalVar {
-                                nrvo_eligible: false,
-                                is_mutable: false,
-                            },
-                        };
-                        self.def_map_builder.record_def(def, *id);
-                        self.insert_symbol(
-                            name,
-                            Symbol {
-                                name: name.clone(),
-                                kind: SymbolKind::Var {
-                                    def_id,
-                                    is_mutable: false,
-                                },
-                            },
-                            *span,
-                        );
-                    }
-                }
+                self.bind_match_bindings(bindings);
+            }
+        }
+    }
+
+    fn bind_match_bindings(&mut self, bindings: &[MatchPatternBinding]) {
+        for binding in bindings {
+            if let MatchPatternBinding::Named { id, name, span } = binding {
+                let def_id = self.def_id_gen.new_id();
+                let def = Def {
+                    id: def_id,
+                    name: name.clone(),
+                    kind: DefKind::LocalVar {
+                        nrvo_eligible: false,
+                        is_mutable: false,
+                    },
+                };
+                self.def_map_builder.record_def(def, *id);
+                self.insert_symbol(
+                    name,
+                    Symbol {
+                        name: name.clone(),
+                        kind: SymbolKind::Var {
+                            def_id,
+                            is_mutable: false,
+                        },
+                    },
+                    *span,
+                );
             }
         }
     }

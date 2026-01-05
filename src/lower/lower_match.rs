@@ -1,4 +1,4 @@
-use crate::ast::{Expr, MatchArm, MatchPattern, MatchPatternBinding};
+use crate::ast::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -33,6 +33,19 @@ impl<'a> FuncLowerer<'a> {
         scrutinee: &Expr,
         arms: &[MatchArm],
     ) -> Result<(), LowerError> {
+        if let Some(arm) = self.tuple_match_arm(scrutinee, arms)? {
+            return self.lower_match_with_tuple(scrutinee, arm, |this, arm| {
+                let op = match this.lower_expr_value(&arm.body)? {
+                    ExprValue::Scalar(op) => op,
+                    ExprValue::Aggregate(_) => {
+                        return Err(LowerError::UnsupportedOperandExpr(arm.body.id));
+                    }
+                };
+                this.emit_copy_scalar(dst.clone(), Rvalue::Use(op));
+                Ok(())
+            });
+        }
+
         self.lower_match_with_switch(scrutinee, arms, |this, arm| {
             let op = match this.lower_expr_value(&arm.body)? {
                 ExprValue::Scalar(op) => op,
@@ -51,6 +64,12 @@ impl<'a> FuncLowerer<'a> {
         scrutinee: &Expr,
         arms: &[MatchArm],
     ) -> Result<(), LowerError> {
+        if let Some(arm) = self.tuple_match_arm(scrutinee, arms)? {
+            return self.lower_match_with_tuple(scrutinee, arm, |this, arm| {
+                this.lower_agg_value_into(dst.clone(), &arm.body)
+            });
+        }
+
         self.lower_match_with_switch(scrutinee, arms, |this, arm| {
             this.lower_agg_value_into(dst.clone(), &arm.body)
         })
@@ -103,6 +122,9 @@ impl<'a> FuncLowerer<'a> {
                         target: arm_bb,
                     });
                 }
+                MatchPattern::Tuple { .. } => {
+                    return Err(LowerError::PatternMismatch(arm.id));
+                }
             }
         }
 
@@ -148,6 +170,51 @@ impl<'a> FuncLowerer<'a> {
 
         self.curr_block = join_bb;
         Ok(())
+    }
+
+    fn tuple_match_arm<'b>(
+        &self,
+        scrutinee: &Expr,
+        arms: &'b [MatchArm],
+    ) -> Result<Option<&'b MatchArm>, LowerError> {
+        if arms.len() != 1 {
+            return Ok(None);
+        }
+
+        let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
+        let (scrutinee_ty, _) = self.peel_heap_for_match(scrutinee_ty.clone());
+        if !matches!(scrutinee_ty, Type::Tuple { .. }) {
+            return Ok(None);
+        }
+
+        let arm = &arms[0];
+        match &arm.pattern {
+            MatchPattern::Tuple { .. } | MatchPattern::Wildcard { .. } => Ok(Some(arm)),
+            _ => Ok(None),
+        }
+    }
+
+    fn lower_match_with_tuple<F>(
+        &mut self,
+        scrutinee: &Expr,
+        arm: &MatchArm,
+        mut emit_arm_body: F,
+    ) -> Result<(), LowerError>
+    where
+        F: FnMut(&mut Self, &MatchArm) -> Result<(), LowerError>,
+    {
+        let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
+        let (scrutinee_ty, deref_count) = self.peel_heap_for_match(scrutinee_ty.clone());
+        let place = self.lower_match_deref_place(scrutinee, &scrutinee_ty, deref_count)?;
+        let PlaceAny::Aggregate(place) = place else {
+            return Err(LowerError::ExprIsNotAggregate(scrutinee.id));
+        };
+
+        if let MatchPattern::Tuple { bindings, .. } = &arm.pattern {
+            self.bind_match_tuple_fields(&scrutinee_ty, &place, bindings, arm.id)?;
+        }
+
+        emit_arm_body(self, arm)
     }
 
     pub(super) fn lower_match_discr(
@@ -271,6 +338,51 @@ impl<'a> FuncLowerer<'a> {
                 let dst = Place::new(local_id, payload_ty_id, vec![]);
                 let payload_place = Place::new(scrutinee_place.base(), payload_ty_id, projs);
                 self.emit_copy_aggregate(dst, payload_place);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn bind_match_tuple_fields(
+        &mut self,
+        scrutinee_ty: &Type,
+        scrutinee_place: &Place<Aggregate>,
+        bindings: &[MatchPatternBinding],
+        arm_id: NodeId,
+    ) -> Result<(), LowerError> {
+        if bindings.is_empty() {
+            return Ok(());
+        }
+
+        let Type::Tuple { fields } = scrutinee_ty else {
+            return Err(LowerError::PatternMismatch(arm_id));
+        };
+        if bindings.len() != fields.len() {
+            return Err(LowerError::PatternMismatch(arm_id));
+        }
+
+        for (index, (binding, field_ty)) in bindings.iter().zip(fields.iter()).enumerate() {
+            let MatchPatternBinding::Named { id, name, .. } = binding else {
+                continue;
+            };
+
+            let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
+            let def_id = self.def_for_node(*id)?.id;
+            let local_id = self.ensure_local_for_def(def_id, field_ty_id, Some(name.clone()));
+
+            let field_place =
+                self.project_place(scrutinee_place, Projection::Field { index }, field_ty_id);
+
+            match field_place {
+                PlaceAny::Scalar(place) => {
+                    let dst = Place::new(local_id, field_ty_id, vec![]);
+                    self.emit_copy_scalar(dst, Rvalue::Use(Operand::Copy(place)));
+                }
+                PlaceAny::Aggregate(place) => {
+                    let dst = Place::new(local_id, field_ty_id, vec![]);
+                    self.emit_copy_aggregate(dst, place);
+                }
             }
         }
 

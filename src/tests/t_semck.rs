@@ -687,6 +687,42 @@ fn test_match_int_duplicate_literal() {
 }
 
 #[test]
+fn test_match_tuple_single_arm_ok() {
+    let source = r#"
+        fn test(t: (u64, bool)) -> u64 {
+            match t {
+                (x, _) => x,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected tuple match to be accepted");
+}
+
+#[test]
+fn test_match_tuple_multiple_arms_rejected() {
+    let source = r#"
+        fn test(t: (u64, bool)) -> u64 {
+            match t {
+                (x, _) => x,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::TupleMatchRequiresSingleArm(_) => {}
+            e => panic!("Expected TupleMatchRequiresSingleArm error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_match_wildcard_not_last() {
     let source = r#"
         type Color = Red | Green

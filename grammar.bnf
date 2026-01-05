@@ -91,8 +91,9 @@ If                 ::= "if" Expr Block ( "else" Block )?
 
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr
-MatchPattern       ::= "_" | BoolLit | IntLit | EnumVariantPattern
+MatchPattern       ::= "_" | BoolLit | IntLit | TuplePattern | EnumVariantPattern
 EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" MatchBindingList? ")" )?
+TuplePattern       ::= "(" MatchBindingList? ")"
 MatchBindingList   ::= MatchBinding ("," MatchBinding)* ","?
 MatchBinding       ::= Identifier | "_"
 

@@ -1263,30 +1263,37 @@ impl TypeChecker {
             peeled_ty = *elem_ty;
         }
         let peeled_ty = self.expand_shallow_type(&peeled_ty);
-        let (enum_name, variants) = match peeled_ty {
-            Type::Enum { name, variants } => (Some(name.clone()), variants),
-            _ => (None, Vec::new()),
-        };
         let mut arm_ty: Option<Type> = None;
 
-        self.visit_match_arms(arms, |this, arm| {
-            this.check_match_arm(arm, &enum_name, &variants, &mut arm_ty)
-        })?;
+        match &peeled_ty {
+            Type::Enum { name, variants } => {
+                let enum_name = name.clone();
+                self.visit_match_arms(arms, |this, arm| {
+                    this.check_enum_match_pattern(&enum_name, variants, &arm.pattern)?;
+                    this.check_match_arm_body(arm, &mut arm_ty)
+                })?;
+            }
+            Type::Tuple { fields } => {
+                self.visit_match_arms(arms, |this, arm| {
+                    this.check_tuple_match_pattern(fields, &arm.pattern);
+                    this.check_match_arm_body(arm, &mut arm_ty)
+                })?;
+            }
+            _ => {
+                self.visit_match_arms(arms, |this, arm| {
+                    this.check_match_arm_body(arm, &mut arm_ty)
+                })?;
+            }
+        }
 
         Ok(arm_ty.unwrap_or(Type::Unit))
     }
 
-    fn check_match_arm(
+    fn check_match_arm_body(
         &mut self,
         arm: &MatchArm,
-        enum_name: &Option<String>,
-        variants: &[EnumVariant],
         arm_ty: &mut Option<Type>,
     ) -> Result<(), TypeCheckError> {
-        if let Some(enum_name) = enum_name {
-            self.check_match_pattern(enum_name, variants, &arm.pattern)?;
-        }
-
         let body_ty = self.visit_match_arm(arm)?;
         if let Some(expected_ty) = arm_ty {
             if body_ty != *expected_ty {
@@ -1304,17 +1311,13 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn check_match_pattern(
+    fn check_enum_match_pattern(
         &mut self,
         enum_name: &String,
         variants: &[EnumVariant],
         pattern: &MatchPattern,
     ) -> Result<(), TypeCheckError> {
         match pattern {
-            MatchPattern::Wildcard { .. } => Ok(()),
-            MatchPattern::BoolLit { .. } => Ok(()),
-            MatchPattern::IntLit { .. } => Ok(()),
-
             MatchPattern::EnumVariant {
                 enum_name: pat_enum_name,
                 variant_name,
@@ -1330,45 +1333,52 @@ impl TypeChecker {
                 if let Some(variant) = variants.iter().find(|v| v.name == *variant_name) {
                     if bindings.len() == variant.payload.len() {
                         for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
-                            if let MatchPatternBinding::Named { id, .. } = binding {
-                                match self.context.def_map.lookup_def(*id) {
-                                    Some(def) => {
-                                        self.type_map_builder
-                                            .record_def_type(def.clone(), ty.clone());
-                                        self.type_map_builder.record_node_type(*id, ty.clone());
-                                    }
-                                    None => panic!(
-                                        "compiler bug: binding [{}] not found in def_map",
-                                        id
-                                    ),
-                                }
-                            }
+                            self.record_match_binding_type(binding, ty);
                         }
                     } else {
                         for binding in bindings {
-                            if let MatchPatternBinding::Named { id, .. } = binding {
-                                if let Some(def) = self.context.def_map.lookup_def(*id) {
-                                    self.type_map_builder
-                                        .record_def_type(def.clone(), Type::Unknown);
-                                    self.type_map_builder.record_node_type(*id, Type::Unknown);
-                                }
-                            }
+                            self.record_match_binding_type(binding, &Type::Unknown);
                         }
                     }
                 } else {
                     for binding in bindings {
-                        if let MatchPatternBinding::Named { id, .. } = binding {
-                            if let Some(def) = self.context.def_map.lookup_def(*id) {
-                                self.type_map_builder
-                                    .record_def_type(def.clone(), Type::Unknown);
-                                self.type_map_builder.record_node_type(*id, Type::Unknown);
-                            }
-                        }
+                        self.record_match_binding_type(binding, &Type::Unknown);
                     }
                 }
 
                 Ok(())
             }
+            _ => Ok(()),
+        }
+    }
+
+    fn check_tuple_match_pattern(&mut self, fields: &[Type], pattern: &MatchPattern) {
+        let MatchPattern::Tuple { bindings, .. } = pattern else {
+            return;
+        };
+
+        if bindings.len() == fields.len() {
+            for (binding, ty) in bindings.iter().zip(fields.iter()) {
+                self.record_match_binding_type(binding, ty);
+            }
+        } else {
+            for binding in bindings {
+                self.record_match_binding_type(binding, &Type::Unknown);
+            }
+        }
+    }
+
+    fn record_match_binding_type(&mut self, binding: &MatchPatternBinding, ty: &Type) {
+        let MatchPatternBinding::Named { id, .. } = binding else {
+            return;
+        };
+        match self.context.def_map.lookup_def(*id) {
+            Some(def) => {
+                self.type_map_builder
+                    .record_def_type(def.clone(), ty.clone());
+                self.type_map_builder.record_node_type(*id, ty.clone());
+            }
+            None => panic!("compiler bug: binding [{}] not found in def_map", id),
         }
     }
 }

@@ -424,6 +424,10 @@ pub enum MatchPattern {
         value: u64,
         span: Span,
     },
+    Tuple {
+        bindings: Vec<MatchPatternBinding>,
+        span: Span,
+    },
     EnumVariant {
         enum_name: Option<String>,
         variant_name: String,

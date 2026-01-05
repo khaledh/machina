@@ -1109,7 +1109,35 @@ impl<'a> Parser<'a> {
             });
         }
 
-        // Case 4: Enum variant (either Enum::Variant or Variant)
+        let parse_match_binding = |parser: &mut Parser| {
+            let marker = parser.mark();
+            if parser.curr_token.kind == TK::Underscore {
+                parser.advance();
+                return Ok(MatchPatternBinding::Wildcard {
+                    span: parser.close(marker),
+                });
+            }
+
+            let name = parser.parse_ident()?;
+            Ok(MatchPatternBinding::Named {
+                id: parser.id_gen.new_id(),
+                name,
+                span: parser.close(marker),
+            })
+        };
+
+        // Case 4: Tuple pattern
+        if self.curr_token.kind == TK::LParen {
+            self.advance();
+            let bindings = self.parse_list(TK::Comma, TK::RParen, parse_match_binding)?;
+            self.consume(&TK::RParen)?;
+            return Ok(MatchPattern::Tuple {
+                bindings,
+                span: self.close(marker),
+            });
+        }
+
+        // Case 5: Enum variant (either Enum::Variant or Variant)
         if !matches!(self.curr_token.kind, TK::Ident(_)) {
             return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
         }
@@ -1127,22 +1155,7 @@ impl<'a> Parser<'a> {
         let mut bindings = vec![];
         if self.curr_token.kind == TK::LParen {
             self.advance();
-            bindings = self.parse_list(TK::Comma, TK::RParen, |parser| {
-                let marker = parser.mark();
-                if parser.curr_token.kind == TK::Underscore {
-                    parser.advance();
-                    return Ok(MatchPatternBinding::Wildcard {
-                        span: parser.close(marker),
-                    });
-                }
-
-                let name = parser.parse_ident()?;
-                Ok(MatchPatternBinding::Named {
-                    id: parser.id_gen.new_id(),
-                    name,
-                    span: parser.close(marker),
-                })
-            })?;
+            bindings = self.parse_list(TK::Comma, TK::RParen, parse_match_binding)?;
             self.consume(&TK::RParen)?;
         }
 

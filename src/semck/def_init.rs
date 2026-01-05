@@ -406,12 +406,17 @@ impl<'a> DefCollector<'a> {
     }
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
-        if let MatchPattern::EnumVariant { bindings, .. } = pattern {
-            for binding in bindings {
-                if let MatchPatternBinding::Named { id, .. } = binding {
-                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
-                        self.defs.insert(def.id);
-                    }
+        let bindings = match pattern {
+            MatchPattern::EnumVariant { bindings, .. } | MatchPattern::Tuple { bindings, .. } => {
+                bindings
+            }
+            _ => return,
+        };
+
+        for binding in bindings {
+            if let MatchPatternBinding::Named { id, .. } = binding {
+                if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                    self.defs.insert(def.id);
                 }
             }
         }
@@ -522,12 +527,17 @@ impl<'a> DefSpanCollector<'a> {
     }
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
-        if let MatchPattern::EnumVariant { bindings, .. } = pattern {
-            for binding in bindings {
-                if let MatchPatternBinding::Named { id, span, .. } = binding {
-                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
-                        self.spans.entry(def.id).or_insert(*span);
-                    }
+        let bindings = match pattern {
+            MatchPattern::EnumVariant { bindings, .. } | MatchPattern::Tuple { bindings, .. } => {
+                bindings
+            }
+            _ => return,
+        };
+
+        for binding in bindings {
+            if let MatchPatternBinding::Named { id, span, .. } = binding {
+                if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                    self.spans.entry(def.id).or_insert(*span);
                 }
             }
         }
@@ -1127,12 +1137,17 @@ impl<'a> DefInitChecker<'a> {
     }
 
     fn mark_match_pattern_initialized(&mut self, init: &mut InitState, pattern: &MatchPattern) {
-        if let MatchPattern::EnumVariant { bindings, .. } = pattern {
-            for binding in bindings {
-                if let MatchPatternBinding::Named { id, .. } = binding {
-                    if let Some(def) = self.ctx.def_map.lookup_def(*id) {
-                        init.mark_full(def.id);
-                    }
+        let bindings = match pattern {
+            MatchPattern::EnumVariant { bindings, .. } | MatchPattern::Tuple { bindings, .. } => {
+                bindings
+            }
+            _ => return,
+        };
+
+        for binding in bindings {
+            if let MatchPatternBinding::Named { id, .. } = binding {
+                if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                    init.mark_full(def.id);
                 }
             }
         }

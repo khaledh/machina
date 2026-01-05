@@ -1042,6 +1042,44 @@ fn test_parse_match_expr_int_patterns() {
 }
 
 #[test]
+fn test_parse_match_expr_tuple_patterns() {
+    let source = r#"
+        fn test(t: (u64, bool)) -> u64 {
+            match t {
+                (x, _) => x,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::Match { scrutinee, arms } => {
+            match &scrutinee.kind {
+                ExprKind::Var(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected scrutinee Var"),
+            }
+            assert_eq!(arms.len(), 1);
+
+            match &arms[0].pattern {
+                MatchPattern::Tuple { bindings, .. } => {
+                    assert_eq!(bindings.len(), 2);
+                    assert!(matches!(
+                        &bindings[0],
+                        MatchPatternBinding::Named { name, .. } if name == "x"
+                    ));
+                    assert!(matches!(&bindings[1], MatchPatternBinding::Wildcard { .. }));
+                }
+                _ => panic!("Expected tuple pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
 fn test_parse_char_literal() {
     let source = r#"
         fn test() -> char {

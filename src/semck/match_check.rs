@@ -41,6 +41,7 @@ enum MatchRuleKind<'a> {
     Enum(EnumRule<'a>),
     Bool,
     Int(IntRule),
+    Tuple(TupleRule<'a>),
     Unsupported,
 }
 
@@ -53,6 +54,7 @@ impl<'a> MatchRuleKind<'a> {
                 signed: *signed,
                 bits: *bits,
             }),
+            Type::Tuple { fields } => Self::Tuple(TupleRule { fields }),
             _ => Self::Unsupported,
         }
     }
@@ -70,6 +72,7 @@ impl<'a> MatchRuleKind<'a> {
             MatchRuleKind::Enum(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Bool => check_bool_match(arms, span, errors),
             MatchRuleKind::Int(rule) => rule.check(arms, span, errors),
+            MatchRuleKind::Tuple(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Unsupported => {
                 errors.push(SemCheckError::MatchTargetNotEnum(
                     scrutinee_ty.clone(),
@@ -221,6 +224,41 @@ impl IntRule {
     }
 }
 
+struct TupleRule<'a> {
+    fields: &'a [Type],
+}
+
+impl<'a> TupleRule<'a> {
+    fn check(&self, arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckError>) {
+        if arms.len() != 1 {
+            errors.push(SemCheckError::TupleMatchRequiresSingleArm(span));
+            return;
+        }
+
+        let arm = &arms[0];
+        match &arm.pattern {
+            MatchPattern::Tuple { bindings, span } => {
+                if bindings.len() != self.fields.len() {
+                    errors.push(SemCheckError::TuplePatternArityMismatch(
+                        self.fields.len(),
+                        bindings.len(),
+                        *span,
+                    ));
+                }
+            }
+            MatchPattern::Wildcard { .. } => {}
+            _ => {
+                errors.push(SemCheckError::InvalidMatchPattern(
+                    Type::Tuple {
+                        fields: self.fields.to_vec(),
+                    },
+                    pattern_span(&arm.pattern),
+                ));
+            }
+        }
+    }
+}
+
 fn check_bool_match(arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckError>) {
     let mut saw_true = false;
     let mut saw_false = false;
@@ -264,6 +302,7 @@ fn pattern_span(pattern: &MatchPattern) -> Span {
         MatchPattern::Wildcard { span }
         | MatchPattern::BoolLit { span, .. }
         | MatchPattern::IntLit { span, .. }
+        | MatchPattern::Tuple { span, .. }
         | MatchPattern::EnumVariant { span, .. } => *span,
     }
 }

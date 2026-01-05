@@ -57,6 +57,12 @@ pub enum SemCheckError {
     #[error("Wildcard match arm must be last")]
     WildcardArmNotLast(Span),
 
+    #[error("Tuple match requires a single arm for now")]
+    TupleMatchRequiresSingleArm(Span),
+
+    #[error("Tuple pattern arity mismatch: expected {0}, found {1}")]
+    TuplePatternArityMismatch(usize, usize, Span),
+
     #[error("inout requires an aggregate parameter type, found {0}")]
     InoutParamNotAggregate(Type, Span),
 
@@ -156,6 +162,8 @@ impl SemCheckError {
             SemCheckError::DuplicateMatchVariant(_, span) => *span,
             SemCheckError::InvalidMatchPattern(_, span) => *span,
             SemCheckError::WildcardArmNotLast(span) => *span,
+            SemCheckError::TupleMatchRequiresSingleArm(span) => *span,
+            SemCheckError::TuplePatternArityMismatch(_, _, span) => *span,
             SemCheckError::InoutParamNotAggregate(_, span) => *span,
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,

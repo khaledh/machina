@@ -312,6 +312,14 @@ impl MatchPattern {
             MatchPattern::IntLit { value, .. } => {
                 writeln!(f, "{}IntLit({})", pad, value)?;
             }
+            MatchPattern::Tuple { bindings, .. } => {
+                writeln!(f, "{}Tuple", pad)?;
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Bindings:", pad1)?;
+                for binding in bindings {
+                    binding.fmt_with_indent(f, level + 2)?;
+                }
+            }
             MatchPattern::EnumVariant {
                 enum_name,
                 variant_name,
