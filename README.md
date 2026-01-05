@@ -21,49 +21,52 @@ protocol ConnectionOps {
     state Connected;
 
     // Commands (caller-initiated)
-    fn connect(self: Disconnected, addr: Address) -> Connecting;
-    fn send(self: inout Connected, data: u8[]);
-    fn disconnect(self: Connected) -> Disconnected;
+    fn open(sink self: Disconnected, addr: Address) -> Connecting;
+    fn send(inout self: Connected, data: u8[]) -> Connected;
+    fn close(sink self: Connected) -> Disconnected;
 
     // Events (environment-initiated)
-    on Established(self: Connecting) -> Connected;
-    on Received(self: inout Connected, data: u8[]);
-    on Lost(self: Connected) -> Disconnected;
+    on Established(self: Connecting, sock: Socket) -> Connected;
+    on Received(inout self: Connected, data: u8[]) -> Connected;
+    on Lost(sink self: Connected) -> Disconnected;
 }
 
-type TcpClient: ConnectionOps {
-    state Disconnected
+machine TcpClient<Net: Net>: ConnectionOps {
+    // Common fields shared by all states
+    net: Net;
+
+    state Disconnected { }
     state Connecting { addr: Address }
     state Connected { socket: Socket }
 
-    fn new() -> Disconnected {
-        Disconnected
+    fn new(net: Net) -> Disconnected {
+        Disconnected { net }
     }
 
-    fn connect(self: Disconnected, addr: Address) -> Connecting {
-        sys_connect(addr);
-        Connecting { addr }
+    fn open(sink self: Disconnected, addr: Address) -> Connecting {
+        self.net.connect(addr);
+        Connecting { net: self.net, addr }
     }
 
-    fn send(self: inout Connected, data: u8[]) {
-        sys_send(self.socket, data);
+    fn send(inout self: Connected, data: u8[]) {
+        self.net.send(self.socket, data);
     }
 
-    fn disconnect(self: Connected) -> Disconnected {
-        sys_close(self.socket);
-        Disconnected
+    fn close(sink self: Connected) -> Disconnected {
+        self.net.close(self.socket);
+        Disconnected { net: self.net }
     }
 
-    on Established(self: Connecting, socket: Socket) -> Connected {
-        Connected { socket }
+    on Established(self: Connecting, sock: Socket) -> Connected {
+        Connected { net: self.net, socket: sock }
     }
 
-    on Received(self: inout Connected, data: u8[]) {
-        // handle incoming data
+    on Received(inout self: Connected, data: u8[]) {
+        self.net.on_data(self.socket, data);
     }
 
-    on Lost(self: Connected) -> Disconnected {
-        Disconnected
+    on Lost(sink self: Connected) -> Disconnected {
+        Disconnected { net: self.net }
     }
 }
 ```
