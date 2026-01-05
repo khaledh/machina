@@ -6,6 +6,10 @@ edition = "2024"
 [[bin]]
 name = "mcc"
 path = "src/main.rs"
+test = false
+
+[lib]
+doctest = false
 
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
