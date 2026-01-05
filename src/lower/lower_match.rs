@@ -66,10 +66,11 @@ impl<'a> FuncLowerer<'a> {
         F: FnMut(&mut Self, &MatchArm) -> Result<(), LowerError>,
     {
         let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
-        let (enum_ty, deref_count) = self.peel_heap_for_match(scrutinee_ty.clone());
+        let (scrutinee_ty, deref_count) = self.peel_heap_for_match(scrutinee_ty.clone());
 
         // lower scrutinee into a temp place
-        let (discr, scrutinee_place) = self.lower_match_discr(scrutinee, &enum_ty, deref_count)?;
+        let (discr, scrutinee_place) =
+            self.lower_match_discr(scrutinee, &scrutinee_ty, deref_count)?;
         let join_bb = self.fb.new_block();
 
         let mut cases = Vec::new();
@@ -84,9 +85,15 @@ impl<'a> FuncLowerer<'a> {
             match &arm.pattern {
                 MatchPattern::Wildcard { .. } => default_bb = Some(arm_bb),
                 MatchPattern::EnumVariant { variant_name, .. } => {
-                    let tag = enum_ty.enum_variant_index(variant_name) as u64;
+                    let tag = scrutinee_ty.enum_variant_index(variant_name) as u64;
                     cases.push(SwitchCase {
                         value: tag,
+                        target: arm_bb,
+                    });
+                }
+                MatchPattern::BoolLit { value, .. } => {
+                    cases.push(SwitchCase {
+                        value: u64::from(*value),
                         target: arm_bb,
                     });
                 }
@@ -125,7 +132,7 @@ impl<'a> FuncLowerer<'a> {
             } = &arm.pattern
                 && let Some(place) = &scrutinee_place
             {
-                self.bind_match_payloads(&enum_ty, place, variant_name, bindings)?;
+                self.bind_match_payloads(&scrutinee_ty, place, variant_name, bindings)?;
             }
 
             emit_arm_body(self, arm)?;

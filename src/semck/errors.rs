@@ -51,6 +51,12 @@ pub enum SemCheckError {
     #[error("Duplicate match arm variant: {0}")]
     DuplicateMatchVariant(String, Span),
 
+    #[error("Invalid match pattern for type {0}")]
+    InvalidMatchPattern(Type, Span),
+
+    #[error("Wildcard match arm must be last")]
+    WildcardArmNotLast(Span),
+
     #[error("inout requires an aggregate parameter type, found {0}")]
     InoutParamNotAggregate(Type, Span),
 
@@ -148,6 +154,8 @@ impl SemCheckError {
             SemCheckError::MatchPatternEnumMismatch(_, _, span) => *span,
             SemCheckError::NonExhaustiveMatch(span) => *span,
             SemCheckError::DuplicateMatchVariant(_, span) => *span,
+            SemCheckError::InvalidMatchPattern(_, span) => *span,
+            SemCheckError::WildcardArmNotLast(span) => *span,
             SemCheckError::InoutParamNotAggregate(_, span) => *span,
             SemCheckError::InoutArgNotLvalue(span) => *span,
             SemCheckError::InoutArgNotMutable(span) => *span,

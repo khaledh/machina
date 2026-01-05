@@ -968,6 +968,43 @@ fn test_parse_match_expr_enum_variants() {
 }
 
 #[test]
+fn test_parse_match_expr_bool_patterns() {
+    let source = r#"
+        fn test(b: bool) -> u64 {
+            match b {
+                true => 1,
+                false => 0,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::Match { scrutinee, arms } => {
+            match &scrutinee.kind {
+                ExprKind::Var(name) => assert_eq!(name, "b"),
+                _ => panic!("Expected scrutinee Var"),
+            }
+            assert_eq!(arms.len(), 2);
+
+            match &arms[0].pattern {
+                MatchPattern::BoolLit { value, .. } => assert!(*value),
+                _ => panic!("Expected bool literal pattern in arm 0"),
+            }
+
+            match &arms[1].pattern {
+                MatchPattern::BoolLit { value, .. } => assert!(!*value),
+                _ => panic!("Expected bool literal pattern in arm 1"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
 fn test_parse_char_literal() {
     let source = r#"
         fn test() -> char {

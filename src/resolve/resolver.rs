@@ -433,6 +433,7 @@ impl SymbolResolver {
     fn check_match_pattern(&mut self, pattern: &MatchPattern, arm_id: NodeId) {
         match pattern {
             MatchPattern::Wildcard { .. } => {}
+            MatchPattern::BoolLit { .. } => {}
             MatchPattern::EnumVariant {
                 enum_name,
                 bindings,

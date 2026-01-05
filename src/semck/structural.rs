@@ -1,11 +1,12 @@
 use crate::ast::{
-    CallArg, CallArgMode, Expr, ExprKind, FunctionParam, FunctionParamMode, MatchArm, MatchPattern,
-    MethodSig, Pattern, PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr,
-    walk_func_sig, walk_method_sig, walk_stmt_expr,
+    CallArg, CallArgMode, Expr, ExprKind, FunctionParam, FunctionParamMode, MatchArm, MethodSig,
+    Pattern, PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig,
+    walk_method_sig, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefKind;
 use crate::semck::SemCheckError;
+use crate::semck::match_check;
 use crate::semck::util::lookup_call_sig;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
@@ -243,79 +244,7 @@ impl<'a> StructuralChecker<'a> {
     }
 
     fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm], span: crate::diag::Span) {
-        // Enforce match target enum shape, arm uniqueness, and exhaustiveness.
-        let Some(scrutinee_ty) = self.ctx.type_map.lookup_node_type(scrutinee.id) else {
-            return;
-        };
-        let mut peeled_ty = scrutinee_ty.clone();
-        while let Type::Heap { elem_ty } = peeled_ty {
-            peeled_ty = *elem_ty;
-        }
-
-        let Type::Enum { name, variants } = peeled_ty else {
-            self.errors.push(SemCheckError::MatchTargetNotEnum(
-                scrutinee_ty,
-                scrutinee.span,
-            ));
-            return;
-        };
-
-        let mut seen_variants = HashSet::new();
-        let mut has_wildcard = false;
-
-        for arm in arms {
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {
-                    has_wildcard = true;
-                }
-                MatchPattern::EnumVariant {
-                    enum_name: pat_enum_name,
-                    variant_name,
-                    bindings,
-                    span,
-                } => {
-                    if let Some(pat_enum_name) = pat_enum_name
-                        && pat_enum_name != &name
-                    {
-                        self.errors.push(SemCheckError::MatchPatternEnumMismatch(
-                            name.clone(),
-                            pat_enum_name.clone(),
-                            *span,
-                        ));
-                    }
-
-                    if !seen_variants.insert(variant_name.clone()) {
-                        self.errors.push(SemCheckError::DuplicateMatchVariant(
-                            variant_name.clone(),
-                            *span,
-                        ));
-                    }
-
-                    let Some(variant) = variants.iter().find(|v| v.name == *variant_name) else {
-                        self.errors.push(SemCheckError::UnknownEnumVariant(
-                            name.clone(),
-                            variant_name.clone(),
-                            *span,
-                        ));
-                        continue;
-                    };
-
-                    if bindings.len() != variant.payload.len() {
-                        self.errors
-                            .push(SemCheckError::EnumVariantPayloadArityMismatch(
-                                variant_name.clone(),
-                                variant.payload.len(),
-                                bindings.len(),
-                                *span,
-                            ));
-                    }
-                }
-            }
-        }
-
-        if !has_wildcard && seen_variants.len() != variants.len() {
-            self.errors.push(SemCheckError::NonExhaustiveMatch(span));
-        }
+        match_check::check_match(self.ctx, scrutinee, arms, span, &mut self.errors);
     }
 
     fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {

@@ -545,6 +545,92 @@ fn test_match_duplicate_variant() {
 }
 
 #[test]
+fn test_match_bool_exhaustive() {
+    let source = r#"
+        fn test(b: bool) -> u64 {
+            match b {
+                true => 1,
+                false => 0,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected match to be exhaustive");
+}
+
+#[test]
+fn test_match_bool_non_exhaustive() {
+    let source = r#"
+        fn test(b: bool) -> u64 {
+            match b {
+                true => 1,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::NonExhaustiveMatch(_) => {}
+            e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_match_bool_invalid_pattern() {
+    let source = r#"
+        fn test(b: bool) -> u64 {
+            match b {
+                Foo => 0,
+                _ => 1,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::InvalidMatchPattern(_, _) => {}
+            e => panic!("Expected InvalidMatchPattern error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_match_wildcard_not_last() {
+    let source = r#"
+        type Color = Red | Green
+
+        fn test(c: Color) -> u64 {
+            match c {
+                _ => 0,
+                Red => 1,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SemCheckError::WildcardArmNotLast(_))),
+            "Expected WildcardArmNotLast error, got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
 fn test_match_target_not_enum() {
     let source = r#"
         fn test() -> u64 {

@@ -2,6 +2,7 @@ mod ast_liveness;
 mod def_init;
 mod errors;
 mod lvalue_overlap;
+mod match_check;
 mod move_check;
 mod slice_borrow;
 mod slice_escape;

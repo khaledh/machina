@@ -416,6 +416,10 @@ pub enum MatchPattern {
     Wildcard {
         span: Span,
     },
+    BoolLit {
+        value: bool,
+        span: Span,
+    },
     EnumVariant {
         enum_name: Option<String>,
         variant_name: String,

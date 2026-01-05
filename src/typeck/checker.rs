@@ -1312,6 +1312,7 @@ impl TypeChecker {
     ) -> Result<(), TypeCheckError> {
         match pattern {
             MatchPattern::Wildcard { .. } => Ok(()),
+            MatchPattern::BoolLit { .. } => Ok(()),
 
             MatchPattern::EnumVariant {
                 enum_name: pat_enum_name,

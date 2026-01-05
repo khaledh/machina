@@ -306,6 +306,9 @@ impl MatchPattern {
             MatchPattern::Wildcard { .. } => {
                 writeln!(f, "{}Wildcard", pad)?;
             }
+            MatchPattern::BoolLit { value, .. } => {
+                writeln!(f, "{}BoolLit({})", pad, value)?;
+            }
             MatchPattern::EnumVariant {
                 enum_name,
                 variant_name,
