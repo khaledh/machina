@@ -1064,13 +1064,10 @@ fn test_parse_match_expr_tuple_patterns() {
             assert_eq!(arms.len(), 1);
 
             match &arms[0].pattern {
-                MatchPattern::Tuple { bindings, .. } => {
-                    assert_eq!(bindings.len(), 2);
-                    assert!(matches!(
-                        &bindings[0],
-                        MatchPatternBinding::Named { name, .. } if name == "x"
-                    ));
-                    assert!(matches!(&bindings[1], MatchPatternBinding::Wildcard { .. }));
+                MatchPattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 2);
+                    assert!(matches!(&patterns[0], MatchPattern::Binding { name, .. } if name == "x"));
+                    assert!(matches!(&patterns[1], MatchPattern::Wildcard { .. }));
                 }
                 _ => panic!("Expected tuple pattern"),
             }

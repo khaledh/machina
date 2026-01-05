@@ -1353,18 +1353,32 @@ impl TypeChecker {
     }
 
     fn check_tuple_match_pattern(&mut self, fields: &[Type], pattern: &MatchPattern) {
-        let MatchPattern::Tuple { bindings, .. } = pattern else {
+        let MatchPattern::Tuple { patterns, .. } = pattern else {
             return;
         };
 
-        if bindings.len() == fields.len() {
-            for (binding, ty) in bindings.iter().zip(fields.iter()) {
-                self.record_match_binding_type(binding, ty);
+        if patterns.len() == fields.len() {
+            for (pattern, ty) in patterns.iter().zip(fields.iter()) {
+                self.record_match_pattern_binding_type(pattern, ty);
             }
         } else {
-            for binding in bindings {
-                self.record_match_binding_type(binding, &Type::Unknown);
+            for pattern in patterns {
+                self.record_match_pattern_binding_type(pattern, &Type::Unknown);
             }
+        }
+    }
+
+    fn record_match_pattern_binding_type(&mut self, pattern: &MatchPattern, ty: &Type) {
+        let MatchPattern::Binding { id, .. } = pattern else {
+            return;
+        };
+        match self.context.def_map.lookup_def(*id) {
+            Some(def) => {
+                self.type_map_builder
+                    .record_def_type(def.clone(), ty.clone());
+                self.type_map_builder.record_node_type(*id, ty.clone());
+            }
+            None => panic!("compiler bug: binding [{}] not found in def_map", id),
         }
     }
 

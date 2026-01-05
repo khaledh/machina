@@ -424,8 +424,13 @@ pub enum MatchPattern {
         value: u64,
         span: Span,
     },
+    Binding {
+        id: NodeId,
+        name: String,
+        span: Span,
+    },
     Tuple {
-        bindings: Vec<MatchPatternBinding>,
+        patterns: Vec<MatchPattern>,
         span: Span,
     },
     EnumVariant {

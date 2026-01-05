@@ -406,19 +406,27 @@ impl<'a> DefCollector<'a> {
     }
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
-        let bindings = match pattern {
-            MatchPattern::EnumVariant { bindings, .. } | MatchPattern::Tuple { bindings, .. } => {
-                bindings
-            }
-            _ => return,
-        };
-
-        for binding in bindings {
-            if let MatchPatternBinding::Named { id, .. } = binding {
+        match pattern {
+            MatchPattern::Binding { id, .. } => {
                 if let Some(def) = self.ctx.def_map.lookup_def(*id) {
                     self.defs.insert(def.id);
                 }
             }
+            MatchPattern::Tuple { patterns, .. } => {
+                for pattern in patterns {
+                    self.collect_match_pattern(pattern);
+                }
+            }
+            MatchPattern::EnumVariant { bindings, .. } => {
+                for binding in bindings {
+                    if let MatchPatternBinding::Named { id, .. } = binding {
+                        if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                            self.defs.insert(def.id);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -527,19 +535,27 @@ impl<'a> DefSpanCollector<'a> {
     }
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
-        let bindings = match pattern {
-            MatchPattern::EnumVariant { bindings, .. } | MatchPattern::Tuple { bindings, .. } => {
-                bindings
-            }
-            _ => return,
-        };
-
-        for binding in bindings {
-            if let MatchPatternBinding::Named { id, span, .. } = binding {
+        match pattern {
+            MatchPattern::Binding { id, span, .. } => {
                 if let Some(def) = self.ctx.def_map.lookup_def(*id) {
                     self.spans.entry(def.id).or_insert(*span);
                 }
             }
+            MatchPattern::Tuple { patterns, .. } => {
+                for pattern in patterns {
+                    self.collect_match_pattern(pattern);
+                }
+            }
+            MatchPattern::EnumVariant { bindings, .. } => {
+                for binding in bindings {
+                    if let MatchPatternBinding::Named { id, span, .. } = binding {
+                        if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                            self.spans.entry(def.id).or_insert(*span);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1137,19 +1153,27 @@ impl<'a> DefInitChecker<'a> {
     }
 
     fn mark_match_pattern_initialized(&mut self, init: &mut InitState, pattern: &MatchPattern) {
-        let bindings = match pattern {
-            MatchPattern::EnumVariant { bindings, .. } | MatchPattern::Tuple { bindings, .. } => {
-                bindings
-            }
-            _ => return,
-        };
-
-        for binding in bindings {
-            if let MatchPatternBinding::Named { id, .. } = binding {
+        match pattern {
+            MatchPattern::Binding { id, .. } => {
                 if let Some(def) = self.ctx.def_map.lookup_def(*id) {
                     init.mark_full(def.id);
                 }
             }
+            MatchPattern::Tuple { patterns, .. } => {
+                for pattern in patterns {
+                    self.mark_match_pattern_initialized(init, pattern);
+                }
+            }
+            MatchPattern::EnumVariant { bindings, .. } => {
+                for binding in bindings {
+                    if let MatchPatternBinding::Named { id, .. } = binding {
+                        if let Some(def) = self.ctx.def_map.lookup_def(*id) {
+                            init.mark_full(def.id);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

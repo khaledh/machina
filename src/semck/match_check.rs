@@ -237,13 +237,24 @@ impl<'a> TupleRule<'a> {
 
         let arm = &arms[0];
         match &arm.pattern {
-            MatchPattern::Tuple { bindings, span } => {
-                if bindings.len() != self.fields.len() {
+            MatchPattern::Tuple { patterns, span } => {
+                if patterns.len() != self.fields.len() {
                     errors.push(SemCheckError::TuplePatternArityMismatch(
                         self.fields.len(),
-                        bindings.len(),
+                        patterns.len(),
                         *span,
                     ));
+                }
+                for pattern in patterns {
+                    match pattern {
+                        MatchPattern::Binding { .. } | MatchPattern::Wildcard { .. } => {}
+                        _ => errors.push(SemCheckError::InvalidMatchPattern(
+                            Type::Tuple {
+                                fields: self.fields.to_vec(),
+                            },
+                            pattern_span(pattern),
+                        )),
+                    }
                 }
             }
             MatchPattern::Wildcard { .. } => {}
@@ -302,6 +313,7 @@ fn pattern_span(pattern: &MatchPattern) -> Span {
         MatchPattern::Wildcard { span }
         | MatchPattern::BoolLit { span, .. }
         | MatchPattern::IntLit { span, .. }
+        | MatchPattern::Binding { span, .. }
         | MatchPattern::Tuple { span, .. }
         | MatchPattern::EnumVariant { span, .. } => *span,
     }

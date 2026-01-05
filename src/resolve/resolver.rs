@@ -435,7 +435,14 @@ impl SymbolResolver {
             MatchPattern::Wildcard { .. } => {}
             MatchPattern::BoolLit { .. } => {}
             MatchPattern::IntLit { .. } => {}
-            MatchPattern::Tuple { bindings, .. } => self.bind_match_bindings(bindings),
+            MatchPattern::Binding { id, name, span } => {
+                self.bind_match_binding(*id, name, *span);
+            }
+            MatchPattern::Tuple { patterns, .. } => {
+                for pattern in patterns {
+                    self.check_match_pattern(pattern, arm_id);
+                }
+            }
             MatchPattern::EnumVariant {
                 enum_name,
                 bindings,
@@ -467,29 +474,33 @@ impl SymbolResolver {
     fn bind_match_bindings(&mut self, bindings: &[MatchPatternBinding]) {
         for binding in bindings {
             if let MatchPatternBinding::Named { id, name, span } = binding {
-                let def_id = self.def_id_gen.new_id();
-                let def = Def {
-                    id: def_id,
-                    name: name.clone(),
-                    kind: DefKind::LocalVar {
-                        nrvo_eligible: false,
-                        is_mutable: false,
-                    },
-                };
-                self.def_map_builder.record_def(def, *id);
-                self.insert_symbol(
-                    name,
-                    Symbol {
-                        name: name.clone(),
-                        kind: SymbolKind::Var {
-                            def_id,
-                            is_mutable: false,
-                        },
-                    },
-                    *span,
-                );
+                self.bind_match_binding(*id, name, *span);
             }
         }
+    }
+
+    fn bind_match_binding(&mut self, id: NodeId, name: &str, span: Span) {
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: name.to_string(),
+            kind: DefKind::LocalVar {
+                nrvo_eligible: false,
+                is_mutable: false,
+            },
+        };
+        self.def_map_builder.record_def(def, id);
+        self.insert_symbol(
+            name,
+            Symbol {
+                name: name.to_string(),
+                kind: SymbolKind::Var {
+                    def_id,
+                    is_mutable: false,
+                },
+            },
+            span,
+        );
     }
 
     fn check_method_block_type(&mut self, method_block: &MethodBlock) {

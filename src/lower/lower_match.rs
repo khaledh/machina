@@ -122,6 +122,9 @@ impl<'a> FuncLowerer<'a> {
                         target: arm_bb,
                     });
                 }
+                MatchPattern::Binding { .. } => {
+                    return Err(LowerError::PatternMismatch(arm.id));
+                }
                 MatchPattern::Tuple { .. } => {
                     return Err(LowerError::PatternMismatch(arm.id));
                 }
@@ -210,8 +213,8 @@ impl<'a> FuncLowerer<'a> {
             return Err(LowerError::ExprIsNotAggregate(scrutinee.id));
         };
 
-        if let MatchPattern::Tuple { bindings, .. } = &arm.pattern {
-            self.bind_match_tuple_fields(&scrutinee_ty, &place, bindings, arm.id)?;
+        if let MatchPattern::Tuple { patterns, .. } = &arm.pattern {
+            self.bind_match_tuple_fields(&scrutinee_ty, &place, patterns, arm.id)?;
         }
 
         emit_arm_body(self, arm)
@@ -348,27 +351,29 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         scrutinee_ty: &Type,
         scrutinee_place: &Place<Aggregate>,
-        bindings: &[MatchPatternBinding],
+        patterns: &[MatchPattern],
         arm_id: NodeId,
     ) -> Result<(), LowerError> {
-        if bindings.is_empty() {
+        if patterns.is_empty() {
             return Ok(());
         }
 
         let Type::Tuple { fields } = scrutinee_ty else {
             return Err(LowerError::PatternMismatch(arm_id));
         };
-        if bindings.len() != fields.len() {
+        if patterns.len() != fields.len() {
             return Err(LowerError::PatternMismatch(arm_id));
         }
 
-        for (index, (binding, field_ty)) in bindings.iter().zip(fields.iter()).enumerate() {
-            let MatchPatternBinding::Named { id, name, .. } = binding else {
-                continue;
+        for (index, (pattern, field_ty)) in patterns.iter().zip(fields.iter()).enumerate() {
+            let (id, name) = match pattern {
+                MatchPattern::Binding { id, name, .. } => (*id, name),
+                MatchPattern::Wildcard { .. } => continue,
+                _ => return Err(LowerError::PatternMismatch(arm_id)),
             };
 
             let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
-            let def_id = self.def_for_node(*id)?.id;
+            let def_id = self.def_for_node(id)?.id;
             let local_id = self.ensure_local_for_def(def_id, field_ty_id, Some(name.clone()));
 
             let field_place =

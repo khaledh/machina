@@ -1109,6 +1109,35 @@ impl<'a> Parser<'a> {
             });
         }
 
+        // Case 4: Tuple pattern
+        if self.curr_token.kind == TK::LParen {
+            self.advance();
+            let parse_tuple_pattern_elem = |parser: &mut Parser| {
+                let marker = parser.mark();
+                if parser.curr_token.kind == TK::Underscore {
+                    parser.advance();
+                    return Ok(MatchPattern::Wildcard {
+                        span: parser.close(marker),
+                    });
+                }
+
+                let name = parser.parse_ident()?;
+                Ok(MatchPattern::Binding {
+                    id: parser.id_gen.new_id(),
+                    name,
+                    span: parser.close(marker),
+                })
+            };
+
+            let patterns =
+                self.parse_list(TK::Comma, TK::RParen, parse_tuple_pattern_elem)?;
+            self.consume(&TK::RParen)?;
+            return Ok(MatchPattern::Tuple {
+                patterns,
+                span: self.close(marker),
+            });
+        }
+
         let parse_match_binding = |parser: &mut Parser| {
             let marker = parser.mark();
             if parser.curr_token.kind == TK::Underscore {
@@ -1125,17 +1154,6 @@ impl<'a> Parser<'a> {
                 span: parser.close(marker),
             })
         };
-
-        // Case 4: Tuple pattern
-        if self.curr_token.kind == TK::LParen {
-            self.advance();
-            let bindings = self.parse_list(TK::Comma, TK::RParen, parse_match_binding)?;
-            self.consume(&TK::RParen)?;
-            return Ok(MatchPattern::Tuple {
-                bindings,
-                span: self.close(marker),
-            });
-        }
 
         // Case 5: Enum variant (either Enum::Variant or Variant)
         if !matches!(self.curr_token.kind, TK::Ident(_)) {
