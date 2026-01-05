@@ -80,6 +80,45 @@ foundational features: expression-oriented syntax, algebraic data types, pattern
 matching, and mutable value semantics—building blocks for the stateful
 abstractions to come.
 
+## Example
+
+```
+type Counter = { total: u64, last: u64 }
+type Event = Add(u64) | Reset
+
+Counter :: {
+    fn add(inout self, value: u64) {
+        self.total = self.total + value;
+        self.last = value;
+    }
+
+    fn reset(inout self) {
+        self.total = 0;
+        self.last = 0;
+    }
+
+    fn snapshot(self) -> (u64, u64) {
+        (self.total, self.last)
+    }
+}
+
+fn main() -> u64 {
+    let events = [Event::Add(2), Event::Add(3), Event::Reset, Event::Add(5)];
+    var counter = Counter { total: 0, last: 0 };
+
+    for ev in events {
+        match ev {
+            Event::Add(n) => counter.add(n),
+            Event::Reset => counter.reset(),
+        }
+    }
+
+    let (total, last) = counter.snapshot();
+    println(f"total={total}, last={last}");
+    total
+}
+```
+
 ### Features
 
 - Mutable value semantics
@@ -138,6 +177,12 @@ abstractions to come.
 - Range expressions are bounds-checked at runtime (compile time for constant
   ranges)
 
+**Ownership**
+- `^T` dynamically allocates a value of type `T` and returns an owning handle
+- The owner must move (`move`) when transferring ownership
+- Owned values are dropped automatically when they go out of scope
+- Access fields/indexes directly (`p.x`, `arr[i]`); deref is implicit
+
 ### Control flow
 
 - `if`/`else`
@@ -154,12 +199,16 @@ abstractions to come.
 
 ### Functions
 
-- `fn foo(arg: arg_type, ...) -> return_type { body }`
-- `inout` parameters for aggregate types (args must be mutable lvalues)
-- `fn foo(arg: arg_type, ...) -> return_type;` declares an external function
-- Recursion
-- Pass and return by value (optimized where possible)
-- Function overloading
+- Function definitions: `fn foo(arg: arg_type, ...) -> return_type { body }`
+- External declarations: `fn foo(arg: arg_type, ...) -> return_type;`
+- Overloading and recursion
+- Pass/return by value (optimized where possible)
+
+**Parameter modes**
+- default (no keyword): immutable borrow of the argument
+- `inout`: mutable borrow (arg must be a mutable lvalue)
+- `out`: write-only parameter; callee must fully initialize it
+- `sink`: ownership transfer to the callee (caller must use `move`)
 
 ### Code generation
 
@@ -170,69 +219,6 @@ abstractions to come.
 - Division by zero
 - Index out of bounds
 - Value out of range
-
-## Example
-
-```
-// Type Alias
-type Coord = u64
-
-type Shade = Light | Dark
-
-// Enum
-type Color = Red(Shade) | Green(u64) | Blue(u64, Shade, bool)
-
-// Struct
-type Point = {
-  x: Coord,
-  y: Coord,
-  color: Color,
-}
-
-fn main() {
-    // Struct literals
-    let a = Point { x: 10, y: 20, color: Color::Red(Shade::Light) };
-    let b = Point { x: 5, y: 40, color: Color::Blue(20, Shade::Dark, true) };
-
-    // Function calls (pass and return by value)
-    // (Optimized to pass by reference and RVO/NRVO internally)
-    let c = scale(a, 2, 3);
-    let d = change_color(b, Color::Blue(20, Shade::Dark, false));
-
-    // Tuple destructuring
-    let (dx, dy) = delta(c, d);
-
-    if is_blue(d) {
-        println(42);
-    } else {
-        println(21);
-    }
-}
-
-fn scale(p: Point, dx: u64, dy: u64) -> Point {
-    // Struct destructuring
-    let Point { x, y, color } = p;
-
-    // Struct update (creates a new struct value)
-    { p | x: x * dx, y: y * dy }
-}
-
-fn change_color(p: Point, color: Color) -> Point {
-    { p | color: color }
-}
-
-fn is_blue(p: Point) -> bool {
-   // pattern matching on enum
-    match p.color {
-        Color::Blue(val, shade, b) => true,
-        _ => false,
-    }
-}
-
-fn delta(p1: Point, p2: Point) -> (u64, u64) {
-    (p2.x - p1.x, p2.y - p1.y)
-}
-```
 
 ## Compiling and running
 
