@@ -457,28 +457,30 @@ impl SymbolResolver {
 
                 // Bind each binding's sub-pattern
                 for binding in bindings {
-                    // Create a new def
-                    let def_id = self.def_id_gen.new_id();
-                    let def = Def {
-                        id: def_id,
-                        name: binding.name.clone(),
-                        kind: DefKind::LocalVar {
-                            nrvo_eligible: false,
-                            is_mutable: false,
-                        },
-                    };
-                    self.def_map_builder.record_def(def, binding.id);
-                    self.insert_symbol(
-                        &binding.name,
-                        Symbol {
-                            name: binding.name.clone(),
-                            kind: SymbolKind::Var {
-                                def_id,
+                    if let MatchPatternBinding::Named { id, name, span } = binding {
+                        // Create a new def
+                        let def_id = self.def_id_gen.new_id();
+                        let def = Def {
+                            id: def_id,
+                            name: name.clone(),
+                            kind: DefKind::LocalVar {
+                                nrvo_eligible: false,
                                 is_mutable: false,
                             },
-                        },
-                        binding.span,
-                    );
+                        };
+                        self.def_map_builder.record_def(def, *id);
+                        self.insert_symbol(
+                            name,
+                            Symbol {
+                                name: name.clone(),
+                                kind: SymbolKind::Var {
+                                    def_id,
+                                    is_mutable: false,
+                                },
+                            },
+                            *span,
+                        );
+                    }
                 }
             }
         }

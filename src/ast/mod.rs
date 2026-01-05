@@ -425,10 +425,15 @@ pub enum MatchPattern {
 }
 
 #[derive(Clone, Debug)]
-pub struct MatchPatternBinding {
-    pub id: NodeId,
-    pub name: String,
-    pub span: Span,
+pub enum MatchPatternBinding {
+    Named {
+        id: NodeId,
+        name: String,
+        span: Span,
+    },
+    Wildcard {
+        span: Span,
+    },
 }
 
 // --- Blocks ---

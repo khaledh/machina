@@ -92,8 +92,9 @@ If                 ::= "if" Expr Block ( "else" Block )?
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr
 MatchPattern       ::= "_" | EnumVariantPattern
-EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" IdentList? ")" )?
-IdentList          ::= Identifier ("," Identifier)* ","?
+EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" MatchBindingList? ")" )?
+MatchBindingList   ::= MatchBinding ("," MatchBinding)* ","?
+MatchBinding       ::= Identifier | "_"
 
 # Operator Precedence (Lowest to Highest)
 # 0. Logical OR (||)

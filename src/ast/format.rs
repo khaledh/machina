@@ -331,7 +331,14 @@ impl MatchPattern {
 impl MatchPatternBinding {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
-        writeln!(f, "{}{}: [{}]", pad1, self.name, self.id)?;
+        match self {
+            MatchPatternBinding::Named { id, name, .. } => {
+                writeln!(f, "{}{}: [{}]", pad1, name, id)?;
+            }
+            MatchPatternBinding::Wildcard { .. } => {
+                writeln!(f, "{}_", pad1)?;
+            }
+        }
         Ok(())
     }
 }

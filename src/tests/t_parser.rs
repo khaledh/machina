@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::{
-    ArrayLitInit, BlockItem, Expr, ExprKind, Function, MatchPattern, Module, PatternKind, StmtExpr,
-    StmtExprKind, TypeDeclKind, TypeExprKind,
+    ArrayLitInit, BlockItem, Expr, ExprKind, Function, MatchPattern, MatchPatternBinding, Module,
+    PatternKind, StmtExpr, StmtExprKind, TypeDeclKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -909,7 +909,7 @@ fn test_parse_match_expr_enum_variants() {
 
         fn test(c: Color) -> u64 {
             match c {
-                Red(x,) => x,
+                Red(_) => 0,
                 Color::Blue(y,) => y,
                 _ => 0,
             }
@@ -938,7 +938,7 @@ fn test_parse_match_expr_enum_variants() {
                     assert!(enum_name.is_none());
                     assert_eq!(variant_name, "Red");
                     assert_eq!(bindings.len(), 1);
-                    assert_eq!(bindings[0].name, "x");
+                    assert!(matches!(&bindings[0], MatchPatternBinding::Wildcard { .. }));
                 }
                 _ => panic!("Expected enum variant pattern in arm 0"),
             }
@@ -953,7 +953,10 @@ fn test_parse_match_expr_enum_variants() {
                     assert_eq!(enum_name.as_deref(), Some("Color"));
                     assert_eq!(variant_name, "Blue");
                     assert_eq!(bindings.len(), 1);
-                    assert_eq!(bindings[0].name, "y");
+                    assert!(matches!(
+                        &bindings[0],
+                        MatchPatternBinding::Named { name, .. } if name == "y"
+                    ));
                 }
                 _ => panic!("Expected enum variant pattern in arm 1"),
             }

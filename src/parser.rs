@@ -1107,8 +1107,15 @@ impl<'a> Parser<'a> {
             self.advance();
             bindings = self.parse_list(TK::Comma, TK::RParen, |parser| {
                 let marker = parser.mark();
+                if parser.curr_token.kind == TK::Underscore {
+                    parser.advance();
+                    return Ok(MatchPatternBinding::Wildcard {
+                        span: parser.close(marker),
+                    });
+                }
+
                 let name = parser.parse_ident()?;
-                Ok(MatchPatternBinding {
+                Ok(MatchPatternBinding::Named {
                     id: parser.id_gen.new_id(),
                     name,
                     span: parser.close(marker),

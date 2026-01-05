@@ -31,7 +31,6 @@ fn main() {
         match ev {
             Event::Add(n) => counter.add(n),
             Event::Reset => counter.reset(),
-            _ => {}
         }
     }
 

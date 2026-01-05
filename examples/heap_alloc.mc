@@ -24,7 +24,6 @@ fn main() -> u64 {
     match boxed.msg {
         Msg::Ping(n) => println(f"Ping({n})"),
         Msg::Pong(n) => println(f"Pong({n})"),
-        _ => println(0),
     };
 
     let t = ^(10, 20);
@@ -40,7 +39,6 @@ fn main() -> u64 {
     match msg {
         Msg::Ping(n) => println(f"Ping({n})"),
         Msg::Pong(n) => println(f"Pong({n})"),
-        _ => println(0),
     };
 
     0

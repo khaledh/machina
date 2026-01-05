@@ -484,7 +484,6 @@ fn test_match_non_exhaustive() {
         fn test(c: Color) -> u64 {
             match c {
                 Red => 0,
-                Green => 1,
             }
         }
     "#;
@@ -499,6 +498,22 @@ fn test_match_non_exhaustive() {
             e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
         }
     }
+}
+
+#[test]
+fn test_match_exhaustive_without_wildcard() {
+    let source = r#"
+        type Color = Red | Green
+
+        fn test(c: Color) -> u64 {
+            match c {
+                Red => 0,
+                Green => 1,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected match to be exhaustive");
 }
 
 #[test]

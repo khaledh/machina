@@ -6,7 +6,6 @@ fn sum(list: Link) -> u64 {
     match list {
         Link::None => 0,
         Link::Some(n) => n.value + sum(n.next),
-        _ => 0,
     }
 }
 

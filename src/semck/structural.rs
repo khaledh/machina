@@ -313,7 +313,7 @@ impl<'a> StructuralChecker<'a> {
             }
         }
 
-        if !has_wildcard {
+        if !has_wildcard && seen_variants.len() != variants.len() {
             self.errors.push(SemCheckError::NonExhaustiveMatch(span));
         }
     }

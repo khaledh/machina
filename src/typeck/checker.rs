@@ -1328,36 +1328,39 @@ impl TypeChecker {
                 if let Some(variant) = variants.iter().find(|v| v.name == *variant_name) {
                     if bindings.len() == variant.payload.len() {
                         for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
-                            match self.context.def_map.lookup_def(binding.id) {
-                                Some(def) => {
-                                    self.type_map_builder
-                                        .record_def_type(def.clone(), ty.clone());
-                                    self.type_map_builder
-                                        .record_node_type(binding.id, ty.clone());
+                            if let MatchPatternBinding::Named { id, .. } = binding {
+                                match self.context.def_map.lookup_def(*id) {
+                                    Some(def) => {
+                                        self.type_map_builder
+                                            .record_def_type(def.clone(), ty.clone());
+                                        self.type_map_builder.record_node_type(*id, ty.clone());
+                                    }
+                                    None => panic!(
+                                        "compiler bug: binding [{}] not found in def_map",
+                                        id
+                                    ),
                                 }
-                                None => panic!(
-                                    "compiler bug: binding [{}] not found in def_map",
-                                    binding.id
-                                ),
                             }
                         }
                     } else {
                         for binding in bindings {
-                            if let Some(def) = self.context.def_map.lookup_def(binding.id) {
-                                self.type_map_builder
-                                    .record_def_type(def.clone(), Type::Unknown);
-                                self.type_map_builder
-                                    .record_node_type(binding.id, Type::Unknown);
+                            if let MatchPatternBinding::Named { id, .. } = binding {
+                                if let Some(def) = self.context.def_map.lookup_def(*id) {
+                                    self.type_map_builder
+                                        .record_def_type(def.clone(), Type::Unknown);
+                                    self.type_map_builder.record_node_type(*id, Type::Unknown);
+                                }
                             }
                         }
                     }
                 } else {
                     for binding in bindings {
-                        if let Some(def) = self.context.def_map.lookup_def(binding.id) {
-                            self.type_map_builder
-                                .record_def_type(def.clone(), Type::Unknown);
-                            self.type_map_builder
-                                .record_node_type(binding.id, Type::Unknown);
+                        if let MatchPatternBinding::Named { id, .. } = binding {
+                            if let Some(def) = self.context.def_map.lookup_def(*id) {
+                                self.type_map_builder
+                                    .record_def_type(def.clone(), Type::Unknown);
+                                self.type_map_builder.record_node_type(*id, Type::Unknown);
+                            }
                         }
                     }
                 }

@@ -93,7 +93,16 @@ impl<'a> FuncLowerer<'a> {
             }
         }
 
-        let default_bb = default_bb.expect("compiler bug: missing default arm");
+        let default_bb = match default_bb {
+            Some(bb) => bb,
+            None => {
+                // Matches can be exhaustive without an explicit wildcard arm.
+                // Use an unreachable default to satisfy the switch terminator.
+                let bb = self.fb.new_block();
+                self.fb.set_terminator(bb, Terminator::Unreachable);
+                bb
+            }
+        };
 
         // set switch terminator
         self.fb.set_terminator(
@@ -224,19 +233,22 @@ impl<'a> FuncLowerer<'a> {
 
         let offsets = scrutinee_ty.enum_variant_payload_offsets(variant_name);
 
-        for ((binding, payload_ty), offset) in bindings
-            .iter()
-            .zip(variant.payload.iter())
-            .zip(offsets.iter())
+        for (index, (binding, payload_ty)) in
+            bindings.iter().zip(variant.payload.iter()).enumerate()
         {
+            let MatchPatternBinding::Named { id, name, .. } = binding else {
+                continue;
+            };
+
             let payload_ty_id = self.ty_lowerer.lower_ty(payload_ty);
-            let def_id = self.def_for_node(binding.id)?.id;
-            let local_id =
-                self.ensure_local_for_def(def_id, payload_ty_id, Some(binding.name.clone()));
+            let def_id = self.def_for_node(*id)?.id;
+            let local_id = self.ensure_local_for_def(def_id, payload_ty_id, Some(name.clone()));
 
             let mut projs = scrutinee_place.projections().to_vec();
             projs.push(Projection::Field { index: 1 });
-            projs.push(Projection::ByteOffset { offset: *offset });
+            projs.push(Projection::ByteOffset {
+                offset: offsets[index],
+            });
 
             if self.is_scalar(payload_ty_id) {
                 let dst = Place::new(local_id, payload_ty_id, vec![]);
