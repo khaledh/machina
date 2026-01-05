@@ -420,6 +420,10 @@ pub enum MatchPattern {
         value: bool,
         span: Span,
     },
+    IntLit {
+        value: u64,
+        span: Span,
+    },
     EnumVariant {
         enum_name: Option<String>,
         variant_name: String,

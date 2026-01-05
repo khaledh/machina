@@ -604,6 +604,89 @@ fn test_match_bool_invalid_pattern() {
 }
 
 #[test]
+fn test_match_int_exhaustive() {
+    let source = r#"
+        fn test(x: u64) -> u64 {
+            match x {
+                0 => 1,
+                _ => 2,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected match to be exhaustive");
+}
+
+#[test]
+fn test_match_int_non_exhaustive() {
+    let source = r#"
+        fn test(x: u64) -> u64 {
+            match x {
+                0 => 1,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::NonExhaustiveMatch(_) => {}
+            e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_match_int_invalid_pattern() {
+    let source = r#"
+        fn test(x: u64) -> u64 {
+            match x {
+                true => 1,
+                _ => 2,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::InvalidMatchPattern(_, _) => {}
+            e => panic!("Expected InvalidMatchPattern error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_match_int_duplicate_literal() {
+    let source = r#"
+        fn test(x: u64) -> u64 {
+            match x {
+                1 => 1,
+                1 => 2,
+                _ => 3,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::DuplicateMatchVariant(_, _) => {}
+            e => panic!("Expected DuplicateMatchVariant error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_match_wildcard_not_last() {
     let source = r#"
         type Color = Red | Green
@@ -634,7 +717,7 @@ fn test_match_wildcard_not_last() {
 fn test_match_target_not_enum() {
     let source = r#"
         fn test() -> u64 {
-            match 1 {
+            match "hi" {
                 _ => 0,
             }
         }
@@ -647,7 +730,7 @@ fn test_match_target_not_enum() {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
             SemCheckError::MatchTargetNotEnum(ty, _) => {
-                assert_eq!(*ty, Type::uint(64));
+                assert_eq!(*ty, Type::String);
             }
             e => panic!("Expected MatchTargetNotEnum error, got {:?}", e),
         }

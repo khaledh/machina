@@ -48,17 +48,32 @@ pub(crate) fn build_live_intervals(body: &FuncBody, live_map: &LiveMap) -> LiveI
             inst_idx += 1;
         }
 
-        if let Terminator::If { cond, .. } = &block.terminator {
-            let mut uses = HashSet::new();
-            collect_operand_uses(cond, &mut uses, &alias_map);
-            for u in uses {
-                map.entry(u)
-                    .and_modify(|iv| iv.end = inst_idx + 1)
-                    .or_insert(LiveInterval {
-                        start: inst_idx,
-                        end: inst_idx + 1,
-                    });
+        match &block.terminator {
+            Terminator::If { cond, .. } => {
+                let mut uses = HashSet::new();
+                collect_operand_uses(cond, &mut uses, &alias_map);
+                for u in uses {
+                    map.entry(u)
+                        .and_modify(|iv| iv.end = inst_idx + 1)
+                        .or_insert(LiveInterval {
+                            start: inst_idx,
+                            end: inst_idx + 1,
+                        });
+                }
             }
+            Terminator::Switch { discr, .. } => {
+                let mut uses = HashSet::new();
+                collect_operand_uses(discr, &mut uses, &alias_map);
+                for u in uses {
+                    map.entry(u)
+                        .and_modify(|iv| iv.end = inst_idx + 1)
+                        .or_insert(LiveInterval {
+                            start: inst_idx,
+                            end: inst_idx + 1,
+                        });
+                }
+            }
+            _ => {}
         }
         if matches!(block.terminator, Terminator::Return) {
             // Treat the return value as used at the terminator so its interval

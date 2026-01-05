@@ -40,6 +40,7 @@ pub(super) fn check_match(
 enum MatchRuleKind<'a> {
     Enum(EnumRule<'a>),
     Bool,
+    Int(IntRule),
     Unsupported,
 }
 
@@ -48,6 +49,10 @@ impl<'a> MatchRuleKind<'a> {
         match ty {
             Type::Enum { name, variants } => Self::Enum(EnumRule { name, variants }),
             Type::Bool => Self::Bool,
+            Type::Int { signed, bits } => Self::Int(IntRule {
+                signed: *signed,
+                bits: *bits,
+            }),
             _ => Self::Unsupported,
         }
     }
@@ -64,6 +69,7 @@ impl<'a> MatchRuleKind<'a> {
         match self {
             MatchRuleKind::Enum(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Bool => check_bool_match(arms, span, errors),
+            MatchRuleKind::Int(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Unsupported => {
                 errors.push(SemCheckError::MatchTargetNotEnum(
                     scrutinee_ty.clone(),
@@ -149,6 +155,72 @@ impl<'a> EnumRule<'a> {
     }
 }
 
+struct IntRule {
+    signed: bool,
+    bits: u8,
+}
+
+impl IntRule {
+    fn check(&self, arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckError>) {
+        let mut seen = HashSet::new();
+        let mut has_wildcard = false;
+        let max_value = self.max_value();
+
+        for arm in arms {
+            match &arm.pattern {
+                MatchPattern::Wildcard { .. } => {
+                    has_wildcard = true;
+                }
+                MatchPattern::IntLit { value, span } => {
+                    if *value > max_value {
+                        errors.push(SemCheckError::ValueOutOfRange(
+                            *value as i128,
+                            0,
+                            (max_value as i128) + 1,
+                            *span,
+                        ));
+                        continue;
+                    }
+
+                    if !seen.insert(*value) {
+                        errors.push(SemCheckError::DuplicateMatchVariant(
+                            value.to_string(),
+                            *span,
+                        ));
+                    }
+                }
+                _ => {
+                    errors.push(SemCheckError::InvalidMatchPattern(
+                        Type::Int {
+                            signed: self.signed,
+                            bits: self.bits,
+                        },
+                        pattern_span(&arm.pattern),
+                    ));
+                }
+            }
+        }
+
+        if !has_wildcard {
+            errors.push(SemCheckError::NonExhaustiveMatch(span));
+        }
+    }
+
+    fn max_value(&self) -> u64 {
+        if self.signed {
+            if self.bits >= 64 {
+                i64::MAX as u64
+            } else {
+                (1u64 << (self.bits - 1)) - 1
+            }
+        } else if self.bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.bits) - 1
+        }
+    }
+}
+
 fn check_bool_match(arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckError>) {
     let mut saw_true = false;
     let mut saw_false = false;
@@ -191,6 +263,7 @@ fn pattern_span(pattern: &MatchPattern) -> Span {
     match pattern {
         MatchPattern::Wildcard { span }
         | MatchPattern::BoolLit { span, .. }
+        | MatchPattern::IntLit { span, .. }
         | MatchPattern::EnumVariant { span, .. } => *span,
     }
 }

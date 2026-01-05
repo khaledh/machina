@@ -1313,6 +1313,7 @@ impl TypeChecker {
         match pattern {
             MatchPattern::Wildcard { .. } => Ok(()),
             MatchPattern::BoolLit { .. } => Ok(()),
+            MatchPattern::IntLit { .. } => Ok(()),
 
             MatchPattern::EnumVariant {
                 enum_name: pat_enum_name,

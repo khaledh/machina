@@ -309,6 +309,9 @@ impl MatchPattern {
             MatchPattern::BoolLit { value, .. } => {
                 writeln!(f, "{}BoolLit({})", pad, value)?;
             }
+            MatchPattern::IntLit { value, .. } => {
+                writeln!(f, "{}IntLit({})", pad, value)?;
+            }
             MatchPattern::EnumVariant {
                 enum_name,
                 variant_name,

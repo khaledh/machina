@@ -1005,6 +1005,43 @@ fn test_parse_match_expr_bool_patterns() {
 }
 
 #[test]
+fn test_parse_match_expr_int_patterns() {
+    let source = r#"
+        fn test(x: u64) -> u64 {
+            match x {
+                0 => 1,
+                42 => 2,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::Match { scrutinee, arms } => {
+            match &scrutinee.kind {
+                ExprKind::Var(name) => assert_eq!(name, "x"),
+                _ => panic!("Expected scrutinee Var"),
+            }
+            assert_eq!(arms.len(), 2);
+
+            match &arms[0].pattern {
+                MatchPattern::IntLit { value, .. } => assert_eq!(*value, 0),
+                _ => panic!("Expected int literal pattern in arm 0"),
+            }
+
+            match &arms[1].pattern {
+                MatchPattern::IntLit { value, .. } => assert_eq!(*value, 42),
+                _ => panic!("Expected int literal pattern in arm 1"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
 fn test_parse_char_literal() {
     let source = r#"
         fn test() -> char {

@@ -97,6 +97,12 @@ impl<'a> FuncLowerer<'a> {
                         target: arm_bb,
                     });
                 }
+                MatchPattern::IntLit { value, .. } => {
+                    cases.push(SwitchCase {
+                        value: *value,
+                        target: arm_bb,
+                    });
+                }
             }
         }
 

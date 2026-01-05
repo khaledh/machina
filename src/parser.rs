@@ -1099,7 +1099,17 @@ impl<'a> Parser<'a> {
             });
         }
 
-        // Case 2: Enum variant (either Enum::Variant or Variant)
+        // Case 3: Integer literal
+        if let TK::IntLit(value) = &self.curr_token.kind {
+            let value = *value;
+            self.advance();
+            return Ok(MatchPattern::IntLit {
+                value,
+                span: self.close(marker),
+            });
+        }
+
+        // Case 4: Enum variant (either Enum::Variant or Variant)
         if !matches!(self.curr_token.kind, TK::Ident(_)) {
             return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
         }

@@ -434,6 +434,7 @@ impl SymbolResolver {
         match pattern {
             MatchPattern::Wildcard { .. } => {}
             MatchPattern::BoolLit { .. } => {}
+            MatchPattern::IntLit { .. } => {}
             MatchPattern::EnumVariant {
                 enum_name,
                 bindings,
