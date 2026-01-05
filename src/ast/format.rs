@@ -9,6 +9,7 @@ impl fmt::Display for Module {
                 Decl::TypeDecl(type_decl) => type_decl.fmt_with_indent(f, 0)?,
                 Decl::Function(func) => func.fmt_with_indent(f, 0)?,
                 Decl::FunctionDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
+                Decl::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
             }
             if i + 1 != self.decls.len() {
                 writeln!(f, "--------------------------------")?;
@@ -142,6 +143,43 @@ impl Function {
         writeln!(f, "{}Function [{}]", pad, self.id)?;
         self.sig.fmt_with_indent(f, level + 1)?;
         self.body.fmt_with_indent(f, level + 1)
+    }
+}
+
+impl MethodBlock {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}MethodBlock [{}]", pad, self.id)?;
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Type: {}", pad1, self.type_name)?;
+        writeln!(f, "{}Methods:", pad1)?;
+        for method in &self.methods {
+            method.fmt_with_indent(f, level + 2)?;
+        }
+        Ok(())
+    }
+}
+
+impl Method {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}Method [{}]", pad, self.id)?;
+        self.sig.fmt_with_indent(f, level + 1)?;
+        self.body.fmt_with_indent(f, level + 1)
+    }
+}
+
+impl MethodSig {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}Name: {}", pad, self.name)?;
+        writeln!(f, "{}Self Mode: {:?}", pad, self.self_param.mode)?;
+        writeln!(f, "{}Return Type: {}", pad, self.return_type)?;
+        writeln!(f, "{}Params:", pad)?;
+        for param in &self.params {
+            writeln!(f, "{}{}", indent(level + 2), param)?;
+        }
+        Ok(())
     }
 }
 
@@ -446,6 +484,19 @@ impl Expr {
                 target.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}Field: {}", pad1, field)?;
             }
+            ExprKind::MethodCall {
+                target,
+                method,
+                args,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}MethodCall [{}]", pad, self.id)?;
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Method: {}", pad1, method)?;
+                writeln!(f, "{}Args:", pad1)?;
+                self.fmt_call_args(f, level + 2, args)?;
+            }
             ExprKind::EnumVariant {
                 enum_name,
                 variant,
@@ -531,26 +582,7 @@ impl Expr {
                 writeln!(f, "{}Call: [{}]", pad, self.id)?;
                 name.fmt_with_indent(f, level + 1)?;
                 writeln!(f, "{}Args:", pad1)?;
-                for arg in args {
-                    let pad2 = indent(level + 2);
-                    match arg.mode {
-                        CallArgMode::Default => {
-                            arg.expr.fmt_with_indent(f, level + 2)?;
-                        }
-                        CallArgMode::Inout => {
-                            writeln!(f, "{}InoutArg:", pad2)?;
-                            arg.expr.fmt_with_indent(f, level + 3)?;
-                        }
-                        CallArgMode::Out => {
-                            writeln!(f, "{}OutArg:", pad2)?;
-                            arg.expr.fmt_with_indent(f, level + 3)?;
-                        }
-                        CallArgMode::Move => {
-                            writeln!(f, "{}MoveArg:", pad2)?;
-                            arg.expr.fmt_with_indent(f, level + 3)?;
-                        }
-                    }
-                }
+                self.fmt_call_args(f, level + 2, args)?;
             }
             ExprKind::Match { scrutinee, arms } => {
                 let pad1 = indent(level + 1);
@@ -590,6 +622,35 @@ impl Expr {
                 writeln!(f, "{}StringFmt [{}]", pad, self.id)?;
                 for segment in segments {
                     segment.fmt_with_indent(f, level + 1)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn fmt_call_args(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        level: usize,
+        args: &[CallArg],
+    ) -> fmt::Result {
+        for arg in args {
+            let pad = indent(level);
+            match arg.mode {
+                CallArgMode::Default => {
+                    arg.expr.fmt_with_indent(f, level)?;
+                }
+                CallArgMode::Inout => {
+                    writeln!(f, "{}InoutArg:", pad)?;
+                    arg.expr.fmt_with_indent(f, level + 1)?;
+                }
+                CallArgMode::Out => {
+                    writeln!(f, "{}OutArg:", pad)?;
+                    arg.expr.fmt_with_indent(f, level + 1)?;
+                }
+                CallArgMode::Move => {
+                    writeln!(f, "{}MoveArg:", pad)?;
+                    arg.expr.fmt_with_indent(f, level + 1)?;
                 }
             }
         }

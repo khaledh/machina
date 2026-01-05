@@ -81,6 +81,9 @@ pub enum SemCheckError {
     #[error("out argument provided for non-out parameter")]
     OutArgUnexpected(Span),
 
+    #[error("out self is not allowed")]
+    OutSelfNotAllowed(Span),
+
     #[error("out parameter `{0}` is not initialized on all paths")]
     OutParamNotInitialized(String, Span),
 
@@ -155,6 +158,7 @@ impl SemCheckError {
             SemCheckError::OutArgNotMutable(span) => *span,
             SemCheckError::OutArgMissingMode(span) => *span,
             SemCheckError::OutArgUnexpected(span) => *span,
+            SemCheckError::OutSelfNotAllowed(span) => *span,
             SemCheckError::OutParamNotInitialized(_, span) => *span,
             SemCheckError::SinkArgMissingMove(span) => *span,
             SemCheckError::MoveArgUnexpected(span) => *span,

@@ -1,4 +1,4 @@
-use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, FunctionParamMode, FunctionSig};
+use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, FunctionParamMode};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -45,6 +45,31 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    pub(super) fn lower_method_call_expr(
+        &mut self,
+        call: &Expr,
+        target: &Expr,
+        args: &[CallArg],
+    ) -> Result<ExprValue, LowerError> {
+        let self_mode = self
+            .lookup_call_param_modes(call)
+            .and_then(|modes| modes.first().cloned());
+        let self_arg_mode = match self_mode {
+            Some(FunctionParamMode::Sink) => CallArgMode::Move,
+            _ => CallArgMode::Default,
+        };
+
+        let mut call_args = Vec::with_capacity(args.len() + 1);
+        call_args.push(CallArg {
+            mode: self_arg_mode,
+            expr: target.clone(),
+            span: target.span,
+        });
+        call_args.extend(args.iter().cloned());
+
+        self.lower_call_expr(call, target, &call_args)
+    }
+
     /// Lower a call into the given destination place.
     pub(super) fn lower_call_into(
         &mut self,
@@ -76,12 +101,7 @@ impl<'a> FuncLowerer<'a> {
         }
 
         let mut out_args = Vec::new();
-        let param_modes = self.lookup_call_sig(call).map(|sig| {
-            sig.params
-                .iter()
-                .map(|p| p.mode.clone())
-                .collect::<Vec<_>>()
-        });
+        let param_modes = self.lookup_call_param_modes(call);
         let arg_vals = if let Some(param_modes) = param_modes {
             let mut vals = Vec::with_capacity(args.len());
             for (mode, arg) in param_modes.iter().zip(args) {
@@ -155,18 +175,29 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn lookup_call_sig(&self, call: &Expr) -> Option<&FunctionSig> {
+    fn lookup_call_param_modes(&self, call: &Expr) -> Option<Vec<FunctionParamMode>> {
         let def_id = self.ctx.type_map.lookup_call_def(call.id)?;
-        for func in self.ctx.module.funcs() {
-            let def = self.ctx.def_map.lookup_def(func.id)?;
-            if def.id == def_id {
-                return Some(&func.sig);
+        for callable in self.ctx.module.callables() {
+            let def = self.ctx.def_map.lookup_def(callable.id())?;
+            if def.id != def_id {
+                continue;
             }
+            return match callable {
+                crate::ast::CallableRef::Function(func) => {
+                    Some(func.sig.params.iter().map(|p| p.mode.clone()).collect())
+                }
+                crate::ast::CallableRef::Method { method, .. } => {
+                    let mut modes = Vec::with_capacity(method.sig.params.len() + 1);
+                    modes.push(method.sig.self_param.mode.clone());
+                    modes.extend(method.sig.params.iter().map(|p| p.mode.clone()));
+                    Some(modes)
+                }
+            };
         }
         for decl in self.ctx.module.func_decls() {
             let def = self.ctx.def_map.lookup_def(decl.id)?;
             if def.id == def_id {
-                return Some(&decl.sig);
+                return Some(decl.sig.params.iter().map(|p| p.mode.clone()).collect());
             }
         }
         None

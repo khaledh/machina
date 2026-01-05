@@ -1,6 +1,7 @@
 use crate::ast::{
-    CallArgMode, Expr, ExprKind, FunctionParamMode, MatchArm, MatchPattern, Pattern, PatternKind,
-    StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig, walk_stmt_expr,
+    CallArg, CallArgMode, Expr, ExprKind, FunctionParam, FunctionParamMode, MatchArm, MatchPattern,
+    MethodSig, Pattern, PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr,
+    walk_func_sig, walk_method_sig, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefKind;
@@ -183,6 +184,30 @@ impl<'a> StructuralChecker<'a> {
         }
     }
 
+    fn check_param_modes(&mut self, params: &[FunctionParam]) {
+        for param in params {
+            if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
+                if param.mode == FunctionParamMode::Inout && !(ty.is_compound() || ty.is_heap()) {
+                    // Only aggregate or heap types can be inout parameters.
+                    self.errors.push(SemCheckError::InoutParamNotAggregate(
+                        ty.clone(),
+                        param.span,
+                    ));
+                }
+                if param.mode == FunctionParamMode::Out && !ty.is_compound() {
+                    // Only aggregate types can be out parameters (for now).
+                    self.errors
+                        .push(SemCheckError::OutParamNotAggregate(ty.clone(), param.span));
+                }
+                if param.mode == FunctionParamMode::Sink && !ty.needs_drop() {
+                    // Sink params are meant only for heap types.
+                    self.errors
+                        .push(SemCheckError::SinkParamNotOwned(ty, param.span));
+                }
+            }
+        }
+    }
+
     fn check_enum_variant(
         &mut self,
         enum_name: &str,
@@ -328,32 +353,97 @@ impl<'a> StructuralChecker<'a> {
             _ => false,
         }
     }
+
+    fn check_call_arg_modes(&mut self, sig: &crate::semck::util::CallSig<'_>, args: &[CallArg]) {
+        for (param, arg) in sig.params().iter().zip(args) {
+            let arg_mode = arg.mode;
+            let arg_expr = &arg.expr;
+            match param.mode {
+                FunctionParamMode::In => match arg_mode {
+                    CallArgMode::Default => {}
+                    CallArgMode::Inout => {
+                        self.errors
+                            .push(SemCheckError::InoutArgUnexpected(arg.span));
+                    }
+                    CallArgMode::Out => {
+                        self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                    }
+                    CallArgMode::Move => {
+                        self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                    }
+                },
+                FunctionParamMode::Inout => match arg_mode {
+                    CallArgMode::Inout => {
+                        let err = match self.is_mutable_lvalue(arg_expr) {
+                            Some(true) => continue,
+                            Some(false) => SemCheckError::InoutArgNotMutable(arg.span),
+                            None => SemCheckError::InoutArgNotLvalue(arg.span),
+                        };
+                        self.errors.push(err);
+                    }
+                    CallArgMode::Default => {
+                        self.errors
+                            .push(SemCheckError::InoutArgMissingMode(arg.span));
+                    }
+                    CallArgMode::Out => {
+                        self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                    }
+                    CallArgMode::Move => {
+                        self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                    }
+                },
+                FunctionParamMode::Out => match arg_mode {
+                    CallArgMode::Out => {
+                        let err = match self.is_mutable_lvalue(arg_expr) {
+                            Some(true) => continue,
+                            Some(false) => SemCheckError::OutArgNotMutable(arg.span),
+                            None => SemCheckError::OutArgNotLvalue(arg.span),
+                        };
+                        self.errors.push(err);
+                    }
+                    CallArgMode::Default => {
+                        self.errors.push(SemCheckError::OutArgMissingMode(arg.span));
+                    }
+                    CallArgMode::Inout => {
+                        self.errors
+                            .push(SemCheckError::InoutArgUnexpected(arg.span));
+                    }
+                    CallArgMode::Move => {
+                        self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                    }
+                },
+                FunctionParamMode::Sink => match arg_mode {
+                    CallArgMode::Move => {}
+                    CallArgMode::Default => {
+                        self.errors
+                            .push(SemCheckError::SinkArgMissingMove(arg.span));
+                    }
+                    CallArgMode::Inout => {
+                        self.errors
+                            .push(SemCheckError::InoutArgUnexpected(arg.span));
+                    }
+                    CallArgMode::Out => {
+                        self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                    }
+                },
+            }
+        }
+    }
 }
 
 impl Visitor for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &crate::ast::FunctionSig) {
-        for param in &func_sig.params {
-            if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
-                if param.mode == FunctionParamMode::Inout && !(ty.is_compound() || ty.is_heap()) {
-                    // Only aggregate or heap types can be inout parameters.
-                    self.errors.push(SemCheckError::InoutParamNotAggregate(
-                        ty.clone(),
-                        param.span,
-                    ));
-                }
-                if param.mode == FunctionParamMode::Out && !ty.is_compound() {
-                    // Only aggregate types can be out parameters (for now).
-                    self.errors
-                        .push(SemCheckError::OutParamNotAggregate(ty.clone(), param.span));
-                }
-                if param.mode == FunctionParamMode::Sink && !ty.needs_drop() {
-                    // Sink params are meant only for heap types.
-                    self.errors
-                        .push(SemCheckError::SinkParamNotOwned(ty, param.span));
-                }
-            }
-        }
+        self.check_param_modes(&func_sig.params);
         walk_func_sig(self, func_sig);
+    }
+
+    fn visit_method_sig(&mut self, method_sig: &MethodSig) {
+        if method_sig.self_param.mode == FunctionParamMode::Out {
+            self.errors
+                .push(SemCheckError::OutSelfNotAllowed(method_sig.self_param.span));
+        }
+        self.check_param_modes(&method_sig.params);
+        walk_method_sig(self, method_sig);
     }
 
     fn visit_stmt_expr(&mut self, stmt: &crate::ast::StmtExpr) {
@@ -418,81 +508,37 @@ impl Visitor for StructuralChecker<'_> {
 
                 // Validate call-site argument modes and lvalue requirements.
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
-                    for (param, arg) in sig.params.iter().zip(args) {
-                        let arg_mode = arg.mode;
-                        let arg_expr = &arg.expr;
-                        match param.mode {
-                            FunctionParamMode::In => match arg_mode {
-                                CallArgMode::Default => {}
-                                CallArgMode::Inout => {
-                                    self.errors
-                                        .push(SemCheckError::InoutArgUnexpected(arg.span));
-                                }
-                                CallArgMode::Out => {
-                                    self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
-                                }
-                                CallArgMode::Move => {
-                                    self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
-                                }
-                            },
-                            FunctionParamMode::Inout => match arg_mode {
-                                CallArgMode::Inout => {
-                                    let err = match self.is_mutable_lvalue(arg_expr) {
-                                        Some(true) => continue,
-                                        Some(false) => SemCheckError::InoutArgNotMutable(arg.span),
-                                        None => SemCheckError::InoutArgNotLvalue(arg.span),
-                                    };
-                                    self.errors.push(err);
-                                }
-                                CallArgMode::Default => {
-                                    self.errors
-                                        .push(SemCheckError::InoutArgMissingMode(arg.span));
-                                }
-                                CallArgMode::Out => {
-                                    self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
-                                }
-                                CallArgMode::Move => {
-                                    self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
-                                }
-                            },
-                            FunctionParamMode::Out => match arg_mode {
-                                CallArgMode::Out => {
-                                    let err = match self.is_mutable_lvalue(arg_expr) {
-                                        Some(true) => continue,
-                                        Some(false) => SemCheckError::OutArgNotMutable(arg.span),
-                                        None => SemCheckError::OutArgNotLvalue(arg.span),
-                                    };
-                                    self.errors.push(err);
-                                }
-                                CallArgMode::Default => {
-                                    self.errors.push(SemCheckError::OutArgMissingMode(arg.span));
-                                }
-                                CallArgMode::Inout => {
-                                    self.errors
-                                        .push(SemCheckError::InoutArgUnexpected(arg.span));
-                                }
-                                CallArgMode::Move => {
-                                    self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
-                                }
-                            },
-                            FunctionParamMode::Sink => match arg_mode {
-                                CallArgMode::Move => {}
-                                CallArgMode::Default => {
-                                    self.errors
-                                        .push(SemCheckError::SinkArgMissingMove(arg.span));
-                                }
-                                CallArgMode::Inout => {
-                                    self.errors
-                                        .push(SemCheckError::InoutArgUnexpected(arg.span));
-                                }
-                                CallArgMode::Out => {
-                                    self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
-                                }
-                            },
-                        }
-                    }
+                    self.check_call_arg_modes(&sig, args);
                 }
                 self.visit_expr(callee);
+                for arg in args {
+                    self.visit_expr(&arg.expr);
+                }
+                return;
+            }
+            ExprKind::MethodCall { target, args, .. } => {
+                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                    if let Some(self_mode) = sig.self_mode() {
+                        match self_mode {
+                            FunctionParamMode::In => {}
+                            FunctionParamMode::Inout | FunctionParamMode::Out => {
+                                let err = match self.is_mutable_lvalue(target) {
+                                    Some(true) => None,
+                                    Some(false) => {
+                                        Some(SemCheckError::InoutArgNotMutable(expr.span))
+                                    }
+                                    None => Some(SemCheckError::InoutArgNotLvalue(expr.span)),
+                                };
+                                if let Some(err) = err {
+                                    self.errors.push(err);
+                                }
+                            }
+                            FunctionParamMode::Sink => {}
+                        }
+                    }
+                    self.check_call_arg_modes(&sig, args);
+                }
+                self.visit_expr(target);
                 for arg in args {
                     self.visit_expr(&arg.expr);
                 }

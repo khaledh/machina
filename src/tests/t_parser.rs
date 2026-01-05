@@ -678,6 +678,41 @@ fn test_parse_tuple_field_access_chained() {
 }
 
 #[test]
+fn test_parse_method_call() {
+    let source = r#"
+        fn test() -> u64 {
+            let p = 1;
+            p.sum(2, 3)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 1);
+
+    let tail = tail.expect("Expected block to have a tail expr");
+    if let ExprKind::MethodCall {
+        target,
+        method,
+        args,
+    } = &tail.kind
+    {
+        match &target.kind {
+            ExprKind::Var(name) => assert_eq!(name, "p"),
+            _ => panic!("Expected Var target"),
+        }
+        assert_eq!(method, "sum");
+        assert_eq!(args.len(), 2);
+        assert!(matches!(args[0].expr.kind, ExprKind::IntLit(2)));
+        assert!(matches!(args[1].expr.kind, ExprKind::IntLit(3)));
+    } else {
+        panic!("Expected MethodCall");
+    }
+}
+
+#[test]
 fn test_parse_tuple_with_array_indexing() {
     let source = r#"
         fn test() -> u64 {

@@ -404,25 +404,60 @@ impl<'a> Visitor for MoveVisitor<'a> {
                 self.visit_expr(callee);
                 // Check args based on param mode: in/inout borrow, sink consumes.
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
-                    for (param, arg) in sig.params.iter().zip(args) {
+                    for (param, arg) in sig.params().iter().zip(args) {
                         let arg_expr = &arg.expr;
                         match param.mode {
                             FunctionParamMode::In | FunctionParamMode::Inout => {
-                                // Borrowed: no move required for heap args.
                                 self.with_borrow_context(|this| this.visit_expr(arg_expr));
                             }
                             FunctionParamMode::Out => {
-                                // Out args are write-only: allow reinit after move.
                                 self.visit_out_arg(arg_expr);
                             }
                             FunctionParamMode::Sink => {
-                                // Owned: explicit move required at call-site.
                                 self.handle_move_target(arg_expr);
                             }
                         }
                     }
                 } else {
-                    // Unknown signature: check all args normally.
+                    for arg in args {
+                        self.visit_expr(&arg.expr);
+                    }
+                }
+            }
+            ExprKind::MethodCall { target, args, .. } => {
+                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                    if let Some(self_mode) = sig.self_mode() {
+                        match self_mode {
+                            FunctionParamMode::In | FunctionParamMode::Inout => {
+                                self.with_borrow_context(|this| this.visit_expr(target));
+                            }
+                            FunctionParamMode::Out => {
+                                self.visit_out_arg(target);
+                            }
+                            FunctionParamMode::Sink => {
+                                self.handle_move_target(target);
+                            }
+                        }
+                    } else {
+                        self.visit_expr(target);
+                    }
+
+                    for (param, arg) in sig.params().iter().zip(args) {
+                        let arg_expr = &arg.expr;
+                        match param.mode {
+                            FunctionParamMode::In | FunctionParamMode::Inout => {
+                                self.with_borrow_context(|this| this.visit_expr(arg_expr));
+                            }
+                            FunctionParamMode::Out => {
+                                self.visit_out_arg(arg_expr);
+                            }
+                            FunctionParamMode::Sink => {
+                                self.handle_move_target(arg_expr);
+                            }
+                        }
+                    }
+                } else {
+                    self.visit_expr(target);
                     for arg in args {
                         self.visit_expr(&arg.expr);
                     }

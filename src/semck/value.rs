@@ -252,9 +252,9 @@ impl Visitor for ValueChecker<'_> {
             } => {
                 self.check_type_expr(elem_ty);
             }
-            ExprKind::Call { args, .. } => {
+            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
                 let param_tys = lookup_call_sig(expr, self.ctx).map(|sig| {
-                    sig.params
+                    sig.params()
                         .iter()
                         .map(|param| self.resolve_type(&param.typ))
                         .collect::<Vec<_>>()

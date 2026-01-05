@@ -22,6 +22,9 @@ pub enum ParseError {
     #[error("Expected identifier, found: {0}")]
     ExpectedIdent(Token),
 
+    #[error("Expected self, found: {0}")]
+    ExpectedSelf(Token),
+
     #[error("Expected type, found: {0}")]
     ExpectedType(Token),
 
@@ -69,6 +72,7 @@ impl ParseError {
             ParseError::ExpectedToken(_, token) => token.span,
             ParseError::ExpectedKeyword(_, token) => token.span,
             ParseError::ExpectedIdent(token) => token.span,
+            ParseError::ExpectedSelf(token) => token.span,
             ParseError::ExpectedType(token) => token.span,
             ParseError::ExpectedPrimary(token) => token.span,
             ParseError::ExpectedIntLit(token) => token.span,
@@ -139,6 +143,9 @@ impl<'a> Parser<'a> {
         match &self.curr_token.kind {
             TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeDecl),
             TK::Ident(name) if name == "fn" => self.parse_func(),
+            TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
+                self.parse_method_block()
+            }
             _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }
     }
@@ -438,17 +445,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RParen)?;
 
         // Parse return type (default to unit if not specified)
-        let return_type = match self.curr_token.kind {
-            TK::Arrow => {
-                self.advance();
-                self.parse_type_expr()?
-            }
-            _ => TypeExpr {
-                id: self.id_gen.new_id(),
-                kind: TypeExprKind::Named("()".to_string()),
-                span: self.close(self.mark()),
-            },
-        };
+        let return_type = self.parse_return_type()?;
 
         Ok(FunctionSig {
             name,
@@ -458,41 +455,55 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_return_type(&mut self) -> Result<TypeExpr, ParseError> {
+        Ok(match self.curr_token.kind {
+            TK::Arrow => {
+                self.advance();
+                self.parse_type_expr()?
+            }
+            _ => TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Named("()".to_string()),
+                span: self.close(self.mark()),
+            },
+        })
+    }
+
     fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParseError> {
         self.parse_list(TK::Comma, TK::RParen, |parser| {
-            let marker = parser.mark();
-
-            // Parse an optional param mode
-            let mode = if matches!(&parser.curr_token.kind, TK::Ident(name) if name == "inout") {
-                parser.advance();
-                FunctionParamMode::Inout
-            } else if matches!(&parser.curr_token.kind, TK::Ident(name) if name == "sink") {
-                parser.advance();
-                FunctionParamMode::Sink
-            } else if matches!(&parser.curr_token.kind, TK::Ident(name) if name == "out") {
-                parser.advance();
-                FunctionParamMode::Out
-            } else {
-                FunctionParamMode::In
-            };
-
-            // Parse parameter name
-            let name = parser.parse_ident()?;
-
-            // Expect ':'
-            parser.consume(&TK::Colon)?;
-
-            // Parse parameter type
-            let typ = parser.parse_type_expr()?;
-
-            Ok(FunctionParam {
-                id: parser.id_gen.new_id(),
-                name,
-                typ,
-                mode,
-                span: parser.close(marker),
-            })
+            parser.parse_function_param()
         })
+    }
+
+    fn parse_function_param(&mut self) -> Result<FunctionParam, ParseError> {
+        let marker = self.mark();
+        let mode = self.parse_param_mode();
+        let name = self.parse_ident()?;
+        self.consume(&TK::Colon)?;
+        let typ = self.parse_type_expr()?;
+
+        Ok(FunctionParam {
+            id: self.id_gen.new_id(),
+            name,
+            typ,
+            mode,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_param_mode(&mut self) -> FunctionParamMode {
+        if matches!(&self.curr_token.kind, TK::Ident(name) if name == "inout") {
+            self.advance();
+            FunctionParamMode::Inout
+        } else if matches!(&self.curr_token.kind, TK::Ident(name) if name == "sink") {
+            self.advance();
+            FunctionParamMode::Sink
+        } else if matches!(&self.curr_token.kind, TK::Ident(name) if name == "out") {
+            self.advance();
+            FunctionParamMode::Out
+        } else {
+            FunctionParamMode::In
+        }
     }
 
     fn parse_func(&mut self) -> Result<Decl, ParseError> {
@@ -519,6 +530,78 @@ impl<'a> Parser<'a> {
                 span: self.close(marker),
             }))
         }
+    }
+
+    // --- Methods ---
+
+    fn parse_method_block(&mut self) -> Result<Decl, ParseError> {
+        let marker = self.mark();
+        let type_name = self.parse_ident()?;
+        self.consume(&TK::DoubleColon)?;
+        self.consume(&TK::LBrace)?;
+
+        let mut methods = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            methods.push(self.parse_method()?);
+        }
+        self.consume(&TK::RBrace)?;
+
+        Ok(Decl::MethodBlock(MethodBlock {
+            id: self.id_gen.new_id(),
+            type_name,
+            methods,
+            span: self.close(marker),
+        }))
+    }
+
+    fn parse_method(&mut self) -> Result<Method, ParseError> {
+        let marker = self.mark();
+        let sig = self.parse_method_sig()?;
+        let body = self.parse_block()?;
+
+        Ok(Method {
+            id: self.id_gen.new_id(),
+            sig,
+            body,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_method_sig(&mut self) -> Result<MethodSig, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword("fn")?;
+        let name = self.parse_ident()?;
+        self.consume(&TK::LParen)?;
+
+        let self_marker = self.mark();
+        let self_mode = self.parse_param_mode();
+        if !matches!(&self.curr_token.kind, TK::Ident(name) if name == "self") {
+            return Err(ParseError::ExpectedSelf(self.curr_token.clone()));
+        }
+        self.advance(); // consume self
+        let self_param = SelfParam {
+            id: self.id_gen.new_id(),
+            mode: self_mode,
+            span: self.close(self_marker),
+        };
+
+        let params = if self.curr_token.kind == TK::Comma {
+            self.advance();
+            self.parse_func_params()?
+        } else {
+            Vec::new()
+        };
+
+        self.consume(&TK::RParen)?;
+        let return_type = self.parse_return_type()?;
+
+        Ok(MethodSig {
+            name,
+            self_param,
+            params,
+            return_type,
+            span: self.close(marker),
+        })
     }
 
     // --- Blocks / Statement Expressions ---
@@ -1649,16 +1732,35 @@ impl<'a> Parser<'a> {
                             };
                         }
                         TK::Ident(name) => {
-                            // Struct field access: .name
+                            // Struct field access or method call: .name / .name(...)
                             self.advance();
-                            expr = Expr {
-                                id: self.id_gen.new_id(),
-                                kind: ExprKind::StructField {
-                                    target: Box::new(expr),
-                                    field: name.clone(),
-                                },
-                                span: self.close(marker.clone()),
-                            };
+                            if self.curr_token.kind == TK::LParen {
+                                // Method call
+                                self.advance();
+                                let args = self.parse_list(TK::Comma, TK::RParen, |parser| {
+                                    parser.parse_call_arg()
+                                })?;
+                                self.consume(&TK::RParen)?;
+                                expr = Expr {
+                                    id: self.id_gen.new_id(),
+                                    kind: ExprKind::MethodCall {
+                                        target: Box::new(expr),
+                                        method: name.clone(),
+                                        args,
+                                    },
+                                    span: self.close(marker.clone()),
+                                };
+                            } else {
+                                // Struct field
+                                expr = Expr {
+                                    id: self.id_gen.new_id(),
+                                    kind: ExprKind::StructField {
+                                        target: Box::new(expr),
+                                        field: name.clone(),
+                                    },
+                                    span: self.close(marker.clone()),
+                                };
+                            }
                         }
                         _ => return Err(ParseError::ExpectedStructField(self.curr_token.clone())),
                     }

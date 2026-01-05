@@ -201,6 +201,7 @@ fn main() -> u64 {
 
 - Function definitions: `fn foo(arg: arg_type, ...) -> return_type { body }`
 - External declarations: `fn foo(arg: arg_type, ...) -> return_type;`
+- Methods via method blocks: `Type :: { fn name(self, ...) { ... } }`
 - Overloading and recursion
 - Pass/return by value (optimized where possible)
 

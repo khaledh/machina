@@ -79,6 +79,35 @@ impl SymbolResolver {
         }
     }
 
+    fn register_param(
+        &mut self,
+        name: &str,
+        mode: FunctionParamMode,
+        id: NodeId,
+        span: Span,
+        index: u32,
+    ) {
+        let is_mutable = matches!(
+            mode,
+            FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
+        );
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: name.to_string(),
+            kind: DefKind::Param { index, is_mutable },
+        };
+        self.def_map_builder.record_def(def, id);
+        self.insert_symbol(
+            name,
+            Symbol {
+                name: name.to_string(),
+                kind: SymbolKind::Var { def_id, is_mutable },
+            },
+            span,
+        );
+    }
+
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.defs.get(name) {
@@ -454,6 +483,25 @@ impl SymbolResolver {
             }
         }
     }
+
+    fn check_method_block_type(&mut self, method_block: &MethodBlock) {
+        match self.lookup_symbol(&method_block.type_name) {
+            Some(symbol) => match &symbol.kind {
+                SymbolKind::TypeAlias { .. }
+                | SymbolKind::StructDef { .. }
+                | SymbolKind::EnumDef { .. } => {}
+                other => self.errors.push(ResolveError::ExpectedType(
+                    method_block.type_name.clone(),
+                    other.clone(),
+                    method_block.span,
+                )),
+            },
+            None => self.errors.push(ResolveError::TypeUndefined(
+                method_block.type_name.clone(),
+                method_block.span,
+            )),
+        }
+    }
 }
 
 impl Visitor for SymbolResolver {
@@ -491,31 +539,62 @@ impl Visitor for SymbolResolver {
 
         self.with_scope(|resolver| {
             for (index, param) in func.sig.params.iter().enumerate() {
-                let is_mutable = matches!(
-                    param.mode,
-                    FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
-                );
-                let def_id = resolver.def_id_gen.new_id();
-                let def = Def {
-                    id: def_id,
-                    name: param.name.clone(),
-                    kind: DefKind::Param {
-                        index: index as u32,
-                        is_mutable,
-                    },
-                };
-                resolver.def_map_builder.record_def(def, param.id);
-                resolver.insert_symbol(
+                resolver.register_param(
                     &param.name,
-                    Symbol {
-                        name: param.name.clone(),
-                        kind: SymbolKind::Var { def_id, is_mutable },
-                    },
+                    param.mode.clone(),
+                    param.id,
                     param.span,
+                    index as u32,
                 );
             }
 
             resolver.visit_expr(&func.body);
+        });
+    }
+
+    fn visit_method_block(&mut self, method_block: &MethodBlock) {
+        self.check_method_block_type(method_block);
+        walk_method_block(self, method_block);
+    }
+
+    fn visit_method(&mut self, method: &Method) {
+        self.visit_type_expr(&method.sig.return_type);
+        for param in &method.sig.params {
+            self.visit_type_expr(&param.typ);
+        }
+
+        // Record a def for the method itself (no global symbol yet).
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: method.sig.name.clone(),
+            kind: DefKind::Func,
+        };
+        self.def_map_builder.record_def(def, method.id);
+
+        // Enter a new scope for the method parameters and body.
+        self.with_scope(|resolver| {
+            resolver.register_param(
+                "self",
+                method.sig.self_param.mode.clone(),
+                method.sig.self_param.id,
+                method.sig.self_param.span,
+                0,
+            );
+
+            // Record defs for the method parameters.
+            for (index, param) in method.sig.params.iter().enumerate() {
+                resolver.register_param(
+                    &param.name,
+                    param.mode.clone(),
+                    param.id,
+                    param.span,
+                    index as u32 + 1,
+                );
+            }
+
+            // Visit the method body.
+            resolver.visit_expr(&method.body);
         });
     }
 
@@ -706,6 +785,13 @@ impl Visitor for SymbolResolver {
                     callee.span,
                 )),
             },
+
+            ExprKind::MethodCall { target, args, .. } => {
+                self.visit_expr(target);
+                for arg in args {
+                    self.visit_expr(&arg.expr);
+                }
+            }
 
             _ => walk_expr(self, expr),
         }

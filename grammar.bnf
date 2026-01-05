@@ -3,7 +3,7 @@
 # Top-level
 Module             ::= Decl*
 
-Decl               ::= TypeDecl | FunctionDecl | Function
+Decl               ::= TypeDecl | FunctionDecl | Function | MethodBlock
 
 # Type Declarations
 TypeDecl           ::= "type" Identifier "=" TypeDeclBody
@@ -36,13 +36,19 @@ IntLitList         ::= IntLit ("," IntLit)* ","?
 
 # Functions
 FunctionSig        ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )?
+FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
+FunctionParam      ::= FunctionParamMode? Identifier ":" TypeExpr
+FunctionParamMode  ::= "inout" | "out" | "sink"
 
 FunctionDecl       ::= FunctionSig ";"
 
 Function           ::= FunctionSig Block
-FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
-FunctionParam      ::= FunctionParamMode? Identifier ":" TypeExpr
-FunctionParamMode  ::= "inout" | "out" | "sink"
+
+# Methods
+MethodBlock        ::= Identifier "::" "{" Method* "}"
+Method             ::= MethodSig Block
+MethodSig          ::= "fn" Identifier "(" SelfParam ("," FunctionParamList)? ")" ( "->" TypeExpr )?
+SelfParam          ::= FunctionParamMode? "self"
 
 # Blocks
 Block              ::= "{" BlockItem* (Expr ";"?)? "}"
@@ -117,7 +123,7 @@ UnaryExpr          ::= ( "-" | "!" | "~" | "^" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange | TupleField | StructField )*
+PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange | TupleField | StructField | MethodCall )*
 
 Call               ::= "(" CallArgList? ")"
 CallArgList        ::= CallArg ("," CallArg)* ","?
@@ -127,6 +133,7 @@ ArrayIndex         ::= "[" ExprList "]"
 SliceRange         ::= "[" Expr? ".." Expr? "]"
 TupleField         ::= "." IntLit
 StructField        ::= "." Identifier
+MethodCall         ::= "." Identifier "(" CallArgList? ")"
 
 Primary            ::= Literal
                      | Identifier

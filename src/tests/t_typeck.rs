@@ -524,6 +524,128 @@ fn test_struct_update_invalid_target() {
 }
 
 #[test]
+fn test_method_block_basic() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn sum(self) -> u64 {
+                self.x + self.y
+            }
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_method_return_mismatch() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn bad(self) -> u64 {
+                true
+            }
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+
+        match errors[0].kind() {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {
+                // Expected error
+            }
+            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_enum_method_block_basic() {
+    let source = r#"
+        type Msg = Ping(u64) | Pong(u64)
+
+        Msg :: {
+            fn is_ping(self) -> bool {
+                match self {
+                    Msg::Ping(n) => n == 0,
+                    Msg::Pong(n) => n == 0,
+                    _ => false,
+                }
+            }
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_method_call_typechecks() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn sum(self) -> u64 {
+                self.x + self.y
+            }
+        }
+
+        fn main() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            p.sum()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_method_call_arg_type_mismatch() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn add(self, n: u64) -> u64 {
+                self.x + self.y + n
+            }
+        }
+
+        fn main() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            p.add(true)
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::ArgTypeMismatch(_, _, _, _) => {}
+            e => panic!("Expected ArgTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_enum_variant_payload_ok() {
     let source = r#"
         type Pair = A(u64) | B(u64)

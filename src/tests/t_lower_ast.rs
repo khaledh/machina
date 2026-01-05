@@ -33,7 +33,7 @@ fn analyze(source: &str) -> AnalyzedContext {
 fn lower_body_with_globals(ctx: &AnalyzedContext, func: &Function) -> (FuncBody, Vec<GlobalItem>) {
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
-    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner, &mut drop_glue, false);
+    let mut lowerer = FuncLowerer::new_function(ctx, func, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, interner.take())
 }
@@ -44,7 +44,7 @@ fn lower_body_with_drop_glue(
 ) -> (FuncBody, Vec<GeneratedDropGlue>) {
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
-    let mut lowerer = FuncLowerer::new(ctx, func, &mut interner, &mut drop_glue, false);
+    let mut lowerer = FuncLowerer::new_function(ctx, func, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, drop_glue.drain())
 }
@@ -95,7 +95,8 @@ fn test_lower_string_literal_global() {
     let func = analyzed.module.funcs()[0];
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
-    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner, &mut drop_glue, false);
+    let mut lowerer =
+        FuncLowerer::new_function(&analyzed, func, &mut interner, &mut drop_glue, false);
 
     let body = lowerer.lower().expect("Failed to lower function");
     let globals = interner.take();
@@ -296,7 +297,8 @@ fn test_lower_drop_glue_emits_free() {
     let func = analyzed.module.funcs()[0];
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
-    let mut lowerer = FuncLowerer::new(&analyzed, func, &mut interner, &mut drop_glue, false);
+    let mut lowerer =
+        FuncLowerer::new_function(&analyzed, func, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     let generated = drop_glue.drain();
 

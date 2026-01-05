@@ -62,6 +62,12 @@ pub trait Visitor {
         walk_func_param(self, func_param)
     }
 
+    // --- Method Signatures ---
+
+    fn visit_method_sig(&mut self, method_sig: &MethodSig) {
+        walk_method_sig(self, method_sig)
+    }
+
     // --- Function Declarations ---
 
     fn visit_func_decl(&mut self, func_decl: &FunctionDecl) {
@@ -72,6 +78,16 @@ pub trait Visitor {
 
     fn visit_func(&mut self, func: &Function) {
         walk_func(self, func)
+    }
+
+    // --- Method Blocks ---
+
+    fn visit_method_block(&mut self, method_block: &MethodBlock) {
+        walk_method_block(self, method_block)
+    }
+
+    fn visit_method(&mut self, method: &Method) {
+        walk_method(self, method)
     }
 
     fn visit_block_item(&mut self, item: &BlockItem) {
@@ -95,6 +111,7 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
             Decl::TypeDecl(type_decl) => v.visit_type_decl(type_decl),
             Decl::FunctionDecl(func_decl) => v.visit_func_decl(func_decl),
             Decl::Function(func) => v.visit_func(func),
+            Decl::MethodBlock(method_block) => v.visit_method_block(method_block),
         }
     }
 }
@@ -160,6 +177,14 @@ pub fn walk_func_param<V: Visitor + ?Sized>(v: &mut V, func_param: &FunctionPara
     v.visit_type_expr(&func_param.typ);
 }
 
+// --- Method Signatures ---
+
+pub fn walk_method_sig<V: Visitor + ?Sized>(v: &mut V, method_sig: &MethodSig) {
+    for param in &method_sig.params {
+        v.visit_func_param(param);
+    }
+}
+
 // --- Function Declarations ---
 
 pub fn walk_func_decl<V: Visitor + ?Sized>(v: &mut V, func_decl: &FunctionDecl) {
@@ -171,6 +196,19 @@ pub fn walk_func_decl<V: Visitor + ?Sized>(v: &mut V, func_decl: &FunctionDecl) 
 pub fn walk_func<V: Visitor + ?Sized>(v: &mut V, func: &Function) {
     v.visit_func_sig(&func.sig);
     v.visit_expr(&func.body);
+}
+
+// --- Method Blocks ---
+
+pub fn walk_method_block<V: Visitor + ?Sized>(v: &mut V, method_block: &MethodBlock) {
+    for method in &method_block.methods {
+        v.visit_method(method);
+    }
+}
+
+pub fn walk_method<V: Visitor + ?Sized>(v: &mut V, method: &Method) {
+    v.visit_method_sig(&method.sig);
+    v.visit_expr(&method.body);
 }
 
 pub fn walk_block_item<V: Visitor + ?Sized>(v: &mut V, item: &BlockItem) {
@@ -294,6 +332,13 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
 
         ExprKind::StructField { target, .. } => {
             v.visit_expr(target);
+        }
+
+        ExprKind::MethodCall { target, args, .. } => {
+            v.visit_expr(target);
+            for arg in args {
+                v.visit_expr(&arg.expr);
+            }
         }
 
         ExprKind::If {

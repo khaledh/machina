@@ -12,35 +12,30 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new(module: &Module, def_map: &DefMap) -> Self {
-        let func_ids = module
-            .funcs()
-            .iter()
-            .map(|func| {
-                def_map
-                    .lookup_def(func.id)
-                    .unwrap_or_else(|| {
-                        panic!("Function {} not found in def_map", func.sig.name);
-                    })
-                    .id
-            })
-            .collect();
-
-        let mut func_defs = Vec::new();
         let mut extern_defs = Vec::new();
 
-        // Split into func and extern defs
+        // Collect extern defs for direct symbol names.
         for def in def_map.clone().into_iter() {
             match def.kind {
-                DefKind::Func => func_defs.push(def),
                 DefKind::ExternFunc => extern_defs.push(def),
                 _ => {}
             }
         }
 
+        let mut func_ids = Vec::new();
+
         // Collect overloads
         let mut overloads: HashMap<String, Vec<DefId>> = HashMap::new();
-        for def in &func_defs {
-            overloads.entry(def.name.clone()).or_default().push(def.id);
+        for callable in module.callables() {
+            let def_id = def_map
+                .lookup_def(callable.id())
+                .unwrap_or_else(|| {
+                    panic!("Callable {} not found in def_map", callable.name());
+                })
+                .id;
+            func_ids.push(def_id);
+            let name = callable.symbol_base_name();
+            overloads.entry(name).or_default().push(def_id);
         }
 
         let mut def_names = HashMap::new();

@@ -77,14 +77,23 @@ impl<'a> LvalueOverlapChecker<'a> {
     }
 
     /// Check a function call for overlapping lvalue arguments.
-    fn check_call(&mut self, call: &Expr, args: &[CallArg]) {
+    fn check_call(&mut self, call: &Expr, args: &[CallArg], receiver: Option<&Expr>) {
         let Some(sig) = lookup_call_sig(call, self.ctx) else {
             return;
         };
 
         // Extract lvalue paths from arguments (non-lvalues like literals are ignored).
         let mut accesses = Vec::new();
-        for (param, arg) in sig.params.iter().zip(args) {
+        if let (Some(self_mode), Some(receiver)) = (sig.self_mode(), receiver) {
+            if let Some(path) = self.lvalue_path(receiver) {
+                accesses.push(ArgAccess {
+                    mode: self_mode,
+                    path,
+                    span: receiver.span,
+                });
+            }
+        }
+        for (param, arg) in sig.params().iter().zip(args) {
             if let Some(path) = self.lvalue_path(&arg.expr) {
                 accesses.push(ArgAccess {
                     mode: param.mode.clone(),
@@ -309,8 +318,14 @@ impl Visitor for LvalueOverlapChecker<'_> {
     }
 
     fn visit_expr(&mut self, expr: &Expr) {
-        if let ExprKind::Call { args, .. } = &expr.kind {
-            self.check_call(expr, args);
+        match &expr.kind {
+            ExprKind::Call { args, .. } => {
+                self.check_call(expr, args, None);
+            }
+            ExprKind::MethodCall { target, args, .. } => {
+                self.check_call(expr, args, Some(target));
+            }
+            _ => {}
         }
         walk_expr(self, expr);
     }

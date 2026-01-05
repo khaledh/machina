@@ -46,6 +46,19 @@ pub trait AstFolder {
         walk_func(self, func)
     }
 
+    // --- Methods ---
+
+    fn visit_method_block(
+        &mut self,
+        method_block: &MethodBlock,
+    ) -> Result<Vec<Self::Output>, Self::Error> {
+        walk_method_block(self, method_block)
+    }
+
+    fn visit_method(&mut self, method: &Method) -> Result<Self::Output, Self::Error> {
+        walk_method(self, method)
+    }
+
     // --- Blocks ---
 
     fn visit_block(
@@ -146,8 +159,12 @@ pub fn walk_module<F: AstFolder + ?Sized>(
 ) -> Result<Vec<F::Output>, F::Error> {
     let mut outputs = Vec::new();
     for decl in &module.decls {
-        if let Decl::Function(func) = decl {
-            outputs.push(f.visit_func(func)?);
+        match decl {
+            Decl::Function(func) => outputs.push(f.visit_func(func)?),
+            Decl::MethodBlock(method_block) => {
+                outputs.extend(f.visit_method_block(method_block)?);
+            }
+            _ => {}
         }
     }
     Ok(outputs)
@@ -157,6 +174,26 @@ pub fn walk_module<F: AstFolder + ?Sized>(
 
 pub fn walk_func<F: AstFolder + ?Sized>(f: &mut F, func: &Function) -> Result<F::Output, F::Error> {
     walk_expr(f, &func.body)
+}
+
+// --- Methods ---
+
+pub fn walk_method_block<F: AstFolder + ?Sized>(
+    f: &mut F,
+    method_block: &MethodBlock,
+) -> Result<Vec<F::Output>, F::Error> {
+    method_block
+        .methods
+        .iter()
+        .map(|method| f.visit_method(method))
+        .collect()
+}
+
+pub fn walk_method<F: AstFolder + ?Sized>(
+    f: &mut F,
+    method: &Method,
+) -> Result<F::Output, F::Error> {
+    walk_expr(f, &method.body)
 }
 
 // --- Blocks ---

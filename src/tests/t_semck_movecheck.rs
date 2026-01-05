@@ -123,6 +123,33 @@ fn test_heap_move_ok() {
 }
 
 #[test]
+fn test_method_sink_self_moves() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn consume(sink self) -> u64 {
+                self.x + self.y
+            }
+        }
+
+        fn main() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            let _sum = p.consume();
+            p.x
+        }
+    "#;
+
+    let result = move_check_source(source);
+    assert!(!result.errors.is_empty(), "Expected a move-check error");
+    assert!(
+        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        "Expected UseAfterMove error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn test_heap_field_access_allows_borrow() {
     let source = r#"
         type Point = { x: u64, y: u64 }

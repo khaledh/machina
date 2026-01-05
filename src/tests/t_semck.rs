@@ -198,6 +198,94 @@ fn test_struct_pattern_duplicate_field() {
 }
 
 #[test]
+fn test_method_inout_self_requires_mutable() {
+    let source = r#"
+        type Counter = { value: u64 }
+
+        Counter :: {
+            fn bump(inout self) {
+                self.value = self.value + 1;
+            }
+        }
+
+        fn main() -> u64 {
+            let c = Counter { value: 0 };
+            c.bump();
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::InoutArgNotMutable(_) => {}
+            e => panic!("Expected InoutArgNotMutable error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_method_inout_self_requires_lvalue() {
+    let source = r#"
+        type Counter = { value: u64 }
+
+        Counter :: {
+            fn bump(inout self) {
+                self.value = self.value + 1;
+            }
+        }
+
+        fn main() -> u64 {
+            Counter { value: 0 }.bump();
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::InoutArgNotLvalue(_) => {}
+            e => panic!("Expected InoutArgNotLvalue error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_method_out_self_rejected() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn init(out self) {
+                self.x = 1;
+                self.y = 2;
+            }
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::OutSelfNotAllowed(_) => {}
+            e => panic!("Expected OutSelfNotAllowed error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_struct_update_unknown_field() {
     let source = r#"
         type Point = { x: u64, y: u64 }

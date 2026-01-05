@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowResult, solve_forward};
 use crate::context::{LivenessContext, OptimizedMcirContext};
-use crate::liveness::{AliasMap, LiveMap, build_alias_map, collect_operand_uses, stmt_defs, stmt_uses};
+use crate::liveness::{
+    AliasMap, LiveMap, build_alias_map, collect_operand_uses, stmt_defs, stmt_uses,
+};
 use crate::mcir::cfg::McirCfg;
 use crate::mcir::types::{
     BasicBlock, FuncBody, LocalId, Operand, Place, PlaceAny, Rvalue, Statement, Terminator,

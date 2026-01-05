@@ -988,9 +988,31 @@ impl<'a> DefInitChecker<'a> {
                 self.check_expr(callee);
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     let mut out_defs = Vec::new();
-                    for (param, arg) in sig.params.iter().zip(args) {
+                    for (param, arg) in sig.params().iter().zip(args) {
                         if param.mode == FunctionParamMode::Out && arg.mode == CallArgMode::Out {
                             // Out args are write-only and become initialized after the call.
+                            if let Some(def_id) = self.check_out_arg(&arg.expr) {
+                                out_defs.push(def_id);
+                            }
+                        } else {
+                            self.check_expr(&arg.expr);
+                        }
+                    }
+                    for def_id in out_defs {
+                        self.initialized.mark_full(def_id);
+                    }
+                } else {
+                    for arg in args {
+                        self.check_expr(&arg.expr);
+                    }
+                }
+            }
+            ExprKind::MethodCall { target, args, .. } => {
+                self.check_expr(target);
+                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                    let mut out_defs = Vec::new();
+                    for (param, arg) in sig.params().iter().zip(args) {
+                        if param.mode == FunctionParamMode::Out && arg.mode == CallArgMode::Out {
                             if let Some(def_id) = self.check_out_arg(&arg.expr) {
                                 out_defs.push(def_id);
                             }

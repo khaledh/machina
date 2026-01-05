@@ -595,12 +595,26 @@ impl<'a> BorrowConflictVisitor<'a> {
     }
 
     /// Check call arguments: error if passing a borrowed base to inout/out/sink.
-    fn check_call(&mut self, call: &Expr, args: &[CallArg]) {
+    fn check_call(&mut self, call: &Expr, args: &[CallArg], receiver: Option<&Expr>) {
         let Some(sig) = lookup_call_sig(call, self.ctx) else {
             return;
         };
 
-        for (param, arg) in sig.params.iter().zip(args) {
+        if let (Some(self_mode), Some(receiver)) = (sig.self_mode(), receiver) {
+            if matches!(
+                self_mode,
+                FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
+            ) {
+                if let Some(def) = base_def_id(receiver, self.ctx)
+                    && self.borrowed_bases.contains(&def)
+                {
+                    self.errors
+                        .push(SemCheckError::SliceBorrowConflict(receiver.span));
+                }
+            }
+        }
+
+        for (param, arg) in sig.params().iter().zip(args) {
             let arg_expr = &arg.expr;
             // Only mutating modes conflict.
             if !matches!(
@@ -632,7 +646,10 @@ impl Visitor for BorrowConflictVisitor<'_> {
                 }
             }
             ExprKind::Call { args, .. } => {
-                self.check_call(expr, args);
+                self.check_call(expr, args, None);
+            }
+            ExprKind::MethodCall { target, args, .. } => {
+                self.check_call(expr, args, Some(target));
             }
             _ => {}
         }

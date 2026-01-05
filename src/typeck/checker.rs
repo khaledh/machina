@@ -17,6 +17,7 @@ pub struct TypeChecker {
     context: ResolvedContext,
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, Vec<FuncOverloadSig>>,
+    method_sigs: HashMap<String, HashMap<String, Vec<FuncOverloadSig>>>,
     type_decls: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
     halted: bool,
@@ -28,6 +29,7 @@ impl TypeChecker {
             context,
             type_map_builder: TypeMapBuilder::new(),
             func_sigs: HashMap::new(),
+            method_sigs: HashMap::new(),
             type_decls: HashMap::new(),
             errors: Vec::new(),
             halted: false,
@@ -37,6 +39,7 @@ impl TypeChecker {
     pub fn check(&mut self) -> Result<TypeMap, Vec<TypeCheckError>> {
         self.populate_type_symbols()?;
         self.populate_function_symbols()?;
+        self.populate_method_symbols()?;
 
         self.halted = false;
         let module = self.context.module.clone();
@@ -136,27 +139,37 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn populate_method_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
+        for method_block in self.context.module.method_blocks() {
+            let type_name = method_block.type_name.clone();
+            for method in &method_block.methods {
+                let def_id = self.context.def_map.lookup_def(method.id).unwrap().id;
+                let params = self.build_param_sigs(&method.sig.params)?;
+                let return_type = self.resolve_return_type(&method.sig.return_type)?;
+
+                self.method_sigs
+                    .entry(type_name.clone())
+                    .or_default()
+                    .entry(method.sig.name.clone())
+                    .or_default()
+                    .push(FuncOverloadSig {
+                        def_id,
+                        params,
+                        return_type,
+                    });
+            }
+        }
+
+        Ok(())
+    }
+
     fn insert_func_overload(
         &mut self,
         def_id: DefId,
         sig: FunctionSig,
     ) -> Result<(), Vec<TypeCheckError>> {
-        let params = sig
-            .params
-            .iter()
-            .map(|p| {
-                let ty = resolve_type_expr(&self.context.def_map, &p.typ)?;
-                Ok(FuncParamSig {
-                    name: p.name.clone(),
-                    ty,
-                    mode: p.mode.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| vec![e])?;
-
-        let return_type =
-            resolve_type_expr(&self.context.def_map, &sig.return_type).map_err(|e| vec![e])?;
+        let params = self.build_param_sigs(&sig.params)?;
+        let return_type = self.resolve_return_type(&sig.return_type)?;
 
         self.func_sigs
             .entry(sig.name.clone())
@@ -168,6 +181,28 @@ impl TypeChecker {
             });
 
         Ok(())
+    }
+
+    fn build_param_sigs(
+        &self,
+        params: &[FunctionParam],
+    ) -> Result<Vec<FuncParamSig>, Vec<TypeCheckError>> {
+        params
+            .iter()
+            .map(|param| {
+                let ty = resolve_type_expr(&self.context.def_map, &param.typ)?;
+                Ok(FuncParamSig {
+                    name: param.name.clone(),
+                    ty,
+                    mode: param.mode.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| vec![e])
+    }
+
+    fn resolve_return_type(&self, return_type: &TypeExpr) -> Result<Type, Vec<TypeCheckError>> {
+        resolve_type_expr(&self.context.def_map, return_type).map_err(|e| vec![e])
     }
 
     fn lookup_def_type(&self, node: NodeId) -> Option<Type> {
@@ -262,6 +297,96 @@ impl TypeChecker {
         // record return type
         self.type_map_builder
             .record_node_type(function.id, body_ty.clone());
+        if self.errors.is_empty() {
+            Ok(body_ty)
+        } else {
+            Err(self.errors.clone())
+        }
+    }
+
+    fn check_method(
+        &mut self,
+        method_block: &MethodBlock,
+        method: &Method,
+    ) -> Result<Type, Vec<TypeCheckError>> {
+        let self_ty = match self.type_decls.get(&method_block.type_name) {
+            Some(ty) => ty.clone(),
+            None => {
+                self.errors
+                    .push(TypeCheckErrorKind::UnknownType(method_block.span).into());
+                return Err(self.errors.clone());
+            }
+        };
+
+        let return_type = match self.resolve_return_type(&method.sig.return_type) {
+            Ok(ty) => ty,
+            Err(errs) => {
+                self.errors.extend(errs);
+                return Err(self.errors.clone());
+            }
+        };
+
+        let param_sigs = match self.build_param_sigs(&method.sig.params) {
+            Ok(params) => params,
+            Err(errs) => {
+                self.errors.extend(errs);
+                return Err(self.errors.clone());
+            }
+        };
+        let param_types = param_sigs
+            .iter()
+            .map(|param| param.ty.clone())
+            .collect::<Vec<_>>();
+
+        match self.context.def_map.lookup_def(method.sig.self_param.id) {
+            Some(def) => {
+                self.type_map_builder
+                    .record_def_type(def.clone(), self_ty.clone());
+                self.type_map_builder
+                    .record_node_type(method.sig.self_param.id, self_ty.clone());
+            }
+            None => panic!("self parameter not found in def_map"),
+        }
+
+        for (param, param_ty) in method.sig.params.iter().zip(param_types.iter()) {
+            match self.context.def_map.lookup_def(param.id) {
+                Some(def) => {
+                    self.type_map_builder
+                        .record_def_type(def.clone(), param_ty.clone());
+                    self.type_map_builder
+                        .record_node_type(param.id, param_ty.clone());
+                }
+                None => panic!("Parameter {} not found in def_map", param.name),
+            }
+        }
+
+        let body_ty = match self.visit_expr(&method.body, Some(&return_type)) {
+            Ok(ty) => ty,
+            Err(e) => {
+                self.errors.push(e);
+                return Err(self.errors.clone());
+            }
+        };
+
+        let return_span = self.function_return_span(&method.body);
+        if matches!(
+            type_assignable(&body_ty, &return_type),
+            TypeAssignability::Incompatible
+        ) {
+            self.errors.push(
+                TypeCheckErrorKind::DeclTypeMismatch(
+                    return_type.clone(),
+                    body_ty.clone(),
+                    return_span,
+                )
+                .into(),
+            );
+            return Err(self.errors.clone());
+        }
+
+        self.type_map_builder
+            .record_node_type(method.id, body_ty.clone());
+
         if self.errors.is_empty() {
             Ok(body_ty)
         } else {
@@ -883,6 +1008,43 @@ impl TypeChecker {
         }
     }
 
+    fn single_arity_param_types(
+        overloads: &[FuncOverloadSig],
+        arg_count: usize,
+    ) -> Option<Vec<Type>> {
+        let mut matches = overloads.iter().filter(|sig| sig.params.len() == arg_count);
+        let sig = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(sig.params.iter().map(|param| param.ty.clone()).collect())
+    }
+
+    fn check_call_arg_types(
+        &mut self,
+        args: &[CallArg],
+        param_types: &[Type],
+    ) -> Result<(), TypeCheckError> {
+        for (i, arg) in args.iter().enumerate() {
+            let param_ty = &param_types[i];
+            let arg_ty = self.visit_expr(&arg.expr, Some(param_ty))?;
+            match self.check_assignable_to(&arg.expr, &arg_ty, param_ty) {
+                Ok(()) => continue,
+                Err(_) => {
+                    let span = arg.span;
+                    return Err(TypeCheckErrorKind::ArgTypeMismatch(
+                        i + 1,
+                        param_ty.clone(),
+                        arg_ty.clone(),
+                        span,
+                    )
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn check_call(
         &mut self,
         call_expr: &Expr,
@@ -900,10 +1062,11 @@ impl TypeChecker {
         // Compute argument types first to avoid holding an immutable borrow of self.funcs
         let arg_types = self.visit_call_args(args)?;
         // Get overload set for the function
-        let (def_id, param_types, return_type) = {
+        let (resolved, fallback_param_types) = {
             let Some(overloads) = self.func_sigs.get(name) else {
                 return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
             };
+            let fallback_param_types = Self::single_arity_param_types(overloads, arg_types.len());
             // If no overload matches the arity and all overloads share the same arity,
             // report a count mismatch instead of a generic overload error.
             if !overloads
@@ -927,36 +1090,124 @@ impl TypeChecker {
             }
 
             let resolved = FuncOverloadResolver::new(name, args, &arg_types, call_expr.span)
-                .resolve(overloads)?;
-            let param_types = resolved
-                .sig
-                .params
-                .iter()
-                .map(|param| param.ty.clone())
-                .collect::<Vec<_>>();
-            let return_type = resolved.sig.return_type.clone();
-            (resolved.def_id, param_types, return_type)
+                .resolve(overloads)
+                .map(|resolved| {
+                    let param_types = resolved
+                        .sig
+                        .params
+                        .iter()
+                        .map(|param| param.ty.clone())
+                        .collect::<Vec<_>>();
+                    let return_type = resolved.sig.return_type.clone();
+                    (resolved.def_id, param_types, return_type)
+                });
+            (resolved, fallback_param_types)
+        };
+
+        let (def_id, param_types, return_type) = match resolved {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                if matches!(err.kind(), TypeCheckErrorKind::FuncOverloadNoMatch(_, _)) {
+                    if let Some(param_types) = fallback_param_types {
+                        if let Err(err) = self.check_call_arg_types(args, &param_types) {
+                            return Err(err);
+                        }
+                    }
+                }
+                return Err(err);
+            }
         };
 
         self.type_map_builder.record_call_def(call_expr.id, def_id);
-        // Check argument types against the resolved overload, re-typing with expectations
-        for (i, arg) in args.iter().enumerate() {
-            let param_ty = &param_types[i];
-            let arg_ty = self.visit_expr(&arg.expr, Some(param_ty))?;
-            match self.check_assignable_to(&arg.expr, &arg_ty, param_ty) {
-                Ok(()) => continue,
-                Err(_) => {
-                    let span = arg.span;
-                    return Err(TypeCheckErrorKind::ArgTypeMismatch(
-                        i + 1,
-                        param_ty.clone(),
-                        arg_ty.clone(),
-                        span,
+        self.check_call_arg_types(args, &param_types)?;
+        Ok(return_type)
+    }
+
+    fn check_method_call(
+        &mut self,
+        call_expr: &Expr,
+        target: &Expr,
+        method: &str,
+        args: &[CallArg],
+    ) -> Result<Type, TypeCheckError> {
+        let target_ty = self.visit_expr(target, None)?;
+        let mut peeled_ty = target_ty.clone();
+        while let Type::Heap { elem_ty } = peeled_ty {
+            peeled_ty = *elem_ty;
+        }
+        peeled_ty = self.expand_shallow_type(&peeled_ty);
+
+        let type_name = match peeled_ty {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => name,
+            _ => {
+                return Err(
+                    TypeCheckErrorKind::InvalidStructFieldTarget(target_ty, target.span).into(),
+                );
+            }
+        };
+
+        let arg_types = self.visit_call_args(args)?;
+        let Some(type_methods) = self.method_sigs.get(&type_name) else {
+            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
+        };
+        let Some(overloads) = type_methods.get(method) else {
+            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
+        };
+        let (resolved, fallback_param_types) = {
+            let name = format!("{}::{}", type_name, method);
+            let fallback_param_types = Self::single_arity_param_types(overloads, arg_types.len());
+            if !overloads
+                .iter()
+                .any(|sig| sig.params.len() == arg_types.len())
+            {
+                let mut counts = HashSet::new();
+                for sig in overloads {
+                    counts.insert(sig.params.len());
+                }
+                if counts.len() == 1 {
+                    let expected = *counts.iter().next().unwrap();
+                    return Err(TypeCheckErrorKind::ArgCountMismatch(
+                        name,
+                        expected,
+                        arg_types.len(),
+                        call_expr.span,
                     )
                     .into());
                 }
             }
-        }
+
+            let resolved = FuncOverloadResolver::new(&name, args, &arg_types, call_expr.span)
+                .resolve(overloads)
+                .map(|resolved| {
+                    let param_types = resolved
+                        .sig
+                        .params
+                        .iter()
+                        .map(|param| param.ty.clone())
+                        .collect::<Vec<_>>();
+                    let return_type = resolved.sig.return_type.clone();
+                    (resolved.def_id, param_types, return_type)
+                });
+            (resolved, fallback_param_types)
+        };
+
+        let (def_id, param_types, return_type) = match resolved {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                if matches!(err.kind(), TypeCheckErrorKind::FuncOverloadNoMatch(_, _)) {
+                    if let Some(param_types) = fallback_param_types {
+                        if let Err(err) = self.check_call_arg_types(args, &param_types) {
+                            return Err(err);
+                        }
+                    }
+                }
+                return Err(err);
+            }
+        };
+
+        self.type_map_builder.record_call_def(call_expr.id, def_id);
+        self.check_call_arg_types(args, &param_types)?;
+
         Ok(return_type)
     }
 
@@ -1132,6 +1383,26 @@ impl AstFolder for TypeChecker {
         }
 
         Ok(Type::Unit)
+    }
+
+    fn visit_method_block(
+        &mut self,
+        method_block: &MethodBlock,
+    ) -> Result<Vec<Type>, TypeCheckError> {
+        if self.halted {
+            return Ok(Vec::new());
+        }
+
+        let mut outputs = Vec::new();
+        for method in &method_block.methods {
+            if self.check_method(method_block, method).is_err() {
+                self.halted = true;
+                break;
+            }
+            outputs.push(Type::Unit);
+        }
+
+        Ok(outputs)
     }
 
     fn visit_if(
@@ -1419,6 +1690,12 @@ impl AstFolder for TypeChecker {
                 }
 
                 ExprKind::Var(_) => self.check_var_ref(expr),
+
+                ExprKind::MethodCall {
+                    target,
+                    method,
+                    args,
+                } => self.check_method_call(expr, target, method, args),
 
                 ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
 

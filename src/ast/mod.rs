@@ -99,6 +99,38 @@ impl Module {
             })
             .collect()
     }
+
+    pub fn method_blocks(&self) -> Vec<&MethodBlock> {
+        self.decls
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::MethodBlock(method_block) = decl {
+                    Some(method_block)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn callables(&self) -> Vec<CallableRef<'_>> {
+        let mut callables = Vec::new();
+        for decl in &self.decls {
+            match decl {
+                Decl::Function(function) => callables.push(CallableRef::Function(function)),
+                Decl::MethodBlock(method_block) => {
+                    for method in &method_block.methods {
+                        callables.push(CallableRef::Method {
+                            type_name: &method_block.type_name,
+                            method,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        callables
+    }
 }
 
 // -- Declarations ---
@@ -108,6 +140,41 @@ pub enum Decl {
     TypeDecl(TypeDecl),
     Function(Function),         // function definition
     FunctionDecl(FunctionDecl), // function declaration
+    MethodBlock(MethodBlock),   // method definitions
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum CallableRef<'a> {
+    Function(&'a Function),
+    Method {
+        type_name: &'a str,
+        method: &'a Method,
+    },
+}
+
+impl<'a> CallableRef<'a> {
+    pub fn id(&self) -> NodeId {
+        match self {
+            CallableRef::Function(function) => function.id,
+            CallableRef::Method { method, .. } => method.id,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            CallableRef::Function(function) => &function.sig.name,
+            CallableRef::Method { method, .. } => &method.sig.name,
+        }
+    }
+
+    pub fn symbol_base_name(&self) -> String {
+        match self {
+            CallableRef::Function(function) => function.sig.name.clone(),
+            CallableRef::Method { type_name, method } => {
+                format!("{type_name}${}", method.sig.name)
+            }
+        }
+    }
 }
 
 // -- Type Declarations ---
@@ -230,6 +297,40 @@ pub struct Function {
     pub id: NodeId,
     pub sig: FunctionSig,
     pub body: Expr,
+    pub span: Span,
+}
+
+// -- Methods ---
+
+#[derive(Clone, Debug)]
+pub struct MethodBlock {
+    pub id: NodeId,
+    pub type_name: String,
+    pub methods: Vec<Method>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct Method {
+    pub id: NodeId,
+    pub sig: MethodSig,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct MethodSig {
+    pub name: String,
+    pub self_param: SelfParam,
+    pub params: Vec<FunctionParam>,
+    pub return_type: TypeExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct SelfParam {
+    pub id: NodeId,
+    pub mode: FunctionParamMode,
     pub span: Span,
 }
 
@@ -462,6 +563,11 @@ pub enum ExprKind {
     StructField {
         target: Box<Expr>,
         field: String,
+    },
+    MethodCall {
+        target: Box<Expr>,
+        method: String,
+        args: Vec<CallArg>,
     },
 
     // Control flow

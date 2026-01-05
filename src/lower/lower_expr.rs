@@ -19,6 +19,8 @@ impl<'a> FuncLowerer<'a> {
 
             EK::Call { callee, args } => self.lower_call_expr(expr, callee, args),
 
+            EK::MethodCall { target, args, .. } => self.lower_method_call_expr(expr, target, args),
+
             EK::Match { scrutinee, arms } => self.lower_match_expr(expr, scrutinee, arms),
 
             EK::Move { expr } => {
@@ -330,7 +332,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             // Function calls, conditionals, blocks
-            EK::Call { .. } | EK::If { .. } | EK::Block { .. } => {
+            EK::Call { .. } | EK::MethodCall { .. } | EK::If { .. } | EK::Block { .. } => {
                 match self.lower_expr_value(expr)? {
                     ExprValue::Scalar(op) => Ok(op),
                     ExprValue::Aggregate(_) => Err(LowerError::UnsupportedOperandExpr(expr.id)),

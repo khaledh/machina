@@ -25,11 +25,7 @@ pub fn analyze(ctx: OptimizedMcirContext) -> LivenessContext {
 
 pub(crate) type AliasMap = HashMap<LocalId, HashSet<LocalId>>;
 
-pub(crate) fn collect_operand_uses(
-    op: &Operand,
-    out: &mut HashSet<LocalId>,
-    alias_map: &AliasMap,
-) {
+pub(crate) fn collect_operand_uses(op: &Operand, out: &mut HashSet<LocalId>, alias_map: &AliasMap) {
     match op {
         Operand::Copy(p) | Operand::Move(p) => collect_place_uses(p, out, alias_map),
         Operand::Const(_) => {}
@@ -64,11 +60,7 @@ fn collect_place_any_uses(place: &PlaceAny, out: &mut HashSet<LocalId>, alias_ma
     }
 }
 
-fn collect_place_any_lhs_uses(
-    place: &PlaceAny,
-    out: &mut HashSet<LocalId>,
-    alias_map: &AliasMap,
-) {
+fn collect_place_any_lhs_uses(place: &PlaceAny, out: &mut HashSet<LocalId>, alias_map: &AliasMap) {
     match place {
         PlaceAny::Scalar(p) => collect_place_lhs_uses(p, out, alias_map),
         PlaceAny::Aggregate(p) => collect_place_lhs_uses(p, out, alias_map),
