@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod ast;
 pub mod compile;
 pub mod context;
+pub mod desugar;
 pub mod diag;
 pub mod lexer;
 pub mod liveness;

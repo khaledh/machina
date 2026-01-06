@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::ast::{Module, NodeIdGen};
 use crate::context::AstContext;
+use crate::desugar;
 use crate::diag::CompileError;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::liveness;
@@ -140,9 +141,13 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
+    // --- Desugar ---
+
+    let desugared_context = desugar::desugar(type_checked_context);
+
     // --- Semantic Check ---
 
-    let semantic_checked_context = sem_check(type_checked_context).map_err(|errs| {
+    let semantic_checked_context = sem_check(desugared_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()
