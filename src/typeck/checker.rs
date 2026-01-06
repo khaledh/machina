@@ -1252,6 +1252,7 @@ impl TypeChecker {
                     .array_item_type()
                     .unwrap_or_else(|| panic!("compiler bug: empty array dims")))
             }
+            Type::Slice { elem_ty } => Ok((**elem_ty).clone()),
             _ => Err(TypeCheckErrorKind::ForIterNotIterable(iter_ty.clone(), span).into()),
         }
     }

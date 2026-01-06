@@ -730,6 +730,21 @@ fn test_for_array_typechecks() {
 }
 
 #[test]
+fn test_for_slice_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            let xs = arr[0..3];
+            var acc = 0;
+            for x in xs { acc = acc + x; }
+            acc
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_for_non_iterable_rejected() {
     let source = r#"
         fn test() -> u64 {

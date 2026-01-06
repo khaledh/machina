@@ -166,6 +166,7 @@ impl<'a> FuncLowerer<'a> {
         match (&iter.kind, &iter_ty) {
             (EK::Range { start, end }, _) => self.lower_for_range_expr(*start, *end, pattern, body),
             (_, Type::Array { .. }) => self.lower_for_array_expr(pattern, iter, &iter_ty, body),
+            (_, Type::Slice { .. }) => self.lower_for_slice_expr(pattern, iter, &iter_ty, body),
             _ => Err(LowerError::UnsupportedOperandExpr(iter.id)),
         }
     }
@@ -177,105 +178,31 @@ impl<'a> FuncLowerer<'a> {
         pattern: &Pattern,
         body: &Expr,
     ) -> Result<ExprValue, LowerError> {
-        // Lowered form:
-        // var i = start;
-        // while i < end {
-        //     <bind pattern to i>
-        //     body
-        //     i = i + 1;
-        // }
-
-        // Create a temp local for the induction variable
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
-        let idx_place = self.new_temp_scalar(u64_ty_id);
-
-        // i = start
         let start_op = Operand::Const(Const::Int {
             signed: false,
             bits: 64,
             value: start as i128,
         });
-        self.emit_copy_scalar(idx_place.clone(), Rvalue::Use(start_op));
-
-        // blocks
-        let loop_cond_bb = self.fb.new_block();
-        let loop_body_bb = self.fb.new_block();
-        let loop_exit_bb = self.fb.new_block();
-
-        // Jump to loop condition
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
-
-        // Loop condition: i < end
-        self.curr_block = loop_cond_bb;
         let end_op = Operand::Const(Const::Int {
             signed: false,
             bits: 64,
             value: end as i128,
         });
-        let cond_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
-        let cond_op = self.emit_scalar_rvalue(
-            cond_ty_id,
-            Rvalue::BinOp {
-                op: BinOp::Lt,
-                lhs: Operand::Copy(idx_place.clone()),
-                rhs: end_op,
-            },
-        );
-        self.fb.set_terminator(
-            self.curr_block,
-            Terminator::If {
-                cond: cond_op,
-                then_bb: loop_body_bb,
-                else_bb: loop_exit_bb,
-            },
-        );
 
-        // Loop body
-        self.curr_block = loop_body_bb;
-
-        // Bind pattern to current index (only ident pattern expected)
-        let PK::Ident { name } = &pattern.kind else {
-            return Err(LowerError::PatternMismatch(pattern.id));
-        };
-        let def_id = self.def_for_node(pattern.id)?.id;
-        self.bind_ident(
-            def_id,
-            name.clone(),
-            u64_ty_id,
-            PlaceAny::Scalar(idx_place.clone()),
-        )?;
-
-        // Lower body
-        let EK::Block { items, tail } = &body.kind else {
-            return Err(LowerError::ExpectedBlock(body.id));
-        };
-        self.lower_block_expr(items, tail.as_deref())?;
-
-        // i = i + 1
-        let one_op = Operand::Const(Const::Int {
-            signed: false,
-            bits: 64,
-            value: 1_i128,
-        });
-        self.emit_copy_scalar(
-            idx_place.clone(),
-            Rvalue::BinOp {
-                op: BinOp::Add,
-                lhs: Operand::Copy(idx_place.clone()),
-                rhs: one_op,
-            },
-        );
-
-        // Jump to loop condition
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
-
-        // After loop
-        self.curr_block = loop_exit_bb;
-
-        // for loops return unit
-        Ok(ExprValue::Scalar(Operand::Const(Const::Unit)))
+        self.lower_for_indexed_loop(start_op, end_op, body, |this, idx_place| {
+            // Bind pattern to current index (only ident pattern expected).
+            let PK::Ident { name } = &pattern.kind else {
+                return Err(LowerError::PatternMismatch(pattern.id));
+            };
+            let def_id = this.def_for_node(pattern.id)?.id;
+            this.bind_ident(
+                def_id,
+                name.clone(),
+                u64_ty_id,
+                PlaceAny::Scalar(idx_place.clone()),
+            )
+        })
     }
 
     pub(super) fn lower_for_array_expr(
@@ -304,19 +231,108 @@ impl<'a> FuncLowerer<'a> {
             .array_item_type()
             .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
 
-        // induction variable
+        let elem_ty_id = self.ty_lowerer.lower_ty(&item_ty);
+        let start_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: 0_i128,
+        });
+        let len_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: len as i128,
+        });
+
+        self.lower_for_indexed_loop(start_op, len_op, body, |this, idx_place| {
+            // element place = iter_place[idx]
+            let elem_place = this.project_place(
+                &iter_place,
+                Projection::Index {
+                    index: Operand::Copy(idx_place.clone()),
+                },
+                elem_ty_id,
+            );
+            this.bind_pattern_with_type(pattern, elem_place, &item_ty)
+        })
+    }
+
+    pub(super) fn lower_for_slice_expr(
+        &mut self,
+        pattern: &Pattern,
+        iter: &Expr,
+        iter_ty: &Type,
+        body: &Expr,
+    ) -> Result<ExprValue, LowerError> {
+        // Evaluate the iterable once.
+        let iter_place = match self.lower_expr_value(iter)? {
+            ExprValue::Scalar(_) => return Err(LowerError::ExprIsNotAggregate(iter.id)),
+            ExprValue::Aggregate(place) => place,
+        };
+
+        let Type::Slice { elem_ty } = iter_ty else {
+            return Err(LowerError::UnsupportedOperandExpr(iter.id));
+        };
+        let elem_ty = (**elem_ty).clone();
+
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
+        let ptr_ty_id = self.ty_lowerer.lower_ty(&Type::Heap {
+            elem_ty: Box::new(elem_ty.clone()),
+        });
+
+        // ptr = slice.ptr (stash in a temp pointer local)
+        let mut ptr_proj = iter_place.projections().to_vec();
+        ptr_proj.push(Projection::Field { index: 0 });
+        let ptr_place = Place::new(iter_place.base(), u64_ty_id, ptr_proj);
+        let ptr_temp = self.new_temp_scalar(ptr_ty_id);
+        self.emit_copy_scalar(ptr_temp.clone(), Rvalue::Use(Operand::Copy(ptr_place)));
+
+        // len = slice.len
+        let mut len_proj = iter_place.projections().to_vec();
+        len_proj.push(Projection::Field { index: 1 });
+        let len_place = Place::new(iter_place.base(), u64_ty_id, len_proj);
+        let len_op = Operand::Copy(len_place);
+
+        let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
+        let start_op = Operand::Const(Const::Int {
+            signed: false,
+            bits: 64,
+            value: 0_i128,
+        });
+
+        self.lower_for_indexed_loop(start_op, len_op, body, |this, idx_place| {
+            let elem_place = this.place_from_ty_id(
+                ptr_temp.base(),
+                elem_ty_id,
+                vec![Projection::Index {
+                    index: Operand::Copy(idx_place.clone()),
+                }],
+            );
+            this.bind_pattern_with_type(pattern, elem_place, &elem_ty)
+        })
+    }
+
+    fn lower_for_indexed_loop<F>(
+        &mut self,
+        start_op: Operand,
+        len_op: Operand,
+        body: &Expr,
+        mut bind_elem: F,
+    ) -> Result<ExprValue, LowerError>
+    where
+        F: FnMut(&mut Self, &Place<Scalar>) -> Result<(), LowerError>,
+    {
+        // Lowered form:
+        // var i = start;
+        // while i < len {
+        //     <bind pattern to element/idx>
+        //     body
+        //     i = i + 1;
+        // }
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let idx_place = self.new_temp_scalar(u64_ty_id);
 
-        // idx = 0
-        self.emit_copy_scalar(
-            idx_place.clone(),
-            Rvalue::Use(Operand::Const(Const::Int {
-                signed: false,
-                bits: 64,
-                value: 0_i128,
-            })),
-        );
+        // i = start
+        self.emit_copy_scalar(idx_place.clone(), Rvalue::Use(start_op));
 
         // blocks
         let loop_cond_bb = self.fb.new_block();
@@ -327,13 +343,8 @@ impl<'a> FuncLowerer<'a> {
         self.fb
             .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
 
-        // condition: idx < len
+        // condition: i < len
         self.curr_block = loop_cond_bb;
-        let len_op = Operand::Const(Const::Int {
-            signed: false,
-            bits: 64,
-            value: len as i128,
-        });
         let cond_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
         let cond_op = self.emit_scalar_rvalue(
             cond_ty_id,
@@ -354,27 +365,14 @@ impl<'a> FuncLowerer<'a> {
 
         // loop body
         self.curr_block = loop_body_bb;
+        bind_elem(self, &idx_place)?;
 
-        // element place = iter_place[idx]
-        let elem_ty_id = self.ty_lowerer.lower_ty(&item_ty);
-        let elem_place = self.project_place(
-            &iter_place,
-            Projection::Index {
-                index: Operand::Copy(idx_place.clone()),
-            },
-            elem_ty_id,
-        );
-
-        // Bind pattern to element
-        self.bind_pattern_with_type(pattern, elem_place, &item_ty)?;
-
-        // Lower body
         let EK::Block { items, tail } = &body.kind else {
             return Err(LowerError::ExpectedBlock(body.id));
         };
         self.lower_block_expr(items, tail.as_deref())?;
 
-        // idx = idx + 1
+        // i = i + 1
         let one_op = Operand::Const(Const::Int {
             signed: false,
             bits: 64,
