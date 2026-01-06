@@ -86,7 +86,7 @@ impl ParseError {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Marker {
     pos: Position,
     token_index: usize,
@@ -1736,137 +1736,132 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_primary()?;
 
         loop {
-            match self.curr_token.kind {
-                TK::LParen => {
-                    // Call expression
+            let next = match self.curr_token.kind {
+                TK::LParen => self.parse_call_postfix(expr, marker)?,
+                TK::LBracket => self.parse_index_or_slice_postfix(expr, marker)?,
+                TK::Dot => self.parse_dot_postfix(expr, marker)?,
+                _ => break,
+            };
+            expr = next;
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_call_postfix(&mut self, expr: Expr, marker: Marker) -> Result<Expr, ParseError> {
+        self.advance();
+        let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+        self.consume(&TK::RParen)?;
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Call {
+                callee: Box::new(expr),
+                args,
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_index_or_slice_postfix(
+        &mut self,
+        expr: Expr,
+        marker: Marker,
+    ) -> Result<Expr, ParseError> {
+        let is_slice = self.lookahead_for(TK::DotDot, TK::RBracket);
+        self.advance(); // consume '['
+
+        if self.curr_token.kind == TK::RBracket {
+            return Err(ParseError::ExpectedArrayIndexOrRange(
+                self.curr_token.clone(),
+            ));
+        }
+
+        if is_slice {
+            let mut start = None;
+            let mut end = None;
+
+            if self.curr_token.kind != TK::DotDot {
+                start = Some(Box::new(self.parse_expr(0)?));
+            }
+
+            self.consume(&TK::DotDot)?;
+
+            if self.curr_token.kind != TK::RBracket {
+                end = Some(Box::new(self.parse_expr(0)?));
+            }
+
+            self.consume(&TK::RBracket)?;
+
+            Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Slice {
+                    target: Box::new(expr),
+                    start,
+                    end,
+                },
+                span: self.close(marker),
+            })
+        } else {
+            let indices =
+                self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
+
+            self.consume(&TK::RBracket)?;
+
+            Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::ArrayIndex {
+                    target: Box::new(expr),
+                    indices,
+                },
+                span: self.close(marker),
+            })
+        }
+    }
+
+    fn parse_dot_postfix(&mut self, expr: Expr, marker: Marker) -> Result<Expr, ParseError> {
+        self.consume(&TK::Dot)?;
+
+        match &self.curr_token.kind {
+            TK::IntLit(index) => {
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::TupleField {
+                        target: Box::new(expr),
+                        index: *index as usize,
+                    },
+                    span: self.close(marker),
+                })
+            }
+            TK::Ident(name) => {
+                self.advance();
+                if self.curr_token.kind == TK::LParen {
                     self.advance();
                     let args =
                         self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
                     self.consume(&TK::RParen)?;
-                    expr = Expr {
+                    Ok(Expr {
                         id: self.id_gen.new_id(),
-                        kind: ExprKind::Call {
-                            callee: Box::new(expr),
+                        kind: ExprKind::MethodCall {
+                            target: Box::new(expr),
+                            method: name.clone(),
                             args,
                         },
-                        span: self.close(marker.clone()),
-                    };
+                        span: self.close(marker),
+                    })
+                } else {
+                    Ok(Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::StructField {
+                            target: Box::new(expr),
+                            field: name.clone(),
+                        },
+                        span: self.close(marker),
+                    })
                 }
-                TK::LBracket => {
-                    // ArrayIndex or Slice expression
-
-                    let is_slice = self.lookahead_for(TK::DotDot, TK::RBracket);
-                    self.advance(); // consume '['
-
-                    // Check if no index or range is provided
-                    if self.curr_token.kind == TK::RBracket {
-                        return Err(ParseError::ExpectedArrayIndexOrRange(
-                            self.curr_token.clone(),
-                        ));
-                    }
-
-                    if is_slice {
-                        // Slice expression
-                        let mut start = None;
-                        let mut end = None;
-
-                        // Parse start (if any)
-                        if self.curr_token.kind != TK::DotDot {
-                            start = Some(Box::new(self.parse_expr(0)?));
-                        }
-
-                        // Consume '..'
-                        self.consume(&TK::DotDot)?;
-
-                        // Parse end (if any)
-                        if self.curr_token.kind != TK::RBracket {
-                            end = Some(Box::new(self.parse_expr(0)?));
-                        }
-
-                        self.consume(&TK::RBracket)?; // consume ']'
-
-                        expr = Expr {
-                            id: self.id_gen.new_id(),
-                            kind: ExprKind::Slice {
-                                target: Box::new(expr),
-                                start,
-                                end,
-                            },
-                            span: self.close(marker.clone()),
-                        };
-                    } else {
-                        // ArrayIndex expression
-                        let indices = self
-                            .parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_expr(0))?;
-
-                        self.consume(&TK::RBracket)?; // consume ']'
-
-                        expr = Expr {
-                            id: self.id_gen.new_id(),
-                            kind: ExprKind::ArrayIndex {
-                                target: Box::new(expr),
-                                indices,
-                            },
-                            span: self.close(marker.clone()),
-                        };
-                    }
-                }
-                TK::Dot => {
-                    // Field access expression
-                    self.consume(&TK::Dot)?;
-
-                    match &self.curr_token.kind {
-                        TK::IntLit(index) => {
-                            // Tuple field access: .0, .1, etc.
-                            self.advance();
-                            expr = Expr {
-                                id: self.id_gen.new_id(),
-                                kind: ExprKind::TupleField {
-                                    target: Box::new(expr),
-                                    index: *index as usize,
-                                },
-                                span: self.close(marker.clone()),
-                            };
-                        }
-                        TK::Ident(name) => {
-                            // Struct field access or method call: .name / .name(...)
-                            self.advance();
-                            if self.curr_token.kind == TK::LParen {
-                                // Method call
-                                self.advance();
-                                let args = self.parse_list(TK::Comma, TK::RParen, |parser| {
-                                    parser.parse_call_arg()
-                                })?;
-                                self.consume(&TK::RParen)?;
-                                expr = Expr {
-                                    id: self.id_gen.new_id(),
-                                    kind: ExprKind::MethodCall {
-                                        target: Box::new(expr),
-                                        method: name.clone(),
-                                        args,
-                                    },
-                                    span: self.close(marker.clone()),
-                                };
-                            } else {
-                                // Struct field
-                                expr = Expr {
-                                    id: self.id_gen.new_id(),
-                                    kind: ExprKind::StructField {
-                                        target: Box::new(expr),
-                                        field: name.clone(),
-                                    },
-                                    span: self.close(marker.clone()),
-                                };
-                            }
-                        }
-                        _ => return Err(ParseError::ExpectedStructField(self.curr_token.clone())),
-                    }
-                }
-                _ => break,
             }
+            _ => Err(ParseError::ExpectedStructField(self.curr_token.clone())),
         }
-
-        Ok(expr)
     }
 
     // --- Primary expressions ---
