@@ -6,7 +6,7 @@ use crate::mcir::types::{
     BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Rvalue, Statement, TyId, TyTable,
 };
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
-use crate::regalloc::liveness::{LiveInterval, LiveIntervalMap, build_live_intervals};
+use crate::regalloc::intervals::{LiveInterval, LiveIntervalMap, build_live_intervals};
 use crate::regalloc::moves::{FnMoveList, Location};
 use crate::regalloc::pos::{InstPos, RelInstPos};
 use crate::regalloc::stack::{StackAllocator, StackSlotId};

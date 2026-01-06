@@ -1,6 +1,6 @@
 pub mod alloc;
 pub mod constraints;
-pub mod liveness;
+pub mod intervals;
 pub mod moves;
 pub mod pos;
 pub mod target;

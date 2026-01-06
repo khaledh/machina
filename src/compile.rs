@@ -196,7 +196,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     if dump_liveness || dump_intervals {
         // --- Dump Liveness Analysis ---
         use crate::liveness::format_liveness_map;
-        use regalloc::liveness::{build_live_intervals, format_live_intervals};
+        use regalloc::intervals::{build_live_intervals, format_live_intervals};
         for (i, body) in liveness_context.func_bodies.iter().enumerate() {
             let live_map = &liveness_context.live_maps[i];
             let func_name = liveness_context.symbols.func_name(i).unwrap_or("<unknown>");
