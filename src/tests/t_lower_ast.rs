@@ -6,7 +6,7 @@ use crate::mcir::abi::RuntimeFn;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::{GlobalItem, GlobalPayload, GlobalSection};
 use crate::nrvo::NrvoAnalyzer;
-use crate::parser::Parser;
+use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::typeck::type_check;

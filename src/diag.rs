@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::lexer::LexError;
 use crate::lower::errors::LowerError;
-use crate::parser::ParseError;
+use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 use crate::semck::SemCheckError;
 use crate::targets::CodegenError;

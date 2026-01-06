@@ -9,7 +9,7 @@ pub mod lower;
 pub mod mcir;
 pub mod nrvo;
 pub mod opt;
-pub mod parser;
+pub mod parse;
 pub mod regalloc;
 pub mod resolve;
 pub mod semck;

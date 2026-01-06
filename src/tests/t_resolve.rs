@@ -2,7 +2,7 @@ use super::*;
 use crate::context::AstContext;
 use crate::context::ResolvedContext;
 use crate::lexer::{LexError, Lexer, Token};
-use crate::parser::Parser;
+use crate::parse::Parser;
 use crate::resolve::resolve;
 
 fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {

@@ -1,6 +1,6 @@
 use crate::context::{AstContext, SemanticCheckedContext};
 use crate::lexer::{LexError, Lexer, Token};
-use crate::parser::Parser;
+use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::{SemCheckError, sem_check};
 use crate::typeck::type_check;

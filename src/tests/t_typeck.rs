@@ -1,7 +1,7 @@
 use super::*;
 use crate::context::AstContext;
 use crate::lexer::{LexError, Lexer, Token};
-use crate::parser::Parser;
+use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::types::Type;
 

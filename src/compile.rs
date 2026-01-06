@@ -10,7 +10,7 @@ use crate::mcir;
 use crate::mcir::types::GlobalSection;
 use crate::nrvo::NrvoAnalyzer;
 use crate::opt;
-use crate::parser::Parser;
+use crate::parse::Parser;
 use crate::regalloc;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
