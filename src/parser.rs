@@ -16,9 +16,6 @@ pub enum ParseError {
     #[error("Expected {0}, found: {1}")]
     ExpectedToken(TokenKind, Token),
 
-    #[error("Expected keyword {0}, found: {1}")]
-    ExpectedKeyword(String, Token),
-
     #[error("Expected identifier, found: {0}")]
     ExpectedIdent(Token),
 
@@ -70,7 +67,6 @@ impl ParseError {
         match self {
             ParseError::ExpectedDecl(token) => token.span,
             ParseError::ExpectedToken(_, token) => token.span,
-            ParseError::ExpectedKeyword(_, token) => token.span,
             ParseError::ExpectedIdent(token) => token.span,
             ParseError::ExpectedSelf(token) => token.span,
             ParseError::ExpectedType(token) => token.span,
@@ -141,8 +137,8 @@ impl<'a> Parser<'a> {
 
     fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match &self.curr_token.kind {
-            TK::Ident(name) if name == "type" => self.parse_type_decl().map(Decl::TypeDecl),
-            TK::Ident(name) if name == "fn" => self.parse_func(),
+            TK::KwType => self.parse_type_decl().map(Decl::TypeDecl),
+            TK::KwFn => self.parse_func(),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 self.parse_method_block()
             }
@@ -156,7 +152,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Expect 'type'
-        self.consume_keyword("type")?;
+        self.consume_keyword(TK::KwType)?;
 
         // Expect type name
         let name = self.parse_ident()?;
@@ -166,7 +162,7 @@ impl<'a> Parser<'a> {
         let kind = if self.curr_token.kind == TK::LBrace {
             // Struct definition: type Foo = { ... }
             self.parse_struct_def()?
-        } else if matches!(&self.curr_token.kind, TK::Ident(name) if name != "range")
+        } else if matches!(&self.curr_token.kind, TK::Ident(_))
             && matches!(
                 self.peek().map(|t| &t.kind),
                 Some(TK::Pipe) | Some(TK::LParen)
@@ -302,9 +298,7 @@ impl<'a> Parser<'a> {
         }
 
         // Check for range type first, then tuple, then named type
-        if let TK::Ident(name) = &self.curr_token.kind
-            && name == "range"
-        {
+        if self.curr_token.kind == TK::KwRange {
             return self.parse_range_type();
         }
 
@@ -407,7 +401,7 @@ impl<'a> Parser<'a> {
         // Range Type: "range(min, max)" or "range(max)"
         let marker = self.mark();
 
-        self.consume_keyword("range")?;
+        self.consume_keyword(TK::KwRange)?;
         self.consume(&TK::LParen)?;
 
         let first = self.parse_int_lit()?;
@@ -434,7 +428,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Expect 'fn'
-        self.consume_keyword("fn")?;
+        self.consume_keyword(TK::KwFn)?;
 
         // Expect function name
         let name = self.parse_ident()?;
@@ -492,17 +486,20 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_param_mode(&mut self) -> FunctionParamMode {
-        if matches!(&self.curr_token.kind, TK::Ident(name) if name == "inout") {
-            self.advance();
-            FunctionParamMode::Inout
-        } else if matches!(&self.curr_token.kind, TK::Ident(name) if name == "sink") {
-            self.advance();
-            FunctionParamMode::Sink
-        } else if matches!(&self.curr_token.kind, TK::Ident(name) if name == "out") {
-            self.advance();
-            FunctionParamMode::Out
-        } else {
-            FunctionParamMode::In
+        match &self.curr_token.kind {
+            TK::KwInout => {
+                self.advance();
+                FunctionParamMode::Inout
+            }
+            TK::KwSink => {
+                self.advance();
+                FunctionParamMode::Sink
+            }
+            TK::KwOut => {
+                self.advance();
+                FunctionParamMode::Out
+            }
+            _ => FunctionParamMode::In,
         }
     }
 
@@ -569,13 +566,13 @@ impl<'a> Parser<'a> {
 
     fn parse_method_sig(&mut self) -> Result<MethodSig, ParseError> {
         let marker = self.mark();
-        self.consume_keyword("fn")?;
+        self.consume_keyword(TK::KwFn)?;
         let name = self.parse_ident()?;
         self.consume(&TK::LParen)?;
 
         let self_marker = self.mark();
         let self_mode = self.parse_param_mode();
-        if !matches!(&self.curr_token.kind, TK::Ident(name) if name == "self") {
+        if self.curr_token.kind != TK::KwSelf {
             return Err(ParseError::ExpectedSelf(self.curr_token.clone()));
         }
         self.advance(); // consume self
@@ -618,19 +615,19 @@ impl<'a> Parser<'a> {
         // Parse block items
         while self.curr_token.kind != TK::RBrace {
             match &self.curr_token.kind {
-                TK::Ident(name) if name == "let" => {
+                TK::KwLet => {
                     let stmt = self.parse_let()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
-                TK::Ident(name) if name == "var" => {
+                TK::KwVar => {
                     let stmt = self.parse_var()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
-                TK::Ident(name) if name == "while" => {
+                TK::KwWhile => {
                     let stmt = self.parse_while()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
-                TK::Ident(name) if name == "for" => {
+                TK::KwFor => {
                     let stmt = self.parse_for()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
@@ -676,7 +673,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Expect 'let'
-        self.consume_keyword("let")?;
+        self.consume_keyword(TK::KwLet)?;
         let pattern = self.parse_pattern()?;
 
         // Parse declaration type (optional)
@@ -711,7 +708,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Expect 'var'
-        self.consume_keyword("var")?;
+        self.consume_keyword(TK::KwVar)?;
 
         let is_binding = self.lookahead_for(TK::Equals, TK::Semicolon);
 
@@ -792,7 +789,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Consume 'while'
-        self.consume_keyword("while")?;
+        self.consume_keyword(TK::KwWhile)?;
 
         // Parse condition
         let cond = self.parse_expr(0)?;
@@ -814,13 +811,13 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Consume 'for'
-        self.consume_keyword("for")?;
+        self.consume_keyword(TK::KwFor)?;
 
         // Parse pattern
         let pattern = self.parse_pattern()?;
 
         // Consume 'in'
-        self.consume_keyword("in")?;
+        self.consume_keyword(TK::KwIn)?;
 
         // Parse range literal or general iterator expression
         // (disallow struct literals to avoid ambiguity with the loop body block)
@@ -970,7 +967,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Expect 'if'
-        self.consume_keyword("if")?;
+        self.consume_keyword(TK::KwIf)?;
 
         // Parse condition
         // (disallow struct literals to avoid ambiguity between struct literals and blocks)
@@ -986,7 +983,7 @@ impl<'a> Parser<'a> {
         };
 
         // Expect 'else'
-        self.consume_keyword("else")?;
+        self.consume_keyword(TK::KwElse)?;
 
         // Parse else body
         let else_body = if self.curr_token.kind == TK::LBrace {
@@ -1026,7 +1023,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         // Expect 'match'
-        self.consume_keyword("match")?;
+        self.consume_keyword(TK::KwMatch)?;
 
         // Parse scrutinee
         // (disallow struct literals to avoid ambiguity between struct literals and match arms)
@@ -1088,10 +1085,8 @@ impl<'a> Parser<'a> {
         }
 
         // Case 2: Boolean literal
-        if let TK::Ident(name) = &self.curr_token.kind
-            && (name == "true" || name == "false")
-        {
-            let value = name == "true";
+        if let TK::BoolLit(value) = &self.curr_token.kind {
+            let value = *value;
             self.advance();
             return Ok(MatchPattern::BoolLit {
                 value,
@@ -1134,10 +1129,8 @@ impl<'a> Parser<'a> {
                 });
             }
 
-            if let TK::Ident(name) = &parser.curr_token.kind
-                && (name == "true" || name == "false")
-            {
-                let value = name == "true";
+            if let TK::BoolLit(value) = &parser.curr_token.kind {
+                let value = *value;
                 parser.advance();
                 return Ok(MatchPattern::BoolLit {
                     value,
@@ -1239,9 +1232,7 @@ impl<'a> Parser<'a> {
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let marker = self.mark();
-        let mut lhs = if let TK::Ident(name) = &self.curr_token.kind
-            && name == "move"
-        {
+        let mut lhs = if self.curr_token.kind == TK::KwMove {
             // Unary move
             self.advance();
             let operand = self.parse_expr(10)?;
@@ -1325,24 +1316,20 @@ impl<'a> Parser<'a> {
 
     fn parse_call_arg(&mut self) -> Result<CallArg, ParseError> {
         let marker = self.mark();
-        let mode = if let TK::Ident(name) = &self.curr_token.kind {
-            match name.as_str() {
-                "inout" => {
-                    self.advance();
-                    CallArgMode::Inout
-                }
-                "out" => {
-                    self.advance();
-                    CallArgMode::Out
-                }
-                "move" => {
-                    self.advance();
-                    CallArgMode::Move
-                }
-                _ => CallArgMode::Default,
+        let mode = match &self.curr_token.kind {
+            TK::KwInout => {
+                self.advance();
+                CallArgMode::Inout
             }
-        } else {
-            CallArgMode::Default
+            TK::KwOut => {
+                self.advance();
+                CallArgMode::Out
+            }
+            TK::KwMove => {
+                self.advance();
+                CallArgMode::Move
+            }
+            _ => CallArgMode::Default,
         };
 
         let expr = self.parse_expr(0)?;
@@ -1934,22 +1921,21 @@ impl<'a> Parser<'a> {
             }
 
             // Boolean literal
-            TK::Ident(name) if name == "true" || name == "false" => {
+            TK::BoolLit(value) => {
                 let span = self.curr_token.span;
-                let value = name == "true";
                 self.advance();
                 Ok(Expr {
                     id: self.id_gen.new_id(),
-                    kind: ExprKind::BoolLit(value),
+                    kind: ExprKind::BoolLit(*value),
                     span,
                 })
             }
 
             // If expression
-            TK::Ident(name) if name == "if" => self.parse_if(),
+            TK::KwIf => self.parse_if(),
 
             // Match expression
-            TK::Ident(name) if name == "match" => self.parse_match_expr(),
+            TK::KwMatch => self.parse_match_expr(),
 
             // Enum variant expression
             TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
@@ -1971,6 +1957,16 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::Var(name.clone()),
+                    span: self.close(marker),
+                })
+            }
+            TK::KwSelf => {
+                let marker = self.mark();
+                self.advance();
+
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::Var("self".to_string()),
                     span: self.close(marker),
                 })
             }
@@ -2226,15 +2222,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn consume_keyword(&mut self, expected: &str) -> Result<(), ParseError> {
-        if self.curr_token.kind == TK::Ident(expected.to_string()) {
+    fn consume_keyword(&mut self, expected: TokenKind) -> Result<(), ParseError> {
+        if self.curr_token.kind == expected {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError::ExpectedKeyword(
-                expected.to_string(),
-                self.curr_token.clone(),
-            ))
+            Err(ParseError::ExpectedToken(expected, self.curr_token.clone()))
         }
     }
 

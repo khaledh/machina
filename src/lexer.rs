@@ -27,10 +27,46 @@ pub enum TokenKind {
     // Literals
     #[display("IntLit({0})")]
     IntLit(u64),
+    #[display("BoolLit({0})")]
+    BoolLit(bool),
     #[display("CharLit({0})")]
     CharLit(char),
     #[display("StringLit({0})")]
     StringLit(String),
+
+    // Keywords
+    #[display("fn")]
+    KwFn,
+    #[display("type")]
+    KwType,
+    #[display("range")]
+    KwRange,
+    #[display("let")]
+    KwLet,
+    #[display("var")]
+    KwVar,
+    #[display("if")]
+    KwIf,
+    #[display("else")]
+    KwElse,
+    #[display("match")]
+    KwMatch,
+    #[display("while")]
+    KwWhile,
+    #[display("for")]
+    KwFor,
+    #[display("in")]
+    KwIn,
+    #[display("inout")]
+    KwInout,
+    #[display("out")]
+    KwOut,
+    #[display("sink")]
+    KwSink,
+    #[display("move")]
+    KwMove,
+    #[display("self")]
+    KwSelf,
 
     // Brackets
     #[display("[")]
@@ -470,7 +506,27 @@ impl<'a> Lexer<'a> {
                 if ident == "_" {
                     Ok(TokenKind::Underscore)
                 } else {
-                    Ok(TokenKind::Ident(ident))
+                    Ok(match ident.as_str() {
+                        "fn" => TokenKind::KwFn,
+                        "type" => TokenKind::KwType,
+                        "range" => TokenKind::KwRange,
+                        "let" => TokenKind::KwLet,
+                        "var" => TokenKind::KwVar,
+                        "if" => TokenKind::KwIf,
+                        "else" => TokenKind::KwElse,
+                        "match" => TokenKind::KwMatch,
+                        "while" => TokenKind::KwWhile,
+                        "for" => TokenKind::KwFor,
+                        "in" => TokenKind::KwIn,
+                        "inout" => TokenKind::KwInout,
+                        "out" => TokenKind::KwOut,
+                        "sink" => TokenKind::KwSink,
+                        "move" => TokenKind::KwMove,
+                        "self" => TokenKind::KwSelf,
+                        "true" => TokenKind::BoolLit(true),
+                        "false" => TokenKind::BoolLit(false),
+                        _ => TokenKind::Ident(ident),
+                    })
                 }
             }
             Some(&ch) if ch.is_ascii_digit() => self.lex_int_literal(start),

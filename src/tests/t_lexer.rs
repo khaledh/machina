@@ -17,6 +17,37 @@ fn test_lex_identifier() {
 }
 
 #[test]
+fn test_lex_keywords_and_bools() {
+    let mut lexer =
+        Lexer::new("fn let var if else match while for in inout out sink move self true false");
+
+    let expected = [
+        TokenKind::KwFn,
+        TokenKind::KwLet,
+        TokenKind::KwVar,
+        TokenKind::KwIf,
+        TokenKind::KwElse,
+        TokenKind::KwMatch,
+        TokenKind::KwWhile,
+        TokenKind::KwFor,
+        TokenKind::KwIn,
+        TokenKind::KwInout,
+        TokenKind::KwOut,
+        TokenKind::KwSink,
+        TokenKind::KwMove,
+        TokenKind::KwSelf,
+        TokenKind::BoolLit(true),
+        TokenKind::BoolLit(false),
+        TokenKind::Eof,
+    ];
+
+    for expected_kind in expected {
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.kind, expected_kind);
+    }
+}
+
+#[test]
 fn test_lex_percent_operator() {
     let mut lexer = Lexer::new("%");
     let token = lexer.next_token().unwrap();
