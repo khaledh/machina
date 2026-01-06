@@ -281,18 +281,18 @@ cargo test --test '*'
 The compiler is a multi-stage pipeline written in Rust:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Frontend                                                        │
-│   Source → Lexer → Parser → Resolver → Type Check → Sem Check   │
-└────────────────────────────────────┬────────────────────────────┘
-┌────────────────────────────────────▼────────────────────────────┐
-│ Middle End                                                      │
-│   MCIR Lowering → Optimizer → Liveness                          │
-└────────────────────────────────────┬────────────────────────────┘
-┌────────────────────────────────────▼────────────────────────────┐
-│ Backend                                                         │
-│   Register Allocation → Code Generation → ARM64                 │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│ Frontend                                                              │
+│   Lexer → Parser → Resolver → Type Check → Sem Check  → NRVO Analysis │
+└────────────────────────────────────┬──────────────────────────────────┘
+┌────────────────────────────────────▼──────────────────────────────────┐
+│ Middle End                                                            │
+│   MCIR Lowering → CFG-Free Opt → Liveness → Dataflow Opt → Liveness   │
+└────────────────────────────────────┬──────────────────────────────────┘
+┌────────────────────────────────────▼──────────────────────────────────┐
+│ Backend                                                               │
+│   Register Allocation → Code Generation → ARM64                       │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 **Frontend** produces progressively richer context:
@@ -302,16 +302,21 @@ The compiler is a multi-stage pipeline written in Rust:
 - **Resolver**: Builds scope tree, records definitions and uses
 - **Type Checker**: Infers and validates types across expressions, resolves
   function overloading
-- **Semantic Check**: Enforces value-based rules and structural rules
+- **Semantic Check**: Enforces value rules, structural rules, move restrictions,
+  borrow restrictions, definition-before-use (including partial init), slice
+  escape/borrow-scope rules, call-argument overlap checks.
+- **NRVO Analysis**: Marks safe copy-elision for aggregate returns
 
 **Middle End** operates on MCIR (Machina IR), a typed, place-based
 representation:
 
 - Scalars as SSA-like temporaries, aggregates as addressable places
 - Explicit control flow graphs with basic blocks and terminators
-- **Optimizer**: Constant folding, identity simplification, constant branch
-  elimination, self-copy removal, last-use copy elision, NRVO
-- **Liveness**: Computes live-in/live-out sets per basic block
+- **CFG-free optimization**: Constant folding, identity simplification, constant
+  branch elimination, self-copy removal
+- **Dataflow optimization**: Last-use copy elision for aggregates
+- **Liveness**: Computes live-in/live-out sets per basic block (used for
+  optimization + register allocation)
 
 **Backend** allocates registers and emits machine code:
 
