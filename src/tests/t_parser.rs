@@ -1066,11 +1066,106 @@ fn test_parse_match_expr_tuple_patterns() {
             match &arms[0].pattern {
                 MatchPattern::Tuple { patterns, .. } => {
                     assert_eq!(patterns.len(), 2);
-                    assert!(matches!(&patterns[0], MatchPattern::Binding { name, .. } if name == "x"));
+                    assert!(
+                        matches!(&patterns[0], MatchPattern::Binding { name, .. } if name == "x")
+                    );
                     assert!(matches!(&patterns[1], MatchPattern::Wildcard { .. }));
                 }
                 _ => panic!("Expected tuple pattern"),
             }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
+fn test_parse_match_expr_tuple_patterns_nested() {
+    let source = r#"
+        fn test(t: (u64, (bool, u64))) -> u64 {
+            match t {
+                (x, (y, _)) => x,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::Match { scrutinee, arms } => {
+            match &scrutinee.kind {
+                ExprKind::Var(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected scrutinee Var"),
+            }
+            assert_eq!(arms.len(), 1);
+
+            match &arms[0].pattern {
+                MatchPattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 2);
+                    assert!(matches!(
+                        &patterns[0],
+                        MatchPattern::Binding { name, .. } if name == "x"
+                    ));
+                    match &patterns[1] {
+                        MatchPattern::Tuple { patterns, .. } => {
+                            assert_eq!(patterns.len(), 2);
+                            assert!(matches!(
+                                &patterns[0],
+                                MatchPattern::Binding { name, .. } if name == "y"
+                            ));
+                            assert!(matches!(&patterns[1], MatchPattern::Wildcard { .. }));
+                        }
+                        _ => panic!("Expected nested tuple pattern"),
+                    }
+                }
+                _ => panic!("Expected tuple pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
+fn test_parse_match_expr_tuple_patterns_literals() {
+    let source = r#"
+        type Flag = On | Off
+
+        fn test(t: (u64, Flag, bool)) -> u64 {
+            match t {
+                (1, Flag::On, true) => 1,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::Match { scrutinee, arms } => {
+            match &scrutinee.kind {
+                ExprKind::Var(name) => assert_eq!(name, "t"),
+                _ => panic!("Expected scrutinee Var"),
+            }
+            assert_eq!(arms.len(), 2);
+
+            match &arms[0].pattern {
+                MatchPattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 3);
+                    assert!(
+                        matches!(&patterns[0], MatchPattern::IntLit { value, .. } if *value == 1)
+                    );
+                    assert!(matches!(
+                        &patterns[1],
+                        MatchPattern::EnumVariant { variant_name, .. } if variant_name == "On"
+                    ));
+                    assert!(matches!(&patterns[2], MatchPattern::BoolLit { value, .. } if *value));
+                }
+                _ => panic!("Expected tuple pattern"),
+            }
+            assert!(matches!(arms[1].pattern, MatchPattern::Wildcard { .. }));
         }
         _ => panic!("Expected match expression"),
     }

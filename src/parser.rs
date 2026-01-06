@@ -1112,30 +1112,93 @@ impl<'a> Parser<'a> {
         // Case 4: Tuple pattern
         if self.curr_token.kind == TK::LParen {
             self.advance();
-            let parse_tuple_pattern_elem = |parser: &mut Parser| {
-                let marker = parser.mark();
-                if parser.curr_token.kind == TK::Underscore {
-                    parser.advance();
-                    return Ok(MatchPattern::Wildcard {
-                        span: parser.close(marker),
-                    });
-                }
+            return self.parse_tuple_match_pattern(marker);
+        }
 
-                let name = parser.parse_ident()?;
-                Ok(MatchPattern::Binding {
-                    id: parser.id_gen.new_id(),
-                    name,
+        // Case 5: Enum variant (either Enum::Variant or Variant)
+        if !matches!(self.curr_token.kind, TK::Ident(_)) {
+            return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
+        }
+        let variant_name = self.parse_ident()?;
+        self.parse_enum_variant_pattern(marker, variant_name)
+    }
+
+    fn parse_tuple_match_pattern(&mut self, marker: Marker) -> Result<MatchPattern, ParseError> {
+        let parse_tuple_pattern_elem = |parser: &mut Parser| {
+            let marker = parser.mark();
+
+            if parser.curr_token.kind == TK::Underscore {
+                parser.advance();
+                return Ok(MatchPattern::Wildcard {
                     span: parser.close(marker),
-                })
+                });
+            }
+
+            if let TK::Ident(name) = &parser.curr_token.kind
+                && (name == "true" || name == "false")
+            {
+                let value = name == "true";
+                parser.advance();
+                return Ok(MatchPattern::BoolLit {
+                    value,
+                    span: parser.close(marker),
+                });
+            }
+
+            if let TK::IntLit(value) = &parser.curr_token.kind {
+                let value = *value;
+                parser.advance();
+                return Ok(MatchPattern::IntLit {
+                    value,
+                    span: parser.close(marker),
+                });
+            }
+
+            if parser.curr_token.kind == TK::LParen {
+                parser.advance();
+                return parser.parse_tuple_match_pattern(marker);
+            }
+
+            let TK::Ident(_) = &parser.curr_token.kind else {
+                return Err(ParseError::ExpectedMatchPattern(parser.curr_token.clone()));
             };
 
-            let patterns =
-                self.parse_list(TK::Comma, TK::RParen, parse_tuple_pattern_elem)?;
-            self.consume(&TK::RParen)?;
-            return Ok(MatchPattern::Tuple {
-                patterns,
-                span: self.close(marker),
-            });
+            let is_enum_variant = matches!(
+                parser.tokens.get(parser.pos + 1).map(|tok| &tok.kind),
+                Some(TK::DoubleColon | TK::LParen)
+            );
+
+            let name = parser.parse_ident()?;
+            if is_enum_variant {
+                return parser.parse_enum_variant_pattern(marker, name);
+            }
+
+            Ok(MatchPattern::Binding {
+                id: parser.id_gen.new_id(),
+                name,
+                span: parser.close(marker),
+            })
+        };
+
+        let patterns = self.parse_list(TK::Comma, TK::RParen, parse_tuple_pattern_elem)?;
+        self.consume(&TK::RParen)?;
+        Ok(MatchPattern::Tuple {
+            patterns,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_enum_variant_pattern(
+        &mut self,
+        marker: Marker,
+        mut variant_name: String,
+    ) -> Result<MatchPattern, ParseError> {
+        let mut enum_name = None;
+
+        if self.curr_token.kind == TK::DoubleColon {
+            self.advance();
+            enum_name = Some(variant_name);
+            variant_name = self.parse_ident()?;
         }
 
         let parse_match_binding = |parser: &mut Parser| {
@@ -1155,27 +1218,14 @@ impl<'a> Parser<'a> {
             })
         };
 
-        // Case 5: Enum variant (either Enum::Variant or Variant)
-        if !matches!(self.curr_token.kind, TK::Ident(_)) {
-            return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
-        }
-
-        let mut enum_name = None;
-        let mut variant_name = self.parse_ident()?;
-
-        if self.curr_token.kind == TK::DoubleColon {
+        let bindings = if self.curr_token.kind == TK::LParen {
             self.advance();
-            enum_name = Some(variant_name);
-            variant_name = self.parse_ident()?;
-        }
-
-        // Parse bindings (if any)
-        let mut bindings = vec![];
-        if self.curr_token.kind == TK::LParen {
-            self.advance();
-            bindings = self.parse_list(TK::Comma, TK::RParen, parse_match_binding)?;
+            let bindings = self.parse_list(TK::Comma, TK::RParen, parse_match_binding)?;
             self.consume(&TK::RParen)?;
-        }
+            bindings
+        } else {
+            vec![]
+        };
 
         Ok(MatchPattern::EnumVariant {
             enum_name,

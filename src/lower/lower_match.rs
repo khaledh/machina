@@ -1,4 +1,7 @@
 use crate::ast::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
+use crate::lower::decision_tree::{
+    ArmDecision, DecisionTreeEmitter, Test, TestKind, build_decision_tree, emit_decision_tree,
+};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -33,8 +36,8 @@ impl<'a> FuncLowerer<'a> {
         scrutinee: &Expr,
         arms: &[MatchArm],
     ) -> Result<(), LowerError> {
-        if let Some(arm) = self.tuple_match_arm(scrutinee, arms)? {
-            return self.lower_match_with_tuple(scrutinee, arm, |this, arm| {
+        if self.is_tuple_match_scrutinee(scrutinee)? {
+            return self.lower_match_with_tuple(scrutinee, arms, |this, arm| {
                 let op = match this.lower_expr_value(&arm.body)? {
                     ExprValue::Scalar(op) => op,
                     ExprValue::Aggregate(_) => {
@@ -64,8 +67,8 @@ impl<'a> FuncLowerer<'a> {
         scrutinee: &Expr,
         arms: &[MatchArm],
     ) -> Result<(), LowerError> {
-        if let Some(arm) = self.tuple_match_arm(scrutinee, arms)? {
-            return self.lower_match_with_tuple(scrutinee, arm, |this, arm| {
+        if self.is_tuple_match_scrutinee(scrutinee)? {
+            return self.lower_match_with_tuple(scrutinee, arms, |this, arm| {
                 this.lower_agg_value_into(dst.clone(), &arm.body)
             });
         }
@@ -175,32 +178,16 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn tuple_match_arm<'b>(
-        &self,
-        scrutinee: &Expr,
-        arms: &'b [MatchArm],
-    ) -> Result<Option<&'b MatchArm>, LowerError> {
-        if arms.len() != 1 {
-            return Ok(None);
-        }
-
+    fn is_tuple_match_scrutinee(&self, scrutinee: &Expr) -> Result<bool, LowerError> {
         let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
         let (scrutinee_ty, _) = self.peel_heap_for_match(scrutinee_ty.clone());
-        if !matches!(scrutinee_ty, Type::Tuple { .. }) {
-            return Ok(None);
-        }
-
-        let arm = &arms[0];
-        match &arm.pattern {
-            MatchPattern::Tuple { .. } | MatchPattern::Wildcard { .. } => Ok(Some(arm)),
-            _ => Ok(None),
-        }
+        Ok(matches!(scrutinee_ty, Type::Tuple { .. }))
     }
 
     fn lower_match_with_tuple<F>(
         &mut self,
         scrutinee: &Expr,
-        arm: &MatchArm,
+        arms: &[MatchArm],
         mut emit_arm_body: F,
     ) -> Result<(), LowerError>
     where
@@ -213,11 +200,55 @@ impl<'a> FuncLowerer<'a> {
             return Err(LowerError::ExprIsNotAggregate(scrutinee.id));
         };
 
-        if let MatchPattern::Tuple { patterns, .. } = &arm.pattern {
-            self.bind_match_tuple_fields(&scrutinee_ty, &place, patterns, arm.id)?;
+        let join_bb = self.fb.new_block();
+        let mut arm_blocks = Vec::new();
+        let mut decisions = Vec::new();
+
+        for arm in arms {
+            let arm_bb = self.fb.new_block();
+            arm_blocks.push((arm_bb, arm));
+
+            // Build the per-arm test list; bindings are applied after the arm is selected.
+            let tests = match &arm.pattern {
+                MatchPattern::Wildcard { .. } => Vec::new(),
+                MatchPattern::Tuple { patterns, .. } => {
+                    let mut tests = Vec::new();
+                    self.collect_tuple_pattern_tests(
+                        &scrutinee_ty,
+                        &place,
+                        patterns,
+                        arm.id,
+                        &mut tests,
+                    )?;
+                    tests
+                }
+                _ => return Err(LowerError::PatternMismatch(arm.id)),
+            };
+
+            decisions.push(ArmDecision {
+                tests,
+                target: arm_bb,
+            });
         }
 
-        emit_arm_body(self, arm)
+        let decision_tree = build_decision_tree(&decisions);
+        let start_bb = self.curr_block;
+        let mut emitter = TupleDecisionEmitter { lowerer: self };
+        emit_decision_tree(&decision_tree, start_bb, &mut emitter)?;
+
+        for (arm_bb, arm) in arm_blocks {
+            self.curr_block = arm_bb;
+            // Bind tuple fields (and any nested enum payloads) only after the arm is chosen.
+            if let MatchPattern::Tuple { patterns, .. } = &arm.pattern {
+                self.bind_match_tuple_fields(&scrutinee_ty, &place, patterns, arm.id)?;
+            }
+            emit_arm_body(self, arm)?;
+            self.fb
+                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+        }
+
+        self.curr_block = join_bb;
+        Ok(())
     }
 
     pub(super) fn lower_match_discr(
@@ -366,31 +397,290 @@ impl<'a> FuncLowerer<'a> {
         }
 
         for (index, (pattern, field_ty)) in patterns.iter().zip(fields.iter()).enumerate() {
-            let (id, name) = match pattern {
-                MatchPattern::Binding { id, name, .. } => (*id, name),
-                MatchPattern::Wildcard { .. } => continue,
-                _ => return Err(LowerError::PatternMismatch(arm_id)),
-            };
-
             let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
-            let def_id = self.def_for_node(id)?.id;
-            let local_id = self.ensure_local_for_def(def_id, field_ty_id, Some(name.clone()));
-
             let field_place =
                 self.project_place(scrutinee_place, Projection::Field { index }, field_ty_id);
 
-            match field_place {
-                PlaceAny::Scalar(place) => {
-                    let dst = Place::new(local_id, field_ty_id, vec![]);
-                    self.emit_copy_scalar(dst, Rvalue::Use(Operand::Copy(place)));
+            match pattern {
+                MatchPattern::Binding { id, name, .. } => {
+                    let def_id = self.def_for_node(*id)?.id;
+                    let local_id =
+                        self.ensure_local_for_def(def_id, field_ty_id, Some(name.clone()));
+
+                    match field_place {
+                        PlaceAny::Scalar(place) => {
+                            let dst = Place::new(local_id, field_ty_id, vec![]);
+                            self.emit_copy_scalar(dst, Rvalue::Use(Operand::Copy(place)));
+                        }
+                        PlaceAny::Aggregate(place) => {
+                            let dst = Place::new(local_id, field_ty_id, vec![]);
+                            self.emit_copy_aggregate(dst, place);
+                        }
+                    }
                 }
-                PlaceAny::Aggregate(place) => {
-                    let dst = Place::new(local_id, field_ty_id, vec![]);
-                    self.emit_copy_aggregate(dst, place);
+                MatchPattern::Wildcard { .. } => {}
+                MatchPattern::BoolLit { .. } | MatchPattern::IntLit { .. } => {}
+                MatchPattern::EnumVariant {
+                    variant_name,
+                    bindings,
+                    ..
+                } => {
+                    if bindings.is_empty() {
+                        continue;
+                    }
+
+                    let (peeled_ty, deref_count) = self.peel_heap_for_match(field_ty.clone());
+                    let place = self.apply_deref_place_any(field_place, &peeled_ty, deref_count);
+                    let Type::Enum { .. } = peeled_ty else {
+                        return Err(LowerError::PatternMismatch(arm_id));
+                    };
+                    let PlaceAny::Aggregate(place) = place else {
+                        return Err(LowerError::PatternMismatch(arm_id));
+                    };
+                    self.bind_match_payloads(&peeled_ty, &place, variant_name, bindings)?;
+                }
+                MatchPattern::Tuple { patterns, .. } => {
+                    let (peeled_ty, deref_count) = self.peel_heap_for_match(field_ty.clone());
+                    let Type::Tuple { .. } = peeled_ty else {
+                        return Err(LowerError::PatternMismatch(arm_id));
+                    };
+                    let place = self.apply_deref_place_any(field_place, &peeled_ty, deref_count);
+                    let PlaceAny::Aggregate(place) = place else {
+                        return Err(LowerError::PatternMismatch(arm_id));
+                    };
+                    self.bind_match_tuple_fields(&peeled_ty, &place, patterns, arm_id)?;
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn collect_tuple_pattern_tests(
+        &mut self,
+        tuple_ty: &Type,
+        tuple_place: &Place<Aggregate>,
+        patterns: &[MatchPattern],
+        arm_id: NodeId,
+        tests: &mut Vec<Test>,
+    ) -> Result<(), LowerError> {
+        let Type::Tuple { fields } = tuple_ty else {
+            return Err(LowerError::PatternMismatch(arm_id));
+        };
+        if patterns.len() != fields.len() {
+            return Err(LowerError::PatternMismatch(arm_id));
+        }
+
+        // Each tuple element contributes tests over a projection of the scrutinee.
+        for (index, (pattern, field_ty)) in patterns.iter().zip(fields.iter()).enumerate() {
+            let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
+            let field_place =
+                self.project_place(tuple_place, Projection::Field { index }, field_ty_id);
+            self.collect_pattern_tests(field_ty, field_place, pattern, arm_id, tests)?;
+        }
+
+        Ok(())
+    }
+
+    fn collect_pattern_tests(
+        &mut self,
+        field_ty: &Type,
+        field_place: PlaceAny,
+        pattern: &MatchPattern,
+        arm_id: NodeId,
+        tests: &mut Vec<Test>,
+    ) -> Result<(), LowerError> {
+        match pattern {
+            MatchPattern::Binding { .. } | MatchPattern::Wildcard { .. } => Ok(()),
+            MatchPattern::BoolLit { value, .. } => {
+                // Compare the projected scalar directly to the literal.
+                let (peeled_ty, deref_count) = self.peel_heap_for_match(field_ty.clone());
+                let Type::Bool = peeled_ty else {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                };
+                let place = self.apply_deref_place_any(field_place, &peeled_ty, deref_count);
+                if !matches!(place, PlaceAny::Scalar(_)) {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                }
+                tests.push(Test {
+                    place,
+                    kind: TestKind::Bool { value: *value },
+                });
+                Ok(())
+            }
+            MatchPattern::IntLit { value, .. } => {
+                // Compare the projected scalar directly to the literal.
+                let (peeled_ty, deref_count) = self.peel_heap_for_match(field_ty.clone());
+                let Type::Int { signed, bits } = peeled_ty else {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                };
+                let place = self.apply_deref_place_any(field_place, &peeled_ty, deref_count);
+                if !matches!(place, PlaceAny::Scalar(_)) {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                }
+                tests.push(Test {
+                    place,
+                    kind: TestKind::Int {
+                        value: *value,
+                        signed,
+                        bits,
+                    },
+                });
+                Ok(())
+            }
+            MatchPattern::EnumVariant { variant_name, .. } => {
+                // Compare enum tags; payload bindings are handled after arm selection.
+                let (peeled_ty, deref_count) = self.peel_heap_for_match(field_ty.clone());
+                let Type::Enum { variants, .. } = &peeled_ty else {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                };
+                let Some(tag) = variants
+                    .iter()
+                    .position(|variant| variant.name == *variant_name)
+                else {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                };
+                let place = self.apply_deref_place_any(field_place, &peeled_ty, deref_count);
+                let is_scalar = peeled_ty.is_scalar();
+                if is_scalar && !matches!(place, PlaceAny::Scalar(_)) {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                }
+                if !is_scalar && !matches!(place, PlaceAny::Aggregate(_)) {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                }
+                tests.push(Test {
+                    place,
+                    kind: TestKind::Enum {
+                        tag: tag as u64,
+                        is_scalar,
+                    },
+                });
+                Ok(())
+            }
+            MatchPattern::Tuple { patterns, .. } => {
+                // Recurse into nested tuples by extending the projection chain.
+                let (peeled_ty, deref_count) = self.peel_heap_for_match(field_ty.clone());
+                let Type::Tuple { .. } = peeled_ty else {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                };
+                let place = self.apply_deref_place_any(field_place, &peeled_ty, deref_count);
+                let PlaceAny::Aggregate(place) = place else {
+                    return Err(LowerError::PatternMismatch(arm_id));
+                };
+                self.collect_tuple_pattern_tests(&peeled_ty, &place, patterns, arm_id, tests)
+            }
+        }
+    }
+
+    fn emit_match_test_operand(&mut self, test: &Test) -> Result<Operand, LowerError> {
+        let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
+        match &test.kind {
+            TestKind::Bool { value } => {
+                // Emit (place == literal) as a bool operand.
+                let PlaceAny::Scalar(place) = &test.place else {
+                    unreachable!("compiler bug: expected scalar place for bool check");
+                };
+                Ok(self.emit_scalar_rvalue(
+                    bool_ty_id,
+                    Rvalue::BinOp {
+                        op: BinOp::Eq,
+                        lhs: Operand::Copy(place.clone()),
+                        rhs: Operand::Const(Const::Bool(*value)),
+                    },
+                ))
+            }
+            TestKind::Int {
+                value,
+                signed,
+                bits,
+            } => {
+                // Emit (place == literal) as a bool operand.
+                let PlaceAny::Scalar(place) = &test.place else {
+                    unreachable!("compiler bug: expected scalar place for int check");
+                };
+                Ok(self.emit_scalar_rvalue(
+                    bool_ty_id,
+                    Rvalue::BinOp {
+                        op: BinOp::Eq,
+                        lhs: Operand::Copy(place.clone()),
+                        rhs: Operand::Const(Const::Int {
+                            signed: *signed,
+                            bits: *bits,
+                            value: (*value) as i128,
+                        }),
+                    },
+                ))
+            }
+            TestKind::Enum { tag, is_scalar } => {
+                // Compare the enum tag directly (scalar enums) or via the tag field.
+                let discr = if *is_scalar {
+                    let PlaceAny::Scalar(place) = &test.place else {
+                        unreachable!("compiler bug: expected scalar place for enum tag check");
+                    };
+                    Operand::Copy(place.clone())
+                } else {
+                    let PlaceAny::Aggregate(place) = &test.place else {
+                        unreachable!("compiler bug: expected aggregate place for enum tag check");
+                    };
+                    let tag_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
+                    let mut projs = place.projections().to_vec();
+                    projs.push(Projection::Field { index: 0 });
+                    let tag_place = Place::new(place.base(), tag_ty_id, projs);
+                    Operand::Copy(tag_place)
+                };
+
+                Ok(self.emit_scalar_rvalue(
+                    bool_ty_id,
+                    Rvalue::BinOp {
+                        op: BinOp::Eq,
+                        lhs: discr,
+                        rhs: Operand::Const(Const::Int {
+                            signed: false,
+                            bits: 64,
+                            value: (*tag) as i128,
+                        }),
+                    },
+                ))
+            }
+        }
+    }
+
+    fn apply_deref_place_any(
+        &mut self,
+        place: PlaceAny,
+        ty: &Type,
+        deref_count: usize,
+    ) -> PlaceAny {
+        let (base, mut projs) = match place {
+            PlaceAny::Scalar(place) => (place.base(), place.projections().to_vec()),
+            PlaceAny::Aggregate(place) => (place.base(), place.projections().to_vec()),
+        };
+        for _ in 0..deref_count {
+            projs.push(Projection::Deref);
+        }
+        let ty_id = self.ty_lowerer.lower_ty(ty);
+        self.place_from_ty_id(base, ty_id, projs)
+    }
+}
+
+struct TupleDecisionEmitter<'a, 'b> {
+    lowerer: &'a mut FuncLowerer<'b>,
+}
+
+impl<'a, 'b> DecisionTreeEmitter for TupleDecisionEmitter<'a, 'b> {
+    fn new_block(&mut self) -> BlockId {
+        self.lowerer.fb.new_block()
+    }
+
+    fn enter_block(&mut self, block: BlockId) {
+        self.lowerer.curr_block = block;
+    }
+
+    fn emit_test(&mut self, test: &Test) -> Result<Operand, LowerError> {
+        self.lowerer.emit_match_test_operand(test)
+    }
+
+    fn set_terminator(&mut self, block: BlockId, term: Terminator) {
+        self.lowerer.fb.set_terminator(block, term);
     }
 }

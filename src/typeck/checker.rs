@@ -1333,16 +1333,16 @@ impl TypeChecker {
                 if let Some(variant) = variants.iter().find(|v| v.name == *variant_name) {
                     if bindings.len() == variant.payload.len() {
                         for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
-                            self.record_match_binding_type(binding, ty);
+                            self.record_match_binding(binding, ty);
                         }
                     } else {
                         for binding in bindings {
-                            self.record_match_binding_type(binding, &Type::Unknown);
+                            self.record_match_binding(binding, &Type::Unknown);
                         }
                     }
                 } else {
                     for binding in bindings {
-                        self.record_match_binding_type(binding, &Type::Unknown);
+                        self.record_match_binding(binding, &Type::Unknown);
                     }
                 }
 
@@ -1352,47 +1352,73 @@ impl TypeChecker {
         }
     }
 
+    fn record_match_binding(&mut self, binding: &MatchPatternBinding, ty: &Type) {
+        let MatchPatternBinding::Named { id, .. } = binding else {
+            return;
+        };
+        self.record_binding_id(*id, ty);
+    }
+
+    fn record_binding_id(&mut self, id: NodeId, ty: &Type) {
+        match self.context.def_map.lookup_def(id) {
+            Some(def) => {
+                self.type_map_builder
+                    .record_def_type(def.clone(), ty.clone());
+                self.type_map_builder.record_node_type(id, ty.clone());
+            }
+            None => panic!("compiler bug: binding [{}] not found in def_map", id),
+        }
+    }
+
     fn check_tuple_match_pattern(&mut self, fields: &[Type], pattern: &MatchPattern) {
         let MatchPattern::Tuple { patterns, .. } = pattern else {
             return;
         };
 
+        self.record_tuple_pattern_bindings(fields, patterns);
+    }
+
+    fn record_tuple_pattern_bindings(&mut self, fields: &[Type], patterns: &[MatchPattern]) {
         if patterns.len() == fields.len() {
             for (pattern, ty) in patterns.iter().zip(fields.iter()) {
-                self.record_match_pattern_binding_type(pattern, ty);
+                self.record_pattern_bindings(pattern, Some(ty));
             }
         } else {
             for pattern in patterns {
-                self.record_match_pattern_binding_type(pattern, &Type::Unknown);
+                self.record_pattern_bindings(pattern, None);
             }
         }
     }
 
-    fn record_match_pattern_binding_type(&mut self, pattern: &MatchPattern, ty: &Type) {
-        let MatchPattern::Binding { id, .. } = pattern else {
-            return;
-        };
-        match self.context.def_map.lookup_def(*id) {
-            Some(def) => {
-                self.type_map_builder
-                    .record_def_type(def.clone(), ty.clone());
-                self.type_map_builder.record_node_type(*id, ty.clone());
+    fn record_pattern_bindings(&mut self, pattern: &MatchPattern, ty: Option<&Type>) {
+        match pattern {
+            MatchPattern::Binding { id, .. } => {
+                self.record_binding_id(*id, ty.unwrap_or(&Type::Unknown));
             }
-            None => panic!("compiler bug: binding [{}] not found in def_map", id),
-        }
-    }
-
-    fn record_match_binding_type(&mut self, binding: &MatchPatternBinding, ty: &Type) {
-        let MatchPatternBinding::Named { id, .. } = binding else {
-            return;
-        };
-        match self.context.def_map.lookup_def(*id) {
-            Some(def) => {
-                self.type_map_builder
-                    .record_def_type(def.clone(), ty.clone());
-                self.type_map_builder.record_node_type(*id, ty.clone());
+            MatchPattern::EnumVariant { bindings, .. } => match ty {
+                Some(Type::Enum { name, variants }) => {
+                    let _ = self.check_enum_match_pattern(name, variants, pattern);
+                }
+                _ => {
+                    for binding in bindings {
+                        self.record_match_binding(binding, &Type::Unknown);
+                    }
+                }
+            },
+            MatchPattern::Tuple { patterns, .. } => {
+                let fields = match ty {
+                    Some(Type::Tuple { fields }) => Some(fields.as_slice()),
+                    _ => None,
+                };
+                if let Some(fields) = fields {
+                    self.record_tuple_pattern_bindings(fields, patterns);
+                } else {
+                    for pattern in patterns {
+                        self.record_pattern_bindings(pattern, None);
+                    }
+                }
             }
-            None => panic!("compiler bug: binding [{}] not found in def_map", id),
+            _ => {}
         }
     }
 }

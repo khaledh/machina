@@ -125,14 +125,13 @@ fn main() -> u64 {
 ### Features
 
 - Mutable value semantics
-- Expression oriented syntax
-- Bindings: `let` (immutable), `var` (mutable)
-- Explicit `move` for ownership transfer
-- Mutable parameters via `inout` mode
-- Blocks (last expression is the block value)
-- Pattern matching
+- Owned heap values (`^T`) with automatic drops
+- Explicit ownership transfer (`move`)
+- Parameter modes (`inout`, `out`, `sink`)
+- Borrow rules for slices and `inout` args
 - Function overloading
-- Runtime safety checks
+- Method blocks and method calls
+- Pattern matching
 
 ### Types
 
@@ -168,9 +167,9 @@ fn main() -> u64 {
 - Struct update: `{ base | x: 10 }`
 
 **Enums**
-- `type Color = Red | Green | Blue`, `let c = Color::Green` - Enum payloads:
-`type Shape = Circle(u64) | Rect(u64, u64)`, `let s = Shape::Circle(10)`
-- Enum pattern matching: `match color { Color::Green(val) => val, _ => 0 }`
+- `type Color = Red | Green | Blue`, `let c = Color::Green`
+- Payloads: `type Shape = Circle(u64) | Rect(u64, u64)`, `let s = Shape::Circle(10)`
+- Pattern matching: `match color { Color::Green(val) => val, _ => 0 }`
 
 **Type aliases**
 - `type Size = u64`, `let s: Size = 10`
@@ -200,6 +199,12 @@ fn main() -> u64 {
 - Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
 - Logical operators (`&&`, `||`, `!`)
 
+### Pattern Matching
+
+- Enum patterns: `match color { Color::Green(val) => val, _ => 0 }`
+- Tuple patterns: `match t { (0, Flag::On, true) => 10, (x, _, _) => x }`
+- Literal matches: `match n { 0 => 10, 1 => 20, _ => 99 }`, `match b { true => 1, false => 0 }`
+
 ### Functions
 
 - Function definitions: `fn foo(arg: arg_type, ...) -> return_type { body }`
@@ -223,6 +228,15 @@ fn main() -> u64 {
 - Division by zero
 - Index out of bounds
 - Value out of range
+
+### Optimizations
+
+- RVO/NRVO (copy elision for return values)
+- Last-use copy elision for aggregates
+- Rvalue simplification
+- Constant branch elimination
+- Self-copy removal
+- Stack slot reuse for non-overlapping lifetimes
 
 ## Compiling and running
 

@@ -700,12 +700,38 @@ fn test_match_tuple_single_arm_ok() {
 }
 
 #[test]
-fn test_match_tuple_multiple_arms_rejected() {
+fn test_match_tuple_nested_ok() {
+    let source = r#"
+        fn test(t: (u64, (bool, u64))) -> u64 {
+            match t {
+                (x, (y, _)) => x,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected nested tuple match to be accepted");
+}
+
+#[test]
+fn test_match_tuple_multiple_arms_ok() {
     let source = r#"
         fn test(t: (u64, bool)) -> u64 {
             match t {
                 (x, _) => x,
                 _ => 0,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected tuple match to be accepted");
+}
+
+#[test]
+fn test_match_tuple_literals_require_wildcard() {
+    let source = r#"
+        fn test(t: (u64, bool)) -> u64 {
+            match t {
+                (1, true) => 1,
             }
         }
     "#;
@@ -716,10 +742,26 @@ fn test_match_tuple_multiple_arms_rejected() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::TupleMatchRequiresSingleArm(_) => {}
-            e => panic!("Expected TupleMatchRequiresSingleArm error, got {:?}", e),
+            SemCheckError::NonExhaustiveMatch(_) => {}
+            e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
         }
     }
+}
+
+#[test]
+fn test_match_tuple_literals_with_wildcard_ok() {
+    let source = r#"
+        type Flag = On | Off
+
+        fn test(t: (u64, Flag, bool)) -> u64 {
+            match t {
+                (1, Flag::On, true) => 1,
+                _ => 0,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected tuple match to be accepted");
 }
 
 #[test]

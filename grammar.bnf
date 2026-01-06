@@ -92,9 +92,14 @@ If                 ::= "if" Expr Block ( "else" Block )?
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr
 MatchPattern       ::= "_" | BoolLit | IntLit | TuplePattern | EnumVariantPattern
+
 EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" MatchBindingList? ")" )?
-TuplePattern       ::= "(" MatchBindingList? ")"
 MatchBindingList   ::= MatchBinding ("," MatchBinding)* ","?
+
+TuplePattern       ::= "(" TuplePatternElemList? ")"
+TuplePatternElemList ::= TuplePatternElem ("," TuplePatternElem)* ","?
+TuplePatternElem   ::= MatchBinding | TuplePattern
+
 MatchBinding       ::= Identifier | "_"
 
 # Operator Precedence (Lowest to Highest)
