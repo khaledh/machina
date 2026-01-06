@@ -1,7 +1,10 @@
 mod format;
 mod relations;
 
-pub use relations::{TypeAssignability, ValueAssignability, type_assignable, value_assignable};
+pub use relations::{
+    TypeAssignability, ValueAssignability, array_to_slice_assignable, type_assignable,
+    value_assignable,
+};
 
 use std::hash::{Hash, Hasher};
 

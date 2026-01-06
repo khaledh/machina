@@ -189,6 +189,22 @@ fn test_slice_2d_array_then_slice_row_typechecks() {
 }
 
 #[test]
+fn test_array_to_slice_call_typechecks() {
+    let source = r#"
+        fn sum(xs: u64[]) -> u64 {
+            0
+        }
+
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            sum(arr)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_match_enum_through_heap() {
     let source = r#"
         type Msg = Ping(u64) | Pong(u64)

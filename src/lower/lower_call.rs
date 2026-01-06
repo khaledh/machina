@@ -2,7 +2,7 @@ use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, FunctionParamMode};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
-use crate::types::Type;
+use crate::types::{Type, array_to_slice_assignable};
 
 impl<'a> FuncLowerer<'a> {
     // --- Calls ---
@@ -52,8 +52,10 @@ impl<'a> FuncLowerer<'a> {
         args: &[CallArg],
     ) -> Result<ExprValue, LowerError> {
         let self_mode = self
-            .lookup_call_param_modes(call)
-            .and_then(|modes| modes.first().cloned());
+            .ctx
+            .type_map
+            .lookup_call_sig(call.id)
+            .and_then(|sig| sig.param_modes.first().cloned());
         let self_arg_mode = match self_mode {
             Some(FunctionParamMode::Sink) => CallArgMode::Move,
             _ => CallArgMode::Default,
@@ -101,10 +103,10 @@ impl<'a> FuncLowerer<'a> {
         }
 
         let mut out_args = Vec::new();
-        let param_modes = self.lookup_call_param_modes(call);
-        let arg_vals = if let Some(param_modes) = param_modes {
+        let call_sig = self.ctx.type_map.lookup_call_sig(call.id);
+        let arg_vals = if let Some(call_sig) = &call_sig {
             let mut vals = Vec::with_capacity(args.len());
-            for (mode, arg) in param_modes.iter().zip(args) {
+            for (idx, (mode, arg)) in call_sig.param_modes.iter().zip(args).enumerate() {
                 let arg_expr = &arg.expr;
                 if *mode == FunctionParamMode::Out {
                     // Out args are write-only; skip drop only when the call is the first init.
@@ -116,7 +118,14 @@ impl<'a> FuncLowerer<'a> {
                     out_args.push(arg_expr);
                     vals.push(place);
                 } else {
-                    vals.push(self.lower_call_arg_place(arg_expr)?);
+                    if let Some(param_ty) = call_sig.param_types.get(idx)
+                        && matches!(arg.mode, CallArgMode::Default | CallArgMode::Inout)
+                        && self.coerce_array_to_slice(arg_expr, param_ty)?
+                    {
+                        vals.push(self.lower_call_array_as_slice(arg_expr, param_ty)?);
+                    } else {
+                        vals.push(self.lower_call_arg_place(arg_expr)?);
+                    }
                 }
                 if *mode == FunctionParamMode::Sink && arg.mode == CallArgMode::Move {
                     self.record_move(arg_expr);
@@ -175,31 +184,21 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn lookup_call_param_modes(&self, call: &Expr) -> Option<Vec<FunctionParamMode>> {
-        let def_id = self.ctx.type_map.lookup_call_def(call.id)?;
-        for callable in self.ctx.module.callables() {
-            let def = self.ctx.def_map.lookup_def(callable.id())?;
-            if def.id != def_id {
-                continue;
-            }
-            return match callable {
-                crate::ast::CallableRef::Function(func) => {
-                    Some(func.sig.params.iter().map(|p| p.mode.clone()).collect())
-                }
-                crate::ast::CallableRef::Method { method, .. } => {
-                    let mut modes = Vec::with_capacity(method.sig.params.len() + 1);
-                    modes.push(method.sig.self_param.mode.clone());
-                    modes.extend(method.sig.params.iter().map(|p| p.mode.clone()));
-                    Some(modes)
-                }
-            };
-        }
-        for decl in self.ctx.module.func_decls() {
-            let def = self.ctx.def_map.lookup_def(decl.id)?;
-            if def.id == def_id {
-                return Some(decl.sig.params.iter().map(|p| p.mode.clone()).collect());
-            }
-        }
-        None
+    fn coerce_array_to_slice(&mut self, arg: &Expr, param_ty: &Type) -> Result<bool, LowerError> {
+        let arg_ty = self.ty_for_node(arg.id)?;
+        Ok(array_to_slice_assignable(&arg_ty, param_ty))
+    }
+
+    fn lower_call_array_as_slice(
+        &mut self,
+        arg: &Expr,
+        param_ty: &Type,
+    ) -> Result<PlaceAny, LowerError> {
+        let ty_id = self.ty_lowerer.lower_ty(param_ty);
+        let temp_place = self.new_temp_aggregate(ty_id);
+        let start: Option<Box<Expr>> = None;
+        let end: Option<Box<Expr>> = None;
+        self.lower_slice_into(&temp_place, arg, &start, &end)?;
+        Ok(PlaceAny::Aggregate(temp_place))
     }
 }

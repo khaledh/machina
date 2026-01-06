@@ -90,6 +90,13 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
     }
 }
 
+pub fn array_to_slice_assignable(from: &Type, to: &Type) -> bool {
+    let Type::Slice { elem_ty } = to else {
+        return false;
+    };
+    matches!(from.array_item_type(), Some(item) if item == **elem_ty)
+}
+
 fn type_tag(ty: &Type) -> TypeTag {
     match ty {
         Type::Int { .. } => TypeTag::Int,

@@ -6,12 +6,12 @@ use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
-use crate::types::{EnumVariant, StructField, Type};
+use crate::types::{EnumVariant, StructField, Type, array_to_slice_assignable};
 use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
 use super::overloads::{FuncOverloadResolver, FuncOverloadSig, FuncParamSig};
-use super::type_map::{TypeMap, TypeMapBuilder, resolve_type_expr};
+use super::type_map::{CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
 
 pub struct TypeChecker {
     context: ResolvedContext,
@@ -1031,6 +1031,12 @@ impl TypeChecker {
             match self.check_assignable_to(&arg.expr, &arg_ty, param_ty) {
                 Ok(()) => continue,
                 Err(_) => {
+                    if arg.mode != CallArgMode::Move
+                        && arg.mode != CallArgMode::Out
+                        && array_to_slice_assignable(&arg_ty, param_ty)
+                    {
+                        continue;
+                    }
                     let span = arg.span;
                     return Err(TypeCheckErrorKind::ArgTypeMismatch(
                         i + 1,
@@ -1098,13 +1104,19 @@ impl TypeChecker {
                         .iter()
                         .map(|param| param.ty.clone())
                         .collect::<Vec<_>>();
+                    let param_modes = resolved
+                        .sig
+                        .params
+                        .iter()
+                        .map(|param| param.mode.clone())
+                        .collect::<Vec<_>>();
                     let return_type = resolved.sig.return_type.clone();
-                    (resolved.def_id, param_types, return_type)
+                    (resolved.def_id, param_types, param_modes, return_type)
                 });
             (resolved, fallback_param_types)
         };
 
-        let (def_id, param_types, return_type) = match resolved {
+        let (def_id, param_types, param_modes, return_type) = match resolved {
             Ok(resolved) => resolved,
             Err(err) => {
                 if matches!(err.kind(), TypeCheckErrorKind::FuncOverloadNoMatch(_, _)) {
@@ -1119,6 +1131,13 @@ impl TypeChecker {
         };
 
         self.type_map_builder.record_call_def(call_expr.id, def_id);
+        self.type_map_builder.record_call_sig(
+            call_expr.id,
+            CallSig {
+                param_modes,
+                param_types: param_types.clone(),
+            },
+        );
         self.check_call_arg_types(args, &param_types)?;
         Ok(return_type)
     }
@@ -1185,13 +1204,19 @@ impl TypeChecker {
                         .iter()
                         .map(|param| param.ty.clone())
                         .collect::<Vec<_>>();
+                    let param_modes = resolved
+                        .sig
+                        .params
+                        .iter()
+                        .map(|param| param.mode.clone())
+                        .collect::<Vec<_>>();
                     let return_type = resolved.sig.return_type.clone();
-                    (resolved.def_id, param_types, return_type)
+                    (resolved.def_id, param_types, param_modes, return_type)
                 });
             (resolved, fallback_param_types)
         };
 
-        let (def_id, param_types, return_type) = match resolved {
+        let (def_id, param_types, param_modes, return_type) = match resolved {
             Ok(resolved) => resolved,
             Err(err) => {
                 if matches!(err.kind(), TypeCheckErrorKind::FuncOverloadNoMatch(_, _)) {
@@ -1206,9 +1231,38 @@ impl TypeChecker {
         };
 
         self.type_map_builder.record_call_def(call_expr.id, def_id);
+        if let Some(self_mode) = self.lookup_method_self_mode(def_id) {
+            let mut call_param_modes = Vec::with_capacity(param_modes.len() + 1);
+            call_param_modes.push(self_mode);
+            call_param_modes.extend(param_modes);
+
+            let mut call_param_types = Vec::with_capacity(param_types.len() + 1);
+            call_param_types.push(target_ty.clone());
+            call_param_types.extend(param_types.iter().cloned());
+
+            self.type_map_builder.record_call_sig(
+                call_expr.id,
+                CallSig {
+                    param_modes: call_param_modes,
+                    param_types: call_param_types,
+                },
+            );
+        }
         self.check_call_arg_types(args, &param_types)?;
 
         Ok(return_type)
+    }
+
+    fn lookup_method_self_mode(&self, def_id: DefId) -> Option<FunctionParamMode> {
+        for block in self.context.module.method_blocks() {
+            for method in &block.methods {
+                let def = self.context.def_map.lookup_def(method.id)?;
+                if def.id == def_id {
+                    return Some(method.sig.self_param.mode.clone());
+                }
+            }
+        }
+        None
     }
 
     fn check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {

@@ -2,7 +2,6 @@ use super::*;
 use crate::types::is_builtin_type_name;
 
 impl<'a> Parser<'a> {
-
     /// Expression parsing (using Pratt parsing for operator precedence)
     pub(super) fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let marker = self.mark();

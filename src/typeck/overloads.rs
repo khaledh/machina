@@ -1,8 +1,10 @@
-use crate::ast::{CallArg, FunctionParamMode};
+use crate::ast::{CallArg, CallArgMode, FunctionParamMode};
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::{Type, TypeAssignability, ValueAssignability, value_assignable};
+use crate::types::{
+    Type, TypeAssignability, ValueAssignability, array_to_slice_assignable, value_assignable,
+};
 
 pub(super) struct FuncParamSig {
     #[allow(dead_code)]
@@ -138,7 +140,16 @@ impl<'a> FuncOverloadResolver<'a> {
                         TypeCheckErrorKind::ValueOutOfRange(value, min, max, arg.span).into(),
                     );
                 }
-                ValueAssignability::Incompatible => return Ok(None),
+                ValueAssignability::Incompatible => {
+                    if arg.mode != CallArgMode::Move
+                        && arg.mode != CallArgMode::Out
+                        && array_to_slice_assignable(arg_ty, &param.ty)
+                    {
+                        ranks.push(ArgOverloadRank::Assignable);
+                    } else {
+                        return Ok(None);
+                    }
+                }
             }
         }
 
