@@ -283,7 +283,8 @@ impl<'a> NrvoSafetyChecker<'a> {
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
             | ExprKind::EnumVariant { .. }
-            | ExprKind::Range { .. } => true,
+            | ExprKind::Range { .. }
+            | ExprKind::Closure { .. } => true,
         }
     }
 

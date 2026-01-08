@@ -537,6 +537,29 @@ impl Expr {
                 writeln!(f, "{}Args:", pad1)?;
                 self.fmt_call_args(f, level + 2, args)?;
             }
+            ExprKind::Closure {
+                params,
+                return_ty,
+                body,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Closure [{}]", pad, self.id)?;
+                if params.is_empty() {
+                    writeln!(f, "{}Params: <none>", pad1)?;
+                } else {
+                    writeln!(f, "{}Params:", pad1)?;
+                    for param in params {
+                        writeln!(f, "{}{}", indent(level + 2), param)?;
+                    }
+                }
+                if let Some(return_ty) = return_ty {
+                    writeln!(f, "{}Return: {}", pad1, return_ty)?;
+                } else {
+                    writeln!(f, "{}Return: <inferred>", pad1)?;
+                }
+                writeln!(f, "{}Body:", pad1)?;
+                body.fmt_with_indent(f, level + 2)?;
+            }
             ExprKind::EnumVariant {
                 enum_name,
                 variant,

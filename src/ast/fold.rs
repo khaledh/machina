@@ -329,3 +329,10 @@ pub fn walk_call_args<F: AstFolder + ?Sized>(
 ) -> Result<Vec<F::Output>, F::Error> {
     args.iter().map(|arg| walk_expr(f, &arg.expr)).collect()
 }
+
+// --- Closures ---
+
+/// Visit a closure body (params/return types are handled by the caller).
+pub fn walk_closure<F: AstFolder + ?Sized>(f: &mut F, body: &Expr) -> Result<F::Output, F::Error> {
+    walk_expr(f, body)
+}

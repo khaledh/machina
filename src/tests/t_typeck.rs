@@ -942,3 +942,87 @@ fn test_range_non_literal_assignment() {
         "expected successful type check for non-literal range assignment"
     );
 }
+
+#[test]
+fn test_closure_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let add = |a: u64, b: u64| -> u64 a + b;
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_closure_return_mismatch_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let _f = |a: u64| -> u64 { true };
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::DeclTypeMismatch(_, found, _) => {
+                assert_eq!(*found, Type::Bool);
+            }
+            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_fn_type_annotation_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let add: fn(u64, u64) -> u64 = |a: u64, b: u64| -> u64 a + b;
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_fn_type_alias_typechecks() {
+    let source = r#"
+        type Add = fn(u64, u64) -> u64
+
+        fn test() -> u64 {
+            let add: Add = |a: u64, b: u64| -> u64 a + b;
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_fn_type_annotation_mismatch_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let add: fn(u64, u64) -> u64 = |a: u64| -> u64 a;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {
+                // Expected error
+            }
+            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
+        }
+    }
+}

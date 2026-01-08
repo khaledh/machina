@@ -359,6 +359,20 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
             }
         }
 
+        ExprKind::Closure {
+            params,
+            return_ty,
+            body,
+        } => {
+            for param in params {
+                v.visit_param(param);
+            }
+            if let Some(return_ty) = return_ty {
+                v.visit_type_expr(return_ty);
+            }
+            v.visit_expr(body);
+        }
+
         ExprKind::If {
             cond,
             then_body,

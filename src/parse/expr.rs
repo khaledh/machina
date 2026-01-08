@@ -234,6 +234,8 @@ impl<'a> Parser<'a> {
 
             TK::LBrace => self.parse_block(),
 
+            TK::Pipe | TK::LogicalOr => self.parse_closure_expr(),
+
             TK::LBracket => self.parse_array_lit(),
 
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
@@ -277,6 +279,44 @@ impl<'a> Parser<'a> {
         Ok(CallArg {
             mode,
             expr,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_closure_expr(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+
+        let params = if self.curr_token.kind == TK::LogicalOr {
+            self.advance();
+            Vec::new()
+        } else {
+            self.consume(&TK::Pipe)?;
+            if self.curr_token.kind == TK::Pipe {
+                self.advance();
+                Vec::new()
+            } else {
+                let params = self.parse_list(TK::Comma, TK::Pipe, |parser| parser.parse_param())?;
+                self.consume(&TK::Pipe)?;
+                params
+            }
+        };
+
+        let return_ty = if self.curr_token.kind == TK::Arrow {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        let body = self.parse_expr(0)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Closure {
+                params,
+                return_ty,
+                body: Box::new(body),
+            },
             span: self.close(marker),
         })
     }

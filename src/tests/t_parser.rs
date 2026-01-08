@@ -1264,3 +1264,60 @@ fn test_parse_for_array_loop() {
     let tail = tail.expect("Expected block to have a tail expr");
     assert!(matches!(tail.kind, ExprKind::IntLit(0)));
 }
+
+#[test]
+fn test_parse_closure_expr() {
+    let source = r#"
+        fn test() -> u64 {
+            |a: u64, b: u64| -> u64 a + b
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Closure {
+            params,
+            return_ty,
+            body,
+        } => {
+            assert_eq!(params.len(), 2);
+            assert_eq!(params[0].name, "a");
+            assert_eq!(params[1].name, "b");
+            match &return_ty.as_ref().expect("Expected return type").kind {
+                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                _ => panic!("Expected named return type"),
+            }
+            assert!(matches!(body.kind, ExprKind::BinOp { .. }));
+        }
+        _ => panic!("Expected closure expression"),
+    }
+}
+
+#[test]
+fn test_parse_closure_expr_empty_params() {
+    let source = r#"
+        fn test() -> u64 {
+            || { 1 }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Closure {
+            params,
+            return_ty,
+            body,
+        } => {
+            assert!(params.is_empty());
+            assert!(return_ty.is_none());
+            assert!(matches!(body.kind, ExprKind::Block { .. }));
+        }
+        _ => panic!("Expected closure expression"),
+    }
+}

@@ -635,6 +635,12 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<CallArg>,
     },
+
+    Closure {
+        params: Vec<Param>,
+        return_ty: Option<TypeExpr>,
+        body: Box<Expr>,
+    },
 }
 
 // -- Operators ---

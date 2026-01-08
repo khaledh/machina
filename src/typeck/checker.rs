@@ -412,6 +412,57 @@ impl TypeChecker {
         }
     }
 
+    fn check_closure(
+        &mut self,
+        params: &[Param],
+        return_ty: &Option<TypeExpr>,
+        body: &Expr,
+    ) -> Result<Type, TypeCheckError> {
+        let mut param_types = Vec::with_capacity(params.len());
+        for param in params {
+            let ty = resolve_type_expr(&self.context.def_map, &param.typ)?;
+            self.type_map_builder.record_node_type(param.id, ty.clone());
+            if let Some(def) = self.context.def_map.lookup_def(param.id) {
+                self.type_map_builder
+                    .record_def_type(def.clone(), ty.clone());
+            }
+            param_types.push(FnParam {
+                mode: fn_param_mode(param.mode.clone()),
+                ty,
+            });
+        }
+
+        let declared_return = match return_ty {
+            Some(ty) => Some(resolve_type_expr(&self.context.def_map, ty)?),
+            None => None,
+        };
+
+        let body_ty = match declared_return.as_ref() {
+            Some(expected) => self.visit_expr(body, Some(expected))?,
+            None => self.visit_expr(body, None)?,
+        };
+
+        let return_ty = if let Some(expected) = declared_return {
+            if matches!(
+                type_assignable(&body_ty, &expected),
+                TypeAssignability::Incompatible
+            ) {
+                let return_span = self.function_return_span(body);
+                return Err(
+                    TypeCheckErrorKind::DeclTypeMismatch(expected, body_ty, return_span).into(),
+                );
+            }
+            expected
+        } else {
+            body_ty
+        };
+
+        Ok(Type::Fn {
+            params: param_types,
+            return_ty: Box::new(return_ty),
+        })
+    }
+
     fn function_return_span(&self, body: &Expr) -> Span {
         match &body.kind {
             ExprKind::Block { items, tail } => {
@@ -1851,6 +1902,12 @@ impl AstFolder for TypeChecker {
                 ExprKind::Slice { target, start, end } => self.check_slice(target, start, end),
 
                 ExprKind::Match { scrutinee, arms } => self.check_match(scrutinee, arms),
+
+                ExprKind::Closure {
+                    params,
+                    return_ty,
+                    body,
+                } => self.check_closure(params, return_ty, body),
             },
         };
 

@@ -802,6 +802,32 @@ impl Visitor for SymbolResolver {
                 }
             }
 
+            ExprKind::Closure {
+                params,
+                return_ty,
+                body,
+            } => {
+                for param in params {
+                    self.visit_type_expr(&param.typ);
+                }
+                if let Some(return_ty) = return_ty {
+                    self.visit_type_expr(return_ty);
+                }
+
+                self.with_scope(|resolver| {
+                    for (index, param) in params.iter().enumerate() {
+                        resolver.register_param(
+                            &param.name,
+                            param.mode.clone(),
+                            param.id,
+                            param.span,
+                            index as u32,
+                        );
+                    }
+                    resolver.visit_expr(body);
+                });
+            }
+
             _ => walk_expr(self, expr),
         }
     }

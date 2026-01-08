@@ -1107,7 +1107,8 @@ impl<'a> DefInitChecker<'a> {
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
             | ExprKind::UnitLit
-            | ExprKind::Range { .. } => {}
+            | ExprKind::Range { .. }
+            | ExprKind::Closure { .. } => {}
         }
     }
 

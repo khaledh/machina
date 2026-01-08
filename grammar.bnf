@@ -51,6 +51,9 @@ Method             ::= MethodSig Block
 MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
 SelfParam          ::= ParamMode? "self"
 
+# Closures
+ClosureSig         ::= "|" ParamList? "|" ( "->" TypeExpr )?
+
 # Parameters (common)
 ParamList          ::= Param ("," Param)* ","?
 Param              ::= ParamMode? Identifier ":" TypeExpr
@@ -154,6 +157,9 @@ Primary            ::= Literal
                      | StructUpdate
                      | "(" Expr ")"
                      | Block
+                     | ClosureExpr
+
+ClosureExpr        ::= ClosureSig Expr
 
 Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
                      | ArrayLit | TupleLit | StructLit
