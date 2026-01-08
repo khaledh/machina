@@ -21,7 +21,8 @@ EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
 
 # Type Expressions
-TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType | TupleType | RangeType | HeapType
+TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType
+                     | TupleType | RangeType | HeapType | FnType
 
 UnitType           ::= "()"
 NamedType          ::= Identifier
@@ -30,6 +31,10 @@ SliceType          ::= TypeExpr "[" "]"
 TupleType          ::= "(" TypeExpr "," ( TypeExprList )? ")"
 RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
 HeapType           ::= "^" TypeExpr
+FnType             ::= "fn" "(" FnTypeParamList? ")" "->" TypeExpr
+
+FnTypeParamList    ::= FnTypeParam ("," FnTypeParam)* ","?
+FnTypeParam        ::= ParamMode? TypeExpr
 
 TypeExprList       ::= TypeExpr ( "," TypeExpr )* ","?
 IntLitList         ::= IntLit ("," IntLit)* ","?

@@ -239,6 +239,16 @@ pub enum TypeExprKind {
     Heap {
         elem_ty: Box<TypeExpr>,
     },
+    Fn {
+        params: Vec<FnTypeParam>,
+        return_ty: Box<TypeExpr>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FnTypeParam {
+    pub mode: ParamMode,
+    pub ty: TypeExpr,
 }
 
 // -- Array Literals ---

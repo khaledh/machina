@@ -26,6 +26,10 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if self.curr_token.kind == TK::KwFn {
+            return self.parse_fn_type();
+        }
+
         if self.curr_token.kind == TK::KwRange {
             return self.parse_range_type();
         }
@@ -36,6 +40,37 @@ impl<'a> Parser<'a> {
         }
 
         self.parse_named_type()
+    }
+
+    fn parse_fn_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwFn)?;
+        self.consume(&TK::LParen)?;
+
+        let params = if self.curr_token.kind == TK::RParen {
+            Vec::new()
+        } else {
+            self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_fn_type_param())?
+        };
+        self.consume(&TK::RParen)?;
+
+        self.consume(&TK::Arrow)?;
+        let return_ty = self.parse_type_expr()?;
+
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Fn {
+                params,
+                return_ty: Box::new(return_ty),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_fn_type_param(&mut self) -> Result<FnTypeParam, ParseError> {
+        let mode = self.parse_param_mode();
+        let ty = self.parse_type_expr()?;
+        Ok(FnTypeParam { mode, ty })
     }
 
     fn parse_named_type(&mut self) -> Result<TypeExpr, ParseError> {

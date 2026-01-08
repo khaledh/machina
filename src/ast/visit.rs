@@ -168,6 +168,12 @@ pub fn walk_type_expr<V: Visitor + ?Sized>(v: &mut V, type_expr: &TypeExpr) {
         TypeExprKind::Range { .. } => {}
         TypeExprKind::Slice { elem_ty } => v.visit_type_expr(elem_ty),
         TypeExprKind::Heap { elem_ty } => v.visit_type_expr(elem_ty),
+        TypeExprKind::Fn { params, return_ty } => {
+            for param in params {
+                v.visit_type_expr(&param.ty);
+            }
+            v.visit_type_expr(return_ty);
+        }
     }
 }
 

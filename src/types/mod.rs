@@ -24,6 +24,10 @@ pub enum Type {
         min: u64,
         max: u64,
     },
+    Fn {
+        params: Vec<FnParam>,
+        return_ty: Box<Type>,
+    },
 
     // Compound Types
     String,
@@ -52,6 +56,20 @@ pub enum Type {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FnParam {
+    pub mode: FnParamMode,
+    pub ty: Type,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FnParamMode {
+    In,
+    InOut,
+    Out,
+    Sink,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructField {
     pub name: String,
@@ -77,6 +95,16 @@ impl PartialEq for Type {
                     max: rmax,
                 },
             ) => lmin == rmin && lmax == rmax,
+            (
+                Type::Fn {
+                    params: p1,
+                    return_ty: r1,
+                },
+                Type::Fn {
+                    params: p2,
+                    return_ty: r2,
+                },
+            ) => p1 == p2 && r1 == r2,
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
             (
@@ -137,34 +165,39 @@ impl Hash for Type {
                 min.hash(state);
                 max.hash(state);
             }
-            Type::String => {
+            Type::Fn { params, return_ty } => {
                 6u8.hash(state);
+                params.hash(state);
+                return_ty.hash(state);
+            }
+            Type::String => {
+                7u8.hash(state);
             }
             Type::Array { elem_ty, dims } => {
-                7u8.hash(state);
+                8u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
             }
             Type::Tuple { fields } => {
-                8u8.hash(state);
+                9u8.hash(state);
                 fields.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
-                9u8.hash(state);
+                10u8.hash(state);
                 name.hash(state);
             }
             Type::Enum { name, .. } => {
                 // Nominal type: only hash the name
-                10u8.hash(state);
+                11u8.hash(state);
                 name.hash(state);
             }
             Type::Slice { elem_ty } => {
-                11u8.hash(state);
+                12u8.hash(state);
                 elem_ty.hash(state);
             }
             Type::Heap { elem_ty } => {
-                12u8.hash(state);
+                13u8.hash(state);
                 elem_ty.hash(state);
             }
         }
@@ -257,6 +290,7 @@ impl Type {
             Type::Bool => 1,
             Type::Char => 4,
             Type::Range { .. } => 8,
+            Type::Fn { .. } => 8,
             Type::String => 16,
             Type::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
@@ -290,6 +324,7 @@ impl Type {
             Type::Bool => 1,
             Type::Char => 4,
             Type::Range { .. } => 8,
+            Type::Fn { .. } => 8,
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),

@@ -6,7 +6,9 @@ use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
-use crate::types::{EnumVariant, StructField, Type, array_to_slice_assignable};
+use crate::types::{
+    EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
+};
 use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -171,6 +173,25 @@ impl TypeChecker {
         let params = self.build_param_sigs(&sig.params)?;
         let return_type = self.resolve_return_type(&sig.return_type)?;
 
+        // Record the function type.
+        if let Some(def) = self.context.def_map.lookup_def_by_id(def_id) {
+            let fn_params = params
+                .iter()
+                .map(|param| FnParam {
+                    mode: fn_param_mode(param.mode.clone()),
+                    ty: param.ty.clone(),
+                })
+                .collect::<Vec<_>>();
+            self.type_map_builder.record_def_type(
+                def.clone(),
+                Type::Fn {
+                    params: fn_params,
+                    return_ty: Box::new(return_type.clone()),
+                },
+            );
+        }
+
+        // Insert an overload entry.
         self.func_sigs
             .entry(sig.name.clone())
             .or_default()
@@ -1469,6 +1490,15 @@ impl TypeChecker {
             }
             _ => {}
         }
+    }
+}
+
+fn fn_param_mode(mode: ParamMode) -> FnParamMode {
+    match mode {
+        ParamMode::In => FnParamMode::In,
+        ParamMode::InOut => FnParamMode::InOut,
+        ParamMode::Out => FnParamMode::Out,
+        ParamMode::Sink => FnParamMode::Sink,
     }
 }
 

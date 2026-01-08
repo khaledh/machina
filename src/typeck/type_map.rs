@@ -1,7 +1,7 @@
 use crate::ast::{NodeId, ParamMode, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::{EnumVariant, StructField, Type};
+use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -79,6 +79,32 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
+        TypeExprKind::Fn { params, return_ty } => {
+            let param_types = params
+                .iter()
+                .map(|param| {
+                    let ty = resolve_type_expr_impl(def_map, &param.ty, in_progress, depth)?;
+                    Ok(FnParam {
+                        mode: fn_param_mode(param.mode.clone()),
+                        ty,
+                    })
+                })
+                .collect::<Result<Vec<_>, TypeCheckError>>()?;
+            let return_ty = resolve_type_expr_impl(def_map, return_ty, in_progress, depth)?;
+            Ok(Type::Fn {
+                params: param_types,
+                return_ty: Box::new(return_ty),
+            })
+        }
+    }
+}
+
+fn fn_param_mode(mode: ParamMode) -> FnParamMode {
+    match mode {
+        ParamMode::In => FnParamMode::In,
+        ParamMode::InOut => FnParamMode::InOut,
+        ParamMode::Out => FnParamMode::Out,
+        ParamMode::Sink => FnParamMode::Sink,
     }
 }
 

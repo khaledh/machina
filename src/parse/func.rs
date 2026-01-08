@@ -40,7 +40,7 @@ impl<'a> Parser<'a> {
         self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())
     }
 
-    fn parse_param(&mut self) -> Result<Param, ParseError> {
+    pub(super) fn parse_param(&mut self) -> Result<Param, ParseError> {
         let marker = self.mark();
         let mode = self.parse_param_mode();
         let name = self.parse_ident()?;
@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_param_mode(&mut self) -> ParamMode {
+    pub(super) fn parse_param_mode(&mut self) -> ParamMode {
         match &self.curr_token.kind {
             TK::KwInOut => {
                 self.advance();

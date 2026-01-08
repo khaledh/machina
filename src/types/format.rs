@@ -14,6 +14,22 @@ impl fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
             Type::Range { min, max } => write!(f, "range({}, {})", min, max),
+            Type::Fn { params, return_ty } => {
+                let params_str = params
+                    .iter()
+                    .map(|param| {
+                        let mode = match param.mode {
+                            FnParamMode::In => "",
+                            FnParamMode::InOut => "inout ",
+                            FnParamMode::Out => "out ",
+                            FnParamMode::Sink => "sink ",
+                        };
+                        format!("{}{}", mode, param.ty)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "fn({}) -> {}", params_str, return_ty)
+            }
             Type::String => write!(f, "string"),
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();

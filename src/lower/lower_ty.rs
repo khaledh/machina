@@ -42,6 +42,10 @@ impl TyLowerer {
                 signed: *signed,
             }),
             Type::Range { .. } => self.lower_ty(&Type::uint(64)),
+            Type::Fn { .. } => {
+                let elem_id = self.lower_ty(&Type::Unit);
+                self.table.add(TyKind::Ptr { elem_ty: elem_id })
+            }
             Type::Heap { elem_ty } => {
                 let elem_id = self.lower_ty(elem_ty);
                 self.table.add(TyKind::Ptr { elem_ty: elem_id })

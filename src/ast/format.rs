@@ -244,6 +244,22 @@ impl fmt::Display for TypeExprKind {
             TypeExprKind::Heap { elem_ty } => {
                 write!(f, "Heap({})", elem_ty)?;
             }
+            TypeExprKind::Fn { params, return_ty } => {
+                let params_str = params
+                    .iter()
+                    .map(|param| {
+                        let mode = match param.mode {
+                            ParamMode::In => "",
+                            ParamMode::InOut => "inout ",
+                            ParamMode::Out => "out ",
+                            ParamMode::Sink => "sink ",
+                        };
+                        format!("{}{}", mode, param.ty)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Fn([{}] -> {})", params_str, return_ty)?;
+            }
         }
         Ok(())
     }

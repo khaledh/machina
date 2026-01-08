@@ -82,6 +82,12 @@ impl<'a> ValueChecker<'a> {
             TypeExprKind::Slice { elem_ty } => self.check_type_expr(elem_ty),
             TypeExprKind::Heap { elem_ty } => self.check_type_expr(elem_ty),
             TypeExprKind::Named(_) => {}
+            TypeExprKind::Fn { params, return_ty } => {
+                for param in params {
+                    self.check_type_expr(&param.ty);
+                }
+                self.check_type_expr(return_ty);
+            }
         }
     }
 
