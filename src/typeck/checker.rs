@@ -13,7 +13,7 @@ use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
 use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
-use super::type_map::{CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
+use super::type_map::{CallParam, CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
 
 pub struct TypeChecker {
     context: ResolvedContext,
@@ -1131,13 +1131,81 @@ impl TypeChecker {
             }
         };
 
-        // Compute argument types first to avoid holding an immutable borrow of self.funcs
+        // Get the function overloads
+        let Some(overloads) = self.func_sigs.get(name).cloned() else {
+            return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
+        };
+
+        self.check_named_call_common(name, callee, call_expr, args, &overloads, false)
+    }
+
+    fn check_method_call(
+        &mut self,
+        name: &str,
+        call_expr: &Expr,
+        callee: &Expr,
+        args: &[CallArg],
+    ) -> Result<Type, TypeCheckError> {
+        let callee_ty = self.visit_expr(callee, None)?;
+        let mut peeled_ty = callee_ty.clone();
+        while let Type::Heap { elem_ty } = peeled_ty {
+            peeled_ty = *elem_ty;
+        }
+        peeled_ty = self.expand_shallow_type(&peeled_ty);
+
+        // Check that the callee type is a struct or enum
+        let type_name = match peeled_ty {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => name,
+            _ => {
+                return Err(
+                    TypeCheckErrorKind::InvalidStructFieldTarget(callee_ty, callee.span).into(),
+                );
+            }
+        };
+
+        // Get a map of method name to overloads
+        let Some(type_methods) = self.method_sigs.get(&type_name) else {
+            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
+        };
+
+        // Get the overloads for the method
+        let Some(overloads) = type_methods.get(name).cloned() else {
+            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
+        };
+
+        // Format the method name as "type::method"
+        let name = format!("{}::{}", type_name, name);
+
+        self.check_named_call_common(&name, callee, call_expr, args, &overloads, true)
+    }
+
+    fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
+        for block in self.context.module.method_blocks() {
+            for method in &block.methods {
+                let Some(def) = self.context.def_map.lookup_def(method.id) else {
+                    continue;
+                };
+                if def.id == def_id {
+                    return method.sig.self_param.mode.clone();
+                }
+            }
+        }
+        panic!("compiler bug: method self mode not found for def {def_id}");
+    }
+
+    fn check_named_call_common(
+        &mut self,
+        name: &str,
+        callee: &Expr,
+        call_expr: &Expr,
+        args: &[CallArg],
+        overloads: &[OverloadSig],
+        is_method: bool,
+    ) -> Result<Type, TypeCheckError> {
+        let callee_ty = self.visit_expr(callee, None)?;
         let arg_types = self.visit_call_args(args)?;
-        // Get overload set for the function
+
         let (resolved, fallback_param_types) = {
-            let Some(overloads) = self.func_sigs.get(name) else {
-                return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
-            };
             let fallback_param_types = Self::single_arity_param_types(overloads, arg_types.len());
             // If no overload matches the arity and all overloads share the same arity,
             // report a count mismatch instead of a generic overload error.
@@ -1196,139 +1264,29 @@ impl TypeChecker {
             }
         };
 
-        self.type_map_builder.record_call_def(call_expr.id, def_id);
-        self.type_map_builder.record_call_sig(
-            call_expr.id,
-            CallSig {
-                param_modes,
-                param_types: param_types.clone(),
-            },
-        );
-        self.check_call_arg_types(args, &param_types)?;
-        Ok(return_type)
-    }
-
-    fn check_method_call(
-        &mut self,
-        call_expr: &Expr,
-        target: &Expr,
-        method: &str,
-        args: &[CallArg],
-    ) -> Result<Type, TypeCheckError> {
-        let target_ty = self.visit_expr(target, None)?;
-        let mut peeled_ty = target_ty.clone();
-        while let Type::Heap { elem_ty } = peeled_ty {
-            peeled_ty = *elem_ty;
+        let mut receiver = None;
+        if is_method {
+            let self_mode = self.lookup_method_self_mode(def_id);
+            receiver = Some(CallParam {
+                mode: self_mode,
+                ty: callee_ty.clone(),
+            });
         }
-        peeled_ty = self.expand_shallow_type(&peeled_ty);
 
-        let type_name = match peeled_ty {
-            Type::Struct { name, .. } | Type::Enum { name, .. } => name,
-            _ => {
-                return Err(
-                    TypeCheckErrorKind::InvalidStructFieldTarget(target_ty, target.span).into(),
-                );
-            }
-        };
-
-        let arg_types = self.visit_call_args(args)?;
-        let Some(type_methods) = self.method_sigs.get(&type_name) else {
-            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
-        };
-        let Some(overloads) = type_methods.get(method) else {
-            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
-        };
-        let (resolved, fallback_param_types) = {
-            let name = format!("{}::{}", type_name, method);
-            let fallback_param_types = Self::single_arity_param_types(overloads, arg_types.len());
-            if !overloads
-                .iter()
-                .any(|sig| sig.params.len() == arg_types.len())
-            {
-                let mut counts = HashSet::new();
-                for sig in overloads {
-                    counts.insert(sig.params.len());
-                }
-                if counts.len() == 1 {
-                    let expected = *counts.iter().next().unwrap();
-                    return Err(TypeCheckErrorKind::ArgCountMismatch(
-                        name,
-                        expected,
-                        arg_types.len(),
-                        call_expr.span,
-                    )
-                    .into());
-                }
-            }
-
-            let resolved = OverloadResolver::new(&name, args, &arg_types, call_expr.span)
-                .resolve(overloads)
-                .map(|resolved| {
-                    let param_types = resolved
-                        .sig
-                        .params
-                        .iter()
-                        .map(|param| param.ty.clone())
-                        .collect::<Vec<_>>();
-                    let param_modes = resolved
-                        .sig
-                        .params
-                        .iter()
-                        .map(|param| param.mode.clone())
-                        .collect::<Vec<_>>();
-                    let return_type = resolved.sig.return_type.clone();
-                    (resolved.def_id, param_types, param_modes, return_type)
-                });
-            (resolved, fallback_param_types)
-        };
-
-        let (def_id, param_types, param_modes, return_type) = match resolved {
-            Ok(resolved) => resolved,
-            Err(err) => {
-                if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _)) {
-                    if let Some(param_types) = fallback_param_types {
-                        if let Err(err) = self.check_call_arg_types(args, &param_types) {
-                            return Err(err);
-                        }
-                    }
-                }
-                return Err(err);
-            }
-        };
+        let params = param_modes
+            .iter()
+            .cloned()
+            .zip(param_types.iter().cloned())
+            .map(|(mode, ty)| CallParam { mode, ty })
+            .collect::<Vec<_>>();
 
         self.type_map_builder.record_call_def(call_expr.id, def_id);
-        if let Some(self_mode) = self.lookup_method_self_mode(def_id) {
-            let mut call_param_modes = Vec::with_capacity(param_modes.len() + 1);
-            call_param_modes.push(self_mode);
-            call_param_modes.extend(param_modes);
+        self.type_map_builder
+            .record_call_sig(call_expr.id, CallSig { receiver, params });
 
-            let mut call_param_types = Vec::with_capacity(param_types.len() + 1);
-            call_param_types.push(target_ty.clone());
-            call_param_types.extend(param_types.iter().cloned());
-
-            self.type_map_builder.record_call_sig(
-                call_expr.id,
-                CallSig {
-                    param_modes: call_param_modes,
-                    param_types: call_param_types,
-                },
-            );
-        }
         self.check_call_arg_types(args, &param_types)?;
 
         Ok(return_type)
-    }
-
-    fn lookup_method_self_mode(&self, def_id: DefId) -> Option<ParamMode> {
-        for block in self.context.module.method_blocks() {
-            for method in &block.methods {
-                let def = self.context.def_map.lookup_def(method.id)?;
-                if def.id == def_id {
-                    return Some(method.sig.self_param.mode.clone());
-                }
-            }
-        }
-        None
     }
 
     fn check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
@@ -1876,13 +1834,13 @@ impl AstFolder for TypeChecker {
 
                 ExprKind::Var(_) => self.check_var_ref(expr),
 
+                ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
+
                 ExprKind::MethodCall {
                     callee,
                     method,
                     args,
-                } => self.check_method_call(expr, callee, method, args),
-
-                ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
+                } => self.check_method_call(method, expr, callee, args),
 
                 ExprKind::If {
                     cond,

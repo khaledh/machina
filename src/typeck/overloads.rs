@@ -6,6 +6,7 @@ use crate::types::{
     Type, TypeAssignability, ValueAssignability, array_to_slice_assignable, value_assignable,
 };
 
+#[derive(Debug, Clone)]
 pub(super) struct ParamSig {
     #[allow(dead_code)]
     pub(super) name: String,
@@ -14,13 +15,14 @@ pub(super) struct ParamSig {
     pub(super) mode: ParamMode,
 }
 
+#[derive(Debug, Clone)]
 pub(super) struct OverloadSig {
     pub(super) def_id: DefId,
     pub(super) params: Vec<ParamSig>,
     pub(super) return_type: Type,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub(super) enum ArgOverloadRank {
     Exact = 0,
     Assignable = 1,

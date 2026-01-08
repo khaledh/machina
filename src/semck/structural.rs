@@ -7,8 +7,7 @@ use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
-use crate::semck::util::lookup_call_sig;
-use crate::typeck::type_map::resolve_type_expr;
+use crate::typeck::type_map::{CallSig, resolve_type_expr};
 use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
@@ -283,8 +282,8 @@ impl<'a> StructuralChecker<'a> {
         }
     }
 
-    fn check_call_arg_modes(&mut self, sig: &crate::semck::util::CallSig<'_>, args: &[CallArg]) {
-        for (param, arg) in sig.params().iter().zip(args) {
+    fn check_call_arg_modes(&mut self, sig: &CallSig, args: &[CallArg]) {
+        for (param, arg) in sig.params.iter().zip(args) {
             let arg_mode = arg.mode;
             let arg_expr = &arg.expr;
             match param.mode {
@@ -436,7 +435,7 @@ impl Visitor for StructuralChecker<'_> {
                 }
 
                 // Validate call-site argument modes and lvalue requirements.
-                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
                     self.check_call_arg_modes(&sig, args);
                 }
                 self.visit_expr(callee);
@@ -447,9 +446,9 @@ impl Visitor for StructuralChecker<'_> {
             }
 
             ExprKind::MethodCall { callee, args, .. } => {
-                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
-                    if let Some(self_mode) = sig.self_mode() {
-                        match self_mode {
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                    if let Some(receiver) = sig.receiver.as_ref() {
+                        match receiver.mode {
                             ParamMode::In => {}
                             ParamMode::InOut | ParamMode::Out => {
                                 let err = match self.is_mutable_lvalue(callee) {

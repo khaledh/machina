@@ -4,7 +4,6 @@ use crate::ast::{
 };
 use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
-use crate::semck::util::lookup_call_sig;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 
@@ -259,17 +258,9 @@ impl Visitor for ValueChecker<'_> {
                 self.check_type_expr(elem_ty);
             }
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
-                let param_tys = lookup_call_sig(expr, self.ctx).map(|sig| {
-                    sig.params()
-                        .iter()
-                        .map(|param| self.resolve_type(&param.typ))
-                        .collect::<Vec<_>>()
-                });
-                if let Some(param_tys) = param_tys {
-                    for (arg, param_ty) in args.iter().zip(param_tys) {
-                        if let Some(param_ty) = param_ty {
-                            self.check_range_binding_value(&arg.expr, &param_ty);
-                        }
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                    for (arg, param) in args.iter().zip(sig.params.iter()) {
+                        self.check_range_binding_value(&arg.expr, &param.ty);
                     }
                 }
             }

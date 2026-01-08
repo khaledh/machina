@@ -7,7 +7,6 @@ mod move_check;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
-mod util;
 mod value;
 
 pub use errors::SemCheckError;

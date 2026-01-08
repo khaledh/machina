@@ -17,7 +17,7 @@ impl<'a> FuncLowerer<'a> {
                 else_body,
             } => self.lower_if_expr(cond, then_body, else_body),
 
-            EK::Call { callee, args } => self.lower_call_expr(expr, callee, args),
+            EK::Call { callee, args } => self.lower_call_expr(expr, callee, None, args),
 
             EK::MethodCall { callee, args, .. } => self.lower_method_call_expr(expr, callee, args),
 
@@ -491,7 +491,13 @@ impl<'a> FuncLowerer<'a> {
             EK::Slice { target, start, end } => self.lower_slice_into(&dst, target, start, end),
             EK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.
-                self.lower_call_into(Some(PlaceAny::Aggregate(dst.clone())), expr, callee, args)
+                self.lower_call_into(
+                    Some(PlaceAny::Aggregate(dst.clone())),
+                    expr,
+                    callee,
+                    None,
+                    args,
+                )
             }
             EK::Block { items, tail } => {
                 self.lower_block_into(dst, items, tail.as_deref(), expr.id)

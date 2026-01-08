@@ -300,8 +300,14 @@ impl TypeMapBuilder {
 
 #[derive(Debug, Clone)]
 pub struct CallSig {
-    pub param_modes: Vec<ParamMode>,
-    pub param_types: Vec<Type>,
+    pub receiver: Option<CallParam>,
+    pub params: Vec<CallParam>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CallParam {
+    pub mode: ParamMode,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]

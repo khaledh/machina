@@ -12,13 +12,14 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         call: &Expr,
         callee: &Expr,
+        receiver: Option<&Expr>,
         args: &[CallArg],
     ) -> Result<ExprValue, LowerError> {
         let result_ty = self.ty_for_node(call.id)?;
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
         if result_ty == Type::Unit {
-            self.lower_call_into(None, call, callee, args)?;
+            self.lower_call_into(None, call, callee, receiver, args)?;
             return Ok(ExprValue::Scalar(Operand::Const(Const::Unit)));
         }
 
@@ -29,6 +30,7 @@ impl<'a> FuncLowerer<'a> {
                 Some(PlaceAny::Scalar(temp_place.clone())),
                 call,
                 callee,
+                receiver,
                 args,
             )?;
             Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
@@ -39,6 +41,7 @@ impl<'a> FuncLowerer<'a> {
                 Some(PlaceAny::Aggregate(temp_place.clone())),
                 call,
                 callee,
+                receiver,
                 args,
             )?;
             Ok(ExprValue::Aggregate(temp_place))
@@ -51,25 +54,7 @@ impl<'a> FuncLowerer<'a> {
         target: &Expr,
         args: &[CallArg],
     ) -> Result<ExprValue, LowerError> {
-        let self_mode = self
-            .ctx
-            .type_map
-            .lookup_call_sig(call.id)
-            .and_then(|sig| sig.param_modes.first().cloned());
-        let self_arg_mode = match self_mode {
-            Some(ParamMode::Sink) => CallArgMode::Move,
-            _ => CallArgMode::Default,
-        };
-
-        let mut call_args = Vec::with_capacity(args.len() + 1);
-        call_args.push(CallArg {
-            mode: self_arg_mode,
-            expr: target.clone(),
-            span: target.span,
-        });
-        call_args.extend(args.iter().cloned());
-
-        self.lower_call_expr(call, target, &call_args)
+        self.lower_call_expr(call, target, Some(target), args)
     }
 
     /// Lower a call into the given destination place.
@@ -78,6 +63,7 @@ impl<'a> FuncLowerer<'a> {
         dst: Option<PlaceAny>,
         call: &Expr,
         callee: &Expr,
+        receiver: Option<&Expr>,
         args: &[CallArg],
     ) -> Result<(), LowerError> {
         let callee = match self.ctx.type_map.lookup_call_def(call.id) {
@@ -105,31 +91,28 @@ impl<'a> FuncLowerer<'a> {
         let mut out_args = Vec::new();
         let call_sig = self.ctx.type_map.lookup_call_sig(call.id);
         let arg_vals = if let Some(call_sig) = &call_sig {
-            let mut vals = Vec::with_capacity(args.len());
-            for (idx, (mode, arg)) in call_sig.param_modes.iter().zip(args).enumerate() {
-                let arg_expr = &arg.expr;
-                if *mode == ParamMode::Out {
-                    // Out args are write-only; skip drop only when the call is the first init.
-                    let place = self.lower_place(arg_expr)?;
-                    let arg_ty = self.ty_for_node(arg_expr.id)?;
-                    if !self.ctx.init_assigns.contains(&arg_expr.id) {
-                        self.emit_overwrite_drop(arg_expr, place.clone(), &arg_ty, true);
-                    }
-                    out_args.push(arg_expr);
-                    vals.push(place);
-                } else {
-                    if let Some(param_ty) = call_sig.param_types.get(idx)
-                        && matches!(arg.mode, CallArgMode::Default | CallArgMode::InOut)
-                        && self.coerce_array_to_slice(arg_expr, param_ty)?
-                    {
-                        vals.push(self.lower_call_array_as_slice(arg_expr, param_ty)?);
-                    } else {
-                        vals.push(self.lower_call_arg_place(arg_expr)?);
-                    }
-                }
-                if *mode == ParamMode::Sink && arg.mode == CallArgMode::Move {
-                    self.record_move(arg_expr);
-                }
+            let mut vals = Vec::with_capacity(args.len() + call_sig.receiver.iter().count());
+
+            if let Some(receiver_param) = call_sig.receiver.as_ref() {
+                let receiver_expr = receiver.expect("compiler bug: missing method receiver");
+                let receiver_arg = CallArg {
+                    mode: match receiver_param.mode {
+                        ParamMode::Sink => CallArgMode::Move,
+                        _ => CallArgMode::Default,
+                    },
+                    expr: receiver_expr.clone(),
+                    span: receiver_expr.span,
+                };
+                vals.push(self.lower_call_arg(
+                    receiver_expr,
+                    receiver_param,
+                    &receiver_arg,
+                    &mut out_args,
+                )?);
+            }
+
+            for (param, arg) in call_sig.params.iter().zip(args) {
+                vals.push(self.lower_call_arg(&arg.expr, param, arg, &mut out_args)?);
             }
             vals
         } else {
@@ -187,6 +170,37 @@ impl<'a> FuncLowerer<'a> {
     fn coerce_array_to_slice(&mut self, arg: &Expr, param_ty: &Type) -> Result<bool, LowerError> {
         let arg_ty = self.ty_for_node(arg.id)?;
         Ok(array_to_slice_assignable(&arg_ty, param_ty))
+    }
+
+    fn lower_call_arg<'b>(
+        &mut self,
+        arg_expr: &'b Expr,
+        param: &crate::typeck::type_map::CallParam,
+        arg: &CallArg,
+        out_args: &mut Vec<&'b Expr>,
+    ) -> Result<PlaceAny, LowerError> {
+        if param.mode == ParamMode::Out {
+            // Out args are write-only; skip drop only when the call is the first init.
+            let place = self.lower_place(arg_expr)?;
+            let arg_ty = self.ty_for_node(arg_expr.id)?;
+            if !self.ctx.init_assigns.contains(&arg_expr.id) {
+                self.emit_overwrite_drop(arg_expr, place.clone(), &arg_ty, true);
+            }
+            out_args.push(arg_expr);
+            return Ok(place);
+        }
+
+        if matches!(arg.mode, CallArgMode::Default | CallArgMode::InOut)
+            && self.coerce_array_to_slice(arg_expr, &param.ty)?
+        {
+            return self.lower_call_array_as_slice(arg_expr, &param.ty);
+        }
+
+        let place = self.lower_call_arg_place(arg_expr)?;
+        if param.mode == ParamMode::Sink && arg.mode == CallArgMode::Move {
+            self.record_move(arg_expr);
+        }
+        Ok(place)
     }
 
     fn lower_call_array_as_slice(

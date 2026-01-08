@@ -19,7 +19,6 @@ use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
-use crate::semck::util::lookup_call_sig;
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,
@@ -402,8 +401,8 @@ impl<'a> Visitor for MoveVisitor<'a> {
             ExprKind::Call { callee, args } => {
                 self.visit_expr(callee);
                 // Check args based on param mode: in/inout borrow, sink consumes.
-                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
-                    for (param, arg) in sig.params().iter().zip(args) {
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                    for (param, arg) in sig.params.iter().zip(args) {
                         let arg_expr = &arg.expr;
                         match param.mode {
                             ParamMode::In | ParamMode::InOut => {
@@ -425,9 +424,9 @@ impl<'a> Visitor for MoveVisitor<'a> {
             }
 
             ExprKind::MethodCall { callee, args, .. } => {
-                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
-                    if let Some(self_mode) = sig.self_mode() {
-                        match self_mode {
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                    if let Some(receiver) = sig.receiver.as_ref() {
+                        match receiver.mode {
                             ParamMode::In | ParamMode::InOut => {
                                 self.with_borrow_context(|this| this.visit_expr(callee));
                             }
@@ -442,7 +441,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
                         self.visit_expr(callee);
                     }
 
-                    for (param, arg) in sig.params().iter().zip(args) {
+                    for (param, arg) in sig.params.iter().zip(args) {
                         let arg_expr = &arg.expr;
                         match param.mode {
                             ParamMode::In | ParamMode::InOut => {

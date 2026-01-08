@@ -18,7 +18,6 @@ use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
-use crate::semck::util::lookup_call_sig;
 use crate::types::Type;
 
 pub(super) struct DefInitResult {
@@ -1016,9 +1015,9 @@ impl<'a> DefInitChecker<'a> {
             }
             ExprKind::Call { callee, args } => {
                 self.check_expr(callee);
-                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
                     let mut out_defs = Vec::new();
-                    for (param, arg) in sig.params().iter().zip(args) {
+                    for (param, arg) in sig.params.iter().zip(args) {
                         if param.mode == ParamMode::Out && arg.mode == CallArgMode::Out {
                             // Out args are write-only and become initialized after the call.
                             if let Some(def_id) = self.check_out_arg(&arg.expr) {
@@ -1040,9 +1039,9 @@ impl<'a> DefInitChecker<'a> {
 
             ExprKind::MethodCall { callee, args, .. } => {
                 self.check_expr(callee);
-                if let Some(sig) = lookup_call_sig(expr, self.ctx) {
+                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
                     let mut out_defs = Vec::new();
-                    for (param, arg) in sig.params().iter().zip(args) {
+                    for (param, arg) in sig.params.iter().zip(args) {
                         if param.mode == ParamMode::Out && arg.mode == CallArgMode::Out {
                             if let Some(def_id) = self.check_out_arg(&arg.expr) {
                                 out_defs.push(def_id);

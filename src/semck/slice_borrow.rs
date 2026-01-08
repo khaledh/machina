@@ -20,7 +20,6 @@ use crate::ast::{
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
-use crate::semck::util::lookup_call_sig;
 use crate::types::Type;
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
@@ -596,13 +595,13 @@ impl<'a> BorrowConflictVisitor<'a> {
 
     /// Check call arguments: error if passing a borrowed base to inout/out/sink.
     fn check_call(&mut self, call: &Expr, args: &[CallArg], receiver: Option<&Expr>) {
-        let Some(sig) = lookup_call_sig(call, self.ctx) else {
+        let Some(sig) = self.ctx.type_map.lookup_call_sig(call.id) else {
             return;
         };
 
-        if let (Some(self_mode), Some(receiver)) = (sig.self_mode(), receiver) {
+        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver) {
             if matches!(
-                self_mode,
+                receiver_param.mode,
                 ParamMode::InOut | ParamMode::Out | ParamMode::Sink
             ) {
                 if let Some(def) = base_def_id(receiver, self.ctx)
@@ -614,7 +613,7 @@ impl<'a> BorrowConflictVisitor<'a> {
             }
         }
 
-        for (param, arg) in sig.params().iter().zip(args) {
+        for (param, arg) in sig.params.iter().zip(args) {
             let arg_expr = &arg.expr;
             // Only mutating modes conflict.
             if !matches!(
