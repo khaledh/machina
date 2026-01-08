@@ -352,8 +352,8 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
             v.visit_expr(target);
         }
 
-        ExprKind::MethodCall { target, args, .. } => {
-            v.visit_expr(target);
+        ExprKind::MethodCall { callee, args, .. } => {
+            v.visit_expr(callee);
             for arg in args {
                 v.visit_expr(&arg.expr);
             }

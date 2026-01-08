@@ -1877,10 +1877,10 @@ impl AstFolder for TypeChecker {
                 ExprKind::Var(_) => self.check_var_ref(expr),
 
                 ExprKind::MethodCall {
-                    target,
+                    callee,
                     method,
                     args,
-                } => self.check_method_call(expr, target, method, args),
+                } => self.check_method_call(expr, callee, method, args),
 
                 ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
 

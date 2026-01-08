@@ -795,8 +795,8 @@ impl Visitor for SymbolResolver {
                 )),
             },
 
-            ExprKind::MethodCall { target, args, .. } => {
-                self.visit_expr(target);
+            ExprKind::MethodCall { callee, args, .. } => {
+                self.visit_expr(callee);
                 for arg in args {
                     self.visit_expr(&arg.expr);
                 }

@@ -598,11 +598,6 @@ pub enum ExprKind {
         target: Box<Expr>,
         field: String,
     },
-    MethodCall {
-        target: Box<Expr>,
-        method: String,
-        args: Vec<CallArg>,
-    },
 
     // Control flow
     If {
@@ -630,9 +625,14 @@ pub enum ExprKind {
         arms: Vec<MatchArm>,
     },
 
-    // Function call
+    // Function/Method call
     Call {
         callee: Box<Expr>,
+        args: Vec<CallArg>,
+    },
+    MethodCall {
+        callee: Box<Expr>,
+        method: String,
         args: Vec<CallArg>,
     },
 

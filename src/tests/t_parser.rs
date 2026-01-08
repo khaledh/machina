@@ -694,12 +694,12 @@ fn test_parse_method_call() {
 
     let tail = tail.expect("Expected block to have a tail expr");
     if let ExprKind::MethodCall {
-        target,
+        callee,
         method,
         args,
     } = &tail.kind
     {
-        match &target.kind {
+        match &callee.kind {
             ExprKind::Var(name) => assert_eq!(name, "p"),
             _ => panic!("Expected Var target"),
         }

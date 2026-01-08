@@ -196,8 +196,8 @@ impl<'a> NrvoSafetyChecker<'a> {
                 });
                 callee_ok && args_ok
             }
-            ExprKind::MethodCall { target, args, .. } => {
-                let target_ok = self.check_expr(target, false);
+            ExprKind::MethodCall { callee, args, .. } => {
+                let target_ok = self.check_expr(callee, false);
                 let args_ok = args.iter().all(|arg| match &arg.expr.kind {
                     ExprKind::Var(_) if self.is_target_var(&arg.expr) => true,
                     _ => self.check_expr(&arg.expr, false),

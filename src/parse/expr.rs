@@ -402,7 +402,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::MethodCall {
-                            target: Box::new(expr),
+                            callee: Box::new(expr),
                             method: name.clone(),
                             args,
                         },

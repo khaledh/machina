@@ -19,7 +19,7 @@ impl<'a> FuncLowerer<'a> {
 
             EK::Call { callee, args } => self.lower_call_expr(expr, callee, args),
 
-            EK::MethodCall { target, args, .. } => self.lower_method_call_expr(expr, target, args),
+            EK::MethodCall { callee, args, .. } => self.lower_method_call_expr(expr, callee, args),
 
             EK::Match { scrutinee, arms } => self.lower_match_expr(expr, scrutinee, arms),
 

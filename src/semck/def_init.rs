@@ -1037,8 +1037,9 @@ impl<'a> DefInitChecker<'a> {
                     }
                 }
             }
-            ExprKind::MethodCall { target, args, .. } => {
-                self.check_expr(target);
+
+            ExprKind::MethodCall { callee, args, .. } => {
+                self.check_expr(callee);
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     let mut out_defs = Vec::new();
                     for (param, arg) in sig.params().iter().zip(args) {

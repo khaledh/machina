@@ -423,22 +423,23 @@ impl<'a> Visitor for MoveVisitor<'a> {
                     }
                 }
             }
-            ExprKind::MethodCall { target, args, .. } => {
+
+            ExprKind::MethodCall { callee, args, .. } => {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     if let Some(self_mode) = sig.self_mode() {
                         match self_mode {
                             ParamMode::In | ParamMode::InOut => {
-                                self.with_borrow_context(|this| this.visit_expr(target));
+                                self.with_borrow_context(|this| this.visit_expr(callee));
                             }
                             ParamMode::Out => {
-                                self.visit_out_arg(target);
+                                self.visit_out_arg(callee);
                             }
                             ParamMode::Sink => {
-                                self.handle_move_target(target);
+                                self.handle_move_target(callee);
                             }
                         }
                     } else {
-                        self.visit_expr(target);
+                        self.visit_expr(callee);
                     }
 
                     for (param, arg) in sig.params().iter().zip(args) {
@@ -456,7 +457,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
                         }
                     }
                 } else {
-                    self.visit_expr(target);
+                    self.visit_expr(callee);
                     for arg in args {
                         self.visit_expr(&arg.expr);
                     }

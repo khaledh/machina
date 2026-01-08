@@ -648,8 +648,8 @@ impl Visitor for BorrowConflictVisitor<'_> {
             ExprKind::Call { args, .. } => {
                 self.check_call(expr, args, None);
             }
-            ExprKind::MethodCall { target, args, .. } => {
-                self.check_call(expr, args, Some(target));
+            ExprKind::MethodCall { callee, args, .. } => {
+                self.check_call(expr, args, Some(callee));
             }
             _ => {}
         }

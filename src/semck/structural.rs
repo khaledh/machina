@@ -445,13 +445,14 @@ impl Visitor for StructuralChecker<'_> {
                 }
                 return;
             }
-            ExprKind::MethodCall { target, args, .. } => {
+
+            ExprKind::MethodCall { callee, args, .. } => {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     if let Some(self_mode) = sig.self_mode() {
                         match self_mode {
                             ParamMode::In => {}
                             ParamMode::InOut | ParamMode::Out => {
-                                let err = match self.is_mutable_lvalue(target) {
+                                let err = match self.is_mutable_lvalue(callee) {
                                     Some(true) => None,
                                     Some(false) => {
                                         Some(SemCheckError::InOutArgNotMutable(expr.span))
@@ -467,7 +468,7 @@ impl Visitor for StructuralChecker<'_> {
                     }
                     self.check_call_arg_modes(&sig, args);
                 }
-                self.visit_expr(target);
+                self.visit_expr(callee);
                 for arg in args {
                     self.visit_expr(&arg.expr);
                 }
