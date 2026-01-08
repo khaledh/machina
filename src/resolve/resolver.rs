@@ -79,18 +79,8 @@ impl SymbolResolver {
         }
     }
 
-    fn register_param(
-        &mut self,
-        name: &str,
-        mode: FunctionParamMode,
-        id: NodeId,
-        span: Span,
-        index: u32,
-    ) {
-        let is_mutable = matches!(
-            mode,
-            FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
-        );
+    fn register_param(&mut self, name: &str, mode: ParamMode, id: NodeId, span: Span, index: u32) {
+        let is_mutable = matches!(mode, ParamMode::InOut | ParamMode::Out | ParamMode::Sink);
         let def_id = self.def_id_gen.new_id();
         let def = Def {
             id: def_id,

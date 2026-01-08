@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfg, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    CallArg, Expr, ExprKind, Function, FunctionParamMode, Pattern, PatternKind, StmtExpr,
-    StmtExprKind, Visitor, walk_expr,
+    CallArg, Expr, ExprKind, Function, ParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
+    Visitor, walk_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefId;
@@ -603,7 +603,7 @@ impl<'a> BorrowConflictVisitor<'a> {
         if let (Some(self_mode), Some(receiver)) = (sig.self_mode(), receiver) {
             if matches!(
                 self_mode,
-                FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
+                ParamMode::InOut | ParamMode::Out | ParamMode::Sink
             ) {
                 if let Some(def) = base_def_id(receiver, self.ctx)
                     && self.borrowed_bases.contains(&def)
@@ -619,7 +619,7 @@ impl<'a> BorrowConflictVisitor<'a> {
             // Only mutating modes conflict.
             if !matches!(
                 param.mode,
-                FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
+                ParamMode::InOut | ParamMode::Out | ParamMode::Sink
             ) {
                 continue;
             }

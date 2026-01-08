@@ -31,7 +31,7 @@ fn test_lex_keywords_and_bools() {
         TokenKind::KwWhile,
         TokenKind::KwFor,
         TokenKind::KwIn,
-        TokenKind::KwInout,
+        TokenKind::KwInOut,
         TokenKind::KwOut,
         TokenKind::KwSink,
         TokenKind::KwMove,

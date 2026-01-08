@@ -1,4 +1,4 @@
-use crate::ast::{CallableRef, Expr, FunctionParamMode, FunctionSig, MethodSig};
+use crate::ast::{CallableRef, Expr, FunctionSig, MethodSig, ParamMode};
 use crate::context::TypeCheckedContext;
 
 pub(super) enum CallSig<'a> {
@@ -7,14 +7,14 @@ pub(super) enum CallSig<'a> {
 }
 
 impl<'a> CallSig<'a> {
-    pub(super) fn params(&self) -> &'a [crate::ast::FunctionParam] {
+    pub(super) fn params(&self) -> &'a [crate::ast::Param] {
         match self {
             CallSig::Function(sig) => &sig.params,
             CallSig::Method(sig) => &sig.params,
         }
     }
 
-    pub(super) fn self_mode(&self) -> Option<FunctionParamMode> {
+    pub(super) fn self_mode(&self) -> Option<ParamMode> {
         match self {
             CallSig::Function(_) => None,
             CallSig::Method(sig) => Some(sig.self_param.mode.clone()),

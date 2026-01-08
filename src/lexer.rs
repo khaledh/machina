@@ -58,7 +58,7 @@ pub enum TokenKind {
     #[display("in")]
     KwIn,
     #[display("inout")]
-    KwInout,
+    KwInOut,
     #[display("out")]
     KwOut,
     #[display("sink")]
@@ -518,7 +518,7 @@ impl<'a> Lexer<'a> {
                         "while" => TokenKind::KwWhile,
                         "for" => TokenKind::KwFor,
                         "in" => TokenKind::KwIn,
-                        "inout" => TokenKind::KwInout,
+                        "inout" => TokenKind::KwInOut,
                         "out" => TokenKind::KwOut,
                         "sink" => TokenKind::KwSink,
                         "move" => TokenKind::KwMove,

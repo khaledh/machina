@@ -10,14 +10,14 @@ use crate::types::{EnumVariant, StructField, Type, array_to_slice_assignable};
 use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
-use super::overloads::{FuncOverloadResolver, FuncOverloadSig, FuncParamSig};
+use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
 use super::type_map::{CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
 
 pub struct TypeChecker {
     context: ResolvedContext,
     type_map_builder: TypeMapBuilder,
-    func_sigs: HashMap<String, Vec<FuncOverloadSig>>,
-    method_sigs: HashMap<String, HashMap<String, Vec<FuncOverloadSig>>>,
+    func_sigs: HashMap<String, Vec<OverloadSig>>,
+    method_sigs: HashMap<String, HashMap<String, Vec<OverloadSig>>>,
     type_decls: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
     halted: bool,
@@ -152,7 +152,7 @@ impl TypeChecker {
                     .or_default()
                     .entry(method.sig.name.clone())
                     .or_default()
-                    .push(FuncOverloadSig {
+                    .push(OverloadSig {
                         def_id,
                         params,
                         return_type,
@@ -174,7 +174,7 @@ impl TypeChecker {
         self.func_sigs
             .entry(sig.name.clone())
             .or_default()
-            .push(FuncOverloadSig {
+            .push(OverloadSig {
                 def_id,
                 params,
                 return_type,
@@ -183,15 +183,12 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn build_param_sigs(
-        &self,
-        params: &[FunctionParam],
-    ) -> Result<Vec<FuncParamSig>, Vec<TypeCheckError>> {
+    fn build_param_sigs(&self, params: &[Param]) -> Result<Vec<ParamSig>, Vec<TypeCheckError>> {
         params
             .iter()
             .map(|param| {
                 let ty = resolve_type_expr(&self.context.def_map, &param.typ)?;
-                Ok(FuncParamSig {
+                Ok(ParamSig {
                     name: param.name.clone(),
                     ty,
                     mode: param.mode.clone(),
@@ -1008,10 +1005,7 @@ impl TypeChecker {
         }
     }
 
-    fn single_arity_param_types(
-        overloads: &[FuncOverloadSig],
-        arg_count: usize,
-    ) -> Option<Vec<Type>> {
+    fn single_arity_param_types(overloads: &[OverloadSig], arg_count: usize) -> Option<Vec<Type>> {
         let mut matches = overloads.iter().filter(|sig| sig.params.len() == arg_count);
         let sig = matches.next()?;
         if matches.next().is_some() {
@@ -1095,7 +1089,7 @@ impl TypeChecker {
                 }
             }
 
-            let resolved = FuncOverloadResolver::new(name, args, &arg_types, call_expr.span)
+            let resolved = OverloadResolver::new(name, args, &arg_types, call_expr.span)
                 .resolve(overloads)
                 .map(|resolved| {
                     let param_types = resolved
@@ -1119,7 +1113,7 @@ impl TypeChecker {
         let (def_id, param_types, param_modes, return_type) = match resolved {
             Ok(resolved) => resolved,
             Err(err) => {
-                if matches!(err.kind(), TypeCheckErrorKind::FuncOverloadNoMatch(_, _)) {
+                if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _)) {
                     if let Some(param_types) = fallback_param_types {
                         if let Err(err) = self.check_call_arg_types(args, &param_types) {
                             return Err(err);
@@ -1195,7 +1189,7 @@ impl TypeChecker {
                 }
             }
 
-            let resolved = FuncOverloadResolver::new(&name, args, &arg_types, call_expr.span)
+            let resolved = OverloadResolver::new(&name, args, &arg_types, call_expr.span)
                 .resolve(overloads)
                 .map(|resolved| {
                     let param_types = resolved
@@ -1219,7 +1213,7 @@ impl TypeChecker {
         let (def_id, param_types, param_modes, return_type) = match resolved {
             Ok(resolved) => resolved,
             Err(err) => {
-                if matches!(err.kind(), TypeCheckErrorKind::FuncOverloadNoMatch(_, _)) {
+                if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _)) {
                     if let Some(param_types) = fallback_param_types {
                         if let Err(err) = self.check_call_arg_types(args, &param_types) {
                             return Err(err);
@@ -1253,7 +1247,7 @@ impl TypeChecker {
         Ok(return_type)
     }
 
-    fn lookup_method_self_mode(&self, def_id: DefId) -> Option<FunctionParamMode> {
+    fn lookup_method_self_mode(&self, def_id: DefId) -> Option<ParamMode> {
         for block in self.context.module.method_blocks() {
             for method in &block.methods {
                 let def = self.context.def_map.lookup_def(method.id)?;

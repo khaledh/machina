@@ -149,10 +149,10 @@ pub enum TypeCheckErrorKind {
     DivisionByZero(Span),
 
     #[error("Function overload not found: {0}")]
-    FuncOverloadNoMatch(String, Span),
+    OverloadNoMatch(String, Span),
 
     #[error("Function overload is ambiguous: {0}")]
-    FuncOverloadAmbiguous(String, Span),
+    OverloadAmbiguous(String, Span),
 
     #[error("Slice target is not an array or string: {0}")]
     SliceTargetNotArrayOrString(Type, Span),
@@ -221,8 +221,8 @@ impl TypeCheckError {
             TypeCheckErrorKind::ValueOutOfRange(_, _, _, span) => *span,
             TypeCheckErrorKind::ForIterNotIterable(_, span) => *span,
             TypeCheckErrorKind::DivisionByZero(span) => *span,
-            TypeCheckErrorKind::FuncOverloadNoMatch(_, span) => *span,
-            TypeCheckErrorKind::FuncOverloadAmbiguous(_, span) => *span,
+            TypeCheckErrorKind::OverloadNoMatch(_, span) => *span,
+            TypeCheckErrorKind::OverloadAmbiguous(_, span) => *span,
             TypeCheckErrorKind::SliceTargetNotArrayOrString(_, span) => *span,
             TypeCheckErrorKind::SliceTargetZeroDimArray(_, span) => *span,
             TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,

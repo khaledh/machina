@@ -64,7 +64,7 @@ pub struct FuncLowerer<'a> {
 pub struct LowerParam {
     pub id: NodeId,
     pub name: String,
-    pub mode: FunctionParamMode,
+    pub mode: ParamMode,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -156,7 +156,7 @@ impl<'a> FuncLowerer<'a> {
         // Track `out` params so we can suppress overwrite drops for their assignments.
         let mut out_param_defs = HashSet::new();
         for param in &params {
-            if param.mode != FunctionParamMode::Out {
+            if param.mode != ParamMode::Out {
                 continue;
             }
             if let Some(def) = ctx.def_map.lookup_def(param.id) {
@@ -205,7 +205,7 @@ impl<'a> FuncLowerer<'a> {
             self.locals.insert(def_id, local_id);
             // `sink` params are treated as owned values; register for drop.
             // (`in`/`inout` params are borrowed)
-            if param.mode == FunctionParamMode::Sink {
+            if param.mode == ParamMode::Sink {
                 let is_initialized = self.create_is_initialized(&param.name, &ty, true);
                 self.register_drop(def_id, &ty, is_initialized);
             }

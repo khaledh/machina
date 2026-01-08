@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    CallArgMode, Expr, ExprKind, Function, FunctionParamMode, MatchPattern, MatchPatternBinding,
-    NodeId, Pattern, PatternKind, StmtExpr, StmtExprKind, Visitor, walk_expr,
+    CallArgMode, Expr, ExprKind, Function, MatchPattern, MatchPatternBinding, NodeId, ParamMode,
+    Pattern, PatternKind, StmtExpr, StmtExprKind, Visitor, walk_expr,
 };
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
@@ -211,7 +211,7 @@ fn collect_param_defs(
 ) -> HashSet<DefId> {
     let mut defs = HashSet::new();
     for param in &func.sig.params {
-        if !include_out && param.mode == FunctionParamMode::Out {
+        if !include_out && param.mode == ParamMode::Out {
             continue;
         }
         if let Some(def) = ctx.def_map.lookup_def(param.id) {
@@ -224,7 +224,7 @@ fn collect_param_defs(
 fn collect_out_param_defs(func: &Function, ctx: &TypeCheckedContext) -> Vec<(DefId, String, Span)> {
     let mut defs = Vec::new();
     for param in &func.sig.params {
-        if param.mode != FunctionParamMode::Out {
+        if param.mode != ParamMode::Out {
             continue;
         }
         if let Some(def) = ctx.def_map.lookup_def(param.id) {
@@ -1019,7 +1019,7 @@ impl<'a> DefInitChecker<'a> {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     let mut out_defs = Vec::new();
                     for (param, arg) in sig.params().iter().zip(args) {
-                        if param.mode == FunctionParamMode::Out && arg.mode == CallArgMode::Out {
+                        if param.mode == ParamMode::Out && arg.mode == CallArgMode::Out {
                             // Out args are write-only and become initialized after the call.
                             if let Some(def_id) = self.check_out_arg(&arg.expr) {
                                 out_defs.push(def_id);
@@ -1042,7 +1042,7 @@ impl<'a> DefInitChecker<'a> {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     let mut out_defs = Vec::new();
                     for (param, arg) in sig.params().iter().zip(args) {
-                        if param.mode == FunctionParamMode::Out && arg.mode == CallArgMode::Out {
+                        if param.mode == ParamMode::Out && arg.mode == CallArgMode::Out {
                             if let Some(def_id) = self.check_out_arg(&arg.expr) {
                                 out_defs.push(def_id);
                             }

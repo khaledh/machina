@@ -12,8 +12,7 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
 use crate::ast::{
-    Expr, ExprKind, Function, FunctionParamMode, NodeId, Pattern, PatternKind, StmtExpr,
-    StmtExprKind,
+    Expr, ExprKind, Function, NodeId, ParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
 };
 use crate::ast::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
@@ -55,7 +54,7 @@ fn check_func(
     // Sink params own their value and can be moved from.
     let mut sink_params = HashSet::new();
     for param in &func.sig.params {
-        if param.mode == FunctionParamMode::Sink {
+        if param.mode == ParamMode::Sink {
             if let Some(def) = ctx.def_map.lookup_def(param.id) {
                 sink_params.insert(def.id);
             }
@@ -407,13 +406,13 @@ impl<'a> Visitor for MoveVisitor<'a> {
                     for (param, arg) in sig.params().iter().zip(args) {
                         let arg_expr = &arg.expr;
                         match param.mode {
-                            FunctionParamMode::In | FunctionParamMode::Inout => {
+                            ParamMode::In | ParamMode::InOut => {
                                 self.with_borrow_context(|this| this.visit_expr(arg_expr));
                             }
-                            FunctionParamMode::Out => {
+                            ParamMode::Out => {
                                 self.visit_out_arg(arg_expr);
                             }
-                            FunctionParamMode::Sink => {
+                            ParamMode::Sink => {
                                 self.handle_move_target(arg_expr);
                             }
                         }
@@ -428,13 +427,13 @@ impl<'a> Visitor for MoveVisitor<'a> {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     if let Some(self_mode) = sig.self_mode() {
                         match self_mode {
-                            FunctionParamMode::In | FunctionParamMode::Inout => {
+                            ParamMode::In | ParamMode::InOut => {
                                 self.with_borrow_context(|this| this.visit_expr(target));
                             }
-                            FunctionParamMode::Out => {
+                            ParamMode::Out => {
                                 self.visit_out_arg(target);
                             }
-                            FunctionParamMode::Sink => {
+                            ParamMode::Sink => {
                                 self.handle_move_target(target);
                             }
                         }
@@ -445,13 +444,13 @@ impl<'a> Visitor for MoveVisitor<'a> {
                     for (param, arg) in sig.params().iter().zip(args) {
                         let arg_expr = &arg.expr;
                         match param.mode {
-                            FunctionParamMode::In | FunctionParamMode::Inout => {
+                            ParamMode::In | ParamMode::InOut => {
                                 self.with_borrow_context(|this| this.visit_expr(arg_expr));
                             }
-                            FunctionParamMode::Out => {
+                            ParamMode::Out => {
                                 self.visit_out_arg(arg_expr);
                             }
-                            FunctionParamMode::Sink => {
+                            ParamMode::Sink => {
                                 self.handle_move_target(arg_expr);
                             }
                         }

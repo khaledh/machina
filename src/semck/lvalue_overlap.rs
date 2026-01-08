@@ -4,7 +4,7 @@
 //! when at least one argument is mutated (inout/out/sink mode).
 //! Read-only aliasing (`in` mode) is allowed.
 
-use crate::ast::{CallArg, Expr, ExprKind, Function, FunctionParamMode, Visitor, walk_expr};
+use crate::ast::{CallArg, Expr, ExprKind, Function, ParamMode, Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
@@ -13,7 +13,7 @@ use crate::semck::util::lookup_call_sig;
 
 /// An argument access: its mode, lvalue path, and source location.
 struct ArgAccess {
-    mode: FunctionParamMode,
+    mode: ParamMode,
     path: LvaluePath,
     span: Span,
 }
@@ -121,11 +121,8 @@ impl<'a> LvalueOverlapChecker<'a> {
     }
 
     /// Returns true if the param mode can mutate the argument.
-    fn is_write(mode: &FunctionParamMode) -> bool {
-        matches!(
-            mode,
-            FunctionParamMode::Inout | FunctionParamMode::Out | FunctionParamMode::Sink
-        )
+    fn is_write(mode: &ParamMode) -> bool {
+        matches!(mode, ParamMode::InOut | ParamMode::Out | ParamMode::Sink)
     }
 
     /// Extract the lvalue path from an expression (base variable + projections).

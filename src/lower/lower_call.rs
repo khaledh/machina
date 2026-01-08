@@ -1,4 +1,4 @@
-use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, FunctionParamMode};
+use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, ParamMode};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -57,7 +57,7 @@ impl<'a> FuncLowerer<'a> {
             .lookup_call_sig(call.id)
             .and_then(|sig| sig.param_modes.first().cloned());
         let self_arg_mode = match self_mode {
-            Some(FunctionParamMode::Sink) => CallArgMode::Move,
+            Some(ParamMode::Sink) => CallArgMode::Move,
             _ => CallArgMode::Default,
         };
 
@@ -108,7 +108,7 @@ impl<'a> FuncLowerer<'a> {
             let mut vals = Vec::with_capacity(args.len());
             for (idx, (mode, arg)) in call_sig.param_modes.iter().zip(args).enumerate() {
                 let arg_expr = &arg.expr;
-                if *mode == FunctionParamMode::Out {
+                if *mode == ParamMode::Out {
                     // Out args are write-only; skip drop only when the call is the first init.
                     let place = self.lower_place(arg_expr)?;
                     let arg_ty = self.ty_for_node(arg_expr.id)?;
@@ -119,7 +119,7 @@ impl<'a> FuncLowerer<'a> {
                     vals.push(place);
                 } else {
                     if let Some(param_ty) = call_sig.param_types.get(idx)
-                        && matches!(arg.mode, CallArgMode::Default | CallArgMode::Inout)
+                        && matches!(arg.mode, CallArgMode::Default | CallArgMode::InOut)
                         && self.coerce_array_to_slice(arg_expr, param_ty)?
                     {
                         vals.push(self.lower_call_array_as_slice(arg_expr, param_ty)?);
@@ -127,7 +127,7 @@ impl<'a> FuncLowerer<'a> {
                         vals.push(self.lower_call_arg_place(arg_expr)?);
                     }
                 }
-                if *mode == FunctionParamMode::Sink && arg.mode == CallArgMode::Move {
+                if *mode == ParamMode::Sink && arg.mode == CallArgMode::Move {
                     self.record_move(arg_expr);
                 }
             }

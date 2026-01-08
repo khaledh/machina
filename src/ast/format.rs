@@ -189,17 +189,17 @@ impl fmt::Display for Function {
     }
 }
 
-impl fmt::Display for FunctionParam {
+impl fmt::Display for Param {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.mode {
-            FunctionParamMode::In => {}
-            FunctionParamMode::Inout => {
+            ParamMode::In => {}
+            ParamMode::InOut => {
                 write!(f, "inout ")?;
             }
-            FunctionParamMode::Out => {
+            ParamMode::Out => {
                 write!(f, "out ")?;
             }
-            FunctionParamMode::Sink => {
+            ParamMode::Sink => {
                 write!(f, "sink ")?;
             }
         }
@@ -664,8 +664,8 @@ impl Expr {
                 CallArgMode::Default => {
                     arg.expr.fmt_with_indent(f, level)?;
                 }
-                CallArgMode::Inout => {
-                    writeln!(f, "{}InoutArg:", pad)?;
+                CallArgMode::InOut => {
+                    writeln!(f, "{}InOutArg:", pad)?;
                     arg.expr.fmt_with_indent(f, level + 1)?;
                 }
                 CallArgMode::Out => {

@@ -1,4 +1,4 @@
-use crate::ast::{FunctionParamMode, NodeId, TypeExpr, TypeExprKind};
+use crate::ast::{NodeId, ParamMode, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, StructField, Type};
@@ -274,7 +274,7 @@ impl TypeMapBuilder {
 
 #[derive(Debug, Clone)]
 pub struct CallSig {
-    pub param_modes: Vec<FunctionParamMode>,
+    pub param_modes: Vec<ParamMode>,
     pub param_types: Vec<Type>,
 }
 

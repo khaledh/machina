@@ -52,22 +52,6 @@ pub trait Visitor {
         walk_type_expr(self, type_expr)
     }
 
-    // --- Function Signatures ---
-
-    fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
-        walk_func_sig(self, func_sig)
-    }
-
-    fn visit_func_param(&mut self, func_param: &FunctionParam) {
-        walk_func_param(self, func_param)
-    }
-
-    // --- Method Signatures ---
-
-    fn visit_method_sig(&mut self, method_sig: &MethodSig) {
-        walk_method_sig(self, method_sig)
-    }
-
     // --- Function Declarations ---
 
     fn visit_func_decl(&mut self, func_decl: &FunctionDecl) {
@@ -80,6 +64,24 @@ pub trait Visitor {
         walk_func(self, func)
     }
 
+    // --- Function Signatures ---
+
+    fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
+        walk_func_sig(self, func_sig)
+    }
+
+    // --- Method Signatures ---
+
+    fn visit_method_sig(&mut self, method_sig: &MethodSig) {
+        walk_method_sig(self, method_sig)
+    }
+
+    // --- Parameters (common) ---
+
+    fn visit_param(&mut self, param: &Param) {
+        walk_param(self, param)
+    }
+
     // --- Method Blocks ---
 
     fn visit_method_block(&mut self, method_block: &MethodBlock) {
@@ -90,9 +92,13 @@ pub trait Visitor {
         walk_method(self, method)
     }
 
+    // --- Blocks ---
+
     fn visit_block_item(&mut self, item: &BlockItem) {
         walk_block_item(self, item)
     }
+
+    // --- Expressions ---
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         walk_stmt_expr(self, stmt)
@@ -165,26 +171,6 @@ pub fn walk_type_expr<V: Visitor + ?Sized>(v: &mut V, type_expr: &TypeExpr) {
     }
 }
 
-// --- Function Signatures ---
-
-pub fn walk_func_sig<V: Visitor + ?Sized>(v: &mut V, func_sig: &FunctionSig) {
-    for param in &func_sig.params {
-        v.visit_func_param(param);
-    }
-}
-
-pub fn walk_func_param<V: Visitor + ?Sized>(v: &mut V, func_param: &FunctionParam) {
-    v.visit_type_expr(&func_param.typ);
-}
-
-// --- Method Signatures ---
-
-pub fn walk_method_sig<V: Visitor + ?Sized>(v: &mut V, method_sig: &MethodSig) {
-    for param in &method_sig.params {
-        v.visit_func_param(param);
-    }
-}
-
 // --- Function Declarations ---
 
 pub fn walk_func_decl<V: Visitor + ?Sized>(v: &mut V, func_decl: &FunctionDecl) {
@@ -196,6 +182,28 @@ pub fn walk_func_decl<V: Visitor + ?Sized>(v: &mut V, func_decl: &FunctionDecl) 
 pub fn walk_func<V: Visitor + ?Sized>(v: &mut V, func: &Function) {
     v.visit_func_sig(&func.sig);
     v.visit_expr(&func.body);
+}
+
+// --- Function Signatures ---
+
+pub fn walk_func_sig<V: Visitor + ?Sized>(v: &mut V, func_sig: &FunctionSig) {
+    for param in &func_sig.params {
+        v.visit_param(param);
+    }
+}
+
+// --- Method Signatures ---
+
+pub fn walk_method_sig<V: Visitor + ?Sized>(v: &mut V, method_sig: &MethodSig) {
+    for param in &method_sig.params {
+        v.visit_param(param);
+    }
+}
+
+// --- Parameters (common) ---
+
+pub fn walk_param<V: Visitor + ?Sized>(v: &mut V, param: &Param) {
+    v.visit_type_expr(&param.typ);
 }
 
 // --- Method Blocks ---
@@ -211,12 +219,16 @@ pub fn walk_method<V: Visitor + ?Sized>(v: &mut V, method: &Method) {
     v.visit_expr(&method.body);
 }
 
+// --- Blocks ---
+
 pub fn walk_block_item<V: Visitor + ?Sized>(v: &mut V, item: &BlockItem) {
     match item {
         BlockItem::Stmt(stmt) => v.visit_stmt_expr(stmt),
         BlockItem::Expr(expr) => v.visit_expr(expr),
     }
 }
+
+// --- Expressions ---
 
 pub fn walk_stmt_expr<V: Visitor + ?Sized>(v: &mut V, stmt: &StmtExpr) {
     match &stmt.kind {

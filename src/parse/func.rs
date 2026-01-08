@@ -9,7 +9,7 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
 
         self.consume(&TK::LParen)?;
-        let params = self.parse_func_params()?;
+        let params = self.parse_params()?;
         self.consume(&TK::RParen)?;
 
         let return_type = self.parse_return_type()?;
@@ -36,20 +36,18 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_func_params(&mut self) -> Result<Vec<FunctionParam>, ParseError> {
-        self.parse_list(TK::Comma, TK::RParen, |parser| {
-            parser.parse_function_param()
-        })
+    fn parse_params(&mut self) -> Result<Vec<Param>, ParseError> {
+        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())
     }
 
-    fn parse_function_param(&mut self) -> Result<FunctionParam, ParseError> {
+    fn parse_param(&mut self) -> Result<Param, ParseError> {
         let marker = self.mark();
         let mode = self.parse_param_mode();
         let name = self.parse_ident()?;
         self.consume(&TK::Colon)?;
         let typ = self.parse_type_expr()?;
 
-        Ok(FunctionParam {
+        Ok(Param {
             id: self.id_gen.new_id(),
             name,
             typ,
@@ -58,21 +56,21 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_param_mode(&mut self) -> FunctionParamMode {
+    fn parse_param_mode(&mut self) -> ParamMode {
         match &self.curr_token.kind {
-            TK::KwInout => {
+            TK::KwInOut => {
                 self.advance();
-                FunctionParamMode::Inout
+                ParamMode::InOut
             }
             TK::KwSink => {
                 self.advance();
-                FunctionParamMode::Sink
+                ParamMode::Sink
             }
             TK::KwOut => {
                 self.advance();
-                FunctionParamMode::Out
+                ParamMode::Out
             }
-            _ => FunctionParamMode::In,
+            _ => ParamMode::In,
         }
     }
 
@@ -152,7 +150,7 @@ impl<'a> Parser<'a> {
 
         let params = if self.curr_token.kind == TK::Comma {
             self.advance();
-            self.parse_func_params()?
+            self.parse_params()?
         } else {
             Vec::new()
         };

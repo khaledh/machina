@@ -64,19 +64,19 @@ pub enum SemCheckError {
     TuplePatternArityMismatch(usize, usize, Span),
 
     #[error("inout requires an aggregate parameter type, found {0}")]
-    InoutParamNotAggregate(Type, Span),
+    InOutParamNotAggregate(Type, Span),
 
     #[error("inout argument must be an assignable lvalue")]
-    InoutArgNotLvalue(Span),
+    InOutArgNotLvalue(Span),
 
     #[error("inout argument must be mutable")]
-    InoutArgNotMutable(Span),
+    InOutArgNotMutable(Span),
 
     #[error("inout parameter requires `inout` argument")]
-    InoutArgMissingMode(Span),
+    InOutArgMissingMode(Span),
 
     #[error("inout argument provided for non-inout parameter")]
-    InoutArgUnexpected(Span),
+    InOutArgUnexpected(Span),
 
     #[error("out requires an aggregate parameter type, found {0}")]
     OutParamNotAggregate(Type, Span),
@@ -164,11 +164,11 @@ impl SemCheckError {
             SemCheckError::WildcardArmNotLast(span) => *span,
             SemCheckError::TupleMatchRequiresSingleArm(span) => *span,
             SemCheckError::TuplePatternArityMismatch(_, _, span) => *span,
-            SemCheckError::InoutParamNotAggregate(_, span) => *span,
-            SemCheckError::InoutArgNotLvalue(span) => *span,
-            SemCheckError::InoutArgNotMutable(span) => *span,
-            SemCheckError::InoutArgMissingMode(span) => *span,
-            SemCheckError::InoutArgUnexpected(span) => *span,
+            SemCheckError::InOutParamNotAggregate(_, span) => *span,
+            SemCheckError::InOutArgNotLvalue(span) => *span,
+            SemCheckError::InOutArgNotMutable(span) => *span,
+            SemCheckError::InOutArgMissingMode(span) => *span,
+            SemCheckError::InOutArgUnexpected(span) => *span,
             SemCheckError::OutParamNotAggregate(_, span) => *span,
             SemCheckError::OutArgNotLvalue(span) => *span,
             SemCheckError::OutArgNotMutable(span) => *span,

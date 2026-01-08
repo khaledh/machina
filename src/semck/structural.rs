@@ -1,6 +1,6 @@
 use crate::ast::{
-    CallArg, CallArgMode, Expr, ExprKind, FunctionParam, FunctionParamMode, MatchArm, MethodSig,
-    Pattern, PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig,
+    CallArg, CallArgMode, Expr, ExprKind, MatchArm, MethodSig, Param, ParamMode, Pattern,
+    PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig,
     walk_method_sig, walk_stmt_expr,
 };
 use crate::context::TypeCheckedContext;
@@ -185,22 +185,22 @@ impl<'a> StructuralChecker<'a> {
         }
     }
 
-    fn check_param_modes(&mut self, params: &[FunctionParam]) {
+    fn check_param_modes(&mut self, params: &[Param]) {
         for param in params {
             if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
-                if param.mode == FunctionParamMode::Inout && !(ty.is_compound() || ty.is_heap()) {
+                if param.mode == ParamMode::InOut && !(ty.is_compound() || ty.is_heap()) {
                     // Only aggregate or heap types can be inout parameters.
-                    self.errors.push(SemCheckError::InoutParamNotAggregate(
+                    self.errors.push(SemCheckError::InOutParamNotAggregate(
                         ty.clone(),
                         param.span,
                     ));
                 }
-                if param.mode == FunctionParamMode::Out && !ty.is_compound() {
+                if param.mode == ParamMode::Out && !ty.is_compound() {
                     // Only aggregate types can be out parameters (for now).
                     self.errors
                         .push(SemCheckError::OutParamNotAggregate(ty.clone(), param.span));
                 }
-                if param.mode == FunctionParamMode::Sink && !ty.needs_drop() {
+                if param.mode == ParamMode::Sink && !ty.needs_drop() {
                     // Sink params are meant only for heap types.
                     self.errors
                         .push(SemCheckError::SinkParamNotOwned(ty, param.span));
@@ -288,11 +288,11 @@ impl<'a> StructuralChecker<'a> {
             let arg_mode = arg.mode;
             let arg_expr = &arg.expr;
             match param.mode {
-                FunctionParamMode::In => match arg_mode {
+                ParamMode::In => match arg_mode {
                     CallArgMode::Default => {}
-                    CallArgMode::Inout => {
+                    CallArgMode::InOut => {
                         self.errors
-                            .push(SemCheckError::InoutArgUnexpected(arg.span));
+                            .push(SemCheckError::InOutArgUnexpected(arg.span));
                     }
                     CallArgMode::Out => {
                         self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
@@ -301,18 +301,18 @@ impl<'a> StructuralChecker<'a> {
                         self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
                     }
                 },
-                FunctionParamMode::Inout => match arg_mode {
-                    CallArgMode::Inout => {
+                ParamMode::InOut => match arg_mode {
+                    CallArgMode::InOut => {
                         let err = match self.is_mutable_lvalue(arg_expr) {
                             Some(true) => continue,
-                            Some(false) => SemCheckError::InoutArgNotMutable(arg.span),
-                            None => SemCheckError::InoutArgNotLvalue(arg.span),
+                            Some(false) => SemCheckError::InOutArgNotMutable(arg.span),
+                            None => SemCheckError::InOutArgNotLvalue(arg.span),
                         };
                         self.errors.push(err);
                     }
                     CallArgMode::Default => {
                         self.errors
-                            .push(SemCheckError::InoutArgMissingMode(arg.span));
+                            .push(SemCheckError::InOutArgMissingMode(arg.span));
                     }
                     CallArgMode::Out => {
                         self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
@@ -321,7 +321,7 @@ impl<'a> StructuralChecker<'a> {
                         self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
                     }
                 },
-                FunctionParamMode::Out => match arg_mode {
+                ParamMode::Out => match arg_mode {
                     CallArgMode::Out => {
                         let err = match self.is_mutable_lvalue(arg_expr) {
                             Some(true) => continue,
@@ -333,23 +333,23 @@ impl<'a> StructuralChecker<'a> {
                     CallArgMode::Default => {
                         self.errors.push(SemCheckError::OutArgMissingMode(arg.span));
                     }
-                    CallArgMode::Inout => {
+                    CallArgMode::InOut => {
                         self.errors
-                            .push(SemCheckError::InoutArgUnexpected(arg.span));
+                            .push(SemCheckError::InOutArgUnexpected(arg.span));
                     }
                     CallArgMode::Move => {
                         self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
                     }
                 },
-                FunctionParamMode::Sink => match arg_mode {
+                ParamMode::Sink => match arg_mode {
                     CallArgMode::Move => {}
                     CallArgMode::Default => {
                         self.errors
                             .push(SemCheckError::SinkArgMissingMove(arg.span));
                     }
-                    CallArgMode::Inout => {
+                    CallArgMode::InOut => {
                         self.errors
-                            .push(SemCheckError::InoutArgUnexpected(arg.span));
+                            .push(SemCheckError::InOutArgUnexpected(arg.span));
                     }
                     CallArgMode::Out => {
                         self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
@@ -367,7 +367,7 @@ impl Visitor for StructuralChecker<'_> {
     }
 
     fn visit_method_sig(&mut self, method_sig: &MethodSig) {
-        if method_sig.self_param.mode == FunctionParamMode::Out {
+        if method_sig.self_param.mode == ParamMode::Out {
             self.errors
                 .push(SemCheckError::OutSelfNotAllowed(method_sig.self_param.span));
         }
@@ -449,20 +449,20 @@ impl Visitor for StructuralChecker<'_> {
                 if let Some(sig) = lookup_call_sig(expr, self.ctx) {
                     if let Some(self_mode) = sig.self_mode() {
                         match self_mode {
-                            FunctionParamMode::In => {}
-                            FunctionParamMode::Inout | FunctionParamMode::Out => {
+                            ParamMode::In => {}
+                            ParamMode::InOut | ParamMode::Out => {
                                 let err = match self.is_mutable_lvalue(target) {
                                     Some(true) => None,
                                     Some(false) => {
-                                        Some(SemCheckError::InoutArgNotMutable(expr.span))
+                                        Some(SemCheckError::InOutArgNotMutable(expr.span))
                                     }
-                                    None => Some(SemCheckError::InoutArgNotLvalue(expr.span)),
+                                    None => Some(SemCheckError::InOutArgNotLvalue(expr.span)),
                                 };
                                 if let Some(err) = err {
                                     self.errors.push(err);
                                 }
                             }
-                            FunctionParamMode::Sink => {}
+                            ParamMode::Sink => {}
                         }
                     }
                     self.check_call_arg_modes(&sig, args);

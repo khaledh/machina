@@ -278,14 +278,6 @@ pub enum StringFmtSegment {
 // -- Functions ---
 
 #[derive(Clone, Debug)]
-pub struct FunctionSig {
-    pub name: String,
-    pub params: Vec<FunctionParam>,
-    pub return_type: TypeExpr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
 pub struct FunctionDecl {
     pub id: NodeId,
     pub sig: FunctionSig,
@@ -297,6 +289,14 @@ pub struct Function {
     pub id: NodeId,
     pub sig: FunctionSig,
     pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct FunctionSig {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_type: TypeExpr,
     pub span: Span,
 }
 
@@ -322,7 +322,7 @@ pub struct Method {
 pub struct MethodSig {
     pub name: String,
     pub self_param: SelfParam,
-    pub params: Vec<FunctionParam>,
+    pub params: Vec<Param>,
     pub return_type: TypeExpr,
     pub span: Span,
 }
@@ -330,23 +330,25 @@ pub struct MethodSig {
 #[derive(Clone, Debug)]
 pub struct SelfParam {
     pub id: NodeId,
-    pub mode: FunctionParamMode,
+    pub mode: ParamMode,
     pub span: Span,
 }
 
+// -- Parameters (common) ---
+
 #[derive(Clone, Debug)]
-pub struct FunctionParam {
+pub struct Param {
     pub id: NodeId,
     pub name: String,
     pub typ: TypeExpr,
-    pub mode: FunctionParamMode,
+    pub mode: ParamMode,
     pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FunctionParamMode {
+pub enum ParamMode {
     In,
-    Inout,
+    InOut,
     Out,
     Sink,
 }
@@ -356,7 +358,7 @@ pub enum FunctionParamMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallArgMode {
     Default,
-    Inout,
+    InOut,
     Out,
     Move,
 }

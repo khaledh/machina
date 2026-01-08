@@ -221,8 +221,8 @@ fn test_method_inout_self_requires_mutable() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::InoutArgNotMutable(_) => {}
-            e => panic!("Expected InoutArgNotMutable error, got {:?}", e),
+            SemCheckError::InOutArgNotMutable(_) => {}
+            e => panic!("Expected InOutArgNotMutable error, got {:?}", e),
         }
     }
 }
@@ -250,8 +250,8 @@ fn test_method_inout_self_requires_lvalue() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::InoutArgNotLvalue(_) => {}
-            e => panic!("Expected InoutArgNotLvalue error, got {:?}", e),
+            SemCheckError::InOutArgNotLvalue(_) => {}
+            e => panic!("Expected InOutArgNotLvalue error, got {:?}", e),
         }
     }
 }
@@ -848,8 +848,8 @@ fn test_inout_param_scalar_rejected() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::InoutParamNotAggregate(_, _) => {}
-            e => panic!("Expected InoutParamNotAggregate error, got {:?}", e),
+            SemCheckError::InOutParamNotAggregate(_, _) => {}
+            e => panic!("Expected InOutParamNotAggregate error, got {:?}", e),
         }
     }
 }
@@ -912,8 +912,8 @@ fn test_inout_arg_not_lvalue() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::InoutArgNotLvalue(_) => {}
-            e => panic!("Expected InoutArgNotLvalue error, got {:?}", e),
+            SemCheckError::InOutArgNotLvalue(_) => {}
+            e => panic!("Expected InOutArgNotLvalue error, got {:?}", e),
         }
     }
 }
@@ -937,8 +937,8 @@ fn test_inout_arg_missing_mode() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::InoutArgMissingMode(_) => {}
-            e => panic!("Expected InoutArgMissingMode error, got {:?}", e),
+            SemCheckError::InOutArgMissingMode(_) => {}
+            e => panic!("Expected InOutArgMissingMode error, got {:?}", e),
         }
     }
 }
@@ -1011,8 +1011,8 @@ fn test_inout_arg_not_mutable() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::InoutArgNotMutable(_) => {}
-            e => panic!("Expected InoutArgNotMutable error, got {:?}", e),
+            SemCheckError::InOutArgNotMutable(_) => {}
+            e => panic!("Expected InOutArgNotMutable error, got {:?}", e),
         }
     }
 }

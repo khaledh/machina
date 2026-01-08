@@ -1,4 +1,4 @@
-use crate::ast::{CallArg, CallArgMode, FunctionParamMode};
+use crate::ast::{CallArg, CallArgMode, ParamMode};
 use crate::diag::Span;
 use crate::resolve::def_map::DefId;
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -6,17 +6,17 @@ use crate::types::{
     Type, TypeAssignability, ValueAssignability, array_to_slice_assignable, value_assignable,
 };
 
-pub(super) struct FuncParamSig {
+pub(super) struct ParamSig {
     #[allow(dead_code)]
     pub(super) name: String,
     pub(super) ty: Type,
     #[allow(dead_code)]
-    pub(super) mode: FunctionParamMode,
+    pub(super) mode: ParamMode,
 }
 
-pub(super) struct FuncOverloadSig {
+pub(super) struct OverloadSig {
     pub(super) def_id: DefId,
-    pub(super) params: Vec<FuncParamSig>,
+    pub(super) params: Vec<ParamSig>,
     pub(super) return_type: Type,
 }
 
@@ -28,7 +28,7 @@ pub(super) enum ArgOverloadRank {
 
 pub(super) struct ResolvedOverload<'a> {
     pub(super) def_id: DefId,
-    pub(super) sig: &'a FuncOverloadSig,
+    pub(super) sig: &'a OverloadSig,
     pub(super) arg_ranks: Vec<ArgOverloadRank>,
 }
 
@@ -38,14 +38,14 @@ impl ResolvedOverload<'_> {
     }
 }
 
-pub(super) struct FuncOverloadResolver<'a> {
+pub(super) struct OverloadResolver<'a> {
     call_span: Span,
     name: &'a str,
     args: &'a [CallArg],
     arg_types: &'a [Type],
 }
 
-impl<'a> FuncOverloadResolver<'a> {
+impl<'a> OverloadResolver<'a> {
     pub(super) fn new(
         name: &'a str,
         args: &'a [CallArg],
@@ -62,7 +62,7 @@ impl<'a> FuncOverloadResolver<'a> {
 
     pub(super) fn resolve(
         self,
-        overloads: &'a [FuncOverloadSig],
+        overloads: &'a [OverloadSig],
     ) -> Result<ResolvedOverload<'a>, TypeCheckError> {
         // Score each candidate by per-arg assignability; keep the best score.
         // If only out-of-range errors are seen, surface that instead of "no match."
@@ -89,8 +89,7 @@ impl<'a> FuncOverloadResolver<'a> {
 
         if candidates.is_empty() {
             return Err(range_err.unwrap_or_else(|| {
-                TypeCheckErrorKind::FuncOverloadNoMatch(self.name.to_string(), self.call_span)
-                    .into()
+                TypeCheckErrorKind::OverloadNoMatch(self.name.to_string(), self.call_span).into()
             }));
         }
 
@@ -102,7 +101,7 @@ impl<'a> FuncOverloadResolver<'a> {
             .collect();
 
         if best.len() != 1 {
-            return Err(TypeCheckErrorKind::FuncOverloadAmbiguous(
+            return Err(TypeCheckErrorKind::OverloadAmbiguous(
                 self.name.to_string(),
                 self.call_span,
             )
@@ -114,7 +113,7 @@ impl<'a> FuncOverloadResolver<'a> {
 
     fn rank_overload(
         &self,
-        sig: &FuncOverloadSig,
+        sig: &OverloadSig,
     ) -> Result<Option<Vec<ArgOverloadRank>>, TypeCheckError> {
         // Reject wrong arity; otherwise classify each argument against its param.
         if sig.params.len() != self.arg_types.len() {

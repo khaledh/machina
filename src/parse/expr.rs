@@ -257,9 +257,9 @@ impl<'a> Parser<'a> {
     fn parse_call_arg(&mut self) -> Result<CallArg, ParseError> {
         let marker = self.mark();
         let mode = match &self.curr_token.kind {
-            TK::KwInout => {
+            TK::KwInOut => {
                 self.advance();
-                CallArgMode::Inout
+                CallArgMode::InOut
             }
             TK::KwOut => {
                 self.advance();

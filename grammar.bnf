@@ -35,20 +35,21 @@ TypeExprList       ::= TypeExpr ( "," TypeExpr )* ","?
 IntLitList         ::= IntLit ("," IntLit)* ","?
 
 # Functions
-FunctionSig        ::= "fn" Identifier "(" FunctionParamList? ")" ( "->" TypeExpr )?
-FunctionParamList  ::= FunctionParam ("," FunctionParam)* ","?
-FunctionParam      ::= FunctionParamMode? Identifier ":" TypeExpr
-FunctionParamMode  ::= "inout" | "out" | "sink"
-
 FunctionDecl       ::= FunctionSig ";"
-
 Function           ::= FunctionSig Block
+
+FunctionSig        ::= "fn" Identifier "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
 MethodBlock        ::= Identifier "::" "{" Method* "}"
 Method             ::= MethodSig Block
-MethodSig          ::= "fn" Identifier "(" SelfParam ("," FunctionParamList)? ")" ( "->" TypeExpr )?
-SelfParam          ::= FunctionParamMode? "self"
+MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
+SelfParam          ::= ParamMode? "self"
+
+# Parameters (common)
+ParamList          ::= Param ("," Param)* ","?
+Param              ::= ParamMode? Identifier ":" TypeExpr
+ParamMode          ::= "inout" | "out" | "sink"
 
 # Blocks
 Block              ::= "{" BlockItem* (Expr ";"?)? "}"
