@@ -9,7 +9,7 @@ pub fn run(ctx: LivenessContext) -> OptimizedMcirContext {
     let mut ctx = copy_elide::run(ctx);
 
     // Lower any remaining mem copies.
-    memcpy_lower::run(&mut ctx.func_bodies);
+    memcpy_lower::run(&mut ctx.funcs);
 
     ctx
 }

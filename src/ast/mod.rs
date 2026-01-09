@@ -117,6 +117,9 @@ impl Module {
         let mut callables = Vec::new();
         for decl in &self.decls {
             match decl {
+                Decl::FunctionDecl(function_decl) => {
+                    callables.push(CallableRef::FunctionDecl(function_decl))
+                }
                 Decl::Function(function) => callables.push(CallableRef::Function(function)),
                 Decl::MethodBlock(method_block) => {
                     for method in &method_block.methods {
@@ -126,7 +129,8 @@ impl Module {
                         });
                     }
                 }
-                _ => {}
+                Decl::Closure(expr) => callables.push(CallableRef::Closure(expr)),
+                Decl::TypeDecl(_) => {}
             }
         }
         callables
@@ -138,41 +142,59 @@ impl Module {
 #[derive(Clone, Debug)]
 pub enum Decl {
     TypeDecl(TypeDecl),
-    Function(Function),         // function definition
     FunctionDecl(FunctionDecl), // function declaration
+    Function(Function),         // function definition
     MethodBlock(MethodBlock),   // method definitions
+    Closure(Expr),              // closure definition
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum CallableRef<'a> {
+    FunctionDecl(&'a FunctionDecl),
     Function(&'a Function),
     Method {
         type_name: &'a str,
         method: &'a Method,
     },
+    Closure(&'a Expr),
 }
 
 impl<'a> CallableRef<'a> {
     pub fn id(&self) -> NodeId {
         match self {
+            CallableRef::FunctionDecl(func_decl) => func_decl.id,
             CallableRef::Function(function) => function.id,
             CallableRef::Method { method, .. } => method.id,
+            CallableRef::Closure(expr) => expr.id,
         }
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> String {
         match self {
-            CallableRef::Function(function) => &function.sig.name,
-            CallableRef::Method { method, .. } => &method.sig.name,
+            CallableRef::FunctionDecl(func_decl) => func_decl.sig.name.clone(),
+            CallableRef::Function(function) => function.sig.name.clone(),
+            CallableRef::Method { method, .. } => method.sig.name.clone(),
+            CallableRef::Closure(expr) => format!("__mc_closure${}", expr.id),
         }
     }
 
     pub fn symbol_base_name(&self) -> String {
         match self {
-            CallableRef::Function(function) => function.sig.name.clone(),
+            CallableRef::FunctionDecl(_) => self.name(),
+            CallableRef::Function(_) => self.name(),
             CallableRef::Method { type_name, method } => {
                 format!("{type_name}${}", method.sig.name)
             }
+            CallableRef::Closure(_) => self.name(),
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            CallableRef::FunctionDecl(func_decl) => func_decl.span,
+            CallableRef::Function(function) => function.span,
+            CallableRef::Method { method, .. } => method.span,
+            CallableRef::Closure(expr) => expr.span,
         }
     }
 }

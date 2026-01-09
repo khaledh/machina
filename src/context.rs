@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use crate::ast::{Module, NodeId};
 use crate::liveness::LiveMap;
-use crate::mcir::{FuncBody, GlobalItem};
+use crate::lower::LoweredFunc;
+use crate::mcir::GlobalItem;
 use crate::regalloc::AllocationResult;
 use crate::resolve::def_map::DefMap;
 use crate::symtab::SymbolTable;
@@ -111,13 +112,13 @@ pub struct AnalyzedContext {
 }
 
 impl AnalyzedContext {
-    pub fn with_func_bodies(
+    pub fn with_funcs(
         self,
-        func_bodies: Vec<FuncBody>,
+        funcs: Vec<LoweredFunc>,
         globals: Vec<GlobalItem>,
     ) -> LoweredMcirContext {
         LoweredMcirContext {
-            func_bodies,
+            funcs,
             symbols: self.symbols,
             globals,
         }
@@ -129,19 +130,19 @@ impl AnalyzedContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct LoweredMcirContext {
-    pub func_bodies: Vec<FuncBody>,
+    pub funcs: Vec<LoweredFunc>,
     pub symbols: SymbolTable,
     pub globals: Vec<GlobalItem>,
 }
 
 impl LoweredMcirContext {
-    pub fn with_optimized_bodies(
+    pub fn with_optimized_funcs(
         self,
-        func_bodies: Vec<FuncBody>,
+        funcs: Vec<LoweredFunc>,
         globals: Vec<GlobalItem>,
     ) -> OptimizedMcirContext {
         OptimizedMcirContext {
-            func_bodies,
+            funcs,
             symbols: self.symbols,
             globals,
         }
@@ -153,7 +154,7 @@ impl LoweredMcirContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct OptimizedMcirContext {
-    pub func_bodies: Vec<FuncBody>,
+    pub funcs: Vec<LoweredFunc>,
     pub symbols: SymbolTable,
     pub globals: Vec<GlobalItem>,
 }
@@ -161,7 +162,7 @@ pub struct OptimizedMcirContext {
 impl OptimizedMcirContext {
     pub fn with_liveness(self, live_maps: Vec<LiveMap>) -> LivenessContext {
         LivenessContext {
-            func_bodies: self.func_bodies,
+            funcs: self.funcs,
             live_maps,
             symbols: self.symbols,
             globals: self.globals,
@@ -170,7 +171,7 @@ impl OptimizedMcirContext {
 
     pub fn with_alloc_results(self, alloc_results: Vec<AllocationResult>) -> RegAllocatedContext {
         RegAllocatedContext {
-            func_bodies: self.func_bodies,
+            funcs: self.funcs,
             alloc_results,
             symbols: self.symbols,
             globals: self.globals,
@@ -183,7 +184,7 @@ impl OptimizedMcirContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct LivenessContext {
-    pub func_bodies: Vec<FuncBody>,
+    pub funcs: Vec<LoweredFunc>,
     pub live_maps: Vec<LiveMap>,
     pub symbols: SymbolTable,
     pub globals: Vec<GlobalItem>,
@@ -192,7 +193,7 @@ pub struct LivenessContext {
 impl LivenessContext {
     pub fn with_alloc_results(self, alloc_results: Vec<AllocationResult>) -> RegAllocatedContext {
         RegAllocatedContext {
-            func_bodies: self.func_bodies,
+            funcs: self.funcs,
             alloc_results,
             symbols: self.symbols,
             globals: self.globals,
@@ -204,7 +205,7 @@ impl LivenessContext {
 // Optimized MCIR & Reg Alloc Context
 // -----------------------------------------------------------------------------
 pub struct RegAllocatedContext {
-    pub func_bodies: Vec<FuncBody>,
+    pub funcs: Vec<LoweredFunc>,
     pub alloc_results: Vec<AllocationResult>,
     pub symbols: SymbolTable,
     pub globals: Vec<GlobalItem>,

@@ -7,9 +7,10 @@ impl fmt::Display for Module {
         for (i, decl) in self.decls.iter().enumerate() {
             match decl {
                 Decl::TypeDecl(type_decl) => type_decl.fmt_with_indent(f, 0)?,
-                Decl::Function(func) => func.fmt_with_indent(f, 0)?,
                 Decl::FunctionDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
+                Decl::Function(func) => func.fmt_with_indent(f, 0)?,
                 Decl::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
+                Decl::Closure(_) => {} // closures are printed where they are defined
             }
             if i + 1 != self.decls.len() {
                 writeln!(f, "--------------------------------")?;

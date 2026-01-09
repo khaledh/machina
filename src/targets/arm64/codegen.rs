@@ -72,20 +72,23 @@ impl<'a> Arm64Codegen<'a> {
 
     pub fn from_regalloc_context(ctx: &'a RegAllocatedContext) -> Self {
         let funcs: Vec<_> = ctx
-            .func_bodies
+            .funcs
             .iter()
-            .zip(ctx.symbols.func_ids.iter())
             .zip(ctx.alloc_results.iter())
-            .map(|((body, def_id), alloc)| {
+            .map(|(func, alloc)| {
                 let name = ctx
                     .symbols
                     .def_names
-                    .get(def_id)
+                    .get(&func.def_id)
                     .unwrap_or_else(|| {
-                        panic!("Function def {:?} missing from symbol table", def_id);
+                        panic!("Function def {:?} missing from symbol table", func.def_id);
                     })
                     .clone();
-                McFunction { name, body, alloc }
+                McFunction {
+                    name,
+                    body: &func.body,
+                    alloc,
+                }
             })
             .collect();
 

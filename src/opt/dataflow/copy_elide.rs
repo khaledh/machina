@@ -19,18 +19,18 @@ use crate::mcir::types::{
 /// - Renames are propagated across the CFG using a must-available dataflow.
 pub fn run(ctx: LivenessContext) -> OptimizedMcirContext {
     let LivenessContext {
-        mut func_bodies,
+        mut funcs,
         live_maps,
         symbols,
         globals,
     } = ctx;
 
-    for (body, live_map) in func_bodies.iter_mut().zip(live_maps.iter()) {
-        elide_in_body(body, live_map);
+    for (func, live_map) in funcs.iter_mut().zip(live_maps.iter()) {
+        elide_in_body(&mut func.body, live_map);
     }
 
     OptimizedMcirContext {
-        func_bodies,
+        funcs,
         symbols,
         globals,
     }

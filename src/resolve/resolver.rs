@@ -149,9 +149,11 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
+        // Populate type declarations
         self.populate_type_decls(&module.type_decls());
-        self.populate_func_decls(&module.func_decls());
-        self.populate_funcs(&module.funcs());
+
+        // Populate callable declarations
+        self.populate_callables(&module.callables());
     }
 
     fn populate_type_decls(&mut self, type_decls: &[&TypeDecl]) {
@@ -211,68 +213,55 @@ impl SymbolResolver {
         }
     }
 
-    fn populate_func_decls(&mut self, func_decls: &[&FunctionDecl]) {
-        for &func_decl in func_decls {
-            // Check if the function decl name is already defined
-            let name = func_decl.sig.name.clone();
-            if self.lookup_symbol(&name).is_some() || self.func_decl_names.contains(&name) {
-                self.errors
-                    .push(ResolveError::SymbolAlreadyDefined(name, func_decl.span));
-                continue;
+    fn populate_callables(&mut self, callables: &[CallableRef]) {
+        for &callable in callables {
+            match callable {
+                CallableRef::FunctionDecl(func_decl) => {
+                    // Check if the function decl name is already defined
+                    let name = func_decl.sig.name.clone();
+                    if self.lookup_symbol(&name).is_some() || self.func_decl_names.contains(&name) {
+                        self.errors
+                            .push(ResolveError::SymbolAlreadyDefined(name, func_decl.span));
+                        return;
+                    }
+                    self.func_decl_names.insert(name);
+                    self.populate_callable(&callable);
+                }
+                CallableRef::Function(func) => {
+                    // Check if the function name is already defined as a function decl
+                    if self.func_decl_names.contains(&func.sig.name) {
+                        self.errors.push(ResolveError::SymbolAlreadyDefined(
+                            func.sig.name.clone(),
+                            func.span,
+                        ));
+                        continue;
+                    }
+                    self.populate_callable(&callable);
+                }
+                CallableRef::Method { .. } => self.populate_callable(&callable),
+                CallableRef::Closure(_) => self.populate_callable(&callable),
             }
-            self.func_decl_names.insert(name);
-
-            // Create and record the def
-            let def_id = self.def_id_gen.new_id();
-            let def = Def {
-                id: def_id,
-                name: func_decl.sig.name.clone(),
-                kind: DefKind::ExternFunc,
-            };
-            self.def_map_builder.record_def(def, func_decl.id);
-            self.insert_symbol(
-                &func_decl.sig.name,
-                Symbol {
-                    name: func_decl.sig.name.clone(),
-                    kind: SymbolKind::Func {
-                        overloads: vec![def_id],
-                    },
-                },
-                func_decl.span,
-            );
         }
     }
 
-    fn populate_funcs(&mut self, funcs: &[&Function]) {
-        for &func in funcs {
-            // Check if the function name is already defined as a function decl
-            if self.func_decl_names.contains(&func.sig.name) {
-                self.errors.push(ResolveError::SymbolAlreadyDefined(
-                    func.sig.name.clone(),
-                    func.span,
-                ));
-                continue;
-            }
-
-            // Create and record the def
-            let def_id = self.def_id_gen.new_id();
-            let def = Def {
-                id: def_id,
-                name: func.sig.name.clone(),
-                kind: DefKind::Func,
-            };
-            self.def_map_builder.record_def(def, func.id);
-            self.insert_symbol(
-                &func.sig.name,
-                Symbol {
-                    name: func.sig.name.clone(),
-                    kind: SymbolKind::Func {
-                        overloads: vec![def_id],
-                    },
+    fn populate_callable(&mut self, callable: &CallableRef) {
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: callable.name(),
+            kind: DefKind::Func,
+        };
+        self.def_map_builder.record_def(def, callable.id());
+        self.insert_symbol(
+            &callable.name(),
+            Symbol {
+                name: callable.symbol_base_name(),
+                kind: SymbolKind::Func {
+                    overloads: vec![def_id],
                 },
-                func.span,
-            );
-        }
+            },
+            callable.span(),
+        );
     }
 
     pub fn resolve(&mut self, module: &Module) -> Result<DefMap, Vec<ResolveError>> {
@@ -572,15 +561,6 @@ impl Visitor for SymbolResolver {
             self.visit_type_expr(&param.typ);
         }
 
-        // Record a def for the method itself (no global symbol yet).
-        let def_id = self.def_id_gen.new_id();
-        let def = Def {
-            id: def_id,
-            name: method.sig.name.clone(),
-            kind: DefKind::Func,
-        };
-        self.def_map_builder.record_def(def, method.id);
-
         // Enter a new scope for the method parameters and body.
         self.with_scope(|resolver| {
             resolver.register_param(
@@ -814,6 +794,7 @@ impl Visitor for SymbolResolver {
                     self.visit_type_expr(return_ty);
                 }
 
+                // Enter a new scope for the closure parameters and body
                 self.with_scope(|resolver| {
                     for (index, param) in params.iter().enumerate() {
                         resolver.register_param(

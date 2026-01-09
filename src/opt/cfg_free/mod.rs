@@ -4,6 +4,7 @@ pub mod memset_lower;
 pub mod self_copy_elim;
 
 use crate::context::{LoweredMcirContext, OptimizedMcirContext};
+use crate::lower::LoweredFunc;
 use crate::mcir::FuncBody;
 
 use const_branch_elim::ConstBranchElim;
@@ -14,17 +15,17 @@ use self_copy_elim::RemoveSelfCopies;
 /// Run all CFG-free MCIR optimizations.
 pub fn run(ctx: LoweredMcirContext) -> OptimizedMcirContext {
     let LoweredMcirContext {
-        func_bodies,
+        funcs,
         symbols,
         globals,
     } = ctx;
-    let mut bodies = func_bodies;
+    let mut funcs = funcs;
 
     let mut manager = PassManager::new();
-    manager.run(&mut bodies);
+    manager.run(&mut funcs);
 
     OptimizedMcirContext {
-        func_bodies: bodies,
+        funcs,
         symbols,
         globals,
     }
@@ -52,14 +53,14 @@ impl PassManager {
         }
     }
 
-    fn run(&mut self, bodies: &mut [FuncBody]) {
+    fn run(&mut self, funcs: &mut [LoweredFunc]) {
         const MAX_ITERS: usize = 4;
 
         for _ in 0..MAX_ITERS {
             let mut changed = false;
             for pass in &mut self.passes {
-                for body in bodies.iter_mut() {
-                    changed |= pass.run(body);
+                for body in funcs.iter_mut() {
+                    changed |= pass.run(&mut body.body);
                 }
             }
             if !changed {

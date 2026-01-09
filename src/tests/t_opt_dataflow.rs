@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::context::LivenessContext;
 use crate::liveness::LivenessAnalysis;
+use crate::lower::LoweredFunc;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::{
     BasicBlock, BlockId, Callee, Const, FuncBody, GlobalItem, Local, LocalId, LocalKind, Operand,
@@ -9,6 +10,7 @@ use crate::mcir::types::{
 };
 use crate::opt::dataflow::copy_elide;
 use crate::opt::dataflow::memcpy_lower;
+use crate::resolve::def_map::DefId;
 use crate::symtab::SymbolTable;
 
 fn const_u64(value: u64) -> Operand {
@@ -66,7 +68,10 @@ fn mk_body(
 fn run_elide(body: FuncBody) -> FuncBody {
     let live_map = LivenessAnalysis::new(&body).analyze();
     let live_ctx = LivenessContext {
-        func_bodies: vec![body],
+        funcs: vec![LoweredFunc {
+            def_id: DefId(0),
+            body,
+        }],
         live_maps: vec![live_map],
         symbols: SymbolTable {
             func_ids: Vec::new(),
@@ -75,14 +80,17 @@ fn run_elide(body: FuncBody) -> FuncBody {
         globals: Vec::<GlobalItem>::new(),
     };
 
-    let mut optimized = copy_elide::run(live_ctx).func_bodies;
-    optimized.pop().expect("expected one optimized body")
+    let mut optimized = copy_elide::run(live_ctx).funcs;
+    optimized.pop().expect("expected one optimized body").body
 }
 
 fn run_memcpy_lower(body: FuncBody) -> FuncBody {
-    let mut bodies = vec![body];
-    memcpy_lower::run(&mut bodies);
-    bodies.pop().expect("expected one optimized body")
+    let mut funcs = vec![LoweredFunc {
+        def_id: DefId(0),
+        body,
+    }];
+    memcpy_lower::run(&mut funcs);
+    funcs.pop().expect("expected one optimized body").body
 }
 
 #[test]

@@ -43,7 +43,7 @@ pub struct AllocationResult {
 /// Run register allocation for a lowered MCIR context.
 pub fn regalloc(ctx: LivenessContext, target: &dyn target::TargetSpec) -> RegAllocatedContext {
     let LivenessContext {
-        func_bodies,
+        funcs,
         live_maps,
         globals,
         ..
@@ -51,14 +51,14 @@ pub fn regalloc(ctx: LivenessContext, target: &dyn target::TargetSpec) -> RegAll
 
     let mut alloc_results = Vec::new();
 
-    for (body, live_map) in func_bodies.iter().zip(live_maps.iter()) {
-        let constraints = analyze_constraints(body, target);
-        let alloc_result = RegAlloc::new(body, &constraints, target, live_map).alloc();
+    for (func, live_map) in funcs.iter().zip(live_maps.iter()) {
+        let constraints = analyze_constraints(&func.body, target);
+        let alloc_result = RegAlloc::new(&func.body, &constraints, target, live_map).alloc();
         alloc_results.push(alloc_result);
     }
 
     RegAllocatedContext {
-        func_bodies,
+        funcs,
         globals,
         alloc_results,
         symbols: ctx.symbols,

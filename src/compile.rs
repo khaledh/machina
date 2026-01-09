@@ -172,9 +172,14 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     if dump_ir {
         println!("MCIR:");
         println!("--------------------------------");
-        for (i, body) in lowered_context.func_bodies.iter().enumerate() {
-            let func_name = lowered_context.symbols.func_name(i).unwrap_or("<unknown>");
-            println!("{}", format_mcir_body(body, func_name));
+        for func in &lowered_context.funcs {
+            let func_name = lowered_context
+                .symbols
+                .def_names
+                .get(&func.def_id)
+                .map(|name| name.as_str())
+                .unwrap_or("<unknown>");
+            println!("{}", format_mcir_body(&func.body, func_name));
             println!("--------------------------------");
         }
     }
@@ -188,9 +193,14 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let mcir = if opts.emit_mcir {
         let mut mcir_out = String::new();
         mcir_out.push_str(&format_globals(&liveness_context.globals));
-        for (i, body) in liveness_context.func_bodies.iter().enumerate() {
-            let func_name = liveness_context.symbols.func_name(i).unwrap_or("<unknown>");
-            mcir_out.push_str(&format!("{}\n", format_mcir_body(body, func_name)));
+        for func in &liveness_context.funcs {
+            let func_name = liveness_context
+                .symbols
+                .def_names
+                .get(&func.def_id)
+                .map(|name| name.as_str())
+                .unwrap_or("<unknown>");
+            mcir_out.push_str(&format!("{}\n", format_mcir_body(&func.body, func_name)));
             mcir_out.push('\n');
         }
         Some(mcir_out)
@@ -202,14 +212,22 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         // --- Dump Liveness Analysis ---
         use crate::liveness::format_liveness_map;
         use regalloc::intervals::{build_live_intervals, format_live_intervals};
-        for (i, body) in liveness_context.func_bodies.iter().enumerate() {
-            let live_map = &liveness_context.live_maps[i];
-            let func_name = liveness_context.symbols.func_name(i).unwrap_or("<unknown>");
+        for (func, live_map) in liveness_context
+            .funcs
+            .iter()
+            .zip(liveness_context.live_maps.iter())
+        {
+            let func_name = liveness_context
+                .symbols
+                .def_names
+                .get(&func.def_id)
+                .map(|name| name.as_str())
+                .unwrap_or("<unknown>");
             if dump_liveness {
                 print!("{}", format_liveness_map(live_map, func_name));
             }
             if dump_intervals {
-                let intervals = build_live_intervals(body, live_map);
+                let intervals = build_live_intervals(&func.body, live_map);
                 print!("{}", format_live_intervals(&intervals, func_name));
             }
         }
@@ -222,8 +240,17 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let regalloc_context = regalloc::regalloc(liveness_context, &target);
 
     if dump_regalloc {
-        for (i, alloc_result) in regalloc_context.alloc_results.iter().enumerate() {
-            let func_name = regalloc_context.symbols.func_name(i).unwrap_or("<unknown>");
+        for (func, alloc_result) in regalloc_context
+            .funcs
+            .iter()
+            .zip(regalloc_context.alloc_results.iter())
+        {
+            let func_name = regalloc_context
+                .symbols
+                .def_names
+                .get(&func.def_id)
+                .map(|name| name.as_str())
+                .unwrap_or("<unknown>");
             print!("{}", alloc_result.format_alloc_map(func_name, &target));
         }
     }

@@ -118,6 +118,7 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
             Decl::FunctionDecl(func_decl) => v.visit_func_decl(func_decl),
             Decl::Function(func) => v.visit_func(func),
             Decl::MethodBlock(method_block) => v.visit_method_block(method_block),
+            Decl::Closure(_) => {} // closures are visited where they are defined
         }
     }
 }

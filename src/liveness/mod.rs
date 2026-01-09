@@ -15,8 +15,8 @@ use crate::mcir::types::{
 /// Run liveness analysis for an optimized MCIR context.
 pub fn analyze(ctx: OptimizedMcirContext) -> LivenessContext {
     let mut live_maps = Vec::new();
-    for body in &ctx.func_bodies {
-        live_maps.push(LivenessAnalysis::new(body).analyze());
+    for body in &ctx.funcs {
+        live_maps.push(LivenessAnalysis::new(&body.body).analyze());
     }
     ctx.with_liveness(live_maps)
 }

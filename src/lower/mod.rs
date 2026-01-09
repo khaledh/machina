@@ -15,3 +15,5 @@ mod lower_pattern;
 mod lower_place;
 mod lower_string;
 mod lower_util;
+
+pub use lower_ast::LoweredFunc;

@@ -1,3 +1,4 @@
+use crate::lower::LoweredFunc;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::layout::size_of_ty;
 use crate::mcir::{
@@ -8,9 +9,9 @@ use crate::mcir::{
 const INLINE_THRESHOLD: u64 = 16;
 
 // Lower aggregate copies into inline byte copies or runtime __mc_memcpy calls.
-pub fn run(bodies: &mut [FuncBody]) {
-    for body in bodies {
-        lower_body(body);
+pub fn run(funcs: &mut [LoweredFunc]) {
+    for func in funcs {
+        lower_body(&mut func.body);
     }
 }
 
