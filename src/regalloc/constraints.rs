@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::mcir::types::{BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Statement, Terminator};
+use crate::mcir::types::{
+    BlockId, Callee, FuncBody, LocalId, LocalKind, Operand, PlaceAny, Statement, Terminator,
+};
 use crate::regalloc::pos::InstPos;
 use crate::regalloc::target::{PhysReg, TargetSpec};
 
@@ -36,8 +38,15 @@ pub struct CallResultConstraint {
 }
 
 #[derive(Debug)]
+pub struct CallCalleeConstraint {
+    pub operand: Operand,
+    pub reg: PhysReg,
+}
+
+#[derive(Debug)]
 pub struct CallConstraint {
     pub pos: InstPos,
+    pub callee: Option<CallCalleeConstraint>,
     pub args: Vec<CallArgConstraint>,
     pub result: Option<CallResultConstraint>,
 }
@@ -112,7 +121,7 @@ pub fn analyze_calls(body: &FuncBody, target: &dyn TargetSpec) -> Vec<CallConstr
     let mut constraints = Vec::new();
     for (b_idx, block) in body.blocks.iter().enumerate() {
         for (i_idx, stmt) in block.stmts.iter().enumerate() {
-            let Statement::Call { dst, args, .. } = stmt else {
+            let Statement::Call { dst, args, callee } = stmt else {
                 continue;
             };
 
@@ -160,8 +169,17 @@ pub fn analyze_calls(body: &FuncBody, target: &dyn TargetSpec) -> Vec<CallConstr
                 }
             });
 
+            let callee = match callee {
+                Callee::Value(operand) => Some(CallCalleeConstraint {
+                    operand: operand.clone(),
+                    reg: target.indirect_call_reg(),
+                }),
+                _ => None,
+            };
+
             constraints.push(CallConstraint {
                 pos: InstPos::new(BlockId(b_idx as u32), i_idx),
+                callee,
                 args: arg_constraints,
                 result,
             });

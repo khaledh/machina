@@ -69,8 +69,17 @@ impl<'a> FuncLowerer<'a> {
         let callee = match self.ctx.type_map.lookup_call_def(call.id) {
             Some(def_id) => Callee::Def(def_id),
             None => {
-                let callee_def = self.def_for_node(callee.id)?;
-                Callee::Def(callee_def.id)
+                if let Ok(callee_def) = self.def_for_node(callee.id)
+                    && matches!(
+                        callee_def.kind,
+                        crate::resolve::def_map::DefKind::Func
+                            | crate::resolve::def_map::DefKind::ExternFunc
+                    )
+                {
+                    Callee::Def(callee_def.id)
+                } else {
+                    Callee::Value(self.lower_scalar_expr(callee)?)
+                }
             }
         };
 

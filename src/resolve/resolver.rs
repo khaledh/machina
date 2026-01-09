@@ -755,25 +755,12 @@ impl Visitor for SymbolResolver {
                 }
             }
 
-            ExprKind::Call { callee, args } => match &callee.kind {
-                // For now, callee must be a Var to a function.
-                // In the future, this can be generalized.
-                ExprKind::Var(name) => match self.lookup_symbol(name) {
-                    Some(symbol) if matches!(&symbol.kind, SymbolKind::Func { .. }) => {
-                        self.def_map_builder.record_use(callee.id, symbol.def_id());
-                        for arg in args {
-                            self.visit_expr(&arg.expr);
-                        }
-                    }
-                    _ => self
-                        .errors
-                        .push(ResolveError::FuncUndefined(name.to_string(), callee.span)),
-                },
-                _ => self.errors.push(ResolveError::InvalidCallee(
-                    callee.kind.clone(),
-                    callee.span,
-                )),
-            },
+            ExprKind::Call { callee, args } => {
+                self.visit_expr(callee);
+                for arg in args {
+                    self.visit_expr(&arg.expr);
+                }
+            }
 
             ExprKind::MethodCall { callee, args, .. } => {
                 self.visit_expr(callee);

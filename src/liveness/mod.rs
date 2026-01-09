@@ -8,7 +8,7 @@ use crate::analysis::dataflow::solve_backward;
 use crate::context::{LivenessContext, OptimizedMcirContext};
 use crate::mcir::cfg::McirCfg;
 use crate::mcir::types::{
-    BasicBlock, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue, Statement,
+    BasicBlock, Callee, FuncBody, LocalId, Operand, Place, PlaceAny, Projection, Rvalue, Statement,
     Terminator, TyKind,
 };
 
@@ -117,9 +117,12 @@ pub(crate) fn stmt_uses(stmt: &Statement, out: &mut HashSet<LocalId>, alias_map:
             collect_place_lhs_uses(dst, out, alias_map);
             collect_operand_uses(value, out, alias_map);
         }
-        Statement::Call { dst, args, .. } => {
+        Statement::Call { dst, callee, args } => {
             if let Some(dst) = dst {
                 collect_place_any_lhs_uses(dst, out, alias_map);
+            }
+            if let Callee::Value(operand) = callee {
+                collect_operand_uses(operand, out, alias_map);
             }
             for arg in args {
                 collect_place_any_uses(arg, out, alias_map);

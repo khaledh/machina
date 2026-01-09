@@ -3,6 +3,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::lower::lower_util::u64_const;
 use crate::mcir::types::*;
+use crate::resolve::def_map::DefKind;
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -99,11 +100,30 @@ impl<'a> FuncLowerer<'a> {
                 Ok(Operand::Const(variant_tag))
             }
 
+            EK::Closure { .. } => {
+                let def = match self.ctx.def_map.lookup_def(expr.id) {
+                    Some(def) => def,
+                    None => panic!(
+                        "compiler bug: closure def not found for expr NodeId({})",
+                        expr.id
+                    ),
+                };
+                Ok(Operand::Const(Const::FuncAddr { def: def.id }))
+            }
+
             // Place-based reads
-            EK::Var(_) | EK::TupleField { .. } | EK::StructField { .. } => {
-                if matches!(expr.kind, EK::Var(_)) && self.ctx.implicit_moves.contains(&expr.id) {
+            EK::Var(_) => {
+                let def = self.def_for_node(expr.id)?;
+                if matches!(def.kind, DefKind::Func | DefKind::ExternFunc) {
+                    return Ok(Operand::Const(Const::FuncAddr { def: def.id }));
+                }
+                if self.ctx.implicit_moves.contains(&expr.id) {
                     self.record_move(expr);
                 }
+                let place = self.lower_place_scalar(expr)?;
+                Ok(Operand::Copy(place))
+            }
+            EK::TupleField { .. } | EK::StructField { .. } => {
                 let place = self.lower_place_scalar(expr)?;
                 Ok(Operand::Copy(place))
             }

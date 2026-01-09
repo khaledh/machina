@@ -1026,3 +1026,31 @@ fn test_fn_type_annotation_mismatch_rejected() {
         }
     }
 }
+
+#[test]
+fn test_closure_value_call_typechecks() {
+    let source = r#"
+        fn test() -> u64 {
+            let inc: fn(u64) -> u64 = |x: u64| -> u64 x + 1;
+            inc(2)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_function_value_assign_typechecks() {
+    let source = r#"
+        fn add(a: u64, b: u64) -> u64 {
+            a + b
+        }
+
+        fn test() -> u64 {
+            let f: fn(u64, u64) -> u64 = add;
+            f(1, 2)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}

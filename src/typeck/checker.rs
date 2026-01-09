@@ -5,7 +5,7 @@ use crate::ast::fold::{walk_expr, walk_if};
 use crate::ast::*;
 use crate::context::ResolvedContext;
 use crate::diag::Span;
-use crate::resolve::def_map::DefId;
+use crate::resolve::def_map::{DefId, DefKind};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
 };
@@ -432,29 +432,30 @@ impl TypeChecker {
             });
         }
 
-        let declared_return = match return_ty {
+        let declared_return_ty = match return_ty {
             Some(ty) => Some(resolve_type_expr(&self.context.def_map, ty)?),
             None => None,
         };
 
-        let body_ty = match declared_return.as_ref() {
-            Some(expected) => self.visit_expr(body, Some(expected))?,
-            None => self.visit_expr(body, None)?,
-        };
+        let body_ty = self.visit_expr(body, declared_return_ty.as_ref())?;
 
-        let return_ty = if let Some(expected) = declared_return {
-            if matches!(
-                type_assignable(&body_ty, &expected),
-                TypeAssignability::Incompatible
-            ) {
-                let return_span = self.function_return_span(body);
-                return Err(
-                    TypeCheckErrorKind::DeclTypeMismatch(expected, body_ty, return_span).into(),
-                );
+        let return_ty = match declared_return_ty {
+            Some(expected) => {
+                if matches!(
+                    type_assignable(&body_ty, &expected),
+                    TypeAssignability::Incompatible
+                ) {
+                    let return_span = self.function_return_span(body);
+                    return Err(TypeCheckErrorKind::DeclTypeMismatch(
+                        expected,
+                        body_ty,
+                        return_span,
+                    )
+                    .into());
+                }
+                expected
             }
-            expected
-        } else {
-            body_ty
+            None => body_ty,
         };
 
         Ok(Type::Fn {
@@ -1123,14 +1124,74 @@ impl TypeChecker {
         callee: &Expr,
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
-        let name = match &callee.kind {
-            ExprKind::Var(name) => name,
-            _ => {
-                let _ = self.visit_call(callee, args)?;
-                return Ok(Type::Unknown);
-            }
+        if let ExprKind::Var(name) = &callee.kind
+            && let Some(def) = self.context.def_map.lookup_def(callee.id)
+            && matches!(def.kind, DefKind::Func | DefKind::ExternFunc)
+        {
+            return self.check_named_call(name, call_expr, callee, args);
+        }
+
+        self.check_expr_call(call_expr, callee, args)
+    }
+
+    fn check_expr_call(
+        &mut self,
+        call_expr: &Expr,
+        callee: &Expr,
+        args: &[CallArg],
+    ) -> Result<Type, TypeCheckError> {
+        let callee_ty = self.visit_expr(callee, None)?;
+        let Type::Fn { params, return_ty } = callee_ty else {
+            return Err(TypeCheckErrorKind::InvalidCallee(callee.kind.clone(), callee.span).into());
         };
 
+        if params.len() != args.len() {
+            return Err(TypeCheckErrorKind::ArgCountMismatch(
+                "<fn>".to_string(),
+                params.len(),
+                args.len(),
+                call_expr.span,
+            )
+            .into());
+        }
+
+        let param_types = params
+            .iter()
+            .map(|param| param.ty.clone())
+            .collect::<Vec<_>>();
+        let params = params
+            .iter()
+            .map(|param| CallParam {
+                mode: match param.mode {
+                    FnParamMode::In => ParamMode::In,
+                    FnParamMode::InOut => ParamMode::InOut,
+                    FnParamMode::Out => ParamMode::Out,
+                    FnParamMode::Sink => ParamMode::Sink,
+                },
+                ty: param.ty.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        self.type_map_builder.record_call_sig(
+            call_expr.id,
+            CallSig {
+                receiver: None,
+                params,
+            },
+        );
+
+        self.check_call_arg_types(args, &param_types)?;
+
+        Ok(*return_ty)
+    }
+
+    fn check_named_call(
+        &mut self,
+        name: &str,
+        call_expr: &Expr,
+        callee: &Expr,
+        args: &[CallArg],
+    ) -> Result<Type, TypeCheckError> {
         // Get the function overloads
         let Some(overloads) = self.func_sigs.get(name).cloned() else {
             return Err(TypeCheckErrorKind::UnknownType(callee.span).into());

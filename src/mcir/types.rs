@@ -193,6 +193,7 @@ pub enum Const {
     Bool(bool),
     Int { value: i128, signed: bool, bits: u8 },
     GlobalAddr { id: GlobalId },
+    FuncAddr { def: DefId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -376,6 +377,7 @@ pub enum Statement {
 pub enum Callee {
     Def(DefId),
     Runtime(RuntimeFn),
+    Value(Operand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -471,6 +473,7 @@ impl fmt::Display for Const {
             Const::Bool(value) => write!(f, "{}", value),
             Const::Int { value, .. } => write!(f, "{}", value),
             Const::GlobalAddr { id } => write!(f, "g#{}", id.index()),
+            Const::FuncAddr { def } => write!(f, "fn#{}", def),
         }
     }
 }
@@ -564,6 +567,7 @@ impl fmt::Display for Callee {
         match self {
             Callee::Def(def_id) => write!(f, "def#{}", def_id),
             Callee::Runtime(func) => write!(f, "runtime::{}", func.sig().name),
+            Callee::Value(operand) => write!(f, "*{}", operand),
         }
     }
 }

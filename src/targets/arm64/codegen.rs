@@ -478,6 +478,11 @@ impl<'a> FuncCodegen<'a> {
 
         // Lookup callee name.
         let name = match callee {
+            Callee::Value(_) => {
+                let call_reg = self.reg(regs::INDIRECT_CALL_REG);
+                asm.push_str(&format!("  blr {call_reg}\n"));
+                return Ok(asm);
+            }
             Callee::Def(def_id) => self
                 .def_names
                 .get(def_id)
@@ -740,6 +745,18 @@ impl<'a> FuncCodegen<'a> {
                         });
 
                         // PC-relative load from the global data section.
+                        asm.push_str(&format!("  adrp {}, {}@PAGE\n", scratch, label));
+                        asm.push_str(&format!(
+                            "  add {}, {}, {}@PAGEOFF\n",
+                            scratch, scratch, label
+                        ));
+                        return Ok(scratch);
+                    }
+                    Const::FuncAddr { def } => {
+                        let name = self.def_names.get(def).cloned().unwrap_or_else(|| {
+                            panic!("compiler bug: func name not found for def {}", def)
+                        });
+                        let label = format!("_{}", name);
                         asm.push_str(&format!("  adrp {}, {}@PAGE\n", scratch, label));
                         asm.push_str(&format!(
                             "  add {}, {}, {}@PAGEOFF\n",
@@ -1360,6 +1377,19 @@ impl<'a> FuncCodegen<'a> {
                 Location::Imm(value) => {
                     let to_reg = self.reg(*to_reg);
                     format!("  mov {to_reg}, #{value}\n")
+                }
+                Location::FuncAddr(def) => {
+                    let to_reg = self.reg(*to_reg);
+                    let name = self
+                        .def_names
+                        .get(def)
+                        .cloned()
+                        .ok_or(*def)
+                        .map_err(CodegenError::CalleeNameNotFound)?;
+                    let label = format!("_{}", name);
+                    asm.push_str(&format!("  adrp {to_reg}, {label}@PAGE\n"));
+                    asm.push_str(&format!("  add {to_reg}, {to_reg}, {label}@PAGEOFF\n"));
+                    String::new()
                 }
                 Location::Reg(from_reg) => {
                     let to_reg = self.reg(*to_reg);

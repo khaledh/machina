@@ -5,11 +5,13 @@ use crate::mcir::types::{BlockId, Place, PlaceAny, Scalar};
 use crate::regalloc::pos::{InstPos, RelInstPos};
 use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
+use crate::resolve::def_map::DefId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
     #[allow(dead_code)]
     Imm(i64),
+    FuncAddr(DefId),
     Reg(PhysReg),
     Stack(StackSlotId),
     StackAddr(StackSlotId),
@@ -21,6 +23,7 @@ impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Location::Imm(value) => write!(f, "Imm({})", value),
+            Location::FuncAddr(def) => write!(f, "FuncAddr({})", def),
             Location::Reg(reg) => write!(f, "Reg(r{})", reg.0),
             Location::Stack(slot) => write!(f, "Stack({})", slot.0),
             Location::StackAddr(slot) => write!(f, "StackAddr({})", slot.0),

@@ -216,6 +216,8 @@ const SCRATCH: [PhysReg; 4] = [
     phys(Arm64Reg::X17),
 ];
 
+pub const INDIRECT_CALL_REG: PhysReg = phys(Arm64Reg::X16);
+
 impl TargetSpec for Arm64Target {
     fn allocatable_regs(&self) -> &[PhysReg] {
         &ALLOCATABLE
@@ -249,6 +251,10 @@ impl TargetSpec for Arm64Target {
 
     fn indirect_result_reg(&self) -> Option<PhysReg> {
         Some(phys(Arm64Reg::X8))
+    }
+
+    fn indirect_call_reg(&self) -> PhysReg {
+        INDIRECT_CALL_REG
     }
 
     fn scratch_regs(&self) -> &[PhysReg] {

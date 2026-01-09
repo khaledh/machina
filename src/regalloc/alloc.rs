@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::liveness::LiveMap;
 use crate::mcir::layout::size_of_ty;
 use crate::mcir::types::{
-    BlockId, FuncBody, LocalId, LocalKind, PlaceAny, Rvalue, Statement, TyId, TyTable,
+    BlockId, Const, FuncBody, LocalId, LocalKind, Operand, PlaceAny, Rvalue, Statement, TyId,
+    TyTable,
 };
 use crate::regalloc::constraints::{CallConstraint, ConstraintMap, FnParamConstraint};
 use crate::regalloc::intervals::{LiveInterval, LiveIntervalMap, build_live_intervals};
@@ -333,7 +334,39 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
-        // 2. Move arguments to their target locations
+        // 2. Move callee to the indirect call register (if needed).
+        if let Some(callee) = &constr.callee {
+            let current_loc = match &callee.operand {
+                Operand::Copy(place) | Operand::Move(place) => {
+                    if place.projections().is_empty() {
+                        self.loc_for_value(place.base())
+                    } else {
+                        Location::PlaceValue(place.clone())
+                    }
+                }
+                Operand::Const(value) => match value {
+                    Const::Unit => Location::Imm(0),
+                    Const::Bool(flag) => Location::Imm(i64::from(*flag)),
+                    Const::Int { value, .. } => {
+                        let imm = i64::try_from(*value).unwrap_or_else(|_| {
+                            panic!("Indirect call target constant out of range: {value}")
+                        });
+                        Location::Imm(imm)
+                    }
+                    Const::GlobalAddr { .. } => {
+                        panic!("Indirect call target cannot be a global address")
+                    }
+                    Const::FuncAddr { def } => Location::FuncAddr(*def),
+                },
+            };
+            let target_loc = Location::Reg(callee.reg);
+            if current_loc != target_loc {
+                self.moves
+                    .add_inst_move(RelInstPos::Before(constr.pos), current_loc, target_loc);
+            }
+        }
+
+        // 3. Move arguments to their target locations
         for arg_constr in &constr.args {
             let current_loc = match arg_constr.kind {
                 crate::regalloc::constraints::CallArgKind::Value => match &arg_constr.place {
@@ -368,7 +401,7 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
-        // 3. Move result from result register to its target location
+        // 4. Move result from result register to its target location
         if let Some(result_constr) = &constr.result {
             let source_loc = Location::Reg(result_constr.reg);
             let target_loc = self.loc_for_value(result_constr.local);
@@ -378,7 +411,7 @@ impl<'a> RegAlloc<'a> {
             }
         }
 
-        // 4. Restore caller-saved registers
+        // 5. Restore caller-saved registers
         for (stack_slot, reg) in caller_saved_preserves {
             self.moves.add_inst_move(
                 RelInstPos::After(constr.pos),

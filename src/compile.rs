@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::ast::{Module, NodeIdGen};
@@ -13,6 +14,7 @@ use crate::nrvo::NrvoAnalyzer;
 use crate::opt;
 use crate::parse::Parser;
 use crate::regalloc;
+use crate::resolve::def_map::DefId;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::targets;
@@ -179,7 +181,10 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                 .get(&func.def_id)
                 .map(|name| name.as_str())
                 .unwrap_or("<unknown>");
-            println!("{}", format_mcir_body(&func.body, func_name));
+            println!(
+                "{}",
+                format_mcir_body(&func.body, func_name, &lowered_context.symbols.def_names)
+            );
             println!("--------------------------------");
         }
     }
@@ -200,7 +205,10 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                 .get(&func.def_id)
                 .map(|name| name.as_str())
                 .unwrap_or("<unknown>");
-            mcir_out.push_str(&format!("{}\n", format_mcir_body(&func.body, func_name)));
+            mcir_out.push_str(&format!(
+                "{}\n",
+                format_mcir_body(&func.body, func_name, &liveness_context.symbols.def_names)
+            ));
             mcir_out.push('\n');
         }
         Some(mcir_out)
@@ -300,7 +308,11 @@ fn parse_with_id_gen(
 
 // --- Formatting ---
 
-fn format_mcir_body(body: &mcir::FuncBody, name: &str) -> String {
+fn format_mcir_body(
+    body: &mcir::FuncBody,
+    name: &str,
+    def_names: &HashMap<DefId, String>,
+) -> String {
     use crate::mcir::LocalKind;
 
     let mut params = body
@@ -326,7 +338,8 @@ fn format_mcir_body(body: &mcir::FuncBody, name: &str) -> String {
         .type_to_string(body.locals[body.ret_local.index()].ty);
     let header = format!("fn {}({}) -> {} {{", name, param_parts.join(", "), ret_ty);
 
-    body.to_string().replacen("body {", &header, 1)
+    let body_str = body.to_string().replacen("body {", &header, 1);
+    replace_func_addrs(&body_str, def_names)
 }
 
 fn format_globals(globals: &[mcir::types::GlobalItem]) -> String {
@@ -354,5 +367,49 @@ fn format_globals(globals: &[mcir::types::GlobalItem]) -> String {
         out.push_str(&format!("  g#{} ({}): {}\n", g.id.index(), kind, payload));
     }
     out.push('\n');
+    out
+}
+
+fn replace_func_addrs(text: &str, def_names: &HashMap<DefId, String>) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 3 <= bytes.len()
+            && (bytes[i] == b'f' && bytes[i + 1] == b'n' && bytes[i + 2] == b'#'
+                || bytes[i] == b'd'
+                    && bytes[i + 1] == b'e'
+                    && bytes[i + 2] == b'f'
+                    && i + 3 < bytes.len()
+                    && bytes[i + 3] == b'#')
+        {
+            let is_fn = bytes[i] == b'f';
+            let prefix_len = if is_fn { 3 } else { 4 };
+            let start = i;
+            i += prefix_len;
+            let digits_start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if digits_start == i {
+                out.push_str(if is_fn { "fn#" } else { "def#" });
+                continue;
+            }
+            if let Ok(id) = text[digits_start..i].parse::<u32>() {
+                let def_id = DefId(id);
+                if let Some(name) = def_names.get(&def_id) {
+                    if is_fn {
+                        out.push('&');
+                    }
+                    out.push_str(name);
+                    continue;
+                }
+            }
+            out.push_str(&text[start..i]);
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
     out
 }
