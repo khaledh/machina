@@ -131,6 +131,7 @@ fn main() -> u64 {
 - Borrow rules for slices and `inout` args
 - Function overloading
 - Method blocks and method calls
+- Closures (non-capturing)
 - Pattern matching
 
 ### Types
@@ -212,6 +213,8 @@ fn main() -> u64 {
 - Methods via method blocks: `Type :: { fn name(self, ...) { ... } }`
 - Overloading and recursion
 - Pass/return by value (optimized where possible)
+- Function types: `fn(u64, u64) -> u64`
+- Closures: `let add = |a: u64, b: u64| -> u64 { a + b }` (non-capturing today)
 
 **Parameter modes**
 - default (no keyword): immutable borrow of the argument
