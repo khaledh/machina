@@ -15,3 +15,7 @@ pub fn desugar(ctx: ResolvedContext) -> HirContext {
         symbols,
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/t_desugar.rs"]
+mod tests;
