@@ -70,7 +70,7 @@ impl<'a> FuncLowerer<'a> {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
             StmtExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
-            StmtExprKind::VarDecl { name, .. } => self.lower_var_decl(stmt, name),
+            StmtExprKind::VarDecl { ident, .. } => self.lower_var_decl(stmt, ident),
             StmtExprKind::Assign { assignee, value } => self.lower_assign(assignee, value),
             StmtExprKind::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
             StmtExprKind::For {
@@ -234,7 +234,11 @@ impl<'a> FuncLowerer<'a> {
 
     fn base_def_for_assignee(&self, assignee: &Expr) -> Option<DefId> {
         match &assignee.kind {
-            ExprKind::Var(_) => self.ctx.def_map.lookup_def(assignee.id).map(|def| def.id),
+            ExprKind::Var(_) => self
+                .ctx
+                .def_map
+                .lookup_node_def(assignee.id)
+                .map(|def| def.id),
             ExprKind::StructField { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::ArrayIndex { target, .. }

@@ -1,6 +1,5 @@
 use super::*;
-use crate::context::AstContext;
-use crate::desugar;
+use crate::context::ParsedContext;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
 use crate::resolve::resolve;
@@ -16,10 +15,9 @@ fn type_check_source(source: &str) -> Result<TypeCheckedContext, Vec<TypeCheckEr
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().expect("Failed to parse");
 
-    let ast_context = AstContext::new(module);
+    let ast_context = ParsedContext::new(module);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
-    let hir_context = desugar::desugar(resolved_context);
-    type_check(hir_context)
+    type_check(resolved_context)
 }
 
 #[test]

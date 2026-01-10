@@ -89,7 +89,7 @@ impl<'a> FuncLowerer<'a> {
             .iter()
             .map(|param| LoweredParam {
                 id: param.id,
-                name: param.name.clone(),
+                name: param.ident.clone(),
                 mode: param.mode.clone(),
             })
             .collect::<Vec<_>>();
@@ -122,7 +122,7 @@ impl<'a> FuncLowerer<'a> {
         for param in &method.sig.params {
             params.push(LoweredParam {
                 id: param.id,
-                name: param.name.clone(),
+                name: param.ident.clone(),
                 mode: param.mode.clone(),
             });
         }
@@ -153,7 +153,7 @@ impl<'a> FuncLowerer<'a> {
             .iter()
             .map(|param| LoweredParam {
                 id: param.id,
-                name: param.name.clone(),
+                name: param.ident.clone(),
                 mode: param.mode.clone(),
             })
             .collect::<Vec<_>>();
@@ -201,7 +201,7 @@ impl<'a> FuncLowerer<'a> {
             if param.mode != ParamMode::Out {
                 continue;
             }
-            if let Some(def) = ctx.def_map.lookup_def(param.id) {
+            if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
                 out_param_defs.insert(def.id);
             }
         }
@@ -364,7 +364,7 @@ pub fn lower_ast(
 
         let def_id = ctx
             .def_map
-            .lookup_def(callable.id())
+            .lookup_node_def(callable.id())
             .unwrap_or_else(|| {
                 panic!("Callable {} not found in def_map", callable.name());
             })

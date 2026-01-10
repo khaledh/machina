@@ -3,14 +3,13 @@
 pub mod cfg;
 pub mod fold;
 mod format;
-mod visit;
+pub mod model;
+pub mod visit;
 
 pub use fold::AstFolder;
 pub use visit::*;
 
 use std::fmt;
-
-use crate::diag::Span;
 
 // -- Nodes ---
 
@@ -45,337 +44,7 @@ impl NodeIdGen {
     }
 }
 
-// -- Module ---
-
-#[derive(Clone, Debug)]
-pub struct Module {
-    pub decls: Vec<Decl>,
-}
-
-impl Module {
-    pub fn type_decls(&self) -> Vec<&TypeDecl> {
-        self.decls
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::TypeDecl(type_decl) = decl {
-                    Some(type_decl)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn func_sigs(&self) -> Vec<&FunctionSig> {
-        self.decls
-            .iter()
-            .filter_map(|decl| match decl {
-                Decl::FunctionDecl(func_decl) => Some(&func_decl.sig),
-                Decl::Function(func) => Some(&func.sig),
-                _ => None,
-            })
-            .collect()
-    }
-
-    pub fn func_decls(&self) -> Vec<&FunctionDecl> {
-        self.decls
-            .iter()
-            .filter_map(|decl| match decl {
-                Decl::FunctionDecl(func_decl) => Some(func_decl),
-                _ => None,
-            })
-            .collect()
-    }
-
-    pub fn funcs(&self) -> Vec<&Function> {
-        self.decls
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Function(function) = decl {
-                    Some(function)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn method_blocks(&self) -> Vec<&MethodBlock> {
-        self.decls
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::MethodBlock(method_block) = decl {
-                    Some(method_block)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    pub fn callables(&self) -> Vec<CallableRef<'_>> {
-        let mut callables = Vec::new();
-        for decl in &self.decls {
-            match decl {
-                Decl::FunctionDecl(function_decl) => {
-                    callables.push(CallableRef::FunctionDecl(function_decl))
-                }
-                Decl::Function(function) => callables.push(CallableRef::Function(function)),
-                Decl::MethodBlock(method_block) => {
-                    for method in &method_block.methods {
-                        callables.push(CallableRef::Method {
-                            type_name: &method_block.type_name,
-                            method,
-                        });
-                    }
-                }
-                Decl::Closure(expr) => callables.push(CallableRef::Closure(expr)),
-                Decl::TypeDecl(_) => {}
-            }
-        }
-        callables
-    }
-}
-
-// -- Declarations ---
-
-#[derive(Clone, Debug)]
-pub enum Decl {
-    TypeDecl(TypeDecl),
-    FunctionDecl(FunctionDecl), // function declaration
-    Function(Function),         // function definition
-    MethodBlock(MethodBlock),   // method definitions
-    Closure(Expr),              // closure definition
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum CallableRef<'a> {
-    FunctionDecl(&'a FunctionDecl),
-    Function(&'a Function),
-    Method {
-        type_name: &'a str,
-        method: &'a Method,
-    },
-    Closure(&'a Expr),
-}
-
-impl<'a> CallableRef<'a> {
-    pub fn id(&self) -> NodeId {
-        match self {
-            CallableRef::FunctionDecl(func_decl) => func_decl.id,
-            CallableRef::Function(function) => function.id,
-            CallableRef::Method { method, .. } => method.id,
-            CallableRef::Closure(expr) => expr.id,
-        }
-    }
-
-    pub fn name(&self) -> String {
-        match self {
-            CallableRef::FunctionDecl(func_decl) => func_decl.sig.name.clone(),
-            CallableRef::Function(function) => function.sig.name.clone(),
-            CallableRef::Method { method, .. } => method.sig.name.clone(),
-            CallableRef::Closure(expr) => format!("__mc_closure${}", expr.id),
-        }
-    }
-
-    pub fn symbol_base_name(&self) -> String {
-        match self {
-            CallableRef::FunctionDecl(_) => self.name(),
-            CallableRef::Function(_) => self.name(),
-            CallableRef::Method { type_name, method } => {
-                format!("{type_name}${}", method.sig.name)
-            }
-            CallableRef::Closure(_) => self.name(),
-        }
-    }
-
-    pub fn span(&self) -> Span {
-        match self {
-            CallableRef::FunctionDecl(func_decl) => func_decl.span,
-            CallableRef::Function(function) => function.span,
-            CallableRef::Method { method, .. } => method.span,
-            CallableRef::Closure(expr) => expr.span,
-        }
-    }
-}
-
-// -- Type Declarations ---
-
-#[derive(Clone, Debug)]
-pub struct TypeDecl {
-    pub id: NodeId,
-    pub name: String,
-    pub kind: TypeDeclKind,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum TypeDeclKind {
-    Alias { aliased_ty: TypeExpr },
-    Struct { fields: Vec<StructField> },
-    Enum { variants: Vec<EnumVariant> },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StructField {
-    pub id: NodeId,
-    pub name: String,
-    pub ty: TypeExpr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EnumVariant {
-    pub id: NodeId,
-    pub name: String,
-    pub payload: Vec<TypeExpr>,
-    pub span: Span,
-}
-
-// -- Type Expressions ---
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TypeExpr {
-    pub id: NodeId,
-    pub kind: TypeExprKind,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TypeExprKind {
-    Named(String),
-    Array {
-        elem_ty: Box<TypeExpr>,
-        dims: Vec<usize>,
-    },
-    Tuple {
-        fields: Vec<TypeExpr>,
-    },
-    Range {
-        min: u64,
-        max: u64,
-    },
-    Slice {
-        elem_ty: Box<TypeExpr>,
-    },
-    Heap {
-        elem_ty: Box<TypeExpr>,
-    },
-    Fn {
-        params: Vec<FnTypeParam>,
-        return_ty: Box<TypeExpr>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FnTypeParam {
-    pub mode: ParamMode,
-    pub ty: TypeExpr,
-}
-
-// -- Array Literals ---
-
-#[derive(Clone, Debug)]
-pub enum ArrayLitInit {
-    Elems(Vec<Expr>),
-    Repeat(Box<Expr>, u64),
-}
-
-// -- Struct Literals ---
-
-#[derive(Clone, Debug)]
-pub struct StructLitField {
-    pub id: NodeId,
-    pub name: String,
-    pub value: Expr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct StructUpdateField {
-    pub id: NodeId,
-    pub name: String,
-    pub value: Expr,
-    pub span: Span,
-}
-
-// -- String Literals ---
-
-#[derive(Clone, Debug)]
-pub enum StringFmtSegment {
-    Literal { value: String, span: Span },
-    Expr { expr: Box<Expr>, span: Span },
-}
-
-// -- Functions ---
-
-#[derive(Clone, Debug)]
-pub struct FunctionDecl {
-    pub id: NodeId,
-    pub sig: FunctionSig,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct Function {
-    pub id: NodeId,
-    pub sig: FunctionSig,
-    pub body: Expr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct FunctionSig {
-    pub name: String,
-    pub params: Vec<Param>,
-    pub return_type: TypeExpr,
-    pub span: Span,
-}
-
-// -- Methods ---
-
-#[derive(Clone, Debug)]
-pub struct MethodBlock {
-    pub id: NodeId,
-    pub type_name: String,
-    pub methods: Vec<Method>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct Method {
-    pub id: NodeId,
-    pub sig: MethodSig,
-    pub body: Expr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct MethodSig {
-    pub name: String,
-    pub self_param: SelfParam,
-    pub params: Vec<Param>,
-    pub return_type: TypeExpr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct SelfParam {
-    pub id: NodeId,
-    pub mode: ParamMode,
-    pub span: Span,
-}
-
-// -- Parameters (common) ---
-
-#[derive(Clone, Debug)]
-pub struct Param {
-    pub id: NodeId,
-    pub name: String,
-    pub typ: TypeExpr,
-    pub mode: ParamMode,
-    pub span: Span,
-}
+// -- Parameter / call modes ---
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParamMode {
@@ -385,284 +54,12 @@ pub enum ParamMode {
     Sink,
 }
 
-// -- Call Args --
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallArgMode {
     Default,
     InOut,
     Out,
     Move,
-}
-
-#[derive(Clone, Debug)]
-pub struct CallArg {
-    pub mode: CallArgMode,
-    pub expr: Expr,
-    pub span: Span,
-}
-
-// -- Patterns ---
-
-#[derive(Clone, Debug)]
-pub struct Pattern {
-    pub id: NodeId,
-    pub kind: PatternKind,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum PatternKind {
-    Ident {
-        name: String,
-    },
-    Array {
-        patterns: Vec<Pattern>,
-    },
-    Tuple {
-        patterns: Vec<Pattern>,
-    },
-    Struct {
-        name: String,
-        fields: Vec<StructPatternField>,
-    },
-}
-
-#[derive(Clone, Debug)]
-pub struct StructPatternField {
-    pub name: String,
-    pub pattern: Pattern,
-    pub span: Span,
-}
-
-// -- Match patterns ---
-
-#[derive(Clone, Debug)]
-pub struct MatchArm {
-    pub id: NodeId,
-    pub pattern: MatchPattern,
-    pub body: Expr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum MatchPattern {
-    Wildcard {
-        span: Span,
-    },
-    BoolLit {
-        value: bool,
-        span: Span,
-    },
-    IntLit {
-        value: u64,
-        span: Span,
-    },
-    Binding {
-        id: NodeId,
-        name: String,
-        span: Span,
-    },
-    Tuple {
-        patterns: Vec<MatchPattern>,
-        span: Span,
-    },
-    EnumVariant {
-        enum_name: Option<String>,
-        variant_name: String,
-        bindings: Vec<MatchPatternBinding>,
-        span: Span,
-    },
-}
-
-#[derive(Clone, Debug)]
-pub enum MatchPatternBinding {
-    Named {
-        id: NodeId,
-        name: String,
-        span: Span,
-    },
-    Wildcard {
-        span: Span,
-    },
-}
-
-// --- Blocks ---
-
-#[derive(Clone, Debug)]
-pub enum BlockItem {
-    Stmt(StmtExpr),
-    Expr(Expr),
-}
-
-// --- Statement Expressions ---
-
-#[derive(Clone, Debug)]
-pub struct StmtExpr {
-    pub id: NodeId,
-    pub kind: StmtExprKind,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum StmtExprKind {
-    LetBind {
-        pattern: Pattern,
-        decl_ty: Option<TypeExpr>,
-        value: Box<Expr>,
-    },
-    VarBind {
-        pattern: Pattern,
-        decl_ty: Option<TypeExpr>,
-        value: Box<Expr>,
-    },
-    VarDecl {
-        name: String,
-        decl_ty: TypeExpr,
-    },
-    Assign {
-        assignee: Box<Expr>,
-        value: Box<Expr>,
-    },
-    While {
-        cond: Box<Expr>,
-        body: Box<Expr>,
-    },
-    For {
-        pattern: Pattern,
-        iter: Box<Expr>,
-        body: Box<Expr>,
-    },
-}
-
-// -- Expressions ---
-
-#[derive(Clone, Debug)]
-pub struct Expr {
-    pub id: NodeId,
-    pub kind: ExprKind,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum ExprKind {
-    Block {
-        items: Vec<BlockItem>,
-        tail: Option<Box<Expr>>,
-    },
-
-    // Literals (scalar)
-    UnitLit,
-    IntLit(u64),
-    BoolLit(bool),
-    CharLit(char),
-    StringLit {
-        value: String,
-    },
-    StringFmt {
-        segments: Vec<StringFmtSegment>,
-    },
-
-    // Literals (compound)
-    ArrayLit {
-        elem_ty: Option<TypeExpr>,
-        init: ArrayLitInit,
-    },
-    TupleLit(Vec<Expr>),
-    StructLit {
-        name: String,
-        fields: Vec<StructLitField>,
-    },
-    EnumVariant {
-        enum_name: String,
-        variant: String,
-        payload: Vec<Expr>,
-    },
-
-    // Struct update
-    StructUpdate {
-        target: Box<Expr>,
-        fields: Vec<StructUpdateField>,
-    },
-
-    // Operators
-    BinOp {
-        left: Box<Expr>,
-        op: BinaryOp,
-        right: Box<Expr>,
-    },
-    UnaryOp {
-        op: UnaryOp,
-        expr: Box<Expr>,
-    },
-
-    // Heap allocation
-    HeapAlloc {
-        expr: Box<Expr>,
-    },
-
-    // Move
-    Move {
-        expr: Box<Expr>,
-    },
-
-    // Var, array index, tuple field, struct field
-    Var(String),
-    ArrayIndex {
-        target: Box<Expr>,
-        indices: Vec<Expr>,
-    },
-    TupleField {
-        target: Box<Expr>,
-        index: usize,
-    },
-    StructField {
-        target: Box<Expr>,
-        field: String,
-    },
-
-    // Control flow
-    If {
-        cond: Box<Expr>,
-        then_body: Box<Expr>,
-        else_body: Box<Expr>,
-    },
-
-    // Range
-    Range {
-        start: u64,
-        end: u64, // exclusive
-    },
-
-    // Slice
-    Slice {
-        target: Box<Expr>,
-        start: Option<Box<Expr>>,
-        end: Option<Box<Expr>>,
-    },
-
-    // Match
-    Match {
-        scrutinee: Box<Expr>,
-        arms: Vec<MatchArm>,
-    },
-
-    // Function/Method call
-    Call {
-        callee: Box<Expr>,
-        args: Vec<CallArg>,
-    },
-    MethodCall {
-        callee: Box<Expr>,
-        method: String,
-        args: Vec<CallArg>,
-    },
-
-    Closure {
-        params: Vec<Param>,
-        return_ty: Option<TypeExpr>,
-        body: Box<Expr>,
-    },
 }
 
 // -- Operators ---
@@ -702,3 +99,40 @@ pub enum UnaryOp {
     LogicalNot,
     BitNot,
 }
+
+// -- String-specialized AST aliases ---
+
+pub type Module = model::Module<String>;
+pub type Decl = model::Decl<String>;
+pub type CallableRef<'a> = model::CallableRef<'a, String>;
+pub type TypeDecl = model::TypeDecl<String>;
+pub type TypeDeclKind = model::TypeDeclKind<String>;
+pub type StructField = model::StructField<String>;
+pub type EnumVariant = model::EnumVariant<String>;
+pub type TypeExpr = model::TypeExpr<String>;
+pub type TypeExprKind = model::TypeExprKind<String>;
+pub type FnTypeParam = model::FnTypeParam<String>;
+pub type StringFmtSegment = model::StringFmtSegment<String>;
+pub type FunctionDecl = model::FunctionDecl<String>;
+pub type Function = model::Function<String>;
+pub type FunctionSig = model::FunctionSig<String>;
+pub type MethodBlock = model::MethodBlock<String>;
+pub type Method = model::Method<String>;
+pub type MethodSig = model::MethodSig<String>;
+pub type SelfParam = model::SelfParam;
+pub type Param = model::Param<String>;
+pub type CallArg = model::CallArg<String>;
+pub type BindPattern = model::BindPattern<String>;
+pub type BindPatternKind = model::BindPatternKind<String>;
+pub type StructFieldBindPattern = model::StructFieldBindPattern<String>;
+pub type MatchArm = model::MatchArm<String>;
+pub type MatchPattern = model::MatchPattern<String>;
+pub type MatchPatternBinding = model::MatchPatternBinding<String>;
+pub type BlockItem = model::BlockItem<String>;
+pub type StmtExpr = model::StmtExpr<String>;
+pub type StmtExprKind = model::StmtExprKind<String>;
+pub type Expr = model::Expr<String>;
+pub type ExprKind = model::ExprKind<String>;
+pub type ArrayLitInit = model::ArrayLitInit<String>;
+pub type StructLitField = model::StructLitField<String>;
+pub type StructUpdateField = model::StructUpdateField<String>;

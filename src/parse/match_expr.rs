@@ -129,14 +129,14 @@ impl<'a> Parser<'a> {
                 Some(TK::DoubleColon | TK::LParen)
             );
 
-            let name = parser.parse_ident()?;
+            let ident = parser.parse_ident()?;
             if is_enum_variant {
-                return parser.parse_enum_variant_pattern(marker, name);
+                return parser.parse_enum_variant_pattern(marker, ident);
             }
 
             Ok(MatchPattern::Binding {
                 id: parser.id_gen.new_id(),
-                name,
+                ident,
                 span: parser.close(marker),
             })
         };
@@ -179,10 +179,10 @@ impl<'a> Parser<'a> {
                 });
             }
 
-            let name = parser.parse_ident()?;
+            let ident = parser.parse_ident()?;
             Ok(MatchPatternBinding::Named {
                 id: parser.id_gen.new_id(),
-                name,
+                ident,
                 span: parser.close(marker),
             })
         };

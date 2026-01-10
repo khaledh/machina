@@ -3,6 +3,7 @@ use crate::ast::*;
 use crate::diag::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 
+mod bind_pattern;
 mod block;
 mod decl;
 mod errors;
@@ -10,7 +11,6 @@ mod expr;
 mod fstring;
 mod func;
 mod match_expr;
-mod pattern;
 mod type_expr;
 
 pub use errors::ParseError;

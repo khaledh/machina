@@ -28,7 +28,7 @@ impl SymbolTable {
         let mut overloads: HashMap<String, Vec<DefId>> = HashMap::new();
         for callable in module.callables() {
             let def_id = def_map
-                .lookup_def(callable.id())
+                .lookup_node_def(callable.id())
                 .unwrap_or_else(|| {
                     panic!("Callable {} not found in def_map", callable.name());
                 })

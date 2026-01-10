@@ -10,12 +10,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
-use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
+use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
-use crate::hir::{
-    Expr, ExprKind, Function, NodeId, ParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
+use crate::hir::model::{
+    BindPattern, BindPatternKind, Expr, ExprKind, Function, NodeId, ParamMode, StmtExpr,
+    StmtExprKind,
 };
-use crate::hir::{Visitor, walk_expr};
+use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
@@ -30,7 +31,7 @@ pub struct MoveCheckResult {
 pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
     let mut errors = Vec::new();
     let mut implicit_moves = HashSet::new();
-    for func in ctx.ast_module.funcs() {
+    for func in ctx.module.funcs() {
         check_func(func, ctx, &mut errors, &mut implicit_moves);
     }
     MoveCheckResult {
@@ -45,7 +46,7 @@ fn check_func(
     errors: &mut Vec<SemCheckError>,
     implicit_moves: &mut HashSet<NodeId>,
 ) {
-    let cfg = AstCfgBuilder::new().build_from_expr(&func.body);
+    let cfg = HirCfgBuilder::new().build_from_expr(&func.body);
 
     // Precompute heap liveness for last-use detection (implicit moves).
     let liveness = ast_liveness::analyze(&cfg, ctx);
@@ -54,7 +55,7 @@ fn check_func(
     let mut sink_params = HashSet::new();
     for param in &func.sig.params {
         if param.mode == ParamMode::Sink {
-            if let Some(def) = ctx.def_map.lookup_def(param.id) {
+            if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
                 sink_params.insert(def.id);
             }
         }
@@ -136,7 +137,7 @@ impl<'a> MoveVisitor<'a> {
     }
 
     /// Process a CFG block: check each item with its liveness context.
-    fn visit_cfg_node(&mut self, node: &AstCfgNode<'_>, block_id: AstBlockId) {
+    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_>, block_id: AstBlockId) {
         // Precompute per-item info for implicit move detection:
         // - use_counts: how many times each heap var is used in each item
         // - live_after: which heap vars are live after each item
@@ -152,8 +153,8 @@ impl<'a> MoveVisitor<'a> {
             self.current_live_after = Some(live_after[idx].clone());
             self.current_use_counts = Some(item_use_counts[idx].clone());
             match item {
-                AstItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
-                AstItem::Expr(expr) => self.visit_expr(expr),
+                HirItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
+                HirItem::Expr(expr) => self.visit_expr(expr),
             }
         }
         self.current_live_after = None;
@@ -161,8 +162,8 @@ impl<'a> MoveVisitor<'a> {
 
         // Check terminator condition (if any).
         match &node.term {
-            AstTerminator::If { cond, .. } => self.visit_expr(cond),
-            AstTerminator::Goto(_) | AstTerminator::End => {}
+            HirTerminator::If { cond, .. } => self.visit_expr(cond),
+            HirTerminator::Goto(_) | HirTerminator::End => {}
         }
     }
 
@@ -170,7 +171,7 @@ impl<'a> MoveVisitor<'a> {
     fn handle_move_target(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var(_) => {
-                let Some(def) = self.ctx.def_map.lookup_def(expr.id) else {
+                let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) else {
                     return;
                 };
                 // Params can only be moved if they're sink params (owned).
@@ -206,7 +207,7 @@ impl<'a> MoveVisitor<'a> {
 
     /// Error if using a variable that has already been moved.
     fn check_use(&mut self, expr: &Expr) {
-        if let Some(def) = self.ctx.def_map.lookup_def(expr.id)
+        if let Some(def) = self.ctx.def_map.lookup_node_def(expr.id)
             && self.moved.contains(&def.id)
         {
             self.errors
@@ -220,7 +221,7 @@ impl<'a> MoveVisitor<'a> {
         if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
             && ty.is_heap()
         {
-            let Some(def) = self.ctx.def_map.lookup_def(expr.id) else {
+            let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) else {
                 return;
             };
             if matches!(def.kind, DefKind::Param { .. }) {
@@ -282,19 +283,19 @@ impl<'a> MoveVisitor<'a> {
 
     /// Clear moved status for variables bound by a pattern.
     /// Called on let/var bindings and reassignments to "revive" the variable.
-    fn clear_pattern_defs(&mut self, pattern: &Pattern) {
+    fn clear_pattern_defs(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            PatternKind::Ident { .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_def(pattern.id) {
+            BindPatternKind::Name(_) => {
+                if let Some(def) = self.ctx.def_map.lookup_node_def(pattern.id) {
                     self.moved.remove(&def.id);
                 }
             }
-            PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
+            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for p in patterns {
                     self.clear_pattern_defs(p);
                 }
             }
-            PatternKind::Struct { fields, .. } => {
+            BindPatternKind::Struct { fields, .. } => {
                 for f in fields {
                     self.clear_pattern_defs(&f.pattern);
                 }
@@ -305,7 +306,7 @@ impl<'a> MoveVisitor<'a> {
     fn visit_out_arg(&mut self, arg: &Expr) {
         match &arg.kind {
             ExprKind::Var(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_def(arg.id) {
+                if let Some(def) = self.ctx.def_map.lookup_node_def(arg.id) {
                     // Out args are reinitialized by the callee.
                     self.moved.remove(&def.id);
                 }
@@ -349,7 +350,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
                 self.visit_expr(value);
                 if let ExprKind::Var(_) = assignee.kind {
                     // Reassigning a variable clears its moved status.
-                    if let Some(def) = self.ctx.def_map.lookup_def(assignee.id) {
+                    if let Some(def) = self.ctx.def_map.lookup_node_def(assignee.id) {
                         self.moved.remove(&def.id);
                     }
                 } else {

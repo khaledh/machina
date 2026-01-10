@@ -1,8 +1,9 @@
 use crate::context::TypeCheckedContext;
-use crate::hir::{
-    BinaryOp, Decl, Expr, ExprKind, Function, StmtExpr, StmtExprKind, TypeExpr, TypeExprKind,
-    UnaryOp, Visitor, walk_expr, walk_stmt_expr,
+use crate::hir::model::{
+    BinaryOp, Decl, Expr, ExprKind, Function, FunctionSig, StmtExpr, StmtExprKind, TypeDecl,
+    TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
 };
+use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::semck::SemCheckError;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
@@ -29,17 +30,17 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        for decl in &self.ctx.ast_module.decls {
+        for decl in &self.ctx.module.decls {
             if let Decl::TypeDecl(decl) = decl {
                 self.check_type_decl(decl);
             }
         }
-        for decl in &self.ctx.ast_module.decls {
-            if let crate::hir::Decl::FunctionDecl(decl) = decl {
+        for decl in &self.ctx.module.decls {
+            if let Decl::FunctionDecl(decl) = decl {
                 self.check_function_sig(&decl.sig);
             }
         }
-        for func in self.ctx.ast_module.funcs() {
+        for func in self.ctx.module.funcs() {
             self.check_function_sig(&func.sig);
             self.visit_func(func);
         }
@@ -90,22 +91,22 @@ impl<'a> ValueChecker<'a> {
         }
     }
 
-    fn check_function_sig(&mut self, sig: &crate::hir::FunctionSig) {
+    fn check_function_sig(&mut self, sig: &FunctionSig) {
         for param in &sig.params {
             self.check_type_expr(&param.typ);
         }
         self.check_type_expr(&sig.return_type);
     }
 
-    fn check_type_decl(&mut self, decl: &crate::hir::TypeDecl) {
+    fn check_type_decl(&mut self, decl: &TypeDecl) {
         match &decl.kind {
-            crate::hir::TypeDeclKind::Alias { aliased_ty } => self.check_type_expr(aliased_ty),
-            crate::hir::TypeDeclKind::Struct { fields } => {
+            TypeDeclKind::Alias { aliased_ty } => self.check_type_expr(aliased_ty),
+            TypeDeclKind::Struct { fields } => {
                 for field in fields {
                     self.check_type_expr(&field.ty);
                 }
             }
-            crate::hir::TypeDeclKind::Enum { variants } => {
+            TypeDeclKind::Enum { variants } => {
                 for variant in variants {
                     for payload_ty in &variant.payload {
                         self.check_type_expr(payload_ty);

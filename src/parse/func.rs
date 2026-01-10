@@ -175,7 +175,7 @@ impl<'a> Parser<'a> {
 
         Ok(Param {
             id: self.id_gen.new_id(),
-            name,
+            ident: name,
             typ,
             mode,
             span: self.close(marker),

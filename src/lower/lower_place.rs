@@ -2,7 +2,7 @@ use crate::ast::{Expr, ExprKind as EK, TypeDeclKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
-use crate::typeck::type_map::resolve_type_expr;
+use crate::typeck::type_map::resolve_ast_type_expr;
 use crate::types::{StructField as TypeStructField, Type};
 
 impl<'a> FuncLowerer<'a> {
@@ -424,7 +424,7 @@ impl<'a> FuncLowerer<'a> {
         let resolved_fields = fields
             .iter()
             .filter_map(|f| {
-                let field_ty = resolve_type_expr(&self.ctx.def_map, &f.ty).ok()?;
+                let field_ty = resolve_ast_type_expr(&self.ctx.def_map, &f.ty).ok()?;
                 Some(TypeStructField {
                     name: f.name.clone(),
                     ty: field_ty,

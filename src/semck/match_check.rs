@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
-use crate::hir::{Expr, MatchArm, MatchPattern};
+use crate::hir::model::{Expr, MatchArm, MatchPattern};
 use crate::semck::SemCheckError;
 use crate::types::{EnumVariant, Type};
 

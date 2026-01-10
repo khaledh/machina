@@ -49,7 +49,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn def_for_node(&self, node_id: NodeId) -> Result<&Def, LowerError> {
         self.ctx
             .def_map
-            .lookup_def(node_id)
+            .lookup_node_def(node_id)
             .ok_or(LowerError::ExprDefNotFound(node_id))
     }
 

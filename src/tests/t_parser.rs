@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::{
-    ArrayLitInit, BlockItem, Expr, ExprKind, Function, MatchPattern, MatchPatternBinding, Module,
-    PatternKind, StmtExpr, StmtExprKind, TypeDeclKind, TypeExprKind,
+    ArrayLitInit, BindPatternKind, BlockItem, Expr, ExprKind, Function, MatchPattern,
+    MatchPatternBinding, Module, StmtExpr, StmtExprKind, TypeDeclKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -769,18 +769,18 @@ fn test_parse_tuple_pattern() {
     if let StmtExprKind::LetBind { pattern, value, .. } = &stmt.kind {
         // Check pattern is a tuple pattern
         match &pattern.kind {
-            PatternKind::Tuple { patterns } => {
+            BindPatternKind::Tuple { patterns } => {
                 assert_eq!(patterns.len(), 2);
 
                 // First pattern should be identifier "a"
                 match &patterns[0].kind {
-                    PatternKind::Ident { name } => assert_eq!(name, "a"),
+                    BindPatternKind::Name(ident) => assert_eq!(ident, "a"),
                     _ => panic!("Expected Ident pattern"),
                 }
 
                 // Second pattern should be identifier "b"
                 match &patterns[1].kind {
-                    PatternKind::Ident { name } => assert_eq!(name, "b"),
+                    BindPatternKind::Name(ident) => assert_eq!(ident, "b"),
                     _ => panic!("Expected Ident pattern"),
                 }
             }
@@ -816,25 +816,25 @@ fn test_parse_tuple_pattern_nested() {
 
     if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
         match &pattern.kind {
-            PatternKind::Tuple { patterns } => {
+            BindPatternKind::Tuple { patterns } => {
                 assert_eq!(patterns.len(), 2);
 
                 // First pattern should be identifier "a"
                 match &patterns[0].kind {
-                    PatternKind::Ident { name } => assert_eq!(name, "a"),
+                    BindPatternKind::Name(ident) => assert_eq!(ident, "a"),
                     _ => panic!("Expected Ident pattern"),
                 }
 
                 // Second pattern should be a nested tuple pattern
                 match &patterns[1].kind {
-                    PatternKind::Tuple { patterns: inner } => {
+                    BindPatternKind::Tuple { patterns: inner } => {
                         assert_eq!(inner.len(), 2);
                         match &inner[0].kind {
-                            PatternKind::Ident { name } => assert_eq!(name, "b"),
+                            BindPatternKind::Name(ident) => assert_eq!(ident, "b"),
                             _ => panic!("Expected Ident pattern"),
                         }
                         match &inner[1].kind {
-                            PatternKind::Ident { name } => assert_eq!(name, "c"),
+                            BindPatternKind::Name(ident) => assert_eq!(ident, "c"),
                             _ => panic!("Expected Ident pattern"),
                         }
                     }
@@ -865,7 +865,7 @@ fn test_parse_tuple_pattern_trailing_comma() {
 
     if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
         match &pattern.kind {
-            PatternKind::Tuple { patterns } => {
+            BindPatternKind::Tuple { patterns } => {
                 assert_eq!(patterns.len(), 2);
             }
             _ => panic!("Expected Tuple pattern"),
@@ -894,7 +894,7 @@ fn test_parse_parenthesized_pattern() {
     if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
         // Should be an Ident pattern, not a Tuple pattern
         match &pattern.kind {
-            PatternKind::Ident { name } => assert_eq!(name, "a"),
+            BindPatternKind::Name(ident) => assert_eq!(ident, "a"),
             _ => panic!("Expected Ident pattern (parenthesized), got {:?}", pattern),
         }
     } else {
@@ -955,7 +955,7 @@ fn test_parse_match_expr_enum_variants() {
                     assert_eq!(bindings.len(), 1);
                     assert!(matches!(
                         &bindings[0],
-                        MatchPatternBinding::Named { name, .. } if name == "y"
+                        MatchPatternBinding::Named { ident, .. } if ident == "y"
                     ));
                 }
                 _ => panic!("Expected enum variant pattern in arm 1"),
@@ -1067,7 +1067,7 @@ fn test_parse_match_expr_tuple_patterns() {
                 MatchPattern::Tuple { patterns, .. } => {
                     assert_eq!(patterns.len(), 2);
                     assert!(
-                        matches!(&patterns[0], MatchPattern::Binding { name, .. } if name == "x")
+                        matches!(&patterns[0], MatchPattern::Binding { ident, .. } if ident == "x")
                     );
                     assert!(matches!(&patterns[1], MatchPattern::Wildcard { .. }));
                 }
@@ -1105,14 +1105,14 @@ fn test_parse_match_expr_tuple_patterns_nested() {
                     assert_eq!(patterns.len(), 2);
                     assert!(matches!(
                         &patterns[0],
-                        MatchPattern::Binding { name, .. } if name == "x"
+                        MatchPattern::Binding { ident, .. } if ident == "x"
                     ));
                     match &patterns[1] {
                         MatchPattern::Tuple { patterns, .. } => {
                             assert_eq!(patterns.len(), 2);
                             assert!(matches!(
                                 &patterns[0],
-                                MatchPattern::Binding { name, .. } if name == "y"
+                                MatchPattern::Binding { ident, .. } if ident == "y"
                             ));
                             assert!(matches!(&patterns[1], MatchPattern::Wildcard { .. }));
                         }
@@ -1211,7 +1211,7 @@ fn test_parse_for_range_loop() {
     } = &stmt.kind
     {
         match &pattern.kind {
-            PatternKind::Ident { name } => assert_eq!(name, "i"),
+            BindPatternKind::Name(ident) => assert_eq!(ident, "i"),
             _ => panic!("Expected ident pattern"),
         }
         match &iter.kind {
@@ -1252,7 +1252,7 @@ fn test_parse_for_array_loop() {
     } = &stmt.kind
     {
         match &pattern.kind {
-            PatternKind::Ident { name } => assert_eq!(name, "x"),
+            BindPatternKind::Name(ident) => assert_eq!(ident, "x"),
             _ => panic!("Expected ident pattern"),
         }
         assert!(matches!(iter.kind, ExprKind::ArrayLit { .. }));
@@ -1284,8 +1284,8 @@ fn test_parse_closure_expr() {
             body,
         } => {
             assert_eq!(params.len(), 2);
-            assert_eq!(params[0].name, "a");
-            assert_eq!(params[1].name, "b");
+            assert_eq!(params[0].ident, "a");
+            assert_eq!(params[1].ident, "b");
             match &return_ty.as_ref().expect("Expected return type").kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                 _ => panic!("Expected named return type"),

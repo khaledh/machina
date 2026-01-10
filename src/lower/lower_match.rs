@@ -350,13 +350,13 @@ impl<'a> FuncLowerer<'a> {
         for (index, (binding, payload_ty)) in
             bindings.iter().zip(variant.payload.iter()).enumerate()
         {
-            let MatchPatternBinding::Named { id, name, .. } = binding else {
+            let MatchPatternBinding::Named { id, ident, .. } = binding else {
                 continue;
             };
 
             let payload_ty_id = self.ty_lowerer.lower_ty(payload_ty);
             let def_id = self.def_for_node(*id)?.id;
-            let local_id = self.ensure_local_for_def(def_id, payload_ty_id, Some(name.clone()));
+            let local_id = self.ensure_local_for_def(def_id, payload_ty_id, Some(ident.clone()));
 
             let mut projs = scrutinee_place.projections().to_vec();
             projs.push(Projection::Field { index: 1 });
@@ -402,10 +402,10 @@ impl<'a> FuncLowerer<'a> {
                 self.project_place(scrutinee_place, Projection::Field { index }, field_ty_id);
 
             match pattern {
-                MatchPattern::Binding { id, name, .. } => {
+                MatchPattern::Binding { id, ident, .. } => {
                     let def_id = self.def_for_node(*id)?.id;
                     let local_id =
-                        self.ensure_local_for_def(def_id, field_ty_id, Some(name.clone()));
+                        self.ensure_local_for_def(def_id, field_ty_id, Some(ident.clone()));
 
                     match field_place {
                         PlaceAny::Scalar(place) => {

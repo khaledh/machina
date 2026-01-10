@@ -13,7 +13,8 @@
 //!   helper like `foo_to_bar`. If it has value-dependent behavior, add a rule
 //!   in `value_rules_for` as well.
 
-use crate::ast::{Expr, ExprKind, UnaryOp};
+use crate::ast::UnaryOp;
+use crate::hir::model::{Expr, ExprKind};
 use crate::types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

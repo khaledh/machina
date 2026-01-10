@@ -204,12 +204,12 @@ impl fmt::Display for Param {
                 write!(f, "sink ")?;
             }
         }
-        write!(f, "{}: {} [{}]", self.name, self.typ, self.id)?;
+        write!(f, "{}: {} [{}]", self.ident, self.typ, self.id)?;
         Ok(())
     }
 }
 
-impl fmt::Display for Pattern {
+impl fmt::Display for BindPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_indent(f, 0)
     }
@@ -266,27 +266,27 @@ impl fmt::Display for TypeExprKind {
     }
 }
 
-impl Pattern {
+impl BindPattern {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
-            PatternKind::Ident { name } => {
-                writeln!(f, "{}Ident({})", pad, name)?;
+            BindPatternKind::Name(ident) => {
+                writeln!(f, "{}Pattern::Name({})", pad, ident)?;
             }
-            PatternKind::Array { patterns } => {
+            BindPatternKind::Array { patterns } => {
                 writeln!(f, "{}Pattern::Array", pad)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
-            PatternKind::Tuple { patterns } => {
+            BindPatternKind::Tuple { patterns } => {
                 writeln!(f, "{}Pattern::Tuple", pad)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
-            PatternKind::Struct { name, fields } => {
-                writeln!(f, "{}Struct({})", pad, name)?;
+            BindPatternKind::Struct { name, fields } => {
+                writeln!(f, "{}Pattern::Struct({})", pad, name)?;
                 for field in fields {
                     field.fmt_with_indent(f, level + 1)?;
                 }
@@ -296,7 +296,7 @@ impl Pattern {
     }
 }
 
-impl StructPatternField {
+impl StructFieldBindPattern {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
         writeln!(f, "{}{}:", pad1, self.name)?;
@@ -329,8 +329,8 @@ impl MatchPattern {
             MatchPattern::IntLit { value, .. } => {
                 writeln!(f, "{}IntLit({})", pad, value)?;
             }
-            MatchPattern::Binding { id, name, .. } => {
-                writeln!(f, "{}Binding {} [{}]", pad, name, id)?;
+            MatchPattern::Binding { id, ident, .. } => {
+                writeln!(f, "{}Binding {} [{}]", pad, ident, id)?;
             }
             MatchPattern::Tuple { patterns, .. } => {
                 writeln!(f, "{}Tuple", pad)?;
@@ -366,8 +366,8 @@ impl MatchPatternBinding {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
         match self {
-            MatchPatternBinding::Named { id, name, .. } => {
-                writeln!(f, "{}{}: [{}]", pad1, name, id)?;
+            MatchPatternBinding::Named { id, ident, .. } => {
+                writeln!(f, "{}{}: [{}]", pad1, ident, id)?;
             }
             MatchPatternBinding::Wildcard { .. } => {
                 writeln!(f, "{}_", pad1)?;
@@ -419,10 +419,10 @@ impl StmtExpr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            StmtExprKind::VarDecl { name, decl_ty } => {
+            StmtExprKind::VarDecl { ident, decl_ty } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}VarDecl [{}]", pad, self.id)?;
-                writeln!(f, "{}Name: {}", pad1, name)?;
+                writeln!(f, "{}Ident: {}", pad1, ident)?;
                 writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
             }
             StmtExprKind::Assign { assignee, value } => {

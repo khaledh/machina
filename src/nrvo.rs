@@ -72,7 +72,7 @@ impl NrvoAnalyzer {
 
     fn find_ret_var_def_id(def_map: &DefMap, expr: &Expr) -> Option<DefId> {
         match &expr.kind {
-            ExprKind::Var(_) => def_map.lookup_def(expr.id).map(|def| def.id),
+            ExprKind::Var(_) => def_map.lookup_node_def(expr.id).map(|def| def.id),
 
             ExprKind::Block { tail, .. } => tail
                 .as_deref()
@@ -149,7 +149,7 @@ impl<'a> NrvoSafetyChecker<'a> {
     fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
         match &expr.kind {
             ExprKind::Var(_) => {
-                if let Some(def) = self.def_map.lookup_def(expr.id)
+                if let Some(def) = self.def_map.lookup_node_def(expr.id)
                     && def.id == self.var_def_id
                 {
                     at_return
@@ -291,7 +291,7 @@ impl<'a> NrvoSafetyChecker<'a> {
     }
 
     fn is_target_var(&self, expr: &Expr) -> bool {
-        match self.def_map.lookup_def(expr.id) {
+        match self.def_map.lookup_node_def(expr.id) {
             Some(def) => def.id == self.var_def_id,
             None => false,
         }
@@ -301,7 +301,7 @@ impl<'a> NrvoSafetyChecker<'a> {
         match &expr.kind {
             ExprKind::Var(_) => {
                 // Check if this Var refers to our target definition
-                if let Some(def) = self.def_map.lookup_def(expr.id) {
+                if let Some(def) = self.def_map.lookup_node_def(expr.id) {
                     def.id == self.var_def_id
                 } else {
                     false

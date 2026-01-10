@@ -1,5 +1,5 @@
 use super::*;
-use crate::context::AstContext;
+use crate::context::ParsedContext;
 use crate::context::ResolvedContext;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
@@ -15,7 +15,7 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().expect("Failed to parse");
 
-    let ast_context = AstContext::new(module);
+    let ast_context = ParsedContext::new(module);
     resolve(ast_context)
 }
 

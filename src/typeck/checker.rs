@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::context::HirContext;
+use crate::ast::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
+use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::hir::fold::{AstFolder, walk_expr, walk_if};
-use crate::hir::*;
+use crate::hir::model::*;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
@@ -15,7 +16,7 @@ use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
 use super::type_map::{CallParam, CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
 
 pub struct TypeChecker {
-    context: HirContext,
+    ctx: ResolvedContext,
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, Vec<OverloadSig>>,
     method_sigs: HashMap<String, HashMap<String, Vec<OverloadSig>>>,
@@ -25,9 +26,9 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
-    pub fn new(context: HirContext) -> Self {
+    pub fn new(context: ResolvedContext) -> Self {
         Self {
-            context,
+            ctx: context,
             type_map_builder: TypeMapBuilder::new(),
             func_sigs: HashMap::new(),
             method_sigs: HashMap::new(),
@@ -43,7 +44,7 @@ impl TypeChecker {
         self.populate_method_symbols()?;
 
         self.halted = false;
-        let module = self.context.ast_module.clone();
+        let module = self.ctx.module.clone();
         let _ = self.visit_module(&module);
 
         if self.errors.is_empty() {
@@ -55,12 +56,12 @@ impl TypeChecker {
     }
 
     fn populate_type_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for type_decl in self.context.ast_module.type_decls() {
+        for type_decl in self.ctx.module.type_decls() {
             match &type_decl.kind {
                 TypeDeclKind::Alias { aliased_ty } => {
                     // Resolve the aliased type
-                    let ty = resolve_type_expr(&self.context.def_map, aliased_ty)
-                        .map_err(|e| vec![e])?;
+                    let ty =
+                        resolve_type_expr(&self.ctx.def_map, aliased_ty).map_err(|e| vec![e])?;
 
                     self.type_decls.insert(type_decl.name.clone(), ty);
                 }
@@ -70,8 +71,8 @@ impl TypeChecker {
                     let struct_fields = fields
                         .iter()
                         .map(|f| {
-                            let field_ty = resolve_type_expr(&self.context.def_map, &f.ty)
-                                .map_err(|e| vec![e])?;
+                            let field_ty =
+                                resolve_type_expr(&self.ctx.def_map, &f.ty).map_err(|e| vec![e])?;
                             Ok(StructField {
                                 name: f.name.clone(),
                                 ty: field_ty,
@@ -95,7 +96,7 @@ impl TypeChecker {
                         let payload = variant
                             .payload
                             .iter()
-                            .map(|ty_expr| resolve_type_expr(&self.context.def_map, ty_expr))
+                            .map(|ty_expr| resolve_type_expr(&self.ctx.def_map, ty_expr))
                             .collect::<Result<Vec<Type>, _>>()
                             .map_err(|e| vec![e])?;
 
@@ -122,14 +123,14 @@ impl TypeChecker {
         let mut overloads = Vec::new();
 
         // Func decls
-        for decl in self.context.ast_module.func_decls() {
-            let def_id = self.context.def_map.lookup_def(decl.id).unwrap().id;
+        for decl in self.ctx.module.func_decls() {
+            let def_id = decl.def_id;
             overloads.push((def_id, decl.sig.clone()));
         }
 
         // Funcs
-        for func in self.context.ast_module.funcs() {
-            let def_id = self.context.def_map.lookup_def(func.id).unwrap().id;
+        for func in self.ctx.module.funcs() {
+            let def_id = func.def_id;
             overloads.push((def_id, func.sig.clone()));
         }
 
@@ -141,10 +142,10 @@ impl TypeChecker {
     }
 
     fn populate_method_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for method_block in self.context.ast_module.method_blocks() {
+        for method_block in self.ctx.module.method_blocks() {
             let type_name = method_block.type_name.clone();
             for method in &method_block.methods {
-                let def_id = self.context.def_map.lookup_def(method.id).unwrap().id;
+                let def_id = method.def_id;
                 let params = self.build_param_sigs(&method.sig.params)?;
                 let return_type = self.resolve_return_type(&method.sig.return_type)?;
 
@@ -173,7 +174,7 @@ impl TypeChecker {
         let return_type = self.resolve_return_type(&sig.return_type)?;
 
         // Record the function type.
-        if let Some(def) = self.context.def_map.lookup_def_by_id(def_id) {
+        if let Some(def) = self.ctx.def_map.lookup_def(def_id) {
             let fn_params = params
                 .iter()
                 .map(|param| FnParam {
@@ -191,8 +192,9 @@ impl TypeChecker {
         }
 
         // Insert an overload entry.
+        let func_name = self.def_name(def_id).to_string();
         self.func_sigs
-            .entry(sig.name.clone())
+            .entry(func_name)
             .or_default()
             .push(OverloadSig {
                 def_id,
@@ -207,9 +209,9 @@ impl TypeChecker {
         params
             .iter()
             .map(|param| {
-                let ty = resolve_type_expr(&self.context.def_map, &param.typ)?;
+                let ty = resolve_type_expr(&self.ctx.def_map, &param.typ)?;
                 Ok(ParamSig {
-                    name: param.name.clone(),
+                    name: self.def_name(param.ident).to_string(),
                     ty,
                     mode: param.mode.clone(),
                 })
@@ -219,14 +221,15 @@ impl TypeChecker {
     }
 
     fn resolve_return_type(&self, return_type: &TypeExpr) -> Result<Type, Vec<TypeCheckError>> {
-        resolve_type_expr(&self.context.def_map, return_type).map_err(|e| vec![e])
+        resolve_type_expr(&self.ctx.def_map, return_type).map_err(|e| vec![e])
     }
 
-    fn lookup_def_type(&self, node: NodeId) -> Option<Type> {
-        self.context
+    fn def_name(&self, def_id: DefId) -> &str {
+        self.ctx
             .def_map
-            .lookup_def(node)
-            .and_then(|def| self.type_map_builder.lookup_def_type(def))
+            .lookup_def(def_id)
+            .map(|def| def.name.as_str())
+            .unwrap_or_else(|| panic!("def {def_id} not found in def_map"))
     }
 
     fn expand_shallow_type(&self, ty: &Type) -> Type {
@@ -247,12 +250,13 @@ impl TypeChecker {
 
     fn check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
         // Lookup the function by def id and find the matching overload.
-        let func_def_id = self.context.def_map.lookup_def(function.id).unwrap().id;
+        let func_def_id = function.def_id;
+        let func_name = function.sig.name.as_str();
         let (param_types, return_type) = {
-            let overloads = self.func_sigs.get(&function.sig.name).unwrap_or_else(|| {
+            let overloads = self.func_sigs.get(func_name).unwrap_or_else(|| {
                 panic!(
                     "compiler bug: function {} not found in func_sigs",
-                    function.sig.name
+                    func_name
                 )
             });
             let func_sig = overloads
@@ -261,7 +265,7 @@ impl TypeChecker {
                 .unwrap_or_else(|| {
                     panic!(
                         "compiler bug: overload for function {} not found",
-                        function.sig.name
+                        func_name
                     )
                 });
             (
@@ -276,14 +280,14 @@ impl TypeChecker {
 
         // Record param types
         for (param, param_ty) in function.sig.params.iter().zip(param_types.iter()) {
-            match self.context.def_map.lookup_def(param.id) {
+            match self.ctx.def_map.lookup_def(param.ident) {
                 Some(def) => {
                     self.type_map_builder
                         .record_def_type(def.clone(), param_ty.clone());
                     self.type_map_builder
                         .record_node_type(param.id, param_ty.clone());
                 }
-                None => panic!("Parameter {} not found in def_map", param.name),
+                None => panic!("Parameter {} not found in def_map", param.ident),
             }
         }
 
@@ -355,25 +359,25 @@ impl TypeChecker {
             .map(|param| param.ty.clone())
             .collect::<Vec<_>>();
 
-        match self.context.def_map.lookup_def(method.sig.self_param.id) {
-            Some(def) => {
-                self.type_map_builder
-                    .record_def_type(def.clone(), self_ty.clone());
-                self.type_map_builder
-                    .record_node_type(method.sig.self_param.id, self_ty.clone());
-            }
-            None => panic!("self parameter not found in def_map"),
+        let self_def_id = method.sig.self_param.def_id;
+        if let Some(def) = self.ctx.def_map.lookup_def(self_def_id) {
+            self.type_map_builder
+                .record_def_type(def.clone(), self_ty.clone());
+            self.type_map_builder
+                .record_node_type(method.sig.self_param.id, self_ty.clone());
+        } else {
+            panic!("self parameter not found in def_map");
         }
 
         for (param, param_ty) in method.sig.params.iter().zip(param_types.iter()) {
-            match self.context.def_map.lookup_def(param.id) {
+            match self.ctx.def_map.lookup_def(param.ident) {
                 Some(def) => {
                     self.type_map_builder
                         .record_def_type(def.clone(), param_ty.clone());
                     self.type_map_builder
                         .record_node_type(param.id, param_ty.clone());
                 }
-                None => panic!("Parameter {} not found in def_map", param.name),
+                None => panic!("Parameter {} not found in def_map", param.ident),
             }
         }
 
@@ -419,9 +423,9 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         let mut param_types = Vec::with_capacity(params.len());
         for param in params {
-            let ty = resolve_type_expr(&self.context.def_map, &param.typ)?;
+            let ty = resolve_type_expr(&self.ctx.def_map, &param.typ)?;
             self.type_map_builder.record_node_type(param.id, ty.clone());
-            if let Some(def) = self.context.def_map.lookup_def(param.id) {
+            if let Some(def) = self.ctx.def_map.lookup_def(param.ident) {
                 self.type_map_builder
                     .record_def_type(def.clone(), ty.clone());
             }
@@ -432,7 +436,7 @@ impl TypeChecker {
         }
 
         let declared_return_ty = match return_ty {
-            Some(ty) => Some(resolve_type_expr(&self.context.def_map, ty)?),
+            Some(ty) => Some(resolve_type_expr(&self.ctx.def_map, ty)?),
             None => None,
         };
 
@@ -492,7 +496,7 @@ impl TypeChecker {
 
         // Resolve the element type
         let elem_ty = if let Some(elem_ty_expr) = elem_ty_expr {
-            resolve_type_expr(&self.context.def_map, elem_ty_expr)?
+            resolve_type_expr(&self.ctx.def_map, elem_ty_expr)?
         } else if let Some(Type::Array {
             elem_ty: expected_elem_ty,
             dims: expected_dims,
@@ -890,17 +894,21 @@ impl TypeChecker {
         Ok(struct_ty)
     }
 
-    fn check_pattern(&mut self, pattern: &Pattern, value_ty: &Type) -> Result<(), TypeCheckError> {
+    fn check_bind_pattern(
+        &mut self,
+        pattern: &BindPattern,
+        value_ty: &Type,
+    ) -> Result<(), TypeCheckError> {
         match &pattern.kind {
-            PatternKind::Ident { .. } => {
+            BindPatternKind::Name(ident) => {
                 // Record this identifier's type
-                if let Some(def) = self.context.def_map.lookup_def(pattern.id) {
+                if let Some(def) = self.ctx.def_map.lookup_def(*ident) {
                     self.type_map_builder
                         .record_def_type(def.clone(), value_ty.clone());
                 }
                 Ok(())
             }
-            PatternKind::Array { patterns } => {
+            BindPatternKind::Array { patterns } => {
                 // Value must be an array
                 match value_ty {
                     Type::Array { dims, .. } => {
@@ -921,7 +929,7 @@ impl TypeChecker {
 
                         // Recursively type check each sub-pattern
                         for pattern in patterns {
-                            self.check_pattern(pattern, &sub_ty)?;
+                            self.check_bind_pattern(pattern, &sub_ty)?;
                         }
                         Ok(())
                     }
@@ -933,7 +941,7 @@ impl TypeChecker {
                     .into()),
                 }
             }
-            PatternKind::Tuple { patterns } => {
+            BindPatternKind::Tuple { patterns } => {
                 match value_ty {
                     Type::Tuple { fields } => {
                         if patterns.len() != fields.len() {
@@ -947,7 +955,7 @@ impl TypeChecker {
 
                         // Recursively type check each sub-pattern
                         for (pattern, field) in patterns.iter().zip(fields) {
-                            self.check_pattern(pattern, field)?;
+                            self.check_bind_pattern(pattern, field)?;
                         }
                         Ok(())
                     }
@@ -959,7 +967,7 @@ impl TypeChecker {
                     .into()),
                 }
             }
-            PatternKind::Struct { name, fields } => {
+            BindPatternKind::Struct { name, fields } => {
                 let Type::Struct {
                     name: ty_name,
                     fields: struct_fields,
@@ -991,7 +999,7 @@ impl TypeChecker {
                         .find(|f| f.name == field.name)
                         .map(|f| &f.ty)
                     {
-                        self.check_pattern(&field.pattern, expected_ty)?;
+                        self.check_bind_pattern(&field.pattern, expected_ty)?;
                     }
                 }
 
@@ -1002,14 +1010,14 @@ impl TypeChecker {
 
     fn check_binding(
         &mut self,
-        pattern: &Pattern,
+        pattern: &BindPattern,
         decl_ty: &Option<TypeExpr>,
         value: &Expr,
     ) -> Result<Type, TypeCheckError> {
         // resolve the declaration type (if present)
         let expected_ty = decl_ty
             .as_ref()
-            .map(|ty_expr| resolve_type_expr(&self.context.def_map, ty_expr))
+            .map(|ty_expr| resolve_type_expr(&self.ctx.def_map, ty_expr))
             .transpose()?;
 
         let mut value_ty = self.visit_expr(value, expected_ty.as_ref())?;
@@ -1025,7 +1033,7 @@ impl TypeChecker {
             }
         }
 
-        self.check_pattern(pattern, &value_ty)?;
+        self.check_bind_pattern(pattern, &value_ty)?;
 
         Ok(Type::Unit)
     }
@@ -1070,10 +1078,15 @@ impl TypeChecker {
         }
     }
 
-    fn check_var_ref(&mut self, var_ref_expr: &Expr) -> Result<Type, TypeCheckError> {
-        match self.lookup_def_type(var_ref_expr.id) {
+    fn check_var_ref(&mut self, def_id: DefId, span: Span) -> Result<Type, TypeCheckError> {
+        match self
+            .ctx
+            .def_map
+            .lookup_def(def_id)
+            .and_then(|def| self.type_map_builder.lookup_def_type(def))
+        {
             Some(def_type) => Ok(def_type.clone()),
-            None => Err(TypeCheckErrorKind::UnknownType(var_ref_expr.span).into()),
+            None => Err(TypeCheckErrorKind::UnknownType(span).into()),
         }
     }
 
@@ -1123,11 +1136,12 @@ impl TypeChecker {
         callee: &Expr,
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
-        if let ExprKind::Var(name) = &callee.kind
-            && let Some(def) = self.context.def_map.lookup_def(callee.id)
+        if let ExprKind::Var(def_id) = &callee.kind
+            && let Some(def) = self.ctx.def_map.lookup_def(*def_id)
             && matches!(def.kind, DefKind::Func | DefKind::ExternFunc)
         {
-            return self.check_named_call(name, call_expr, callee, args);
+            let name = def.name.clone();
+            return self.check_named_call(&name, call_expr, callee, args);
         }
 
         self.check_expr_call(call_expr, callee, args)
@@ -1240,12 +1254,9 @@ impl TypeChecker {
     }
 
     fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
-        for block in self.context.ast_module.method_blocks() {
+        for block in self.ctx.module.method_blocks() {
             for method in &block.methods {
-                let Some(def) = self.context.def_map.lookup_def(method.id) else {
-                    continue;
-                };
-                if def.id == def_id {
+                if method.def_id == def_id {
                     return method.sig.self_param.mode.clone();
                 }
             }
@@ -1361,7 +1372,7 @@ impl TypeChecker {
 
     fn check_for(
         &mut self,
-        pattern: &Pattern,
+        pattern: &BindPattern,
         iter: &Expr,
         body: &Expr,
     ) -> Result<Type, TypeCheckError> {
@@ -1369,7 +1380,7 @@ impl TypeChecker {
         let item_ty = self.iterable_item_type(&iter_ty, iter.span)?;
 
         // Loop variable's type is the item type of the iterable
-        self.check_pattern(pattern, &item_ty)?;
+        self.check_bind_pattern(pattern, &item_ty)?;
 
         // Type check body
         let _ = self.visit_expr(body, None)?;
@@ -1492,20 +1503,22 @@ impl TypeChecker {
     }
 
     fn record_match_binding(&mut self, binding: &MatchPatternBinding, ty: &Type) {
-        let MatchPatternBinding::Named { id, .. } = binding else {
+        let MatchPatternBinding::Named { ident, .. } = binding else {
             return;
         };
-        self.record_binding_id(*id, ty);
+        self.record_binding_def(*ident, ty);
     }
 
-    fn record_binding_id(&mut self, id: NodeId, ty: &Type) {
-        match self.context.def_map.lookup_def(id) {
+    fn record_binding_def(&mut self, def_id: DefId, ty: &Type) {
+        match self.ctx.def_map.lookup_def(def_id) {
             Some(def) => {
                 self.type_map_builder
                     .record_def_type(def.clone(), ty.clone());
-                self.type_map_builder.record_node_type(id, ty.clone());
             }
-            None => panic!("compiler bug: binding [{}] not found in def_map", id),
+            None => panic!(
+                "compiler bug: binding def [{}] not found in def_map",
+                def_id
+            ),
         }
     }
 
@@ -1531,8 +1544,8 @@ impl TypeChecker {
 
     fn record_pattern_bindings(&mut self, pattern: &MatchPattern, ty: Option<&Type>) {
         match pattern {
-            MatchPattern::Binding { id, .. } => {
-                self.record_binding_id(*id, ty.unwrap_or(&Type::Unknown));
+            MatchPattern::Binding { ident, .. } => {
+                self.record_binding_def(*ident, ty.unwrap_or(&Type::Unknown));
             }
             MatchPattern::EnumVariant { bindings, .. } => match ty {
                 Some(Type::Enum { name, variants }) => {
@@ -1645,9 +1658,9 @@ impl AstFolder for TypeChecker {
                 value,
             } => self.check_binding(pattern, decl_ty, value)?,
 
-            StmtExprKind::VarDecl { decl_ty, .. } => {
-                let ty = resolve_type_expr(&self.context.def_map, decl_ty)?;
-                if let Some(def) = self.context.def_map.lookup_def(stmt.id) {
+            StmtExprKind::VarDecl { decl_ty, ident } => {
+                let ty = resolve_type_expr(&self.ctx.def_map, decl_ty)?;
+                if let Some(def) = self.ctx.def_map.lookup_def(*ident) {
                     self.type_map_builder.record_def_type(def.clone(), ty);
                 }
                 Type::Unit
@@ -1892,7 +1905,7 @@ impl AstFolder for TypeChecker {
                     Ok(tail_ty.unwrap_or(Type::Unit))
                 }
 
-                ExprKind::Var(_) => self.check_var_ref(expr),
+                ExprKind::Var(def_id) => self.check_var_ref(*def_id, expr.span),
 
                 ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
 

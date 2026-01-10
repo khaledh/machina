@@ -1,4 +1,5 @@
-use crate::hir::{NodeId, ParamMode, TypeExpr, TypeExprKind};
+use crate::ast::{self, NodeId, ParamMode};
+use crate::hir::model::{FnTypeParam, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
@@ -37,6 +38,14 @@ pub(crate) fn resolve_type_expr(
     resolve_type_expr_impl(def_map, type_expr, &mut in_progress, ResolveDepth::Full)
 }
 
+pub(crate) fn resolve_ast_type_expr(
+    def_map: &DefMap,
+    type_expr: &ast::TypeExpr,
+) -> Result<Type, TypeCheckError> {
+    let hir_expr = hir_type_expr_from_ast(def_map, type_expr);
+    resolve_type_expr(def_map, &hir_expr)
+}
+
 fn resolve_type_expr_impl(
     def_map: &DefMap,
     type_expr: &TypeExpr,
@@ -44,8 +53,8 @@ fn resolve_type_expr_impl(
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        TypeExprKind::Named(name) => {
-            resolve_named_type(def_map, type_expr, name, in_progress, depth)
+        TypeExprKind::Named(def_id) => {
+            resolve_named_type(def_map, type_expr, def_id, in_progress, depth)
         }
         TypeExprKind::Array { elem_ty, dims } => {
             let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
@@ -111,20 +120,23 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
 fn resolve_named_type(
     def_map: &DefMap,
     type_expr: &TypeExpr,
-    name: &str,
+    def_id: &DefId,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     let def = def_map
-        .lookup_def(type_expr.id)
+        .lookup_def(*def_id)
         .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
 
-    if let Some(ty) = builtin_type(name) {
+    if let Some(ty) = builtin_type(&def.name) {
         return Ok(ty);
     }
 
     match &def.kind {
-        DefKind::TypeAlias { ty_expr } => resolve_type_alias(def_map, def, ty_expr, in_progress),
+        DefKind::TypeAlias { ty_expr } => {
+            let hir_ty_expr = hir_type_expr_from_ast(def_map, ty_expr);
+            resolve_type_alias(def_map, def, &hir_ty_expr, in_progress)
+        }
         DefKind::StructDef { fields } => {
             resolve_struct_type(def_map, def, fields, in_progress, depth)
         }
@@ -150,10 +162,55 @@ fn resolve_type_alias(
     ty
 }
 
+fn hir_type_expr_from_ast(def_map: &DefMap, type_expr: &ast::TypeExpr) -> TypeExpr {
+    TypeExpr {
+        id: type_expr.id,
+        span: type_expr.span,
+        kind: match &type_expr.kind {
+            ast::TypeExprKind::Named(_name) => {
+                let def = def_map
+                    .lookup_node_def(type_expr.id)
+                    .unwrap_or_else(|| panic!("Missing def for NodeId({})", type_expr.id.0));
+                TypeExprKind::Named(def.id)
+            }
+            ast::TypeExprKind::Array { elem_ty, dims } => TypeExprKind::Array {
+                elem_ty: Box::new(hir_type_expr_from_ast(def_map, elem_ty)),
+                dims: dims.clone(),
+            },
+            ast::TypeExprKind::Tuple { fields } => TypeExprKind::Tuple {
+                fields: fields
+                    .iter()
+                    .map(|field| hir_type_expr_from_ast(def_map, field))
+                    .collect(),
+            },
+            ast::TypeExprKind::Range { min, max } => TypeExprKind::Range {
+                min: *min,
+                max: *max,
+            },
+            ast::TypeExprKind::Slice { elem_ty } => TypeExprKind::Slice {
+                elem_ty: Box::new(hir_type_expr_from_ast(def_map, elem_ty)),
+            },
+            ast::TypeExprKind::Heap { elem_ty } => TypeExprKind::Heap {
+                elem_ty: Box::new(hir_type_expr_from_ast(def_map, elem_ty)),
+            },
+            ast::TypeExprKind::Fn { params, return_ty } => TypeExprKind::Fn {
+                params: params
+                    .iter()
+                    .map(|param| FnTypeParam {
+                        mode: param.mode.clone(),
+                        ty: hir_type_expr_from_ast(def_map, &param.ty),
+                    })
+                    .collect(),
+                return_ty: Box::new(hir_type_expr_from_ast(def_map, return_ty)),
+            },
+        },
+    }
+}
+
 fn resolve_struct_type(
     def_map: &DefMap,
     def: &Def,
-    fields: &[crate::hir::StructField],
+    fields: &[ast::StructField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -180,14 +237,15 @@ fn resolve_struct_type(
 
 fn resolve_struct_fields(
     def_map: &DefMap,
-    fields: &[crate::hir::StructField],
+    fields: &[ast::StructField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
     fields
         .iter()
         .map(|field| {
-            let field_ty = resolve_type_expr_impl(def_map, &field.ty, in_progress, depth)?;
+            let hir_ty = hir_type_expr_from_ast(def_map, &field.ty);
+            let field_ty = resolve_type_expr_impl(def_map, &hir_ty, in_progress, depth)?;
             Ok(StructField {
                 name: field.name.clone(),
                 ty: field_ty,
@@ -199,7 +257,7 @@ fn resolve_struct_fields(
 fn resolve_enum_type(
     def_map: &DefMap,
     def: &Def,
-    variants: &[crate::hir::EnumVariant],
+    variants: &[ast::EnumVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -226,7 +284,7 @@ fn resolve_enum_type(
 
 fn resolve_enum_variants(
     def_map: &DefMap,
-    variants: &[crate::hir::EnumVariant],
+    variants: &[ast::EnumVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
@@ -235,7 +293,10 @@ fn resolve_enum_variants(
         let payload = variant
             .payload
             .iter()
-            .map(|payload_ty| resolve_type_expr_impl(def_map, payload_ty, in_progress, depth))
+            .map(|payload_ty| {
+                let hir_ty = hir_type_expr_from_ast(def_map, payload_ty);
+                resolve_type_expr_impl(def_map, &hir_ty, in_progress, depth)
+            })
             .collect::<Result<Vec<Type>, _>>()?;
         enum_variants.push(EnumVariant {
             name: variant.name.clone(),

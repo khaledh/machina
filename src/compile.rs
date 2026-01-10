@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::ast::{Module, NodeIdGen};
-use crate::context::AstContext;
-use crate::desugar;
+use crate::context::ParsedContext;
 use crate::diag::CompileError;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::liveness;
@@ -113,7 +112,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- Resolve Defs/Uses ---
 
-    let ast_context = AstContext::new(module);
+    let ast_context = ParsedContext::new(module);
 
     let resolved_context = resolve(ast_context).map_err(|errs| {
         errs.into_iter()
@@ -128,13 +127,9 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
-    // --- Desugar ---
-
-    let hir_context = desugar::desugar(resolved_context);
-
     // --- Type Check ---
 
-    let type_checked_context = type_check(hir_context).map_err(|errs| {
+    let type_checked_context = type_check(resolved_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

@@ -1,9 +1,10 @@
 use crate::context::TypeCheckedContext;
-use crate::hir::{
-    CallArg, CallArgMode, Expr, ExprKind, MatchArm, MethodSig, Param, ParamMode, Pattern,
-    PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig,
-    walk_method_sig, walk_stmt_expr,
+use crate::hir::model::{
+    BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
+    MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
+    TypeDeclKind,
 };
+use crate::hir::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::resolve::def_map::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
@@ -36,16 +37,16 @@ impl<'a> StructuralChecker<'a> {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 
-        for decl in ctx.ast_module.type_decls() {
+        for decl in ctx.module.type_decls() {
             match &decl.kind {
-                crate::hir::TypeDeclKind::Struct { fields } => {
+                TypeDeclKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
                     struct_fields.insert(
                         decl.name.clone(),
                         fields.iter().map(|f| f.name.clone()).collect(),
                     );
                 }
-                crate::hir::TypeDeclKind::Enum { variants } => {
+                TypeDeclKind::Enum { variants } => {
                     // Collect variant payload arity for enum literals and match patterns.
                     enum_variants.insert(
                         decl.name.clone(),
@@ -58,7 +59,7 @@ impl<'a> StructuralChecker<'a> {
                             .collect(),
                     );
                 }
-                crate::hir::TypeDeclKind::Alias { .. } => {}
+                TypeDeclKind::Alias { .. } => {}
             }
         }
 
@@ -71,7 +72,7 @@ impl<'a> StructuralChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        self.visit_module(&self.ctx.ast_module);
+        self.visit_module(&self.ctx.module);
     }
 
     fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: crate::diag::Span) {
@@ -136,15 +137,15 @@ impl<'a> StructuralChecker<'a> {
         }
     }
 
-    fn check_pattern(&mut self, pattern: &Pattern) {
+    fn check_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            PatternKind::Ident { .. } => {}
-            PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
+            BindPatternKind::Name(_) => {}
+            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for pattern in patterns {
                     self.check_pattern(pattern);
                 }
             }
-            PatternKind::Struct { name, fields } => {
+            BindPatternKind::Struct { name, fields } => {
                 // Enforce struct pattern fields and recurse into subpatterns.
                 let Some(struct_fields) = self.struct_fields.get(name).cloned() else {
                     self.errors
@@ -249,7 +250,7 @@ impl<'a> StructuralChecker<'a> {
     fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {
         match &expr.kind {
             ExprKind::Var(_) => {
-                let def = self.ctx.def_map.lookup_def(expr.id)?;
+                let def = self.ctx.def_map.lookup_node_def(expr.id)?;
                 match def.kind {
                     DefKind::LocalVar { is_mutable, .. } | DefKind::Param { is_mutable, .. } => {
                         Some(is_mutable)
@@ -268,7 +269,7 @@ impl<'a> StructuralChecker<'a> {
     fn is_lvalue(&self, expr: &Expr) -> bool {
         match &expr.kind {
             ExprKind::Var(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_def(expr.id) {
+                if let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) {
                     matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
                 } else {
                     false
@@ -360,7 +361,7 @@ impl<'a> StructuralChecker<'a> {
 }
 
 impl Visitor for StructuralChecker<'_> {
-    fn visit_func_sig(&mut self, func_sig: &crate::hir::FunctionSig) {
+    fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
         self.check_param_modes(&func_sig.params);
         walk_func_sig(self, func_sig);
     }
@@ -374,12 +375,12 @@ impl Visitor for StructuralChecker<'_> {
         walk_method_sig(self, method_sig);
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &crate::hir::StmtExpr) {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         // Struct patterns are validated here before walking child expressions.
         match &stmt.kind {
-            crate::hir::StmtExprKind::LetBind { pattern, .. }
-            | crate::hir::StmtExprKind::VarBind { pattern, .. }
-            | crate::hir::StmtExprKind::For { pattern, .. } => {
+            StmtExprKind::LetBind { pattern, .. }
+            | StmtExprKind::VarBind { pattern, .. }
+            | StmtExprKind::For { pattern, .. } => {
                 self.check_pattern(pattern);
             }
             _ => {}

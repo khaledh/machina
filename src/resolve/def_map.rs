@@ -180,13 +180,13 @@ pub struct DefMap {
 }
 
 impl DefMap {
-    pub fn lookup_def(&self, node: NodeId) -> Option<&Def> {
+    pub fn lookup_node_def(&self, node: NodeId) -> Option<&Def> {
         self.node_def
             .get(&node)
             .map(|def_id| &self.defs[def_id.0 as usize])
     }
 
-    pub fn lookup_def_by_id(&self, def_id: DefId) -> Option<&Def> {
+    pub fn lookup_def(&self, def_id: DefId) -> Option<&Def> {
         self.defs.get(def_id.0 as usize)
     }
 

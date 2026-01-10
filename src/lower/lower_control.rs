@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind as EK, Pattern, PatternKind as PK};
+use crate::ast::{BindPattern, BindPatternKind as PK, Expr, ExprKind as EK};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -157,7 +157,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lower a for expression (returns unit).
     pub(super) fn lower_for_expr(
         &mut self,
-        pattern: &Pattern,
+        pattern: &BindPattern,
         iter: &Expr,
         body: &Expr,
     ) -> Result<ExprValue, LowerError> {
@@ -175,7 +175,7 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         start: u64,
         end: u64,
-        pattern: &Pattern,
+        pattern: &BindPattern,
         body: &Expr,
     ) -> Result<ExprValue, LowerError> {
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
@@ -191,14 +191,14 @@ impl<'a> FuncLowerer<'a> {
         });
 
         self.lower_for_indexed_loop(start_op, end_op, body, |this, idx_place| {
-            // Bind pattern to current index (only ident pattern expected).
-            let PK::Ident { name } = &pattern.kind else {
+            // Bind pattern to current index (only name pattern expected).
+            let PK::Name(ident) = &pattern.kind else {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
             let def_id = this.def_for_node(pattern.id)?.id;
             this.bind_ident(
                 def_id,
-                name.clone(),
+                ident.clone(),
                 u64_ty_id,
                 PlaceAny::Scalar(idx_place.clone()),
             )
@@ -207,7 +207,7 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_for_array_expr(
         &mut self,
-        pattern: &Pattern,
+        pattern: &BindPattern,
         iter: &Expr,
         iter_ty: &Type,
         body: &Expr,
@@ -258,7 +258,7 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_for_slice_expr(
         &mut self,
-        pattern: &Pattern,
+        pattern: &BindPattern,
         iter: &Expr,
         iter_ty: &Type,
         body: &Expr,

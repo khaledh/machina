@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_backward;
-use crate::ast::cfg::{AstCfg, AstCfgNode, AstItem, AstTerminator};
+use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
-use crate::hir::{Expr, ExprKind, Pattern, PatternKind, StmtExpr, StmtExprKind};
-use crate::hir::{Visitor, walk_expr};
+use crate::hir::model::{
+    BindPattern, BindPatternKind, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind,
+};
+use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::def_map::DefId;
 
 // ============================================================================
@@ -21,7 +23,7 @@ pub struct AstLiveness {
 
 /// Compute liveness for heap-owned locals on the AST CFG. This keeps the analysis
 /// lightweight and scoped to the move-checker (we only track heap uses).
-pub fn analyze(cfg: &AstCfg<'_>, ctx: &TypeCheckedContext) -> AstLiveness {
+pub fn analyze(cfg: &HirCfg<'_>, ctx: &TypeCheckedContext) -> AstLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -60,13 +62,13 @@ pub fn analyze(cfg: &AstCfg<'_>, ctx: &TypeCheckedContext) -> AstLiveness {
 /// Count heap-owned variable uses within one AST item. This lets move_check
 /// avoid implicit moves when a single item uses the same binding multiple times.
 pub(crate) fn heap_use_counts_for_item(
-    item: &AstItem<'_>,
+    item: &HirItem<'_>,
     ctx: &TypeCheckedContext,
 ) -> HashMap<DefId, usize> {
     let mut counts = HashMap::new();
     match item {
-        AstItem::Stmt(stmt) => collect_stmt_uses(stmt, ctx, &mut counts),
-        AstItem::Expr(expr) => collect_expr_uses(expr, ctx, &mut counts),
+        HirItem::Stmt(stmt) => collect_stmt_uses(stmt, ctx, &mut counts),
+        HirItem::Expr(expr) => collect_expr_uses(expr, ctx, &mut counts),
     }
     counts
 }
@@ -97,7 +99,7 @@ impl HeapUseAccumulator for HashMap<DefId, usize> {
 
 fn compute_live_in(
     ctx: &TypeCheckedContext,
-    node: &AstCfgNode<'_>,
+    node: &HirCfgNode<'_>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
     let mut live = live_out.clone();
@@ -112,7 +114,7 @@ fn compute_live_in(
 /// Per-item live-after sets are used to detect last-use sites inside a block.
 fn compute_live_after(
     ctx: &TypeCheckedContext,
-    node: &AstCfgNode<'_>,
+    node: &HirCfgNode<'_>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
     let mut live = live_out.clone();
@@ -125,7 +127,7 @@ fn compute_live_after(
     live_after
 }
 
-fn apply_item_defs_uses(item: &AstItem<'_>, ctx: &TypeCheckedContext, live: &mut HashSet<DefId>) {
+fn apply_item_defs_uses(item: &HirItem<'_>, ctx: &TypeCheckedContext, live: &mut HashSet<DefId>) {
     let mut defs = HashSet::new();
     let mut uses = HashSet::new();
     collect_item_defs_uses(item, ctx, &mut defs, &mut uses);
@@ -138,11 +140,11 @@ fn apply_item_defs_uses(item: &AstItem<'_>, ctx: &TypeCheckedContext, live: &mut
 }
 
 fn add_terminator_uses(
-    term: &AstTerminator<'_>,
+    term: &HirTerminator<'_>,
     ctx: &TypeCheckedContext,
     uses: &mut HashSet<DefId>,
 ) {
-    if let AstTerminator::If { cond, .. } = term {
+    if let HirTerminator::If { cond, .. } = term {
         collect_expr_uses(cond, ctx, uses);
     }
 }
@@ -152,14 +154,14 @@ fn add_terminator_uses(
 // ============================================================================
 
 fn collect_item_defs_uses(
-    item: &AstItem<'_>,
+    item: &HirItem<'_>,
     ctx: &TypeCheckedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        AstItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
-        AstItem::Expr(expr) => collect_expr_uses(expr, ctx, uses),
+        HirItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
+        HirItem::Expr(expr) => collect_expr_uses(expr, ctx, uses),
     }
 }
 
@@ -184,15 +186,19 @@ fn collect_stmt_defs_uses(
     }
 }
 
-fn collect_pattern_defs(pattern: &Pattern, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
+fn collect_pattern_defs(
+    pattern: &BindPattern,
+    ctx: &TypeCheckedContext,
+    defs: &mut HashSet<DefId>,
+) {
     match &pattern.kind {
-        PatternKind::Ident { .. } => add_def_if_heap(pattern.id, ctx, defs),
-        PatternKind::Array { patterns } | PatternKind::Tuple { patterns } => {
+        BindPatternKind::Name(_) => add_def_if_heap(pattern.id, ctx, defs),
+        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
             }
         }
-        PatternKind::Struct { fields, .. } => {
+        BindPatternKind::Struct { fields, .. } => {
             for field in fields {
                 collect_pattern_defs(&field.pattern, ctx, defs);
             }
@@ -208,12 +214,8 @@ fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut H
 }
 
 /// Only treat heap-owned locals as tracked defs.
-fn add_def_if_heap(
-    node_id: crate::hir::NodeId,
-    ctx: &TypeCheckedContext,
-    defs: &mut HashSet<DefId>,
-) {
-    let Some(def) = ctx.def_map.lookup_def(node_id) else {
+fn add_def_if_heap(node_id: NodeId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
+    let Some(def) = ctx.def_map.lookup_node_def(node_id) else {
         return;
     };
     let Some(ty) = ctx.type_map.lookup_def_type(def) else {
@@ -314,6 +316,6 @@ fn heap_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     if !ty.is_heap() {
         return None;
     }
-    let def = ctx.def_map.lookup_def(expr.id)?;
+    let def = ctx.def_map.lookup_node_def(expr.id)?;
     Some(def.id)
 }

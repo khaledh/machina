@@ -11,22 +11,23 @@ use crate::symtab::SymbolTable;
 use crate::typeck::type_map::TypeMap;
 
 // -----------------------------------------------------------------------------
-// AST Context
+// Parsed Context
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
-pub struct AstContext {
+pub struct ParsedContext {
     pub module: AstModule,
 }
 
-impl AstContext {
+impl ParsedContext {
     pub fn new(module: AstModule) -> Self {
         Self { module }
     }
 
-    pub fn with_def_map(self, def_map: DefMap) -> ResolvedContext {
+    pub fn with_def_map(self, def_map: DefMap, hir_module: HirModule) -> ResolvedContext {
         let symbols = SymbolTable::new(&self.module, &def_map);
         ResolvedContext {
-            module: self.module,
+            ast_module: self.module,
+            module: hir_module,
             def_map,
             symbols,
         }
@@ -38,34 +39,13 @@ impl AstContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct ResolvedContext {
-    pub module: AstModule,
-    pub def_map: DefMap,
-    pub symbols: SymbolTable,
-}
-
-impl ResolvedContext {
-    pub fn with_hir(self, module: HirModule) -> HirContext {
-        HirContext {
-            ast_module: self.module,
-            module,
-            def_map: self.def_map,
-            symbols: self.symbols,
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// HIR Context
-// -----------------------------------------------------------------------------
-#[derive(Clone)]
-pub struct HirContext {
     pub ast_module: AstModule,
     pub module: HirModule,
     pub def_map: DefMap,
     pub symbols: SymbolTable,
 }
 
-impl HirContext {
+impl ResolvedContext {
     pub fn with_type_map(self, type_map: TypeMap) -> TypeCheckedContext {
         TypeCheckedContext {
             ast_module: self.ast_module,

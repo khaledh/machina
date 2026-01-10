@@ -6,7 +6,8 @@
 
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
-use crate::hir::{CallArg, Expr, ExprKind, Function, ParamMode, Visitor, walk_expr};
+use crate::hir::model::{CallArg, Expr, ExprKind, Function, ParamMode};
+use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
 
@@ -58,7 +59,7 @@ enum Bound {
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut checker = LvalueOverlapChecker::new(ctx);
-    checker.visit_module(&ctx.ast_module);
+    checker.visit_module(&ctx.module);
     checker.errors
 }
 
@@ -129,7 +130,7 @@ impl<'a> LvalueOverlapChecker<'a> {
     fn lvalue_path(&self, expr: &Expr) -> Option<LvaluePath> {
         match &expr.kind {
             ExprKind::Var(_) => {
-                let def_id = self.ctx.def_map.lookup_def(expr.id)?.id;
+                let def_id = self.ctx.def_map.lookup_node_def(expr.id)?.id;
                 Some(LvaluePath {
                     base: def_id,
                     projections: Vec::new(),

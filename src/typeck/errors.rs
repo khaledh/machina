@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::diag::Span;
-use crate::hir::{ExprKind, Pattern};
+use crate::hir::model::{BindPattern, ExprKind};
 use crate::types::Type;
 
 #[derive(Debug, Clone, Error)]
@@ -62,7 +62,7 @@ pub enum TypeCheckErrorKind {
     UnknownType(Span),
 
     #[error("Pattern type mismatch: expected {0}, found {1}")]
-    PatternTypeMismatch(Pattern, Type, Span),
+    PatternTypeMismatch(BindPattern, Type, Span),
 
     #[error("Declaration type mismatch: declared type {0}, found type {1}")]
     DeclTypeMismatch(Type, Type, Span),

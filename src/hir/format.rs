@@ -1,7 +1,15 @@
 //! HIR formatting helpers (currently identical to AST formatting).
 
-use super::Module;
+use std::fmt;
+
+use crate::hir::model::{BindPattern, Module};
 
 pub fn format_module(module: &Module) -> String {
-    module.to_string()
+    format!("{module:?}")
+}
+
+impl fmt::Display for BindPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
 }

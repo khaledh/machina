@@ -1,50 +1,51 @@
 //! AST-based CFG construction.
 
 use crate::analysis::dataflow::DataflowGraph;
-use crate::ast::{BlockItem, Expr, ExprKind, Pattern, StmtExpr, StmtExprKind};
+use crate::ast::model::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
+use crate::resolve::def_map::DefId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);
 
-pub enum AstItem<'a> {
-    Stmt(&'a StmtExpr),
-    Expr(&'a Expr),
+pub enum CfgItem<'a, T> {
+    Stmt(&'a StmtExpr<T>),
+    Expr(&'a Expr<T>),
 }
 
-pub enum AstTerminator<'a> {
+pub enum CfgTerminator<'a, T> {
     Goto(AstBlockId),
     If {
-        cond: &'a Expr,
+        cond: &'a Expr<T>,
         then_bb: AstBlockId,
         else_bb: AstBlockId,
     },
     End,
 }
 
-pub struct AstCfgNode<'a> {
-    pub items: Vec<AstItem<'a>>,
-    pub term: AstTerminator<'a>,
-    pub loop_inits: Vec<&'a Pattern>,
+pub struct CfgNode<'a, T> {
+    pub items: Vec<CfgItem<'a, T>>,
+    pub term: CfgTerminator<'a, T>,
+    pub loop_inits: Vec<&'a BindPattern<T>>,
 }
 
-pub struct AstCfg<'a> {
-    pub nodes: Vec<AstCfgNode<'a>>,
+pub struct Cfg<'a, T> {
+    pub nodes: Vec<CfgNode<'a, T>>,
     preds: Vec<Vec<AstBlockId>>,
     succs: Vec<Vec<AstBlockId>>,
 }
 
-pub struct AstCfgBuilder<'a> {
-    nodes: Vec<AstCfgNode<'a>>,
+pub struct CfgBuilder<'a, T> {
+    nodes: Vec<CfgNode<'a, T>>,
     succs: Vec<Vec<AstBlockId>>,
 }
 
-impl<'a> Default for AstCfgBuilder<'a> {
+impl<'a, T> Default for CfgBuilder<'a, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> AstCfgBuilder<'a> {
+impl<'a, T> CfgBuilder<'a, T> {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -54,9 +55,9 @@ impl<'a> AstCfgBuilder<'a> {
 
     fn new_block(&mut self) -> AstBlockId {
         let id = AstBlockId(self.nodes.len());
-        self.nodes.push(AstCfgNode {
+        self.nodes.push(CfgNode {
             items: Vec::new(),
-            term: AstTerminator::End,
+            term: CfgTerminator::End,
             loop_inits: Vec::new(),
         });
         self.succs.push(Vec::new());
@@ -67,29 +68,29 @@ impl<'a> AstCfgBuilder<'a> {
         self.succs[from.0].push(to);
     }
 
-    fn set_term(&mut self, block: AstBlockId, term: AstTerminator<'a>) {
+    fn set_term(&mut self, block: AstBlockId, term: CfgTerminator<'a, T>) {
         self.nodes[block.0].term = term;
     }
 
-    fn push_item(&mut self, block: AstBlockId, item: AstItem<'a>) {
+    fn push_item(&mut self, block: AstBlockId, item: CfgItem<'a, T>) {
         self.nodes[block.0].items.push(item);
     }
 
-    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a Pattern) {
+    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a BindPattern<T>) {
         self.nodes[block.0].loop_inits.push(pattern);
     }
 
-    pub fn build_from_expr(self, expr: &'a Expr) -> AstCfg<'a> {
+    pub fn build_from_expr(self, expr: &'a Expr<T>) -> Cfg<'a, T> {
         let mut builder = self;
         builder.build_block_expr(expr);
         builder.finish()
     }
 
-    fn build_block_expr(&mut self, expr: &'a Expr) -> AstBlockId {
+    fn build_block_expr(&mut self, expr: &'a Expr<T>) -> AstBlockId {
         let ExprKind::Block { items, tail } = &expr.kind else {
             // For now, require a block expression at entry.
             let b = self.new_block();
-            self.push_item(b, AstItem::Expr(expr));
+            self.push_item(b, CfgItem::Expr(expr));
             return b;
         };
 
@@ -105,7 +106,7 @@ impl<'a> AstCfgBuilder<'a> {
                         curr_bb = self.handle_expr(curr_bb, expr);
                     }
                     _ => {
-                        self.push_item(curr_bb, AstItem::Expr(expr));
+                        self.push_item(curr_bb, CfgItem::Expr(expr));
                         curr_bb = self.handle_expr(curr_bb, expr);
                     }
                 },
@@ -113,14 +114,14 @@ impl<'a> AstCfgBuilder<'a> {
         }
 
         if let Some(tail) = tail {
-            self.push_item(curr_bb, AstItem::Expr(tail));
+            self.push_item(curr_bb, CfgItem::Expr(tail));
             curr_bb = self.handle_expr(curr_bb, tail);
         }
 
         curr_bb
     }
 
-    fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr) -> AstBlockId {
+    fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr<T>) -> AstBlockId {
         match &stmt.kind {
             StmtExprKind::While { cond, body } => {
                 let cond_bb = self.new_block();
@@ -128,12 +129,12 @@ impl<'a> AstCfgBuilder<'a> {
                 let exit_bb = self.new_block();
 
                 // current -> cond
-                self.set_term(curr_bb, AstTerminator::Goto(cond_bb));
+                self.set_term(curr_bb, CfgTerminator::Goto(cond_bb));
 
                 // cond -> body/exit
                 self.set_term(
                     cond_bb,
-                    AstTerminator::If {
+                    CfgTerminator::If {
                         cond: cond.as_ref(),
                         then_bb: body_bb,
                         else_bb: exit_bb,
@@ -143,7 +144,7 @@ impl<'a> AstCfgBuilder<'a> {
                 self.push_edge(cond_bb, exit_bb);
 
                 // body -> cond
-                self.set_term(body_bb, AstTerminator::Goto(cond_bb));
+                self.set_term(body_bb, CfgTerminator::Goto(cond_bb));
                 self.push_edge(body_bb, cond_bb);
 
                 exit_bb
@@ -155,11 +156,11 @@ impl<'a> AstCfgBuilder<'a> {
                 let body_bb = self.build_block_expr(body);
                 let exit_bb = self.new_block();
 
-                self.set_term(curr_bb, AstTerminator::Goto(cond_bb));
+                self.set_term(curr_bb, CfgTerminator::Goto(cond_bb));
                 self.push_edge(curr_bb, cond_bb);
 
                 // Placeholder: no explicit condition expr yet, so use End with two edges.
-                self.set_term(cond_bb, AstTerminator::End);
+                self.set_term(cond_bb, CfgTerminator::End);
                 self.push_edge(cond_bb, body_bb);
                 self.push_edge(cond_bb, exit_bb);
 
@@ -168,19 +169,19 @@ impl<'a> AstCfgBuilder<'a> {
                     self.push_loop_init(body_bb, pattern);
                 }
 
-                self.set_term(body_bb, AstTerminator::Goto(cond_bb));
+                self.set_term(body_bb, CfgTerminator::Goto(cond_bb));
                 self.push_edge(body_bb, cond_bb);
 
                 exit_bb
             }
             _ => {
-                self.push_item(curr_bb, AstItem::Stmt(stmt));
+                self.push_item(curr_bb, CfgItem::Stmt(stmt));
                 curr_bb
             }
         }
     }
 
-    fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr) -> AstBlockId {
+    fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr<T>) -> AstBlockId {
         match &expr.kind {
             ExprKind::If {
                 cond,
@@ -193,7 +194,7 @@ impl<'a> AstCfgBuilder<'a> {
 
                 self.set_term(
                     cur,
-                    AstTerminator::If {
+                    CfgTerminator::If {
                         cond: cond.as_ref(),
                         then_bb,
                         else_bb,
@@ -212,7 +213,7 @@ impl<'a> AstCfgBuilder<'a> {
         }
     }
 
-    fn finish(self) -> AstCfg<'a> {
+    fn finish(self) -> Cfg<'a, T> {
         let mut preds = vec![vec![]; self.nodes.len()];
         for (idx, outs) in self.succs.iter().enumerate() {
             let src = AstBlockId(idx);
@@ -221,7 +222,7 @@ impl<'a> AstCfgBuilder<'a> {
             }
         }
 
-        AstCfg {
+        Cfg {
             nodes: self.nodes,
             preds,
             succs: self.succs,
@@ -229,7 +230,7 @@ impl<'a> AstCfgBuilder<'a> {
     }
 }
 
-impl DataflowGraph for AstCfg<'_> {
+impl<T> DataflowGraph for Cfg<'_, T> {
     type Node = AstBlockId;
 
     fn num_nodes(&self) -> usize {
@@ -252,3 +253,15 @@ impl DataflowGraph for AstCfg<'_> {
         &self.succs[node.0]
     }
 }
+
+pub type AstItem<'a> = CfgItem<'a, String>;
+pub type AstTerminator<'a> = CfgTerminator<'a, String>;
+pub type AstCfgNode<'a> = CfgNode<'a, String>;
+pub type AstCfg<'a> = Cfg<'a, String>;
+pub type AstCfgBuilder<'a> = CfgBuilder<'a, String>;
+
+pub type HirItem<'a> = CfgItem<'a, DefId>;
+pub type HirTerminator<'a> = CfgTerminator<'a, DefId>;
+pub type HirCfgNode<'a> = CfgNode<'a, DefId>;
+pub type HirCfg<'a> = Cfg<'a, DefId>;
+pub type HirCfgBuilder<'a> = CfgBuilder<'a, DefId>;

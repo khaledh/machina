@@ -65,7 +65,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         self.consume_keyword(TK::KwLet)?;
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_bind_pattern()?;
 
         let decl_ty = if self.curr_token.kind == TK::Colon {
             self.advance();
@@ -99,7 +99,7 @@ impl<'a> Parser<'a> {
         let is_binding = self.lookahead_for(TK::Equals, TK::Semicolon);
 
         if is_binding {
-            let pattern = self.parse_pattern()?;
+            let pattern = self.parse_bind_pattern()?;
 
             let decl_ty = if self.curr_token.kind == TK::Colon {
                 self.advance();
@@ -124,7 +124,7 @@ impl<'a> Parser<'a> {
                 span: self.close(marker),
             })
         } else {
-            let name = self.parse_ident()?;
+            let ident = self.parse_ident()?;
 
             self.consume(&TK::Colon)?;
 
@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
 
             Ok(StmtExpr {
                 id: self.id_gen.new_id(),
-                kind: StmtExprKind::VarDecl { name, decl_ty },
+                kind: StmtExprKind::VarDecl { ident, decl_ty },
                 span: self.close(marker),
             })
         }
@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
 
         self.consume_keyword(TK::KwFor)?;
 
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_bind_pattern()?;
 
         self.consume_keyword(TK::KwIn)?;
 

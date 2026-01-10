@@ -101,7 +101,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             EK::Closure { .. } => {
-                let def = match self.ctx.def_map.lookup_def(expr.id) {
+                let def = match self.ctx.def_map.lookup_node_def(expr.id) {
                     Some(def) => def,
                     None => panic!(
                         "compiler bug: closure def not found for expr NodeId({})",
