@@ -1,4 +1,5 @@
 use crate::context::{HirContext, ResolvedContext};
+use crate::hir;
 
 /// Desugar high-level syntax into core constructs.
 ///
@@ -10,7 +11,7 @@ pub fn desugar(ctx: ResolvedContext) -> HirContext {
         symbols,
     } = ctx;
     HirContext {
-        module,
+        module: hir::builder::build(module),
         def_map,
         symbols,
     }

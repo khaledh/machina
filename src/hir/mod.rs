@@ -4,6 +4,7 @@
 //! AST, but we'll gradually make it semantically explicit (moves, coercions,
 //! call modes, places, etc.).
 
+pub mod builder;
 pub mod fold;
 pub mod format;
 pub mod visit;
