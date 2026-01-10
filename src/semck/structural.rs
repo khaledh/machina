@@ -1,9 +1,9 @@
-use crate::ast::{
+use crate::context::TypeCheckedContext;
+use crate::hir::{
     CallArg, CallArgMode, Expr, ExprKind, MatchArm, MethodSig, Param, ParamMode, Pattern,
     PatternKind, StructLitField, StructUpdateField, Visitor, walk_expr, walk_func_sig,
     walk_method_sig, walk_stmt_expr,
 };
-use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
@@ -38,14 +38,14 @@ impl<'a> StructuralChecker<'a> {
 
         for decl in ctx.module.type_decls() {
             match &decl.kind {
-                crate::ast::TypeDeclKind::Struct { fields } => {
+                crate::hir::TypeDeclKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
                     struct_fields.insert(
                         decl.name.clone(),
                         fields.iter().map(|f| f.name.clone()).collect(),
                     );
                 }
-                crate::ast::TypeDeclKind::Enum { variants } => {
+                crate::hir::TypeDeclKind::Enum { variants } => {
                     // Collect variant payload arity for enum literals and match patterns.
                     enum_variants.insert(
                         decl.name.clone(),
@@ -58,7 +58,7 @@ impl<'a> StructuralChecker<'a> {
                             .collect(),
                     );
                 }
-                crate::ast::TypeDeclKind::Alias { .. } => {}
+                crate::hir::TypeDeclKind::Alias { .. } => {}
             }
         }
 
@@ -360,7 +360,7 @@ impl<'a> StructuralChecker<'a> {
 }
 
 impl Visitor for StructuralChecker<'_> {
-    fn visit_func_sig(&mut self, func_sig: &crate::ast::FunctionSig) {
+    fn visit_func_sig(&mut self, func_sig: &crate::hir::FunctionSig) {
         self.check_param_modes(&func_sig.params);
         walk_func_sig(self, func_sig);
     }
@@ -374,12 +374,12 @@ impl Visitor for StructuralChecker<'_> {
         walk_method_sig(self, method_sig);
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &crate::ast::StmtExpr) {
+    fn visit_stmt_expr(&mut self, stmt: &crate::hir::StmtExpr) {
         // Struct patterns are validated here before walking child expressions.
         match &stmt.kind {
-            crate::ast::StmtExprKind::LetBind { pattern, .. }
-            | crate::ast::StmtExprKind::VarBind { pattern, .. }
-            | crate::ast::StmtExprKind::For { pattern, .. } => {
+            crate::hir::StmtExprKind::LetBind { pattern, .. }
+            | crate::hir::StmtExprKind::VarBind { pattern, .. }
+            | crate::hir::StmtExprKind::For { pattern, .. } => {
                 self.check_pattern(pattern);
             }
             _ => {}

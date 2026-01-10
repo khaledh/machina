@@ -1,5 +1,5 @@
-use crate::ast::{CallArg, CallArgMode, ParamMode};
 use crate::diag::Span;
+use crate::hir::{CallArg, CallArgMode, ParamMode};
 use crate::resolve::def_map::DefId;
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{

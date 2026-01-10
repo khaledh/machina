@@ -1,8 +1,8 @@
-use crate::ast::{
+use crate::context::TypeCheckedContext;
+use crate::hir::{
     ArrayLitInit, Expr, ExprKind, Function, StmtExpr, StmtExprKind, Visitor, walk_expr,
     walk_stmt_expr,
 };
-use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
 use crate::types::Type;
 

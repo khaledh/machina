@@ -1,4 +1,4 @@
-use crate::ast::{NodeId, ParamMode, TypeExpr, TypeExprKind};
+use crate::hir::{NodeId, ParamMode, TypeExpr, TypeExprKind};
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
@@ -153,7 +153,7 @@ fn resolve_type_alias(
 fn resolve_struct_type(
     def_map: &DefMap,
     def: &Def,
-    fields: &[crate::ast::StructField],
+    fields: &[crate::hir::StructField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -180,7 +180,7 @@ fn resolve_struct_type(
 
 fn resolve_struct_fields(
     def_map: &DefMap,
-    fields: &[crate::ast::StructField],
+    fields: &[crate::hir::StructField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
@@ -199,7 +199,7 @@ fn resolve_struct_fields(
 fn resolve_enum_type(
     def_map: &DefMap,
     def: &Def,
-    variants: &[crate::ast::EnumVariant],
+    variants: &[crate::hir::EnumVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -226,7 +226,7 @@ fn resolve_enum_type(
 
 fn resolve_enum_variants(
     def_map: &DefMap,
-    variants: &[crate::ast::EnumVariant],
+    variants: &[crate::hir::EnumVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {

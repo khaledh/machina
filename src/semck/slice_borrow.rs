@@ -13,11 +13,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfg, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
-use crate::ast::{
+use crate::context::TypeCheckedContext;
+use crate::hir::{
     CallArg, Expr, ExprKind, Function, ParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
     Visitor, walk_expr,
 };
-use crate::context::TypeCheckedContext;
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
 use crate::types::Type;
@@ -459,7 +459,7 @@ fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut H
 
 /// Add a DefId to the set if it has slice type.
 fn add_def_if_slice(
-    node_id: crate::ast::NodeId,
+    node_id: crate::hir::NodeId,
     ctx: &TypeCheckedContext,
     defs: &mut HashSet<DefId>,
 ) {

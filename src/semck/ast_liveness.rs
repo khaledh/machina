@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_backward;
 use crate::ast::cfg::{AstCfg, AstCfgNode, AstItem, AstTerminator};
-use crate::ast::{Expr, ExprKind, Pattern, PatternKind, StmtExpr, StmtExprKind};
-use crate::ast::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
+use crate::hir::{Expr, ExprKind, Pattern, PatternKind, StmtExpr, StmtExprKind};
+use crate::hir::{Visitor, walk_expr};
 use crate::resolve::def_map::DefId;
 
 // ============================================================================
@@ -209,7 +209,7 @@ fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut H
 
 /// Only treat heap-owned locals as tracked defs.
 fn add_def_if_heap(
-    node_id: crate::ast::NodeId,
+    node_id: crate::hir::NodeId,
     ctx: &TypeCheckedContext,
     defs: &mut HashSet<DefId>,
 ) {

@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::AstFolder;
-use crate::ast::fold::{walk_expr, walk_if};
-use crate::ast::*;
 use crate::context::HirContext;
 use crate::diag::Span;
+use crate::hir::fold::{AstFolder, walk_expr, walk_if};
+use crate::hir::*;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,

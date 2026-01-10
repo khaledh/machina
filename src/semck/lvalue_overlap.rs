@@ -4,9 +4,9 @@
 //! when at least one argument is mutated (inout/out/sink mode).
 //! Read-only aliasing (`in` mode) is allowed.
 
-use crate::ast::{CallArg, Expr, ExprKind, Function, ParamMode, Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
+use crate::hir::{CallArg, Expr, ExprKind, Function, ParamMode, Visitor, walk_expr};
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
 

@@ -1,8 +1,8 @@
-use crate::ast::{
+use crate::context::TypeCheckedContext;
+use crate::hir::{
     BinaryOp, Decl, Expr, ExprKind, Function, StmtExpr, StmtExprKind, TypeExpr, TypeExprKind,
     UnaryOp, Visitor, walk_expr, walk_stmt_expr,
 };
-use crate::context::TypeCheckedContext;
 use crate::semck::SemCheckError;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
@@ -35,7 +35,7 @@ impl<'a> ValueChecker<'a> {
             }
         }
         for decl in &self.ctx.module.decls {
-            if let crate::ast::Decl::FunctionDecl(decl) = decl {
+            if let crate::hir::Decl::FunctionDecl(decl) = decl {
                 self.check_function_sig(&decl.sig);
             }
         }
@@ -90,22 +90,22 @@ impl<'a> ValueChecker<'a> {
         }
     }
 
-    fn check_function_sig(&mut self, sig: &crate::ast::FunctionSig) {
+    fn check_function_sig(&mut self, sig: &crate::hir::FunctionSig) {
         for param in &sig.params {
             self.check_type_expr(&param.typ);
         }
         self.check_type_expr(&sig.return_type);
     }
 
-    fn check_type_decl(&mut self, decl: &crate::ast::TypeDecl) {
+    fn check_type_decl(&mut self, decl: &crate::hir::TypeDecl) {
         match &decl.kind {
-            crate::ast::TypeDeclKind::Alias { aliased_ty } => self.check_type_expr(aliased_ty),
-            crate::ast::TypeDeclKind::Struct { fields } => {
+            crate::hir::TypeDeclKind::Alias { aliased_ty } => self.check_type_expr(aliased_ty),
+            crate::hir::TypeDeclKind::Struct { fields } => {
                 for field in fields {
                     self.check_type_expr(&field.ty);
                 }
             }
-            crate::ast::TypeDeclKind::Enum { variants } => {
+            crate::hir::TypeDeclKind::Enum { variants } => {
                 for variant in variants {
                     for payload_ty in &variant.payload {
                         self.check_type_expr(payload_ty);

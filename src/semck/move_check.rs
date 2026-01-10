@@ -11,11 +11,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
-use crate::ast::{
+use crate::context::TypeCheckedContext;
+use crate::hir::{
     Expr, ExprKind, Function, NodeId, ParamMode, Pattern, PatternKind, StmtExpr, StmtExprKind,
 };
-use crate::ast::{Visitor, walk_expr};
-use crate::context::TypeCheckedContext;
+use crate::hir::{Visitor, walk_expr};
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};

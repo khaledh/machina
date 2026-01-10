@@ -10,12 +10,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, AstCfgBuilder, AstCfgNode, AstItem, AstTerminator};
-use crate::ast::{
+use crate::context::TypeCheckedContext;
+use crate::diag::Span;
+use crate::hir::{
     CallArgMode, Expr, ExprKind, Function, MatchPattern, MatchPatternBinding, NodeId, ParamMode,
     Pattern, PatternKind, StmtExpr, StmtExprKind, Visitor, walk_expr,
 };
-use crate::context::TypeCheckedContext;
-use crate::diag::Span;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::types::Type;
@@ -321,8 +321,8 @@ impl<'a> DefCollector<'a> {
             ExprKind::Block { items, tail } => {
                 for item in items {
                     match item {
-                        crate::ast::BlockItem::Stmt(stmt) => self.collect_stmt(stmt),
-                        crate::ast::BlockItem::Expr(expr) => self.collect_expr(expr),
+                        crate::hir::BlockItem::Stmt(stmt) => self.collect_stmt(stmt),
+                        crate::hir::BlockItem::Expr(expr) => self.collect_expr(expr),
                     }
                 }
                 if let Some(tail) = tail {
@@ -451,8 +451,8 @@ impl<'a> DefSpanCollector<'a> {
             ExprKind::Block { items, tail } => {
                 for item in items {
                     match item {
-                        crate::ast::BlockItem::Stmt(stmt) => self.collect_stmt(stmt),
-                        crate::ast::BlockItem::Expr(expr) => self.collect_expr(expr),
+                        crate::hir::BlockItem::Stmt(stmt) => self.collect_stmt(stmt),
+                        crate::hir::BlockItem::Expr(expr) => self.collect_expr(expr),
                     }
                 }
                 if let Some(tail) = tail {
@@ -1005,8 +1005,8 @@ impl<'a> DefInitChecker<'a> {
             ExprKind::Block { items, tail } => {
                 for item in items {
                     match item {
-                        crate::ast::BlockItem::Stmt(stmt) => self.check_stmt(stmt),
-                        crate::ast::BlockItem::Expr(expr) => self.check_expr(expr),
+                        crate::hir::BlockItem::Stmt(stmt) => self.check_stmt(stmt),
+                        crate::hir::BlockItem::Expr(expr) => self.check_expr(expr),
                     }
                 }
                 if let Some(tail) = tail {
@@ -1076,12 +1076,12 @@ impl<'a> DefInitChecker<'a> {
                 }
             }
             ExprKind::ArrayLit { init, .. } => match init {
-                crate::ast::ArrayLitInit::Elems(elems) => {
+                crate::hir::ArrayLitInit::Elems(elems) => {
                     for elem in elems {
                         self.check_expr(elem);
                     }
                 }
-                crate::ast::ArrayLitInit::Repeat(expr, _) => self.check_expr(expr),
+                crate::hir::ArrayLitInit::Repeat(expr, _) => self.check_expr(expr),
             },
             ExprKind::TupleLit(fields) => {
                 for field in fields {
@@ -1090,7 +1090,7 @@ impl<'a> DefInitChecker<'a> {
             }
             ExprKind::StringFmt { segments } => {
                 for segment in segments {
-                    if let crate::ast::StringFmtSegment::Expr { expr, .. } = segment {
+                    if let crate::hir::StringFmtSegment::Expr { expr, .. } = segment {
                         self.check_expr(expr);
                     }
                 }
