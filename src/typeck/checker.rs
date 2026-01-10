@@ -43,7 +43,7 @@ impl TypeChecker {
         self.populate_method_symbols()?;
 
         self.halted = false;
-        let module = self.context.module.clone();
+        let module = self.context.ast_module.clone();
         let _ = self.visit_module(&module);
 
         if self.errors.is_empty() {
@@ -55,7 +55,7 @@ impl TypeChecker {
     }
 
     fn populate_type_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for type_decl in self.context.module.type_decls() {
+        for type_decl in self.context.ast_module.type_decls() {
             match &type_decl.kind {
                 TypeDeclKind::Alias { aliased_ty } => {
                     // Resolve the aliased type
@@ -122,13 +122,13 @@ impl TypeChecker {
         let mut overloads = Vec::new();
 
         // Func decls
-        for decl in self.context.module.func_decls() {
+        for decl in self.context.ast_module.func_decls() {
             let def_id = self.context.def_map.lookup_def(decl.id).unwrap().id;
             overloads.push((def_id, decl.sig.clone()));
         }
 
         // Funcs
-        for func in self.context.module.funcs() {
+        for func in self.context.ast_module.funcs() {
             let def_id = self.context.def_map.lookup_def(func.id).unwrap().id;
             overloads.push((def_id, func.sig.clone()));
         }
@@ -141,7 +141,7 @@ impl TypeChecker {
     }
 
     fn populate_method_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for method_block in self.context.module.method_blocks() {
+        for method_block in self.context.ast_module.method_blocks() {
             let type_name = method_block.type_name.clone();
             for method in &method_block.methods {
                 let def_id = self.context.def_map.lookup_def(method.id).unwrap().id;
@@ -1240,7 +1240,7 @@ impl TypeChecker {
     }
 
     fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
-        for block in self.context.module.method_blocks() {
+        for block in self.context.ast_module.method_blocks() {
             for method in &block.methods {
                 let Some(def) = self.context.def_map.lookup_def(method.id) else {
                     continue;

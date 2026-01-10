@@ -36,7 +36,7 @@ impl<'a> StructuralChecker<'a> {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 
-        for decl in ctx.module.type_decls() {
+        for decl in ctx.ast_module.type_decls() {
             match &decl.kind {
                 crate::hir::TypeDeclKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
@@ -71,7 +71,7 @@ impl<'a> StructuralChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        self.visit_module(&self.ctx.module);
+        self.visit_module(&self.ctx.ast_module);
     }
 
     fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: crate::diag::Span) {

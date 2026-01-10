@@ -29,17 +29,17 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        for decl in &self.ctx.module.decls {
+        for decl in &self.ctx.ast_module.decls {
             if let Decl::TypeDecl(decl) = decl {
                 self.check_type_decl(decl);
             }
         }
-        for decl in &self.ctx.module.decls {
+        for decl in &self.ctx.ast_module.decls {
             if let crate::hir::Decl::FunctionDecl(decl) = decl {
                 self.check_function_sig(&decl.sig);
             }
         }
-        for func in self.ctx.module.funcs() {
+        for func in self.ctx.ast_module.funcs() {
             self.check_function_sig(&func.sig);
             self.visit_func(func);
         }

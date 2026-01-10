@@ -412,7 +412,7 @@ impl<'a> FuncLowerer<'a> {
             return ty.clone();
         }
 
-        let decls = self.ctx.module.type_decls();
+        let decls = self.ctx.ast_module.type_decls();
         let decl = decls.iter().find(|decl| decl.name == *name);
         let Some(decl) = decl else {
             return ty.clone();

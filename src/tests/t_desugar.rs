@@ -42,7 +42,7 @@ fn test_desugar_preserves_decl_count() {
     "#;
 
     let ctx = desugar_source(source);
-    assert_eq!(ctx.module.decls.len(), 2);
+    assert_eq!(ctx.ast_module.decls.len(), 2);
 }
 
 #[test]
@@ -55,6 +55,6 @@ fn test_hir_visitor_walks_exprs() {
 
     let ctx = desugar_source(source);
     let mut counter = ExprCounter { count: 0 };
-    counter.visit_module(&ctx.module);
+    counter.visit_module(&ctx.ast_module);
     assert!(counter.count > 0, "expected to visit expressions");
 }

@@ -25,7 +25,7 @@ use crate::types::Type;
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
 
-    for func in ctx.module.funcs() {
+    for func in ctx.ast_module.funcs() {
         check_func(ctx, func, &mut errors);
     }
 

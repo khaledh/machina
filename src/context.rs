@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::ast::{Module as AstModule, NodeId};
-use crate::hir::Module as HirModule;
+use crate::hir::model::Module as HirModule;
 use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
@@ -46,6 +46,7 @@ pub struct ResolvedContext {
 impl ResolvedContext {
     pub fn with_hir(self, module: HirModule) -> HirContext {
         HirContext {
+            ast_module: self.module,
             module,
             def_map: self.def_map,
             symbols: self.symbols,
@@ -58,6 +59,7 @@ impl ResolvedContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct HirContext {
+    pub ast_module: AstModule,
     pub module: HirModule,
     pub def_map: DefMap,
     pub symbols: SymbolTable,
@@ -66,6 +68,7 @@ pub struct HirContext {
 impl HirContext {
     pub fn with_type_map(self, type_map: TypeMap) -> TypeCheckedContext {
         TypeCheckedContext {
+            ast_module: self.ast_module,
             module: self.module,
             def_map: self.def_map,
             type_map,
@@ -79,6 +82,7 @@ impl HirContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct TypeCheckedContext {
+    pub ast_module: AstModule,
     pub module: HirModule,
     pub def_map: DefMap,
     pub type_map: TypeMap,
@@ -93,6 +97,7 @@ impl TypeCheckedContext {
         full_init_assigns: HashSet<NodeId>,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
+            ast_module: self.ast_module,
             module: self.module,
             def_map: self.def_map,
             type_map: self.type_map,
@@ -109,6 +114,7 @@ impl TypeCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
+    pub ast_module: AstModule,
     pub module: HirModule,
     pub def_map: DefMap,
     pub type_map: TypeMap,
@@ -123,6 +129,7 @@ pub struct SemanticCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
+    pub ast_module: AstModule,
     pub module: HirModule,
     pub def_map: DefMap,
     pub type_map: TypeMap,

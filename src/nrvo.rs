@@ -21,6 +21,7 @@ impl NrvoAnalyzer {
 
     pub fn analyze(self) -> AnalyzedContext {
         let SemanticCheckedContext {
+            ast_module,
             module,
             def_map,
             type_map,
@@ -32,11 +33,12 @@ impl NrvoAnalyzer {
 
         let mut def_map = def_map;
 
-        for func in module.funcs() {
+        for func in ast_module.funcs() {
             Self::analyze_function(&mut def_map, &type_map, func);
         }
 
         AnalyzedContext {
+            ast_module,
             module,
             def_map,
             type_map,

@@ -111,7 +111,7 @@ pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
     let mut errors = Vec::new();
     let mut init_assigns = HashSet::new();
     let mut full_init_assigns = HashSet::new();
-    for func in ctx.module.funcs() {
+    for func in ctx.ast_module.funcs() {
         check_func(
             func,
             ctx,

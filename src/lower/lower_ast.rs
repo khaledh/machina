@@ -312,7 +312,7 @@ pub fn lower_ast(
     let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
 
     // Lower all callables (functions + methods).
-    for callable in ctx.module.callables() {
+    for callable in ctx.ast_module.callables() {
         let body = match callable {
             CallableRef::FunctionDecl(_) => continue,
             CallableRef::Function(function) => FuncLowerer::new_function(

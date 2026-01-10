@@ -30,7 +30,7 @@ pub struct MoveCheckResult {
 pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
     let mut errors = Vec::new();
     let mut implicit_moves = HashSet::new();
-    for func in ctx.module.funcs() {
+    for func in ctx.ast_module.funcs() {
         check_func(func, ctx, &mut errors, &mut implicit_moves);
     }
     MoveCheckResult {

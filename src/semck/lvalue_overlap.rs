@@ -58,7 +58,7 @@ enum Bound {
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut checker = LvalueOverlapChecker::new(ctx);
-    checker.visit_module(&ctx.module);
+    checker.visit_module(&ctx.ast_module);
     checker.errors
 }
 

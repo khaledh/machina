@@ -8,7 +8,7 @@ use crate::types::Type;
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut checker = SliceEscapeChecker::new(ctx);
-    checker.visit_module(&ctx.module);
+    checker.visit_module(&ctx.ast_module);
     checker.errors
 }
 
