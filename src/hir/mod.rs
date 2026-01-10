@@ -7,6 +7,7 @@
 pub mod builder;
 pub mod fold;
 pub mod format;
+pub mod model;
 pub mod visit;
 
 pub use crate::ast::*;
