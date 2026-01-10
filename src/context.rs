@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use crate::ast::{Module, NodeId};
+use crate::ast::{Module as AstModule, NodeId};
+use crate::hir::Module as HirModule;
 use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
@@ -14,11 +15,11 @@ use crate::typeck::type_map::TypeMap;
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct AstContext {
-    pub module: Module,
+    pub module: AstModule,
 }
 
 impl AstContext {
-    pub fn new(module: Module) -> Self {
+    pub fn new(module: AstModule) -> Self {
         Self { module }
     }
 
@@ -37,12 +38,32 @@ impl AstContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct ResolvedContext {
-    pub module: Module,
+    pub module: AstModule,
     pub def_map: DefMap,
     pub symbols: SymbolTable,
 }
 
 impl ResolvedContext {
+    pub fn with_hir(self, module: HirModule) -> HirContext {
+        HirContext {
+            module,
+            def_map: self.def_map,
+            symbols: self.symbols,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HIR Context
+// -----------------------------------------------------------------------------
+#[derive(Clone)]
+pub struct HirContext {
+    pub module: HirModule,
+    pub def_map: DefMap,
+    pub symbols: SymbolTable,
+}
+
+impl HirContext {
     pub fn with_type_map(self, type_map: TypeMap) -> TypeCheckedContext {
         TypeCheckedContext {
             module: self.module,
@@ -58,7 +79,7 @@ impl ResolvedContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct TypeCheckedContext {
-    pub module: Module,
+    pub module: HirModule,
     pub def_map: DefMap,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -88,7 +109,7 @@ impl TypeCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
-    pub module: Module,
+    pub module: HirModule,
     pub def_map: DefMap,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -102,7 +123,7 @@ pub struct SemanticCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
-    pub module: Module,
+    pub module: HirModule,
     pub def_map: DefMap,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,

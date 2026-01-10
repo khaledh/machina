@@ -4,6 +4,7 @@ pub mod compile;
 pub mod context;
 pub mod desugar;
 pub mod diag;
+pub mod hir;
 pub mod lexer;
 pub mod liveness;
 pub mod lower;

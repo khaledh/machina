@@ -128,9 +128,13 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
+    // --- Desugar ---
+
+    let hir_context = desugar::desugar(resolved_context);
+
     // --- Type Check ---
 
-    let type_checked_context = type_check(resolved_context).map_err(|errs| {
+    let type_checked_context = type_check(hir_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()
@@ -143,13 +147,9 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
-    // --- Desugar ---
-
-    let desugared_context = desugar::desugar(type_checked_context);
-
     // --- Semantic Check ---
 
-    let semantic_checked_context = sem_check(desugared_context).map_err(|errs| {
+    let semantic_checked_context = sem_check(type_checked_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

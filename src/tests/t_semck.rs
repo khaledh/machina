@@ -1,4 +1,5 @@
 use crate::context::{AstContext, SemanticCheckedContext};
+use crate::desugar;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
 use crate::resolve::resolve;
@@ -18,7 +19,8 @@ fn sem_check_source(source: &str) -> Result<SemanticCheckedContext, Vec<SemCheck
 
     let ast_context = AstContext::new(module);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
-    let type_checked_context = type_check(resolved_context).expect("Failed to type check");
+    let hir_context = desugar::desugar(resolved_context);
+    let type_checked_context = type_check(hir_context).expect("Failed to type check");
     sem_check(type_checked_context)
 }
 

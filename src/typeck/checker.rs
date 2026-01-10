@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::AstFolder;
 use crate::ast::fold::{walk_expr, walk_if};
 use crate::ast::*;
-use crate::context::ResolvedContext;
+use crate::context::HirContext;
 use crate::diag::Span;
 use crate::resolve::def_map::{DefId, DefKind};
 use crate::types::{
@@ -16,7 +16,7 @@ use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
 use super::type_map::{CallParam, CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
 
 pub struct TypeChecker {
-    context: ResolvedContext,
+    context: HirContext,
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, Vec<OverloadSig>>,
     method_sigs: HashMap<String, HashMap<String, Vec<OverloadSig>>>,
@@ -26,7 +26,7 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
-    pub fn new(context: ResolvedContext) -> Self {
+    pub fn new(context: HirContext) -> Self {
         Self {
             context,
             type_map_builder: TypeMapBuilder::new(),
