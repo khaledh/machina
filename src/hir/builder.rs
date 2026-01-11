@@ -99,12 +99,24 @@ impl ToHir for ast::StructDefField {
     type Output = hir::StructDefField;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::StructDefField {
-            id: self.id,
-            name: self.name,
-            ty: self.ty.to_hir(def_map),
-            span: self.span,
-        }
+        struct_def_field_to_hir(def_map, &self)
+    }
+}
+
+impl ToHir for &ast::StructDefField {
+    type Output = hir::StructDefField;
+
+    fn to_hir(self, def_map: &DefMap) -> Self::Output {
+        struct_def_field_to_hir(def_map, self)
+    }
+}
+
+fn struct_def_field_to_hir(def_map: &DefMap, field: &ast::StructDefField) -> hir::StructDefField {
+    hir::StructDefField {
+        id: field.id,
+        name: field.name.clone(),
+        ty: (&field.ty).to_hir(def_map),
+        span: field.span,
     }
 }
 
@@ -112,16 +124,28 @@ impl ToHir for ast::EnumDefVariant {
     type Output = hir::EnumDefVariant;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::EnumDefVariant {
-            id: self.id,
-            name: self.name,
-            payload: self
-                .payload
-                .into_iter()
-                .map(|ty| ty.to_hir(def_map))
-                .collect(),
-            span: self.span,
-        }
+        enum_def_variant_to_hir(def_map, &self)
+    }
+}
+
+impl ToHir for &ast::EnumDefVariant {
+    type Output = hir::EnumDefVariant;
+
+    fn to_hir(self, def_map: &DefMap) -> Self::Output {
+        enum_def_variant_to_hir(def_map, self)
+    }
+}
+
+fn enum_def_variant_to_hir(def_map: &DefMap, variant: &ast::EnumDefVariant) -> hir::EnumDefVariant {
+    hir::EnumDefVariant {
+        id: variant.id,
+        name: variant.name.clone(),
+        payload: variant
+            .payload
+            .iter()
+            .map(|ty| ty.to_hir(def_map))
+            .collect(),
+        span: variant.span,
     }
 }
 
@@ -129,42 +153,51 @@ impl ToHir for ast::TypeExpr {
     type Output = hir::TypeExpr;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::TypeExpr {
-            id: self.id,
-            span: self.span,
-            kind: match self.kind {
-                ast::TypeExprKind::Named(_name) => {
-                    hir::TypeExprKind::Named(def_id(def_map, self.id))
-                }
-                ast::TypeExprKind::Array { elem_ty_expr, dims } => hir::TypeExprKind::Array {
-                    elem_ty_expr: Box::new(elem_ty_expr.to_hir(def_map)),
-                    dims,
-                },
-                ast::TypeExprKind::Tuple { field_ty_exprs } => hir::TypeExprKind::Tuple {
-                    field_ty_exprs: field_ty_exprs
-                        .into_iter()
-                        .map(|t| t.to_hir(def_map))
-                        .collect(),
-                },
-                ast::TypeExprKind::Range { min, max } => hir::TypeExprKind::Range { min, max },
-                ast::TypeExprKind::Slice { elem_ty_expr } => hir::TypeExprKind::Slice {
-                    elem_ty_expr: Box::new(elem_ty_expr.to_hir(def_map)),
-                },
-                ast::TypeExprKind::Heap { elem_ty_expr } => hir::TypeExprKind::Heap {
-                    elem_ty_expr: Box::new(elem_ty_expr.to_hir(def_map)),
-                },
-                ast::TypeExprKind::Fn {
-                    params,
-                    ret_ty_expr,
-                } => hir::TypeExprKind::Fn {
-                    params: params
-                        .into_iter()
-                        .map(|param| param.to_hir(def_map))
-                        .collect(),
-                    ret_ty_expr: Box::new(ret_ty_expr.to_hir(def_map)),
-                },
+        type_expr_to_hir(def_map, &self)
+    }
+}
+
+impl ToHir for &ast::TypeExpr {
+    type Output = hir::TypeExpr;
+
+    fn to_hir(self, def_map: &DefMap) -> Self::Output {
+        type_expr_to_hir(def_map, self)
+    }
+}
+
+fn type_expr_to_hir(def_map: &DefMap, type_expr: &ast::TypeExpr) -> hir::TypeExpr {
+    hir::TypeExpr {
+        id: type_expr.id,
+        span: type_expr.span,
+        kind: match &type_expr.kind {
+            ast::TypeExprKind::Named(_name) => {
+                hir::TypeExprKind::Named(def_id(def_map, type_expr.id))
+            }
+            ast::TypeExprKind::Array { elem_ty_expr, dims } => hir::TypeExprKind::Array {
+                elem_ty_expr: Box::new(elem_ty_expr.as_ref().to_hir(def_map)),
+                dims: dims.clone(),
             },
-        }
+            ast::TypeExprKind::Tuple { field_ty_exprs } => hir::TypeExprKind::Tuple {
+                field_ty_exprs: field_ty_exprs.iter().map(|t| t.to_hir(def_map)).collect(),
+            },
+            ast::TypeExprKind::Range { min, max } => hir::TypeExprKind::Range {
+                min: *min,
+                max: *max,
+            },
+            ast::TypeExprKind::Slice { elem_ty_expr } => hir::TypeExprKind::Slice {
+                elem_ty_expr: Box::new(elem_ty_expr.as_ref().to_hir(def_map)),
+            },
+            ast::TypeExprKind::Heap { elem_ty_expr } => hir::TypeExprKind::Heap {
+                elem_ty_expr: Box::new(elem_ty_expr.as_ref().to_hir(def_map)),
+            },
+            ast::TypeExprKind::Fn {
+                params,
+                ret_ty_expr,
+            } => hir::TypeExprKind::Fn {
+                params: params.iter().map(|param| param.to_hir(def_map)).collect(),
+                ret_ty_expr: Box::new(ret_ty_expr.as_ref().to_hir(def_map)),
+            },
+        },
     }
 }
 
@@ -172,10 +205,22 @@ impl ToHir for ast::FnTypeParam {
     type Output = hir::FnTypeParam;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::FnTypeParam {
-            mode: self.mode,
-            ty_expr: self.ty_expr.to_hir(def_map),
-        }
+        fn_type_param_to_hir(def_map, &self)
+    }
+}
+
+impl ToHir for &ast::FnTypeParam {
+    type Output = hir::FnTypeParam;
+
+    fn to_hir(self, def_map: &DefMap) -> Self::Output {
+        fn_type_param_to_hir(def_map, self)
+    }
+}
+
+fn fn_type_param_to_hir(def_map: &DefMap, param: &ast::FnTypeParam) -> hir::FnTypeParam {
+    hir::FnTypeParam {
+        mode: param.mode.clone(),
+        ty_expr: (&param.ty_expr).to_hir(def_map),
     }
 }
 

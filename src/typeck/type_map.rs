@@ -1,5 +1,6 @@
-use crate::ast::{self, NodeId, ParamMode};
-use crate::hir::model::{FnTypeParam, TypeExpr, TypeExprKind};
+use crate::ast::{NodeId, ParamMode};
+use crate::hir::builder::ToHir;
+use crate::hir::model::*;
 use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
@@ -127,14 +128,22 @@ fn resolve_named_type(
 
     match &def.kind {
         DefKind::TypeAlias { ty_expr } => {
-            let hir_ty_expr = hir_type_expr_from_ast(def_map, ty_expr);
+            let hir_ty_expr = ty_expr.to_hir(def_map);
             resolve_type_alias(def_map, def, &hir_ty_expr, in_progress)
         }
         DefKind::StructDef { fields } => {
-            resolve_struct_type(def_map, def, fields, in_progress, depth)
+            let hir_fields = fields
+                .iter()
+                .map(|field| field.to_hir(def_map))
+                .collect::<Vec<_>>();
+            resolve_struct_type(def_map, def, &hir_fields, in_progress, depth)
         }
         DefKind::EnumDef { variants } => {
-            resolve_enum_type(def_map, def, variants, in_progress, depth)
+            let hir_variants = variants
+                .iter()
+                .map(|variant| variant.to_hir(def_map))
+                .collect::<Vec<_>>();
+            resolve_enum_type(def_map, def, &hir_variants, in_progress, depth)
         }
         _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
     }
@@ -155,58 +164,10 @@ fn resolve_type_alias(
     ty
 }
 
-fn hir_type_expr_from_ast(def_map: &DefMap, type_expr: &ast::TypeExpr) -> TypeExpr {
-    TypeExpr {
-        id: type_expr.id,
-        span: type_expr.span,
-        kind: match &type_expr.kind {
-            ast::TypeExprKind::Named(_name) => {
-                let def = def_map
-                    .lookup_node_def(type_expr.id)
-                    .unwrap_or_else(|| panic!("Missing def for NodeId({})", type_expr.id.0));
-                TypeExprKind::Named(def.id)
-            }
-            ast::TypeExprKind::Array { elem_ty_expr, dims } => TypeExprKind::Array {
-                elem_ty_expr: Box::new(hir_type_expr_from_ast(def_map, elem_ty_expr)),
-                dims: dims.clone(),
-            },
-            ast::TypeExprKind::Tuple { field_ty_exprs } => TypeExprKind::Tuple {
-                field_ty_exprs: field_ty_exprs
-                    .iter()
-                    .map(|field| hir_type_expr_from_ast(def_map, field))
-                    .collect(),
-            },
-            ast::TypeExprKind::Range { min, max } => TypeExprKind::Range {
-                min: *min,
-                max: *max,
-            },
-            ast::TypeExprKind::Slice { elem_ty_expr } => TypeExprKind::Slice {
-                elem_ty_expr: Box::new(hir_type_expr_from_ast(def_map, elem_ty_expr)),
-            },
-            ast::TypeExprKind::Heap { elem_ty_expr } => TypeExprKind::Heap {
-                elem_ty_expr: Box::new(hir_type_expr_from_ast(def_map, elem_ty_expr)),
-            },
-            ast::TypeExprKind::Fn {
-                params,
-                ret_ty_expr,
-            } => TypeExprKind::Fn {
-                params: params
-                    .iter()
-                    .map(|param| FnTypeParam {
-                        mode: param.mode.clone(),
-                        ty_expr: hir_type_expr_from_ast(def_map, &param.ty_expr),
-                    })
-                    .collect(),
-                ret_ty_expr: Box::new(hir_type_expr_from_ast(def_map, ret_ty_expr)),
-            },
-        },
-    }
-}
-
 fn resolve_struct_type(
     def_map: &DefMap,
     def: &Def,
-    fields: &[ast::StructDefField],
+    fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -233,15 +194,14 @@ fn resolve_struct_type(
 
 fn resolve_struct_fields(
     def_map: &DefMap,
-    fields: &[ast::StructDefField],
+    fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
     fields
         .iter()
         .map(|field| {
-            let hir_ty = hir_type_expr_from_ast(def_map, &field.ty);
-            let field_ty = resolve_type_expr_impl(def_map, &hir_ty, in_progress, depth)?;
+            let field_ty = resolve_type_expr_impl(def_map, &field.ty, in_progress, depth)?;
             Ok(StructField {
                 name: field.name.clone(),
                 ty: field_ty,
@@ -253,7 +213,7 @@ fn resolve_struct_fields(
 fn resolve_enum_type(
     def_map: &DefMap,
     def: &Def,
-    variants: &[ast::EnumDefVariant],
+    variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -280,7 +240,7 @@ fn resolve_enum_type(
 
 fn resolve_enum_variants(
     def_map: &DefMap,
-    variants: &[ast::EnumDefVariant],
+    variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
@@ -289,10 +249,7 @@ fn resolve_enum_variants(
         let payload = variant
             .payload
             .iter()
-            .map(|payload_ty| {
-                let hir_ty = hir_type_expr_from_ast(def_map, payload_ty);
-                resolve_type_expr_impl(def_map, &hir_ty, in_progress, depth)
-            })
+            .map(|payload_ty| resolve_type_expr_impl(def_map, payload_ty, in_progress, depth))
             .collect::<Result<Vec<Type>, _>>()?;
         enum_variants.push(EnumVariant {
             name: variant.name.clone(),
