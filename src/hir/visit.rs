@@ -88,8 +88,8 @@ pub trait Visitor {
         walk_method_block(self, method_block)
     }
 
-    fn visit_method(&mut self, method: &Method) {
-        walk_method(self, method)
+    fn visit_method_def(&mut self, method_def: &MethodDef) {
+        walk_method_def(self, method_def)
     }
 
     // --- Blocks ---
@@ -216,14 +216,14 @@ pub fn walk_param<V: Visitor + ?Sized>(v: &mut V, param: &Param) {
 // --- Method Blocks ---
 
 pub fn walk_method_block<V: Visitor + ?Sized>(v: &mut V, method_block: &MethodBlock) {
-    for method in &method_block.methods {
-        v.visit_method(method);
+    for method in &method_block.method_defs {
+        v.visit_method_def(method);
     }
 }
 
-pub fn walk_method<V: Visitor + ?Sized>(v: &mut V, method: &Method) {
-    v.visit_method_sig(&method.sig);
-    v.visit_expr(&method.body);
+pub fn walk_method_def<V: Visitor + ?Sized>(v: &mut V, method_def: &MethodDef) {
+    v.visit_method_sig(&method_def.sig);
+    v.visit_expr(&method_def.body);
 }
 
 // --- Blocks ---

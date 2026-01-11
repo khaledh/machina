@@ -73,12 +73,12 @@ impl<'a> Parser<'a> {
         Ok(Decl::MethodBlock(MethodBlock {
             id: self.id_gen.new_id(),
             type_name,
-            methods,
+            method_defs: methods,
             span: self.close(marker),
         }))
     }
 
-    fn parse_method(&mut self, type_name: &str) -> Result<Method, ParseError> {
+    fn parse_method(&mut self, type_name: &str) -> Result<MethodDef, ParseError> {
         let marker = self.mark();
         let sig = self.parse_method_sig()?;
 
@@ -92,7 +92,7 @@ impl<'a> Parser<'a> {
         self.closure_base = prev_base;
         self.closure_index = prev_index;
 
-        Ok(Method {
+        Ok(MethodDef {
             id: self.id_gen.new_id(),
             sig,
             body,

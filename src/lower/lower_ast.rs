@@ -116,28 +116,28 @@ impl<'a> FuncLowerer<'a> {
 
     pub fn new_method(
         ctx: &'a AnalyzedContext,
-        method: &'a Method,
+        method_def: &'a MethodDef,
         global_interner: &'a mut GlobalInterner,
         drop_glue: &'a mut DropGlueRegistry,
         trace_alloc: bool,
     ) -> Self {
-        let mut params = Vec::with_capacity(method.sig.params.len() + 1);
+        let mut params = Vec::with_capacity(method_def.sig.params.len() + 1);
         let self_def = ctx
             .def_map
-            .lookup_def(method.sig.self_param.def_id)
+            .lookup_def(method_def.sig.self_param.def_id)
             .unwrap_or_else(|| {
                 panic!(
                     "compiler bug: self def {:?} not found",
-                    method.sig.self_param.def_id
+                    method_def.sig.self_param.def_id
                 )
             });
         params.push(LoweredParam {
-            id: method.sig.self_param.id,
-            def_id: method.sig.self_param.def_id,
+            id: method_def.sig.self_param.id,
+            def_id: method_def.sig.self_param.def_id,
             name: self_def.name.clone(),
-            mode: method.sig.self_param.mode.clone(),
+            mode: method_def.sig.self_param.mode.clone(),
         });
-        for param in &method.sig.params {
+        for param in &method_def.sig.params {
             let def = ctx
                 .def_map
                 .lookup_def(param.ident)
@@ -151,9 +151,9 @@ impl<'a> FuncLowerer<'a> {
         }
         Self::new(
             ctx,
-            method.id,
-            &method.sig.name,
-            &method.body,
+            method_def.id,
+            &method_def.sig.name,
+            &method_def.body,
             params,
             global_interner,
             drop_glue,
@@ -352,11 +352,11 @@ pub fn lower_ast(
                 )
                 .lower()?,
             ),
-            CallableRef::Method { method, .. } => (
-                method.def_id,
+            CallableRef::MethodDef { method_def, .. } => (
+                method_def.def_id,
                 FuncLowerer::new_method(
                     &ctx,
-                    method,
+                    method_def,
                     &mut global_interner,
                     &mut drop_glue,
                     trace_alloc,

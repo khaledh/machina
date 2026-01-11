@@ -154,17 +154,17 @@ impl MethodBlock {
         let pad1 = indent(level + 1);
         writeln!(f, "{}Type: {}", pad1, self.type_name)?;
         writeln!(f, "{}Methods:", pad1)?;
-        for method in &self.methods {
+        for method in &self.method_defs {
             method.fmt_with_indent(f, level + 2)?;
         }
         Ok(())
     }
 }
 
-impl Method {
+impl MethodDef {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        writeln!(f, "{}Method [{}]", pad, self.id)?;
+        writeln!(f, "{}MethodDef [{}]", pad, self.id)?;
         self.sig.fmt_with_indent(f, level + 1)?;
         self.body.fmt_with_indent(f, level + 1)
     }

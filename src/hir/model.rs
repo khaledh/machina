@@ -81,10 +81,10 @@ impl Module {
                 Decl::FuncDecl(func_decl) => callables.push(CallableRef::FuncDecl(func_decl)),
                 Decl::FuncDef(func_def) => callables.push(CallableRef::FuncDef(func_def)),
                 Decl::MethodBlock(method_block) => {
-                    for method in &method_block.methods {
-                        callables.push(CallableRef::Method {
+                    for method_def in &method_block.method_defs {
+                        callables.push(CallableRef::MethodDef {
                             type_name: &method_block.type_name,
-                            method,
+                            method_def,
                         });
                     }
                 }
@@ -113,9 +113,9 @@ pub enum Decl {
 pub enum CallableRef<'a> {
     FuncDecl(&'a FuncDecl),
     FuncDef(&'a FuncDef),
-    Method {
+    MethodDef {
         type_name: &'a str,
-        method: &'a Method,
+        method_def: &'a MethodDef,
     },
     ClosureDecl(&'a ClosureDecl),
 }
@@ -125,7 +125,7 @@ impl<'a> CallableRef<'a> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.id,
             CallableRef::FuncDef(func_def) => func_def.id,
-            CallableRef::Method { method, .. } => method.id,
+            CallableRef::MethodDef { method_def, .. } => method_def.id,
             CallableRef::ClosureDecl(closure_decl) => closure_decl.id,
         }
     }
@@ -134,7 +134,7 @@ impl<'a> CallableRef<'a> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::FuncDef(func_def) => func_def.sig.name.clone(),
-            CallableRef::Method { method, .. } => method.sig.name.clone(),
+            CallableRef::MethodDef { method_def, .. } => method_def.sig.name.clone(),
             CallableRef::ClosureDecl(closure_decl) => closure_decl.sig.name.clone(),
         }
     }
@@ -143,8 +143,11 @@ impl<'a> CallableRef<'a> {
         match self {
             CallableRef::FuncDecl(_) => self.name(),
             CallableRef::FuncDef(_) => self.name(),
-            CallableRef::Method { type_name, method } => {
-                format!("{type_name}${}", method.sig.name)
+            CallableRef::MethodDef {
+                type_name,
+                method_def,
+            } => {
+                format!("{type_name}${}", method_def.sig.name)
             }
             CallableRef::ClosureDecl(_) => self.name(),
         }
@@ -154,7 +157,7 @@ impl<'a> CallableRef<'a> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.span,
             CallableRef::FuncDef(func_def) => func_def.span,
-            CallableRef::Method { method, .. } => method.span,
+            CallableRef::MethodDef { method_def, .. } => method_def.span,
             CallableRef::ClosureDecl(closure_decl) => closure_decl.span,
         }
     }
@@ -193,12 +196,12 @@ pub struct FuncDef {
 pub struct MethodBlock {
     pub id: NodeId,
     pub type_name: String,
-    pub methods: Vec<Method>,
+    pub method_defs: Vec<MethodDef>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct Method {
+pub struct MethodDef {
     pub id: NodeId,
     pub def_id: DefId,
     pub sig: MethodSig,

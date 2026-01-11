@@ -239,7 +239,7 @@ impl SymbolResolver {
                     }
                     self.populate_callable(callable);
                 }
-                CallableRef::Method { .. } => self.populate_callable(callable),
+                CallableRef::MethodDef { .. } => self.populate_callable(callable),
                 CallableRef::ClosureDecl(_) => self.populate_callable(callable),
             }
         }
@@ -580,9 +580,9 @@ impl Visitor for SymbolResolver {
         walk_method_block(self, method_block);
     }
 
-    fn visit_method(&mut self, method: &Method) {
-        self.visit_type_expr(&method.sig.return_type);
-        for param in &method.sig.params {
+    fn visit_method_def(&mut self, method_def: &MethodDef) {
+        self.visit_type_expr(&method_def.sig.return_type);
+        for param in &method_def.sig.params {
             self.visit_type_expr(&param.typ);
         }
 
@@ -590,14 +590,14 @@ impl Visitor for SymbolResolver {
         self.with_scope(|resolver| {
             resolver.register_param(
                 "self",
-                method.sig.self_param.mode.clone(),
-                method.sig.self_param.id,
-                method.sig.self_param.span,
+                method_def.sig.self_param.mode.clone(),
+                method_def.sig.self_param.id,
+                method_def.sig.self_param.span,
                 0,
             );
 
             // Record defs for the method parameters.
-            for (index, param) in method.sig.params.iter().enumerate() {
+            for (index, param) in method_def.sig.params.iter().enumerate() {
                 resolver.register_param(
                     &param.ident,
                     param.mode.clone(),
@@ -608,7 +608,7 @@ impl Visitor for SymbolResolver {
             }
 
             // Visit the method body.
-            resolver.visit_expr(&method.body);
+            resolver.visit_expr(&method_def.body);
         });
     }
 

@@ -55,8 +55,8 @@ pub trait AstFolder {
         walk_method_block(self, method_block)
     }
 
-    fn visit_method(&mut self, method: &Method) -> Result<Self::Output, Self::Error> {
-        walk_method(self, method)
+    fn visit_method_def(&mut self, method_def: &MethodDef) -> Result<Self::Output, Self::Error> {
+        walk_method_def(self, method_def)
     }
 
     // --- Blocks ---
@@ -186,17 +186,17 @@ pub fn walk_method_block<F: AstFolder + ?Sized>(
     method_block: &MethodBlock,
 ) -> Result<Vec<F::Output>, F::Error> {
     method_block
-        .methods
+        .method_defs
         .iter()
-        .map(|method| f.visit_method(method))
+        .map(|method| f.visit_method_def(method))
         .collect()
 }
 
-pub fn walk_method<F: AstFolder + ?Sized>(
+pub fn walk_method_def<F: AstFolder + ?Sized>(
     f: &mut F,
-    method: &Method,
+    method_def: &MethodDef,
 ) -> Result<F::Output, F::Error> {
-    walk_expr(f, &method.body)
+    walk_expr(f, &method_def.body)
 }
 
 // --- Blocks ---

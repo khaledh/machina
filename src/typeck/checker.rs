@@ -144,7 +144,7 @@ impl TypeChecker {
     fn populate_method_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
         for method_block in self.ctx.module.method_blocks() {
             let type_name = method_block.type_name.clone();
-            for method in &method_block.methods {
+            for method in &method_block.method_defs {
                 let def_id = method.def_id;
                 let params = self.build_param_sigs(&method.sig.params)?;
                 let return_type = self.resolve_return_type(&method.sig.return_type)?;
@@ -328,7 +328,7 @@ impl TypeChecker {
     fn check_method(
         &mut self,
         method_block: &MethodBlock,
-        method: &Method,
+        method_def: &MethodDef,
     ) -> Result<Type, Vec<TypeCheckError>> {
         let self_ty = match self.type_defs.get(&method_block.type_name) {
             Some(ty) => ty.clone(),
@@ -339,7 +339,7 @@ impl TypeChecker {
             }
         };
 
-        let return_type = match self.resolve_return_type(&method.sig.return_type) {
+        let return_type = match self.resolve_return_type(&method_def.sig.return_type) {
             Ok(ty) => ty,
             Err(errs) => {
                 self.errors.extend(errs);
@@ -347,7 +347,7 @@ impl TypeChecker {
             }
         };
 
-        let param_sigs = match self.build_param_sigs(&method.sig.params) {
+        let param_sigs = match self.build_param_sigs(&method_def.sig.params) {
             Ok(params) => params,
             Err(errs) => {
                 self.errors.extend(errs);
@@ -359,17 +359,17 @@ impl TypeChecker {
             .map(|param| param.ty.clone())
             .collect::<Vec<_>>();
 
-        let self_def_id = method.sig.self_param.def_id;
+        let self_def_id = method_def.sig.self_param.def_id;
         if let Some(def) = self.ctx.def_map.lookup_def(self_def_id) {
             self.type_map_builder
                 .record_def_type(def.clone(), self_ty.clone());
             self.type_map_builder
-                .record_node_type(method.sig.self_param.id, self_ty.clone());
+                .record_node_type(method_def.sig.self_param.id, self_ty.clone());
         } else {
             panic!("self parameter not found in def_map");
         }
 
-        for (param, param_ty) in method.sig.params.iter().zip(param_types.iter()) {
+        for (param, param_ty) in method_def.sig.params.iter().zip(param_types.iter()) {
             match self.ctx.def_map.lookup_def(param.ident) {
                 Some(def) => {
                     self.type_map_builder
@@ -381,7 +381,7 @@ impl TypeChecker {
             }
         }
 
-        let body_ty = match self.visit_expr(&method.body, Some(&return_type)) {
+        let body_ty = match self.visit_expr(&method_def.body, Some(&return_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
@@ -389,7 +389,7 @@ impl TypeChecker {
             }
         };
 
-        let return_span = self.function_return_span(&method.body);
+        let return_span = self.function_return_span(&method_def.body);
         if matches!(
             type_assignable(&body_ty, &return_type),
             TypeAssignability::Incompatible
@@ -406,7 +406,7 @@ impl TypeChecker {
         }
 
         self.type_map_builder
-            .record_node_type(method.id, body_ty.clone());
+            .record_node_type(method_def.id, body_ty.clone());
 
         if self.errors.is_empty() {
             Ok(body_ty)
@@ -1243,7 +1243,7 @@ impl TypeChecker {
 
     fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
         for block in self.ctx.module.method_blocks() {
-            for method in &block.methods {
+            for method in &block.method_defs {
                 if method.def_id == def_id {
                     return method.sig.self_param.mode.clone();
                 }
@@ -1598,7 +1598,7 @@ impl AstFolder for TypeChecker {
         }
 
         let mut outputs = Vec::new();
-        for method in &method_block.methods {
+        for method in &method_block.method_defs {
             if self.check_method(method_block, method).is_err() {
                 self.halted = true;
                 break;

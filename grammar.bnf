@@ -46,8 +46,8 @@ Func               ::= FuncSig Block
 FuncSig            ::= "fn" Identifier "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
-MethodBlock        ::= Identifier "::" "{" Method* "}"
-Method             ::= MethodSig Block
+MethodBlock        ::= Identifier "::" "{" MethodDef* "}"
+MethodDef          ::= MethodSig Block
 MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
 SelfParam          ::= ParamMode? "self"
 

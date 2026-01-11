@@ -227,8 +227,8 @@ impl ToHir for ast::MethodBlock {
         hir::MethodBlock {
             id: self.id,
             type_name: self.type_name,
-            methods: self
-                .methods
+            method_defs: self
+                .method_defs
                 .into_iter()
                 .map(|method| method.to_hir(def_map))
                 .collect(),
@@ -237,12 +237,12 @@ impl ToHir for ast::MethodBlock {
     }
 }
 
-impl ToHir for ast::Method {
-    type Output = hir::Method;
+impl ToHir for ast::MethodDef {
+    type Output = hir::MethodDef;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
         let def_id = def_id(def_map, self.id);
-        hir::Method {
+        hir::MethodDef {
             id: self.id,
             def_id,
             sig: self.sig.to_hir(def_map),
