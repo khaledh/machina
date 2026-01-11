@@ -94,9 +94,9 @@ fn test_parse_multidim_array_type() {
     let func = &funcs[0];
 
     assert_eq!(func.sig.name, "test");
-    match &func.sig.return_type.kind {
-        TypeExprKind::Array { elem_ty, dims } => {
-            match &elem_ty.kind {
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            match &elem_ty_expr.kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
@@ -117,9 +117,9 @@ fn test_parse_multidim_array_type_3d() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    match &func.sig.return_type.kind {
-        TypeExprKind::Array { elem_ty, dims } => {
-            match &elem_ty.kind {
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            match &elem_ty_expr.kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
@@ -224,8 +224,8 @@ fn test_parse_heap_type_and_alloc_expr() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    match &func.sig.return_type.kind {
-        TypeExprKind::Heap { elem_ty } => match &elem_ty.kind {
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Heap { elem_ty_expr } => match &elem_ty_expr.kind {
             TypeExprKind::Named(name) => assert_eq!(name, "u64"),
             _ => panic!("Expected named element type"),
         },
@@ -326,14 +326,14 @@ fn test_parse_tuple_type() {
     let func = &funcs[0];
 
     assert_eq!(func.sig.name, "test");
-    match &func.sig.return_type.kind {
-        TypeExprKind::Tuple { fields } => {
-            assert_eq!(fields.len(), 2);
-            match &fields[0].kind {
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Tuple { field_ty_exprs } => {
+            assert_eq!(field_ty_exprs.len(), 2);
+            match &field_ty_exprs[0].kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
-            match &fields[1].kind {
+            match &field_ty_exprs[1].kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "bool"),
                 _ => panic!("Expected named type"),
             }
@@ -353,21 +353,23 @@ fn test_parse_tuple_type_nested() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    match &func.sig.return_type.kind {
-        TypeExprKind::Tuple { fields } => {
-            assert_eq!(fields.len(), 2);
-            match &fields[0].kind {
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Tuple { field_ty_exprs } => {
+            assert_eq!(field_ty_exprs.len(), 2);
+            match &field_ty_exprs[0].kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
-            match &fields[1].kind {
-                TypeExprKind::Tuple { fields: inner } => {
-                    assert_eq!(inner.len(), 2);
-                    match &inner[0].kind {
+            match &field_ty_exprs[1].kind {
+                TypeExprKind::Tuple {
+                    field_ty_exprs: inner_ty_exprs,
+                } => {
+                    assert_eq!(inner_ty_exprs.len(), 2);
+                    match &inner_ty_exprs[0].kind {
                         TypeExprKind::Named(name) => assert_eq!(name, "bool"),
                         _ => panic!("Expected named type"),
                     }
-                    match &inner[1].kind {
+                    match &inner_ty_exprs[1].kind {
                         TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                         _ => panic!("Expected named type"),
                     }

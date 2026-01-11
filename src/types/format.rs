@@ -14,7 +14,7 @@ impl fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
             Type::Range { min, max } => write!(f, "range({}, {})", min, max),
-            Type::Fn { params, return_ty } => {
+            Type::Fn { params, ret_ty } => {
                 let params_str = params
                     .iter()
                     .map(|param| {
@@ -28,15 +28,15 @@ impl fmt::Display for Type {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "fn({}) -> {}", params_str, return_ty)
+                write!(f, "fn({}) -> {}", params_str, ret_ty)
             }
             Type::String => write!(f, "string"),
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
             }
-            Type::Tuple { fields } => {
-                let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+            Type::Tuple { field_tys } => {
+                let fields_str = field_tys.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "({})", fields_str.join(", "))
             }
             Type::Struct { name, fields } => {

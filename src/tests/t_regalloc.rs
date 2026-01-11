@@ -14,18 +14,14 @@ use crate::regalloc::target::TargetSpec;
 use crate::resolve::def_map::DefId;
 use crate::targets::arm64::regs::Arm64Target;
 
-fn u64_ty(types: &mut TyTable) -> crate::mcir::types::TyId {
+fn u64_ty(types: &mut TyTable) -> TyId {
     types.add(TyKind::Int {
         signed: false,
         bits: 64,
     })
 }
 
-fn tuple2_ty(
-    types: &mut TyTable,
-    a: crate::mcir::types::TyId,
-    b: crate::mcir::types::TyId,
-) -> crate::mcir::types::TyId {
+fn tuple2_ty(types: &mut TyTable, a: TyId, b: TyId) -> TyId {
     types.add(TyKind::Tuple {
         field_tys: vec![a, b],
     })
@@ -165,11 +161,7 @@ fn test_aggregate_return_uses_indirect_reg() {
     }];
 
     let l0 = LocalId(0);
-    let p0 = Place::new(
-        l0,
-        u64_ty,
-        vec![crate::mcir::types::Projection::Field { index: 0 }],
-    );
+    let p0 = Place::new(l0, u64_ty, vec![Projection::Field { index: 0 }]);
 
     let stmts = vec![Statement::CopyScalar {
         dst: p0,

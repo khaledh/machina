@@ -54,7 +54,7 @@ impl<'a> MatchRuleKind<'a> {
                 signed: *signed,
                 bits: *bits,
             }),
-            Type::Tuple { fields } => Self::Tuple(TupleRule { fields }),
+            Type::Tuple { field_tys } => Self::Tuple(TupleRule { field_tys }),
             _ => Self::Unsupported,
         }
     }
@@ -225,7 +225,7 @@ impl IntRule {
 }
 
 struct TupleRule<'a> {
-    fields: &'a [Type],
+    field_tys: &'a [Type],
 }
 
 impl<'a> TupleRule<'a> {
@@ -236,7 +236,7 @@ impl<'a> TupleRule<'a> {
         for arm in arms {
             match &arm.pattern {
                 MatchPattern::Tuple { patterns, span } => {
-                    self.check_tuple_pattern(self.fields, patterns, *span, errors);
+                    self.check_tuple_pattern(self.field_tys, patterns, *span, errors);
                     if !pattern_is_irrefutable(&arm.pattern) {
                         all_irrefutable = false;
                     }
@@ -248,7 +248,7 @@ impl<'a> TupleRule<'a> {
                     all_irrefutable = false;
                     errors.push(SemCheckError::InvalidMatchPattern(
                         Type::Tuple {
-                            fields: self.fields.to_vec(),
+                            field_tys: self.field_tys.to_vec(),
                         },
                         pattern_span(&arm.pattern),
                     ));
@@ -263,20 +263,20 @@ impl<'a> TupleRule<'a> {
 
     fn check_tuple_pattern(
         &self,
-        fields: &[Type],
+        field_tys: &[Type],
         patterns: &[MatchPattern],
         span: Span,
         errors: &mut Vec<SemCheckError>,
     ) {
-        if patterns.len() != fields.len() {
+        if patterns.len() != field_tys.len() {
             errors.push(SemCheckError::TuplePatternArityMismatch(
-                fields.len(),
+                field_tys.len(),
                 patterns.len(),
                 span,
             ));
         }
 
-        for (field_ty, pattern) in fields.iter().zip(patterns.iter()) {
+        for (field_ty, pattern) in field_tys.iter().zip(patterns.iter()) {
             let peeled_ty = peel_heap_type(field_ty.clone());
             match pattern {
                 MatchPattern::Binding { .. } | MatchPattern::Wildcard { .. } => {}
@@ -303,11 +303,11 @@ impl<'a> TupleRule<'a> {
                     check_enum_pattern(&name, &variants, pattern, errors);
                 }
                 MatchPattern::Tuple { patterns, span } => {
-                    let Type::Tuple { fields } = peeled_ty else {
+                    let Type::Tuple { .. } = peeled_ty else {
                         errors.push(SemCheckError::InvalidMatchPattern(peeled_ty, *span));
                         continue;
                     };
-                    self.check_tuple_pattern(&fields, patterns, *span, errors);
+                    self.check_tuple_pattern(&field_tys, patterns, *span, errors);
                 }
             }
         }

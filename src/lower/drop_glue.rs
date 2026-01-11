@@ -184,8 +184,8 @@ fn emit_drop_for_type(
             }
         }
 
-        Type::Tuple { fields } => {
-            for (idx, elem_ty) in fields.iter().enumerate().rev() {
+        Type::Tuple { field_tys } => {
+            for (idx, elem_ty) in field_tys.iter().enumerate().rev() {
                 if !elem_ty.needs_drop() {
                     continue;
                 }

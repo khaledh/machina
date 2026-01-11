@@ -252,7 +252,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn return_type(&self) -> Result<Type, LowerError> {
+    fn ret_type(&self) -> Result<Type, LowerError> {
         if let Some(ty) = &self.func_return_ty {
             Ok(ty.clone())
         } else {
@@ -303,7 +303,7 @@ impl<'a> FuncLowerer<'a> {
             let ret_place = Place::<Scalar>::new(ret_id, ret_ty, vec![]);
             let body_value = self.lower_expr_value(self.func_body)?;
             if let ExprValue::Scalar(op) = body_value {
-                let ret_ast_ty = self.return_type()?;
+                let ret_ast_ty = self.ret_type()?;
                 self.emit_conversion_check(&body_ty, &ret_ast_ty, &op);
                 self.emit_copy_scalar(ret_place, Rvalue::Use(op));
             }

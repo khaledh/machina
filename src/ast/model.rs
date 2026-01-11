@@ -206,32 +206,32 @@ pub struct TypeExpr<T> {
 pub enum TypeExprKind<T> {
     Named(T),
     Array {
-        elem_ty: Box<TypeExpr<T>>,
+        elem_ty_expr: Box<TypeExpr<T>>,
         dims: Vec<usize>,
     },
     Tuple {
-        fields: Vec<TypeExpr<T>>,
+        field_ty_exprs: Vec<TypeExpr<T>>,
     },
     Range {
         min: u64,
         max: u64,
     },
     Slice {
-        elem_ty: Box<TypeExpr<T>>,
+        elem_ty_expr: Box<TypeExpr<T>>,
     },
     Heap {
-        elem_ty: Box<TypeExpr<T>>,
+        elem_ty_expr: Box<TypeExpr<T>>,
     },
     Fn {
         params: Vec<FnTypeParam<T>>,
-        return_ty: Box<TypeExpr<T>>,
+        ret_ty_expr: Box<TypeExpr<T>>,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FnTypeParam<T> {
     pub mode: ParamMode,
-    pub ty: TypeExpr<T>,
+    pub ty_expr: TypeExpr<T>,
 }
 
 // -- String Literals ---
@@ -263,7 +263,7 @@ pub struct FuncDef<T> {
 pub struct FunctionSig<T> {
     pub name: String,
     pub params: Vec<Param<T>>,
-    pub return_type: TypeExpr<T>,
+    pub ret_ty_expr: TypeExpr<T>,
     pub span: Span,
 }
 
@@ -290,7 +290,7 @@ pub struct MethodSig<T> {
     pub name: String,
     pub self_param: SelfParam,
     pub params: Vec<Param<T>>,
-    pub return_type: TypeExpr<T>,
+    pub ret_ty_expr: TypeExpr<T>,
     pub span: Span,
 }
 

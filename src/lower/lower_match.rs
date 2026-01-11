@@ -389,14 +389,14 @@ impl<'a> FuncLowerer<'a> {
             return Ok(());
         }
 
-        let Type::Tuple { fields } = scrutinee_ty else {
+        let Type::Tuple { field_tys } = scrutinee_ty else {
             return Err(LowerError::PatternMismatch(arm_id));
         };
-        if patterns.len() != fields.len() {
+        if patterns.len() != field_tys.len() {
             return Err(LowerError::PatternMismatch(arm_id));
         }
 
-        for (index, (pattern, field_ty)) in patterns.iter().zip(fields.iter()).enumerate() {
+        for (index, (pattern, field_ty)) in patterns.iter().zip(field_tys.iter()).enumerate() {
             let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
             let field_place =
                 self.project_place(scrutinee_place, Projection::Field { index }, field_ty_id);
@@ -463,15 +463,15 @@ impl<'a> FuncLowerer<'a> {
         arm_id: NodeId,
         tests: &mut Vec<Test>,
     ) -> Result<(), LowerError> {
-        let Type::Tuple { fields } = tuple_ty else {
+        let Type::Tuple { field_tys } = tuple_ty else {
             return Err(LowerError::PatternMismatch(arm_id));
         };
-        if patterns.len() != fields.len() {
+        if patterns.len() != field_tys.len() {
             return Err(LowerError::PatternMismatch(arm_id));
         }
 
         // Each tuple element contributes tests over a projection of the scrutinee.
-        for (index, (pattern, field_ty)) in patterns.iter().zip(fields.iter()).enumerate() {
+        for (index, (pattern, field_ty)) in patterns.iter().zip(field_tys.iter()).enumerate() {
             let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
             let field_place =
                 self.project_place(tuple_place, Projection::Field { index }, field_ty_id);

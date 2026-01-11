@@ -26,7 +26,7 @@ pub enum Type {
     },
     Fn {
         params: Vec<FnParam>,
-        return_ty: Box<Type>,
+        ret_ty: Box<Type>,
     },
 
     // Compound Types
@@ -36,7 +36,7 @@ pub enum Type {
         dims: Vec<usize>,
     },
     Tuple {
-        fields: Vec<Type>,
+        field_tys: Vec<Type>,
     },
     Struct {
         name: String,
@@ -98,11 +98,11 @@ impl PartialEq for Type {
             (
                 Type::Fn {
                     params: p1,
-                    return_ty: r1,
+                    ret_ty: r1,
                 },
                 Type::Fn {
                     params: p2,
-                    return_ty: r2,
+                    ret_ty: r2,
                 },
             ) => p1 == p2 && r1 == r2,
             (Type::Unknown, Type::Unknown) => true,
@@ -130,7 +130,7 @@ impl PartialEq for Type {
                     dims: d2,
                 },
             ) => e1 == e2 && d1 == d2,
-            (Type::Tuple { fields: f1 }, Type::Tuple { fields: f2 }) => f1 == f2,
+            (Type::Tuple { field_tys: f1 }, Type::Tuple { field_tys: f2 }) => f1 == f2,
             (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
             (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
             (Type::Slice { elem_ty: e1 }, Type::Slice { elem_ty: e2 }) => e1 == e2,
@@ -165,10 +165,10 @@ impl Hash for Type {
                 min.hash(state);
                 max.hash(state);
             }
-            Type::Fn { params, return_ty } => {
+            Type::Fn { params, ret_ty } => {
                 6u8.hash(state);
                 params.hash(state);
-                return_ty.hash(state);
+                ret_ty.hash(state);
             }
             Type::String => {
                 7u8.hash(state);
@@ -178,9 +178,9 @@ impl Hash for Type {
                 elem_ty.hash(state);
                 dims.hash(state);
             }
-            Type::Tuple { fields } => {
+            Type::Tuple { field_tys } => {
                 9u8.hash(state);
-                fields.hash(state);
+                field_tys.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
@@ -296,8 +296,8 @@ impl Type {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
             }
-            Type::Tuple { fields } => {
-                let total_size: usize = fields.iter().map(|f| f.size_of()).sum();
+            Type::Tuple { field_tys } => {
+                let total_size: usize = field_tys.iter().map(|f| f.size_of()).sum();
                 total_size
             }
             Type::Struct { fields, .. } => {
@@ -327,7 +327,7 @@ impl Type {
             Type::Fn { .. } => 8,
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
-            Type::Tuple { fields } => fields.iter().map(|f| f.align_of()).max().unwrap_or(1),
+            Type::Tuple { field_tys } => field_tys.iter().map(|t| t.align_of()).max().unwrap_or(1),
             Type::Struct { fields, .. } => {
                 fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
             }
@@ -378,7 +378,7 @@ impl Type {
         match self {
             Type::Heap { .. } => true,
             Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
-            Type::Tuple { fields } => fields.iter().any(Type::needs_drop),
+            Type::Tuple { field_tys } => field_tys.iter().any(Type::needs_drop),
             Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.needs_drop()),
             Type::Enum { variants, .. } => variants
                 .iter()
@@ -410,18 +410,18 @@ impl Type {
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
-        let Type::Tuple { fields } = self else {
+        let Type::Tuple { field_tys } = self else {
             panic!("Expected tuple type");
         };
-        assert!(index < fields.len(), "Tuple field index out of bounds");
-        fields.iter().take(index).map(|f| f.size_of()).sum()
+        assert!(index < field_tys.len(), "Tuple field index out of bounds");
+        field_tys.iter().take(index).map(|f| f.size_of()).sum()
     }
 
     pub fn tuple_field_type(&self, index: usize) -> Type {
-        let Type::Tuple { fields } = self else {
+        let Type::Tuple { field_tys } = self else {
             panic!("Expected tuple type");
         };
-        fields[index].clone()
+        field_tys[index].clone()
     }
 
     pub fn struct_field_offset(&self, field_name: &str) -> usize {

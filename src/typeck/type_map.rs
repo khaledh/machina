@@ -48,53 +48,54 @@ fn resolve_type_expr_impl(
         TypeExprKind::Named(def_id) => {
             resolve_named_type(def_map, type_expr, def_id, in_progress, depth)
         }
-        TypeExprKind::Array { elem_ty, dims } => {
-            let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            let elem_ty = resolve_type_expr_impl(def_map, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
                 dims: dims.clone(),
             })
         }
-        TypeExprKind::Tuple { fields } => {
-            let field_types = fields
+        TypeExprKind::Tuple { field_ty_exprs } => {
+            let field_tys = field_ty_exprs
                 .iter()
                 .map(|f| resolve_type_expr_impl(def_map, f, in_progress, depth))
                 .collect::<Result<Vec<Type>, _>>()?;
-            Ok(Type::Tuple {
-                fields: field_types,
-            })
+            Ok(Type::Tuple { field_tys })
         }
         TypeExprKind::Range { min, max } => Ok(Type::Range {
             min: *min,
             max: *max,
         }),
-        TypeExprKind::Slice { elem_ty } => {
-            let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
+        TypeExprKind::Slice { elem_ty_expr } => {
+            let elem_ty = resolve_type_expr_impl(def_map, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
             })
         }
-        TypeExprKind::Heap { elem_ty } => {
-            let elem_ty = resolve_type_expr_impl(def_map, elem_ty, in_progress, depth)?;
+        TypeExprKind::Heap { elem_ty_expr } => {
+            let elem_ty = resolve_type_expr_impl(def_map, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
             })
         }
-        TypeExprKind::Fn { params, return_ty } => {
-            let param_types = params
+        TypeExprKind::Fn {
+            params,
+            ret_ty_expr,
+        } => {
+            let param_tys = params
                 .iter()
                 .map(|param| {
-                    let ty = resolve_type_expr_impl(def_map, &param.ty, in_progress, depth)?;
+                    let ty = resolve_type_expr_impl(def_map, &param.ty_expr, in_progress, depth)?;
                     Ok(FnParam {
                         mode: fn_param_mode(param.mode.clone()),
                         ty,
                     })
                 })
                 .collect::<Result<Vec<_>, TypeCheckError>>()?;
-            let return_ty = resolve_type_expr_impl(def_map, return_ty, in_progress, depth)?;
+            let ret_ty = resolve_type_expr_impl(def_map, ret_ty_expr, in_progress, depth)?;
             Ok(Type::Fn {
-                params: param_types,
-                return_ty: Box::new(return_ty),
+                params: param_tys,
+                ret_ty: Box::new(ret_ty),
             })
         }
     }
@@ -165,12 +166,12 @@ fn hir_type_expr_from_ast(def_map: &DefMap, type_expr: &ast::TypeExpr) -> TypeEx
                     .unwrap_or_else(|| panic!("Missing def for NodeId({})", type_expr.id.0));
                 TypeExprKind::Named(def.id)
             }
-            ast::TypeExprKind::Array { elem_ty, dims } => TypeExprKind::Array {
-                elem_ty: Box::new(hir_type_expr_from_ast(def_map, elem_ty)),
+            ast::TypeExprKind::Array { elem_ty_expr, dims } => TypeExprKind::Array {
+                elem_ty_expr: Box::new(hir_type_expr_from_ast(def_map, elem_ty_expr)),
                 dims: dims.clone(),
             },
-            ast::TypeExprKind::Tuple { fields } => TypeExprKind::Tuple {
-                fields: fields
+            ast::TypeExprKind::Tuple { field_ty_exprs } => TypeExprKind::Tuple {
+                field_ty_exprs: field_ty_exprs
                     .iter()
                     .map(|field| hir_type_expr_from_ast(def_map, field))
                     .collect(),
@@ -179,21 +180,24 @@ fn hir_type_expr_from_ast(def_map: &DefMap, type_expr: &ast::TypeExpr) -> TypeEx
                 min: *min,
                 max: *max,
             },
-            ast::TypeExprKind::Slice { elem_ty } => TypeExprKind::Slice {
-                elem_ty: Box::new(hir_type_expr_from_ast(def_map, elem_ty)),
+            ast::TypeExprKind::Slice { elem_ty_expr } => TypeExprKind::Slice {
+                elem_ty_expr: Box::new(hir_type_expr_from_ast(def_map, elem_ty_expr)),
             },
-            ast::TypeExprKind::Heap { elem_ty } => TypeExprKind::Heap {
-                elem_ty: Box::new(hir_type_expr_from_ast(def_map, elem_ty)),
+            ast::TypeExprKind::Heap { elem_ty_expr } => TypeExprKind::Heap {
+                elem_ty_expr: Box::new(hir_type_expr_from_ast(def_map, elem_ty_expr)),
             },
-            ast::TypeExprKind::Fn { params, return_ty } => TypeExprKind::Fn {
+            ast::TypeExprKind::Fn {
+                params,
+                ret_ty_expr,
+            } => TypeExprKind::Fn {
                 params: params
                     .iter()
                     .map(|param| FnTypeParam {
                         mode: param.mode.clone(),
-                        ty: hir_type_expr_from_ast(def_map, &param.ty),
+                        ty_expr: hir_type_expr_from_ast(def_map, &param.ty_expr),
                     })
                     .collect(),
-                return_ty: Box::new(hir_type_expr_from_ast(def_map, return_ty)),
+                ret_ty_expr: Box::new(hir_type_expr_from_ast(def_map, ret_ty_expr)),
             },
         },
     }

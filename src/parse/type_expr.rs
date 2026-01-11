@@ -16,11 +16,11 @@ impl<'a> Parser<'a> {
 
         if self.curr_token.kind == TK::Caret {
             self.advance();
-            let elem_ty = self.parse_type_atom()?;
+            let elem_ty_expr = self.parse_type_atom()?;
             return Ok(TypeExpr {
                 id: self.id_gen.new_id(),
                 kind: TypeExprKind::Heap {
-                    elem_ty: Box::new(elem_ty),
+                    elem_ty_expr: Box::new(elem_ty_expr),
                 },
                 span: self.close(marker),
             });
@@ -55,13 +55,13 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RParen)?;
 
         self.consume(&TK::Arrow)?;
-        let return_ty = self.parse_type_expr()?;
+        let ret_ty_expr = self.parse_type_expr()?;
 
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
             kind: TypeExprKind::Fn {
                 params,
-                return_ty: Box::new(return_ty),
+                ret_ty_expr: Box::new(ret_ty_expr),
             },
             span: self.close(marker),
         })
@@ -69,8 +69,8 @@ impl<'a> Parser<'a> {
 
     fn parse_fn_type_param(&mut self) -> Result<FnTypeParam, ParseError> {
         let mode = self.parse_param_mode();
-        let ty = self.parse_type_expr()?;
-        Ok(FnTypeParam { mode, ty })
+        let ty_expr = self.parse_type_expr()?;
+        Ok(FnTypeParam { mode, ty_expr })
     }
 
     fn parse_named_type(&mut self) -> Result<TypeExpr, ParseError> {
@@ -98,20 +98,20 @@ impl<'a> Parser<'a> {
     fn parse_tuple_type(&mut self) -> Result<TypeExpr, ParseError> {
         let marker = self.mark();
 
-        let mut fields = Vec::new();
-        fields.push(self.parse_type_expr()?);
+        let mut field_ty_exprs = Vec::new();
+        field_ty_exprs.push(self.parse_type_expr()?);
 
         while self.curr_token.kind == TK::Comma {
             self.advance();
             if self.curr_token.kind == TK::RParen {
                 break;
             }
-            fields.push(self.parse_type_expr()?);
+            field_ty_exprs.push(self.parse_type_expr()?);
         }
 
         self.consume(&TK::RParen)?;
 
-        if fields.len() == 1 {
+        if field_ty_exprs.len() == 1 {
             return Err(ParseError::SingleFieldTupleMissingComma(
                 self.curr_token.clone(),
             ));
@@ -119,12 +119,12 @@ impl<'a> Parser<'a> {
 
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
-            kind: TypeExprKind::Tuple { fields },
+            kind: TypeExprKind::Tuple { field_ty_exprs },
             span: self.close(marker),
         })
     }
 
-    fn parse_array_type(&mut self, elem_ty: TypeExpr) -> Result<TypeExpr, ParseError> {
+    fn parse_array_type(&mut self, elem_ty_expr: TypeExpr) -> Result<TypeExpr, ParseError> {
         let marker = self.mark();
 
         self.advance();
@@ -135,7 +135,7 @@ impl<'a> Parser<'a> {
             return Ok(TypeExpr {
                 id: self.id_gen.new_id(),
                 kind: TypeExprKind::Slice {
-                    elem_ty: Box::new(elem_ty),
+                    elem_ty_expr: Box::new(elem_ty_expr),
                 },
                 span: self.close(marker),
             });
@@ -144,7 +144,7 @@ impl<'a> Parser<'a> {
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
             kind: TypeExprKind::Array {
-                elem_ty: Box::new(elem_ty),
+                elem_ty_expr: Box::new(elem_ty_expr),
                 dims: dims.into_iter().map(|d| d as usize).collect(),
             },
             span: self.close(marker),

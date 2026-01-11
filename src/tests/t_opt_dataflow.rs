@@ -45,9 +45,9 @@ fn array_ty(
 
 fn tuple_ty(
     types: &mut TyTable,
-    fields: Vec<crate::mcir::types::TyId>,
+    field_tys: Vec<crate::mcir::types::TyId>,
 ) -> crate::mcir::types::TyId {
-    types.add(TyKind::Tuple { field_tys: fields })
+    types.add(TyKind::Tuple { field_tys })
 }
 
 fn mk_body(

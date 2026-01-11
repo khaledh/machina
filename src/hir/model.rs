@@ -214,7 +214,7 @@ pub struct MethodSig {
     pub name: String,
     pub self_param: SelfParam,
     pub params: Vec<Param>,
-    pub return_type: TypeExpr,
+    pub ret_ty_expr: TypeExpr,
     pub span: Span,
 }
 

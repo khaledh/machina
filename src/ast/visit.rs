@@ -163,20 +163,23 @@ pub fn walk_enum_def_variant<V: Visitor<T> + ?Sized, T>(v: &mut V, variant: &Enu
 pub fn walk_type_expr<V: Visitor<T> + ?Sized, T>(v: &mut V, type_expr: &TypeExpr<T>) {
     match &type_expr.kind {
         TypeExprKind::Named(_) => {}
-        TypeExprKind::Array { elem_ty, .. } => v.visit_type_expr(elem_ty),
-        TypeExprKind::Tuple { fields } => {
-            for field in fields {
+        TypeExprKind::Array { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
+        TypeExprKind::Tuple { field_ty_exprs } => {
+            for field in field_ty_exprs {
                 v.visit_type_expr(field);
             }
         }
         TypeExprKind::Range { .. } => {}
-        TypeExprKind::Slice { elem_ty } => v.visit_type_expr(elem_ty),
-        TypeExprKind::Heap { elem_ty } => v.visit_type_expr(elem_ty),
-        TypeExprKind::Fn { params, return_ty } => {
+        TypeExprKind::Slice { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
+        TypeExprKind::Heap { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
+        TypeExprKind::Fn {
+            params,
+            ret_ty_expr,
+        } => {
             for param in params {
-                v.visit_type_expr(&param.ty);
+                v.visit_type_expr(&param.ty_expr);
             }
-            v.visit_type_expr(return_ty);
+            v.visit_type_expr(ret_ty_expr);
         }
     }
 }

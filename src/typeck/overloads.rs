@@ -20,7 +20,7 @@ pub(super) struct ParamSig {
 pub(super) struct OverloadSig {
     pub(super) def_id: DefId,
     pub(super) params: Vec<ParamSig>,
-    pub(super) return_type: Type,
+    pub(super) ret_ty: Type,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]

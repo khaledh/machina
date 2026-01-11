@@ -46,12 +46,12 @@ impl<'a> Parser<'a> {
         let params = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())?;
         self.consume(&TK::RParen)?;
 
-        let return_type = self.parse_return_type()?;
+        let ret_ty_expr = self.parse_ret_type()?;
 
         Ok(FunctionSig {
             name,
             params,
-            return_type,
+            ret_ty_expr,
             span: self.close(marker),
         })
     }
@@ -126,13 +126,13 @@ impl<'a> Parser<'a> {
         };
 
         self.consume(&TK::RParen)?;
-        let return_type = self.parse_return_type()?;
+        let ret_ty_expr = self.parse_ret_type()?;
 
         Ok(MethodSig {
             name,
             self_param,
             params,
-            return_type,
+            ret_ty_expr,
             span: self.close(marker),
         })
     }
@@ -157,7 +157,7 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let return_ty = self.parse_return_type()?;
+        let return_ty = self.parse_ret_type()?;
 
         let body = self.parse_expr(0)?;
         let ident = self.next_closure_ident();
@@ -233,7 +233,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_return_type(&mut self) -> Result<TypeExpr, ParseError> {
+    fn parse_ret_type(&mut self) -> Result<TypeExpr, ParseError> {
         Ok(match self.curr_token.kind {
             TK::Arrow => {
                 self.advance();

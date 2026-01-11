@@ -69,20 +69,23 @@ impl<'a> ValueChecker<'a> {
                         .push(SemCheckError::InvalidRangeBounds(*min, *max, ty.span));
                 }
             }
-            TypeExprKind::Array { elem_ty, .. } => self.check_type_expr(elem_ty),
-            TypeExprKind::Tuple { fields } => {
-                for field in fields {
+            TypeExprKind::Array { elem_ty_expr, .. } => self.check_type_expr(elem_ty_expr),
+            TypeExprKind::Tuple { field_ty_exprs } => {
+                for field in field_ty_exprs {
                     self.check_type_expr(field);
                 }
             }
-            TypeExprKind::Slice { elem_ty } => self.check_type_expr(elem_ty),
-            TypeExprKind::Heap { elem_ty } => self.check_type_expr(elem_ty),
+            TypeExprKind::Slice { elem_ty_expr } => self.check_type_expr(elem_ty_expr),
+            TypeExprKind::Heap { elem_ty_expr } => self.check_type_expr(elem_ty_expr),
             TypeExprKind::Named(_) => {}
-            TypeExprKind::Fn { params, return_ty } => {
+            TypeExprKind::Fn {
+                params,
+                ret_ty_expr,
+            } => {
                 for param in params {
-                    self.check_type_expr(&param.ty);
+                    self.check_type_expr(&param.ty_expr);
                 }
-                self.check_type_expr(return_ty);
+                self.check_type_expr(ret_ty_expr);
             }
         }
     }
@@ -91,7 +94,7 @@ impl<'a> ValueChecker<'a> {
         for param in &sig.params {
             self.check_type_expr(&param.typ);
         }
-        self.check_type_expr(&sig.return_type);
+        self.check_type_expr(&sig.ret_ty_expr);
     }
 
     fn check_type_def(&mut self, def: &TypeDef) {
@@ -137,7 +140,7 @@ impl<'a> ValueChecker<'a> {
 
 impl Visitor for ValueChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
-        self.current_return_ty = self.resolve_type(&func_def.sig.return_type);
+        self.current_return_ty = self.resolve_type(&func_def.sig.ret_ty_expr);
         walk_expr(self, &func_def.body);
 
         let ret_expr = match &func_def.body.kind {

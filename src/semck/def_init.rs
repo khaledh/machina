@@ -756,7 +756,7 @@ impl<'a> DefInitChecker<'a> {
                     projections: vec![InitProj::Field(field.name.clone())],
                 })
             }),
-            Type::Tuple { fields } => fields.iter().enumerate().all(|(index, _)| {
+            Type::Tuple { field_tys } => field_tys.iter().enumerate().all(|(index, _)| {
                 self.initialized.partial.contains(&InitPath {
                     base,
                     projections: vec![InitProj::TupleField(index)],

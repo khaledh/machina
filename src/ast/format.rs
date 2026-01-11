@@ -120,7 +120,7 @@ impl FunctionSig {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         writeln!(f, "{}Name: {}", pad, self.name)?;
-        writeln!(f, "{}Return Type: {}", pad, self.return_type)?;
+        writeln!(f, "{}Return Type: {}", pad, self.ret_ty_expr)?;
         writeln!(f, "{}Params:", pad)?;
         for param in &self.params {
             writeln!(f, "{}{}", indent(level + 2), param)?;
@@ -175,7 +175,7 @@ impl MethodSig {
         let pad = indent(level);
         writeln!(f, "{}Name: {}", pad, self.name)?;
         writeln!(f, "{}Self Mode: {:?}", pad, self.self_param.mode)?;
-        writeln!(f, "{}Return Type: {}", pad, self.return_type)?;
+        writeln!(f, "{}Return Type: {}", pad, self.ret_ty_expr)?;
         writeln!(f, "{}Params:", pad)?;
         for param in &self.params {
             writeln!(f, "{}{}", indent(level + 2), param)?;
@@ -249,24 +249,30 @@ impl fmt::Display for TypeExprKind {
             TypeExprKind::Named(name) => {
                 write!(f, "Named({})", name)?;
             }
-            TypeExprKind::Array { elem_ty, dims } => {
+            TypeExprKind::Array { elem_ty_expr, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
-                write!(f, "Array({}, dims=[{}])", elem_ty, dims_str.join(", "))?;
+                write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;
             }
-            TypeExprKind::Tuple { fields } => {
-                let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>();
-                write!(f, "Tuple([{}])", fields_str.join(", "))?;
+            TypeExprKind::Tuple { field_ty_exprs } => {
+                let field_ty_exprs_str = field_ty_exprs
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>();
+                write!(f, "Tuple([{}])", field_ty_exprs_str.join(", "))?;
             }
             TypeExprKind::Range { min, max } => {
                 write!(f, "Range({}, {})", min, max)?;
             }
-            TypeExprKind::Slice { elem_ty } => {
-                write!(f, "Slice({})", elem_ty)?;
+            TypeExprKind::Slice { elem_ty_expr } => {
+                write!(f, "Slice({})", elem_ty_expr)?;
             }
-            TypeExprKind::Heap { elem_ty } => {
-                write!(f, "Heap({})", elem_ty)?;
+            TypeExprKind::Heap { elem_ty_expr } => {
+                write!(f, "Heap({})", elem_ty_expr)?;
             }
-            TypeExprKind::Fn { params, return_ty } => {
+            TypeExprKind::Fn {
+                params,
+                ret_ty_expr,
+            } => {
                 let params_str = params
                     .iter()
                     .map(|param| {
@@ -276,11 +282,11 @@ impl fmt::Display for TypeExprKind {
                             ParamMode::Out => "out ",
                             ParamMode::Sink => "sink ",
                         };
-                        format!("{}{}", mode, param.ty)
+                        format!("{}{}", mode, param.ty_expr)
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "Fn([{}] -> {})", params_str, return_ty)?;
+                write!(f, "Fn([{}] -> {})", params_str, ret_ty_expr)?;
             }
         }
         Ok(())

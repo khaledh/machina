@@ -59,8 +59,8 @@ impl TyLowerer {
                     dims: dims.clone(),
                 })
             }
-            Type::Tuple { fields } => {
-                let ids = fields.iter().map(|t| self.lower_ty(t)).collect();
+            Type::Tuple { field_tys } => {
+                let ids = field_tys.iter().map(|t| self.lower_ty(t)).collect();
                 self.table.add(TyKind::Tuple { field_tys: ids })
             }
             Type::Struct { name, fields } => {

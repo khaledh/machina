@@ -533,12 +533,12 @@ impl Visitor for SymbolResolver {
     }
 
     fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
-        self.visit_type_expr(&func_sig.return_type);
+        self.visit_type_expr(&func_sig.ret_ty_expr);
         walk_func_sig(self, func_sig);
     }
 
     fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
-        self.visit_type_expr(&func_decl.sig.return_type);
+        self.visit_type_expr(&func_decl.sig.ret_ty_expr);
         for param in &func_decl.sig.params {
             self.visit_type_expr(&param.typ);
         }
@@ -581,7 +581,7 @@ impl Visitor for SymbolResolver {
     }
 
     fn visit_method_def(&mut self, method_def: &MethodDef) {
-        self.visit_type_expr(&method_def.sig.return_type);
+        self.visit_type_expr(&method_def.sig.ret_ty_expr);
         for param in &method_def.sig.params {
             self.visit_type_expr(&param.typ);
         }

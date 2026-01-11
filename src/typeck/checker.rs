@@ -147,7 +147,7 @@ impl TypeChecker {
             for method in &method_block.method_defs {
                 let def_id = method.def_id;
                 let params = self.build_param_sigs(&method.sig.params)?;
-                let return_type = self.resolve_return_type(&method.sig.return_type)?;
+                let ret_type = self.resolve_ret_type(&method.sig.ret_ty_expr)?;
 
                 self.method_sigs
                     .entry(type_name.clone())
@@ -157,7 +157,7 @@ impl TypeChecker {
                     .push(OverloadSig {
                         def_id,
                         params,
-                        return_type,
+                        ret_ty: ret_type,
                     });
             }
         }
@@ -171,7 +171,7 @@ impl TypeChecker {
         sig: FunctionSig,
     ) -> Result<(), Vec<TypeCheckError>> {
         let params = self.build_param_sigs(&sig.params)?;
-        let return_type = self.resolve_return_type(&sig.return_type)?;
+        let ret_ty = self.resolve_ret_type(&sig.ret_ty_expr)?;
 
         // Record the function type.
         if let Some(def) = self.ctx.def_map.lookup_def(def_id) {
@@ -186,7 +186,7 @@ impl TypeChecker {
                 def.clone(),
                 Type::Fn {
                     params: fn_params,
-                    return_ty: Box::new(return_type.clone()),
+                    ret_ty: Box::new(ret_ty.clone()),
                 },
             );
         }
@@ -199,7 +199,7 @@ impl TypeChecker {
             .push(OverloadSig {
                 def_id,
                 params,
-                return_type,
+                ret_ty,
             });
 
         Ok(())
@@ -220,8 +220,8 @@ impl TypeChecker {
             .map_err(|e| vec![e])
     }
 
-    fn resolve_return_type(&self, return_type: &TypeExpr) -> Result<Type, Vec<TypeCheckError>> {
-        resolve_type_expr(&self.ctx.def_map, return_type).map_err(|e| vec![e])
+    fn resolve_ret_type(&self, ret_type: &TypeExpr) -> Result<Type, Vec<TypeCheckError>> {
+        resolve_type_expr(&self.ctx.def_map, ret_type).map_err(|e| vec![e])
     }
 
     fn def_name(&self, def_id: DefId) -> &str {
@@ -252,7 +252,7 @@ impl TypeChecker {
         // Lookup the function by def id and find the matching overload.
         let func_def_id = func_def.def_id;
         let func_name = func_def.sig.name.as_str();
-        let (param_types, return_type) = {
+        let (param_types, ret_type) = {
             let overloads = self.func_sigs.get(func_name).unwrap_or_else(|| {
                 panic!(
                     "compiler bug: function {} not found in func_sigs",
@@ -274,7 +274,7 @@ impl TypeChecker {
                     .iter()
                     .map(|param| param.ty.clone())
                     .collect::<Vec<Type>>(),
-                func_sig.return_type.clone(),
+                func_sig.ret_ty.clone(),
             )
         };
 
@@ -291,7 +291,7 @@ impl TypeChecker {
             }
         }
 
-        let body_ty = match self.visit_expr(&func_def.body, Some(&return_type)) {
+        let body_ty = match self.visit_expr(&func_def.body, Some(&ret_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
@@ -301,12 +301,12 @@ impl TypeChecker {
 
         let return_span = self.function_return_span(&func_def.body);
         if matches!(
-            type_assignable(&body_ty, &return_type),
+            type_assignable(&body_ty, &ret_type),
             TypeAssignability::Incompatible
         ) {
             self.errors.push(
                 TypeCheckErrorKind::DeclTypeMismatch(
-                    return_type.clone(),
+                    ret_type.clone(),
                     body_ty.clone(),
                     return_span,
                 )
@@ -339,7 +339,7 @@ impl TypeChecker {
             }
         };
 
-        let return_type = match self.resolve_return_type(&method_def.sig.return_type) {
+        let ret_type = match self.resolve_ret_type(&method_def.sig.ret_ty_expr) {
             Ok(ty) => ty,
             Err(errs) => {
                 self.errors.extend(errs);
@@ -381,7 +381,7 @@ impl TypeChecker {
             }
         }
 
-        let body_ty = match self.visit_expr(&method_def.body, Some(&return_type)) {
+        let body_ty = match self.visit_expr(&method_def.body, Some(&ret_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
@@ -391,12 +391,12 @@ impl TypeChecker {
 
         let return_span = self.function_return_span(&method_def.body);
         if matches!(
-            type_assignable(&body_ty, &return_type),
+            type_assignable(&body_ty, &ret_type),
             TypeAssignability::Incompatible
         ) {
             self.errors.push(
                 TypeCheckErrorKind::DeclTypeMismatch(
-                    return_type.clone(),
+                    ret_type.clone(),
                     body_ty.clone(),
                     return_span,
                 )
@@ -451,7 +451,7 @@ impl TypeChecker {
 
         Ok(Type::Fn {
             params: param_types,
-            return_ty: Box::new(return_ty),
+            ret_ty: Box::new(return_ty),
         })
     }
 
@@ -682,11 +682,9 @@ impl TypeChecker {
         }
 
         // Type check each field
-        let field_types = self.visit_exprs(fields)?;
+        let field_tys = self.visit_exprs(fields)?;
 
-        Ok(Type::Tuple {
-            fields: field_types,
-        })
+        Ok(Type::Tuple { field_tys })
     }
 
     fn check_tuple_field_access(
@@ -703,18 +701,18 @@ impl TypeChecker {
         peeled_ty = self.expand_shallow_type(&peeled_ty);
 
         match peeled_ty {
-            Type::Tuple { fields } => {
+            Type::Tuple { field_tys } => {
                 let index_usize = index;
-                if index_usize >= fields.len() {
+                if index_usize >= field_tys.len() {
                     return Err(TypeCheckErrorKind::TupleFieldOutOfBounds(
-                        fields.len(),
+                        field_tys.len(),
                         index,
                         target.span,
                     )
                     .into());
                 }
 
-                Ok(fields[index_usize].clone())
+                Ok(field_tys[index_usize].clone())
             }
             _ => Err(TypeCheckErrorKind::InvalidTupleFieldTarget(target_ty, target.span).into()),
         }
@@ -931,10 +929,10 @@ impl TypeChecker {
             }
             BindPatternKind::Tuple { patterns } => {
                 match value_ty {
-                    Type::Tuple { fields } => {
-                        if patterns.len() != fields.len() {
+                    Type::Tuple { field_tys } => {
+                        if patterns.len() != field_tys.len() {
                             return Err(TypeCheckErrorKind::TuplePatternLengthMismatch(
-                                fields.len(),
+                                field_tys.len(),
                                 patterns.len(),
                                 pattern.span,
                             )
@@ -942,7 +940,7 @@ impl TypeChecker {
                         }
 
                         // Recursively type check each sub-pattern
-                        for (pattern, field) in patterns.iter().zip(fields) {
+                        for (pattern, field) in patterns.iter().zip(field_tys) {
                             self.check_bind_pattern(pattern, field)?;
                         }
                         Ok(())
@@ -1142,7 +1140,7 @@ impl TypeChecker {
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
         let callee_ty = self.visit_expr(callee, None)?;
-        let Type::Fn { params, return_ty } = callee_ty else {
+        let Type::Fn { params, ret_ty } = callee_ty else {
             return Err(TypeCheckErrorKind::InvalidCallee(callee.kind.clone(), callee.span).into());
         };
 
@@ -1183,7 +1181,7 @@ impl TypeChecker {
 
         self.check_call_arg_types(args, &param_types)?;
 
-        Ok(*return_ty)
+        Ok(*ret_ty)
     }
 
     fn check_named_call(
@@ -1303,13 +1301,13 @@ impl TypeChecker {
                         .iter()
                         .map(|param| param.mode.clone())
                         .collect::<Vec<_>>();
-                    let return_type = resolved.sig.return_type.clone();
-                    (resolved.def_id, param_types, param_modes, return_type)
+                    let ret_type = resolved.sig.ret_ty.clone();
+                    (resolved.def_id, param_types, param_modes, ret_type)
                 });
             (resolved, fallback_param_types)
         };
 
-        let (def_id, param_types, param_modes, return_type) = match resolved {
+        let (def_id, param_types, param_modes, ret_type) = match resolved {
             Ok(resolved) => resolved,
             Err(err) => {
                 if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _)) {
@@ -1345,7 +1343,7 @@ impl TypeChecker {
 
         self.check_call_arg_types(args, &param_types)?;
 
-        Ok(return_type)
+        Ok(ret_type)
     }
 
     fn check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
@@ -1411,9 +1409,9 @@ impl TypeChecker {
                     this.check_match_arm_body(arm, &mut arm_ty)
                 })?;
             }
-            Type::Tuple { fields } => {
+            Type::Tuple { field_tys } => {
                 self.visit_match_arms(arms, |this, arm| {
-                    this.check_tuple_match_pattern(fields, &arm.pattern);
+                    this.check_tuple_match_pattern(field_tys, &arm.pattern);
                     this.check_match_arm_body(arm, &mut arm_ty)
                 })?;
             }
@@ -1547,7 +1545,7 @@ impl TypeChecker {
             },
             MatchPattern::Tuple { patterns, .. } => {
                 let fields = match ty {
-                    Some(Type::Tuple { fields }) => Some(fields.as_slice()),
+                    Some(Type::Tuple { field_tys }) => Some(field_tys.as_slice()),
                     _ => None,
                 };
                 if let Some(fields) = fields {

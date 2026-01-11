@@ -125,13 +125,13 @@ impl<'a> FuncLowerer<'a> {
                     _ => return Err(LowerError::PatternMismatch(pattern.id)),
                 };
 
-                let Type::Tuple { fields } = src_ty else {
+                let Type::Tuple { field_tys } = src_ty else {
                     unreachable!("compiler bug: non-tuple pattern");
                 };
-                debug_assert_eq!(patterns.len(), fields.len(), "pattern arity mismatch");
+                debug_assert_eq!(patterns.len(), field_tys.len(), "pattern arity mismatch");
 
                 for (i, pat) in patterns.iter().enumerate() {
-                    let field_ty = &fields[i];
+                    let field_ty = &field_tys[i];
                     let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
 
                     let field_place =
