@@ -167,8 +167,8 @@ impl<'a> CallableRef<'a> {
 
 pub type TypeDef = model::TypeDef<DefId>;
 pub type TypeDefKind = model::TypeDefKind<DefId>;
-pub type StructField = model::StructField<DefId>;
-pub type EnumVariant = model::EnumVariant<DefId>;
+pub type StructDefField = model::StructDefField<DefId>;
+pub type EnumDefVariant = model::EnumDefVariant<DefId>;
 pub type TypeExpr = model::TypeExpr<DefId>;
 pub type TypeExprKind = model::TypeExprKind<DefId>;
 pub type FnTypeParam = model::FnTypeParam<DefId>;

@@ -173,12 +173,12 @@ pub struct TypeDef<T> {
 #[derive(Clone, Debug)]
 pub enum TypeDefKind<T> {
     Alias { aliased_ty: TypeExpr<T> },
-    Struct { fields: Vec<StructField<T>> },
-    Enum { variants: Vec<EnumVariant<T>> },
+    Struct { fields: Vec<StructDefField<T>> },
+    Enum { variants: Vec<EnumDefVariant<T>> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StructField<T> {
+pub struct StructDefField<T> {
     pub id: NodeId,
     pub name: String,
     pub ty: TypeExpr<T>,
@@ -186,7 +186,7 @@ pub struct StructField<T> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EnumVariant<T> {
+pub struct EnumDefVariant<T> {
     pub id: NodeId,
     pub name: String,
     pub payload: Vec<TypeExpr<T>>,

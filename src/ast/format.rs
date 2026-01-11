@@ -92,7 +92,7 @@ impl ArrayLitInit {
     }
 }
 
-impl StructField {
+impl StructDefField {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
         writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.ty, self.id)?;

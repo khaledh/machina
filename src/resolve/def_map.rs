@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use crate::ast::{EnumVariant, NodeId, StructField, TypeExpr};
+use crate::ast::{EnumDefVariant, NodeId, StructDefField, TypeExpr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(pub u32);
@@ -41,10 +41,10 @@ pub enum DefKind {
         ty_expr: TypeExpr,
     },
     StructDef {
-        fields: Vec<StructField>,
+        fields: Vec<StructDefField>,
     },
     EnumDef {
-        variants: Vec<EnumVariant>,
+        variants: Vec<EnumDefVariant>,
     },
     Func,
     ExternFunc,

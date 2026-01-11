@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
             parser.consume(&TK::Colon)?;
             let ty = parser.parse_type_expr()?;
 
-            Ok(StructField {
+            Ok(StructDefField {
                 id: parser.id_gen.new_id(),
                 name,
                 ty,
@@ -89,7 +89,7 @@ impl<'a> Parser<'a> {
 
         let payload = parse_payload(self)?;
 
-        variants.push(EnumVariant {
+        variants.push(EnumDefVariant {
             id: self.id_gen.new_id(),
             name,
             payload,
@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
             let marker = self.mark();
             let name = self.parse_ident()?;
             let payload = parse_payload(self)?;
-            variants.push(EnumVariant {
+            variants.push(EnumDefVariant {
                 id: self.id_gen.new_id(),
                 name,
                 payload,

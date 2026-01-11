@@ -30,20 +30,20 @@ pub trait Visitor<T = String> {
         walk_type_def(self, type_def)
     }
 
-    fn visit_struct_fields(&mut self, fields: &[StructField<T>]) {
-        walk_struct_fields(self, fields)
+    fn visit_struct_def_fields(&mut self, fields: &[StructDefField<T>]) {
+        walk_struct_def_fields(self, fields)
     }
 
-    fn visit_struct_field(&mut self, field: &StructField<T>) {
-        walk_struct_field(self, field)
+    fn visit_struct_def_field(&mut self, field: &StructDefField<T>) {
+        walk_struct_def_field(self, field)
     }
 
-    fn visit_enum_variants(&mut self, variants: &[EnumVariant<T>]) {
-        walk_enum_variants(self, variants)
+    fn visit_enum_def_variants(&mut self, variants: &[EnumDefVariant<T>]) {
+        walk_enum_def_variants(self, variants)
     }
 
-    fn visit_enum_variant(&mut self, variant: &EnumVariant<T>) {
-        walk_enum_variant(self, variant)
+    fn visit_enum_def_variant(&mut self, variant: &EnumDefVariant<T>) {
+        walk_enum_def_variant(self, variant)
     }
 
     // --- Type Expressions ---
@@ -128,28 +128,31 @@ pub fn walk_module<V: Visitor<T> + ?Sized, T>(v: &mut V, module: &Module<T>) {
 pub fn walk_type_def<V: Visitor<T> + ?Sized, T>(v: &mut V, type_def: &TypeDef<T>) {
     match &type_def.kind {
         TypeDefKind::Alias { aliased_ty } => v.visit_type_expr(aliased_ty),
-        TypeDefKind::Struct { fields } => v.visit_struct_fields(fields),
-        TypeDefKind::Enum { variants } => v.visit_enum_variants(variants),
+        TypeDefKind::Struct { fields } => v.visit_struct_def_fields(fields),
+        TypeDefKind::Enum { variants } => v.visit_enum_def_variants(variants),
     }
 }
 
-pub fn walk_struct_fields<V: Visitor<T> + ?Sized, T>(v: &mut V, fields: &[StructField<T>]) {
+pub fn walk_struct_def_fields<V: Visitor<T> + ?Sized, T>(v: &mut V, fields: &[StructDefField<T>]) {
     for field in fields {
-        v.visit_struct_field(field);
+        v.visit_struct_def_field(field);
     }
 }
 
-pub fn walk_struct_field<V: Visitor<T> + ?Sized, T>(v: &mut V, field: &StructField<T>) {
+pub fn walk_struct_def_field<V: Visitor<T> + ?Sized, T>(v: &mut V, field: &StructDefField<T>) {
     v.visit_type_expr(&field.ty);
 }
 
-pub fn walk_enum_variants<V: Visitor<T> + ?Sized, T>(v: &mut V, variants: &[EnumVariant<T>]) {
+pub fn walk_enum_def_variants<V: Visitor<T> + ?Sized, T>(
+    v: &mut V,
+    variants: &[EnumDefVariant<T>],
+) {
     for variant in variants {
-        v.visit_enum_variant(variant);
+        v.visit_enum_def_variant(variant);
     }
 }
 
-pub fn walk_enum_variant<V: Visitor<T> + ?Sized, T>(v: &mut V, variant: &EnumVariant<T>) {
+pub fn walk_enum_def_variant<V: Visitor<T> + ?Sized, T>(v: &mut V, variant: &EnumDefVariant<T>) {
     for payload in &variant.payload {
         v.visit_type_expr(payload);
     }

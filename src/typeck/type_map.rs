@@ -202,7 +202,7 @@ fn hir_type_expr_from_ast(def_map: &DefMap, type_expr: &ast::TypeExpr) -> TypeEx
 fn resolve_struct_type(
     def_map: &DefMap,
     def: &Def,
-    fields: &[ast::StructField],
+    fields: &[ast::StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -229,7 +229,7 @@ fn resolve_struct_type(
 
 fn resolve_struct_fields(
     def_map: &DefMap,
-    fields: &[ast::StructField],
+    fields: &[ast::StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
@@ -249,7 +249,7 @@ fn resolve_struct_fields(
 fn resolve_enum_type(
     def_map: &DefMap,
     def: &Def,
-    variants: &[ast::EnumVariant],
+    variants: &[ast::EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -276,7 +276,7 @@ fn resolve_enum_type(
 
 fn resolve_enum_variants(
     def_map: &DefMap,
-    variants: &[ast::EnumVariant],
+    variants: &[ast::EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {

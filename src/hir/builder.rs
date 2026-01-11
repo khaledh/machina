@@ -95,11 +95,11 @@ impl ToHir for ast::TypeDef {
     }
 }
 
-impl ToHir for ast::StructField {
-    type Output = hir::StructField;
+impl ToHir for ast::StructDefField {
+    type Output = hir::StructDefField;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::StructField {
+        hir::StructDefField {
             id: self.id,
             name: self.name,
             ty: self.ty.to_hir(def_map),
@@ -108,11 +108,11 @@ impl ToHir for ast::StructField {
     }
 }
 
-impl ToHir for ast::EnumVariant {
-    type Output = hir::EnumVariant;
+impl ToHir for ast::EnumDefVariant {
+    type Output = hir::EnumDefVariant;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::EnumVariant {
+        hir::EnumDefVariant {
             id: self.id,
             name: self.name,
             payload: self

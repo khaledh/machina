@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{EnumVariant, StructField, TypeExpr};
+use crate::ast::{EnumDefVariant, StructDefField, TypeExpr};
 use crate::resolve::def_map::DefId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,11 +18,11 @@ pub enum SymbolKind {
     },
     StructDef {
         def_id: DefId,
-        fields: Vec<StructField>,
+        fields: Vec<StructDefField>,
     },
     EnumDef {
         def_id: DefId,
-        variants: Vec<EnumVariant>,
+        variants: Vec<EnumDefVariant>,
     },
 }
 
