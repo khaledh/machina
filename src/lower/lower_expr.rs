@@ -1,4 +1,4 @@
-use crate::ast::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
+use crate::hir::model::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::lower::lower_util::u64_const;
@@ -100,20 +100,11 @@ impl<'a> FuncLowerer<'a> {
                 Ok(Operand::Const(variant_tag))
             }
 
-            EK::Closure { .. } => {
-                let def = match self.ctx.def_map.lookup_node_def(expr.id) {
-                    Some(def) => def,
-                    None => panic!(
-                        "compiler bug: closure def not found for expr NodeId({})",
-                        expr.id
-                    ),
-                };
-                Ok(Operand::Const(Const::FuncAddr { def: def.id }))
-            }
+            EK::Closure { ident, .. } => Ok(Operand::Const(Const::FuncAddr { def: *ident })),
 
             // Place-based reads
-            EK::Var(_) => {
-                let def = self.def_for_node(expr.id)?;
+            EK::Var(def_id) => {
+                let def = self.def_for_id(*def_id, expr.id)?;
                 if matches!(def.kind, DefKind::Func | DefKind::ExternFunc) {
                     return Ok(Operand::Const(Const::FuncAddr { def: def.id }));
                 }

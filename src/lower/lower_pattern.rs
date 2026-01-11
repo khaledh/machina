@@ -1,4 +1,4 @@
-use crate::ast::{BindPattern, BindPatternKind as PK, Expr};
+use crate::hir::model::{BindPattern, BindPatternKind as PK, Expr};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::ExprValue;
 use crate::lower::lower_ast::FuncLowerer;
@@ -19,27 +19,27 @@ impl<'a> FuncLowerer<'a> {
 
         if value_ty.is_scalar() {
             // Scalar binding: compute operand and assign.
-            let PK::Name(ident) = &pattern.kind else {
+            let PK::Name(def_id) = &pattern.kind else {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
             let op = self.lower_scalar_expr(value)?;
-            let target_ty = self.def_ty_for_node(pattern.id)?;
+            let target_ty = self.def_ty_for_id(*def_id, pattern.id)?;
             self.emit_conversion_check(&value_ty, &target_ty, &op);
 
             let ty_id = self.ty_lowerer.lower_ty(&target_ty);
-            let def_id = self.def_for_node(pattern.id)?.id;
+            let name = self.def_name(*def_id, pattern.id)?;
 
             // Track owned heap values for drop at scope exit.
-            let is_initialized = self.create_is_initialized(ident, &target_ty, true);
-            self.register_drop(def_id, &target_ty, is_initialized);
+            let is_initialized = self.create_is_initialized(&name, &target_ty, true);
+            self.register_drop(*def_id, &target_ty, is_initialized);
 
             // Bind identifier to operand.
-            self.bind_ident_operand(def_id, ident.clone(), ty_id, op)?;
+            self.bind_ident_operand(*def_id, name, ty_id, op)?;
             return Ok(());
         }
 
         // Aggregate binding
-        let PK::Name(ident) = &pattern.kind else {
+        let PK::Name(def_id) = &pattern.kind else {
             // Aggregate destructuring via patterns.
             let src_place = match self.lower_expr_value(value)? {
                 ExprValue::Aggregate(place) => PlaceAny::Aggregate(place),
@@ -53,7 +53,7 @@ impl<'a> FuncLowerer<'a> {
 
         // Aggregate ident binding: prefer NRVO when eligible.
         let (def_id, nrvo_eligible) = {
-            let def = self.def_for_node(pattern.id)?;
+            let def = self.def_for_id(*def_id, pattern.id)?;
             let eligible = matches!(
                 def.kind,
                 DefKind::LocalVar {
@@ -75,7 +75,8 @@ impl<'a> FuncLowerer<'a> {
             self.lower_agg_value_into(dst, value)?;
 
             // NRVO still needs drop tracking for owned values.
-            let is_initialized = self.create_is_initialized(ident, &value_ty, true);
+            let name = self.def_name(def_id, pattern.id)?;
+            let is_initialized = self.create_is_initialized(&name, &value_ty, true);
             self.register_drop(def_id, &value_ty, is_initialized);
 
             return Ok(());
@@ -83,14 +84,15 @@ impl<'a> FuncLowerer<'a> {
 
         // Create a local for the aggregate.
         let ty_id = self.ty_lowerer.lower_ty(&value_ty);
-        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(ident.clone()));
+        let name = self.def_name(def_id, pattern.id)?;
+        let local_id = self.ensure_local_for_def(def_id, ty_id, Some(name.clone()));
 
         // Lower aggregate into the local place.
         let dst = Place::new(local_id, ty_id, vec![]);
         self.lower_agg_value_into(dst, value)?;
 
         // Track owned heap values for drop at scope exit.
-        let is_initialized = self.create_is_initialized(ident, &value_ty, true);
+        let is_initialized = self.create_is_initialized(&name, &value_ty, true);
         self.register_drop(def_id, &value_ty, is_initialized);
 
         Ok(())
@@ -104,16 +106,16 @@ impl<'a> FuncLowerer<'a> {
         src_ty: &Type,
     ) -> Result<(), LowerError> {
         match &pattern.kind {
-            PK::Name(ident) => {
+            PK::Name(def_id) => {
                 // Bind a single identifier to a place.
                 let src_ty_id = self.ty_lowerer.lower_ty(src_ty);
-                let def_id = self.def_for_node(pattern.id)?.id;
+                let name = self.def_name(*def_id, pattern.id)?;
 
                 // Track owned heap values for drop at scope exit.
-                let is_initialized = self.create_is_initialized(ident, src_ty, true);
-                self.register_drop(def_id, src_ty, is_initialized);
+                let is_initialized = self.create_is_initialized(&name, src_ty, true);
+                self.register_drop(*def_id, src_ty, is_initialized);
 
-                self.bind_ident(def_id, ident.clone(), src_ty_id, src_place)
+                self.bind_ident(*def_id, name, src_ty_id, src_place)
             }
 
             PK::Tuple { patterns } => {

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::ast::{Expr, ExprKind};
+use crate::hir::model::{Expr, ExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::types::*;
@@ -85,7 +85,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     pub(super) fn record_move(&mut self, expr: &Expr) {
-        let ExprKind::Var(_) = expr.kind else {
+        let ExprKind::Var(def_id) = expr.kind else {
             return;
         };
         let Ok(ty) = self.ty_for_node(expr.id) else {
@@ -95,15 +95,12 @@ impl<'a> FuncLowerer<'a> {
             return;
         }
         // Mark the binding as moved so we skip drop at scope exit.
-        let Ok(def) = self.def_for_node(expr.id) else {
-            return;
-        };
-        if let Some(flag) = self.is_initialized_for_def(def.id) {
+        if let Some(flag) = self.is_initialized_for_def(def_id) {
             // For conditional drops, moving clears the init flag so we don't drop.
             self.set_is_initialized(flag, false);
             return;
         }
-        self.mark_moved(def.id);
+        self.mark_moved(def_id);
     }
 
     fn mark_moved(&mut self, def_id: DefId) {

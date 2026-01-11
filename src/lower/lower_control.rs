@@ -1,4 +1,4 @@
-use crate::ast::{BindPattern, BindPatternKind as PK, Expr, ExprKind as EK};
+use crate::hir::model::{BindPattern, BindPatternKind as PK, Expr, ExprKind as EK};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -192,13 +192,13 @@ impl<'a> FuncLowerer<'a> {
 
         self.lower_for_indexed_loop(start_op, end_op, body, |this, idx_place| {
             // Bind pattern to current index (only name pattern expected).
-            let PK::Name(ident) = &pattern.kind else {
+            let PK::Name(def_id) = &pattern.kind else {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
-            let def_id = this.def_for_node(pattern.id)?.id;
+            let name = this.def_name(*def_id, pattern.id)?;
             this.bind_ident(
-                def_id,
-                ident.clone(),
+                *def_id,
+                name,
                 u64_ty_id,
                 PlaceAny::Scalar(idx_place.clone()),
             )

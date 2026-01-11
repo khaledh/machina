@@ -1,55 +1,55 @@
-use crate::ast::{self, NodeId};
+use crate::hir::model::{BinaryOp, NodeId, UnaryOp};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::resolve::def_map::Def;
+use crate::resolve::def_map::{Def, DefId};
 use crate::types::{Type, TypeAssignability, type_assignable};
 
 impl<'a> FuncLowerer<'a> {
     /// Map AST binary op to MCIR binary op.
-    pub(super) fn map_binop(op: ast::BinaryOp) -> BinOp {
+    pub(super) fn map_binop(op: BinaryOp) -> BinOp {
         match op {
-            ast::BinaryOp::Add => BinOp::Add,
-            ast::BinaryOp::Sub => BinOp::Sub,
-            ast::BinaryOp::Mul => BinOp::Mul,
-            ast::BinaryOp::Div => BinOp::Div,
-            ast::BinaryOp::Mod => {
+            BinaryOp::Add => BinOp::Add,
+            BinaryOp::Sub => BinOp::Sub,
+            BinaryOp::Mul => BinOp::Mul,
+            BinaryOp::Div => BinOp::Div,
+            BinaryOp::Mod => {
                 unreachable!("compiler bug: mod op lowered into div/mul/sub")
             }
-            ast::BinaryOp::BitOr => BinOp::BitOr,
-            ast::BinaryOp::BitXor => BinOp::BitXor,
-            ast::BinaryOp::BitAnd => BinOp::BitAnd,
-            ast::BinaryOp::Shl => BinOp::Shl,
-            ast::BinaryOp::Shr => BinOp::Shr,
-            ast::BinaryOp::Eq => BinOp::Eq,
-            ast::BinaryOp::Ne => BinOp::Ne,
-            ast::BinaryOp::Lt => BinOp::Lt,
-            ast::BinaryOp::LtEq => BinOp::LtEq,
-            ast::BinaryOp::Gt => BinOp::Gt,
-            ast::BinaryOp::GtEq => BinOp::GtEq,
-            ast::BinaryOp::LogicalAnd | ast::BinaryOp::LogicalOr => {
+            BinaryOp::BitOr => BinOp::BitOr,
+            BinaryOp::BitXor => BinOp::BitXor,
+            BinaryOp::BitAnd => BinOp::BitAnd,
+            BinaryOp::Shl => BinOp::Shl,
+            BinaryOp::Shr => BinOp::Shr,
+            BinaryOp::Eq => BinOp::Eq,
+            BinaryOp::Ne => BinOp::Ne,
+            BinaryOp::Lt => BinOp::Lt,
+            BinaryOp::LtEq => BinOp::LtEq,
+            BinaryOp::Gt => BinOp::Gt,
+            BinaryOp::GtEq => BinOp::GtEq,
+            BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
                 unreachable!("compiler bug: logical ops lowered via short-circuiting lowering")
             }
         }
     }
 
     /// Map AST unary op to MCIR unary op.
-    pub(super) fn map_unop(op: ast::UnaryOp) -> UnOp {
+    pub(super) fn map_unop(op: UnaryOp) -> UnOp {
         match op {
-            ast::UnaryOp::Neg => UnOp::Neg,
-            ast::UnaryOp::LogicalNot => {
+            UnaryOp::Neg => UnOp::Neg,
+            UnaryOp::LogicalNot => {
                 unreachable!("compiler bug: logical not lowered via comparison")
             }
-            ast::UnaryOp::BitNot => UnOp::BitNot,
+            UnaryOp::BitNot => UnOp::BitNot,
         }
     }
 
-    /// Lookup a definition for an AST node id.
-    pub(super) fn def_for_node(&self, node_id: NodeId) -> Result<&Def, LowerError> {
+    /// Lookup a definition for a def id.
+    pub(super) fn def_for_id(&self, def_id: DefId, node_id: NodeId) -> Result<&Def, LowerError> {
         self.ctx
             .def_map
-            .lookup_node_def(node_id)
+            .lookup_def(def_id)
             .ok_or(LowerError::ExprDefNotFound(node_id))
     }
 
@@ -61,13 +61,17 @@ impl<'a> FuncLowerer<'a> {
             .ok_or(LowerError::ExprTypeNotFound(node_id))
     }
 
-    /// Lookup the AST type for a definition bound to a node id.
-    pub(super) fn def_ty_for_node(&self, node_id: NodeId) -> Result<Type, LowerError> {
-        let def = self.def_for_node(node_id)?;
+    /// Lookup the AST type for a definition id.
+    pub(super) fn def_ty_for_id(&self, def_id: DefId, node_id: NodeId) -> Result<Type, LowerError> {
+        let def = self.def_for_id(def_id, node_id)?;
         self.ctx
             .type_map
             .lookup_def_type(def)
             .ok_or(LowerError::ExprTypeNotFound(node_id))
+    }
+
+    pub(super) fn def_name(&self, def_id: DefId, node_id: NodeId) -> Result<String, LowerError> {
+        Ok(self.def_for_id(def_id, node_id)?.name.clone())
     }
 
     /// Check whether a lowered type is scalar.

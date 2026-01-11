@@ -10,7 +10,7 @@ impl fmt::Display for Module {
                 Decl::FunctionDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 Decl::Function(func) => func.fmt_with_indent(f, 0)?,
                 Decl::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
-                Decl::Closure(_) => {} // closures are printed where they are defined
+                Decl::ClosureDecl(closure_decl) => closure_decl.fmt_with_indent(f, 0)?,
             }
             if i + 1 != self.decls.len() {
                 writeln!(f, "--------------------------------")?;
@@ -82,10 +82,10 @@ impl ArrayLitInit {
                     .map(|e| format!("{}", e))
                     .collect::<Vec<_>>()
                     .join(", ");
-                writeln!(f, "{}[{}]", pad, elems_str)?;
+                writeln!(f, "{}Elems: [{}]", pad, elems_str)?;
             }
-            ArrayLitInit::Repeat(expr, count) => {
-                writeln!(f, "{}[{}; {}]", pad, expr, count)?;
+            ArrayLitInit::Repeat(expr, _) => {
+                writeln!(f, "{}Repeat: {}", pad, expr)?;
             }
         }
         Ok(())
@@ -184,6 +184,27 @@ impl MethodSig {
     }
 }
 
+impl ClosureDecl {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}ClosureDecl [{}]", pad, self.id)?;
+        self.sig.fmt_with_indent(f, level + 1)
+    }
+}
+
+impl ClosureSig {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}Name: {}", pad, self.name)?;
+        writeln!(f, "{}Return Type: {}", pad, self.return_ty)?;
+        writeln!(f, "{}Params:", pad)?;
+        for param in &self.params {
+            writeln!(f, "{}{}", indent(level + 2), param)?;
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_indent(f, 0)
@@ -271,22 +292,22 @@ impl BindPattern {
         let pad = indent(level);
         match &self.kind {
             BindPatternKind::Name(ident) => {
-                writeln!(f, "{}Pattern::Name({})", pad, ident)?;
+                writeln!(f, "{}Name({}) [{}]", pad, ident, self.id)?;
             }
             BindPatternKind::Array { patterns } => {
-                writeln!(f, "{}Pattern::Array", pad)?;
+                writeln!(f, "{}Array [{}]", pad, self.id)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
             BindPatternKind::Tuple { patterns } => {
-                writeln!(f, "{}Pattern::Tuple", pad)?;
+                writeln!(f, "{}Tuple [{}]", pad, self.id)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
             BindPatternKind::Struct { name, fields } => {
-                writeln!(f, "{}Pattern::Struct({})", pad, name)?;
+                writeln!(f, "{}Struct({}) [{}]", pad, name, self.id)?;
                 for field in fields {
                     field.fmt_with_indent(f, level + 1)?;
                 }
@@ -397,9 +418,11 @@ impl StmtExpr {
             } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Let [{}]", pad, self.id)?;
+                writeln!(f, "{}Pattern:", pad1)?;
                 pattern.fmt_with_indent(f, level + 2)?;
                 if let Some(decl_ty) = decl_ty {
-                    writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
+                    writeln!(f, "{}Decl Type:", pad1)?;
+                    writeln!(f, "{}{}", indent(level + 2), decl_ty)?;
                 }
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
@@ -480,11 +503,12 @@ impl Expr {
                 writeln!(f, "{}UnitLit [{}]", pad, self.id)?;
             }
             ExprKind::ArrayLit { elem_ty, init } => {
-                writeln!(f, "{}ArrayLit [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
+                writeln!(f, "{}ArrayLit [{}]", pad, self.id)?;
                 if let Some(elem_ty) = elem_ty {
                     writeln!(f, "{}Elem Type: {}", pad1, elem_ty)?;
                 }
+                writeln!(f, "{}Length: {}", pad1, init.length())?;
                 init.fmt_with_indent(f, level + 1)?;
             }
             ExprKind::ArrayIndex { target, indices } => {
@@ -539,12 +563,15 @@ impl Expr {
                 self.fmt_call_args(f, level + 2, args)?;
             }
             ExprKind::Closure {
+                ident,
                 params,
                 return_ty,
                 body,
+                ..
             } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Closure [{}]", pad, self.id)?;
+                writeln!(f, "{}Ident: {}", pad1, ident)?;
                 if params.is_empty() {
                     writeln!(f, "{}Params: <none>", pad1)?;
                 } else {
@@ -553,11 +580,7 @@ impl Expr {
                         writeln!(f, "{}{}", indent(level + 2), param)?;
                     }
                 }
-                if let Some(return_ty) = return_ty {
-                    writeln!(f, "{}Return: {}", pad1, return_ty)?;
-                } else {
-                    writeln!(f, "{}Return: <inferred>", pad1)?;
-                }
+                writeln!(f, "{}Return Type: {}", pad1, return_ty)?;
                 writeln!(f, "{}Body:", pad1)?;
                 body.fmt_with_indent(f, level + 2)?;
             }

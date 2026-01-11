@@ -1,8 +1,8 @@
-use crate::ast::{Expr, ExprKind as EK, TypeDeclKind};
+use crate::hir::model::{Expr, ExprKind as EK, TypeDeclKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
-use crate::typeck::type_map::resolve_ast_type_expr;
+use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{StructField as TypeStructField, Type};
 
 impl<'a> FuncLowerer<'a> {
@@ -43,11 +43,13 @@ impl<'a> FuncLowerer<'a> {
 
     /// Resolve a variable reference into its local place.
     pub(super) fn lower_var(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
-        let def = self.def_for_node(expr.id)?;
+        let EK::Var(def_id) = expr.kind else {
+            return Err(LowerError::ExprIsNotPlace(expr.id));
+        };
         let local_id = *self
             .locals
-            .get(&def.id)
-            .ok_or(LowerError::VarLocalNotFound(expr.id, def.id))?;
+            .get(&def_id)
+            .ok_or(LowerError::VarLocalNotFound(expr.id, def_id))?;
 
         let local_ty = self.fb.body.locals[local_id.0 as usize].ty;
 
@@ -412,7 +414,7 @@ impl<'a> FuncLowerer<'a> {
             return ty.clone();
         }
 
-        let decls = self.ctx.ast_module.type_decls();
+        let decls = self.ctx.module.type_decls();
         let decl = decls.iter().find(|decl| decl.name == *name);
         let Some(decl) = decl else {
             return ty.clone();
@@ -424,7 +426,7 @@ impl<'a> FuncLowerer<'a> {
         let resolved_fields = fields
             .iter()
             .filter_map(|f| {
-                let field_ty = resolve_ast_type_expr(&self.ctx.def_map, &f.ty).ok()?;
+                let field_ty = resolve_type_expr(&self.ctx.def_map, &f.ty).ok()?;
                 Some(TypeStructField {
                     name: f.name.clone(),
                     ty: field_ty,

@@ -28,6 +28,8 @@ pub struct Parser<'a> {
     id_gen: NodeIdGen,
     allow_struct_lit: bool,
     closure_decls: Vec<Decl>,
+    closure_base: Option<String>,
+    closure_index: u32,
 }
 
 impl<'a> Parser<'a> {
@@ -39,6 +41,8 @@ impl<'a> Parser<'a> {
             id_gen: NodeIdGen::new(),
             allow_struct_lit: true,
             closure_decls: Vec::new(),
+            closure_base: None,
+            closure_index: 0,
         }
     }
 
@@ -50,6 +54,8 @@ impl<'a> Parser<'a> {
             id_gen,
             allow_struct_lit: true,
             closure_decls: Vec::new(),
+            closure_base: None,
+            closure_index: 0,
         }
     }
 

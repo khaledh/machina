@@ -418,7 +418,7 @@ impl TypeChecker {
     fn check_closure(
         &mut self,
         params: &[Param],
-        return_ty: &Option<TypeExpr>,
+        return_ty: &TypeExpr,
         body: &Expr,
     ) -> Result<Type, TypeCheckError> {
         let mut param_types = Vec::with_capacity(params.len());
@@ -435,31 +435,19 @@ impl TypeChecker {
             });
         }
 
-        let declared_return_ty = match return_ty {
-            Some(ty) => Some(resolve_type_expr(&self.ctx.def_map, ty)?),
-            None => None,
-        };
+        let return_ty = resolve_type_expr(&self.ctx.def_map, return_ty)?;
 
-        let body_ty = self.visit_expr(body, declared_return_ty.as_ref())?;
+        let body_ty = self.visit_expr(body, Some(&return_ty))?;
 
-        let return_ty = match declared_return_ty {
-            Some(expected) => {
-                if matches!(
-                    type_assignable(&body_ty, &expected),
-                    TypeAssignability::Incompatible
-                ) {
-                    let return_span = self.function_return_span(body);
-                    return Err(TypeCheckErrorKind::DeclTypeMismatch(
-                        expected,
-                        body_ty,
-                        return_span,
-                    )
-                    .into());
-                }
-                expected
-            }
-            None => body_ty,
-        };
+        if matches!(
+            type_assignable(&body_ty, &return_ty),
+            TypeAssignability::Incompatible
+        ) {
+            let return_span = self.function_return_span(body);
+            return Err(
+                TypeCheckErrorKind::DeclTypeMismatch(return_ty, body_ty, return_span).into(),
+            );
+        }
 
         Ok(Type::Fn {
             params: param_types,
@@ -1938,6 +1926,7 @@ impl AstFolder for TypeChecker {
                     params,
                     return_ty,
                     body,
+                    ..
                 } => self.check_closure(params, return_ty, body),
             },
         };

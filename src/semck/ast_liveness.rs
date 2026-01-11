@@ -3,9 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::solve_backward;
 use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{
-    BindPattern, BindPatternKind, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind,
-};
+use crate::hir::model::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::def_map::DefId;
 
@@ -192,7 +190,7 @@ fn collect_pattern_defs(
     defs: &mut HashSet<DefId>,
 ) {
     match &pattern.kind {
-        BindPatternKind::Name(_) => add_def_if_heap(pattern.id, ctx, defs),
+        BindPatternKind::Name(def_id) => add_def_if_heap(*def_id, ctx, defs),
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
@@ -208,21 +206,21 @@ fn collect_pattern_defs(
 
 fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
     // Only a plain variable counts as a definition; projections are treated as uses.
-    if matches!(assignee.kind, ExprKind::Var(_)) {
-        add_def_if_heap(assignee.id, ctx, defs);
+    if let ExprKind::Var(def_id) = assignee.kind {
+        add_def_if_heap(def_id, ctx, defs);
     }
 }
 
 /// Only treat heap-owned locals as tracked defs.
-fn add_def_if_heap(node_id: NodeId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
-    let Some(def) = ctx.def_map.lookup_node_def(node_id) else {
+fn add_def_if_heap(def_id: DefId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
+    let Some(def) = ctx.def_map.lookup_def(def_id) else {
         return;
     };
     let Some(ty) = ctx.type_map.lookup_def_type(def) else {
         return;
     };
     if ty.is_heap() {
-        defs.insert(def.id);
+        defs.insert(def_id);
     }
 }
 
@@ -309,13 +307,12 @@ impl<A: HeapUseAccumulator> Visitor for HeapUseCollector<'_, A> {
 
 /// Returns the DefId if `expr` is a plain heap variable read.
 fn heap_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
-    if !matches!(expr.kind, ExprKind::Var(_)) {
+    let ExprKind::Var(def_id) = expr.kind else {
         return None;
-    }
+    };
     let ty = ctx.type_map.lookup_node_type(expr.id)?;
     if !ty.is_heap() {
         return None;
     }
-    let def = ctx.def_map.lookup_node_def(expr.id)?;
-    Some(def.id)
+    Some(def_id)
 }

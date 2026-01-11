@@ -138,14 +138,14 @@ fn check_func(
     let cfg = HirCfgBuilder::new().build_from_expr(&func.body);
 
     // Params are initialized at entry, except `out` params which start uninitialized.
-    let entry_state = InitState::new(collect_param_defs(func, ctx, false));
+    let entry_state = InitState::new(collect_param_defs(func, false));
     let out_params = collect_out_param_defs(func, ctx);
     let out_param_defs: HashSet<_> = out_params.iter().map(|(def_id, _, _)| *def_id).collect();
 
     // Bottom = "all defs" so unreachable blocks don't produce spurious errors.
     // (Intersection with "all" is identity, so unreachable blocks inherit from reachable ones.)
-    let bottom = InitState::new(collect_all_defs(func, ctx));
-    let def_spans = collect_def_spans(func, ctx);
+    let bottom = InitState::new(collect_all_defs(func));
+    let def_spans = collect_def_spans(func);
 
     let result = solve_forward(
         &cfg,
@@ -204,19 +204,13 @@ fn check_func(
     }
 }
 
-fn collect_param_defs(
-    func: &Function,
-    ctx: &TypeCheckedContext,
-    include_out: bool,
-) -> HashSet<DefId> {
+fn collect_param_defs(func: &Function, include_out: bool) -> HashSet<DefId> {
     let mut defs = HashSet::new();
     for param in &func.sig.params {
         if !include_out && param.mode == ParamMode::Out {
             continue;
         }
-        if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
-            defs.insert(def.id);
-        }
+        defs.insert(param.ident);
     }
     defs
 }
@@ -227,25 +221,22 @@ fn collect_out_param_defs(func: &Function, ctx: &TypeCheckedContext) -> Vec<(Def
         if param.mode != ParamMode::Out {
             continue;
         }
-        if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
-            defs.push((def.id, def.name.clone(), param.span));
+        if let Some(def) = ctx.def_map.lookup_def(param.ident) {
+            defs.push((param.ident, def.name.clone(), param.span));
         }
     }
     defs
 }
 
-fn collect_all_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId> {
-    let mut defs = collect_param_defs(func, ctx, true);
-    let mut collector = DefCollector {
-        ctx,
-        defs: &mut defs,
-    };
+fn collect_all_defs(func: &Function) -> HashSet<DefId> {
+    let mut defs = collect_param_defs(func, true);
+    let mut collector = DefCollector { defs: &mut defs };
     collector.collect_expr(&func.body);
     defs
 }
 
 fn collect_local_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId> {
-    collect_all_defs(func, ctx)
+    collect_all_defs(func)
         .into_iter()
         .filter(|def_id| {
             matches!(
@@ -256,17 +247,12 @@ fn collect_local_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefI
         .collect()
 }
 
-fn collect_def_spans(func: &Function, ctx: &TypeCheckedContext) -> HashMap<DefId, Span> {
+fn collect_def_spans(func: &Function) -> HashMap<DefId, Span> {
     let mut spans = HashMap::new();
     for param in &func.sig.params {
-        if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
-            spans.insert(def.id, param.span);
-        }
+        spans.insert(param.ident, param.span);
     }
-    let mut collector = DefSpanCollector {
-        ctx,
-        spans: &mut spans,
-    };
+    let mut collector = DefSpanCollector { spans: &mut spans };
     collector.collect_expr(&func.body);
     spans
 }
@@ -312,7 +298,6 @@ fn intersect_states(states: &[InitState]) -> InitState {
 /// Collects all local definitions in a function (params, let/var bindings, match bindings).
 /// Used to build the "bottom" state for dataflow (all defs = initialized everywhere).
 struct DefCollector<'a> {
-    ctx: &'a TypeCheckedContext,
     defs: &'a mut HashSet<DefId>,
 }
 
@@ -360,10 +345,8 @@ impl<'a> DefCollector<'a> {
                 self.collect_bind_pattern(pattern);
                 self.collect_expr(value);
             }
-            StmtExprKind::VarDecl { .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(stmt.id) {
-                    self.defs.insert(def.id);
-                }
+            StmtExprKind::VarDecl { ident, .. } => {
+                self.defs.insert(*ident);
             }
             StmtExprKind::Assign { assignee, value } => {
                 self.collect_expr(assignee);
@@ -387,10 +370,8 @@ impl<'a> DefCollector<'a> {
 
     fn collect_bind_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(pattern.id) {
-                    self.defs.insert(def.id);
-                }
+            BindPatternKind::Name(def_id) => {
+                self.defs.insert(*def_id);
             }
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for pat in patterns {
@@ -407,10 +388,8 @@ impl<'a> DefCollector<'a> {
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding { id, .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(*id) {
-                    self.defs.insert(def.id);
-                }
+            MatchPattern::Binding { ident, .. } => {
+                self.defs.insert(*ident);
             }
             MatchPattern::Tuple { patterns, .. } => {
                 for pattern in patterns {
@@ -419,10 +398,8 @@ impl<'a> DefCollector<'a> {
             }
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let MatchPatternBinding::Named { id, .. } = binding {
-                        if let Some(def) = self.ctx.def_map.lookup_node_def(*id) {
-                            self.defs.insert(def.id);
-                        }
+                    if let MatchPatternBinding::Named { ident, .. } = binding {
+                        self.defs.insert(*ident);
                     }
                 }
             }
@@ -442,7 +419,6 @@ impl<'a> Visitor for DefCollector<'a> {
 }
 
 struct DefSpanCollector<'a> {
-    ctx: &'a TypeCheckedContext,
     spans: &'a mut std::collections::HashMap<DefId, Span>,
 }
 
@@ -489,10 +465,8 @@ impl<'a> DefSpanCollector<'a> {
                 self.collect_pattern(pattern);
                 self.collect_expr(value);
             }
-            StmtExprKind::VarDecl { .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(stmt.id) {
-                    self.spans.entry(def.id).or_insert(stmt.span);
-                }
+            StmtExprKind::VarDecl { ident, .. } => {
+                self.spans.entry(*ident).or_insert(stmt.span);
             }
             StmtExprKind::Assign { assignee, value } => {
                 self.collect_expr(assignee);
@@ -516,10 +490,8 @@ impl<'a> DefSpanCollector<'a> {
 
     fn collect_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(pattern.id) {
-                    self.spans.entry(def.id).or_insert(pattern.span);
-                }
+            BindPatternKind::Name(def_id) => {
+                self.spans.entry(*def_id).or_insert(pattern.span);
             }
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for pat in patterns {
@@ -536,10 +508,8 @@ impl<'a> DefSpanCollector<'a> {
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding { id, span, .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(*id) {
-                    self.spans.entry(def.id).or_insert(*span);
-                }
+            MatchPattern::Binding { ident, span, .. } => {
+                self.spans.entry(*ident).or_insert(*span);
             }
             MatchPattern::Tuple { patterns, .. } => {
                 for pattern in patterns {
@@ -548,10 +518,8 @@ impl<'a> DefSpanCollector<'a> {
             }
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let MatchPatternBinding::Named { id, span, .. } = binding {
-                        if let Some(def) = self.ctx.def_map.lookup_node_def(*id) {
-                            self.spans.entry(def.id).or_insert(*span);
-                        }
+                    if let MatchPatternBinding::Named { ident, span, .. } = binding {
+                        self.spans.entry(*ident).or_insert(*span);
                     }
                 }
             }
@@ -624,13 +592,11 @@ impl<'a> DefInitChecker<'a> {
                 self.check_expr(value);
                 self.mark_pattern_initialized(pattern);
             }
-            StmtExprKind::VarDecl { .. } => {
+            StmtExprKind::VarDecl { ident, .. } => {
                 // Declaration without initializer: clear any inherited init from a
                 // dominating path (e.g., the variable might shadow one from an outer
                 // scope or be re-declared after a conditional init).
-                if let Some(def) = self.ctx.def_map.lookup_node_def(stmt.id) {
-                    self.initialized.clear_def(def.id);
-                }
+                self.initialized.clear_def(*ident);
             }
             StmtExprKind::Assign { assignee, value } => {
                 self.check_expr(value);
@@ -653,12 +619,10 @@ impl<'a> DefInitChecker<'a> {
     ///   require a fully-initialized base.
     fn check_assignment(&mut self, assignee: &Expr) {
         match &assignee.kind {
-            ExprKind::Var(_) => {
+            ExprKind::Var(def_id) => {
                 // Assigning to a variable initializes it. Track the first
                 // assignment so lowering can skip dropping uninitialized memory.
-                if let Some(def) = self.ctx.def_map.lookup_node_def(assignee.id)
-                    && !self.initialized.is_full(def.id)
-                {
+                if !self.initialized.is_full(*def_id) {
                     self.init_assigns.insert(assignee.id);
                 }
                 self.mark_var_initialized(assignee);
@@ -821,7 +785,7 @@ impl<'a> DefInitChecker<'a> {
 
     fn collect_lvalue_path(&self, expr: &Expr, projections: &mut Vec<InitProj>) -> Option<DefId> {
         match &expr.kind {
-            ExprKind::Var(_) => self.ctx.def_map.lookup_node_def(expr.id).map(|def| def.id),
+            ExprKind::Var(def_id) => Some(*def_id),
             ExprKind::StructField { target, field } => {
                 let base = self.collect_lvalue_path(target, projections)?;
                 projections.push(InitProj::Field(field.clone()));
@@ -855,7 +819,7 @@ impl<'a> DefInitChecker<'a> {
     /// if it's a local or param (we don't track init for globals/functions).
     fn lookup_tracked_def(&self, expr: &Expr) -> Option<DefId> {
         let def_id = match &expr.kind {
-            ExprKind::Var(_) => self.ctx.def_map.lookup_node_def(expr.id).map(|def| def.id),
+            ExprKind::Var(def_id) => Some(*def_id),
             ExprKind::StructField { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::ArrayIndex { target, .. }
@@ -910,10 +874,8 @@ impl<'a> DefInitChecker<'a> {
 
     fn mark_pattern_initialized(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(pattern.id) {
-                    self.initialized.mark_full(def.id);
-                }
+            BindPatternKind::Name(def_id) => {
+                self.initialized.mark_full(*def_id);
             }
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for pat in patterns {
@@ -929,14 +891,17 @@ impl<'a> DefInitChecker<'a> {
     }
 
     fn mark_var_initialized(&mut self, expr: &Expr) {
-        if let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) {
-            self.initialized.mark_full(def.id);
+        if let ExprKind::Var(def_id) = expr.kind {
+            self.initialized.mark_full(def_id);
         }
     }
 
     /// Report an error if a local variable is used before initialization.
     fn check_var_use(&mut self, expr: &Expr) {
-        let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) else {
+        let ExprKind::Var(def_id) = expr.kind else {
+            return;
+        };
+        let Some(def) = self.ctx.def_map.lookup_def(def_id) else {
             return;
         };
         // Only check locals and params (globals, functions, etc. are always "initialized").
@@ -1115,14 +1080,14 @@ impl<'a> DefInitChecker<'a> {
 
     fn check_out_arg(&mut self, arg: &Expr) -> Option<DefId> {
         match &arg.kind {
-            ExprKind::Var(_) => {
-                let def = self.ctx.def_map.lookup_node_def(arg.id)?;
+            ExprKind::Var(def_id) => {
+                let def = self.ctx.def_map.lookup_def(*def_id)?;
                 if matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }) {
-                    if !self.initialized.is_full(def.id) {
+                    if !self.initialized.is_full(*def_id) {
                         // Record the first init through an `out` call so lowering skips drops.
                         self.init_assigns.insert(arg.id);
                     }
-                    return Some(def.id);
+                    return Some(*def_id);
                 }
                 None
             }
@@ -1156,10 +1121,8 @@ impl<'a> DefInitChecker<'a> {
 
     fn mark_match_pattern_initialized(&mut self, init: &mut InitState, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding { id, .. } => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(*id) {
-                    init.mark_full(def.id);
-                }
+            MatchPattern::Binding { ident, .. } => {
+                init.mark_full(*ident);
             }
             MatchPattern::Tuple { patterns, .. } => {
                 for pattern in patterns {
@@ -1168,10 +1131,8 @@ impl<'a> DefInitChecker<'a> {
             }
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let MatchPatternBinding::Named { id, .. } = binding {
-                        if let Some(def) = self.ctx.def_map.lookup_node_def(*id) {
-                            init.mark_full(def.id);
-                        }
+                    if let MatchPatternBinding::Named { ident, .. } = binding {
+                        init.mark_full(*ident);
                     }
                 }
             }

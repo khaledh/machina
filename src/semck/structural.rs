@@ -249,8 +249,8 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {
         match &expr.kind {
-            ExprKind::Var(_) => {
-                let def = self.ctx.def_map.lookup_node_def(expr.id)?;
+            ExprKind::Var(def_id) => {
+                let def = self.ctx.def_map.lookup_def(*def_id)?;
                 match def.kind {
                     DefKind::LocalVar { is_mutable, .. } | DefKind::Param { is_mutable, .. } => {
                         Some(is_mutable)
@@ -268,13 +268,9 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_lvalue(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::Var(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) {
-                    matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
-                } else {
-                    false
-                }
-            }
+            ExprKind::Var(def_id) => self.ctx.def_map.lookup_def(*def_id).is_some_and(|def| {
+                matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
+            }),
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::StructField { target, .. }

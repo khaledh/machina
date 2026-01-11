@@ -1,4 +1,4 @@
-use crate::ast::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
+use crate::hir::model::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
 use crate::lower::decision_tree::{
     ArmDecision, DecisionTreeEmitter, Test, TestKind, build_decision_tree, emit_decision_tree,
 };
@@ -355,8 +355,8 @@ impl<'a> FuncLowerer<'a> {
             };
 
             let payload_ty_id = self.ty_lowerer.lower_ty(payload_ty);
-            let def_id = self.def_for_node(*id)?.id;
-            let local_id = self.ensure_local_for_def(def_id, payload_ty_id, Some(ident.clone()));
+            let name = self.def_name(*ident, *id)?;
+            let local_id = self.ensure_local_for_def(*ident, payload_ty_id, Some(name));
 
             let mut projs = scrutinee_place.projections().to_vec();
             projs.push(Projection::Field { index: 1 });
@@ -403,9 +403,8 @@ impl<'a> FuncLowerer<'a> {
 
             match pattern {
                 MatchPattern::Binding { id, ident, .. } => {
-                    let def_id = self.def_for_node(*id)?.id;
-                    let local_id =
-                        self.ensure_local_for_def(def_id, field_ty_id, Some(ident.clone()));
+                    let name = self.def_name(*ident, *id)?;
+                    let local_id = self.ensure_local_for_def(*ident, field_ty_id, Some(name));
 
                     match field_place {
                         PlaceAny::Scalar(place) => {

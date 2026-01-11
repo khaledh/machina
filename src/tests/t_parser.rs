@@ -1279,14 +1279,17 @@ fn test_parse_closure_expr() {
 
     match &tail.kind {
         ExprKind::Closure {
+            ident,
             params,
             return_ty,
             body,
+            ..
         } => {
+            assert_eq!(ident, "test$closure$1");
             assert_eq!(params.len(), 2);
             assert_eq!(params[0].ident, "a");
             assert_eq!(params[1].ident, "b");
-            match &return_ty.as_ref().expect("Expected return type").kind {
+            match &return_ty.kind {
                 TypeExprKind::Named(name) => assert_eq!(name, "u64"),
                 _ => panic!("Expected named return type"),
             }
@@ -1310,12 +1313,18 @@ fn test_parse_closure_expr_empty_params() {
 
     match &tail.kind {
         ExprKind::Closure {
+            ident,
             params,
             return_ty,
             body,
+            ..
         } => {
+            assert_eq!(ident, "test$closure$1");
             assert!(params.is_empty());
-            assert!(return_ty.is_none());
+            match &return_ty.kind {
+                TypeExprKind::Named(ty) => assert_eq!(ty, "()"),
+                _ => panic!("Expected named return type"),
+            }
             assert!(matches!(body.kind, ExprKind::Block { .. }));
         }
         _ => panic!("Expected closure expression"),

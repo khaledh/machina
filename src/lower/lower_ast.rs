@@ -19,8 +19,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::*;
 use crate::context::{AnalyzedContext, LoweredMcirContext};
+use crate::hir::model::*;
 use crate::lower::drop_glue::DropGlueRegistry;
 use crate::lower::errors::LowerError;
 use crate::lower::lower_drop::DropScope;
@@ -29,6 +29,7 @@ use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
 use crate::resolve::def_map::DefId;
+use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 
 pub(super) enum ExprValue {
@@ -51,6 +52,7 @@ pub struct LoweredFunc {
 #[derive(Debug, Clone)]
 pub struct LoweredParam {
     pub id: NodeId,
+    pub def_id: DefId,
     pub name: String,
     pub mode: ParamMode,
 }
@@ -87,10 +89,16 @@ impl<'a> FuncLowerer<'a> {
             .sig
             .params
             .iter()
-            .map(|param| LoweredParam {
-                id: param.id,
-                name: param.ident.clone(),
-                mode: param.mode.clone(),
+            .map(|param| {
+                let def = ctx.def_map.lookup_def(param.ident).unwrap_or_else(|| {
+                    panic!("compiler bug: param def {:?} not found", param.ident)
+                });
+                LoweredParam {
+                    id: param.id,
+                    def_id: param.ident,
+                    name: def.name.clone(),
+                    mode: param.mode.clone(),
+                }
             })
             .collect::<Vec<_>>();
         Self::new(
@@ -114,15 +122,30 @@ impl<'a> FuncLowerer<'a> {
         trace_alloc: bool,
     ) -> Self {
         let mut params = Vec::with_capacity(method.sig.params.len() + 1);
+        let self_def = ctx
+            .def_map
+            .lookup_def(method.sig.self_param.def_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: self def {:?} not found",
+                    method.sig.self_param.def_id
+                )
+            });
         params.push(LoweredParam {
             id: method.sig.self_param.id,
-            name: "self".to_string(),
+            def_id: method.sig.self_param.def_id,
+            name: self_def.name.clone(),
             mode: method.sig.self_param.mode.clone(),
         });
         for param in &method.sig.params {
+            let def = ctx
+                .def_map
+                .lookup_def(param.ident)
+                .unwrap_or_else(|| panic!("compiler bug: param def {:?} not found", param.ident));
             params.push(LoweredParam {
                 id: param.id,
-                name: param.ident.clone(),
+                def_id: param.ident,
+                name: def.name.clone(),
                 mode: param.mode.clone(),
             });
         }
@@ -151,10 +174,16 @@ impl<'a> FuncLowerer<'a> {
     ) -> Self {
         let params = params
             .iter()
-            .map(|param| LoweredParam {
-                id: param.id,
-                name: param.ident.clone(),
-                mode: param.mode.clone(),
+            .map(|param| {
+                let def = ctx.def_map.lookup_def(param.ident).unwrap_or_else(|| {
+                    panic!("compiler bug: param def {:?} not found", param.ident)
+                });
+                LoweredParam {
+                    id: param.id,
+                    def_id: param.ident,
+                    name: def.name.clone(),
+                    mode: param.mode.clone(),
+                }
             })
             .collect::<Vec<_>>();
         Self::new(
@@ -201,9 +230,7 @@ impl<'a> FuncLowerer<'a> {
             if param.mode != ParamMode::Out {
                 continue;
             }
-            if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
-                out_param_defs.insert(def.id);
-            }
+            out_param_defs.insert(param.def_id);
         }
 
         Self {
@@ -245,20 +272,19 @@ impl<'a> FuncLowerer<'a> {
         // Create locals for params.
         let params = self.params.clone();
         for (i, param) in params.iter().enumerate() {
-            let ty = self.ty_for_node(param.id)?;
+            let ty = self.def_ty_for_id(param.def_id, param.id)?;
             let ty_id = self.ty_lowerer.lower_ty(&ty);
-            let def_id = self.def_for_node(param.id)?.id;
             let local_id = self.fb.new_local(
                 ty_id,
                 LocalKind::Param { index: i as u32 },
                 Some(param.name.clone()),
             );
-            self.locals.insert(def_id, local_id);
+            self.locals.insert(param.def_id, local_id);
             // `sink` params are treated as owned values; register for drop.
             // (`in`/`inout` params are borrowed)
             if param.mode == ParamMode::Sink {
                 let is_initialized = self.create_is_initialized(&param.name, &ty, true);
-                self.register_drop(def_id, &ty, is_initialized);
+                self.register_drop(param.def_id, &ty, is_initialized);
             }
 
             if matches!(ty, Type::Range { .. }) {
@@ -312,63 +338,55 @@ pub fn lower_ast(
     let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
 
     // Lower all callables (functions + methods).
-    for callable in ctx.ast_module.callables() {
-        let body = match callable {
+    for callable in ctx.module.callables() {
+        let (def_id, body) = match callable {
             CallableRef::FunctionDecl(_) => continue,
-            CallableRef::Function(function) => FuncLowerer::new_function(
-                &ctx,
-                function,
-                &mut global_interner,
-                &mut drop_glue,
-                trace_alloc,
-            )
-            .lower()?,
-            CallableRef::Method { method, .. } => FuncLowerer::new_method(
-                &ctx,
-                method,
-                &mut global_interner,
-                &mut drop_glue,
-                trace_alloc,
-            )
-            .lower()?,
-            CallableRef::Closure(expr) => {
-                let Expr {
-                    kind: ExprKind::Closure { params, body, .. },
-                    ..
-                } = expr
-                else {
-                    panic!("compiler bug: expected closure expr");
-                };
-                let closure_ty = ctx
-                    .type_map
-                    .lookup_node_type(expr.id)
-                    .ok_or(LowerError::ExprTypeNotFound(expr.id))?;
-                let Type::Fn { return_ty, .. } = closure_ty else {
-                    panic!("compiler bug: expected closure type to be a function");
-                };
-
-                // Non-capturing only: lower to a standalone generated function.
-                let mut lowerer = FuncLowerer::new_closure(
+            CallableRef::Function(function) => (
+                function.def_id,
+                FuncLowerer::new_function(
                     &ctx,
-                    expr.id,
-                    params,
-                    (*return_ty).clone(),
-                    body,
+                    function,
                     &mut global_interner,
                     &mut drop_glue,
                     trace_alloc,
-                );
-                lowerer.lower()?
+                )
+                .lower()?,
+            ),
+            CallableRef::Method { method, .. } => (
+                method.def_id,
+                FuncLowerer::new_method(
+                    &ctx,
+                    method,
+                    &mut global_interner,
+                    &mut drop_glue,
+                    trace_alloc,
+                )
+                .lower()?,
+            ),
+            CallableRef::ClosureDecl(closure_decl) => {
+                let return_ty = resolve_type_expr(&ctx.def_map, &closure_decl.sig.return_ty)
+                    .expect(
+                        format!(
+                            "compiler bug: cannot resolve closure return type {:?}",
+                            closure_decl.sig.return_ty
+                        )
+                        .as_str(),
+                    );
+                // Non-capturing only: lower to a standalone generated function.
+                let lowered_body = FuncLowerer::new_closure(
+                    &ctx,
+                    closure_decl.id,
+                    &closure_decl.sig.params,
+                    return_ty,
+                    &closure_decl.body,
+                    &mut global_interner,
+                    &mut drop_glue,
+                    trace_alloc,
+                )
+                .lower()?;
+                (closure_decl.def_id, lowered_body)
             }
         };
-
-        let def_id = ctx
-            .def_map
-            .lookup_node_def(callable.id())
-            .unwrap_or_else(|| {
-                panic!("Callable {} not found in def_map", callable.name());
-            })
-            .id;
 
         funcs.push(LoweredFunc { def_id, body });
     }

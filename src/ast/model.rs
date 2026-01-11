@@ -87,7 +87,9 @@ impl<T> Module<T> {
                         });
                     }
                 }
-                Decl::Closure(expr) => callables.push(CallableRef::Closure(expr)),
+                Decl::ClosureDecl(closure_decl) => {
+                    callables.push(CallableRef::ClosureDecl(closure_decl))
+                }
                 Decl::TypeDecl(_) => {}
             }
         }
@@ -103,7 +105,7 @@ pub enum Decl<T> {
     FunctionDecl(FunctionDecl<T>), // function declaration
     Function(Function<T>),         // function definition
     MethodBlock(MethodBlock<T>),   // method definitions
-    Closure(Expr<T>),              // closure definition
+    ClosureDecl(ClosureDecl<T>),   // closure declaration (generated)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,7 +116,7 @@ pub enum CallableRef<'a, T> {
         type_name: &'a str,
         method: &'a Method<T>,
     },
-    Closure(&'a Expr<T>),
+    ClosureDecl(&'a ClosureDecl<T>),
 }
 
 impl<'a, T> CallableRef<'a, T> {
@@ -123,27 +125,33 @@ impl<'a, T> CallableRef<'a, T> {
             CallableRef::FunctionDecl(func_decl) => func_decl.id,
             CallableRef::Function(function) => function.id,
             CallableRef::Method { method, .. } => method.id,
-            CallableRef::Closure(expr) => expr.id,
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.id,
         }
     }
 
-    pub fn name(&self) -> String {
+    pub fn name(&self) -> String
+    where
+        T: std::fmt::Display,
+    {
         match self {
             CallableRef::FunctionDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::Function(function) => function.sig.name.clone(),
             CallableRef::Method { method, .. } => method.sig.name.clone(),
-            CallableRef::Closure(expr) => format!("__mc_closure${}", expr.id),
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.sig.name.clone(),
         }
     }
 
-    pub fn symbol_base_name(&self) -> String {
+    pub fn symbol_base_name(&self) -> String
+    where
+        T: std::fmt::Display,
+    {
         match self {
             CallableRef::FunctionDecl(_) => self.name(),
             CallableRef::Function(_) => self.name(),
             CallableRef::Method { type_name, method } => {
                 format!("{type_name}${}", method.sig.name)
             }
-            CallableRef::Closure(_) => self.name(),
+            CallableRef::ClosureDecl(_) => self.name(),
         }
     }
 
@@ -152,7 +160,7 @@ impl<'a, T> CallableRef<'a, T> {
             CallableRef::FunctionDecl(func_decl) => func_decl.span,
             CallableRef::Function(function) => function.span,
             CallableRef::Method { method, .. } => method.span,
-            CallableRef::Closure(expr) => expr.span,
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.span,
         }
     }
 }
@@ -295,6 +303,24 @@ pub struct MethodSig<T> {
 pub struct SelfParam {
     pub id: NodeId,
     pub mode: ParamMode,
+    pub span: Span,
+}
+
+// -- Closures Decls ---
+
+#[derive(Clone, Debug)]
+pub struct ClosureDecl<T> {
+    pub id: NodeId,
+    pub sig: ClosureSig<T>,
+    pub body: Expr<T>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ClosureSig<T> {
+    pub name: String,
+    pub params: Vec<Param<T>>,
+    pub return_ty: TypeExpr<T>,
     pub span: Span,
 }
 
@@ -567,8 +593,9 @@ pub enum ExprKind<T> {
     },
 
     Closure {
+        ident: T,
         params: Vec<Param<T>>,
-        return_ty: Option<TypeExpr<T>>,
+        return_ty: TypeExpr<T>,
         body: Box<Expr<T>>,
     },
 }
@@ -579,6 +606,15 @@ pub enum ExprKind<T> {
 pub enum ArrayLitInit<T> {
     Elems(Vec<Expr<T>>),
     Repeat(Box<Expr<T>>, u64),
+}
+
+impl<T> ArrayLitInit<T> {
+    pub fn length(&self) -> usize {
+        match self {
+            ArrayLitInit::Elems(elems) => elems.len(),
+            ArrayLitInit::Repeat(_, count) => *count as usize,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -118,7 +118,7 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
             Decl::FunctionDecl(func_decl) => v.visit_func_decl(func_decl),
             Decl::Function(func) => v.visit_func(func),
             Decl::MethodBlock(method_block) => v.visit_method_block(method_block),
-            Decl::Closure(_) => {} // closures are visited where they are defined
+            Decl::ClosureDecl(_) => {} // closures are visited where they are defined
         }
     }
 }
@@ -364,13 +364,12 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
             params,
             return_ty,
             body,
+            ..
         } => {
             for param in params {
                 v.visit_param(param);
             }
-            if let Some(return_ty) = return_ty {
-                v.visit_type_expr(return_ty);
-            }
+            v.visit_type_expr(return_ty);
             v.visit_expr(body);
         }
 

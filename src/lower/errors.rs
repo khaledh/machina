@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::ast::NodeId;
+use crate::hir::model::NodeId;
 use crate::lower::lower_ast::PlaceKind;
 use crate::resolve::def_map::DefId;
 

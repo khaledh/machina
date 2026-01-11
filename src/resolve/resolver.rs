@@ -240,7 +240,7 @@ impl SymbolResolver {
                     self.populate_callable(callable);
                 }
                 CallableRef::Method { .. } => self.populate_callable(callable),
-                CallableRef::Closure(_) => self.populate_callable(callable),
+                CallableRef::ClosureDecl(_) => self.populate_callable(callable),
             }
         }
     }
@@ -795,31 +795,35 @@ impl Visitor for SymbolResolver {
             }
 
             ExprKind::Closure {
+                ident,
                 params,
                 return_ty,
                 body,
-            } => {
-                for param in params {
-                    self.visit_type_expr(&param.typ);
-                }
-                if let Some(return_ty) = return_ty {
-                    self.visit_type_expr(return_ty);
-                }
-
-                // Enter a new scope for the closure parameters and body
-                self.with_scope(|resolver| {
-                    for (index, param) in params.iter().enumerate() {
-                        resolver.register_param(
-                            &param.ident,
-                            param.mode.clone(),
-                            param.id,
-                            param.span,
-                            index as u32,
-                        );
+                ..
+            } => match self.lookup_symbol(ident) {
+                Some(symbol) => {
+                    self.def_map_builder.record_use(expr.id, symbol.def_id());
+                    for param in params {
+                        self.visit_type_expr(&param.typ);
                     }
-                    resolver.visit_expr(body);
-                });
-            }
+                    self.visit_type_expr(return_ty);
+
+                    // Enter a new scope for the closure parameters and body
+                    self.with_scope(|resolver| {
+                        for (index, param) in params.iter().enumerate() {
+                            resolver.register_param(
+                                &param.ident,
+                                param.mode.clone(),
+                                param.id,
+                                param.span,
+                                index as u32,
+                            );
+                        }
+                        resolver.visit_expr(body);
+                    });
+                }
+                None => panic!("compiler bug: closure {} undefined", ident),
+            },
 
             _ => walk_expr(self, expr),
         }

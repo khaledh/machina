@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind as EK, StringFmtSegment};
+use crate::hir::model::{Expr, ExprKind as EK, StringFmtSegment};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;

@@ -129,13 +129,10 @@ impl<'a> LvalueOverlapChecker<'a> {
     /// Returns None for non-lvalue expressions (e.g., literals, calls).
     fn lvalue_path(&self, expr: &Expr) -> Option<LvaluePath> {
         match &expr.kind {
-            ExprKind::Var(_) => {
-                let def_id = self.ctx.def_map.lookup_node_def(expr.id)?.id;
-                Some(LvaluePath {
-                    base: def_id,
-                    projections: Vec::new(),
-                })
-            }
+            ExprKind::Var(def_id) => Some(LvaluePath {
+                base: *def_id,
+                projections: Vec::new(),
+            }),
             ExprKind::StructField { target, field } => {
                 let mut path = self.lvalue_path(target)?;
                 path.projections.push(Projection::Field(field.clone()));

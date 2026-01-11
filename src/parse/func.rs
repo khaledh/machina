@@ -16,7 +16,16 @@ impl<'a> Parser<'a> {
                 span: self.close(marker),
             }))
         } else {
+            let prev_base = self.closure_base.clone();
+            let prev_index = self.closure_index;
+            self.closure_base = Some(sig.name.clone());
+            self.closure_index = 0;
+
             let body = self.parse_block()?;
+
+            self.closure_base = prev_base;
+            self.closure_index = prev_index;
+
             Ok(Decl::Function(Function {
                 id: self.id_gen.new_id(),
                 sig,
@@ -57,7 +66,7 @@ impl<'a> Parser<'a> {
 
         let mut methods = Vec::new();
         while self.curr_token.kind != TK::RBrace {
-            methods.push(self.parse_method()?);
+            methods.push(self.parse_method(&type_name)?);
         }
         self.consume(&TK::RBrace)?;
 
@@ -69,10 +78,19 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    fn parse_method(&mut self) -> Result<Method, ParseError> {
+    fn parse_method(&mut self, type_name: &str) -> Result<Method, ParseError> {
         let marker = self.mark();
         let sig = self.parse_method_sig()?;
+
+        let prev_base = self.closure_base.clone();
+        let prev_index = self.closure_index;
+        self.closure_base = Some(format!("{}${}", type_name, sig.name));
+        self.closure_index = 0;
+
         let body = self.parse_block()?;
+
+        self.closure_base = prev_base;
+        self.closure_index = prev_index;
 
         Ok(Method {
             id: self.id_gen.new_id(),
@@ -139,29 +157,44 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let return_ty = if self.curr_token.kind == TK::Arrow {
-            self.advance();
-            Some(self.parse_type_expr()?)
-        } else {
-            None
-        };
+        let return_ty = self.parse_return_type()?;
 
         let body = self.parse_expr(0)?;
+        let ident = self.next_closure_ident();
 
         let closure_expr = Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Closure {
-                params,
-                return_ty,
-                body: Box::new(body),
+                ident: ident.clone(),
+                params: params.clone(),
+                return_ty: return_ty.clone(),
+                body: Box::new(body.clone()), // TODO: see if we can restructure this to avoid cloning
             },
             span: self.close(marker),
         };
 
-        // Record the closure definition (to be included in the module decls)
-        self.closure_decls.push(Decl::Closure(closure_expr.clone()));
+        // Record the closure declaration (to be included in the module decls)
+        let closure_decl = ClosureDecl {
+            id: self.id_gen.new_id(),
+            sig: ClosureSig {
+                name: ident,
+                params,
+                return_ty,
+                span: self.close(marker),
+            },
+            body: body,
+            span: self.close(marker),
+        };
+        self.closure_decls
+            .push(Decl::ClosureDecl(closure_decl.clone()));
 
         Ok(closure_expr)
+    }
+
+    fn next_closure_ident(&mut self) -> String {
+        self.closure_index += 1;
+        let base = self.closure_base.as_deref().unwrap_or("anon").to_string();
+        format!("{base}$closure${}", self.closure_index)
     }
 
     // --- Params & Return Type ---

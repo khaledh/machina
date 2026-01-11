@@ -90,7 +90,9 @@ impl Module {
                         });
                     }
                 }
-                Decl::Closure(expr) => callables.push(CallableRef::Closure(expr)),
+                Decl::ClosureDecl(closure_decl) => {
+                    callables.push(CallableRef::ClosureDecl(closure_decl))
+                }
                 Decl::TypeDecl(_) => {}
             }
         }
@@ -106,7 +108,7 @@ pub enum Decl {
     FunctionDecl(FunctionDecl),
     Function(Function),
     MethodBlock(MethodBlock),
-    Closure(Expr),
+    ClosureDecl(ClosureDecl),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -117,7 +119,7 @@ pub enum CallableRef<'a> {
         type_name: &'a str,
         method: &'a Method,
     },
-    Closure(&'a Expr),
+    ClosureDecl(&'a ClosureDecl),
 }
 
 impl<'a> CallableRef<'a> {
@@ -126,7 +128,7 @@ impl<'a> CallableRef<'a> {
             CallableRef::FunctionDecl(func_decl) => func_decl.id,
             CallableRef::Function(function) => function.id,
             CallableRef::Method { method, .. } => method.id,
-            CallableRef::Closure(expr) => expr.id,
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.id,
         }
     }
 
@@ -135,7 +137,7 @@ impl<'a> CallableRef<'a> {
             CallableRef::FunctionDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::Function(function) => function.sig.name.clone(),
             CallableRef::Method { method, .. } => method.sig.name.clone(),
-            CallableRef::Closure(expr) => format!("__mc_closure${}", expr.id),
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.sig.name.clone(),
         }
     }
 
@@ -146,7 +148,7 @@ impl<'a> CallableRef<'a> {
             CallableRef::Method { type_name, method } => {
                 format!("{type_name}${}", method.sig.name)
             }
-            CallableRef::Closure(_) => self.name(),
+            CallableRef::ClosureDecl(_) => self.name(),
         }
     }
 
@@ -155,7 +157,7 @@ impl<'a> CallableRef<'a> {
             CallableRef::FunctionDecl(func_decl) => func_decl.span,
             CallableRef::Function(function) => function.span,
             CallableRef::Method { method, .. } => method.span,
-            CallableRef::Closure(expr) => expr.span,
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.span,
         }
     }
 }
@@ -222,6 +224,24 @@ pub struct SelfParam {
     pub mode: ParamMode,
     pub span: Span,
 }
+
+#[derive(Clone, Debug)]
+pub struct ClosureDecl {
+    pub id: NodeId,
+    pub def_id: DefId,
+    pub sig: ClosureSig,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ClosureSig {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_ty: TypeExpr,
+    pub span: Span,
+}
+
 pub type Param = model::Param<DefId>;
 pub type CallArg = model::CallArg<DefId>;
 pub type BindPattern = model::BindPattern<DefId>;

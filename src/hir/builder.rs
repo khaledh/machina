@@ -55,14 +55,8 @@ impl ToHir for ast::Decl {
             ast::Decl::FunctionDecl(decl) => hir::Decl::FunctionDecl(decl.to_hir(def_map)),
             ast::Decl::Function(func) => hir::Decl::Function(func.to_hir(def_map)),
             ast::Decl::MethodBlock(block) => hir::Decl::MethodBlock(block.to_hir(def_map)),
-            ast::Decl::Closure(closure) => {
-                if !matches!(closure.kind, ast::ExprKind::Closure { .. }) {
-                    panic!(
-                        "Expected closure expression for Decl::Closure (NodeId({}))",
-                        closure.id.0
-                    );
-                }
-                hir::Decl::Closure(closure.to_hir(def_map))
+            ast::Decl::ClosureDecl(closure_decl) => {
+                hir::Decl::ClosureDecl(closure_decl.to_hir(def_map))
             }
         }
     }
@@ -280,6 +274,38 @@ impl ToHir for ast::MethodSig {
     }
 }
 
+impl ToHir for ast::ClosureDecl {
+    type Output = hir::ClosureDecl;
+
+    fn to_hir(self, def_map: &DefMap) -> Self::Output {
+        let def_id = def_id(def_map, self.id);
+        hir::ClosureDecl {
+            id: self.id,
+            def_id,
+            sig: self.sig.to_hir(def_map),
+            body: self.body.to_hir(def_map),
+            span: self.span,
+        }
+    }
+}
+
+impl ToHir for ast::ClosureSig {
+    type Output = hir::ClosureSig;
+
+    fn to_hir(self, def_map: &DefMap) -> Self::Output {
+        hir::ClosureSig {
+            name: self.name,
+            params: self
+                .params
+                .into_iter()
+                .map(|param| param.to_hir(def_map))
+                .collect(),
+            return_ty: self.return_ty.to_hir(def_map),
+            span: self.span,
+        }
+    }
+}
+
 impl ToHir for ast::Param {
     type Output = hir::Param;
 
@@ -423,12 +449,14 @@ impl ToHir for ast::Expr {
                 params,
                 return_ty,
                 body,
+                ..
             } => hir::ExprKind::Closure {
+                ident: def_id(def_map, id),
                 params: params
                     .into_iter()
                     .map(|param| param.to_hir(def_map))
                     .collect(),
-                return_ty: return_ty.map(|ty| ty.to_hir(def_map)),
+                return_ty: return_ty.to_hir(def_map),
                 body: Box::new(body.to_hir(def_map)),
             },
         };

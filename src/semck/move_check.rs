@@ -55,9 +55,7 @@ fn check_func(
     let mut sink_params = HashSet::new();
     for param in &func.sig.params {
         if param.mode == ParamMode::Sink {
-            if let Some(def) = ctx.def_map.lookup_node_def(param.id) {
-                sink_params.insert(def.id);
-            }
+            sink_params.insert(param.ident);
         }
     }
 
@@ -170,13 +168,13 @@ impl<'a> MoveVisitor<'a> {
     /// Process `move x`: validate target and mark as moved.
     fn handle_move_target(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Var(_) => {
-                let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) else {
+            ExprKind::Var(def_id) => {
+                let Some(def) = self.ctx.def_map.lookup_def(*def_id) else {
                     return;
                 };
                 // Params can only be moved if they're sink params (owned).
                 if matches!(def.kind, DefKind::Param { .. }) {
-                    if !self.sink_params.contains(&def.id) {
+                    if !self.sink_params.contains(def_id) {
                         self.errors.push(SemCheckError::MoveFromParam(expr.span));
                         return;
                     }
@@ -186,7 +184,7 @@ impl<'a> MoveVisitor<'a> {
                 };
                 // Only track moves for types that need ownership tracking.
                 if ty.is_move_tracked() {
-                    self.moved.insert(def.id);
+                    self.moved.insert(*def_id);
                 }
             }
             // `move x.field` or `move arr[i]` not allowed - must move whole variable.
@@ -207,8 +205,9 @@ impl<'a> MoveVisitor<'a> {
 
     /// Error if using a variable that has already been moved.
     fn check_use(&mut self, expr: &Expr) {
-        if let Some(def) = self.ctx.def_map.lookup_node_def(expr.id)
-            && self.moved.contains(&def.id)
+        if let ExprKind::Var(def_id) = expr.kind
+            && let Some(def) = self.ctx.def_map.lookup_def(def_id)
+            && self.moved.contains(&def_id)
         {
             self.errors
                 .push(SemCheckError::UseAfterMove(def.name.clone(), expr.span));
@@ -221,12 +220,15 @@ impl<'a> MoveVisitor<'a> {
         if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
             && ty.is_heap()
         {
-            let Some(def) = self.ctx.def_map.lookup_node_def(expr.id) else {
+            let ExprKind::Var(def_id) = expr.kind else {
+                return;
+            };
+            let Some(def) = self.ctx.def_map.lookup_def(def_id) else {
                 return;
             };
             if matches!(def.kind, DefKind::Param { .. }) {
                 // Allow moving from sink params only.
-                if !self.sink_params.contains(&def.id) {
+                if !self.sink_params.contains(&def_id) {
                     self.errors.push(SemCheckError::MoveFromParam(expr.span));
                     return;
                 }
@@ -239,13 +241,13 @@ impl<'a> MoveVisitor<'a> {
             let use_count = self
                 .current_use_counts
                 .as_ref()
-                .and_then(|counts| counts.get(&def.id))
+                .and_then(|counts| counts.get(&def_id))
                 .copied()
                 .unwrap_or(0);
             // Require explicit move if:
             // - Used multiple times in same item (e.g., `f(p, p)`) - ambiguous which moves
             // - Live after this item - can't implicitly consume something still needed
-            if use_count > 1 || live_after.contains(&def.id) {
+            if use_count > 1 || live_after.contains(&def_id) {
                 self.errors
                     .push(SemCheckError::OwnedMoveRequired(expr.span));
                 return;
@@ -253,7 +255,7 @@ impl<'a> MoveVisitor<'a> {
 
             // Last-use and only use in this item: implicit move is safe.
             self.implicit_moves.insert(expr.id);
-            self.moved.insert(def.id);
+            self.moved.insert(def_id);
         }
     }
 
@@ -285,10 +287,8 @@ impl<'a> MoveVisitor<'a> {
     /// Called on let/var bindings and reassignments to "revive" the variable.
     fn clear_pattern_defs(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(pattern.id) {
-                    self.moved.remove(&def.id);
-                }
+            BindPatternKind::Name(def_id) => {
+                self.moved.remove(def_id);
             }
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for p in patterns {
@@ -305,11 +305,9 @@ impl<'a> MoveVisitor<'a> {
 
     fn visit_out_arg(&mut self, arg: &Expr) {
         match &arg.kind {
-            ExprKind::Var(_) => {
-                if let Some(def) = self.ctx.def_map.lookup_node_def(arg.id) {
-                    // Out args are reinitialized by the callee.
-                    self.moved.remove(&def.id);
-                }
+            ExprKind::Var(def_id) => {
+                // Out args are reinitialized by the callee.
+                self.moved.remove(def_id);
             }
             ExprKind::StructField { target, .. } => {
                 self.visit_place_base(target);
@@ -348,11 +346,9 @@ impl<'a> Visitor for MoveVisitor<'a> {
             StmtExprKind::VarDecl { .. } => {}
             StmtExprKind::Assign { assignee, value } => {
                 self.visit_expr(value);
-                if let ExprKind::Var(_) = assignee.kind {
+                if let ExprKind::Var(def_id) = assignee.kind {
                     // Reassigning a variable clears its moved status.
-                    if let Some(def) = self.ctx.def_map.lookup_node_def(assignee.id) {
-                        self.moved.remove(&def.id);
-                    }
+                    self.moved.remove(&def_id);
                 } else {
                     // For projections (x.field = ...), check the base is usable.
                     self.visit_expr(assignee);

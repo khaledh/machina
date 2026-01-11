@@ -1,4 +1,4 @@
-use crate::ast::{BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
+use crate::hir::model::{BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
@@ -70,7 +70,7 @@ impl<'a> FuncLowerer<'a> {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
             StmtExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
-            StmtExprKind::VarDecl { ident, .. } => self.lower_var_decl(stmt, ident),
+            StmtExprKind::VarDecl { ident, .. } => self.lower_var_decl(stmt, *ident),
             StmtExprKind::Assign { assignee, value } => self.lower_assign(assignee, value),
             StmtExprKind::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
             StmtExprKind::For {
@@ -124,15 +124,15 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn lower_var_decl(&mut self, stmt: &StmtExpr, name: &str) -> Result<(), LowerError> {
+    fn lower_var_decl(&mut self, stmt: &StmtExpr, def_id: DefId) -> Result<(), LowerError> {
         // Reserve storage for the declaration; initialization is handled by
         // a later assignment (tracked by def-init).
-        let def_id = self.def_for_node(stmt.id)?.id;
-        let decl_ty = self.def_ty_for_node(stmt.id)?;
+        let decl_ty = self.def_ty_for_id(def_id, stmt.id)?;
         let decl_ty_id = self.ty_lowerer.lower_ty(&decl_ty);
-        self.ensure_local_for_def(def_id, decl_ty_id, Some(name.to_string()));
+        let name = self.def_name(def_id, stmt.id)?;
+        self.ensure_local_for_def(def_id, decl_ty_id, Some(name.clone()));
 
-        let is_initialized = self.create_is_initialized(name, &decl_ty, false);
+        let is_initialized = self.create_is_initialized(&name, &decl_ty, false);
         self.register_drop(def_id, &decl_ty, is_initialized);
 
         Ok(())
@@ -191,10 +191,8 @@ impl<'a> FuncLowerer<'a> {
 
         self.emit_drop_place(place, target_ty);
         if clear_moved {
-            if let ExprKind::Var(_) = assignee.kind {
-                if let Ok(def) = self.def_for_node(assignee.id) {
-                    self.clear_moved(def.id);
-                }
+            if let ExprKind::Var(def_id) = assignee.kind {
+                self.clear_moved(def_id);
             }
         }
     }
@@ -218,12 +216,12 @@ impl<'a> FuncLowerer<'a> {
         self.set_is_initialized(flag, true);
     }
 
-    fn is_initialized_for_assignee(&mut self, assignee: &Expr) -> Option<LocalId> {
-        if !matches!(assignee.kind, ExprKind::Var(_)) {
-            return None;
+    fn is_initialized_for_assignee(&self, assignee: &Expr) -> Option<LocalId> {
+        if let ExprKind::Var(def_id) = assignee.kind {
+            self.is_initialized_for_def(def_id)
+        } else {
+            None
         }
-        let def = self.def_for_node(assignee.id).ok()?;
-        self.is_initialized_for_def(def.id)
     }
 
     fn is_out_param_assignee(&self, assignee: &Expr) -> bool {
@@ -234,11 +232,7 @@ impl<'a> FuncLowerer<'a> {
 
     fn base_def_for_assignee(&self, assignee: &Expr) -> Option<DefId> {
         match &assignee.kind {
-            ExprKind::Var(_) => self
-                .ctx
-                .def_map
-                .lookup_node_def(assignee.id)
-                .map(|def| def.id),
+            ExprKind::Var(def_id) => Some(*def_id),
             ExprKind::StructField { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::ArrayIndex { target, .. }

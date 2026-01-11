@@ -15,7 +15,7 @@ use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
-    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, Function, NodeId, ParamMode, StmtExpr,
+    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, Function, ParamMode, StmtExpr,
     StmtExprKind,
 };
 use crate::hir::visit::{Visitor, walk_expr};
@@ -205,21 +205,21 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &HirItem<'_>, ctx: &Type
     match &stmt.kind {
         StmtExprKind::LetBind { pattern, value, .. }
         | StmtExprKind::VarBind { pattern, value, .. } => {
-            if let BindPatternKind::Name(_) = &pattern.kind
-                && let Some(def) = ctx.def_map.lookup_node_def(pattern.id)
+            if let BindPatternKind::Name(def_id) = &pattern.kind
+                && let Some(def) = ctx.def_map.lookup_def(*def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
                 let bases = slice_bases_for_value(value, state, ctx);
-                update_slice_binding(state, def.id, bases);
+                update_slice_binding(state, *def_id, bases);
             }
         }
         StmtExprKind::Assign { assignee, value } => {
-            if matches!(assignee.kind, ExprKind::Var(_))
-                && let Some(def) = ctx.def_map.lookup_node_def(assignee.id)
+            if let ExprKind::Var(def_id) = assignee.kind
+                && let Some(def) = ctx.def_map.lookup_def(def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
                 let bases = slice_bases_for_value(value, state, ctx);
-                update_slice_binding(state, def.id, bases);
+                update_slice_binding(state, def_id, bases);
             }
         }
         _ => {}
@@ -293,13 +293,12 @@ fn slice_bases_for_slice_target(
 
 fn slice_def_from_expr(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     match &expr.kind {
-        ExprKind::Var(_) => {
+        ExprKind::Var(def_id) => {
             let ty = ctx.type_map.lookup_node_type(expr.id)?;
             if !matches!(ty, Type::Slice { .. }) {
                 return None;
             }
-            let def = ctx.def_map.lookup_node_def(expr.id)?;
-            Some(def.id)
+            Some(*def_id)
         }
         ExprKind::Move { expr } => slice_def_from_expr(expr, ctx),
         _ => None,
@@ -441,7 +440,7 @@ fn collect_pattern_defs(
     defs: &mut HashSet<DefId>,
 ) {
     match &pattern.kind {
-        BindPatternKind::Name(_) => add_def_if_slice(pattern.id, ctx, defs),
+        BindPatternKind::Name(def_id) => add_def_if_slice(*def_id, ctx, defs),
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
@@ -457,21 +456,21 @@ fn collect_pattern_defs(
 
 /// Collect slice-typed definitions from an assignment target.
 fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
-    if matches!(assignee.kind, ExprKind::Var(_)) {
-        add_def_if_slice(assignee.id, ctx, defs);
+    if let ExprKind::Var(def_id) = assignee.kind {
+        add_def_if_slice(def_id, ctx, defs);
     }
 }
 
 /// Add a DefId to the set if it has slice type.
-fn add_def_if_slice(node_id: NodeId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
-    let Some(def) = ctx.def_map.lookup_node_def(node_id) else {
+fn add_def_if_slice(def_id: DefId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
+    let Some(def) = ctx.def_map.lookup_def(def_id) else {
         return;
     };
     let Some(ty) = ctx.type_map.lookup_def_type(def) else {
         return;
     };
     if matches!(ty, Type::Slice { .. }) {
-        defs.insert(def.id);
+        defs.insert(def_id);
     }
 }
 
@@ -559,15 +558,14 @@ impl Visitor for SliceUseCollector<'_> {
 
 /// If expr is a slice-typed variable use, return its DefId.
 fn slice_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
-    if !matches!(expr.kind, ExprKind::Var(_)) {
+    let ExprKind::Var(def_id) = expr.kind else {
         return None;
-    }
+    };
     let ty = ctx.type_map.lookup_node_type(expr.id)?;
     if !matches!(ty, Type::Slice { .. }) {
         return None;
     }
-    let def = ctx.def_map.lookup_node_def(expr.id)?;
-    Some(def.id)
+    Some(def_id)
 }
 
 // ============================================================================
@@ -665,7 +663,7 @@ impl Visitor for BorrowConflictVisitor<'_> {
 /// E.g., `arr[0].field` -> DefId of `arr`.
 fn base_def_id(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     match &expr.kind {
-        ExprKind::Var(_) => ctx.def_map.lookup_node_def(expr.id).map(|def| def.id),
+        ExprKind::Var(def_id) => Some(*def_id),
         ExprKind::ArrayIndex { target, .. }
         | ExprKind::TupleField { target, .. }
         | ExprKind::StructField { target, .. }

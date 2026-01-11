@@ -38,14 +38,6 @@ pub(crate) fn resolve_type_expr(
     resolve_type_expr_impl(def_map, type_expr, &mut in_progress, ResolveDepth::Full)
 }
 
-pub(crate) fn resolve_ast_type_expr(
-    def_map: &DefMap,
-    type_expr: &ast::TypeExpr,
-) -> Result<Type, TypeCheckError> {
-    let hir_expr = hir_type_expr_from_ast(def_map, type_expr);
-    resolve_type_expr(def_map, &hir_expr)
-}
-
 fn resolve_type_expr_impl(
     def_map: &DefMap,
     type_expr: &TypeExpr,

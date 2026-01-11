@@ -1,7 +1,8 @@
-use crate::ast::{CallArg, CallArgMode, Expr, ExprKind, ParamMode};
+use crate::hir::model::{CallArg, CallArgMode, Expr, ExprKind, ParamMode};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
+use crate::resolve::def_map::DefKind;
 use crate::types::{Type, array_to_slice_assignable};
 
 impl<'a> FuncLowerer<'a> {
@@ -69,14 +70,13 @@ impl<'a> FuncLowerer<'a> {
         let callee = match self.ctx.type_map.lookup_call_def(call.id) {
             Some(def_id) => Callee::Def(def_id),
             None => {
-                if let Ok(callee_def) = self.def_for_node(callee.id)
-                    && matches!(
-                        callee_def.kind,
-                        crate::resolve::def_map::DefKind::Func
-                            | crate::resolve::def_map::DefKind::ExternFunc
-                    )
-                {
-                    Callee::Def(callee_def.id)
+                if let ExprKind::Var(def_id) = callee.kind {
+                    let def = self.def_for_id(def_id, callee.id)?;
+                    if matches!(def.kind, DefKind::Func | DefKind::ExternFunc) {
+                        Callee::Def(def.id)
+                    } else {
+                        Callee::Value(self.lower_scalar_expr(callee)?)
+                    }
                 } else {
                     Callee::Value(self.lower_scalar_expr(callee)?)
                 }

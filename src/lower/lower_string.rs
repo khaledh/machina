@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::hir::model::Expr;
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;
