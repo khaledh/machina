@@ -1,15 +1,13 @@
-pub mod def_map;
+pub mod def;
+pub mod def_table;
 pub mod errors;
 mod resolver;
 pub mod symbols;
 
-#[allow(unused_imports)]
-pub use def_map::{Def, DefId, DefIdGen, DefKind, DefMap, DefMapBuilder};
-#[allow(unused_imports)]
+pub use def::{Def, DefId, DefIdGen, DefKind};
+pub use def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 pub use errors::ResolveError;
-#[allow(unused_imports)]
 pub use resolver::{SymbolResolver, resolve};
-#[allow(unused_imports)]
 pub use symbols::SymbolKind;
 
 #[cfg(test)]

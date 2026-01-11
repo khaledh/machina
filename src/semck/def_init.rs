@@ -17,7 +17,7 @@ use crate::hir::model::{
     MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
 use crate::hir::visit::{Visitor, walk_expr};
-use crate::resolve::def_map::{DefId, DefKind};
+use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::types::Type;
 
@@ -184,7 +184,7 @@ fn check_func(
     let local_defs = collect_local_defs(func_def, ctx);
     let mut reported = HashSet::new();
     for def_id in local_defs {
-        let Some(def) = ctx.def_map.lookup_def(def_id) else {
+        let Some(def) = ctx.def_table.lookup_def(def_id) else {
             continue;
         };
         let Some(ty) = ctx.type_map.lookup_def_type(def) else {
@@ -224,7 +224,7 @@ fn collect_out_param_defs(
         if param.mode != ParamMode::Out {
             continue;
         }
-        if let Some(def) = ctx.def_map.lookup_def(param.ident) {
+        if let Some(def) = ctx.def_table.lookup_def(param.ident) {
             defs.push((param.ident, def.name.clone(), param.span));
         }
     }
@@ -243,7 +243,7 @@ fn collect_local_defs(func_def: &FuncDef, ctx: &TypeCheckedContext) -> HashSet<D
         .into_iter()
         .filter(|def_id| {
             matches!(
-                ctx.def_map.lookup_def(*def_id).map(|def| &def.kind),
+                ctx.def_table.lookup_def(*def_id).map(|def| &def.kind),
                 Some(DefKind::LocalVar { .. })
             )
         })
@@ -814,7 +814,7 @@ impl<'a> DefInitChecker<'a> {
     }
 
     fn def_type(&self, def_id: DefId) -> Option<Type> {
-        let def = self.ctx.def_map.lookup_def(def_id)?;
+        let def = self.ctx.def_table.lookup_def(def_id)?;
         self.ctx.type_map.lookup_def_type(def)
     }
 
@@ -830,12 +830,12 @@ impl<'a> DefInitChecker<'a> {
             _ => None,
         }?;
 
-        let def = self.ctx.def_map.lookup_def(def_id)?;
+        let def = self.ctx.def_table.lookup_def(def_id)?;
         matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }).then_some(def_id)
     }
 
     fn is_local_var(&self, def_id: DefId) -> bool {
-        let Some(def) = self.ctx.def_map.lookup_def(def_id) else {
+        let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
             return false;
         };
         matches!(def.kind, DefKind::LocalVar { .. })
@@ -868,7 +868,7 @@ impl<'a> DefInitChecker<'a> {
     }
 
     fn report_use_before_init(&mut self, def_id: DefId, span: Span) {
-        let Some(def) = self.ctx.def_map.lookup_def(def_id) else {
+        let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
             return;
         };
         self.errors
@@ -904,7 +904,7 @@ impl<'a> DefInitChecker<'a> {
         let ExprKind::Var(def_id) = expr.kind else {
             return;
         };
-        let Some(def) = self.ctx.def_map.lookup_def(def_id) else {
+        let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
             return;
         };
         // Only check locals and params (globals, functions, etc. are always "initialized").
@@ -1084,7 +1084,7 @@ impl<'a> DefInitChecker<'a> {
     fn check_out_arg(&mut self, arg: &Expr) -> Option<DefId> {
         match &arg.kind {
             ExprKind::Var(def_id) => {
-                let def = self.ctx.def_map.lookup_def(*def_id)?;
+                let def = self.ctx.def_table.lookup_def(*def_id)?;
                 if matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. }) {
                     if !self.initialized.is_full(*def_id) {
                         // Record the first init through an `out` call so lowering skips drops.

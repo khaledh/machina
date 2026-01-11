@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 use std::marker::PhantomData;
 
 use crate::mcir::abi::RuntimeFn;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 // --- IR Type System ---
 

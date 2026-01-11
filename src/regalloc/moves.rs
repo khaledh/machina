@@ -5,7 +5,7 @@ use crate::mcir::types::{BlockId, Place, PlaceAny, Scalar};
 use crate::regalloc::pos::{InstPos, RelInstPos};
 use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {

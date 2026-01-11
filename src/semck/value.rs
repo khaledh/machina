@@ -116,7 +116,7 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Option<Type> {
-        resolve_type_expr(&self.ctx.def_map, ty).ok()
+        resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ty).ok()
     }
 
     fn check_range_binding_value(&mut self, value: &Expr, ty: &Type) {

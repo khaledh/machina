@@ -5,7 +5,7 @@ use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::hir::fold::{AstFolder, walk_expr, walk_if};
 use crate::hir::model::*;
-use crate::resolve::def_map::{DefId, DefKind};
+use crate::resolve::{DefId, DefKind};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
 };
@@ -60,8 +60,8 @@ impl TypeChecker {
             match &type_def.kind {
                 TypeDefKind::Alias { aliased_ty } => {
                     // Resolve the aliased type
-                    let ty =
-                        resolve_type_expr(&self.ctx.def_map, aliased_ty).map_err(|e| vec![e])?;
+                    let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, aliased_ty)
+                        .map_err(|e| vec![e])?;
 
                     self.type_defs.insert(type_def.name.clone(), ty);
                 }
@@ -72,7 +72,8 @@ impl TypeChecker {
                         .iter()
                         .map(|f| {
                             let field_ty =
-                                resolve_type_expr(&self.ctx.def_map, &f.ty).map_err(|e| vec![e])?;
+                                resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &f.ty)
+                                    .map_err(|e| vec![e])?;
                             Ok(StructField {
                                 name: f.name.clone(),
                                 ty: field_ty,
@@ -96,7 +97,9 @@ impl TypeChecker {
                         let payload = variant
                             .payload
                             .iter()
-                            .map(|ty_expr| resolve_type_expr(&self.ctx.def_map, ty_expr))
+                            .map(|ty_expr| {
+                                resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ty_expr)
+                            })
                             .collect::<Result<Vec<Type>, _>>()
                             .map_err(|e| vec![e])?;
 
@@ -174,7 +177,7 @@ impl TypeChecker {
         let ret_ty = self.resolve_ret_type(&sig.ret_ty_expr)?;
 
         // Record the function type.
-        if let Some(def) = self.ctx.def_map.lookup_def(def_id) {
+        if let Some(def) = self.ctx.def_table.lookup_def(def_id) {
             let fn_params = params
                 .iter()
                 .map(|param| FnParam {
@@ -209,7 +212,7 @@ impl TypeChecker {
         params
             .iter()
             .map(|param| {
-                let ty = resolve_type_expr(&self.ctx.def_map, &param.typ)?;
+                let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ)?;
                 Ok(ParamSig {
                     name: self.def_name(param.ident).to_string(),
                     ty,
@@ -221,15 +224,15 @@ impl TypeChecker {
     }
 
     fn resolve_ret_type(&self, ret_type: &TypeExpr) -> Result<Type, Vec<TypeCheckError>> {
-        resolve_type_expr(&self.ctx.def_map, ret_type).map_err(|e| vec![e])
+        resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ret_type).map_err(|e| vec![e])
     }
 
     fn def_name(&self, def_id: DefId) -> &str {
         self.ctx
-            .def_map
+            .def_table
             .lookup_def(def_id)
             .map(|def| def.name.as_str())
-            .unwrap_or_else(|| panic!("def {def_id} not found in def_map"))
+            .unwrap_or_else(|| panic!("def {def_id} not found in def_table"))
     }
 
     fn expand_shallow_type(&self, ty: &Type) -> Type {
@@ -280,14 +283,14 @@ impl TypeChecker {
 
         // Record param types
         for (param, param_ty) in func_def.sig.params.iter().zip(param_types.iter()) {
-            match self.ctx.def_map.lookup_def(param.ident) {
+            match self.ctx.def_table.lookup_def(param.ident) {
                 Some(def) => {
                     self.type_map_builder
                         .record_def_type(def.clone(), param_ty.clone());
                     self.type_map_builder
                         .record_node_type(param.id, param_ty.clone());
                 }
-                None => panic!("Parameter {} not found in def_map", param.ident),
+                None => panic!("Parameter {} not found in def_table", param.ident),
             }
         }
 
@@ -360,24 +363,24 @@ impl TypeChecker {
             .collect::<Vec<_>>();
 
         let self_def_id = method_def.sig.self_param.def_id;
-        if let Some(def) = self.ctx.def_map.lookup_def(self_def_id) {
+        if let Some(def) = self.ctx.def_table.lookup_def(self_def_id) {
             self.type_map_builder
                 .record_def_type(def.clone(), self_ty.clone());
             self.type_map_builder
                 .record_node_type(method_def.sig.self_param.id, self_ty.clone());
         } else {
-            panic!("self parameter not found in def_map");
+            panic!("self parameter not found in def_table");
         }
 
         for (param, param_ty) in method_def.sig.params.iter().zip(param_types.iter()) {
-            match self.ctx.def_map.lookup_def(param.ident) {
+            match self.ctx.def_table.lookup_def(param.ident) {
                 Some(def) => {
                     self.type_map_builder
                         .record_def_type(def.clone(), param_ty.clone());
                     self.type_map_builder
                         .record_node_type(param.id, param_ty.clone());
                 }
-                None => panic!("Parameter {} not found in def_map", param.ident),
+                None => panic!("Parameter {} not found in def_table", param.ident),
             }
         }
 
@@ -423,9 +426,9 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         let mut param_types = Vec::with_capacity(params.len());
         for param in params {
-            let ty = resolve_type_expr(&self.ctx.def_map, &param.typ)?;
+            let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ)?;
             self.type_map_builder.record_node_type(param.id, ty.clone());
-            if let Some(def) = self.ctx.def_map.lookup_def(param.ident) {
+            if let Some(def) = self.ctx.def_table.lookup_def(param.ident) {
                 self.type_map_builder
                     .record_def_type(def.clone(), ty.clone());
             }
@@ -435,7 +438,7 @@ impl TypeChecker {
             });
         }
 
-        let return_ty = resolve_type_expr(&self.ctx.def_map, return_ty)?;
+        let return_ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, return_ty)?;
 
         let body_ty = self.visit_expr(body, Some(&return_ty))?;
 
@@ -484,7 +487,7 @@ impl TypeChecker {
 
         // Resolve the element type
         let elem_ty = if let Some(elem_ty_expr) = elem_ty_expr {
-            resolve_type_expr(&self.ctx.def_map, elem_ty_expr)?
+            resolve_type_expr(&self.ctx.def_table, &self.ctx.module, elem_ty_expr)?
         } else if let Some(Type::Array {
             elem_ty: expected_elem_ty,
             dims: expected_dims,
@@ -888,7 +891,7 @@ impl TypeChecker {
         match &pattern.kind {
             BindPatternKind::Name(ident) => {
                 // Record this identifier's type
-                if let Some(def) = self.ctx.def_map.lookup_def(*ident) {
+                if let Some(def) = self.ctx.def_table.lookup_def(*ident) {
                     self.type_map_builder
                         .record_def_type(def.clone(), value_ty.clone());
                 }
@@ -1003,7 +1006,7 @@ impl TypeChecker {
         // resolve the declaration type (if present)
         let expected_ty = decl_ty
             .as_ref()
-            .map(|ty_expr| resolve_type_expr(&self.ctx.def_map, ty_expr))
+            .map(|ty_expr| resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ty_expr))
             .transpose()?;
 
         let mut value_ty = self.visit_expr(value, expected_ty.as_ref())?;
@@ -1067,7 +1070,7 @@ impl TypeChecker {
     fn check_var_ref(&mut self, def_id: DefId, span: Span) -> Result<Type, TypeCheckError> {
         match self
             .ctx
-            .def_map
+            .def_table
             .lookup_def(def_id)
             .and_then(|def| self.type_map_builder.lookup_def_type(def))
         {
@@ -1123,7 +1126,7 @@ impl TypeChecker {
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
         if let ExprKind::Var(def_id) = &callee.kind
-            && let Some(def) = self.ctx.def_map.lookup_def(*def_id)
+            && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
             && matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl)
         {
             let name = def.name.clone();
@@ -1496,13 +1499,13 @@ impl TypeChecker {
     }
 
     fn record_binding_def(&mut self, def_id: DefId, ty: &Type) {
-        match self.ctx.def_map.lookup_def(def_id) {
+        match self.ctx.def_table.lookup_def(def_id) {
             Some(def) => {
                 self.type_map_builder
                     .record_def_type(def.clone(), ty.clone());
             }
             None => panic!(
-                "compiler bug: binding def [{}] not found in def_map",
+                "compiler bug: binding def [{}] not found in def_table",
                 def_id
             ),
         }
@@ -1645,8 +1648,8 @@ impl AstFolder for TypeChecker {
             } => self.check_binding(pattern, decl_ty, value)?,
 
             StmtExprKind::VarDecl { decl_ty, ident } => {
-                let ty = resolve_type_expr(&self.ctx.def_map, decl_ty)?;
-                if let Some(def) = self.ctx.def_map.lookup_def(*ident) {
+                let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, decl_ty)?;
+                if let Some(def) = self.ctx.def_table.lookup_def(*ident) {
                     self.type_map_builder.record_def_type(def.clone(), ty);
                 }
                 Type::Unit

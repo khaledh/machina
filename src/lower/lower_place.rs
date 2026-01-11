@@ -426,7 +426,8 @@ impl<'a> FuncLowerer<'a> {
         let resolved_fields = fields
             .iter()
             .filter_map(|f| {
-                let field_ty = resolve_type_expr(&self.ctx.def_map, &f.ty).ok()?;
+                let field_ty =
+                    resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &f.ty).ok()?;
                 Some(TypeStructField {
                     name: f.name.clone(),
                     ty: field_ty,

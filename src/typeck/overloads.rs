@@ -1,7 +1,7 @@
 use crate::ast::{CallArgMode, ParamMode};
 use crate::diag::Span;
 use crate::hir::model::CallArg;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{
     Type, TypeAssignability, ValueAssignability, array_to_slice_assignable, value_assignable,

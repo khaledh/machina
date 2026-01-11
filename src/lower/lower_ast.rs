@@ -28,7 +28,7 @@ use crate::lower::lower_ty::TyLowerer;
 use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 
@@ -90,7 +90,7 @@ impl<'a> FuncLowerer<'a> {
             .params
             .iter()
             .map(|param| {
-                let def = ctx.def_map.lookup_def(param.ident).unwrap_or_else(|| {
+                let def = ctx.def_table.lookup_def(param.ident).unwrap_or_else(|| {
                     panic!("compiler bug: param def {:?} not found", param.ident)
                 });
                 LoweredParam {
@@ -123,7 +123,7 @@ impl<'a> FuncLowerer<'a> {
     ) -> Self {
         let mut params = Vec::with_capacity(method_def.sig.params.len() + 1);
         let self_def = ctx
-            .def_map
+            .def_table
             .lookup_def(method_def.sig.self_param.def_id)
             .unwrap_or_else(|| {
                 panic!(
@@ -139,7 +139,7 @@ impl<'a> FuncLowerer<'a> {
         });
         for param in &method_def.sig.params {
             let def = ctx
-                .def_map
+                .def_table
                 .lookup_def(param.ident)
                 .unwrap_or_else(|| panic!("compiler bug: param def {:?} not found", param.ident));
             params.push(LoweredParam {
@@ -175,7 +175,7 @@ impl<'a> FuncLowerer<'a> {
         let params = params
             .iter()
             .map(|param| {
-                let def = ctx.def_map.lookup_def(param.ident).unwrap_or_else(|| {
+                let def = ctx.def_table.lookup_def(param.ident).unwrap_or_else(|| {
                     panic!("compiler bug: param def {:?} not found", param.ident)
                 });
                 LoweredParam {
@@ -335,7 +335,7 @@ pub fn lower_ast(
     let mut global_interner = GlobalInterner::new();
 
     // Drop glue registry
-    let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
+    let mut drop_glue = DropGlueRegistry::new(ctx.def_table.next_def_id());
 
     // Lower all callables (functions + methods).
     for callable in ctx.module.callables() {
@@ -364,14 +364,15 @@ pub fn lower_ast(
                 .lower()?,
             ),
             CallableRef::ClosureDecl(closure_decl) => {
-                let return_ty = resolve_type_expr(&ctx.def_map, &closure_decl.sig.return_ty)
-                    .expect(
-                        format!(
-                            "compiler bug: cannot resolve closure return type {:?}",
-                            closure_decl.sig.return_ty
-                        )
-                        .as_str(),
-                    );
+                let return_ty =
+                    resolve_type_expr(&ctx.def_table, &ctx.module, &closure_decl.sig.return_ty)
+                        .expect(
+                            format!(
+                                "compiler bug: cannot resolve closure return type {:?}",
+                                closure_decl.sig.return_ty
+                            )
+                            .as_str(),
+                        );
                 // Non-capturing only: lower to a standalone generated function.
                 let lowered_body = FuncLowerer::new_closure(
                     &ctx,

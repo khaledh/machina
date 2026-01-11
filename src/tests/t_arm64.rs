@@ -7,7 +7,7 @@ use crate::mcir::types::*;
 use crate::regalloc::moves::FnMoveList;
 use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::{AllocationResult, MappedLocal};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::targets::arm64::codegen::Arm64Codegen;
 use crate::targets::arm64::regs::{self, Arm64Reg as R};
 

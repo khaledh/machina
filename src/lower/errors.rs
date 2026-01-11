@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::hir::model::NodeId;
 use crate::lower::lower_ast::PlaceKind;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 #[derive(Debug, Error)]
 pub enum LowerError {

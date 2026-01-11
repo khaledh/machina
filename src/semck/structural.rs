@@ -5,7 +5,7 @@ use crate::hir::model::{
     TypeDefKind,
 };
 use crate::hir::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
-use crate::resolve::def_map::DefKind;
+use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
 use crate::typeck::type_map::{CallSig, resolve_type_expr};
@@ -187,7 +187,7 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_param_modes(&mut self, params: &[Param]) {
         for param in params {
-            if let Ok(ty) = resolve_type_expr(&self.ctx.def_map, &param.typ) {
+            if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ) {
                 if param.mode == ParamMode::InOut && !(ty.is_compound() || ty.is_heap()) {
                     // Only aggregate or heap types can be inout parameters.
                     self.errors.push(SemCheckError::InOutParamNotAggregate(
@@ -250,7 +250,7 @@ impl<'a> StructuralChecker<'a> {
     fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {
         match &expr.kind {
             ExprKind::Var(def_id) => {
-                let def = self.ctx.def_map.lookup_def(*def_id)?;
+                let def = self.ctx.def_table.lookup_def(*def_id)?;
                 match def.kind {
                     DefKind::LocalVar { is_mutable, .. } | DefKind::Param { is_mutable, .. } => {
                         Some(is_mutable)
@@ -268,7 +268,7 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_lvalue(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::Var(def_id) => self.ctx.def_map.lookup_def(*def_id).is_some_and(|def| {
+            ExprKind::Var(def_id) => self.ctx.def_table.lookup_def(*def_id).is_some_and(|def| {
                 matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
             }),
             ExprKind::ArrayIndex { target, .. }

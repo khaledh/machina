@@ -17,7 +17,7 @@ use crate::hir::model::{
     StmtExprKind,
 };
 use crate::hir::visit::{Visitor, walk_expr};
-use crate::resolve::def_map::{DefId, DefKind};
+use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
 
@@ -169,7 +169,7 @@ impl<'a> MoveVisitor<'a> {
     fn handle_move_target(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var(def_id) => {
-                let Some(def) = self.ctx.def_map.lookup_def(*def_id) else {
+                let Some(def) = self.ctx.def_table.lookup_def(*def_id) else {
                     return;
                 };
                 // Params can only be moved if they're sink params (owned).
@@ -206,7 +206,7 @@ impl<'a> MoveVisitor<'a> {
     /// Error if using a variable that has already been moved.
     fn check_use(&mut self, expr: &Expr) {
         if let ExprKind::Var(def_id) = expr.kind
-            && let Some(def) = self.ctx.def_map.lookup_def(def_id)
+            && let Some(def) = self.ctx.def_table.lookup_def(def_id)
             && self.moved.contains(&def_id)
         {
             self.errors
@@ -223,7 +223,7 @@ impl<'a> MoveVisitor<'a> {
             let ExprKind::Var(def_id) = expr.kind else {
                 return;
             };
-            let Some(def) = self.ctx.def_map.lookup_def(def_id) else {
+            let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
                 return;
             };
             if matches!(def.kind, DefKind::Param { .. }) {

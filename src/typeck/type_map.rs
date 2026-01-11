@@ -1,7 +1,7 @@
 use crate::ast::{NodeId, ParamMode};
-use crate::hir::builder::ToHir;
 use crate::hir::model::*;
-use crate::resolve::def_map::{Def, DefId, DefKind, DefMap};
+use crate::hir::{EnumDefVariant, StructDefField, TypeExpr};
+use crate::resolve::{Def, DefId, DefKind, DefTable};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
 use std::collections::{HashMap, HashSet};
@@ -32,25 +32,34 @@ enum ResolveDepth {
 }
 
 pub(crate) fn resolve_type_expr(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     type_expr: &TypeExpr,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
-    resolve_type_expr_impl(def_map, type_expr, &mut in_progress, ResolveDepth::Full)
+    resolve_type_expr_impl(
+        def_table,
+        module,
+        type_expr,
+        &mut in_progress,
+        ResolveDepth::Full,
+    )
 }
 
 fn resolve_type_expr_impl(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     type_expr: &TypeExpr,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
         TypeExprKind::Named(def_id) => {
-            resolve_named_type(def_map, type_expr, def_id, in_progress, depth)
+            resolve_named_type(def_table, module, type_expr, def_id, in_progress, depth)
         }
         TypeExprKind::Array { elem_ty_expr, dims } => {
-            let elem_ty = resolve_type_expr_impl(def_map, elem_ty_expr, in_progress, depth)?;
+            let elem_ty =
+                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
                 dims: dims.clone(),
@@ -59,7 +68,7 @@ fn resolve_type_expr_impl(
         TypeExprKind::Tuple { field_ty_exprs } => {
             let field_tys = field_ty_exprs
                 .iter()
-                .map(|f| resolve_type_expr_impl(def_map, f, in_progress, depth))
+                .map(|f| resolve_type_expr_impl(def_table, module, f, in_progress, depth))
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
         }
@@ -68,13 +77,15 @@ fn resolve_type_expr_impl(
             max: *max,
         }),
         TypeExprKind::Slice { elem_ty_expr } => {
-            let elem_ty = resolve_type_expr_impl(def_map, elem_ty_expr, in_progress, depth)?;
+            let elem_ty =
+                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
             })
         }
         TypeExprKind::Heap { elem_ty_expr } => {
-            let elem_ty = resolve_type_expr_impl(def_map, elem_ty_expr, in_progress, depth)?;
+            let elem_ty =
+                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
             })
@@ -86,14 +97,21 @@ fn resolve_type_expr_impl(
             let param_tys = params
                 .iter()
                 .map(|param| {
-                    let ty = resolve_type_expr_impl(def_map, &param.ty_expr, in_progress, depth)?;
+                    let ty = resolve_type_expr_impl(
+                        def_table,
+                        module,
+                        &param.ty_expr,
+                        in_progress,
+                        depth,
+                    )?;
                     Ok(FnParam {
                         mode: fn_param_mode(param.mode.clone()),
                         ty,
                     })
                 })
                 .collect::<Result<Vec<_>, TypeCheckError>>()?;
-            let ret_ty = resolve_type_expr_impl(def_map, ret_ty_expr, in_progress, depth)?;
+            let ret_ty =
+                resolve_type_expr_impl(def_table, module, ret_ty_expr, in_progress, depth)?;
             Ok(Type::Fn {
                 params: param_tys,
                 ret_ty: Box::new(ret_ty),
@@ -112,13 +130,14 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
 }
 
 fn resolve_named_type(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     type_expr: &TypeExpr,
     def_id: &DefId,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
-    let def = def_map
+    let def = def_table
         .lookup_def(*def_id)
         .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
 
@@ -127,30 +146,29 @@ fn resolve_named_type(
     }
 
     match &def.kind {
-        DefKind::TypeAlias { ty_expr } => {
-            let hir_ty_expr = ty_expr.to_hir(def_map);
-            resolve_type_alias(def_map, def, &hir_ty_expr, in_progress)
-        }
-        DefKind::StructDef { fields } => {
-            let hir_fields = fields
-                .iter()
-                .map(|field| field.to_hir(def_map))
-                .collect::<Vec<_>>();
-            resolve_struct_type(def_map, def, &hir_fields, in_progress, depth)
-        }
-        DefKind::EnumDef { variants } => {
-            let hir_variants = variants
-                .iter()
-                .map(|variant| variant.to_hir(def_map))
-                .collect::<Vec<_>>();
-            resolve_enum_type(def_map, def, &hir_variants, in_progress, depth)
+        DefKind::TypeDef => {
+            let type_def = module
+                .type_def_by_id(*def_id)
+                .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
+            match &type_def.kind {
+                TypeDefKind::Alias { aliased_ty } => {
+                    resolve_type_alias(def_table, module, def, aliased_ty, in_progress)
+                }
+                TypeDefKind::Struct { fields } => {
+                    resolve_struct_type(def_table, module, def, fields, in_progress, depth)
+                }
+                TypeDefKind::Enum { variants } => {
+                    resolve_enum_type(def_table, module, def, variants, in_progress, depth)
+                }
+            }
         }
         _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
     }
 }
 
 fn resolve_type_alias(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     def: &Def,
     ty_expr: &TypeExpr,
     in_progress: &mut HashSet<DefId>,
@@ -159,13 +177,14 @@ fn resolve_type_alias(
         return Ok(Type::Unknown);
     }
     in_progress.insert(def.id);
-    let ty = resolve_type_expr_impl(def_map, ty_expr, in_progress, ResolveDepth::Full);
+    let ty = resolve_type_expr_impl(def_table, module, ty_expr, in_progress, ResolveDepth::Full);
     in_progress.remove(&def.id);
     ty
 }
 
 fn resolve_struct_type(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     def: &Def,
     fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
@@ -173,9 +192,13 @@ fn resolve_struct_type(
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def.id) {
         let struct_fields = match depth {
-            ResolveDepth::Full => {
-                resolve_struct_fields(def_map, fields, in_progress, ResolveDepth::Shallow)?
-            }
+            ResolveDepth::Full => resolve_struct_fields(
+                def_table,
+                module,
+                fields,
+                in_progress,
+                ResolveDepth::Shallow,
+            )?,
             ResolveDepth::Shallow => Vec::new(),
         };
         return Ok(Type::Struct {
@@ -184,7 +207,7 @@ fn resolve_struct_type(
         });
     }
     in_progress.insert(def.id);
-    let struct_fields = resolve_struct_fields(def_map, fields, in_progress, depth)?;
+    let struct_fields = resolve_struct_fields(def_table, module, fields, in_progress, depth)?;
     in_progress.remove(&def.id);
     Ok(Type::Struct {
         name: def.name.clone(),
@@ -193,7 +216,8 @@ fn resolve_struct_type(
 }
 
 fn resolve_struct_fields(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -201,7 +225,8 @@ fn resolve_struct_fields(
     fields
         .iter()
         .map(|field| {
-            let field_ty = resolve_type_expr_impl(def_map, &field.ty, in_progress, depth)?;
+            let field_ty =
+                resolve_type_expr_impl(def_table, module, &field.ty, in_progress, depth)?;
             Ok(StructField {
                 name: field.name.clone(),
                 ty: field_ty,
@@ -211,7 +236,8 @@ fn resolve_struct_fields(
 }
 
 fn resolve_enum_type(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     def: &Def,
     variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
@@ -219,9 +245,13 @@ fn resolve_enum_type(
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def.id) {
         let enum_variants = match depth {
-            ResolveDepth::Full => {
-                resolve_enum_variants(def_map, variants, in_progress, ResolveDepth::Shallow)?
-            }
+            ResolveDepth::Full => resolve_enum_variants(
+                def_table,
+                module,
+                variants,
+                in_progress,
+                ResolveDepth::Shallow,
+            )?,
             ResolveDepth::Shallow => Vec::new(),
         };
         return Ok(Type::Enum {
@@ -230,7 +260,7 @@ fn resolve_enum_type(
         });
     }
     in_progress.insert(def.id);
-    let enum_variants = resolve_enum_variants(def_map, variants, in_progress, depth)?;
+    let enum_variants = resolve_enum_variants(def_table, module, variants, in_progress, depth)?;
     in_progress.remove(&def.id);
     Ok(Type::Enum {
         name: def.name.clone(),
@@ -239,7 +269,8 @@ fn resolve_enum_type(
 }
 
 fn resolve_enum_variants(
-    def_map: &DefMap,
+    def_table: &DefTable,
+    module: &Module,
     variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -249,7 +280,9 @@ fn resolve_enum_variants(
         let payload = variant
             .payload
             .iter()
-            .map(|payload_ty| resolve_type_expr_impl(def_map, payload_ty, in_progress, depth))
+            .map(|payload_ty| {
+                resolve_type_expr_impl(def_table, module, payload_ty, in_progress, depth)
+            })
             .collect::<Result<Vec<Type>, _>>()?;
         enum_variants.push(EnumVariant {
             name: variant.name.clone(),

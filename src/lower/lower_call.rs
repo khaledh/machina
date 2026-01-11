@@ -2,7 +2,7 @@ use crate::hir::model::{CallArg, CallArgMode, Expr, ExprKind, ParamMode};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
-use crate::resolve::def_map::DefKind;
+use crate::resolve::DefKind;
 use crate::types::{Type, array_to_slice_assignable};
 
 impl<'a> FuncLowerer<'a> {

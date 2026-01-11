@@ -5,7 +5,7 @@ use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::hir::visit::{Visitor, walk_expr};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 // ============================================================================
 // Public API
@@ -213,7 +213,7 @@ fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut H
 
 /// Only treat heap-owned locals as tracked defs.
 fn add_def_if_heap(def_id: DefId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
-    let Some(def) = ctx.def_map.lookup_def(def_id) else {
+    let Some(def) = ctx.def_table.lookup_def(def_id) else {
         return;
     };
     let Some(ty) = ctx.type_map.lookup_def_type(def) else {

@@ -2,7 +2,7 @@
 
 use crate::analysis::dataflow::DataflowGraph;
 use crate::ast::model::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);

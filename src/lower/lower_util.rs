@@ -3,7 +3,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::resolve::def_map::{Def, DefId};
+use crate::resolve::{Def, DefId};
 use crate::types::{Type, TypeAssignability, type_assignable};
 
 impl<'a> FuncLowerer<'a> {
@@ -48,7 +48,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lookup a definition for a def id.
     pub(super) fn def_for_id(&self, def_id: DefId, node_id: NodeId) -> Result<&Def, LowerError> {
         self.ctx
-            .def_map
+            .def_table
             .lookup_def(def_id)
             .ok_or(LowerError::ExprDefNotFound(node_id))
     }

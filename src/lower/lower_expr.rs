@@ -3,7 +3,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::lower::lower_util::u64_const;
 use crate::mcir::types::*;
-use crate::resolve::def_map::DefKind;
+use crate::resolve::DefKind;
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

@@ -11,7 +11,7 @@ use crate::regalloc::pos::InstPos;
 use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
 use crate::regalloc::{AllocationResult, MappedLocal};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 #[derive(Debug, Error)]
 pub enum CodegenError {

@@ -19,7 +19,7 @@ use crate::hir::model::{
     StmtExprKind,
 };
 use crate::hir::visit::{Visitor, walk_expr};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::types::Type;
 
@@ -206,7 +206,7 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &HirItem<'_>, ctx: &Type
         StmtExprKind::LetBind { pattern, value, .. }
         | StmtExprKind::VarBind { pattern, value, .. } => {
             if let BindPatternKind::Name(def_id) = &pattern.kind
-                && let Some(def) = ctx.def_map.lookup_def(*def_id)
+                && let Some(def) = ctx.def_table.lookup_def(*def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
                 let bases = slice_bases_for_value(value, state, ctx);
@@ -215,7 +215,7 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &HirItem<'_>, ctx: &Type
         }
         StmtExprKind::Assign { assignee, value } => {
             if let ExprKind::Var(def_id) = assignee.kind
-                && let Some(def) = ctx.def_map.lookup_def(def_id)
+                && let Some(def) = ctx.def_table.lookup_def(def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
                 let bases = slice_bases_for_value(value, state, ctx);
@@ -463,7 +463,7 @@ fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut H
 
 /// Add a DefId to the set if it has slice type.
 fn add_def_if_slice(def_id: DefId, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
-    let Some(def) = ctx.def_map.lookup_def(def_id) else {
+    let Some(def) = ctx.def_table.lookup_def(def_id) else {
         return;
     };
     let Some(ty) = ctx.type_map.lookup_def_type(def) else {

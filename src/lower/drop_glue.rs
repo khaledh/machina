@@ -8,7 +8,7 @@ use crate::mcir::types::{
     BlockId, Callee, Const, LocalId, LocalKind, Operand, PlaceAny, SwitchCase, Terminator,
 };
 use crate::mcir::types::{Place, Projection, Statement};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::types::Type;
 
 #[derive(Debug)]

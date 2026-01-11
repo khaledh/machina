@@ -2,8 +2,7 @@ use crate::context::{AnalyzedContext, SemanticCheckedContext};
 use crate::hir::model::{
     ArrayLitInit, BlockItem, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind, StringFmtSegment,
 };
-use crate::resolve::def_map::DefId;
-use crate::resolve::def_map::DefMap;
+use crate::resolve::{DefId, DefTable};
 use crate::typeck::type_map::TypeMap;
 
 /// NRVO (Named Return Value Optimization) analyzer.
@@ -22,7 +21,7 @@ impl NrvoAnalyzer {
     pub fn analyze(self) -> AnalyzedContext {
         let SemanticCheckedContext {
             module,
-            def_map,
+            def_table,
             type_map,
             symbols,
             implicit_moves,
@@ -30,15 +29,15 @@ impl NrvoAnalyzer {
             full_init_assigns,
         } = self.ctx;
 
-        let mut def_map = def_map;
+        let mut def_table = def_table;
 
         for func_def in module.func_defs() {
-            Self::analyze_func_def(&mut def_map, &type_map, func_def);
+            Self::analyze_func_def(&mut def_table, &type_map, func_def);
         }
 
         AnalyzedContext {
             module,
-            def_map,
+            def_table,
             type_map,
             symbols,
             implicit_moves,
@@ -47,7 +46,7 @@ impl NrvoAnalyzer {
         }
     }
 
-    fn analyze_func_def(def_map: &mut DefMap, type_map: &TypeMap, func_def: &FuncDef) {
+    fn analyze_func_def(def_table: &mut DefTable, type_map: &TypeMap, func_def: &FuncDef) {
         // Step 1: Check if function return type is compound
         let ret_ty = type_map
             .lookup_node_type(func_def.id)
@@ -64,7 +63,7 @@ impl NrvoAnalyzer {
         if let Some(var_def_id) = ret_var_def_id
             && Self::is_nrvo_safe(&func_def.body, var_def_id)
         {
-            def_map.mark_nrvo_eligible(var_def_id);
+            def_table.mark_nrvo_eligible(var_def_id);
         }
     }
 

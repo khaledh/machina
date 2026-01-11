@@ -6,7 +6,7 @@ use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
 use crate::regalloc::AllocationResult;
-use crate::resolve::def_map::DefMap;
+use crate::resolve::DefTable;
 use crate::symtab::SymbolTable;
 use crate::typeck::type_map::TypeMap;
 
@@ -23,11 +23,11 @@ impl ParsedContext {
         Self { module }
     }
 
-    pub fn with_def_map(self, def_map: DefMap, module: HirModule) -> ResolvedContext {
+    pub fn with_def_table(self, def_table: DefTable, module: HirModule) -> ResolvedContext {
         let symbols = SymbolTable::new(&module);
         ResolvedContext {
             module,
-            def_map,
+            def_table,
             symbols,
         }
     }
@@ -39,7 +39,7 @@ impl ParsedContext {
 #[derive(Clone)]
 pub struct ResolvedContext {
     pub module: HirModule,
-    pub def_map: DefMap,
+    pub def_table: DefTable,
     pub symbols: SymbolTable,
 }
 
@@ -47,7 +47,7 @@ impl ResolvedContext {
     pub fn with_type_map(self, type_map: TypeMap) -> TypeCheckedContext {
         TypeCheckedContext {
             module: self.module,
-            def_map: self.def_map,
+            def_table: self.def_table,
             type_map,
             symbols: self.symbols,
         }
@@ -60,7 +60,7 @@ impl ResolvedContext {
 #[derive(Clone)]
 pub struct TypeCheckedContext {
     pub module: HirModule,
-    pub def_map: DefMap,
+    pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
 }
@@ -74,7 +74,7 @@ impl TypeCheckedContext {
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
             module: self.module,
-            def_map: self.def_map,
+            def_table: self.def_table,
             type_map: self.type_map,
             symbols: self.symbols,
             implicit_moves,
@@ -90,7 +90,7 @@ impl TypeCheckedContext {
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
     pub module: HirModule,
-    pub def_map: DefMap,
+    pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub implicit_moves: HashSet<NodeId>,
@@ -104,7 +104,7 @@ pub struct SemanticCheckedContext {
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
     pub module: HirModule,
-    pub def_map: DefMap,
+    pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub implicit_moves: HashSet<NodeId>,

@@ -2,7 +2,7 @@
 
 use crate::ast::model;
 use crate::diag::Span;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 
 pub use crate::ast::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
 
@@ -25,6 +25,13 @@ impl Module {
                 }
             })
             .collect()
+    }
+
+    pub fn type_def_by_id(&self, def_id: DefId) -> Option<&TypeDef> {
+        self.top_level_items.iter().find_map(|item| match item {
+            Decl::TypeDef(type_def) if type_def.def_id == def_id => Some(type_def),
+            _ => None,
+        })
     }
 
     pub fn func_sigs(&self) -> Vec<&FunctionSig> {
@@ -174,7 +181,15 @@ impl<'a> CallableRef<'a> {
 
 // -- Type Definitions ---
 
-pub type TypeDef = model::TypeDef<DefId>;
+#[derive(Clone, Debug)]
+pub struct TypeDef {
+    pub id: NodeId,
+    pub def_id: DefId,
+    pub name: String,
+    pub kind: TypeDefKind,
+    pub span: Span,
+}
+
 pub type TypeDefKind = model::TypeDefKind<DefId>;
 pub type StructDefField = model::StructDefField<DefId>;
 pub type EnumDefVariant = model::EnumDefVariant<DefId>;

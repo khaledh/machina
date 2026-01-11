@@ -11,7 +11,7 @@ use crate::regalloc::pos::{InstPos, RelInstPos};
 use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
 use crate::regalloc::target::TargetSpec;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::targets::arm64::regs::Arm64Target;
 
 fn u64_ty(types: &mut TyTable) -> TyId {

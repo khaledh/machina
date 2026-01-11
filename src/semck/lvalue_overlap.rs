@@ -8,7 +8,7 @@ use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::hir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::hir::visit::{Visitor, walk_expr};
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 
 /// An argument access: its mode, lvalue path, and source location.

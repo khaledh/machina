@@ -35,7 +35,7 @@ fn lower_body_with_globals(
     func_def: &FuncDef,
 ) -> (FuncBody, Vec<GlobalItem>) {
     let mut interner = GlobalInterner::new();
-    let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
+    let mut drop_glue = DropGlueRegistry::new(ctx.def_table.next_def_id());
     let mut lowerer =
         FuncLowerer::new_function(ctx, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
@@ -47,7 +47,7 @@ fn lower_body_with_drop_glue(
     func_def: &FuncDef,
 ) -> (FuncBody, Vec<GeneratedDropGlue>) {
     let mut interner = GlobalInterner::new();
-    let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
+    let mut drop_glue = DropGlueRegistry::new(ctx.def_table.next_def_id());
     let mut lowerer =
         FuncLowerer::new_function(ctx, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
@@ -99,7 +99,7 @@ fn test_lower_string_literal_global() {
     let analyzed = analyze(source);
     let func_def = analyzed.module.func_defs()[0];
     let mut interner = GlobalInterner::new();
-    let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
+    let mut drop_glue = DropGlueRegistry::new(analyzed.def_table.next_def_id());
     let mut lowerer =
         FuncLowerer::new_function(&analyzed, func_def, &mut interner, &mut drop_glue, false);
 
@@ -301,7 +301,7 @@ fn test_lower_drop_glue_emits_free() {
     let analyzed = analyze(source);
     let func_def = analyzed.module.func_defs()[0];
     let mut interner = GlobalInterner::new();
-    let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
+    let mut drop_glue = DropGlueRegistry::new(analyzed.def_table.next_def_id());
     let mut lowerer =
         FuncLowerer::new_function(&analyzed, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");

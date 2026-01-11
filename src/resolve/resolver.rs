@@ -5,17 +5,17 @@ use crate::ast::*;
 use crate::context::{ParsedContext, ResolvedContext};
 use crate::diag::Span;
 use crate::hir::builder::HirBuilder;
-use crate::resolve::def_map::{Def, DefId, DefIdGen, DefKind, DefMap, DefMapBuilder};
+use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
-use crate::resolve::symbols::SymbolKind;
-use crate::resolve::symbols::{Scope, Symbol};
+use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
+use crate::resolve::{Def, DefId, DefIdGen, DefKind};
 use crate::types::BUILTIN_TYPES;
 
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
     def_id_gen: DefIdGen,
-    def_map_builder: DefMapBuilder,
+    def_table_builder: DefTableBuilder,
     func_decl_names: HashSet<String>,
 }
 
@@ -33,7 +33,7 @@ impl SymbolResolver {
             }],
             errors: Vec::new(),
             def_id_gen: DefIdGen::new(),
-            def_map_builder: DefMapBuilder::new(),
+            def_table_builder: DefTableBuilder::new(),
             func_decl_names: HashSet::new(),
         }
     }
@@ -88,7 +88,7 @@ impl SymbolResolver {
             name: name.to_string(),
             kind: DefKind::Param { index, is_mutable },
         };
-        self.def_map_builder.record_def(def, id);
+        self.def_table_builder.record_def(def, id);
         self.insert_symbol(
             name,
             Symbol {
@@ -110,20 +110,14 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::TypeAlias { ty_expr, .. } => DefKind::TypeAlias {
-                ty_expr: ty_expr.clone(),
-            },
-            SymbolKind::StructDef { fields, .. } => DefKind::StructDef {
-                fields: fields.clone(),
-            },
+            SymbolKind::TypeAlias { .. } => DefKind::TypeDef,
+            SymbolKind::StructDef { .. } => DefKind::TypeDef,
             SymbolKind::Func { .. } => DefKind::FuncDef,
             SymbolKind::Var { is_mutable, .. } => DefKind::LocalVar {
                 nrvo_eligible: false,
                 is_mutable: *is_mutable,
             },
-            SymbolKind::EnumDef { variants, .. } => DefKind::EnumDef {
-                variants: variants.clone(),
-            },
+            SymbolKind::EnumDef { .. } => DefKind::TypeDef,
         }
     }
 
@@ -138,7 +132,7 @@ impl SymbolResolver {
             name: name.to_string(),
             kind: Self::map_symbol_kind_to_def_kind(&kind),
         };
-        self.def_map_builder.record_def(def, NodeId(0));
+        self.def_table_builder.record_def(def, NodeId(0));
         self.insert_symbol(
             name,
             Symbol {
@@ -164,27 +158,21 @@ impl SymbolResolver {
             // Map type def kind to a (def kind, symbol kind) pair
             let (def_kind, symbol_kind) = match &type_def.kind {
                 TypeDefKind::Alias { aliased_ty } => (
-                    DefKind::TypeAlias {
-                        ty_expr: aliased_ty.clone(),
-                    },
+                    DefKind::TypeDef,
                     SymbolKind::TypeAlias {
                         def_id,
                         ty_expr: aliased_ty.clone(),
                     },
                 ),
                 TypeDefKind::Struct { fields } => (
-                    DefKind::StructDef {
-                        fields: fields.clone(),
-                    },
+                    DefKind::TypeDef,
                     SymbolKind::StructDef {
                         def_id,
                         fields: fields.clone(),
                     },
                 ),
                 TypeDefKind::Enum { variants } => (
-                    DefKind::EnumDef {
-                        variants: variants.clone(),
-                    },
+                    DefKind::TypeDef,
                     SymbolKind::EnumDef {
                         def_id,
                         variants: variants.clone(),
@@ -200,7 +188,7 @@ impl SymbolResolver {
             };
 
             // Record the def
-            self.def_map_builder.record_def(def, type_def.id);
+            self.def_table_builder.record_def(def, type_def.id);
 
             // Insert the symbol
             self.insert_symbol(
@@ -251,11 +239,11 @@ impl SymbolResolver {
             id: def_id,
             name: callable.name(),
             kind: match callable {
-                CallableRef::FuncDecl(_) => DefKind::FuncDecl,
-                _ => DefKind::FuncDef,
+                CallableRef::FuncDecl(_) | CallableRef::ClosureDecl(_) => DefKind::FuncDecl,
+                CallableRef::FuncDef(_) | CallableRef::MethodDef { .. } => DefKind::FuncDef,
             },
         };
-        self.def_map_builder.record_def(def, callable.id());
+        self.def_table_builder.record_def(def, callable.id());
         self.insert_symbol(
             &callable.name(),
             Symbol {
@@ -268,7 +256,10 @@ impl SymbolResolver {
         );
     }
 
-    pub fn resolve(&mut self, module: &Module) -> Result<DefMap, Vec<ResolveError>> {
+    pub fn resolve(
+        &mut self,
+        module: &Module,
+    ) -> Result<(DefTable, NodeDefLookup), Vec<ResolveError>> {
         self.with_scope(|resolver| {
             // global scope
 
@@ -291,8 +282,8 @@ impl SymbolResolver {
         });
 
         if self.errors.is_empty() {
-            let def_map = std::mem::take(&mut self.def_map_builder).finish();
-            Ok(def_map)
+            let (def_table, node_def_lookup) = std::mem::take(&mut self.def_table_builder).finish();
+            Ok((def_table, node_def_lookup))
         } else {
             Err(self.errors.clone())
         }
@@ -307,13 +298,13 @@ impl SymbolResolver {
                             is_mutable: true, ..
                         } => {
                             // Mutable: ok
-                            self.def_map_builder.record_use(expr.id, symbol.def_id());
+                            self.def_table_builder.record_use(expr.id, symbol.def_id());
                         }
                         SymbolKind::Var {
                             is_mutable: false, ..
                         } => {
                             // Immutable: error
-                            self.def_map_builder.record_use(expr.id, symbol.def_id());
+                            self.def_table_builder.record_use(expr.id, symbol.def_id());
                             self.errors
                                 .push(ResolveError::VarImmutable(name.clone(), expr.span));
                         }
@@ -362,7 +353,7 @@ impl SymbolResolver {
                         is_mutable,
                     },
                 };
-                self.def_map_builder.record_def(def, pattern.id);
+                self.def_table_builder.record_def(def, pattern.id);
                 self.insert_symbol(
                     var_name,
                     Symbol {
@@ -394,7 +385,7 @@ impl SymbolResolver {
                         kind: SymbolKind::StructDef { def_id, .. },
                         ..
                     }) => {
-                        self.def_map_builder.record_use(pattern.id, *def_id);
+                        self.def_table_builder.record_use(pattern.id, *def_id);
                     }
                     Some(symbol) => {
                         self.errors.push(ResolveError::ExpectedType(
@@ -447,7 +438,7 @@ impl SymbolResolver {
                             .push(ResolveError::EnumUndefined(enum_name.clone(), *span));
                         return;
                     };
-                    self.def_map_builder.record_use(arm_id, *def_id);
+                    self.def_table_builder.record_use(arm_id, *def_id);
                 }
 
                 // Note: We delegate to the type checker to validate the variant.
@@ -476,7 +467,7 @@ impl SymbolResolver {
                 is_mutable: false,
             },
         };
-        self.def_map_builder.record_def(def, id);
+        self.def_table_builder.record_def(def, id);
         self.insert_symbol(
             name,
             Symbol {
@@ -518,7 +509,7 @@ impl Visitor for SymbolResolver {
                     SymbolKind::TypeAlias { .. }
                     | SymbolKind::StructDef { .. }
                     | SymbolKind::EnumDef { .. } => {
-                        self.def_map_builder
+                        self.def_table_builder
                             .record_use(type_expr.id, symbol.def_id());
                     }
                     other => self.errors.push(ResolveError::ExpectedType(
@@ -653,7 +644,7 @@ impl Visitor for SymbolResolver {
                         nrvo_eligible: false,
                     },
                 };
-                self.def_map_builder.record_def(def, stmt.id);
+                self.def_table_builder.record_def(def, stmt.id);
                 self.insert_symbol(
                     ident,
                     Symbol {
@@ -727,7 +718,7 @@ impl Visitor for SymbolResolver {
                         kind: SymbolKind::StructDef { def_id, .. },
                         ..
                     }) => {
-                        self.def_map_builder.record_use(expr.id, *def_id);
+                        self.def_table_builder.record_use(expr.id, *def_id);
                     }
                     _ => self
                         .errors
@@ -737,7 +728,7 @@ impl Visitor for SymbolResolver {
             }
 
             ExprKind::Var(name) => match self.lookup_symbol(name) {
-                Some(symbol) => self.def_map_builder.record_use(expr.id, symbol.def_id()),
+                Some(symbol) => self.def_table_builder.record_use(expr.id, symbol.def_id()),
                 None => self
                     .errors
                     .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
@@ -767,7 +758,7 @@ impl Visitor for SymbolResolver {
                     return;
                 }
 
-                self.def_map_builder.record_use(expr.id, *def_id);
+                self.def_table_builder.record_use(expr.id, *def_id);
                 walk_expr(self, expr);
             }
 
@@ -805,7 +796,7 @@ impl Visitor for SymbolResolver {
                 ..
             } => match self.lookup_symbol(ident) {
                 Some(symbol) => {
-                    self.def_map_builder.record_use(expr.id, symbol.def_id());
+                    self.def_table_builder.record_use(expr.id, symbol.def_id());
                     for param in params {
                         self.visit_type_expr(&param.typ);
                     }
@@ -835,9 +826,13 @@ impl Visitor for SymbolResolver {
 
 pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<ResolveError>> {
     let mut resolver = SymbolResolver::new();
-    let def_map = resolver.resolve(&ast_context.module)?;
-    let hir_builder = HirBuilder::new(&def_map);
+    let (def_table, node_def_lookup) = resolver.resolve(&ast_context.module)?;
+
+    // Build HIR from AST + DefTable + NodeDefLookup
+    let hir_builder = HirBuilder::new(&def_table, &node_def_lookup);
     let hir_module = hir_builder.build_module(ast_context.module.clone());
-    let resolved_context = ast_context.with_def_map(def_map, hir_module);
+
+    let resolved_context = ast_context.with_def_table(def_table, hir_module);
+
     Ok(resolved_context)
 }

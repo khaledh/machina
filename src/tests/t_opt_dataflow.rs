@@ -10,7 +10,7 @@ use crate::mcir::types::{
 };
 use crate::opt::dataflow::copy_elide;
 use crate::opt::dataflow::memcpy_lower;
-use crate::resolve::def_map::DefId;
+use crate::resolve::DefId;
 use crate::symtab::SymbolTable;
 
 fn const_u64(value: u64) -> Operand {

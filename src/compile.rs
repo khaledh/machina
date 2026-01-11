@@ -13,8 +13,7 @@ use crate::nrvo::NrvoAnalyzer;
 use crate::opt;
 use crate::parse::Parser;
 use crate::regalloc;
-use crate::resolve::def_map::DefId;
-use crate::resolve::resolve;
+use crate::resolve::{DefId, resolve};
 use crate::semck::sem_check;
 use crate::targets;
 use crate::targets::TargetKind;
@@ -36,7 +35,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     // Parse dump flags from comma-separated list, e.g. --dump ast,ir,liveness
     let mut dump_tokens = false;
     let mut dump_ast = false;
-    let mut dump_def_map = false;
+    let mut dump_def_table = false;
     let mut dump_type_map = false;
     let mut dump_nrvo = false;
     let mut dump_ir = false;
@@ -50,7 +49,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             match item.as_str() {
                 "tokens" => dump_tokens = true,
                 "ast" => dump_ast = true,
-                "defmap" => dump_def_map = true,
+                "deftbl" => dump_def_table = true,
                 "typemap" => dump_type_map = true,
                 "nrvo" => dump_nrvo = true,
                 "ir" => dump_ir = true,
@@ -120,10 +119,10 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             .collect::<Vec<CompileError>>()
     })?;
 
-    if dump_def_map {
+    if dump_def_table {
         println!("Def Map:");
         println!("--------------------------------");
-        println!("{}", resolved_context.def_map);
+        println!("{}", resolved_context.def_table);
         println!("--------------------------------");
     }
 
@@ -157,7 +156,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     if dump_nrvo {
         println!("NRVO:");
         println!("--------------------------------");
-        for def in analyzed_context.def_map.get_nrvo_eligible_defs() {
+        for def in analyzed_context.def_table.get_nrvo_eligible_defs() {
             println!("{}", def);
         }
         println!("--------------------------------");
