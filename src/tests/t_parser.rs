@@ -1,7 +1,7 @@
 use super::*;
 use crate::ast::{
     ArrayLitInit, BindPatternKind, BlockItem, Expr, ExprKind, Function, MatchPattern,
-    MatchPatternBinding, Module, StmtExpr, StmtExprKind, TypeDeclKind, TypeExprKind,
+    MatchPatternBinding, Module, StmtExpr, StmtExprKind, TypeDefKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
 
@@ -390,17 +390,17 @@ fn test_parse_enum_type_decl() {
     "#;
 
     let module = parse_module(source).expect("Failed to parse");
-    let type_decls = module.type_decls();
-    assert_eq!(type_decls.len(), 1);
+    let type_defs = module.type_defs();
+    assert_eq!(type_defs.len(), 1);
 
-    let type_decl = type_decls[0];
-    assert_eq!(type_decl.name, "Color");
-    match &type_decl.kind {
-        TypeDeclKind::Enum { variants } => {
+    let type_def = type_defs[0];
+    assert_eq!(type_def.name, "Color");
+    match &type_def.kind {
+        TypeDefKind::Enum { variants } => {
             let names = variants.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
             assert_eq!(names, vec!["Red", "Green", "Blue"]);
         }
-        _ => panic!("Expected enum type decl"),
+        _ => panic!("Expected enum type def"),
     }
 }
 
@@ -443,13 +443,13 @@ fn test_parse_enum_type_decl_with_payload() {
     "#;
 
     let module = parse_module(source).expect("Failed to parse");
-    let type_decls = module.type_decls();
-    assert_eq!(type_decls.len(), 1);
+    let type_defs = module.type_defs();
+    assert_eq!(type_defs.len(), 1);
 
-    let type_decl = type_decls[0];
-    assert_eq!(type_decl.name, "Option");
-    match &type_decl.kind {
-        TypeDeclKind::Enum { variants } => {
+    let type_def = type_defs[0];
+    assert_eq!(type_def.name, "Option");
+    match &type_def.kind {
+        TypeDefKind::Enum { variants } => {
             assert_eq!(variants.len(), 2);
             assert_eq!(variants[0].name, "None");
             assert!(variants[0].payload.is_empty());
@@ -460,7 +460,7 @@ fn test_parse_enum_type_decl_with_payload() {
                 _ => panic!("Expected named payload type"),
             }
         }
-        _ => panic!("Expected enum type decl"),
+        _ => panic!("Expected enum type def"),
     }
 }
 

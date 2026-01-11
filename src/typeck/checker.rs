@@ -20,7 +20,7 @@ pub struct TypeChecker {
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, Vec<OverloadSig>>,
     method_sigs: HashMap<String, HashMap<String, Vec<OverloadSig>>>,
-    type_decls: HashMap<String, Type>,
+    type_defs: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
     halted: bool,
 }
@@ -32,7 +32,7 @@ impl TypeChecker {
             type_map_builder: TypeMapBuilder::new(),
             func_sigs: HashMap::new(),
             method_sigs: HashMap::new(),
-            type_decls: HashMap::new(),
+            type_defs: HashMap::new(),
             errors: Vec::new(),
             halted: false,
         }
@@ -56,17 +56,17 @@ impl TypeChecker {
     }
 
     fn populate_type_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
-        for type_decl in self.ctx.module.type_decls() {
-            match &type_decl.kind {
-                TypeDeclKind::Alias { aliased_ty } => {
+        for type_def in self.ctx.module.type_defs() {
+            match &type_def.kind {
+                TypeDefKind::Alias { aliased_ty } => {
                     // Resolve the aliased type
                     let ty =
                         resolve_type_expr(&self.ctx.def_map, aliased_ty).map_err(|e| vec![e])?;
 
-                    self.type_decls.insert(type_decl.name.clone(), ty);
+                    self.type_defs.insert(type_def.name.clone(), ty);
                 }
 
-                TypeDeclKind::Struct { fields } => {
+                TypeDefKind::Struct { fields } => {
                     // Resolve each struct field type
                     let struct_fields = fields
                         .iter()
@@ -82,14 +82,14 @@ impl TypeChecker {
 
                     // Create the struct type
                     let ty = Type::Struct {
-                        name: type_decl.name.clone(),
+                        name: type_def.name.clone(),
                         fields: struct_fields,
                     };
 
-                    self.type_decls.insert(type_decl.name.clone(), ty);
+                    self.type_defs.insert(type_def.name.clone(), ty);
                 }
 
-                TypeDeclKind::Enum { variants } => {
+                TypeDefKind::Enum { variants } => {
                     // Collect the enum variant names + payload types
                     let mut enum_variants = Vec::new();
                     for variant in variants {
@@ -108,11 +108,11 @@ impl TypeChecker {
 
                     // Create the enum type
                     let ty = Type::Enum {
-                        name: type_decl.name.clone(),
+                        name: type_def.name.clone(),
                         variants: enum_variants,
                     };
 
-                    self.type_decls.insert(type_decl.name.clone(), ty);
+                    self.type_defs.insert(type_def.name.clone(), ty);
                 }
             }
         }
@@ -235,12 +235,12 @@ impl TypeChecker {
     fn expand_shallow_type(&self, ty: &Type) -> Type {
         match ty {
             Type::Struct { name, fields } if fields.is_empty() => self
-                .type_decls
+                .type_defs
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| ty.clone()),
             Type::Enum { name, variants } if variants.is_empty() => self
-                .type_decls
+                .type_defs
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| ty.clone()),
@@ -330,7 +330,7 @@ impl TypeChecker {
         method_block: &MethodBlock,
         method: &Method,
     ) -> Result<Type, Vec<TypeCheckError>> {
-        let self_ty = match self.type_decls.get(&method_block.type_name) {
+        let self_ty = match self.type_defs.get(&method_block.type_name) {
             Some(ty) => ty.clone(),
             None => {
                 self.errors
@@ -725,7 +725,7 @@ impl TypeChecker {
         name: &String,
         fields: &[StructLitField],
     ) -> Result<Type, TypeCheckError> {
-        let struct_ty = match self.type_decls.get(name) {
+        let struct_ty = match self.type_defs.get(name) {
             Some(ty) => ty.clone(),
             None => {
                 for field in fields {
@@ -788,7 +788,7 @@ impl TypeChecker {
         payload: &[Expr],
     ) -> Result<Type, TypeCheckError> {
         // Lookup the type
-        let enum_ty = match self.type_decls.get(enum_name) {
+        let enum_ty = match self.type_defs.get(enum_name) {
             Some(ty) => ty.clone(),
             None => {
                 for expr in payload {

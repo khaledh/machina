@@ -6,7 +6,7 @@ impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, decl) in self.decls.iter().enumerate() {
             match decl {
-                Decl::TypeDecl(type_decl) => type_decl.fmt_with_indent(f, 0)?,
+                Decl::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
                 Decl::FunctionDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 Decl::Function(func) => func.fmt_with_indent(f, 0)?,
                 Decl::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
@@ -20,10 +20,10 @@ impl fmt::Display for Module {
     }
 }
 
-impl TypeDecl {
+impl TypeDef {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        writeln!(f, "{}TypeDecl [{}]", pad, self.id)?;
+        writeln!(f, "{}TypeDef [{}]", pad, self.id)?;
         let pad1 = indent(level + 1);
         writeln!(f, "{}Name: {}", pad1, self.name)?;
         writeln!(f, "{}Kind:", pad1)?;
@@ -32,20 +32,20 @@ impl TypeDecl {
     }
 }
 
-impl TypeDeclKind {
+impl TypeDefKind {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match self {
-            TypeDeclKind::Alias { aliased_ty } => {
+            TypeDefKind::Alias { aliased_ty } => {
                 writeln!(f, "{}Alias: {} [{}]", pad, aliased_ty, aliased_ty.id)?;
             }
-            TypeDeclKind::Struct { fields } => {
+            TypeDefKind::Struct { fields } => {
                 writeln!(f, "{}Struct:", pad)?;
                 for field in fields {
                     field.fmt_with_indent(f, level + 2)?;
                 }
             }
-            TypeDeclKind::Enum { variants } => {
+            TypeDefKind::Enum { variants } => {
                 writeln!(f, "{}Enum:", pad)?;
                 for variant in variants {
                     if variant.payload.is_empty() {

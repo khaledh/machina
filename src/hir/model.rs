@@ -14,12 +14,12 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn type_decls(&self) -> Vec<&TypeDecl> {
+    pub fn type_defs(&self) -> Vec<&TypeDef> {
         self.decls
             .iter()
             .filter_map(|decl| {
-                if let Decl::TypeDecl(type_decl) = decl {
-                    Some(type_decl)
+                if let Decl::TypeDef(type_def) = decl {
+                    Some(type_def)
                 } else {
                     None
                 }
@@ -93,7 +93,7 @@ impl Module {
                 Decl::ClosureDecl(closure_decl) => {
                     callables.push(CallableRef::ClosureDecl(closure_decl))
                 }
-                Decl::TypeDecl(_) => {}
+                Decl::TypeDef(_) => {}
             }
         }
         callables
@@ -104,7 +104,7 @@ impl Module {
 
 #[derive(Clone, Debug)]
 pub enum Decl {
-    TypeDecl(TypeDecl),
+    TypeDef(TypeDef),
     FunctionDecl(FunctionDecl),
     Function(Function),
     MethodBlock(MethodBlock),
@@ -162,10 +162,10 @@ impl<'a> CallableRef<'a> {
     }
 }
 
-// -- Type Declarations ---
+// -- Type Definitions ---
 
-pub type TypeDecl = model::TypeDecl<DefId>;
-pub type TypeDeclKind = model::TypeDeclKind<DefId>;
+pub type TypeDef = model::TypeDef<DefId>;
+pub type TypeDefKind = model::TypeDefKind<DefId>;
 pub type StructField = model::StructField<DefId>;
 pub type EnumVariant = model::EnumVariant<DefId>;
 pub type TypeExpr = model::TypeExpr<DefId>;

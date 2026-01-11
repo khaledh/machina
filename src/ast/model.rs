@@ -1,6 +1,6 @@
 //! Generic AST model: parameterized over identifier representation.
 
-use crate::ast::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
+use crate::ast::NodeId;
 use crate::diag::Span;
 
 // -- Module ---
@@ -11,12 +11,12 @@ pub struct Module<T> {
 }
 
 impl<T> Module<T> {
-    pub fn type_decls(&self) -> Vec<&TypeDecl<T>> {
+    pub fn type_defs(&self) -> Vec<&TypeDef<T>> {
         self.decls
             .iter()
             .filter_map(|decl| {
-                if let Decl::TypeDecl(type_decl) = decl {
-                    Some(type_decl)
+                if let Decl::TypeDef(type_def) = decl {
+                    Some(type_def)
                 } else {
                     None
                 }
@@ -90,7 +90,7 @@ impl<T> Module<T> {
                 Decl::ClosureDecl(closure_decl) => {
                     callables.push(CallableRef::ClosureDecl(closure_decl))
                 }
-                Decl::TypeDecl(_) => {}
+                Decl::TypeDef(_) => {}
             }
         }
         callables
@@ -101,7 +101,7 @@ impl<T> Module<T> {
 
 #[derive(Clone, Debug)]
 pub enum Decl<T> {
-    TypeDecl(TypeDecl<T>),
+    TypeDef(TypeDef<T>),
     FunctionDecl(FunctionDecl<T>), // function declaration
     Function(Function<T>),         // function definition
     MethodBlock(MethodBlock<T>),   // method definitions
@@ -165,18 +165,18 @@ impl<'a, T> CallableRef<'a, T> {
     }
 }
 
-// -- Type Declarations ---
+// -- Type Definitions ---
 
 #[derive(Clone, Debug)]
-pub struct TypeDecl<T> {
+pub struct TypeDef<T> {
     pub id: NodeId,
     pub name: String,
-    pub kind: TypeDeclKind<T>,
+    pub kind: TypeDefKind<T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum TypeDeclKind<T> {
+pub enum TypeDefKind<T> {
     Alias { aliased_ty: TypeExpr<T> },
     Struct { fields: Vec<StructField<T>> },
     Enum { variants: Vec<EnumVariant<T>> },
@@ -631,4 +631,60 @@ pub struct StructUpdateField<T> {
     pub name: String,
     pub value: Expr<T>,
     pub span: Span,
+}
+
+// -- Parameter / call modes ---
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParamMode {
+    In,
+    InOut,
+    Out,
+    Sink,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallArgMode {
+    Default,
+    InOut,
+    Out,
+    Move,
+}
+
+// -- Operators ---
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum BinaryOp {
+    // Arithmetic operators
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+
+    // Comparison operators
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+
+    // Bitwise operators
+    BitOr,
+    BitXor,
+    BitAnd,
+    Shl,
+    Shr,
+
+    // Logical operators
+    LogicalAnd,
+    LogicalOr,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    LogicalNot,
+    BitNot,
 }

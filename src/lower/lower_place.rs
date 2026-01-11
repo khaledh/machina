@@ -1,4 +1,4 @@
-use crate::hir::model::{Expr, ExprKind as EK, TypeDeclKind};
+use crate::hir::model::{Expr, ExprKind as EK, TypeDefKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
@@ -414,12 +414,12 @@ impl<'a> FuncLowerer<'a> {
             return ty.clone();
         }
 
-        let decls = self.ctx.module.type_decls();
-        let decl = decls.iter().find(|decl| decl.name == *name);
-        let Some(decl) = decl else {
+        let defs = self.ctx.module.type_defs();
+        let def = defs.iter().find(|def| def.name == *name);
+        let Some(def) = def else {
             return ty.clone();
         };
-        let TypeDeclKind::Struct { fields } = &decl.kind else {
+        let TypeDefKind::Struct { fields } = &def.kind else {
             return ty.clone();
         };
 

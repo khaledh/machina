@@ -51,7 +51,7 @@ impl ToHir for ast::Decl {
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
         match self {
-            ast::Decl::TypeDecl(decl) => hir::Decl::TypeDecl(decl.to_hir(def_map)),
+            ast::Decl::TypeDef(decl) => hir::Decl::TypeDef(decl.to_hir(def_map)),
             ast::Decl::FunctionDecl(decl) => hir::Decl::FunctionDecl(decl.to_hir(def_map)),
             ast::Decl::Function(func) => hir::Decl::Function(func.to_hir(def_map)),
             ast::Decl::MethodBlock(block) => hir::Decl::MethodBlock(block.to_hir(def_map)),
@@ -62,24 +62,24 @@ impl ToHir for ast::Decl {
     }
 }
 
-impl ToHir for ast::TypeDecl {
-    type Output = hir::TypeDecl;
+impl ToHir for ast::TypeDef {
+    type Output = hir::TypeDef;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
-        hir::TypeDecl {
+        hir::TypeDef {
             id: self.id,
             name: self.name,
             kind: match self.kind {
-                ast::TypeDeclKind::Alias { aliased_ty } => hir::TypeDeclKind::Alias {
+                ast::TypeDefKind::Alias { aliased_ty } => hir::TypeDefKind::Alias {
                     aliased_ty: aliased_ty.to_hir(def_map),
                 },
-                ast::TypeDeclKind::Struct { fields } => hir::TypeDeclKind::Struct {
+                ast::TypeDefKind::Struct { fields } => hir::TypeDefKind::Struct {
                     fields: fields
                         .into_iter()
                         .map(|field| field.to_hir(def_map))
                         .collect(),
                 },
-                ast::TypeDeclKind::Enum { variants } => hir::TypeDeclKind::Enum {
+                ast::TypeDefKind::Enum { variants } => hir::TypeDefKind::Enum {
                     variants: variants
                         .into_iter()
                         .map(|variant| variant.to_hir(def_map))

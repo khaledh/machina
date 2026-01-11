@@ -150,20 +150,20 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
-        // Populate type declarations
-        self.populate_type_decls(&module.type_decls());
+        // Populate type definitions
+        self.populate_type_defs(&module.type_defs());
 
         // Populate callable declarations
         self.populate_callables(&module.callables());
     }
 
-    fn populate_type_decls(&mut self, type_decls: &[&TypeDecl]) {
-        for &type_decl in type_decls {
+    fn populate_type_defs(&mut self, type_defs: &[&TypeDef]) {
+        for &type_def in type_defs {
             let def_id = self.def_id_gen.new_id();
 
-            // Map type decl kind to a (def kind, symbol kind) pair
-            let (def_kind, symbol_kind) = match &type_decl.kind {
-                TypeDeclKind::Alias { aliased_ty } => (
+            // Map type def kind to a (def kind, symbol kind) pair
+            let (def_kind, symbol_kind) = match &type_def.kind {
+                TypeDefKind::Alias { aliased_ty } => (
                     DefKind::TypeAlias {
                         ty_expr: aliased_ty.clone(),
                     },
@@ -172,7 +172,7 @@ impl SymbolResolver {
                         ty_expr: aliased_ty.clone(),
                     },
                 ),
-                TypeDeclKind::Struct { fields } => (
+                TypeDefKind::Struct { fields } => (
                     DefKind::StructDef {
                         fields: fields.clone(),
                     },
@@ -181,7 +181,7 @@ impl SymbolResolver {
                         fields: fields.clone(),
                     },
                 ),
-                TypeDeclKind::Enum { variants } => (
+                TypeDefKind::Enum { variants } => (
                     DefKind::EnumDef {
                         variants: variants.clone(),
                     },
@@ -195,21 +195,21 @@ impl SymbolResolver {
             // Create a new Def
             let def = Def {
                 id: def_id,
-                name: type_decl.name.clone(),
+                name: type_def.name.clone(),
                 kind: def_kind,
             };
 
             // Record the def
-            self.def_map_builder.record_def(def, type_decl.id);
+            self.def_map_builder.record_def(def, type_def.id);
 
             // Insert the symbol
             self.insert_symbol(
-                &type_decl.name,
+                &type_def.name,
                 Symbol {
-                    name: type_decl.name.clone(),
+                    name: type_def.name.clone(),
                     kind: symbol_kind,
                 },
-                type_decl.span,
+                type_def.span,
             );
         }
     }

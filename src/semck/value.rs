@@ -1,7 +1,7 @@
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
-    BinaryOp, Decl, Expr, ExprKind, Function, FunctionSig, StmtExpr, StmtExprKind, TypeDecl,
-    TypeDeclKind, TypeExpr, TypeExprKind, UnaryOp,
+    BinaryOp, Decl, Expr, ExprKind, Function, FunctionSig, StmtExpr, StmtExprKind, TypeDef,
+    TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::semck::SemCheckError;
@@ -31,8 +31,8 @@ impl<'a> ValueChecker<'a> {
 
     fn check_module(&mut self) {
         for decl in &self.ctx.module.decls {
-            if let Decl::TypeDecl(decl) = decl {
-                self.check_type_decl(decl);
+            if let Decl::TypeDef(decl) = decl {
+                self.check_type_def(decl);
             }
         }
         for decl in &self.ctx.module.decls {
@@ -98,15 +98,15 @@ impl<'a> ValueChecker<'a> {
         self.check_type_expr(&sig.return_type);
     }
 
-    fn check_type_decl(&mut self, decl: &TypeDecl) {
-        match &decl.kind {
-            TypeDeclKind::Alias { aliased_ty } => self.check_type_expr(aliased_ty),
-            TypeDeclKind::Struct { fields } => {
+    fn check_type_def(&mut self, def: &TypeDef) {
+        match &def.kind {
+            TypeDefKind::Alias { aliased_ty } => self.check_type_expr(aliased_ty),
+            TypeDefKind::Struct { fields } => {
                 for field in fields {
                     self.check_type_expr(&field.ty);
                 }
             }
-            TypeDeclKind::Enum { variants } => {
+            TypeDefKind::Enum { variants } => {
                 for variant in variants {
                     for payload_ty in &variant.payload {
                         self.check_type_expr(payload_ty);

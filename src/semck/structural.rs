@@ -2,7 +2,7 @@ use crate::context::TypeCheckedContext;
 use crate::hir::model::{
     BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
     MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
-    TypeDeclKind,
+    TypeDefKind,
 };
 use crate::hir::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::resolve::def_map::DefKind;
@@ -37,16 +37,16 @@ impl<'a> StructuralChecker<'a> {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 
-        for decl in ctx.module.type_decls() {
+        for decl in ctx.module.type_defs() {
             match &decl.kind {
-                TypeDeclKind::Struct { fields } => {
+                TypeDefKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
                     struct_fields.insert(
                         decl.name.clone(),
                         fields.iter().map(|f| f.name.clone()).collect(),
                     );
                 }
-                TypeDeclKind::Enum { variants } => {
+                TypeDefKind::Enum { variants } => {
                     // Collect variant payload arity for enum literals and match patterns.
                     enum_variants.insert(
                         decl.name.clone(),
@@ -59,7 +59,7 @@ impl<'a> StructuralChecker<'a> {
                             .collect(),
                     );
                 }
-                TypeDeclKind::Alias { .. } => {}
+                TypeDefKind::Alias { .. } => {}
             }
         }
 

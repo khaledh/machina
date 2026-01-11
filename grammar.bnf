@@ -3,11 +3,11 @@
 # Top-level
 Module             ::= Decl*
 
-Decl               ::= TypeDecl | FunctionDecl | Function | MethodBlock
+Decl               ::= TypeDef | FunctionDecl | Function | MethodBlock
 
-# Type Declarations
-TypeDecl           ::= "type" Identifier "=" TypeDeclBody
-TypeDeclBody       ::= TypeAliasDef
+# Type Definitions
+TypeDef            ::= "type" Identifier "=" TypeDefBody
+TypeDefBody        ::= TypeAliasDef
                      | StructDef
                      | EnumDef
 

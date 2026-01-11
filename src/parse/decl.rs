@@ -3,7 +3,7 @@ use super::*;
 impl<'a> Parser<'a> {
     pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match &self.curr_token.kind {
-            TK::KwType => self.parse_type_decl().map(Decl::TypeDecl),
+            TK::KwType => self.parse_type_def().map(Decl::TypeDef),
             TK::KwFn => self.parse_func(),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 self.parse_method_block()
@@ -12,7 +12,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_type_decl(&mut self) -> Result<TypeDecl, ParseError> {
+    fn parse_type_def(&mut self) -> Result<TypeDef, ParseError> {
         let marker = self.mark();
 
         self.consume_keyword(TK::KwType)?;
@@ -36,10 +36,10 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
 
-            TypeDeclKind::Alias { aliased_ty: ty }
+            TypeDefKind::Alias { aliased_ty: ty }
         };
 
-        Ok(TypeDecl {
+        Ok(TypeDef {
             id: self.id_gen.new_id(),
             name,
             kind,
@@ -47,7 +47,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_struct_def(&mut self) -> Result<TypeDeclKind, ParseError> {
+    fn parse_struct_def(&mut self) -> Result<TypeDefKind, ParseError> {
         self.consume(&TK::LBrace)?;
 
         let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
@@ -65,10 +65,10 @@ impl<'a> Parser<'a> {
         })?;
 
         self.consume(&TK::RBrace)?;
-        Ok(TypeDeclKind::Struct { fields })
+        Ok(TypeDefKind::Struct { fields })
     }
 
-    fn parse_enum_def(&mut self) -> Result<TypeDeclKind, ParseError> {
+    fn parse_enum_def(&mut self) -> Result<TypeDefKind, ParseError> {
         let mut variants = Vec::new();
 
         let marker = self.mark();
@@ -113,6 +113,6 @@ impl<'a> Parser<'a> {
             self.advance();
         }
 
-        Ok(TypeDeclKind::Enum { variants })
+        Ok(TypeDefKind::Enum { variants })
     }
 }

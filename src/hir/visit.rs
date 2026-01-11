@@ -24,10 +24,10 @@ pub trait Visitor {
         walk_module(self, module)
     }
 
-    // --- Type Declarations ---
+    // --- Type Definitions ---
 
-    fn visit_type_decl(&mut self, type_decl: &TypeDecl) {
-        walk_type_decl(self, type_decl)
+    fn visit_type_def(&mut self, type_def: &TypeDef) {
+        walk_type_def(self, type_def)
     }
 
     fn visit_struct_fields(&mut self, fields: &[StructField]) {
@@ -114,7 +114,7 @@ pub trait Visitor {
 pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
     for decl in &module.decls {
         match decl {
-            Decl::TypeDecl(type_decl) => v.visit_type_decl(type_decl),
+            Decl::TypeDef(type_def) => v.visit_type_def(type_def),
             Decl::FunctionDecl(func_decl) => v.visit_func_decl(func_decl),
             Decl::Function(func) => v.visit_func(func),
             Decl::MethodBlock(method_block) => v.visit_method_block(method_block),
@@ -123,13 +123,13 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
     }
 }
 
-// --- Type Declarations ---
+// --- Type Definitions ---
 
-pub fn walk_type_decl<V: Visitor + ?Sized>(v: &mut V, type_decl: &TypeDecl) {
-    match &type_decl.kind {
-        TypeDeclKind::Alias { aliased_ty } => v.visit_type_expr(aliased_ty),
-        TypeDeclKind::Struct { fields } => v.visit_struct_fields(fields),
-        TypeDeclKind::Enum { variants } => v.visit_enum_variants(variants),
+pub fn walk_type_def<V: Visitor + ?Sized>(v: &mut V, type_def: &TypeDef) {
+    match &type_def.kind {
+        TypeDefKind::Alias { aliased_ty } => v.visit_type_expr(aliased_ty),
+        TypeDefKind::Struct { fields } => v.visit_struct_fields(fields),
+        TypeDefKind::Enum { variants } => v.visit_enum_variants(variants),
     }
 }
 
