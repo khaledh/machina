@@ -1,7 +1,7 @@
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
-    BinaryOp, Decl, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef,
-    TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
+    BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
+    TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::semck::SemCheckError;
@@ -30,15 +30,11 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        for decl in &self.ctx.module.decls {
-            if let Decl::TypeDef(type_def) = decl {
-                self.check_type_def(type_def);
-            }
+        for type_def in &self.ctx.module.type_defs() {
+            self.check_type_def(type_def);
         }
-        for decl in &self.ctx.module.decls {
-            if let Decl::FuncDecl(func_decl) = decl {
-                self.check_function_sig(&func_decl.sig);
-            }
+        for func_decl in &self.ctx.module.func_decls() {
+            self.check_function_sig(&func_decl.sig);
         }
         for func_def in self.ctx.module.func_defs() {
             self.check_function_sig(&func_def.sig);

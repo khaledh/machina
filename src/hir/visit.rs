@@ -112,8 +112,8 @@ pub trait Visitor {
 // --- Module ---
 
 pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
-    for decl in &module.decls {
-        match decl {
+    for item in &module.top_level_items {
+        match item {
             Decl::TypeDef(type_def) => v.visit_type_def(type_def),
             Decl::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             Decl::FuncDef(func_def) => v.visit_func_def(func_def),

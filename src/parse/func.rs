@@ -3,14 +3,14 @@ use super::*;
 impl<'a> Parser<'a> {
     // --- Functions ---
 
-    pub(super) fn parse_func(&mut self) -> Result<Decl, ParseError> {
+    pub(super) fn parse_func(&mut self) -> Result<TopLevelItem, ParseError> {
         let marker = self.mark();
 
         let sig = self.parse_func_sig()?;
 
         if self.curr_token.kind == TK::Semicolon {
             self.advance();
-            Ok(Decl::FuncDecl(FuncDecl {
+            Ok(TopLevelItem::FuncDecl(FuncDecl {
                 id: self.id_gen.new_id(),
                 sig,
                 span: self.close(marker),
@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
             self.closure_base = prev_base;
             self.closure_index = prev_index;
 
-            Ok(Decl::FuncDef(FuncDef {
+            Ok(TopLevelItem::FuncDef(FuncDef {
                 id: self.id_gen.new_id(),
                 sig,
                 body,
@@ -58,7 +58,7 @@ impl<'a> Parser<'a> {
 
     // --- Methods ---
 
-    pub(super) fn parse_method_block(&mut self) -> Result<Decl, ParseError> {
+    pub(super) fn parse_method_block(&mut self) -> Result<TopLevelItem, ParseError> {
         let marker = self.mark();
         let type_name = self.parse_ident()?;
         self.consume(&TK::DoubleColon)?;
@@ -70,7 +70,7 @@ impl<'a> Parser<'a> {
         }
         self.consume(&TK::RBrace)?;
 
-        Ok(Decl::MethodBlock(MethodBlock {
+        Ok(TopLevelItem::MethodBlock(MethodBlock {
             id: self.id_gen.new_id(),
             type_name,
             method_defs: methods,
@@ -186,7 +186,7 @@ impl<'a> Parser<'a> {
             span: self.close(marker),
         };
         self.closure_decls
-            .push(Decl::ClosureDecl(closure_decl.clone()));
+            .push(TopLevelItem::ClosureDecl(closure_decl.clone()));
 
         Ok(closure_expr)
     }

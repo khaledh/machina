@@ -27,7 +27,7 @@ pub struct Parser<'a> {
     curr_token: &'a Token,
     id_gen: NodeIdGen,
     allow_struct_lit: bool,
-    closure_decls: Vec<Decl>,
+    closure_decls: Vec<TopLevelItem>,
     closure_base: Option<String>,
     closure_index: u32,
 }
@@ -64,17 +64,17 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<Module, ParseError> {
-        let mut decls = Vec::new();
+        let mut top_level_items = Vec::new();
 
-        // Parse the top-level declarations
+        // Parse the top-level items
         while self.curr_token.kind != TK::Eof {
-            decls.push(self.parse_decl()?);
+            top_level_items.push(self.parse_top_level_item()?);
         }
 
         // Include the closure declarations (parsed and recorded during parsing)
-        decls.extend(self.closure_decls.clone());
+        top_level_items.extend(self.closure_decls.clone());
 
-        Ok(Module { decls })
+        Ok(Module { top_level_items })
     }
 
     fn advance(&mut self) {

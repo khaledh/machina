@@ -15,7 +15,7 @@ pub use visit::*;
 // -- String-specialized AST aliases ---
 
 pub type Module = model::Module<String>;
-pub type Decl = model::Decl<String>;
+pub type TopLevelItem = model::TopLevelItem<String>;
 pub type CallableRef<'a> = model::CallableRef<'a, String>;
 pub type TypeDef = model::TypeDef<String>;
 pub type TypeDefKind = model::TypeDefKind<String>;

@@ -97,11 +97,11 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
     let (user_module, _id_gen) = parse_with_id_gen(source, id_gen)?;
 
-    // combine decls: prelude first, then user
-    let mut decls = Vec::new();
-    decls.extend(prelude_module.decls);
-    decls.extend(user_module.decls);
-    let module = Module { decls };
+    // combine top_level_items: prelude first, then user
+    let mut top_level_items = Vec::new();
+    top_level_items.extend(prelude_module.top_level_items);
+    top_level_items.extend(user_module.top_level_items);
+    let module = Module { top_level_items };
 
     if dump_ast {
         println!("AST:");

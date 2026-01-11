@@ -1,9 +1,9 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
+    pub(super) fn parse_top_level_item(&mut self) -> Result<TopLevelItem, ParseError> {
         match &self.curr_token.kind {
-            TK::KwType => self.parse_type_def().map(Decl::TypeDef),
+            TK::KwType => self.parse_type_def().map(TopLevelItem::TypeDef),
             TK::KwFn => self.parse_func(),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 self.parse_method_block()

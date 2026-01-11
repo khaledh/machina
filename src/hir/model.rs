@@ -10,15 +10,15 @@ pub use crate::ast::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
 
 #[derive(Clone, Debug)]
 pub struct Module {
-    pub decls: Vec<Decl>,
+    pub top_level_items: Vec<Decl>,
 }
 
 impl Module {
     pub fn type_defs(&self) -> Vec<&TypeDef> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| {
-                if let Decl::TypeDef(type_def) = decl {
+            .filter_map(|item| {
+                if let Decl::TypeDef(type_def) = item {
                     Some(type_def)
                 } else {
                     None
@@ -28,9 +28,9 @@ impl Module {
     }
 
     pub fn func_sigs(&self) -> Vec<&FunctionSig> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| match decl {
+            .filter_map(|item| match item {
                 Decl::FuncDecl(func_decl) => Some(&func_decl.sig),
                 Decl::FuncDef(func_def) => Some(&func_def.sig),
                 _ => None,
@@ -39,9 +39,9 @@ impl Module {
     }
 
     pub fn func_decls(&self) -> Vec<&FuncDecl> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| match decl {
+            .filter_map(|item| match item {
                 Decl::FuncDecl(func_decl) => Some(func_decl),
                 _ => None,
             })
@@ -49,10 +49,10 @@ impl Module {
     }
 
     pub fn func_defs(&self) -> Vec<&FuncDef> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| {
-                if let Decl::FuncDef(func_def) = decl {
+            .filter_map(|item| {
+                if let Decl::FuncDef(func_def) = item {
                     Some(func_def)
                 } else {
                     None
@@ -62,10 +62,10 @@ impl Module {
     }
 
     pub fn method_blocks(&self) -> Vec<&MethodBlock> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| {
-                if let Decl::MethodBlock(method_block) = decl {
+            .filter_map(|item| {
+                if let Decl::MethodBlock(method_block) = item {
                     Some(method_block)
                 } else {
                     None
@@ -76,8 +76,8 @@ impl Module {
 
     pub fn callables(&self) -> Vec<CallableRef<'_>> {
         let mut callables = Vec::new();
-        for decl in &self.decls {
-            match decl {
+        for item in &self.top_level_items {
+            match item {
                 Decl::FuncDecl(func_decl) => callables.push(CallableRef::FuncDecl(func_decl)),
                 Decl::FuncDef(func_def) => callables.push(CallableRef::FuncDef(func_def)),
                 Decl::MethodBlock(method_block) => {

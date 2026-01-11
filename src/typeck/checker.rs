@@ -123,9 +123,9 @@ impl TypeChecker {
         let mut overloads = Vec::new();
 
         // Func decls
-        for decl in self.ctx.module.func_decls() {
-            let def_id = decl.def_id;
-            overloads.push((def_id, decl.sig.clone()));
+        for func_decl in self.ctx.module.func_decls() {
+            let def_id = func_decl.def_id;
+            overloads.push((def_id, func_decl.sig.clone()));
         }
 
         // Func defs

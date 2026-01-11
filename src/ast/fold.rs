@@ -158,10 +158,10 @@ pub fn walk_module<F: AstFolder<T> + ?Sized, T>(
     module: &Module<T>,
 ) -> Result<Vec<F::Output>, F::Error> {
     let mut outputs = Vec::new();
-    for decl in &module.decls {
-        match decl {
-            Decl::FuncDef(func_def) => outputs.push(f.visit_func_def(func_def)?),
-            Decl::MethodBlock(method_block) => {
+    for item in &module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(func_def) => outputs.push(f.visit_func_def(func_def)?),
+            TopLevelItem::MethodBlock(method_block) => {
                 outputs.extend(f.visit_method_block(method_block)?);
             }
             _ => {}

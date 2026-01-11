@@ -1,9 +1,9 @@
 # Machina programming language grammar
 
 # Top-level
-Module             ::= Decl*
+Module             ::= TopLevelItem*
 
-Decl               ::= TypeDef | FuncDecl | FuncDef | MethodBlock
+TopLevelItem       ::= TypeDef | FuncDecl | FuncDef | MethodBlock
 
 # Type Definitions
 TypeDef            ::= "type" Identifier "=" TypeDefBody

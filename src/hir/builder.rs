@@ -37,27 +37,29 @@ impl ToHir for ast::Module {
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
         hir::Module {
-            decls: self
-                .decls
+            top_level_items: self
+                .top_level_items
                 .into_iter()
-                .map(|decl| decl.to_hir(def_map))
+                .map(|item| item.to_hir(def_map))
                 .collect(),
         }
     }
 }
 
-impl ToHir for ast::Decl {
+impl ToHir for ast::TopLevelItem {
     type Output = hir::Decl;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
         match self {
-            ast::Decl::TypeDef(type_def) => hir::Decl::TypeDef(type_def.to_hir(def_map)),
-            ast::Decl::FuncDecl(func_decl) => hir::Decl::FuncDecl(func_decl.to_hir(def_map)),
-            ast::Decl::FuncDef(func_def) => hir::Decl::FuncDef(func_def.to_hir(def_map)),
-            ast::Decl::MethodBlock(method_block) => {
+            ast::TopLevelItem::TypeDef(type_def) => hir::Decl::TypeDef(type_def.to_hir(def_map)),
+            ast::TopLevelItem::FuncDecl(func_decl) => {
+                hir::Decl::FuncDecl(func_decl.to_hir(def_map))
+            }
+            ast::TopLevelItem::FuncDef(func_def) => hir::Decl::FuncDef(func_def.to_hir(def_map)),
+            ast::TopLevelItem::MethodBlock(method_block) => {
                 hir::Decl::MethodBlock(method_block.to_hir(def_map))
             }
-            ast::Decl::ClosureDecl(closure_decl) => {
+            ast::TopLevelItem::ClosureDecl(closure_decl) => {
                 hir::Decl::ClosureDecl(closure_decl.to_hir(def_map))
             }
         }

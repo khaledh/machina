@@ -37,19 +37,19 @@ impl<'a> StructuralChecker<'a> {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 
-        for decl in ctx.module.type_defs() {
-            match &decl.kind {
+        for type_def in ctx.module.type_defs() {
+            match &type_def.kind {
                 TypeDefKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
                     struct_fields.insert(
-                        decl.name.clone(),
+                        type_def.name.clone(),
                         fields.iter().map(|f| f.name.clone()).collect(),
                     );
                 }
                 TypeDefKind::Enum { variants } => {
                     // Collect variant payload arity for enum literals and match patterns.
                     enum_variants.insert(
-                        decl.name.clone(),
+                        type_def.name.clone(),
                         variants
                             .iter()
                             .map(|variant| EnumVariantInfo {

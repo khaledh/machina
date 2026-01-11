@@ -4,15 +4,15 @@ use std::fmt;
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, decl) in self.decls.iter().enumerate() {
-            match decl {
-                Decl::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
-                Decl::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
-                Decl::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
-                Decl::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
-                Decl::ClosureDecl(closure_decl) => closure_decl.fmt_with_indent(f, 0)?,
+        for (i, item) in self.top_level_items.iter().enumerate() {
+            match item {
+                TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
+                TopLevelItem::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
+                TopLevelItem::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
+                TopLevelItem::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
+                TopLevelItem::ClosureDecl(closure_decl) => closure_decl.fmt_with_indent(f, 0)?,
             }
-            if i + 1 != self.decls.len() {
+            if i + 1 != self.top_level_items.len() {
                 writeln!(f, "--------------------------------")?;
             }
         }

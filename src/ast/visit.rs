@@ -112,13 +112,13 @@ pub trait Visitor<T = String> {
 // --- Module ---
 
 pub fn walk_module<V: Visitor<T> + ?Sized, T>(v: &mut V, module: &Module<T>) {
-    for decl in &module.decls {
-        match decl {
-            Decl::TypeDef(type_def) => v.visit_type_def(type_def),
-            Decl::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
-            Decl::FuncDef(func_def) => v.visit_func_def(func_def),
-            Decl::MethodBlock(method_block) => v.visit_method_block(method_block),
-            Decl::ClosureDecl(_) => {} // closures are visited where they are defined
+    for item in &module.top_level_items {
+        match item {
+            TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
+            TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
+            TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
+            TopLevelItem::MethodBlock(method_block) => v.visit_method_block(method_block),
+            TopLevelItem::ClosureDecl(_) => {} // closures are visited where they are defined
         }
     }
 }

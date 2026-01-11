@@ -7,98 +7,92 @@ use crate::diag::Span;
 
 #[derive(Clone, Debug)]
 pub struct Module<T> {
-    pub decls: Vec<Decl<T>>,
+    pub top_level_items: Vec<TopLevelItem<T>>,
 }
 
 impl<T> Module<T> {
     pub fn type_defs(&self) -> Vec<&TypeDef<T>> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| {
-                if let Decl::TypeDef(type_def) = decl {
-                    Some(type_def)
-                } else {
-                    None
-                }
+            .filter_map(|item| match item {
+                TopLevelItem::TypeDef(type_def) => Some(type_def),
+                _ => None,
             })
             .collect()
     }
 
     pub fn func_sigs(&self) -> Vec<&FunctionSig<T>> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| match decl {
-                Decl::FuncDecl(func_decl) => Some(&func_decl.sig),
-                Decl::FuncDef(func_def) => Some(&func_def.sig),
+            .filter_map(|item| match item {
+                TopLevelItem::FuncDecl(func_decl) => Some(&func_decl.sig),
+                TopLevelItem::FuncDef(func_def) => Some(&func_def.sig),
                 _ => None,
             })
             .collect()
     }
 
     pub fn func_decls(&self) -> Vec<&FuncDecl<T>> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| match decl {
-                Decl::FuncDecl(func_decl) => Some(func_decl),
+            .filter_map(|item| match item {
+                TopLevelItem::FuncDecl(func_decl) => Some(func_decl),
                 _ => None,
             })
             .collect()
     }
 
     pub fn func_defs(&self) -> Vec<&FuncDef<T>> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| {
-                if let Decl::FuncDef(func_def) = decl {
-                    Some(func_def)
-                } else {
-                    None
-                }
+            .filter_map(|item| match item {
+                TopLevelItem::FuncDef(func_def) => Some(func_def),
+                _ => None,
             })
             .collect()
     }
 
     pub fn method_blocks(&self) -> Vec<&MethodBlock<T>> {
-        self.decls
+        self.top_level_items
             .iter()
-            .filter_map(|decl| {
-                if let Decl::MethodBlock(method_block) = decl {
-                    Some(method_block)
-                } else {
-                    None
-                }
+            .filter_map(|item| match item {
+                TopLevelItem::MethodBlock(method_block) => Some(method_block),
+                _ => None,
             })
             .collect()
     }
 
     pub fn callables(&self) -> Vec<CallableRef<'_, T>> {
-        let mut callables = Vec::new();
-        for decl in &self.decls {
-            match decl {
-                Decl::FuncDecl(func_decl) => callables.push(CallableRef::FuncDecl(func_decl)),
-                Decl::FuncDef(func_def) => callables.push(CallableRef::FuncDef(func_def)),
-                Decl::MethodBlock(method_block) => {
-                    for method_def in &method_block.method_defs {
-                        callables.push(CallableRef::MethodDef {
-                            type_name: &method_block.type_name,
-                            method_def,
-                        });
-                    }
+        self.top_level_items
+            .iter()
+            .flat_map(|item| match item {
+                TopLevelItem::FuncDecl(func_decl) => {
+                    vec![CallableRef::FuncDecl(func_decl)]
                 }
-                Decl::ClosureDecl(closure_decl) => {
-                    callables.push(CallableRef::ClosureDecl(closure_decl))
+                TopLevelItem::FuncDef(func_def) => {
+                    vec![CallableRef::FuncDef(func_def)]
                 }
-                Decl::TypeDef(_) => {}
-            }
-        }
-        callables
+                TopLevelItem::MethodBlock(method_block) => method_block
+                    .method_defs
+                    .iter()
+                    .map(|method_def| CallableRef::MethodDef {
+                        type_name: &method_block.type_name,
+                        method_def,
+                    })
+                    .collect(),
+                TopLevelItem::ClosureDecl(closure_decl) => {
+                    vec![CallableRef::ClosureDecl(closure_decl)]
+                }
+                TopLevelItem::TypeDef(_) => vec![],
+            })
+            .collect()
     }
 }
 
-// -- Declarations ---
+// -- Top Leve Items ---
 
 #[derive(Clone, Debug)]
-pub enum Decl<T> {
+pub enum TopLevelItem<T> {
     TypeDef(TypeDef<T>),
     FuncDecl(FuncDecl<T>),       // function declaration
     FuncDef(FuncDef<T>),         // function definition
