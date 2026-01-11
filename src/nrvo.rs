@@ -21,7 +21,6 @@ impl NrvoAnalyzer {
 
     pub fn analyze(self) -> AnalyzedContext {
         let SemanticCheckedContext {
-            ast_module,
             module,
             def_map,
             type_map,
@@ -38,7 +37,6 @@ impl NrvoAnalyzer {
         }
 
         AnalyzedContext {
-            ast_module,
             module,
             def_map,
             type_map,
