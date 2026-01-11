@@ -6,7 +6,7 @@
 
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
-use crate::hir::model::{CallArg, Expr, ExprKind, Function, ParamMode};
+use crate::hir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::def_map::DefId;
 use crate::semck::SemCheckError;
@@ -307,8 +307,8 @@ impl<'a> LvalueOverlapChecker<'a> {
 }
 
 impl Visitor for LvalueOverlapChecker<'_> {
-    fn visit_func(&mut self, func: &Function) {
-        self.visit_expr(&func.body);
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
+        self.visit_expr(&func_def.body);
     }
 
     fn visit_expr(&mut self, expr: &Expr) {

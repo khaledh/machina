@@ -1,6 +1,6 @@
 use super::*;
 use crate::ast::{
-    ArrayLitInit, BindPatternKind, BlockItem, Expr, ExprKind, Function, MatchPattern,
+    ArrayLitInit, BindPatternKind, BlockItem, Expr, ExprKind, FuncDef, MatchPattern,
     MatchPatternBinding, Module, StmtExpr, StmtExprKind, TypeDefKind, TypeExprKind,
 };
 use crate::lexer::{LexError, Lexer, Token};
@@ -16,9 +16,9 @@ fn parse_module(source: &str) -> Result<Module, ParseError> {
     parser.parse()
 }
 
-fn parse_source(source: &str) -> Result<Vec<Function>, ParseError> {
+fn parse_source(source: &str) -> Result<Vec<FuncDef>, ParseError> {
     let module = parse_module(source)?;
-    Ok(module.funcs().into_iter().cloned().collect())
+    Ok(module.func_defs().into_iter().cloned().collect())
 }
 
 fn block_parts(expr: &Expr) -> (&[BlockItem], Option<&Expr>) {

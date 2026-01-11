@@ -128,10 +128,10 @@ impl TypeChecker {
             overloads.push((def_id, decl.sig.clone()));
         }
 
-        // Funcs
-        for func in self.ctx.module.funcs() {
-            let def_id = func.def_id;
-            overloads.push((def_id, func.sig.clone()));
+        // Func defs
+        for func_def in self.ctx.module.func_defs() {
+            let def_id = func_def.def_id;
+            overloads.push((def_id, func_def.sig.clone()));
         }
 
         for (def_id, sig) in overloads {
@@ -248,10 +248,10 @@ impl TypeChecker {
         }
     }
 
-    fn check_function(&mut self, function: &Function) -> Result<Type, Vec<TypeCheckError>> {
+    fn check_func_def(&mut self, func_def: &FuncDef) -> Result<Type, Vec<TypeCheckError>> {
         // Lookup the function by def id and find the matching overload.
-        let func_def_id = function.def_id;
-        let func_name = function.sig.name.as_str();
+        let func_def_id = func_def.def_id;
+        let func_name = func_def.sig.name.as_str();
         let (param_types, return_type) = {
             let overloads = self.func_sigs.get(func_name).unwrap_or_else(|| {
                 panic!(
@@ -279,7 +279,7 @@ impl TypeChecker {
         };
 
         // Record param types
-        for (param, param_ty) in function.sig.params.iter().zip(param_types.iter()) {
+        for (param, param_ty) in func_def.sig.params.iter().zip(param_types.iter()) {
             match self.ctx.def_map.lookup_def(param.ident) {
                 Some(def) => {
                     self.type_map_builder
@@ -291,7 +291,7 @@ impl TypeChecker {
             }
         }
 
-        let body_ty = match self.visit_expr(&function.body, Some(&return_type)) {
+        let body_ty = match self.visit_expr(&func_def.body, Some(&return_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
@@ -299,7 +299,7 @@ impl TypeChecker {
             }
         };
 
-        let return_span = self.function_return_span(&function.body);
+        let return_span = self.function_return_span(&func_def.body);
         if matches!(
             type_assignable(&body_ty, &return_type),
             TypeAssignability::Incompatible
@@ -317,7 +317,7 @@ impl TypeChecker {
 
         // record return type
         self.type_map_builder
-            .record_node_type(function.id, body_ty.clone());
+            .record_node_type(func_def.id, body_ty.clone());
         if self.errors.is_empty() {
             Ok(body_ty)
         } else {
@@ -1577,12 +1577,12 @@ impl AstFolder for TypeChecker {
     type Output = Type;
     type Input = Type;
 
-    fn visit_func(&mut self, func: &Function) -> Result<Type, TypeCheckError> {
+    fn visit_func_def(&mut self, func_def: &FuncDef) -> Result<Type, TypeCheckError> {
         if self.halted {
             return Ok(Type::Unit);
         }
 
-        if self.check_function(func).is_err() {
+        if self.check_func_def(func_def).is_err() {
             self.halted = true;
         }
 

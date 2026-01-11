@@ -30,21 +30,26 @@ fn analyze(source: &str) -> AnalyzedContext {
     NrvoAnalyzer::new(sem_checked_context).analyze()
 }
 
-fn lower_body_with_globals(ctx: &AnalyzedContext, func: &Function) -> (FuncBody, Vec<GlobalItem>) {
+fn lower_body_with_globals(
+    ctx: &AnalyzedContext,
+    func_def: &FuncDef,
+) -> (FuncBody, Vec<GlobalItem>) {
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
-    let mut lowerer = FuncLowerer::new_function(ctx, func, &mut interner, &mut drop_glue, false);
+    let mut lowerer =
+        FuncLowerer::new_function(ctx, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, interner.take())
 }
 
 fn lower_body_with_drop_glue(
     ctx: &AnalyzedContext,
-    func: &Function,
+    func_def: &FuncDef,
 ) -> (FuncBody, Vec<GeneratedDropGlue>) {
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(ctx.def_map.next_def_id());
-    let mut lowerer = FuncLowerer::new_function(ctx, func, &mut interner, &mut drop_glue, false);
+    let mut lowerer =
+        FuncLowerer::new_function(ctx, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, drop_glue.drain())
 }
@@ -58,8 +63,8 @@ fn test_lower_literal_value() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     println!("Lowered body:\n{}", body);
 
@@ -92,11 +97,11 @@ fn test_lower_string_literal_global() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
+    let func_def = analyzed.module.func_defs()[0];
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
     let mut lowerer =
-        FuncLowerer::new_function(&analyzed, func, &mut interner, &mut drop_glue, false);
+        FuncLowerer::new_function(&analyzed, func_def, &mut interner, &mut drop_glue, false);
 
     let body = lowerer.lower().expect("Failed to lower function");
     let globals = interner.take();
@@ -159,13 +164,13 @@ fn test_lower_call_emits_arg_temp() {
     "#;
 
     let analyzed = analyze(source);
-    let func = *analyzed
+    let func_def = *analyzed
         .module
-        .funcs()
+        .func_defs()
         .iter()
         .find(|f| f.sig.name == "main")
         .expect("main not found");
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     println!("Lowered body:\n{}", body);
 
@@ -220,13 +225,13 @@ fn test_lower_call_emits_arg_temp() {
 
     assert!(matches!(entry_block.terminator, Terminator::Return));
 
-    let id_func = *analyzed
+    let id_func_def = *analyzed
         .module
-        .funcs()
+        .func_defs()
         .iter()
         .find(|f| f.sig.name == "id")
         .expect("id not found");
-    let (body, _) = lower_body_with_globals(&analyzed, id_func);
+    let (body, _) = lower_body_with_globals(&analyzed, id_func_def);
 
     println!("Lowered body:\n{}", body);
 }
@@ -243,8 +248,8 @@ fn test_lower_heap_alloc_and_free() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func_def);
 
     let mut saw_alloc = false;
     let mut saw_drop_call = false;
@@ -294,11 +299,11 @@ fn test_lower_drop_glue_emits_free() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
+    let func_def = analyzed.module.func_defs()[0];
     let mut interner = GlobalInterner::new();
     let mut drop_glue = DropGlueRegistry::new(analyzed.def_map.next_def_id());
     let mut lowerer =
-        FuncLowerer::new_function(&analyzed, func, &mut interner, &mut drop_glue, false);
+        FuncLowerer::new_function(&analyzed, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     let generated = drop_glue.drain();
 
@@ -350,8 +355,8 @@ fn test_lower_sink_param_dropped() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func_def);
     let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
 
     let mut saw_drop_call = false;
@@ -387,13 +392,13 @@ fn test_lower_sink_call_skips_caller_drop() {
     "#;
 
     let analyzed = analyze(source);
-    let funcs = analyzed.module.funcs();
-    let func = funcs
+    let funcs = analyzed.module.func_defs();
+    let func_def = funcs
         .iter()
         .find(|f| f.sig.name == "main")
         .copied()
         .expect("main not found");
-    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func_def);
     let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
 
     let mut drop_calls = 0;
@@ -436,8 +441,8 @@ fn test_lower_heap_implicit_move_skips_double_free() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, generated) = lower_body_with_drop_glue(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, generated) = lower_body_with_drop_glue(&analyzed, func_def);
     let generated_ids: HashSet<_> = generated.iter().map(|entry| entry.def_id).collect();
 
     let mut alloc_calls = 0;
@@ -481,8 +486,8 @@ fn test_lower_string_index_emits_memcpy() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let mut has_memcpy = false;
     let mut has_trap = false;
@@ -511,8 +516,8 @@ fn test_lower_tuple_return_literal() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     println!("Lowered body:\n{}", body);
 
@@ -561,8 +566,8 @@ fn test_lower_nrvo_binding_elides_copy() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     println!("Lowered body:\n{}", body);
 
@@ -608,14 +613,14 @@ fn test_lower_struct_pattern_binding() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed
+    let func_def = analyzed
         .module
-        .funcs()
+        .func_defs()
         .iter()
         .find(|f| f.sig.name == "main")
         .copied()
         .expect("main not found");
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let x_local = body
         .locals
@@ -671,8 +676,8 @@ fn test_lower_enum_variant_literal() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
@@ -705,8 +710,8 @@ fn test_lower_enum_variant_payload_literal() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let entry = body.entry;
     let entry_block = &body.blocks[entry.index()];
@@ -784,13 +789,13 @@ fn test_lower_match_switch_payload_binding() {
     "#;
 
     let analyzed = analyze(source);
-    let func = *analyzed
+    let func_def = *analyzed
         .module
-        .funcs()
+        .func_defs()
         .iter()
         .find(|f| f.sig.name == "main")
         .expect("main not found");
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let c_local = body
         .locals
@@ -864,8 +869,8 @@ fn test_lower_var_decl_conditional_drop() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let has_is_initialized = body
         .locals
@@ -895,8 +900,8 @@ fn test_lower_struct_update() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let p_local = body
         .locals
@@ -948,8 +953,8 @@ fn test_lower_for_range_loop() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     assert!(
         body.blocks.len() >= 4,
@@ -989,8 +994,8 @@ fn test_lower_for_array_loop() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     fn place_has_index<K>(place: &Place<K>) -> bool {
         place
@@ -1073,8 +1078,8 @@ fn test_lower_array_index_emits_bounds_check() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let saw_trap_call = body.blocks.iter().any(|block| {
         let has_trap_call = block.stmts.iter().any(|stmt| {
@@ -1103,8 +1108,8 @@ fn test_lower_heap_tuple_field_uses_deref() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     fn place_has_deref<K>(place: &Place<K>) -> bool {
         place
@@ -1185,8 +1190,8 @@ fn test_lower_u8_repeat_literal_emits_memset() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let mut saw_memset = false;
     for block in &body.blocks {
@@ -1219,12 +1224,12 @@ fn test_lower_logical_and_short_circuits() {
     "#;
 
     let analyzed = analyze(source);
-    let funcs = analyzed.module.funcs();
-    let func = funcs
+    let funcs = analyzed.module.func_defs();
+    let func_def = funcs
         .iter()
         .find(|f| f.sig.name == "main")
         .expect("main not found");
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let if_terms: Vec<_> = body
         .blocks
@@ -1275,12 +1280,12 @@ fn test_lower_logical_or_short_circuits() {
     "#;
 
     let analyzed = analyze(source);
-    let funcs = analyzed.module.funcs();
-    let func = funcs
+    let funcs = analyzed.module.func_defs();
+    let func_def = funcs
         .iter()
         .find(|f| f.sig.name == "main")
         .expect("main not found");
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let if_terms: Vec<_> = body
         .blocks
@@ -1328,8 +1333,8 @@ fn test_lower_mod_emits_div_mul_sub() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let mut saw_div = false;
     let mut saw_mul = false;
@@ -1365,8 +1370,8 @@ fn test_lower_fstring_calls_runtime() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, globals) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, globals) = lower_body_with_globals(&analyzed, func_def);
 
     let mut saw_fmt_init = false;
     let mut saw_append_bytes = false;
@@ -1411,8 +1416,8 @@ fn test_lower_fstring_signed_uses_i64_runtime() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, globals) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, globals) = lower_body_with_globals(&analyzed, func_def);
 
     let saw_append_i64 = body.blocks.iter().any(|block| {
         block.stmts.iter().any(|stmt| {
@@ -1451,8 +1456,8 @@ fn test_lower_bitwise_ops() {
     "#;
 
     let analyzed = analyze(source);
-    let func = analyzed.module.funcs()[0];
-    let (body, _) = lower_body_with_globals(&analyzed, func);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
 
     let mut saw_and = false;
     let mut saw_or = false;

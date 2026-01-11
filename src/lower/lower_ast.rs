@@ -80,12 +80,12 @@ impl<'a> FuncLowerer<'a> {
     /// Create a lowering context for one function.
     pub fn new_function(
         ctx: &'a AnalyzedContext,
-        func: &'a Function,
+        func_def: &'a FuncDef,
         global_interner: &'a mut GlobalInterner,
         drop_glue: &'a mut DropGlueRegistry,
         trace_alloc: bool,
     ) -> Self {
-        let params = func
+        let params = func_def
             .sig
             .params
             .iter()
@@ -103,9 +103,9 @@ impl<'a> FuncLowerer<'a> {
             .collect::<Vec<_>>();
         Self::new(
             ctx,
-            func.id,
-            &func.sig.name,
-            &func.body,
+            func_def.id,
+            &func_def.sig.name,
+            &func_def.body,
             params,
             global_interner,
             drop_glue,
@@ -341,11 +341,11 @@ pub fn lower_ast(
     for callable in ctx.module.callables() {
         let (def_id, body) = match callable {
             CallableRef::FunctionDecl(_) => continue,
-            CallableRef::Function(function) => (
-                function.def_id,
+            CallableRef::FuncDef(func_def) => (
+                func_def.def_id,
                 FuncLowerer::new_function(
                     &ctx,
-                    function,
+                    func_def,
                     &mut global_interner,
                     &mut drop_glue,
                     trace_alloc,

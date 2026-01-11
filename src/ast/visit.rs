@@ -60,8 +60,8 @@ pub trait Visitor<T = String> {
 
     // --- Functions ---
 
-    fn visit_func(&mut self, func: &Function<T>) {
-        walk_func(self, func)
+    fn visit_func_def(&mut self, func_def: &FuncDef<T>) {
+        walk_func_def(self, func_def)
     }
 
     // --- Function Signatures ---
@@ -116,7 +116,7 @@ pub fn walk_module<V: Visitor<T> + ?Sized, T>(v: &mut V, module: &Module<T>) {
         match decl {
             Decl::TypeDef(type_def) => v.visit_type_def(type_def),
             Decl::FunctionDecl(func_decl) => v.visit_func_decl(func_decl),
-            Decl::Function(func) => v.visit_func(func),
+            Decl::FuncDef(func_def) => v.visit_func_def(func_def),
             Decl::MethodBlock(method_block) => v.visit_method_block(method_block),
             Decl::ClosureDecl(_) => {} // closures are visited where they are defined
         }
@@ -186,9 +186,9 @@ pub fn walk_func_decl<V: Visitor<T> + ?Sized, T>(v: &mut V, func_decl: &Function
 
 // --- Functions ---
 
-pub fn walk_func<V: Visitor<T> + ?Sized, T>(v: &mut V, func: &Function<T>) {
-    v.visit_func_sig(&func.sig);
-    v.visit_expr(&func.body);
+pub fn walk_func_def<V: Visitor<T> + ?Sized, T>(v: &mut V, func_def: &FuncDef<T>) {
+    v.visit_func_sig(&func_def.sig);
+    v.visit_expr(&func_def.body);
 }
 
 // --- Function Signatures ---

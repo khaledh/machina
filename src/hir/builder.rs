@@ -53,7 +53,7 @@ impl ToHir for ast::Decl {
         match self {
             ast::Decl::TypeDef(decl) => hir::Decl::TypeDef(decl.to_hir(def_map)),
             ast::Decl::FunctionDecl(decl) => hir::Decl::FunctionDecl(decl.to_hir(def_map)),
-            ast::Decl::Function(func) => hir::Decl::Function(func.to_hir(def_map)),
+            ast::Decl::FuncDef(func_def) => hir::Decl::FuncDef(func_def.to_hir(def_map)),
             ast::Decl::MethodBlock(block) => hir::Decl::MethodBlock(block.to_hir(def_map)),
             ast::Decl::ClosureDecl(closure_decl) => {
                 hir::Decl::ClosureDecl(closure_decl.to_hir(def_map))
@@ -186,12 +186,12 @@ impl ToHir for ast::FunctionDecl {
     }
 }
 
-impl ToHir for ast::Function {
-    type Output = hir::Function;
+impl ToHir for ast::FuncDef {
+    type Output = hir::FuncDef;
 
     fn to_hir(self, def_map: &DefMap) -> Self::Output {
         let def_id = def_id(def_map, self.id);
-        hir::Function {
+        hir::FuncDef {
             id: self.id,
             def_id,
             sig: self.sig.to_hir(def_map),

@@ -42,8 +42,8 @@ pub trait AstFolder<T = String> {
 
     // --- Functions ---
 
-    fn visit_func(&mut self, func: &Function<T>) -> Result<Self::Output, Self::Error> {
-        walk_func(self, func)
+    fn visit_func_def(&mut self, func_def: &FuncDef<T>) -> Result<Self::Output, Self::Error> {
+        walk_func_def(self, func_def)
     }
 
     // --- Methods ---
@@ -160,7 +160,7 @@ pub fn walk_module<F: AstFolder<T> + ?Sized, T>(
     let mut outputs = Vec::new();
     for decl in &module.decls {
         match decl {
-            Decl::Function(func) => outputs.push(f.visit_func(func)?),
+            Decl::FuncDef(func_def) => outputs.push(f.visit_func_def(func_def)?),
             Decl::MethodBlock(method_block) => {
                 outputs.extend(f.visit_method_block(method_block)?);
             }
@@ -172,11 +172,11 @@ pub fn walk_module<F: AstFolder<T> + ?Sized, T>(
 
 // --- Functions ---
 
-pub fn walk_func<F: AstFolder<T> + ?Sized, T>(
+pub fn walk_func_def<F: AstFolder<T> + ?Sized, T>(
     f: &mut F,
-    func: &Function<T>,
+    func_def: &FuncDef<T>,
 ) -> Result<F::Output, F::Error> {
-    walk_expr(f, &func.body)
+    walk_expr(f, &func_def.body)
 }
 
 // --- Methods ---

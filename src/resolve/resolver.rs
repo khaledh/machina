@@ -228,12 +228,12 @@ impl SymbolResolver {
                     self.func_decl_names.insert(name);
                     self.populate_callable(callable);
                 }
-                CallableRef::Function(func) => {
+                CallableRef::FuncDef(func_def) => {
                     // Check if the function name is already defined as a function decl
-                    if self.func_decl_names.contains(&func.sig.name) {
+                    if self.func_decl_names.contains(&func_def.sig.name) {
                         self.errors.push(ResolveError::SymbolAlreadyDefined(
-                            func.sig.name.clone(),
-                            func.span,
+                            func_def.sig.name.clone(),
+                            func_def.span,
                         ));
                         continue;
                     }
@@ -557,11 +557,11 @@ impl Visitor for SymbolResolver {
         });
     }
 
-    fn visit_func(&mut self, func: &Function) {
-        self.visit_func_sig(&func.sig);
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
+        self.visit_func_sig(&func_def.sig);
 
         self.with_scope(|resolver| {
-            for (index, param) in func.sig.params.iter().enumerate() {
+            for (index, param) in func_def.sig.params.iter().enumerate() {
                 resolver.register_param(
                     &param.ident,
                     param.mode.clone(),
@@ -571,7 +571,7 @@ impl Visitor for SymbolResolver {
                 );
             }
 
-            resolver.visit_expr(&func.body);
+            resolver.visit_expr(&func_def.body);
         });
     }
 

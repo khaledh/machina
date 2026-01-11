@@ -1,6 +1,6 @@
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
-    BinaryOp, Decl, Expr, ExprKind, Function, FunctionSig, StmtExpr, StmtExprKind, TypeDef,
+    BinaryOp, Decl, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef,
     TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
@@ -40,9 +40,9 @@ impl<'a> ValueChecker<'a> {
                 self.check_function_sig(&decl.sig);
             }
         }
-        for func in self.ctx.module.funcs() {
-            self.check_function_sig(&func.sig);
-            self.visit_func(func);
+        for func_def in self.ctx.module.func_defs() {
+            self.check_function_sig(&func_def.sig);
+            self.visit_func_def(func_def);
         }
     }
 
@@ -140,16 +140,16 @@ impl<'a> ValueChecker<'a> {
 }
 
 impl Visitor for ValueChecker<'_> {
-    fn visit_func(&mut self, func: &Function) {
-        self.current_return_ty = self.resolve_type(&func.sig.return_type);
-        walk_expr(self, &func.body);
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
+        self.current_return_ty = self.resolve_type(&func_def.sig.return_type);
+        walk_expr(self, &func_def.body);
 
-        let ret_expr = match &func.body.kind {
+        let ret_expr = match &func_def.body.kind {
             ExprKind::Block {
                 tail: Some(tail), ..
             } => Some(tail.as_ref()),
             ExprKind::Block { tail: None, .. } => None,
-            _ => Some(&func.body),
+            _ => Some(&func_def.body),
         };
         if let (Some(Type::Range { min, max }), Some(ret_expr)) =
             (&self.current_return_ty, ret_expr)

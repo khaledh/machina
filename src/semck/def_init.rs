@@ -13,7 +13,7 @@ use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTermina
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::hir::model::{
-    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, Function,
+    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
     MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
 use crate::hir::visit::{Visitor, walk_expr};
@@ -112,9 +112,9 @@ pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
     let mut errors = Vec::new();
     let mut init_assigns = HashSet::new();
     let mut full_init_assigns = HashSet::new();
-    for func in ctx.module.funcs() {
+    for func_def in ctx.module.func_defs() {
         check_func(
-            func,
+            func_def,
             ctx,
             &mut errors,
             &mut init_assigns,
@@ -129,23 +129,23 @@ pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
 }
 
 fn check_func(
-    func: &Function,
+    func_def: &FuncDef,
     ctx: &TypeCheckedContext,
     errors: &mut Vec<SemCheckError>,
     init_assigns: &mut HashSet<NodeId>,
     full_init_assigns: &mut HashSet<NodeId>,
 ) {
-    let cfg = HirCfgBuilder::new().build_from_expr(&func.body);
+    let cfg = HirCfgBuilder::new().build_from_expr(&func_def.body);
 
     // Params are initialized at entry, except `out` params which start uninitialized.
-    let entry_state = InitState::new(collect_param_defs(func, false));
-    let out_params = collect_out_param_defs(func, ctx);
+    let entry_state = InitState::new(collect_param_defs(func_def, false));
+    let out_params = collect_out_param_defs(func_def, ctx);
     let out_param_defs: HashSet<_> = out_params.iter().map(|(def_id, _, _)| *def_id).collect();
 
     // Bottom = "all defs" so unreachable blocks don't produce spurious errors.
     // (Intersection with "all" is identity, so unreachable blocks inherit from reachable ones.)
-    let bottom = InitState::new(collect_all_defs(func));
-    let def_spans = collect_def_spans(func);
+    let bottom = InitState::new(collect_all_defs(func_def));
+    let def_spans = collect_def_spans(func_def);
 
     let result = solve_forward(
         &cfg,
@@ -181,7 +181,7 @@ fn check_func(
         }
     }
 
-    let local_defs = collect_local_defs(func, ctx);
+    let local_defs = collect_local_defs(func_def, ctx);
     let mut reported = HashSet::new();
     for def_id in local_defs {
         let Some(def) = ctx.def_map.lookup_def(def_id) else {
@@ -204,9 +204,9 @@ fn check_func(
     }
 }
 
-fn collect_param_defs(func: &Function, include_out: bool) -> HashSet<DefId> {
+fn collect_param_defs(func_def: &FuncDef, include_out: bool) -> HashSet<DefId> {
     let mut defs = HashSet::new();
-    for param in &func.sig.params {
+    for param in &func_def.sig.params {
         if !include_out && param.mode == ParamMode::Out {
             continue;
         }
@@ -215,9 +215,12 @@ fn collect_param_defs(func: &Function, include_out: bool) -> HashSet<DefId> {
     defs
 }
 
-fn collect_out_param_defs(func: &Function, ctx: &TypeCheckedContext) -> Vec<(DefId, String, Span)> {
+fn collect_out_param_defs(
+    func_def: &FuncDef,
+    ctx: &TypeCheckedContext,
+) -> Vec<(DefId, String, Span)> {
     let mut defs = Vec::new();
-    for param in &func.sig.params {
+    for param in &func_def.sig.params {
         if param.mode != ParamMode::Out {
             continue;
         }
@@ -228,15 +231,15 @@ fn collect_out_param_defs(func: &Function, ctx: &TypeCheckedContext) -> Vec<(Def
     defs
 }
 
-fn collect_all_defs(func: &Function) -> HashSet<DefId> {
-    let mut defs = collect_param_defs(func, true);
+fn collect_all_defs(func_def: &FuncDef) -> HashSet<DefId> {
+    let mut defs = collect_param_defs(func_def, true);
     let mut collector = DefCollector { defs: &mut defs };
-    collector.collect_expr(&func.body);
+    collector.collect_expr(&func_def.body);
     defs
 }
 
-fn collect_local_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefId> {
-    collect_all_defs(func)
+fn collect_local_defs(func_def: &FuncDef, ctx: &TypeCheckedContext) -> HashSet<DefId> {
+    collect_all_defs(func_def)
         .into_iter()
         .filter(|def_id| {
             matches!(
@@ -247,13 +250,13 @@ fn collect_local_defs(func: &Function, ctx: &TypeCheckedContext) -> HashSet<DefI
         .collect()
 }
 
-fn collect_def_spans(func: &Function) -> HashMap<DefId, Span> {
+fn collect_def_spans(func_def: &FuncDef) -> HashMap<DefId, Span> {
     let mut spans = HashMap::new();
-    for param in &func.sig.params {
+    for param in &func_def.sig.params {
         spans.insert(param.ident, param.span);
     }
     let mut collector = DefSpanCollector { spans: &mut spans };
-    collector.collect_expr(&func.body);
+    collector.collect_expr(&func_def.body);
     spans
 }
 

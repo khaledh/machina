@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
             self.closure_base = prev_base;
             self.closure_index = prev_index;
 
-            Ok(Decl::Function(Function {
+            Ok(Decl::FuncDef(FuncDef {
                 id: self.id_gen.new_id(),
                 sig,
                 body,

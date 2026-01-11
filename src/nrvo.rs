@@ -1,5 +1,5 @@
 use crate::ast::{
-    ArrayLitInit, BlockItem, Expr, ExprKind, Function, StmtExpr, StmtExprKind, StringFmtSegment,
+    ArrayLitInit, BlockItem, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind, StringFmtSegment,
 };
 use crate::context::{AnalyzedContext, SemanticCheckedContext};
 use crate::resolve::def_map::DefId;
@@ -33,8 +33,8 @@ impl NrvoAnalyzer {
 
         let mut def_map = def_map;
 
-        for func in ast_module.funcs() {
-            Self::analyze_function(&mut def_map, &type_map, func);
+        for func_def in ast_module.func_defs() {
+            Self::analyze_func_def(&mut def_map, &type_map, func_def);
         }
 
         AnalyzedContext {
@@ -49,22 +49,22 @@ impl NrvoAnalyzer {
         }
     }
 
-    fn analyze_function(def_map: &mut DefMap, type_map: &TypeMap, func: &Function) {
+    fn analyze_func_def(def_map: &mut DefMap, type_map: &TypeMap, func_def: &FuncDef) {
         // Step 1: Check if function return type is compound
         let ret_ty = type_map
-            .lookup_node_type(func.id)
-            .unwrap_or_else(|| panic!("Function {} not found in type_map", func.sig.name));
+            .lookup_node_type(func_def.id)
+            .unwrap_or_else(|| panic!("Function {} not found in type_map", func_def.sig.name));
 
         if !ret_ty.is_compound() {
             return;
         }
 
         // Step 2: Find the returned variable def
-        let ret_var_def_id = Self::find_ret_var_def_id(def_map, &func.body);
+        let ret_var_def_id = Self::find_ret_var_def_id(def_map, &func_def.body);
 
         // Step 3: Check if the returned variable is only used as lvalue
         if let Some(var_def_id) = ret_var_def_id
-            && Self::is_nrvo_safe(def_map, &func.body, var_def_id)
+            && Self::is_nrvo_safe(def_map, &func_def.body, var_def_id)
         {
             def_map.mark_nrvo_eligible(var_def_id);
         }

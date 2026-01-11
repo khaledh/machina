@@ -15,7 +15,7 @@ use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
-    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, Function, ParamMode, StmtExpr,
+    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
     StmtExprKind,
 };
 use crate::hir::visit::{Visitor, walk_expr};
@@ -26,8 +26,8 @@ use crate::types::Type;
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
 
-    for func in ctx.module.funcs() {
-        check_func(ctx, func, &mut errors);
+    for func_def in ctx.module.func_defs() {
+        check_func_def(ctx, func_def, &mut errors);
     }
 
     errors
@@ -39,8 +39,8 @@ pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
 ///
 /// Then walk each block, checking for conflicts where a borrowed base is
 /// mutated/moved while a slice borrowing it is still live.
-fn check_func(ctx: &TypeCheckedContext, func: &Function, errors: &mut Vec<SemCheckError>) {
-    let cfg = HirCfgBuilder::new().build_from_expr(&func.body);
+fn check_func_def(ctx: &TypeCheckedContext, func_def: &FuncDef, errors: &mut Vec<SemCheckError>) {
+    let cfg = HirCfgBuilder::new().build_from_expr(&func_def.body);
     let liveness = analyze_slice_liveness(&cfg, ctx);
     let bindings = analyze_slice_bindings(&cfg, ctx);
 

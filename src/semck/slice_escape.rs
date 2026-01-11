@@ -1,5 +1,5 @@
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{ArrayLitInit, Expr, ExprKind, Function, StmtExpr, StmtExprKind};
+use crate::hir::model::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
 use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::semck::SemCheckError;
 use crate::types::Type;
@@ -44,19 +44,19 @@ impl<'a> SliceEscapeChecker<'a> {
         }
     }
 
-    fn return_expr<'b>(&self, func: &'b Function) -> Option<&'b Expr> {
-        match &func.body.kind {
+    fn return_expr<'b>(&self, func_def: &'b FuncDef) -> Option<&'b Expr> {
+        match &func_def.body.kind {
             ExprKind::Block { tail, .. } => tail.as_deref(),
-            _ => Some(&func.body),
+            _ => Some(&func_def.body),
         }
     }
 }
 
 impl Visitor for SliceEscapeChecker<'_> {
-    fn visit_func(&mut self, func: &Function) {
-        self.visit_expr(&func.body);
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
+        self.visit_expr(&func_def.body);
 
-        if let Some(ret_expr) = self.return_expr(func)
+        if let Some(ret_expr) = self.return_expr(func_def)
             && self.is_slice_expr(ret_expr)
         {
             self.record_slice_return(ret_expr.span);

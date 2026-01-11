@@ -13,7 +13,7 @@ use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
-    BindPattern, BindPatternKind, Expr, ExprKind, Function, NodeId, ParamMode, StmtExpr,
+    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
     StmtExprKind,
 };
 use crate::hir::visit::{Visitor, walk_expr};
@@ -31,8 +31,8 @@ pub struct MoveCheckResult {
 pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
     let mut errors = Vec::new();
     let mut implicit_moves = HashSet::new();
-    for func in ctx.module.funcs() {
-        check_func(func, ctx, &mut errors, &mut implicit_moves);
+    for func_def in ctx.module.func_defs() {
+        check_func_def(func_def, ctx, &mut errors, &mut implicit_moves);
     }
     MoveCheckResult {
         errors,
@@ -40,20 +40,20 @@ pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
     }
 }
 
-fn check_func(
-    func: &Function,
+fn check_func_def(
+    func_def: &FuncDef,
     ctx: &TypeCheckedContext,
     errors: &mut Vec<SemCheckError>,
     implicit_moves: &mut HashSet<NodeId>,
 ) {
-    let cfg = HirCfgBuilder::new().build_from_expr(&func.body);
+    let cfg = HirCfgBuilder::new().build_from_expr(&func_def.body);
 
     // Precompute heap liveness for last-use detection (implicit moves).
     let liveness = ast_liveness::analyze(&cfg, ctx);
 
     // Sink params own their value and can be moved from.
     let mut sink_params = HashSet::new();
-    for param in &func.sig.params {
+    for param in &func_def.sig.params {
         if param.mode == ParamMode::Sink {
             sink_params.insert(param.ident);
         }
