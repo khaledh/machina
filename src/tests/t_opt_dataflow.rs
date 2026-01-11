@@ -74,7 +74,6 @@ fn run_elide(body: FuncBody) -> FuncBody {
         }],
         live_maps: vec![live_map],
         symbols: SymbolTable {
-            func_ids: Vec::new(),
             def_names: HashMap::new(),
         },
         globals: Vec::<GlobalItem>::new(),

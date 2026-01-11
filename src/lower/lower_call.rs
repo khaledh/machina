@@ -72,7 +72,7 @@ impl<'a> FuncLowerer<'a> {
             None => {
                 if let ExprKind::Var(def_id) = callee.kind {
                     let def = self.def_for_id(def_id, callee.id)?;
-                    if matches!(def.kind, DefKind::Func | DefKind::ExternFunc) {
+                    if matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
                         Callee::Def(def.id)
                     } else {
                         Callee::Value(self.lower_scalar_expr(callee)?)

@@ -105,7 +105,7 @@ impl<'a> FuncLowerer<'a> {
             // Place-based reads
             EK::Var(def_id) => {
                 let def = self.def_for_id(*def_id, expr.id)?;
-                if matches!(def.kind, DefKind::Func | DefKind::ExternFunc) {
+                if matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
                     return Ok(Operand::Const(Const::FuncAddr { def: def.id }));
                 }
                 if self.ctx.implicit_moves.contains(&expr.id) {

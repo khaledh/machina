@@ -130,6 +130,15 @@ impl<'a> CallableRef<'a> {
         }
     }
 
+    pub fn def_id(&self) -> DefId {
+        match self {
+            CallableRef::FuncDecl(func_decl) => func_decl.def_id,
+            CallableRef::FuncDef(func_def) => func_def.def_id,
+            CallableRef::MethodDef { method_def, .. } => method_def.def_id,
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.def_id,
+        }
+    }
+
     pub fn name(&self) -> String {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),

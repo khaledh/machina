@@ -24,7 +24,7 @@ impl ParsedContext {
     }
 
     pub fn with_def_map(self, def_map: DefMap, hir_module: HirModule) -> ResolvedContext {
-        let symbols = SymbolTable::new(&self.module, &def_map);
+        let symbols = SymbolTable::new(&hir_module);
         ResolvedContext {
             ast_module: self.module,
             module: hir_module,

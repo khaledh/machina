@@ -46,8 +46,8 @@ pub enum DefKind {
     EnumDef {
         variants: Vec<EnumDefVariant>,
     },
-    Func,
-    ExternFunc,
+    FuncDef,
+    FuncDecl,
     LocalVar {
         nrvo_eligible: bool,
         is_mutable: bool,
@@ -76,8 +76,8 @@ impl fmt::Display for DefKind {
                     .collect::<Vec<_>>();
                 write!(f, "EnumDef[{}]", variant_names.join(", "))
             }
-            DefKind::Func => write!(f, "Func"),
-            DefKind::ExternFunc => write!(f, "ExternFunc"),
+            DefKind::FuncDef => write!(f, "FuncDef"),
+            DefKind::FuncDecl => write!(f, "FuncDecl"),
             DefKind::LocalVar {
                 nrvo_eligible,
                 is_mutable,

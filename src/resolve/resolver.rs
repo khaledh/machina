@@ -116,7 +116,7 @@ impl SymbolResolver {
             SymbolKind::StructDef { fields, .. } => DefKind::StructDef {
                 fields: fields.clone(),
             },
-            SymbolKind::Func { .. } => DefKind::Func,
+            SymbolKind::Func { .. } => DefKind::FuncDef,
             SymbolKind::Var { is_mutable, .. } => DefKind::LocalVar {
                 nrvo_eligible: false,
                 is_mutable: *is_mutable,
@@ -250,7 +250,10 @@ impl SymbolResolver {
         let def = Def {
             id: def_id,
             name: callable.name(),
-            kind: DefKind::Func,
+            kind: match callable {
+                CallableRef::FuncDecl(_) => DefKind::FuncDecl,
+                _ => DefKind::FuncDef,
+            },
         };
         self.def_map_builder.record_def(def, callable.id());
         self.insert_symbol(

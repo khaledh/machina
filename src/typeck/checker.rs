@@ -1124,7 +1124,7 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         if let ExprKind::Var(def_id) = &callee.kind
             && let Some(def) = self.ctx.def_map.lookup_def(*def_id)
-            && matches!(def.kind, DefKind::Func | DefKind::ExternFunc)
+            && matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl)
         {
             let name = def.name.clone();
             return self.check_named_call(&name, call_expr, callee, args);
