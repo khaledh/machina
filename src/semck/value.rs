@@ -31,13 +31,13 @@ impl<'a> ValueChecker<'a> {
 
     fn check_module(&mut self) {
         for decl in &self.ctx.module.decls {
-            if let Decl::TypeDef(decl) = decl {
-                self.check_type_def(decl);
+            if let Decl::TypeDef(type_def) = decl {
+                self.check_type_def(type_def);
             }
         }
         for decl in &self.ctx.module.decls {
-            if let Decl::FunctionDecl(decl) = decl {
-                self.check_function_sig(&decl.sig);
+            if let Decl::FuncDecl(func_decl) = decl {
+                self.check_function_sig(&func_decl.sig);
             }
         }
         for func_def in self.ctx.module.func_defs() {

@@ -217,7 +217,7 @@ impl SymbolResolver {
     fn populate_callables(&mut self, callables: &[CallableRef]) {
         for callable in callables {
             match callable {
-                CallableRef::FunctionDecl(func_decl) => {
+                CallableRef::FuncDecl(func_decl) => {
                     // Check if the function decl name is already defined
                     let name = func_decl.sig.name.clone();
                     if self.lookup_symbol(&name).is_some() || self.func_decl_names.contains(&name) {
@@ -537,7 +537,7 @@ impl Visitor for SymbolResolver {
         walk_func_sig(self, func_sig);
     }
 
-    fn visit_func_decl(&mut self, func_decl: &FunctionDecl) {
+    fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
         self.visit_type_expr(&func_decl.sig.return_type);
         for param in &func_decl.sig.params {
             self.visit_type_expr(&param.typ);

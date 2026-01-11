@@ -28,18 +28,18 @@ impl<T> Module<T> {
         self.decls
             .iter()
             .filter_map(|decl| match decl {
-                Decl::FunctionDecl(func_decl) => Some(&func_decl.sig),
+                Decl::FuncDecl(func_decl) => Some(&func_decl.sig),
                 Decl::FuncDef(func_def) => Some(&func_def.sig),
                 _ => None,
             })
             .collect()
     }
 
-    pub fn func_decls(&self) -> Vec<&FunctionDecl<T>> {
+    pub fn func_decls(&self) -> Vec<&FuncDecl<T>> {
         self.decls
             .iter()
             .filter_map(|decl| match decl {
-                Decl::FunctionDecl(func_decl) => Some(func_decl),
+                Decl::FuncDecl(func_decl) => Some(func_decl),
                 _ => None,
             })
             .collect()
@@ -75,9 +75,7 @@ impl<T> Module<T> {
         let mut callables = Vec::new();
         for decl in &self.decls {
             match decl {
-                Decl::FunctionDecl(function_decl) => {
-                    callables.push(CallableRef::FunctionDecl(function_decl))
-                }
+                Decl::FuncDecl(func_decl) => callables.push(CallableRef::FuncDecl(func_decl)),
                 Decl::FuncDef(func_def) => callables.push(CallableRef::FuncDef(func_def)),
                 Decl::MethodBlock(method_block) => {
                     for method in &method_block.methods {
@@ -102,15 +100,15 @@ impl<T> Module<T> {
 #[derive(Clone, Debug)]
 pub enum Decl<T> {
     TypeDef(TypeDef<T>),
-    FunctionDecl(FunctionDecl<T>), // function declaration
-    FuncDef(FuncDef<T>),           // function definition
-    MethodBlock(MethodBlock<T>),   // method definitions
-    ClosureDecl(ClosureDecl<T>),   // closure declaration (generated)
+    FuncDecl(FuncDecl<T>),       // function declaration
+    FuncDef(FuncDef<T>),         // function definition
+    MethodBlock(MethodBlock<T>), // method definitions
+    ClosureDecl(ClosureDecl<T>), // closure declaration (generated)
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum CallableRef<'a, T> {
-    FunctionDecl(&'a FunctionDecl<T>),
+    FuncDecl(&'a FuncDecl<T>),
     FuncDef(&'a FuncDef<T>),
     Method {
         type_name: &'a str,
@@ -122,7 +120,7 @@ pub enum CallableRef<'a, T> {
 impl<'a, T> CallableRef<'a, T> {
     pub fn id(&self) -> NodeId {
         match self {
-            CallableRef::FunctionDecl(func_decl) => func_decl.id,
+            CallableRef::FuncDecl(func_decl) => func_decl.id,
             CallableRef::FuncDef(func_def) => func_def.id,
             CallableRef::Method { method, .. } => method.id,
             CallableRef::ClosureDecl(closure_decl) => closure_decl.id,
@@ -134,7 +132,7 @@ impl<'a, T> CallableRef<'a, T> {
         T: std::fmt::Display,
     {
         match self {
-            CallableRef::FunctionDecl(func_decl) => func_decl.sig.name.clone(),
+            CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::FuncDef(func_def) => func_def.sig.name.clone(),
             CallableRef::Method { method, .. } => method.sig.name.clone(),
             CallableRef::ClosureDecl(closure_decl) => closure_decl.sig.name.clone(),
@@ -146,7 +144,7 @@ impl<'a, T> CallableRef<'a, T> {
         T: std::fmt::Display,
     {
         match self {
-            CallableRef::FunctionDecl(_) => self.name(),
+            CallableRef::FuncDecl(_) => self.name(),
             CallableRef::FuncDef(_) => self.name(),
             CallableRef::Method { type_name, method } => {
                 format!("{type_name}${}", method.sig.name)
@@ -157,7 +155,7 @@ impl<'a, T> CallableRef<'a, T> {
 
     pub fn span(&self) -> Span {
         match self {
-            CallableRef::FunctionDecl(func_decl) => func_decl.span,
+            CallableRef::FuncDecl(func_decl) => func_decl.span,
             CallableRef::FuncDef(func_def) => func_def.span,
             CallableRef::Method { method, .. } => method.span,
             CallableRef::ClosureDecl(closure_decl) => closure_decl.span,
@@ -250,7 +248,7 @@ pub enum StringFmtSegment<T> {
 // -- Functions ---
 
 #[derive(Clone, Debug)]
-pub struct FunctionDecl<T> {
+pub struct FuncDecl<T> {
     pub id: NodeId,
     pub sig: FunctionSig<T>,
     pub span: Span,

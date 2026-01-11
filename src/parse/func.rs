@@ -10,7 +10,7 @@ impl<'a> Parser<'a> {
 
         if self.curr_token.kind == TK::Semicolon {
             self.advance();
-            Ok(Decl::FunctionDecl(FunctionDecl {
+            Ok(Decl::FuncDecl(FuncDecl {
                 id: self.id_gen.new_id(),
                 sig,
                 span: self.close(marker),

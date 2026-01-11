@@ -7,7 +7,7 @@ impl fmt::Display for Module {
         for (i, decl) in self.decls.iter().enumerate() {
             match decl {
                 Decl::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
-                Decl::FunctionDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
+                Decl::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 Decl::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
                 Decl::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
                 Decl::ClosureDecl(closure_decl) => closure_decl.fmt_with_indent(f, 0)?,
@@ -129,10 +129,10 @@ impl FunctionSig {
     }
 }
 
-impl FunctionDecl {
+impl FuncDecl {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        writeln!(f, "{}FunctionDecl [{}]", pad, self.id)?;
+        writeln!(f, "{}FuncDecl [{}]", pad, self.id)?;
         self.sig.fmt_with_indent(f, level + 1)?;
         Ok(())
     }
