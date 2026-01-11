@@ -589,7 +589,7 @@ pub enum ExprKind<T> {
     },
     MethodCall {
         callee: Box<Expr<T>>,
-        method: String,
+        method_name: String,
         args: Vec<CallArg<T>>,
     },
 

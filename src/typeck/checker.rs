@@ -1203,7 +1203,7 @@ impl TypeChecker {
 
     fn check_method_call(
         &mut self,
-        name: &str,
+        method_name: &str,
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
@@ -1231,12 +1231,12 @@ impl TypeChecker {
         };
 
         // Get the overloads for the method
-        let Some(overloads) = type_methods.get(name).cloned() else {
+        let Some(overloads) = type_methods.get(method_name).cloned() else {
             return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
         };
 
         // Format the method name as "type::method"
-        let name = format!("{}::{}", type_name, name);
+        let name = format!("{}::{}", type_name, method_name);
 
         self.check_named_call_common(&name, callee, call_expr, args, &overloads, true)
     }
@@ -1899,9 +1899,9 @@ impl AstFolder for TypeChecker {
 
                 ExprKind::MethodCall {
                     callee,
-                    method,
+                    method_name,
                     args,
-                } => self.check_method_call(method, expr, callee, args),
+                } => self.check_method_call(method_name, expr, callee, args),
 
                 ExprKind::If {
                     cond,

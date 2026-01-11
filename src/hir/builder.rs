@@ -439,11 +439,11 @@ impl ToHir for ast::Expr {
             },
             ast::ExprKind::MethodCall {
                 callee,
-                method,
+                method_name,
                 args,
             } => hir::ExprKind::MethodCall {
                 callee: Box::new(callee.to_hir(def_map)),
-                method,
+                method_name,
                 args: args.into_iter().map(|arg| arg.to_hir(def_map)).collect(),
             },
 

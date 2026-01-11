@@ -551,14 +551,14 @@ impl Expr {
             }
             ExprKind::MethodCall {
                 callee,
-                method,
+                method_name,
                 args,
             } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}MethodCall [{}]", pad, self.id)?;
                 writeln!(f, "{}Target:", pad1)?;
                 callee.fmt_with_indent(f, level + 2)?;
-                writeln!(f, "{}Method: {}", pad1, method)?;
+                writeln!(f, "{}Method Name: {}", pad1, method_name)?;
                 writeln!(f, "{}Args:", pad1)?;
                 self.fmt_call_args(f, level + 2, args)?;
             }

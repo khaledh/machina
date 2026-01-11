@@ -365,7 +365,7 @@ impl<'a> Parser<'a> {
                         id: self.id_gen.new_id(),
                         kind: ExprKind::MethodCall {
                             callee: Box::new(expr),
-                            method: name.clone(),
+                            method_name: name.clone(),
                             args,
                         },
                         span: self.close(marker),
