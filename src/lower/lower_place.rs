@@ -11,7 +11,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an lvalue expression into a place.
     pub(super) fn lower_place(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
         match &expr.kind {
-            EK::Var(_) => self.lower_var(expr),
+            EK::Var { .. } => self.lower_var(expr),
             EK::ArrayIndex { target, indices } => self.lower_array_index(expr, target, indices),
             EK::TupleField { target, index } => self.lower_tuple_field(target, *index),
             EK::StructField { target, field } => self.lower_struct_field(target, field),
@@ -43,7 +43,7 @@ impl<'a> FuncLowerer<'a> {
 
     /// Resolve a variable reference into its local place.
     pub(super) fn lower_var(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
-        let EK::Var(def_id) = expr.kind else {
+        let EK::Var { def_id, .. } = expr.kind else {
             return Err(LowerError::ExprIsNotPlace(expr.id));
         };
         let local_id = *self

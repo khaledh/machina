@@ -134,7 +134,11 @@ impl<'a> Parser<'a> {
 
             Ok(StmtExpr {
                 id: self.id_gen.new_id(),
-                kind: StmtExprKind::VarDecl { ident, decl_ty },
+                kind: StmtExprKind::VarDecl {
+                    ident,
+                    def_id: (),
+                    decl_ty,
+                },
                 span: self.close(marker),
             })
         }

@@ -205,7 +205,7 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &HirItem<'_>, ctx: &Type
     match &stmt.kind {
         StmtExprKind::LetBind { pattern, value, .. }
         | StmtExprKind::VarBind { pattern, value, .. } => {
-            if let BindPatternKind::Name(def_id) = &pattern.kind
+            if let BindPatternKind::Name { def_id, .. } = &pattern.kind
                 && let Some(def) = ctx.def_table.lookup_def(*def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
@@ -214,7 +214,7 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &HirItem<'_>, ctx: &Type
             }
         }
         StmtExprKind::Assign { assignee, value } => {
-            if let ExprKind::Var(def_id) = assignee.kind
+            if let ExprKind::Var { def_id, .. } = assignee.kind
                 && let Some(def) = ctx.def_table.lookup_def(def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
@@ -244,7 +244,7 @@ fn slice_bases_for_value(
     match &expr.kind {
         ExprKind::Slice { target, .. } => slice_bases_for_slice_target(target, state, ctx),
         // Copy of existing slice: inherit its borrowed bases.
-        ExprKind::Var(_) | ExprKind::Move { .. } => {
+        ExprKind::Var { .. } | ExprKind::Move { .. } => {
             if let Some(slice_def) = slice_def_from_expr(expr, ctx) {
                 return state.get(&slice_def).cloned().unwrap_or_default();
             }
@@ -293,7 +293,7 @@ fn slice_bases_for_slice_target(
 
 fn slice_def_from_expr(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     match &expr.kind {
-        ExprKind::Var(def_id) => {
+        ExprKind::Var { def_id, .. } => {
             let ty = ctx.type_map.lookup_node_type(expr.id)?;
             if !matches!(ty, Type::Slice { .. }) {
                 return None;
@@ -440,7 +440,7 @@ fn collect_pattern_defs(
     defs: &mut HashSet<DefId>,
 ) {
     match &pattern.kind {
-        BindPatternKind::Name(def_id) => add_def_if_slice(*def_id, ctx, defs),
+        BindPatternKind::Name { def_id, .. } => add_def_if_slice(*def_id, ctx, defs),
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
@@ -456,7 +456,7 @@ fn collect_pattern_defs(
 
 /// Collect slice-typed definitions from an assignment target.
 fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
-    if let ExprKind::Var(def_id) = assignee.kind {
+    if let ExprKind::Var { def_id, .. } = assignee.kind {
         add_def_if_slice(def_id, ctx, defs);
     }
 }
@@ -512,7 +512,7 @@ fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &TypeCheckedContext, uses: &mut
 fn collect_assignee_uses(assignee: &Expr, ctx: &TypeCheckedContext, uses: &mut HashSet<DefId>) {
     match &assignee.kind {
         // Assigning to a var doesn't use it.
-        ExprKind::Var(_) => {}
+        ExprKind::Var { .. } => {}
         ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
             collect_expr_slice_uses(target, ctx, uses);
         }
@@ -558,7 +558,7 @@ impl Visitor for SliceUseCollector<'_> {
 
 /// If expr is a slice-typed variable use, return its DefId.
 fn slice_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
-    let ExprKind::Var(def_id) = expr.kind else {
+    let ExprKind::Var { def_id, .. } = expr.kind else {
         return None;
     };
     let ty = ctx.type_map.lookup_node_type(expr.id)?;
@@ -663,7 +663,7 @@ impl Visitor for BorrowConflictVisitor<'_> {
 /// E.g., `arr[0].field` -> DefId of `arr`.
 fn base_def_id(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     match &expr.kind {
-        ExprKind::Var(def_id) => Some(*def_id),
+        ExprKind::Var { def_id, .. } => Some(*def_id),
         ExprKind::ArrayIndex { target, .. }
         | ExprKind::TupleField { target, .. }
         | ExprKind::StructField { target, .. }

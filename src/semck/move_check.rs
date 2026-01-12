@@ -55,7 +55,7 @@ fn check_func_def(
     let mut sink_params = HashSet::new();
     for param in &func_def.sig.params {
         if param.mode == ParamMode::Sink {
-            sink_params.insert(param.ident);
+            sink_params.insert(param.def_id);
         }
     }
 
@@ -168,7 +168,7 @@ impl<'a> MoveVisitor<'a> {
     /// Process `move x`: validate target and mark as moved.
     fn handle_move_target(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Var(def_id) => {
+            ExprKind::Var { def_id, .. } => {
                 let Some(def) = self.ctx.def_table.lookup_def(*def_id) else {
                     return;
                 };
@@ -205,7 +205,7 @@ impl<'a> MoveVisitor<'a> {
 
     /// Error if using a variable that has already been moved.
     fn check_use(&mut self, expr: &Expr) {
-        if let ExprKind::Var(def_id) = expr.kind
+        if let ExprKind::Var { def_id, .. } = expr.kind
             && let Some(def) = self.ctx.def_table.lookup_def(def_id)
             && self.moved.contains(&def_id)
         {
@@ -220,7 +220,7 @@ impl<'a> MoveVisitor<'a> {
         if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
             && ty.is_heap()
         {
-            let ExprKind::Var(def_id) = expr.kind else {
+            let ExprKind::Var { def_id, .. } = expr.kind else {
                 return;
             };
             let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
@@ -263,7 +263,7 @@ impl<'a> MoveVisitor<'a> {
     /// Projections (field access, indexing) borrow the base, so no move required.
     fn visit_place_base(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Var(_) => {
+            ExprKind::Var { .. } => {
                 // Place projections are treated as borrows of the base.
                 self.check_use(expr);
             }
@@ -287,7 +287,7 @@ impl<'a> MoveVisitor<'a> {
     /// Called on let/var bindings and reassignments to "revive" the variable.
     fn clear_pattern_defs(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name(def_id) => {
+            BindPatternKind::Name { def_id, .. } => {
                 self.moved.remove(def_id);
             }
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
@@ -305,7 +305,7 @@ impl<'a> MoveVisitor<'a> {
 
     fn visit_out_arg(&mut self, arg: &Expr) {
         match &arg.kind {
-            ExprKind::Var(def_id) => {
+            ExprKind::Var { def_id, .. } => {
                 // Out args are reinitialized by the callee.
                 self.moved.remove(def_id);
             }
@@ -346,7 +346,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
             StmtExprKind::VarDecl { .. } => {}
             StmtExprKind::Assign { assignee, value } => {
                 self.visit_expr(value);
-                if let ExprKind::Var(def_id) = assignee.kind {
+                if let ExprKind::Var { def_id, .. } = assignee.kind {
                     // Reassigning a variable clears its moved status.
                     self.moved.remove(&def_id);
                 } else {
@@ -368,7 +368,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
             ExprKind::Move { expr } => {
                 self.handle_move_target(expr);
             }
-            ExprKind::Var(_) => {
+            ExprKind::Var { .. } => {
                 self.check_use(expr);
                 // Heap values need explicit move (or implicit if last-use).
                 // Skip if we're in a borrow context (in/inout arg).

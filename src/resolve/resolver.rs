@@ -270,7 +270,10 @@ impl SymbolResolver {
                     def_id,
                     ty_expr: TypeExpr {
                         id: NodeId(0),
-                        kind: TypeExprKind::Named(ty_name.clone()),
+                        kind: TypeExprKind::Named {
+                            ident: ty_name.clone(),
+                            def_id: (),
+                        },
                         span: Span::default(),
                     },
                 });
@@ -291,7 +294,7 @@ impl SymbolResolver {
 
     fn check_lvalue_mutability(&mut self, expr: &ast::Expr) {
         match &expr.kind {
-            ExprKind::Var(name) => {
+            ExprKind::Var { ident: name, .. } => {
                 match self.lookup_symbol(name) {
                     Some(symbol) => match &symbol.kind {
                         SymbolKind::Var {
@@ -343,7 +346,9 @@ impl SymbolResolver {
 
     fn check_bind_pattern(&mut self, pattern: &BindPattern, is_mutable: bool) {
         match &pattern.kind {
-            BindPatternKind::Name(var_name) => {
+            BindPatternKind::Name {
+                ident: var_name, ..
+            } => {
                 let def_id = self.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -413,7 +418,9 @@ impl SymbolResolver {
             MatchPattern::Wildcard { .. } => {}
             MatchPattern::BoolLit { .. } => {}
             MatchPattern::IntLit { .. } => {}
-            MatchPattern::Binding { id, ident, span } => {
+            MatchPattern::Binding {
+                id, ident, span, ..
+            } => {
                 self.bind_match_binding(*id, ident, *span);
             }
             MatchPattern::Tuple { patterns, .. } => {
@@ -451,7 +458,10 @@ impl SymbolResolver {
 
     fn bind_match_bindings(&mut self, bindings: &[MatchPatternBinding]) {
         for binding in bindings {
-            if let MatchPatternBinding::Named { id, ident, span } = binding {
+            if let MatchPatternBinding::Named {
+                id, ident, span, ..
+            } = binding
+            {
                 self.bind_match_binding(*id, ident, *span);
             }
         }
@@ -501,10 +511,10 @@ impl SymbolResolver {
     }
 }
 
-impl Visitor for SymbolResolver {
+impl Visitor<AstDef> for SymbolResolver {
     fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
-            TypeExprKind::Named(name) => match self.lookup_symbol(name) {
+            TypeExprKind::Named { ident: name, .. } => match self.lookup_symbol(name) {
                 Some(symbol) => match &symbol.kind {
                     SymbolKind::TypeAlias { .. }
                     | SymbolKind::StructDef { .. }
@@ -634,7 +644,11 @@ impl Visitor for SymbolResolver {
                 self.check_bind_pattern(pattern, true);
             }
 
-            StmtExprKind::VarDecl { ident, decl_ty } => {
+            StmtExprKind::VarDecl {
+                ident,
+                decl_ty,
+                def_id: _,
+            } => {
                 let def_id = self.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -727,7 +741,7 @@ impl Visitor for SymbolResolver {
                 walk_expr(self, expr);
             }
 
-            ExprKind::Var(name) => match self.lookup_symbol(name) {
+            ExprKind::Var { ident: name, .. } => match self.lookup_symbol(name) {
                 Some(symbol) => self.def_table_builder.record_use(expr.id, symbol.def_id()),
                 None => self
                     .errors

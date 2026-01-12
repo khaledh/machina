@@ -121,10 +121,7 @@ impl<'a, T> CallableRef<'a, T> {
         }
     }
 
-    pub fn name(&self) -> String
-    where
-        T: std::fmt::Display,
-    {
+    pub fn name(&self) -> String {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::FuncDef(func_def) => func_def.sig.name.clone(),
@@ -133,10 +130,7 @@ impl<'a, T> CallableRef<'a, T> {
         }
     }
 
-    pub fn symbol_base_name(&self) -> String
-    where
-        T: std::fmt::Display,
-    {
+    pub fn symbol_base_name(&self) -> String {
         match self {
             CallableRef::FuncDecl(_) => self.name(),
             CallableRef::FuncDef(_) => self.name(),
@@ -204,7 +198,10 @@ pub struct TypeExpr<T> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExprKind<T> {
-    Named(T),
+    Named {
+        ident: String,
+        def_id: T,
+    },
     Array {
         elem_ty_expr: Box<TypeExpr<T>>,
         dims: Vec<usize>,
@@ -324,7 +321,8 @@ pub struct ClosureSig<T> {
 #[derive(Clone, Debug)]
 pub struct Param<T> {
     pub id: NodeId,
-    pub ident: T,
+    pub ident: String,
+    pub def_id: T,
     pub typ: TypeExpr<T>,
     pub mode: ParamMode,
     pub span: Span,
@@ -350,7 +348,10 @@ pub struct BindPattern<T> {
 
 #[derive(Clone, Debug)]
 pub enum BindPatternKind<T> {
-    Name(T),
+    Name {
+        ident: String,
+        def_id: T,
+    },
     Array {
         patterns: Vec<BindPattern<T>>,
     },
@@ -395,7 +396,8 @@ pub enum MatchPattern<T> {
     },
     Binding {
         id: NodeId,
-        ident: T,
+        ident: String,
+        def_id: T,
         span: Span,
     },
     Tuple {
@@ -412,8 +414,15 @@ pub enum MatchPattern<T> {
 
 #[derive(Clone, Debug)]
 pub enum MatchPatternBinding<T> {
-    Named { id: NodeId, ident: T, span: Span },
-    Wildcard { span: Span },
+    Named {
+        id: NodeId,
+        ident: String,
+        def_id: T,
+        span: Span,
+    },
+    Wildcard {
+        span: Span,
+    },
 }
 
 // --- Blocks ---
@@ -446,7 +455,8 @@ pub enum StmtExprKind<T> {
         value: Box<Expr<T>>,
     },
     VarDecl {
-        ident: T,
+        ident: String,
+        def_id: T,
         decl_ty: TypeExpr<T>,
     },
     Assign {
@@ -536,7 +546,10 @@ pub enum ExprKind<T> {
     },
 
     // Var, array index, tuple field, struct field
-    Var(T),
+    Var {
+        ident: String,
+        def_id: T,
+    },
     ArrayIndex {
         target: Box<Expr<T>>,
         indices: Vec<Expr<T>>,
@@ -588,7 +601,8 @@ pub enum ExprKind<T> {
     },
 
     Closure {
-        ident: T,
+        ident: String,
+        def_id: T,
         params: Vec<Param<T>>,
         return_ty: TypeExpr<T>,
         body: Box<Expr<T>>,

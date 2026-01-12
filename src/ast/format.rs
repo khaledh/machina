@@ -246,8 +246,8 @@ impl fmt::Display for TypeExpr {
 impl fmt::Display for TypeExprKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TypeExprKind::Named(name) => {
-                write!(f, "Named({})", name)?;
+            TypeExprKind::Named { ident, .. } => {
+                write!(f, "Named({})", ident)?;
             }
             TypeExprKind::Array { elem_ty_expr, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
@@ -297,7 +297,7 @@ impl BindPattern {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
-            BindPatternKind::Name(ident) => {
+            BindPatternKind::Name { ident, .. } => {
                 writeln!(f, "{}Name({}) [{}]", pad, ident, self.id)?;
             }
             BindPatternKind::Array { patterns } => {
@@ -448,7 +448,7 @@ impl StmtExpr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
-            StmtExprKind::VarDecl { ident, decl_ty } => {
+            StmtExprKind::VarDecl { ident, decl_ty, .. } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}VarDecl [{}]", pad, self.id)?;
                 writeln!(f, "{}Ident: {}", pad1, ident)?;
@@ -653,8 +653,8 @@ impl Expr {
                     tail.fmt_with_indent(f, level + 1)?;
                 }
             }
-            ExprKind::Var(name) => {
-                writeln!(f, "{}Var({}) [{}]", pad, name, self.id)?;
+            ExprKind::Var { ident, .. } => {
+                writeln!(f, "{}Var({}) [{}]", pad, ident, self.id)?;
             }
             ExprKind::If {
                 cond,

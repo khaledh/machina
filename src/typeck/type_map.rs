@@ -54,7 +54,7 @@ fn resolve_type_expr_impl(
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        TypeExprKind::Named(def_id) => {
+        TypeExprKind::Named { def_id, .. } => {
             resolve_named_type(def_table, module, type_expr, def_id, in_progress, depth)
         }
         TypeExprKind::Array { elem_ty_expr, dims } => {

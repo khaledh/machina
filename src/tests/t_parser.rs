@@ -97,7 +97,7 @@ fn test_parse_multidim_array_type() {
     match &func.sig.ret_ty_expr.kind {
         TypeExprKind::Array { elem_ty_expr, dims } => {
             match &elem_ty_expr.kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
             assert_eq!(dims, &vec![2, 3]);
@@ -120,7 +120,7 @@ fn test_parse_multidim_array_type_3d() {
     match &func.sig.ret_ty_expr.kind {
         TypeExprKind::Array { elem_ty_expr, dims } => {
             match &elem_ty_expr.kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
             assert_eq!(dims, &vec![2, 3, 4]);
@@ -148,7 +148,7 @@ fn test_parse_multi_index_expr() {
     if let ExprKind::ArrayIndex { target, indices } = &tail.kind {
         // Check target is Var
         match &target.kind {
-            ExprKind::Var(name) => assert_eq!(name, "arr"),
+            ExprKind::Var { ident: name, .. } => assert_eq!(name, "arr"),
             _ => panic!("Expected Var"),
         }
 
@@ -226,7 +226,7 @@ fn test_parse_heap_type_and_alloc_expr() {
 
     match &func.sig.ret_ty_expr.kind {
         TypeExprKind::Heap { elem_ty_expr } => match &elem_ty_expr.kind {
-            TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+            TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
             _ => panic!("Expected named element type"),
         },
         _ => panic!("Expected heap type"),
@@ -264,7 +264,7 @@ fn test_parse_typed_array_literal() {
         } = &value.kind
         {
             match &elem_ty.kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u8"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u8"),
                 _ => panic!("Expected named type"),
             }
             assert_eq!(elems.len(), 3);
@@ -301,7 +301,7 @@ fn test_parse_array_repeat_literal() {
         } = &value.kind
         {
             match &elem_ty.kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u8"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u8"),
                 _ => panic!("Expected named type"),
             }
             assert_eq!(*count, 4);
@@ -330,11 +330,11 @@ fn test_parse_tuple_type() {
         TypeExprKind::Tuple { field_ty_exprs } => {
             assert_eq!(field_ty_exprs.len(), 2);
             match &field_ty_exprs[0].kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
             match &field_ty_exprs[1].kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "bool"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "bool"),
                 _ => panic!("Expected named type"),
             }
         }
@@ -357,7 +357,7 @@ fn test_parse_tuple_type_nested() {
         TypeExprKind::Tuple { field_ty_exprs } => {
             assert_eq!(field_ty_exprs.len(), 2);
             match &field_ty_exprs[0].kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
             match &field_ty_exprs[1].kind {
@@ -366,11 +366,11 @@ fn test_parse_tuple_type_nested() {
                 } => {
                     assert_eq!(inner_ty_exprs.len(), 2);
                     match &inner_ty_exprs[0].kind {
-                        TypeExprKind::Named(name) => assert_eq!(name, "bool"),
+                        TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "bool"),
                         _ => panic!("Expected named type"),
                     }
                     match &inner_ty_exprs[1].kind {
-                        TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                        TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                         _ => panic!("Expected named type"),
                     }
                 }
@@ -458,7 +458,7 @@ fn test_parse_enum_type_decl_with_payload() {
             assert_eq!(variants[1].name, "Some");
             assert_eq!(variants[1].payload.len(), 1);
             match &variants[1].payload[0].kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named payload type"),
             }
         }
@@ -520,7 +520,7 @@ fn test_parse_struct_update_expr() {
     match &tail.kind {
         ExprKind::StructUpdate { target, fields } => {
             match &target.kind {
-                ExprKind::Var(name) => assert_eq!(name, "p"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "p"),
                 _ => panic!("Expected StructUpdate target to be Var"),
             }
             assert_eq!(fields.len(), 1);
@@ -629,7 +629,7 @@ fn test_parse_tuple_field_access() {
     if let ExprKind::TupleField { target, index } = &tail.kind {
         // Check target is Var
         match &target.kind {
-            ExprKind::Var(name) => assert_eq!(name, "t"),
+            ExprKind::Var { ident: name, .. } => assert_eq!(name, "t"),
             _ => panic!("Expected Var"),
         }
 
@@ -668,7 +668,7 @@ fn test_parse_tuple_field_access_chained() {
             assert_eq!(*inner_index, 1);
 
             match &inner_target.kind {
-                ExprKind::Var(name) => assert_eq!(name, "t"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "t"),
                 _ => panic!("Expected Var"),
             }
         } else {
@@ -702,7 +702,7 @@ fn test_parse_method_call() {
     } = &tail.kind
     {
         match &callee.kind {
-            ExprKind::Var(name) => assert_eq!(name, "p"),
+            ExprKind::Var { ident: name, .. } => assert_eq!(name, "p"),
             _ => panic!("Expected Var target"),
         }
         assert_eq!(method_name, "sum");
@@ -742,7 +742,7 @@ fn test_parse_tuple_with_array_indexing() {
             assert_eq!(*index, 0);
 
             match &field_target.kind {
-                ExprKind::Var(name) => assert_eq!(name, "t"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "t"),
                 _ => panic!("Expected Var"),
             }
         } else {
@@ -776,13 +776,13 @@ fn test_parse_tuple_pattern() {
 
                 // First pattern should be identifier "a"
                 match &patterns[0].kind {
-                    BindPatternKind::Name(ident) => assert_eq!(ident, "a"),
+                    BindPatternKind::Name { ident, .. } => assert_eq!(ident, "a"),
                     _ => panic!("Expected Ident pattern"),
                 }
 
                 // Second pattern should be identifier "b"
                 match &patterns[1].kind {
-                    BindPatternKind::Name(ident) => assert_eq!(ident, "b"),
+                    BindPatternKind::Name { ident, .. } => assert_eq!(ident, "b"),
                     _ => panic!("Expected Ident pattern"),
                 }
             }
@@ -823,7 +823,7 @@ fn test_parse_tuple_pattern_nested() {
 
                 // First pattern should be identifier "a"
                 match &patterns[0].kind {
-                    BindPatternKind::Name(ident) => assert_eq!(ident, "a"),
+                    BindPatternKind::Name { ident, .. } => assert_eq!(ident, "a"),
                     _ => panic!("Expected Ident pattern"),
                 }
 
@@ -832,11 +832,11 @@ fn test_parse_tuple_pattern_nested() {
                     BindPatternKind::Tuple { patterns: inner } => {
                         assert_eq!(inner.len(), 2);
                         match &inner[0].kind {
-                            BindPatternKind::Name(ident) => assert_eq!(ident, "b"),
+                            BindPatternKind::Name { ident, .. } => assert_eq!(ident, "b"),
                             _ => panic!("Expected Ident pattern"),
                         }
                         match &inner[1].kind {
-                            BindPatternKind::Name(ident) => assert_eq!(ident, "c"),
+                            BindPatternKind::Name { ident, .. } => assert_eq!(ident, "c"),
                             _ => panic!("Expected Ident pattern"),
                         }
                     }
@@ -896,7 +896,7 @@ fn test_parse_parenthesized_pattern() {
     if let StmtExprKind::LetBind { pattern, .. } = &stmt.kind {
         // Should be an Ident pattern, not a Tuple pattern
         match &pattern.kind {
-            BindPatternKind::Name(ident) => assert_eq!(ident, "a"),
+            BindPatternKind::Name { ident, .. } => assert_eq!(ident, "a"),
             _ => panic!("Expected Ident pattern (parenthesized), got {:?}", pattern),
         }
     } else {
@@ -925,7 +925,7 @@ fn test_parse_match_expr_enum_variants() {
     match &tail.kind {
         ExprKind::Match { scrutinee, arms } => {
             match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "c"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "c"),
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 3);
@@ -987,7 +987,7 @@ fn test_parse_match_expr_bool_patterns() {
     match &tail.kind {
         ExprKind::Match { scrutinee, arms } => {
             match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "b"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "b"),
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 2);
@@ -1024,7 +1024,7 @@ fn test_parse_match_expr_int_patterns() {
     match &tail.kind {
         ExprKind::Match { scrutinee, arms } => {
             match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "x"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "x"),
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 2);
@@ -1060,7 +1060,7 @@ fn test_parse_match_expr_tuple_patterns() {
     match &tail.kind {
         ExprKind::Match { scrutinee, arms } => {
             match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "t"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "t"),
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 1);
@@ -1097,7 +1097,7 @@ fn test_parse_match_expr_tuple_patterns_nested() {
     match &tail.kind {
         ExprKind::Match { scrutinee, arms } => {
             match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "t"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "t"),
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 1);
@@ -1148,7 +1148,7 @@ fn test_parse_match_expr_tuple_patterns_literals() {
     match &tail.kind {
         ExprKind::Match { scrutinee, arms } => {
             match &scrutinee.kind {
-                ExprKind::Var(name) => assert_eq!(name, "t"),
+                ExprKind::Var { ident: name, .. } => assert_eq!(name, "t"),
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 2);
@@ -1213,7 +1213,7 @@ fn test_parse_for_range_loop() {
     } = &stmt.kind
     {
         match &pattern.kind {
-            BindPatternKind::Name(ident) => assert_eq!(ident, "i"),
+            BindPatternKind::Name { ident, .. } => assert_eq!(ident, "i"),
             _ => panic!("Expected ident pattern"),
         }
         match &iter.kind {
@@ -1254,7 +1254,7 @@ fn test_parse_for_array_loop() {
     } = &stmt.kind
     {
         match &pattern.kind {
-            BindPatternKind::Name(ident) => assert_eq!(ident, "x"),
+            BindPatternKind::Name { ident, .. } => assert_eq!(ident, "x"),
             _ => panic!("Expected ident pattern"),
         }
         assert!(matches!(iter.kind, ExprKind::ArrayLit { .. }));
@@ -1292,7 +1292,7 @@ fn test_parse_closure_expr() {
             assert_eq!(params[0].ident, "a");
             assert_eq!(params[1].ident, "b");
             match &return_ty.kind {
-                TypeExprKind::Named(name) => assert_eq!(name, "u64"),
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named return type"),
             }
             assert!(matches!(body.kind, ExprKind::BinOp { .. }));
@@ -1324,7 +1324,7 @@ fn test_parse_closure_expr_empty_params() {
             assert_eq!(ident, "test$closure$1");
             assert!(params.is_empty());
             match &return_ty.kind {
-                TypeExprKind::Named(ty) => assert_eq!(ty, "()"),
+                TypeExprKind::Named { ident: ty, .. } => assert_eq!(ty, "()"),
                 _ => panic!("Expected named return type"),
             }
             assert!(matches!(body.kind, ExprKind::Block { .. }));

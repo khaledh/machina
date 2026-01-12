@@ -192,7 +192,7 @@ impl<'a> FuncLowerer<'a> {
 
         self.lower_for_indexed_loop(start_op, end_op, body, |this, idx_place| {
             // Bind pattern to current index (only name pattern expected).
-            let PK::Name(def_id) = &pattern.kind else {
+            let PK::Name { def_id, .. } = &pattern.kind else {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
             let name = this.def_name(*def_id, pattern.id)?;

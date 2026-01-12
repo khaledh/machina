@@ -199,9 +199,10 @@ fn type_expr_to_hir(def_lookup: &DefLookup, type_expr: &ast::TypeExpr) -> hir::T
         id: type_expr.id,
         span: type_expr.span,
         kind: match &type_expr.kind {
-            ast::TypeExprKind::Named(_name) => {
-                hir::TypeExprKind::Named(def_id(def_lookup, type_expr.id))
-            }
+            ast::TypeExprKind::Named { ident, .. } => hir::TypeExprKind::Named {
+                ident: ident.clone(),
+                def_id: def_id(def_lookup, type_expr.id),
+            },
             ast::TypeExprKind::Array { elem_ty_expr, dims } => hir::TypeExprKind::Array {
                 elem_ty_expr: Box::new(elem_ty_expr.as_ref().to_hir(def_lookup)),
                 dims: dims.clone(),
@@ -399,7 +400,8 @@ impl ToHir for ast::Param {
     fn to_hir(self, def_lookup: &DefLookup) -> Self::Output {
         hir::Param {
             id: self.id,
-            ident: def_id(def_lookup, self.id),
+            ident: self.ident,
+            def_id: def_id(def_lookup, self.id),
             typ: self.typ.to_hir(def_lookup),
             mode: self.mode,
             span: self.span,
@@ -483,7 +485,10 @@ impl ToHir for ast::Expr {
             ast::ExprKind::Move { expr } => hir::ExprKind::Move {
                 expr: Box::new(expr.to_hir(def_lookup)),
             },
-            ast::ExprKind::Var(_) => hir::ExprKind::Var(def_id(def_lookup, id)),
+            ast::ExprKind::Var { ident, .. } => hir::ExprKind::Var {
+                ident,
+                def_id: def_id(def_lookup, id),
+            },
             ast::ExprKind::ArrayIndex { target, indices } => hir::ExprKind::ArrayIndex {
                 target: Box::new(target.to_hir(def_lookup)),
                 indices: indices
@@ -536,12 +541,14 @@ impl ToHir for ast::Expr {
             },
 
             ast::ExprKind::Closure {
+                ident,
                 params,
                 return_ty,
                 body,
                 ..
             } => hir::ExprKind::Closure {
-                ident: def_id(def_lookup, id),
+                ident,
+                def_id: def_id(def_lookup, id),
                 params: params
                     .into_iter()
                     .map(|param| param.to_hir(def_lookup))
@@ -591,11 +598,9 @@ impl ToHir for ast::StmtExpr {
                 decl_ty: decl_ty.map(|ty| ty.to_hir(def_lookup)),
                 value: Box::new(value.to_hir(def_lookup)),
             },
-            ast::StmtExprKind::VarDecl {
-                ident: _ident,
-                decl_ty,
-            } => hir::StmtExprKind::VarDecl {
-                ident: def_id(def_lookup, id),
+            ast::StmtExprKind::VarDecl { ident, decl_ty, .. } => hir::StmtExprKind::VarDecl {
+                ident,
+                def_id: def_id(def_lookup, id),
                 decl_ty: decl_ty.to_hir(def_lookup),
             },
             ast::StmtExprKind::Assign { assignee, value } => hir::StmtExprKind::Assign {
@@ -628,7 +633,10 @@ impl ToHir for ast::BindPattern {
         let id = self.id;
         let span = self.span;
         let kind = match self.kind {
-            ast::BindPatternKind::Name(_) => hir::BindPatternKind::Name(def_id(def_lookup, id)),
+            ast::BindPatternKind::Name { ident, .. } => hir::BindPatternKind::Name {
+                ident,
+                def_id: def_id(def_lookup, id),
+            },
             ast::BindPatternKind::Array { patterns } => hir::BindPatternKind::Array {
                 patterns: patterns
                     .into_iter()
@@ -689,9 +697,12 @@ impl ToHir for ast::MatchPattern {
                 hir::MatchPattern::BoolLit { value, span }
             }
             ast::MatchPattern::IntLit { value, span } => hir::MatchPattern::IntLit { value, span },
-            ast::MatchPattern::Binding { id, ident: _, span } => hir::MatchPattern::Binding {
+            ast::MatchPattern::Binding {
+                id, ident, span, ..
+            } => hir::MatchPattern::Binding {
                 id,
-                ident: def_id(def_lookup, id),
+                ident,
+                def_id: def_id(def_lookup, id),
                 span,
             },
             ast::MatchPattern::Tuple { patterns, span } => hir::MatchPattern::Tuple {
@@ -724,13 +735,14 @@ impl ToHir for ast::MatchPatternBinding {
 
     fn to_hir(self, def_lookup: &DefLookup) -> Self::Output {
         match self {
-            ast::MatchPatternBinding::Named { id, ident: _, span } => {
-                hir::MatchPatternBinding::Named {
-                    id,
-                    ident: def_id(def_lookup, id),
-                    span,
-                }
-            }
+            ast::MatchPatternBinding::Named {
+                id, ident, span, ..
+            } => hir::MatchPatternBinding::Named {
+                id,
+                ident,
+                def_id: def_id(def_lookup, id),
+                span,
+            },
             ast::MatchPatternBinding::Wildcard { span } => {
                 hir::MatchPatternBinding::Wildcard { span }
             }

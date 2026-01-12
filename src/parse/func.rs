@@ -166,6 +166,7 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             kind: ExprKind::Closure {
                 ident: ident.clone(),
+                def_id: (),
                 params: params.clone(),
                 return_ty: return_ty.clone(),
                 body: Box::new(body.clone()), // TODO: see if we can restructure this to avoid cloning
@@ -209,6 +210,7 @@ impl<'a> Parser<'a> {
         Ok(Param {
             id: self.id_gen.new_id(),
             ident: name,
+            def_id: (),
             typ,
             mode,
             span: self.close(marker),
@@ -241,7 +243,10 @@ impl<'a> Parser<'a> {
             }
             _ => TypeExpr {
                 id: self.id_gen.new_id(),
-                kind: TypeExprKind::Named("()".to_string()),
+                kind: TypeExprKind::Named {
+                    ident: "()".to_string(),
+                    def_id: (),
+                },
                 span: self.close(self.mark()),
             },
         })

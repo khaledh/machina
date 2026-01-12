@@ -139,7 +139,7 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name(_) => {}
+            BindPatternKind::Name { .. } => {}
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for pattern in patterns {
                     self.check_pattern(pattern);
@@ -249,7 +249,7 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {
         match &expr.kind {
-            ExprKind::Var(def_id) => {
+            ExprKind::Var { def_id, .. } => {
                 let def = self.ctx.def_table.lookup_def(*def_id)?;
                 match def.kind {
                     DefKind::LocalVar { is_mutable, .. } | DefKind::Param { is_mutable, .. } => {
@@ -268,9 +268,11 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_lvalue(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::Var(def_id) => self.ctx.def_table.lookup_def(*def_id).is_some_and(|def| {
-                matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
-            }),
+            ExprKind::Var { def_id, .. } => {
+                self.ctx.def_table.lookup_def(*def_id).is_some_and(|def| {
+                    matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
+                })
+            }
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::StructField { target, .. }
@@ -424,7 +426,7 @@ impl Visitor for StructuralChecker<'_> {
             }
             ExprKind::Call { callee, args } => {
                 // Only plain identifiers are valid callees at the AST level for now.
-                if !matches!(callee.kind, ExprKind::Var(_)) {
+                if !matches!(callee.kind, ExprKind::Var { .. }) {
                     self.errors.push(SemCheckError::InvalidCallee(
                         callee.kind.clone(),
                         callee.span,

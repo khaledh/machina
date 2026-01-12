@@ -137,6 +137,7 @@ impl<'a> Parser<'a> {
             Ok(MatchPattern::Binding {
                 id: parser.id_gen.new_id(),
                 ident,
+                def_id: (),
                 span: parser.close(marker),
             })
         };
@@ -183,6 +184,7 @@ impl<'a> Parser<'a> {
             Ok(MatchPatternBinding::Named {
                 id: parser.id_gen.new_id(),
                 ident,
+                def_id: (),
                 span: parser.close(marker),
             })
         };

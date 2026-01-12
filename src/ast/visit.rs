@@ -162,7 +162,7 @@ pub fn walk_enum_def_variant<V: Visitor<T> + ?Sized, T>(v: &mut V, variant: &Enu
 
 pub fn walk_type_expr<V: Visitor<T> + ?Sized, T>(v: &mut V, type_expr: &TypeExpr<T>) {
     match &type_expr.kind {
-        TypeExprKind::Named(_) => {}
+        TypeExprKind::Named { .. } => {}
         TypeExprKind::Array { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Tuple { field_ty_exprs } => {
             for field in field_ty_exprs {
@@ -280,7 +280,7 @@ pub fn walk_expr<V: Visitor<T> + ?Sized, T>(v: &mut V, expr: &Expr<T>) {
         | ExprKind::CharLit(_)
         | ExprKind::StringLit { .. }
         | ExprKind::UnitLit
-        | ExprKind::Var(_)
+        | ExprKind::Var { .. }
         | ExprKind::Range { .. } => {}
 
         ExprKind::StringFmt { segments } => {

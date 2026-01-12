@@ -213,7 +213,10 @@ impl<'a> Parser<'a> {
 
                 Ok(Expr {
                     id: self.id_gen.new_id(),
-                    kind: ExprKind::Var(name.clone()),
+                    kind: ExprKind::Var {
+                        ident: name.clone(),
+                        def_id: (),
+                    },
                     span: self.close(marker),
                 })
             }
@@ -223,7 +226,10 @@ impl<'a> Parser<'a> {
 
                 Ok(Expr {
                     id: self.id_gen.new_id(),
-                    kind: ExprKind::Var("self".to_string()),
+                    kind: ExprKind::Var {
+                        ident: "self".to_string(),
+                        def_id: (),
+                    },
                     span: self.close(marker),
                 })
             }
@@ -442,7 +448,10 @@ impl<'a> Parser<'a> {
 
         let elem_ty = TypeExpr {
             id: self.id_gen.new_id(),
-            kind: TypeExprKind::Named(type_name),
+            kind: TypeExprKind::Named {
+                ident: type_name,
+                def_id: (),
+            },
             span: self.close(marker),
         };
 

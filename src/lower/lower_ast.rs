@@ -90,12 +90,12 @@ impl<'a> FuncLowerer<'a> {
             .params
             .iter()
             .map(|param| {
-                let def = ctx.def_table.lookup_def(param.ident).unwrap_or_else(|| {
-                    panic!("compiler bug: param def {:?} not found", param.ident)
+                let def = ctx.def_table.lookup_def(param.def_id).unwrap_or_else(|| {
+                    panic!("compiler bug: param def {:?} not found", param.def_id)
                 });
                 LoweredParam {
                     id: param.id,
-                    def_id: param.ident,
+                    def_id: param.def_id,
                     name: def.name.clone(),
                     mode: param.mode.clone(),
                 }
@@ -140,11 +140,11 @@ impl<'a> FuncLowerer<'a> {
         for param in &method_def.sig.params {
             let def = ctx
                 .def_table
-                .lookup_def(param.ident)
-                .unwrap_or_else(|| panic!("compiler bug: param def {:?} not found", param.ident));
+                .lookup_def(param.def_id)
+                .unwrap_or_else(|| panic!("compiler bug: param def {:?} not found", param.def_id));
             params.push(LoweredParam {
                 id: param.id,
-                def_id: param.ident,
+                def_id: param.def_id,
                 name: def.name.clone(),
                 mode: param.mode.clone(),
             });
@@ -175,12 +175,12 @@ impl<'a> FuncLowerer<'a> {
         let params = params
             .iter()
             .map(|param| {
-                let def = ctx.def_table.lookup_def(param.ident).unwrap_or_else(|| {
-                    panic!("compiler bug: param def {:?} not found", param.ident)
+                let def = ctx.def_table.lookup_def(param.def_id).unwrap_or_else(|| {
+                    panic!("compiler bug: param def {:?} not found", param.def_id)
                 });
                 LoweredParam {
                     id: param.id,
-                    def_id: param.ident,
+                    def_id: param.def_id,
                     name: def.name.clone(),
                     mode: param.mode.clone(),
                 }

@@ -81,13 +81,19 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(TypeExpr {
                     id: self.id_gen.new_id(),
-                    kind: TypeExprKind::Named("()".to_string()),
+                    kind: TypeExprKind::Named {
+                        ident: "()".to_string(),
+                        def_id: (),
+                    },
                     span: self.close(marker),
                 })
             }
             TK::Ident(name) => Ok(TypeExpr {
                 id: self.id_gen.new_id(),
-                kind: TypeExprKind::Named(name.clone()),
+                kind: TypeExprKind::Named {
+                    ident: name.clone(),
+                    def_id: (),
+                },
                 span: self.close(marker),
             }),
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),

@@ -69,7 +69,7 @@ impl NrvoAnalyzer {
 
     fn find_ret_var_def_id(expr: &Expr) -> Option<DefId> {
         match &expr.kind {
-            ExprKind::Var(def_id) => Some(*def_id),
+            ExprKind::Var { def_id, .. } => Some(*def_id),
 
             ExprKind::Block { tail, .. } => tail
                 .as_deref()
@@ -141,7 +141,7 @@ impl NrvoSafetyChecker {
 
     fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
         match &expr.kind {
-            ExprKind::Var(def_id) => {
+            ExprKind::Var { def_id, .. } => {
                 if *def_id == self.var_def_id {
                     at_return
                 } else {
@@ -184,7 +184,7 @@ impl NrvoSafetyChecker {
             ExprKind::Call { callee, args } => {
                 let callee_ok = self.check_expr(callee, false);
                 let args_ok = args.iter().all(|arg| match &arg.expr.kind {
-                    ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                     _ => self.check_expr(&arg.expr, false),
                 });
                 callee_ok && args_ok
@@ -192,7 +192,7 @@ impl NrvoSafetyChecker {
             ExprKind::MethodCall { callee, args, .. } => {
                 let target_ok = self.check_expr(callee, false);
                 let args_ok = args.iter().all(|arg| match &arg.expr.kind {
-                    ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                     _ => self.check_expr(&arg.expr, false),
                 });
                 target_ok && args_ok
@@ -205,7 +205,7 @@ impl NrvoSafetyChecker {
 
             ExprKind::ArrayIndex { target, indices } => {
                 let target_ok = match &target.kind {
-                    ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                     _ => self.check_expr(target, false),
                 };
                 let index_ok = indices.iter().all(|index| self.check_expr(index, false));
@@ -214,7 +214,7 @@ impl NrvoSafetyChecker {
 
             ExprKind::Slice { target, start, end } => {
                 let target_ok = match &target.kind {
-                    ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                     _ => self.check_expr(target, false),
                 };
                 let start_ok = start
@@ -229,7 +229,7 @@ impl NrvoSafetyChecker {
             ExprKind::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
             ExprKind::TupleField { target, .. } => match &target.kind {
-                ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                 _ => self.check_expr(target, false),
             },
 
@@ -238,13 +238,13 @@ impl NrvoSafetyChecker {
                 .all(|field| self.check_expr(&field.value, false)),
 
             ExprKind::StructField { target, .. } => match &target.kind {
-                ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                 _ => self.check_expr(target, false),
             },
 
             ExprKind::StructUpdate { target, fields } => {
                 let target_ok = match &target.kind {
-                    ExprKind::Var(def_id) if *def_id == self.var_def_id => true,
+                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
                     _ => self.check_expr(target, false),
                 };
                 let fields_ok = fields
@@ -283,7 +283,7 @@ impl NrvoSafetyChecker {
 
     fn is_lvalue_use(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::Var(def_id) => *def_id == self.var_def_id,
+            ExprKind::Var { def_id, .. } => *def_id == self.var_def_id,
             ExprKind::ArrayIndex { target, .. } => self.is_lvalue_use(target),
             ExprKind::TupleField { target, .. } => self.is_lvalue_use(target),
             _ => false,

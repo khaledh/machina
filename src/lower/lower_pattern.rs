@@ -19,7 +19,7 @@ impl<'a> FuncLowerer<'a> {
 
         if value_ty.is_scalar() {
             // Scalar binding: compute operand and assign.
-            let PK::Name(def_id) = &pattern.kind else {
+            let PK::Name { def_id, .. } = &pattern.kind else {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
             let op = self.lower_scalar_expr(value)?;
@@ -39,7 +39,7 @@ impl<'a> FuncLowerer<'a> {
         }
 
         // Aggregate binding
-        let PK::Name(def_id) = &pattern.kind else {
+        let PK::Name { def_id, .. } = &pattern.kind else {
             // Aggregate destructuring via patterns.
             let src_place = match self.lower_expr_value(value)? {
                 ExprValue::Aggregate(place) => PlaceAny::Aggregate(place),
@@ -106,7 +106,7 @@ impl<'a> FuncLowerer<'a> {
         src_ty: &Type,
     ) -> Result<(), LowerError> {
         match &pattern.kind {
-            PK::Name(def_id) => {
+            PK::Name { def_id, .. } => {
                 // Bind a single identifier to a place.
                 let src_ty_id = self.ty_lowerer.lower_ty(src_ty);
                 let name = self.def_name(*def_id, pattern.id)?;

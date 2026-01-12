@@ -214,7 +214,7 @@ impl TypeChecker {
             .map(|param| {
                 let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ)?;
                 Ok(ParamSig {
-                    name: self.def_name(param.ident).to_string(),
+                    name: self.def_name(param.def_id).to_string(),
                     ty,
                     mode: param.mode.clone(),
                 })
@@ -283,7 +283,7 @@ impl TypeChecker {
 
         // Record param types
         for (param, param_ty) in func_def.sig.params.iter().zip(param_types.iter()) {
-            match self.ctx.def_table.lookup_def(param.ident) {
+            match self.ctx.def_table.lookup_def(param.def_id) {
                 Some(def) => {
                     self.type_map_builder
                         .record_def_type(def.clone(), param_ty.clone());
@@ -373,7 +373,7 @@ impl TypeChecker {
         }
 
         for (param, param_ty) in method_def.sig.params.iter().zip(param_types.iter()) {
-            match self.ctx.def_table.lookup_def(param.ident) {
+            match self.ctx.def_table.lookup_def(param.def_id) {
                 Some(def) => {
                     self.type_map_builder
                         .record_def_type(def.clone(), param_ty.clone());
@@ -428,7 +428,7 @@ impl TypeChecker {
         for param in params {
             let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ)?;
             self.type_map_builder.record_node_type(param.id, ty.clone());
-            if let Some(def) = self.ctx.def_table.lookup_def(param.ident) {
+            if let Some(def) = self.ctx.def_table.lookup_def(param.def_id) {
                 self.type_map_builder
                     .record_def_type(def.clone(), ty.clone());
             }
@@ -889,9 +889,9 @@ impl TypeChecker {
         value_ty: &Type,
     ) -> Result<(), TypeCheckError> {
         match &pattern.kind {
-            BindPatternKind::Name(ident) => {
+            BindPatternKind::Name { def_id, .. } => {
                 // Record this identifier's type
-                if let Some(def) = self.ctx.def_table.lookup_def(*ident) {
+                if let Some(def) = self.ctx.def_table.lookup_def(*def_id) {
                     self.type_map_builder
                         .record_def_type(def.clone(), value_ty.clone());
                 }
@@ -1125,7 +1125,7 @@ impl TypeChecker {
         callee: &Expr,
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
-        if let ExprKind::Var(def_id) = &callee.kind
+        if let ExprKind::Var { def_id, .. } = &callee.kind
             && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
             && matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl)
         {
@@ -1492,10 +1492,10 @@ impl TypeChecker {
     }
 
     fn record_match_binding(&mut self, binding: &MatchPatternBinding, ty: &Type) {
-        let MatchPatternBinding::Named { ident, .. } = binding else {
+        let MatchPatternBinding::Named { def_id, .. } = binding else {
             return;
         };
-        self.record_binding_def(*ident, ty);
+        self.record_binding_def(*def_id, ty);
     }
 
     fn record_binding_def(&mut self, def_id: DefId, ty: &Type) {
@@ -1533,8 +1533,8 @@ impl TypeChecker {
 
     fn record_pattern_bindings(&mut self, pattern: &MatchPattern, ty: Option<&Type>) {
         match pattern {
-            MatchPattern::Binding { ident, .. } => {
-                self.record_binding_def(*ident, ty.unwrap_or(&Type::Unknown));
+            MatchPattern::Binding { def_id, .. } => {
+                self.record_binding_def(*def_id, ty.unwrap_or(&Type::Unknown));
             }
             MatchPattern::EnumVariant { bindings, .. } => match ty {
                 Some(Type::Enum { name, variants }) => {
@@ -1647,9 +1647,13 @@ impl AstFolder for TypeChecker {
                 value,
             } => self.check_binding(pattern, decl_ty, value)?,
 
-            StmtExprKind::VarDecl { decl_ty, ident } => {
+            StmtExprKind::VarDecl {
+                decl_ty,
+                ident: _,
+                def_id,
+            } => {
                 let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, decl_ty)?;
-                if let Some(def) = self.ctx.def_table.lookup_def(*ident) {
+                if let Some(def) = self.ctx.def_table.lookup_def(*def_id) {
                     self.type_map_builder.record_def_type(def.clone(), ty);
                 }
                 Type::Unit
@@ -1894,7 +1898,7 @@ impl AstFolder for TypeChecker {
                     Ok(tail_ty.unwrap_or(Type::Unit))
                 }
 
-                ExprKind::Var(def_id) => self.check_var_ref(*def_id, expr.span),
+                ExprKind::Var { def_id, .. } => self.check_var_ref(*def_id, expr.span),
 
                 ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
 

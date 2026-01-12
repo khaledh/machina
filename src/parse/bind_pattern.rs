@@ -23,7 +23,10 @@ impl<'a> Parser<'a> {
         self.advance(); // consume the ident
         Ok(BindPattern {
             id: self.id_gen.new_id(),
-            kind: BindPatternKind::Name(var_name),
+            kind: BindPatternKind::Name {
+                ident: var_name,
+                def_id: (),
+            },
             span: self.close(marker),
         })
     }
@@ -50,7 +53,10 @@ impl<'a> Parser<'a> {
                 // Shorthand field pattern
                 BindPattern {
                     id: parser.id_gen.new_id(),
-                    kind: BindPatternKind::Name(field_name.clone()),
+                    kind: BindPatternKind::Name {
+                        ident: field_name.clone(),
+                        def_id: (),
+                    },
                     span: parser.close(field_marker.clone()),
                 }
             };

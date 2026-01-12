@@ -66,7 +66,7 @@ impl Visitor for SliceEscapeChecker<'_> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         if let StmtExprKind::Assign { assignee, value } = &stmt.kind
             && self.is_slice_expr(value)
-            && !matches!(assignee.kind, ExprKind::Var(_))
+            && !matches!(assignee.kind, ExprKind::Var { .. })
         {
             self.record_slice_store(value.span);
         }

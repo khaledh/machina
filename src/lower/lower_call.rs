@@ -70,7 +70,7 @@ impl<'a> FuncLowerer<'a> {
         let callee = match self.ctx.type_map.lookup_call_def(call.id) {
             Some(def_id) => Callee::Def(def_id),
             None => {
-                if let ExprKind::Var(def_id) = callee.kind {
+                if let ExprKind::Var { def_id, .. } = callee.kind {
                     let def = self.def_for_id(def_id, callee.id)?;
                     if matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
                         Callee::Def(def.id)
@@ -148,7 +148,7 @@ impl<'a> FuncLowerer<'a> {
 
     /// Lower a call argument into a place (or temp if needed).
     pub(super) fn lower_call_arg_place(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
-        if matches!(arg.kind, ExprKind::Var(_)) && self.ctx.implicit_moves.contains(&arg.id) {
+        if matches!(arg.kind, ExprKind::Var { .. }) && self.ctx.implicit_moves.contains(&arg.id) {
             // Implicitly moved heap args should skip caller drops.
             self.record_move(arg);
         }

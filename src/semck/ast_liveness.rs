@@ -190,7 +190,7 @@ fn collect_pattern_defs(
     defs: &mut HashSet<DefId>,
 ) {
     match &pattern.kind {
-        BindPatternKind::Name(def_id) => add_def_if_heap(*def_id, ctx, defs),
+        BindPatternKind::Name { def_id, .. } => add_def_if_heap(*def_id, ctx, defs),
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
@@ -206,7 +206,7 @@ fn collect_pattern_defs(
 
 fn collect_assignee_defs(assignee: &Expr, ctx: &TypeCheckedContext, defs: &mut HashSet<DefId>) {
     // Only a plain variable counts as a definition; projections are treated as uses.
-    if let ExprKind::Var(def_id) = assignee.kind {
+    if let ExprKind::Var { def_id, .. } = assignee.kind {
         add_def_if_heap(def_id, ctx, defs);
     }
 }
@@ -259,7 +259,7 @@ fn collect_assignee_uses<A: HeapUseAccumulator>(
     acc: &mut A,
 ) {
     match &assignee.kind {
-        ExprKind::Var(_) => {}
+        ExprKind::Var { .. } => {}
         ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
             collect_expr_uses(target, ctx, acc);
         }
@@ -307,7 +307,7 @@ impl<A: HeapUseAccumulator> Visitor for HeapUseCollector<'_, A> {
 
 /// Returns the DefId if `expr` is a plain heap variable read.
 fn heap_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
-    let ExprKind::Var(def_id) = expr.kind else {
+    let ExprKind::Var { def_id, .. } = expr.kind else {
         return None;
     };
     let ty = ctx.type_map.lookup_node_type(expr.id)?;

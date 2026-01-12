@@ -70,7 +70,7 @@ impl<'a> FuncLowerer<'a> {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
             StmtExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
-            StmtExprKind::VarDecl { ident, .. } => self.lower_var_decl(stmt, *ident),
+            StmtExprKind::VarDecl { def_id, .. } => self.lower_var_decl(stmt, *def_id),
             StmtExprKind::Assign { assignee, value } => self.lower_assign(assignee, value),
             StmtExprKind::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
             StmtExprKind::For {
@@ -173,7 +173,7 @@ impl<'a> FuncLowerer<'a> {
         }
 
         if self.is_out_param_assignee(assignee)
-            && matches!(assignee.kind, ExprKind::Var(_))
+            && matches!(assignee.kind, ExprKind::Var { .. })
             && self.ctx.init_assigns.contains(&assignee.id)
         {
             // First assignment to an out param is a full initialization; skip drop.
@@ -191,7 +191,7 @@ impl<'a> FuncLowerer<'a> {
 
         self.emit_drop_place(place, target_ty);
         if clear_moved {
-            if let ExprKind::Var(def_id) = assignee.kind {
+            if let ExprKind::Var { def_id, .. } = assignee.kind {
                 self.clear_moved(def_id);
             }
         }
@@ -217,7 +217,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     fn is_initialized_for_assignee(&self, assignee: &Expr) -> Option<LocalId> {
-        if let ExprKind::Var(def_id) = assignee.kind {
+        if let ExprKind::Var { def_id, .. } = assignee.kind {
             self.is_initialized_for_def(def_id)
         } else {
             None
@@ -232,7 +232,7 @@ impl<'a> FuncLowerer<'a> {
 
     fn base_def_for_assignee(&self, assignee: &Expr) -> Option<DefId> {
         match &assignee.kind {
-            ExprKind::Var(def_id) => Some(*def_id),
+            ExprKind::Var { def_id, .. } => Some(*def_id),
             ExprKind::StructField { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::ArrayIndex { target, .. }

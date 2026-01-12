@@ -100,10 +100,10 @@ impl<'a> FuncLowerer<'a> {
                 Ok(Operand::Const(variant_tag))
             }
 
-            EK::Closure { ident, .. } => Ok(Operand::Const(Const::FuncAddr { def: *ident })),
+            EK::Closure { def_id, .. } => Ok(Operand::Const(Const::FuncAddr { def: *def_id })),
 
             // Place-based reads
-            EK::Var(def_id) => {
+            EK::Var { def_id, .. } => {
                 let def = self.def_for_id(*def_id, expr.id)?;
                 if matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
                     return Ok(Operand::Const(Const::FuncAddr { def: def.id }));
@@ -489,7 +489,10 @@ impl<'a> FuncLowerer<'a> {
                 // Aggregate literal: build in place.
                 self.lower_agg_lit_into(dst, expr)
             }
-            EK::Var(_) | EK::ArrayIndex { .. } | EK::TupleField { .. } | EK::StructField { .. } => {
+            EK::Var { .. }
+            | EK::ArrayIndex { .. }
+            | EK::TupleField { .. }
+            | EK::StructField { .. } => {
                 // Aggregate place: copy unless it's already the destination.
                 let src = self.lower_place_agg(expr)?;
                 if src.base() == dst.base() && src.projections() == dst.projections() {

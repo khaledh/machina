@@ -85,7 +85,7 @@ impl<'a> FuncLowerer<'a> {
     }
 
     pub(super) fn record_move(&mut self, expr: &Expr) {
-        let ExprKind::Var(def_id) = expr.kind else {
+        let ExprKind::Var { def_id, .. } = expr.kind else {
             return;
         };
         let Ok(ty) = self.ty_for_node(expr.id) else {

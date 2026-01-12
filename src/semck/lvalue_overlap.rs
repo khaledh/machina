@@ -129,7 +129,7 @@ impl<'a> LvalueOverlapChecker<'a> {
     /// Returns None for non-lvalue expressions (e.g., literals, calls).
     fn lvalue_path(&self, expr: &Expr) -> Option<LvaluePath> {
         match &expr.kind {
-            ExprKind::Var(def_id) => Some(LvaluePath {
+            ExprKind::Var { def_id, .. } => Some(LvaluePath {
                 base: *def_id,
                 projections: Vec::new(),
             }),
