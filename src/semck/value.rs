@@ -1,29 +1,28 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::context::TypeCheckedContext;
+use crate::context::ElaboratedContext;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
-use crate::tir::model::{
-    BinaryOp, FunctionSig, TypeDef, TypeDefKind, TypeExpr, TypeExprKind, TypedExpr as Expr,
-    TypedExprKind as ExprKind, TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr,
-    TypedStmtExprKind as StmtExprKind, UnaryOp,
+use crate::sir::model::{
+    BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
+    TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{Type, TypeId};
 
-pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
     let mut checker = ValueChecker::new(ctx);
     checker.check_module();
     checker.errors
 }
 
 struct ValueChecker<'a> {
-    ctx: &'a TypeCheckedContext,
+    ctx: &'a ElaboratedContext,
     errors: Vec<SemCheckError>,
     current_return_ty: Option<Type>,
 }
 
 impl<'a> ValueChecker<'a> {
-    fn new(ctx: &'a TypeCheckedContext) -> Self {
+    fn new(ctx: &'a ElaboratedContext) -> Self {
         Self {
             ctx,
             errors: Vec::new(),
@@ -32,13 +31,13 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        for type_def in &self.ctx.module.type_defs() {
+        for type_def in &self.ctx.sir_module.type_defs() {
             self.check_type_def(type_def);
         }
-        for func_decl in &self.ctx.module.func_decls() {
+        for func_decl in &self.ctx.sir_module.func_decls() {
             self.check_function_sig(&func_decl.sig);
         }
-        for func_def in self.ctx.module.func_defs() {
+        for func_def in self.ctx.sir_module.func_defs() {
             self.check_function_sig(&func_def.sig);
             self.visit_func_def(func_def);
         }
@@ -118,7 +117,7 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Option<Type> {
-        resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ty).ok()
+        resolve_type_expr(&self.ctx.def_table, &self.ctx.sir_module, ty).ok()
     }
 
     fn check_range_binding_value(&mut self, value: &Expr, ty: &Type) {

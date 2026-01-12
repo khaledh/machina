@@ -21,9 +21,11 @@ impl NrvoAnalyzer {
     pub fn analyze(self) -> AnalyzedContext {
         let SemanticCheckedContext {
             module: typed_module,
+            sir_module,
             def_table,
             type_map,
             symbols,
+            node_id_gen,
             implicit_moves,
             init_assigns,
             full_init_assigns,
@@ -37,9 +39,11 @@ impl NrvoAnalyzer {
 
         AnalyzedContext {
             module: typed_module,
+            sir_module,
             def_table,
             type_map,
             symbols,
+            node_id_gen,
             implicit_moves,
             init_assigns,
             full_init_assigns,
@@ -262,6 +266,8 @@ impl NrvoSafetyChecker {
 
             ExprKind::Move { expr } => self.check_expr(expr, false),
 
+            ExprKind::Coerce { expr, .. } => self.check_expr(expr, false),
+
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
 
             ExprKind::BinOp { left, right, .. } => {
@@ -286,6 +292,7 @@ impl NrvoSafetyChecker {
             ExprKind::Var { def_id, .. } => *def_id == self.var_def_id,
             ExprKind::ArrayIndex { target, .. } => self.is_lvalue_use(target),
             ExprKind::TupleField { target, .. } => self.is_lvalue_use(target),
+            ExprKind::Coerce { expr, .. } => self.is_lvalue_use(expr),
             _ => false,
         }
     }

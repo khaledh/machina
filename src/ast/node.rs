@@ -9,6 +9,7 @@ impl fmt::Display for NodeId {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct NodeIdGen {
     next_id: u32,
 }

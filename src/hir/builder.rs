@@ -485,6 +485,10 @@ impl ToHir for ast::Expr {
             ast::ExprKind::Move { expr } => hir::ExprKind::Move {
                 expr: Box::new(expr.to_hir(def_lookup)),
             },
+            ast::ExprKind::Coerce { kind, expr } => hir::ExprKind::Coerce {
+                kind,
+                expr: Box::new(expr.to_hir(def_lookup)),
+            },
             ast::ExprKind::Var { ident, .. } => hir::ExprKind::Var {
                 ident,
                 def_id: def_id(def_lookup, id),

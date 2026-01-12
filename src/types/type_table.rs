@@ -36,6 +36,10 @@ impl TypeTable {
         &self.types[id.index()]
     }
 
+    pub fn lookup_id(&self, ty: &Type) -> Option<TypeId> {
+        self.ids.get(ty).copied()
+    }
+
     pub fn len(&self) -> usize {
         self.types.len()
     }

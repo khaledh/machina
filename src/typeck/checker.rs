@@ -1888,6 +1888,8 @@ impl AstFolder<DefId> for TypeChecker {
 
                 ExprKind::Move { expr } => walk_expr(self, expr),
 
+                ExprKind::Coerce { expr, .. } => walk_expr(self, expr),
+
                 ExprKind::Block { items, tail } => {
                     for item in items {
                         let _ = self.visit_block_item(item)?;

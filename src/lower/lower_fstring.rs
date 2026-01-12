@@ -3,7 +3,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::tir::model::{Expr, ExprKind as EK, StringFmtSegment};
+use crate::sir::model::{Expr, ExprKind as EK, StringFmtSegment};
 use crate::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;

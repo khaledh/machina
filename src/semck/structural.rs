@@ -1,20 +1,19 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
-use crate::context::TypeCheckedContext;
+use crate::context::ElaboratedContext;
 use crate::resolve::DefId;
 use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
-use crate::tir::model::{
-    BindPattern, BindPatternKind, CallArgMode, FunctionSig, MethodSig, Param, ParamMode,
-    TypeDefKind, TypedCallArg as CallArg, TypedExpr as Expr, TypedExprKind as ExprKind,
-    TypedMatchArm as MatchArm, TypedStmtExpr as StmtExpr, TypedStmtExprKind as StmtExprKind,
-    TypedStructLitField as StructLitField, TypedStructUpdateField as StructUpdateField,
+use crate::sir::model::{
+    BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
+    MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
+    TypeDefKind,
 };
 use crate::typeck::type_map::{CallSig, resolve_type_expr};
 use crate::types::{Type, TypeId};
 use std::collections::{HashMap, HashSet};
 
-pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
     // Structural checks depend on type map + AST shape, not value flow.
     let mut checker = StructuralChecker::new(ctx);
     checker.check_module();
@@ -27,7 +26,7 @@ struct EnumVariantInfo {
 }
 
 struct StructuralChecker<'a> {
-    ctx: &'a TypeCheckedContext,
+    ctx: &'a ElaboratedContext,
     errors: Vec<SemCheckError>,
     // Cached field/variant shapes from type declarations.
     struct_fields: HashMap<String, Vec<String>>,
@@ -35,11 +34,11 @@ struct StructuralChecker<'a> {
 }
 
 impl<'a> StructuralChecker<'a> {
-    fn new(ctx: &'a TypeCheckedContext) -> Self {
+    fn new(ctx: &'a ElaboratedContext) -> Self {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 
-        for type_def in ctx.module.type_defs() {
+        for type_def in ctx.sir_module.type_defs() {
             match &type_def.kind {
                 TypeDefKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
@@ -74,7 +73,7 @@ impl<'a> StructuralChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        self.visit_module(&self.ctx.module);
+        self.visit_module(&self.ctx.sir_module);
     }
 
     fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: crate::diag::Span) {
@@ -190,7 +189,8 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_param_modes(&mut self, params: &[Param]) {
         for param in params {
-            if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ) {
+            if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.sir_module, &param.typ)
+            {
                 if param.mode == ParamMode::InOut && !(ty.is_compound() || ty.is_heap()) {
                     // Only aggregate or heap types can be inout parameters.
                     self.errors.push(SemCheckError::InOutParamNotAggregate(
@@ -264,7 +264,8 @@ impl<'a> StructuralChecker<'a> {
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::StructField { target, .. }
-            | ExprKind::Slice { target, .. } => self.is_mutable_lvalue(target),
+            | ExprKind::Slice { target, .. }
+            | ExprKind::Coerce { expr: target, .. } => self.is_mutable_lvalue(target),
             _ => None,
         }
     }
@@ -279,7 +280,8 @@ impl<'a> StructuralChecker<'a> {
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::StructField { target, .. }
-            | ExprKind::Slice { target, .. } => self.is_lvalue(target),
+            | ExprKind::Slice { target, .. }
+            | ExprKind::Coerce { expr: target, .. } => self.is_lvalue(target),
             _ => false,
         }
     }

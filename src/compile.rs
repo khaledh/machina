@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::ast::{Module, NodeIdGen};
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
+use crate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::liveness;
 use crate::lower;
@@ -94,7 +95,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
 
     let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
-    let (user_module, _id_gen) = parse_with_id_gen(source, id_gen)?;
+    let (user_module, id_gen) = parse_with_id_gen(source, id_gen)?;
 
     // combine top_level_items: prelude first, then user
     let mut top_level_items = Vec::new();
@@ -111,7 +112,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- Resolve Defs/Uses ---
 
-    let ast_context = ParsedContext::new(module);
+    let ast_context = ParsedContext::new(module, id_gen);
 
     let resolved_context = resolve(ast_context).map_err(|errs| {
         errs.into_iter()
@@ -141,9 +142,13 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
+    // --- Elaborate (TIR -> SIR) ---
+
+    let elaborated_context = elaborate::elaborate(type_checked_context);
+
     // --- Semantic Check ---
 
-    let semantic_checked_context = sem_check(type_checked_context).map_err(|errs| {
+    let semantic_checked_context = sem_check(elaborated_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

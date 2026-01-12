@@ -718,6 +718,13 @@ impl Expr {
                     segment.fmt_with_indent(f, level + 1)?;
                 }
             }
+            ExprKind::Coerce { kind, expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Coerce [{}]", pad, self.id)?;
+                writeln!(f, "{}Kind: {}", pad1, kind)?;
+                writeln!(f, "{}Expr:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
         }
         Ok(())
     }
@@ -807,6 +814,15 @@ impl fmt::Display for UnaryOp {
             UnaryOp::BitNot => write!(f, "~")?,
         }
         Ok(())
+    }
+}
+
+impl fmt::Display for CoerceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            CoerceKind::ArrayToSlice => "ArrayToSlice",
+        };
+        write!(f, "{}", name)
     }
 }
 

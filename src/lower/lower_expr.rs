@@ -3,7 +3,7 @@ use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::lower::lower_util::u64_const;
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
-use crate::tir::model::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
+use crate::sir::model::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -30,6 +30,8 @@ impl<'a> FuncLowerer<'a> {
                 self.lower_expr_value(expr)
             }
 
+            EK::Coerce { expr, .. } => self.lower_expr_value(expr),
+
             // everything else: decide scalar vs aggregate by type
             _ => {
                 let ty = self.ty_for_node(expr.id)?;
@@ -51,6 +53,8 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an expression expected to produce a scalar operand.
     pub(super) fn lower_scalar_expr(&mut self, expr: &Expr) -> Result<Operand, LowerError> {
         match &expr.kind {
+            EK::Coerce { expr, .. } => self.lower_scalar_expr(expr),
+
             // Literals
             EK::IntLit(value) => {
                 let ty = self.ty_for_node(expr.id)?;

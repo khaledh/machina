@@ -14,8 +14,9 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
 
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
 
-    let ast_context = ParsedContext::new(module);
+    let ast_context = ParsedContext::new(module, id_gen);
     resolve(ast_context)
 }
 

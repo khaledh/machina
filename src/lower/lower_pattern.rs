@@ -3,7 +3,7 @@ use crate::lower::lower_ast::ExprValue;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::types::*;
 use crate::resolve::{DefId, DefKind};
-use crate::tir::model::{BindPattern, BindPatternKind as PK, Expr};
+use crate::sir::model::{BindPattern, BindPatternKind as PK, Expr};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

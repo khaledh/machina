@@ -5,11 +5,11 @@
 //! Read-only aliasing (`in` mode) is allowed.
 
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::TypeCheckedContext;
+use crate::context::ElaboratedContext;
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
-use crate::tir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
+use crate::sir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::types::TypeId;
 
 /// An argument access: its mode, lvalue path, and source location.
@@ -58,19 +58,19 @@ enum Bound {
     Unspecified, // `arr[..n]` (start omitted) or `arr[n..]` (end omitted)
 }
 
-pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
     let mut checker = LvalueOverlapChecker::new(ctx);
-    checker.visit_module(&ctx.module);
+    checker.visit_module(&ctx.sir_module);
     checker.errors
 }
 
 struct LvalueOverlapChecker<'a> {
-    ctx: &'a TypeCheckedContext,
+    ctx: &'a ElaboratedContext,
     errors: Vec<SemCheckError>,
 }
 
 impl<'a> LvalueOverlapChecker<'a> {
-    fn new(ctx: &'a TypeCheckedContext) -> Self {
+    fn new(ctx: &'a ElaboratedContext) -> Self {
         Self {
             ctx,
             errors: Vec::new(),
@@ -162,6 +162,7 @@ impl<'a> LvalueOverlapChecker<'a> {
             }
             // Treat move as an lvalue use for overlap detection.
             ExprKind::Move { expr } => self.lvalue_path(expr),
+            ExprKind::Coerce { expr, .. } => self.lvalue_path(expr),
             _ => None,
         }
     }

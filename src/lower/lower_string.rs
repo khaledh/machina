@@ -3,7 +3,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::tir::model::Expr;
+use crate::sir::model::Expr;
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

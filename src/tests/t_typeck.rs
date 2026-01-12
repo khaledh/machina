@@ -14,8 +14,9 @@ fn type_check_source(source: &str) -> Result<TypeCheckedContext, Vec<TypeCheckEr
 
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
 
-    let ast_context = ParsedContext::new(module);
+    let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     type_check(resolved_context)
 }

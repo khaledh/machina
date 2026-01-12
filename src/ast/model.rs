@@ -637,6 +637,17 @@ pub enum ExprKind<D, T = ()> {
         return_ty: TypeExpr<D>,
         body: Box<Expr<D, T>>,
     },
+
+    // SIR-only: elaboration inserts these, parser never emits them.
+    Coerce {
+        kind: CoerceKind,
+        expr: Box<Expr<D, T>>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoerceKind {
+    ArrayToSlice,
 }
 
 // -- Array literals ---

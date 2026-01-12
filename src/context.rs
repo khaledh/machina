@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 
-use crate::ast::{Module as AstModule, NodeId};
+use crate::ast::{Module as AstModule, NodeId, NodeIdGen};
 use crate::hir::model::Module as HirModule;
 use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
 use crate::regalloc::AllocationResult;
 use crate::resolve::DefTable;
+use crate::sir::model::Module as SirModule;
 use crate::symtab::SymbolTable;
 use crate::tir::model::TypedModule;
 use crate::typeck::type_map::TypeMap;
@@ -17,11 +18,15 @@ use crate::typeck::type_map::TypeMap;
 #[derive(Clone)]
 pub struct ParsedContext {
     pub module: AstModule,
+    pub node_id_gen: NodeIdGen,
 }
 
 impl ParsedContext {
-    pub fn new(module: AstModule) -> Self {
-        Self { module }
+    pub fn new(module: AstModule, node_id_gen: NodeIdGen) -> Self {
+        Self {
+            module,
+            node_id_gen,
+        }
     }
 
     pub fn with_def_table(self, def_table: DefTable, module: HirModule) -> ResolvedContext {
@@ -30,6 +35,7 @@ impl ParsedContext {
             module,
             def_table,
             symbols,
+            node_id_gen: self.node_id_gen,
         }
     }
 }
@@ -42,6 +48,7 @@ pub struct ResolvedContext {
     pub module: HirModule,
     pub def_table: DefTable,
     pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
 }
 
 impl ResolvedContext {
@@ -51,6 +58,7 @@ impl ResolvedContext {
             def_table: self.def_table,
             type_map,
             symbols: self.symbols,
+            node_id_gen: self.node_id_gen,
         }
     }
 }
@@ -64,9 +72,23 @@ pub struct TypeCheckedContext {
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
 }
 
-impl TypeCheckedContext {
+// -----------------------------------------------------------------------------
+// Elaborated Context
+// -----------------------------------------------------------------------------
+#[derive(Clone)]
+pub struct ElaboratedContext {
+    pub tir_module: TypedModule,
+    pub sir_module: SirModule,
+    pub def_table: DefTable,
+    pub type_map: TypeMap,
+    pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
+}
+
+impl ElaboratedContext {
     pub fn with_sem_results(
         self,
         implicit_moves: HashSet<NodeId>,
@@ -74,10 +96,12 @@ impl TypeCheckedContext {
         full_init_assigns: HashSet<NodeId>,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
-            module: self.module,
+            module: self.tir_module,
+            sir_module: self.sir_module,
             def_table: self.def_table,
             type_map: self.type_map,
             symbols: self.symbols,
+            node_id_gen: self.node_id_gen,
             implicit_moves,
             init_assigns,
             full_init_assigns,
@@ -91,9 +115,11 @@ impl TypeCheckedContext {
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
     pub module: TypedModule,
+    pub sir_module: SirModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
     pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,
@@ -105,9 +131,11 @@ pub struct SemanticCheckedContext {
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
     pub module: TypedModule,
+    pub sir_module: SirModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
     pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,

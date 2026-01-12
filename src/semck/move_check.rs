@@ -12,13 +12,13 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::TypeCheckedContext;
+use crate::context::ElaboratedContext;
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
-use crate::tir::model::{
-    BindPattern, BindPatternKind, NodeId, ParamMode, TypedExpr as Expr, TypedExprKind as ExprKind,
-    TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr, TypedStmtExprKind as StmtExprKind,
+use crate::sir::model::{
+    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
+    StmtExprKind,
 };
 use crate::types::TypeId;
 
@@ -29,10 +29,10 @@ pub struct MoveCheckResult {
 }
 
 /// Run move checking and collect implicit moves for last-use heap values.
-pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
+pub fn check(ctx: &ElaboratedContext) -> MoveCheckResult {
     let mut errors = Vec::new();
     let mut implicit_moves = HashSet::new();
-    for func_def in ctx.module.func_defs() {
+    for func_def in ctx.sir_module.func_defs() {
         check_func_def(func_def, ctx, &mut errors, &mut implicit_moves);
     }
     MoveCheckResult {
@@ -43,7 +43,7 @@ pub fn check(ctx: &TypeCheckedContext) -> MoveCheckResult {
 
 fn check_func_def(
     func_def: &FuncDef,
-    ctx: &TypeCheckedContext,
+    ctx: &ElaboratedContext,
     errors: &mut Vec<SemCheckError>,
     implicit_moves: &mut HashSet<NodeId>,
 ) {
@@ -95,7 +95,7 @@ fn check_func_def(
 
 /// Walks expressions checking for use-after-move and tracking moved variables.
 struct MoveVisitor<'a> {
-    ctx: &'a TypeCheckedContext,
+    ctx: &'a ElaboratedContext,
     /// Variables that have been moved and cannot be used.
     moved: HashSet<DefId>,
     /// Sink params can be moved from (they own the value).
@@ -115,7 +115,7 @@ struct MoveVisitor<'a> {
 
 impl<'a> MoveVisitor<'a> {
     fn new(
-        ctx: &'a TypeCheckedContext,
+        ctx: &'a ElaboratedContext,
         moved: HashSet<DefId>,
         sink_params: HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
@@ -364,6 +364,9 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
         match &expr.kind {
             ExprKind::Move { expr } => {
                 self.handle_move_target(expr);
+            }
+            ExprKind::Coerce { expr, .. } => {
+                self.visit_expr(expr);
             }
             ExprKind::Var { .. } => {
                 self.check_use(expr);

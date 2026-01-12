@@ -406,6 +406,12 @@ impl TypeMap {
         self.call_sig.get(&node).cloned()
     }
 
+    pub fn insert_node_type(&mut self, node: NodeId, typ: Type) -> TypeId {
+        let id = self.type_table.intern(typ);
+        self.node_type.insert(node, id);
+        id
+    }
+
     pub fn type_table(&self) -> &TypeTable {
         &self.type_table
     }

@@ -6,6 +6,7 @@ mod format;
 pub mod model;
 pub mod node;
 pub mod visit;
+pub mod visit_mut;
 
 pub use fold::AstFolder;
 pub use model::*;

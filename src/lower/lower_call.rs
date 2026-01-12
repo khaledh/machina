@@ -2,7 +2,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
-use crate::tir::model::{CallArg, CallArgMode, Expr, ExprKind, ParamMode};
+use crate::sir::model::{CallArg, CallArgMode, CoerceKind, Expr, ExprKind, ParamMode};
 use crate::types::{Type, array_to_slice_assignable};
 
 impl<'a> FuncLowerer<'a> {
@@ -148,6 +148,7 @@ impl<'a> FuncLowerer<'a> {
 
     /// Lower a call argument into a place (or temp if needed).
     pub(super) fn lower_call_arg_place(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
+        let (arg, _) = self.peel_coerce_expr(arg);
         if matches!(arg.kind, ExprKind::Var { .. }) && self.ctx.implicit_moves.contains(&arg.id) {
             // Implicitly moved heap args should skip caller drops.
             self.record_move(arg);
@@ -181,6 +182,13 @@ impl<'a> FuncLowerer<'a> {
         Ok(array_to_slice_assignable(&arg_ty, param_ty))
     }
 
+    fn peel_coerce_expr<'b>(&self, expr: &'b Expr) -> (&'b Expr, Option<CoerceKind>) {
+        match &expr.kind {
+            ExprKind::Coerce { kind, expr } => (expr.as_ref(), Some(*kind)),
+            _ => (expr, None),
+        }
+    }
+
     fn lower_call_arg<'b>(
         &mut self,
         arg_expr: &'b Expr,
@@ -188,6 +196,7 @@ impl<'a> FuncLowerer<'a> {
         arg: &CallArg,
         out_args: &mut Vec<&'b Expr>,
     ) -> Result<PlaceAny, LowerError> {
+        let (arg_expr, coerce_kind) = self.peel_coerce_expr(arg_expr);
         if param.mode == ParamMode::Out {
             // Out args are write-only; skip drop only when the call is the first init.
             let place = self.lower_place(arg_expr)?;
@@ -199,8 +208,9 @@ impl<'a> FuncLowerer<'a> {
             return Ok(place);
         }
 
-        if matches!(arg.mode, CallArgMode::Default | CallArgMode::InOut)
-            && self.coerce_array_to_slice(arg_expr, &param.ty)?
+        if matches!(coerce_kind, Some(CoerceKind::ArrayToSlice))
+            || (matches!(arg.mode, CallArgMode::Default | CallArgMode::InOut)
+                && self.coerce_array_to_slice(arg_expr, &param.ty)?)
         {
             return self.lower_call_array_as_slice(arg_expr, &param.ty);
         }

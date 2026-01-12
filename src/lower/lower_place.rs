@@ -1,7 +1,7 @@
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
-use crate::tir::model::{Expr, ExprKind as EK, TypeDefKind};
+use crate::sir::model::{Expr, ExprKind as EK, TypeDefKind};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{StructField as TypeStructField, Type};
 
@@ -414,7 +414,7 @@ impl<'a> FuncLowerer<'a> {
             return ty.clone();
         }
 
-        let defs = self.ctx.module.type_defs();
+        let defs = self.ctx.sir_module.type_defs();
         let def = defs.iter().find(|def| def.name == *name);
         let Some(def) = def else {
             return ty.clone();
@@ -427,7 +427,7 @@ impl<'a> FuncLowerer<'a> {
             .iter()
             .filter_map(|f| {
                 let field_ty =
-                    resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &f.ty).ok()?;
+                    resolve_type_expr(&self.ctx.def_table, &self.ctx.sir_module, &f.ty).ok()?;
                 Some(TypeStructField {
                     name: f.name.clone(),
                     ty: field_ty,

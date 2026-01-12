@@ -11,15 +11,13 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::TypeCheckedContext;
+use crate::context::ElaboratedContext;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
-use crate::tir::model::{
-    BindPattern, BindPatternKind, CallArgMode, MatchPattern, MatchPatternBinding, NodeId,
-    ParamMode, TypedArrayLitInit as ArrayLitInit, TypedBlockItem as BlockItem, TypedExpr as Expr,
-    TypedExprKind as ExprKind, TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr,
-    TypedStmtExprKind as StmtExprKind, TypedStringFmtSegment as StringFmtSegment,
+use crate::sir::model::{
+    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
+    MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
 use crate::types::{Type, TypeId};
 
@@ -110,11 +108,11 @@ enum InitProj {
     Index(u64),
 }
 
-pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
+pub(super) fn check(ctx: &ElaboratedContext) -> DefInitResult {
     let mut errors = Vec::new();
     let mut init_assigns = HashSet::new();
     let mut full_init_assigns = HashSet::new();
-    for func_def in ctx.module.func_defs() {
+    for func_def in ctx.sir_module.func_defs() {
         check_func(
             func_def,
             ctx,
@@ -132,7 +130,7 @@ pub(super) fn check(ctx: &TypeCheckedContext) -> DefInitResult {
 
 fn check_func(
     func_def: &FuncDef,
-    ctx: &TypeCheckedContext,
+    ctx: &ElaboratedContext,
     errors: &mut Vec<SemCheckError>,
     init_assigns: &mut HashSet<NodeId>,
     full_init_assigns: &mut HashSet<NodeId>,
@@ -219,7 +217,7 @@ fn collect_param_defs(func_def: &FuncDef, include_out: bool) -> HashSet<DefId> {
 
 fn collect_out_param_defs(
     func_def: &FuncDef,
-    ctx: &TypeCheckedContext,
+    ctx: &ElaboratedContext,
 ) -> Vec<(DefId, String, Span)> {
     let mut defs = Vec::new();
     for param in &func_def.sig.params {
@@ -240,7 +238,7 @@ fn collect_all_defs(func_def: &FuncDef) -> HashSet<DefId> {
     defs
 }
 
-fn collect_local_defs(func_def: &FuncDef, ctx: &TypeCheckedContext) -> HashSet<DefId> {
+fn collect_local_defs(func_def: &FuncDef, ctx: &ElaboratedContext) -> HashSet<DefId> {
     collect_all_defs(func_def)
         .into_iter()
         .filter(|def_id| {
@@ -546,7 +544,7 @@ impl<'a> Visitor<DefId, TypeId> for DefSpanCollector<'a> {
 /// Walks a CFG block, checking for uses of uninitialized variables and
 /// updating the initialized set as assignments occur.
 struct DefInitChecker<'a> {
-    ctx: &'a TypeCheckedContext,
+    ctx: &'a ElaboratedContext,
     initialized: InitState,
     out_param_defs: &'a HashSet<DefId>,
     errors: &'a mut Vec<SemCheckError>,
@@ -556,7 +554,7 @@ struct DefInitChecker<'a> {
 
 impl<'a> DefInitChecker<'a> {
     fn new(
-        ctx: &'a TypeCheckedContext,
+        ctx: &'a ElaboratedContext,
         initialized: InitState,
         out_param_defs: &'a HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
@@ -1073,6 +1071,7 @@ impl<'a> DefInitChecker<'a> {
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr),
             ExprKind::HeapAlloc { expr } => self.check_expr(expr),
             ExprKind::Move { expr } => self.check_expr(expr),
+            ExprKind::Coerce { expr, .. } => self.check_expr(expr),
             ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
@@ -1117,6 +1116,7 @@ impl<'a> DefInitChecker<'a> {
                 }
                 None
             }
+            ExprKind::Coerce { expr, .. } => self.check_out_arg(expr),
             _ => {
                 self.check_expr(arg);
                 None
