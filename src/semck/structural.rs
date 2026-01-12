@@ -1,10 +1,11 @@
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
     BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
     MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
     TypeDefKind,
 };
-use crate::hir::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
@@ -358,7 +359,7 @@ impl<'a> StructuralChecker<'a> {
     }
 }
 
-impl Visitor for StructuralChecker<'_> {
+impl Visitor<HirDef> for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
         self.check_param_modes(&func_sig.params);
         walk_func_sig(self, func_sig);

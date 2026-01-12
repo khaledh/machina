@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::ast::fold::{AstFolder, walk_expr, walk_if};
+use crate::ast::stage::HirDef;
 use crate::ast::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::context::ResolvedContext;
 use crate::diag::Span;
-use crate::hir::fold::{AstFolder, walk_expr, walk_if};
 use crate::hir::model::*;
 use crate::resolve::{DefId, DefKind};
 use crate::types::{
@@ -1573,7 +1574,7 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
     }
 }
 
-impl AstFolder for TypeChecker {
+impl AstFolder<HirDef> for TypeChecker {
     type Error = TypeCheckError;
     type Output = Type;
     type Input = Type;

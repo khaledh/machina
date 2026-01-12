@@ -10,13 +10,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::hir::model::{
     ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
     MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
-use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::types::Type;
@@ -411,7 +412,7 @@ impl<'a> DefCollector<'a> {
     }
 }
 
-impl<'a> Visitor for DefCollector<'a> {
+impl<'a> Visitor<HirDef> for DefCollector<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         self.collect_stmt(stmt);
     }
@@ -531,7 +532,7 @@ impl<'a> DefSpanCollector<'a> {
     }
 }
 
-impl<'a> Visitor for DefSpanCollector<'a> {
+impl<'a> Visitor<HirDef> for DefSpanCollector<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         self.collect_stmt(stmt);
     }

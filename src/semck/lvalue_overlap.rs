@@ -4,10 +4,11 @@
 //! when at least one argument is mutated (inout/out/sink mode).
 //! Read-only aliasing (`in` mode) is allowed.
 
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
 use crate::hir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
-use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 
@@ -306,7 +307,7 @@ impl<'a> LvalueOverlapChecker<'a> {
     }
 }
 
-impl Visitor for LvalueOverlapChecker<'_> {
+impl Visitor<HirDef> for LvalueOverlapChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.visit_expr(&func_def.body);
     }

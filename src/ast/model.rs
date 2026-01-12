@@ -21,6 +21,16 @@ impl<T> Module<T> {
             .collect()
     }
 
+    pub fn type_def_by_id(&self, def_id: T) -> Option<&TypeDef<T>>
+    where
+        T: Copy + Eq,
+    {
+        self.top_level_items.iter().find_map(|item| match item {
+            TopLevelItem::TypeDef(type_def) if type_def.def_id == def_id => Some(type_def),
+            _ => None,
+        })
+    }
+
     pub fn func_sigs(&self) -> Vec<&FunctionSig<T>> {
         self.top_level_items
             .iter()
@@ -121,6 +131,18 @@ impl<'a, T> CallableRef<'a, T> {
         }
     }
 
+    pub fn def_id(&self) -> T
+    where
+        T: Copy,
+    {
+        match self {
+            CallableRef::FuncDecl(func_decl) => func_decl.def_id,
+            CallableRef::FuncDef(func_def) => func_def.def_id,
+            CallableRef::MethodDef { method_def, .. } => method_def.def_id,
+            CallableRef::ClosureDecl(closure_decl) => closure_decl.def_id,
+        }
+    }
+
     pub fn name(&self) -> String {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),
@@ -159,6 +181,7 @@ impl<'a, T> CallableRef<'a, T> {
 #[derive(Clone, Debug)]
 pub struct TypeDef<T> {
     pub id: NodeId,
+    pub def_id: T,
     pub name: String,
     pub kind: TypeDefKind<T>,
     pub span: Span,
@@ -244,6 +267,7 @@ pub enum StringFmtSegment<T> {
 #[derive(Clone, Debug)]
 pub struct FuncDecl<T> {
     pub id: NodeId,
+    pub def_id: T,
     pub sig: FunctionSig<T>,
     pub span: Span,
 }
@@ -251,6 +275,7 @@ pub struct FuncDecl<T> {
 #[derive(Clone, Debug)]
 pub struct FuncDef<T> {
     pub id: NodeId,
+    pub def_id: T,
     pub sig: FunctionSig<T>,
     pub body: Expr<T>,
     pub span: Span,
@@ -277,6 +302,7 @@ pub struct MethodBlock<T> {
 #[derive(Clone, Debug)]
 pub struct MethodDef<T> {
     pub id: NodeId,
+    pub def_id: T,
     pub sig: MethodSig<T>,
     pub body: Expr<T>,
     pub span: Span,
@@ -285,15 +311,16 @@ pub struct MethodDef<T> {
 #[derive(Clone, Debug)]
 pub struct MethodSig<T> {
     pub name: String,
-    pub self_param: SelfParam,
+    pub self_param: SelfParam<T>,
     pub params: Vec<Param<T>>,
     pub ret_ty_expr: TypeExpr<T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct SelfParam {
+pub struct SelfParam<T> {
     pub id: NodeId,
+    pub def_id: T,
     pub mode: ParamMode,
     pub span: Span,
 }
@@ -303,6 +330,7 @@ pub struct SelfParam {
 #[derive(Clone, Debug)]
 pub struct ClosureDecl<T> {
     pub id: NodeId,
+    pub def_id: T,
     pub sig: ClosureSig<T>,
     pub body: Expr<T>,
     pub span: Span,

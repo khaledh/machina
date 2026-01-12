@@ -41,6 +41,7 @@ impl<'a> Parser<'a> {
 
         Ok(TypeDef {
             id: self.id_gen.new_id(),
+            def_id: (),
             name,
             kind,
             span: self.close(marker),

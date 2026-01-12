@@ -1,4 +1,5 @@
 use super::*;
+use crate::ast::model;
 
 use std::fmt;
 
@@ -211,7 +212,7 @@ impl fmt::Display for FuncDef {
     }
 }
 
-impl fmt::Display for Param {
+impl<T> fmt::Display for model::Param<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.mode {
             ParamMode::In => {}
@@ -230,46 +231,46 @@ impl fmt::Display for Param {
     }
 }
 
-impl fmt::Display for BindPattern {
+impl<T> fmt::Display for model::BindPattern<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_indent(f, 0)
     }
 }
 
-impl fmt::Display for TypeExpr {
+impl<T> fmt::Display for model::TypeExpr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TypeExpr::{} [{}]", self.kind, self.id)?;
         Ok(())
     }
 }
 
-impl fmt::Display for TypeExprKind {
+impl<T> fmt::Display for model::TypeExprKind<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TypeExprKind::Named { ident, .. } => {
+            model::TypeExprKind::Named { ident, .. } => {
                 write!(f, "Named({})", ident)?;
             }
-            TypeExprKind::Array { elem_ty_expr, dims } => {
+            model::TypeExprKind::Array { elem_ty_expr, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;
             }
-            TypeExprKind::Tuple { field_ty_exprs } => {
+            model::TypeExprKind::Tuple { field_ty_exprs } => {
                 let field_ty_exprs_str = field_ty_exprs
                     .iter()
                     .map(|t| t.to_string())
                     .collect::<Vec<_>>();
                 write!(f, "Tuple([{}])", field_ty_exprs_str.join(", "))?;
             }
-            TypeExprKind::Range { min, max } => {
+            model::TypeExprKind::Range { min, max } => {
                 write!(f, "Range({}, {})", min, max)?;
             }
-            TypeExprKind::Slice { elem_ty_expr } => {
+            model::TypeExprKind::Slice { elem_ty_expr } => {
                 write!(f, "Slice({})", elem_ty_expr)?;
             }
-            TypeExprKind::Heap { elem_ty_expr } => {
+            model::TypeExprKind::Heap { elem_ty_expr } => {
                 write!(f, "Heap({})", elem_ty_expr)?;
             }
-            TypeExprKind::Fn {
+            model::TypeExprKind::Fn {
                 params,
                 ret_ty_expr,
             } => {
@@ -293,26 +294,26 @@ impl fmt::Display for TypeExprKind {
     }
 }
 
-impl BindPattern {
+impl<T> model::BindPattern<T> {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
-            BindPatternKind::Name { ident, .. } => {
+            model::BindPatternKind::Name { ident, .. } => {
                 writeln!(f, "{}Name({}) [{}]", pad, ident, self.id)?;
             }
-            BindPatternKind::Array { patterns } => {
+            model::BindPatternKind::Array { patterns } => {
                 writeln!(f, "{}Array [{}]", pad, self.id)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
-            BindPatternKind::Tuple { patterns } => {
+            model::BindPatternKind::Tuple { patterns } => {
                 writeln!(f, "{}Tuple [{}]", pad, self.id)?;
                 for pattern in patterns {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }
-            BindPatternKind::Struct { name, fields } => {
+            model::BindPatternKind::Struct { name, fields } => {
                 writeln!(f, "{}Struct({}) [{}]", pad, name, self.id)?;
                 for field in fields {
                     field.fmt_with_indent(f, level + 1)?;
@@ -323,7 +324,7 @@ impl BindPattern {
     }
 }
 
-impl StructFieldBindPattern {
+impl<T> model::StructFieldBindPattern<T> {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
         writeln!(f, "{}{}:", pad1, self.name)?;

@@ -12,6 +12,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(TopLevelItem::FuncDecl(FuncDecl {
                 id: self.id_gen.new_id(),
+                def_id: (),
                 sig,
                 span: self.close(marker),
             }))
@@ -28,6 +29,7 @@ impl<'a> Parser<'a> {
 
             Ok(TopLevelItem::FuncDef(FuncDef {
                 id: self.id_gen.new_id(),
+                def_id: (),
                 sig,
                 body,
                 span: self.close(marker),
@@ -94,6 +96,7 @@ impl<'a> Parser<'a> {
 
         Ok(MethodDef {
             id: self.id_gen.new_id(),
+            def_id: (),
             sig,
             body,
             span: self.close(marker),
@@ -114,6 +117,7 @@ impl<'a> Parser<'a> {
         self.advance();
         let self_param = SelfParam {
             id: self.id_gen.new_id(),
+            def_id: (),
             mode: self_mode,
             span: self.close(self_marker),
         };
@@ -177,6 +181,7 @@ impl<'a> Parser<'a> {
         // Record the closure declaration (to be included in the module decls)
         let closure_decl = ClosureDecl {
             id: self.id_gen.new_id(),
+            def_id: (),
             sig: ClosureSig {
                 name: ident,
                 params,

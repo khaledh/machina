@@ -11,12 +11,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
     BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
     StmtExprKind,
 };
-use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
@@ -335,7 +336,7 @@ impl<'a> MoveVisitor<'a> {
     }
 }
 
-impl<'a> Visitor for MoveVisitor<'a> {
+impl<'a> Visitor<HirDef> for MoveVisitor<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. }

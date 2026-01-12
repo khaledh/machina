@@ -1,6 +1,7 @@
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
-use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::semck::SemCheckError;
 use crate::types::Type;
 
@@ -52,7 +53,7 @@ impl<'a> SliceEscapeChecker<'a> {
     }
 }
 
-impl Visitor for SliceEscapeChecker<'_> {
+impl Visitor<HirDef> for SliceEscapeChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.visit_expr(&func_def.body);
 

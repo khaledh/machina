@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_backward;
 use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
-use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::DefId;
 
 // ============================================================================
@@ -296,7 +297,7 @@ struct HeapUseCollector<'a, A> {
     acc: &'a mut A,
 }
 
-impl<A: HeapUseAccumulator> Visitor for HeapUseCollector<'_, A> {
+impl<A: HeapUseAccumulator> Visitor<HirDef> for HeapUseCollector<'_, A> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(def_id) = heap_use_def(expr, self.ctx) {
             self.acc.record(def_id);

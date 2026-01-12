@@ -1,9 +1,10 @@
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
     BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
     TypeExpr, TypeExprKind, UnaryOp,
 };
-use crate::hir::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::semck::SemCheckError;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
@@ -138,7 +139,7 @@ impl<'a> ValueChecker<'a> {
     }
 }
 
-impl Visitor for ValueChecker<'_> {
+impl Visitor<HirDef> for ValueChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.current_return_ty = self.resolve_type(&func_def.sig.ret_ty_expr);
         walk_expr(self, &func_def.body);

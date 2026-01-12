@@ -13,12 +13,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
+use crate::ast::stage::HirDef;
+use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::hir::model::{
     BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
     StmtExprKind,
 };
-use crate::hir::visit::{Visitor, walk_expr};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::types::Type;
@@ -547,7 +548,7 @@ struct SliceUseCollector<'a> {
     uses: &'a mut HashSet<DefId>,
 }
 
-impl Visitor for SliceUseCollector<'_> {
+impl Visitor<HirDef> for SliceUseCollector<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(def_id) = slice_use_def(expr, self.ctx) {
             self.uses.insert(def_id);
@@ -631,7 +632,7 @@ impl<'a> BorrowConflictVisitor<'a> {
     }
 }
 
-impl Visitor for BorrowConflictVisitor<'_> {
+impl Visitor<HirDef> for BorrowConflictVisitor<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             // Moving a borrowed base is a conflict.
