@@ -1,16 +1,17 @@
-use crate::ast::stage::HirDef;
 use crate::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{
-    BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
-    MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
-    TypeDefKind,
-};
+use crate::resolve::DefId;
 use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
+use crate::tir::model::{
+    BindPattern, BindPatternKind, CallArgMode, FunctionSig, MethodSig, Param, ParamMode,
+    TypeDefKind, TypedCallArg as CallArg, TypedExpr as Expr, TypedExprKind as ExprKind,
+    TypedMatchArm as MatchArm, TypedStmtExpr as StmtExpr, TypedStmtExprKind as StmtExprKind,
+    TypedStructLitField as StructLitField, TypedStructUpdateField as StructUpdateField,
+};
 use crate::typeck::type_map::{CallSig, resolve_type_expr};
-use crate::types::Type;
+use crate::types::{Type, TypeId};
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
@@ -114,10 +115,11 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_struct_update(&mut self, target: &Expr, fields: &[StructUpdateField]) {
         // Validate field names on struct update expressions.
-        let Some(Type::Struct {
+        let target_ty = self.ctx.type_map.type_table().get(target.ty);
+        let Type::Struct {
             fields: struct_fields,
             ..
-        }) = self.ctx.type_map.lookup_node_type(target.id)
+        } = target_ty
         else {
             return;
         };
@@ -359,7 +361,7 @@ impl<'a> StructuralChecker<'a> {
     }
 }
 
-impl Visitor<HirDef> for StructuralChecker<'_> {
+impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
         self.check_param_modes(&func_sig.params);
         walk_func_sig(self, func_sig);
@@ -397,16 +399,15 @@ impl Visitor<HirDef> for StructuralChecker<'_> {
             }
             ExprKind::StructField { target, field } => {
                 // Validate struct field access targets early for clearer errors.
-                if let Some(mut target_ty) = self.ctx.type_map.lookup_node_type(target.id) {
-                    while let Type::Heap { elem_ty } = target_ty {
-                        target_ty = *elem_ty;
-                    }
-                    if let Type::Struct { fields, .. } = target_ty
-                        && !fields.iter().any(|f| f.name == *field)
-                    {
-                        self.errors
-                            .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
-                    }
+                let mut target_ty = self.ctx.type_map.type_table().get(target.ty).clone();
+                while let Type::Heap { elem_ty } = target_ty {
+                    target_ty = *elem_ty;
+                }
+                if let Type::Struct { fields, .. } = target_ty
+                    && !fields.iter().any(|f| f.name == *field)
+                {
+                    self.errors
+                        .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
                 }
             }
             ExprKind::Slice { target, .. } => {

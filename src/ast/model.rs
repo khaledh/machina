@@ -1,4 +1,4 @@
-//! Generic AST model: parameterized over identifier representation.
+//! Generic AST model: parameterized over Def/Ty types.
 
 use crate::ast::NodeId;
 use crate::diag::Span;
@@ -6,12 +6,12 @@ use crate::diag::Span;
 // -- Module ---
 
 #[derive(Clone, Debug)]
-pub struct Module<T> {
-    pub top_level_items: Vec<TopLevelItem<T>>,
+pub struct Module<D, T = ()> {
+    pub top_level_items: Vec<TopLevelItem<D, T>>,
 }
 
-impl<T> Module<T> {
-    pub fn type_defs(&self) -> Vec<&TypeDef<T>> {
+impl<D, T> Module<D, T> {
+    pub fn type_defs(&self) -> Vec<&TypeDef<D>> {
         self.top_level_items
             .iter()
             .filter_map(|item| match item {
@@ -21,9 +21,9 @@ impl<T> Module<T> {
             .collect()
     }
 
-    pub fn type_def_by_id(&self, def_id: T) -> Option<&TypeDef<T>>
+    pub fn type_def_by_id(&self, def_id: D) -> Option<&TypeDef<D>>
     where
-        T: Copy + Eq,
+        D: Copy + Eq,
     {
         self.top_level_items.iter().find_map(|item| match item {
             TopLevelItem::TypeDef(type_def) if type_def.def_id == def_id => Some(type_def),
@@ -31,7 +31,7 @@ impl<T> Module<T> {
         })
     }
 
-    pub fn func_sigs(&self) -> Vec<&FunctionSig<T>> {
+    pub fn func_sigs(&self) -> Vec<&FunctionSig<D>> {
         self.top_level_items
             .iter()
             .filter_map(|item| match item {
@@ -42,7 +42,7 @@ impl<T> Module<T> {
             .collect()
     }
 
-    pub fn func_decls(&self) -> Vec<&FuncDecl<T>> {
+    pub fn func_decls(&self) -> Vec<&FuncDecl<D>> {
         self.top_level_items
             .iter()
             .filter_map(|item| match item {
@@ -52,7 +52,7 @@ impl<T> Module<T> {
             .collect()
     }
 
-    pub fn func_defs(&self) -> Vec<&FuncDef<T>> {
+    pub fn func_defs(&self) -> Vec<&FuncDef<D, T>> {
         self.top_level_items
             .iter()
             .filter_map(|item| match item {
@@ -62,7 +62,7 @@ impl<T> Module<T> {
             .collect()
     }
 
-    pub fn method_blocks(&self) -> Vec<&MethodBlock<T>> {
+    pub fn method_blocks(&self) -> Vec<&MethodBlock<D, T>> {
         self.top_level_items
             .iter()
             .filter_map(|item| match item {
@@ -72,7 +72,7 @@ impl<T> Module<T> {
             .collect()
     }
 
-    pub fn callables(&self) -> Vec<CallableRef<'_, T>> {
+    pub fn callables(&self) -> Vec<CallableRef<'_, D, T>> {
         self.top_level_items
             .iter()
             .flat_map(|item| match item {
@@ -102,26 +102,26 @@ impl<T> Module<T> {
 // -- Top Leve Items ---
 
 #[derive(Clone, Debug)]
-pub enum TopLevelItem<T> {
-    TypeDef(TypeDef<T>),
-    FuncDecl(FuncDecl<T>),       // function declaration
-    FuncDef(FuncDef<T>),         // function definition
-    MethodBlock(MethodBlock<T>), // method definitions
-    ClosureDecl(ClosureDecl<T>), // closure declaration (generated)
+pub enum TopLevelItem<D, T = ()> {
+    TypeDef(TypeDef<D>),
+    FuncDecl(FuncDecl<D>),          // function declaration
+    FuncDef(FuncDef<D, T>),         // function definition
+    MethodBlock(MethodBlock<D, T>), // method definitions
+    ClosureDecl(ClosureDecl<D, T>), // closure declaration (generated)
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum CallableRef<'a, T> {
-    FuncDecl(&'a FuncDecl<T>),
-    FuncDef(&'a FuncDef<T>),
+pub enum CallableRef<'a, D, T = ()> {
+    FuncDecl(&'a FuncDecl<D>),
+    FuncDef(&'a FuncDef<D, T>),
     MethodDef {
         type_name: &'a str,
-        method_def: &'a MethodDef<T>,
+        method_def: &'a MethodDef<D, T>,
     },
-    ClosureDecl(&'a ClosureDecl<T>),
+    ClosureDecl(&'a ClosureDecl<D, T>),
 }
 
-impl<'a, T> CallableRef<'a, T> {
+impl<'a, D, T> CallableRef<'a, D, T> {
     pub fn id(&self) -> NodeId {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.id,
@@ -131,9 +131,9 @@ impl<'a, T> CallableRef<'a, T> {
         }
     }
 
-    pub fn def_id(&self) -> T
+    pub fn def_id(&self) -> D
     where
-        T: Copy,
+        D: Copy,
     {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.def_id,
@@ -179,148 +179,148 @@ impl<'a, T> CallableRef<'a, T> {
 // -- Type Definitions ---
 
 #[derive(Clone, Debug)]
-pub struct TypeDef<T> {
+pub struct TypeDef<D> {
     pub id: NodeId,
-    pub def_id: T,
+    pub def_id: D,
     pub name: String,
-    pub kind: TypeDefKind<T>,
+    pub kind: TypeDefKind<D>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum TypeDefKind<T> {
-    Alias { aliased_ty: TypeExpr<T> },
-    Struct { fields: Vec<StructDefField<T>> },
-    Enum { variants: Vec<EnumDefVariant<T>> },
+pub enum TypeDefKind<D> {
+    Alias { aliased_ty: TypeExpr<D> },
+    Struct { fields: Vec<StructDefField<D>> },
+    Enum { variants: Vec<EnumDefVariant<D>> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StructDefField<T> {
+pub struct StructDefField<D> {
     pub id: NodeId,
     pub name: String,
-    pub ty: TypeExpr<T>,
+    pub ty: TypeExpr<D>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EnumDefVariant<T> {
+pub struct EnumDefVariant<D> {
     pub id: NodeId,
     pub name: String,
-    pub payload: Vec<TypeExpr<T>>,
+    pub payload: Vec<TypeExpr<D>>,
     pub span: Span,
 }
 
 // -- Type Expressions ---
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TypeExpr<T> {
+pub struct TypeExpr<D> {
     pub id: NodeId,
-    pub kind: TypeExprKind<T>,
+    pub kind: TypeExprKind<D>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TypeExprKind<T> {
+pub enum TypeExprKind<D> {
     Named {
         ident: String,
-        def_id: T,
+        def_id: D,
     },
     Array {
-        elem_ty_expr: Box<TypeExpr<T>>,
+        elem_ty_expr: Box<TypeExpr<D>>,
         dims: Vec<usize>,
     },
     Tuple {
-        field_ty_exprs: Vec<TypeExpr<T>>,
+        field_ty_exprs: Vec<TypeExpr<D>>,
     },
     Range {
         min: u64,
         max: u64,
     },
     Slice {
-        elem_ty_expr: Box<TypeExpr<T>>,
+        elem_ty_expr: Box<TypeExpr<D>>,
     },
     Heap {
-        elem_ty_expr: Box<TypeExpr<T>>,
+        elem_ty_expr: Box<TypeExpr<D>>,
     },
     Fn {
-        params: Vec<FnTypeParam<T>>,
-        ret_ty_expr: Box<TypeExpr<T>>,
+        params: Vec<FnTypeParam<D>>,
+        ret_ty_expr: Box<TypeExpr<D>>,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FnTypeParam<T> {
+pub struct FnTypeParam<D> {
     pub mode: ParamMode,
-    pub ty_expr: TypeExpr<T>,
+    pub ty_expr: TypeExpr<D>,
 }
 
 // -- String Literals ---
 
 #[derive(Clone, Debug)]
-pub enum StringFmtSegment<T> {
+pub enum StringFmtSegment<D, T = ()> {
     Literal { value: String, span: Span },
-    Expr { expr: Box<Expr<T>>, span: Span },
+    Expr { expr: Box<Expr<D, T>>, span: Span },
 }
 
 // -- Functions ---
 
 #[derive(Clone, Debug)]
-pub struct FuncDecl<T> {
+pub struct FuncDecl<D> {
     pub id: NodeId,
-    pub def_id: T,
-    pub sig: FunctionSig<T>,
+    pub def_id: D,
+    pub sig: FunctionSig<D>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct FuncDef<T> {
+pub struct FuncDef<D, T = ()> {
     pub id: NodeId,
-    pub def_id: T,
-    pub sig: FunctionSig<T>,
-    pub body: Expr<T>,
+    pub def_id: D,
+    pub sig: FunctionSig<D>,
+    pub body: Expr<D, T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct FunctionSig<T> {
+pub struct FunctionSig<D> {
     pub name: String,
-    pub params: Vec<Param<T>>,
-    pub ret_ty_expr: TypeExpr<T>,
+    pub params: Vec<Param<D>>,
+    pub ret_ty_expr: TypeExpr<D>,
     pub span: Span,
 }
 
 // -- Methods ---
 
 #[derive(Clone, Debug)]
-pub struct MethodBlock<T> {
+pub struct MethodBlock<D, T = ()> {
     pub id: NodeId,
     pub type_name: String,
-    pub method_defs: Vec<MethodDef<T>>,
+    pub method_defs: Vec<MethodDef<D, T>>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct MethodDef<T> {
+pub struct MethodDef<D, T = ()> {
     pub id: NodeId,
-    pub def_id: T,
-    pub sig: MethodSig<T>,
-    pub body: Expr<T>,
+    pub def_id: D,
+    pub sig: MethodSig<D>,
+    pub body: Expr<D, T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct MethodSig<T> {
+pub struct MethodSig<D> {
     pub name: String,
-    pub self_param: SelfParam<T>,
-    pub params: Vec<Param<T>>,
-    pub ret_ty_expr: TypeExpr<T>,
+    pub self_param: SelfParam<D>,
+    pub params: Vec<Param<D>>,
+    pub ret_ty_expr: TypeExpr<D>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct SelfParam<T> {
+pub struct SelfParam<D> {
     pub id: NodeId,
-    pub def_id: T,
+    pub def_id: D,
     pub mode: ParamMode,
     pub span: Span,
 }
@@ -328,30 +328,30 @@ pub struct SelfParam<T> {
 // -- Closures Decls ---
 
 #[derive(Clone, Debug)]
-pub struct ClosureDecl<T> {
+pub struct ClosureDecl<D, T = ()> {
     pub id: NodeId,
-    pub def_id: T,
-    pub sig: ClosureSig<T>,
-    pub body: Expr<T>,
+    pub def_id: D,
+    pub sig: ClosureSig<D>,
+    pub body: Expr<D, T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct ClosureSig<T> {
+pub struct ClosureSig<D> {
     pub name: String,
-    pub params: Vec<Param<T>>,
-    pub return_ty: TypeExpr<T>,
+    pub params: Vec<Param<D>>,
+    pub return_ty: TypeExpr<D>,
     pub span: Span,
 }
 
 // -- Parameters (common) ---
 
 #[derive(Clone, Debug)]
-pub struct Param<T> {
+pub struct Param<D> {
     pub id: NodeId,
     pub ident: String,
-    pub def_id: T,
-    pub typ: TypeExpr<T>,
+    pub def_id: D,
+    pub typ: TypeExpr<D>,
     pub mode: ParamMode,
     pub span: Span,
 }
@@ -359,58 +359,58 @@ pub struct Param<T> {
 // -- Call Args --
 
 #[derive(Clone, Debug)]
-pub struct CallArg<T> {
+pub struct CallArg<D, T = ()> {
     pub mode: CallArgMode,
-    pub expr: Expr<T>,
+    pub expr: Expr<D, T>,
     pub span: Span,
 }
 
 // -- Patterns ---
 
 #[derive(Clone, Debug)]
-pub struct BindPattern<T> {
+pub struct BindPattern<D> {
     pub id: NodeId,
-    pub kind: BindPatternKind<T>,
+    pub kind: BindPatternKind<D>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum BindPatternKind<T> {
+pub enum BindPatternKind<D> {
     Name {
         ident: String,
-        def_id: T,
+        def_id: D,
     },
     Array {
-        patterns: Vec<BindPattern<T>>,
+        patterns: Vec<BindPattern<D>>,
     },
     Tuple {
-        patterns: Vec<BindPattern<T>>,
+        patterns: Vec<BindPattern<D>>,
     },
     Struct {
         name: String,
-        fields: Vec<StructFieldBindPattern<T>>,
+        fields: Vec<StructFieldBindPattern<D>>,
     },
 }
 
 #[derive(Clone, Debug)]
-pub struct StructFieldBindPattern<T> {
+pub struct StructFieldBindPattern<D> {
     pub name: String,
-    pub pattern: BindPattern<T>,
+    pub pattern: BindPattern<D>,
     pub span: Span,
 }
 
 // -- Match patterns ---
 
 #[derive(Clone, Debug)]
-pub struct MatchArm<T> {
+pub struct MatchArm<D, T = ()> {
     pub id: NodeId,
-    pub pattern: MatchPattern<T>,
-    pub body: Expr<T>,
+    pub pattern: MatchPattern<D>,
+    pub body: Expr<D, T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum MatchPattern<T> {
+pub enum MatchPattern<D> {
     Wildcard {
         span: Span,
     },
@@ -425,27 +425,27 @@ pub enum MatchPattern<T> {
     Binding {
         id: NodeId,
         ident: String,
-        def_id: T,
+        def_id: D,
         span: Span,
     },
     Tuple {
-        patterns: Vec<MatchPattern<T>>,
+        patterns: Vec<MatchPattern<D>>,
         span: Span,
     },
     EnumVariant {
         enum_name: Option<String>,
         variant_name: String,
-        bindings: Vec<MatchPatternBinding<T>>,
+        bindings: Vec<MatchPatternBinding<D>>,
         span: Span,
     },
 }
 
 #[derive(Clone, Debug)]
-pub enum MatchPatternBinding<T> {
+pub enum MatchPatternBinding<D> {
     Named {
         id: NodeId,
         ident: String,
-        def_id: T,
+        def_id: D,
         span: Span,
     },
     Wildcard {
@@ -456,66 +456,68 @@ pub enum MatchPatternBinding<T> {
 // --- Blocks ---
 
 #[derive(Clone, Debug)]
-pub enum BlockItem<T> {
-    Stmt(StmtExpr<T>),
-    Expr(Expr<T>),
+pub enum BlockItem<D, T = ()> {
+    Stmt(StmtExpr<D, T>),
+    Expr(Expr<D, T>),
 }
 
 // --- Statement Expressions ---
 
 #[derive(Clone, Debug)]
-pub struct StmtExpr<T> {
+pub struct StmtExpr<D, T = ()> {
     pub id: NodeId,
-    pub kind: StmtExprKind<T>,
+    pub kind: StmtExprKind<D, T>,
+    pub ty: T,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum StmtExprKind<T> {
+pub enum StmtExprKind<D, T = ()> {
     LetBind {
-        pattern: BindPattern<T>,
-        decl_ty: Option<TypeExpr<T>>,
-        value: Box<Expr<T>>,
+        pattern: BindPattern<D>,
+        decl_ty: Option<TypeExpr<D>>,
+        value: Box<Expr<D, T>>,
     },
     VarBind {
-        pattern: BindPattern<T>,
-        decl_ty: Option<TypeExpr<T>>,
-        value: Box<Expr<T>>,
+        pattern: BindPattern<D>,
+        decl_ty: Option<TypeExpr<D>>,
+        value: Box<Expr<D, T>>,
     },
     VarDecl {
         ident: String,
-        def_id: T,
-        decl_ty: TypeExpr<T>,
+        def_id: D,
+        decl_ty: TypeExpr<D>,
     },
     Assign {
-        assignee: Box<Expr<T>>,
-        value: Box<Expr<T>>,
+        assignee: Box<Expr<D, T>>,
+        value: Box<Expr<D, T>>,
     },
     While {
-        cond: Box<Expr<T>>,
-        body: Box<Expr<T>>,
+        cond: Box<Expr<D, T>>,
+        body: Box<Expr<D, T>>,
     },
     For {
-        pattern: BindPattern<T>,
-        iter: Box<Expr<T>>,
-        body: Box<Expr<T>>,
+        pattern: BindPattern<D>,
+        iter: Box<Expr<D, T>>,
+        body: Box<Expr<D, T>>,
     },
 }
 
 // -- Expressions ---
 
 #[derive(Clone, Debug)]
-pub struct Expr<T> {
+pub struct Expr<D, T = ()> {
     pub id: NodeId,
-    pub kind: ExprKind<T>,
+    pub kind: ExprKind<D, T>,
+    pub ty: T,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum ExprKind<T> {
+pub enum ExprKind<D, T = ()> {
     Block {
-        items: Vec<BlockItem<T>>,
-        tail: Option<Box<Expr<T>>>,
+        items: Vec<BlockItem<D, T>>,
+        tail: Option<Box<Expr<D, T>>>,
     },
 
     // Literals (scalar)
@@ -527,75 +529,75 @@ pub enum ExprKind<T> {
         value: String,
     },
     StringFmt {
-        segments: Vec<StringFmtSegment<T>>,
+        segments: Vec<StringFmtSegment<D, T>>,
     },
 
     // Literals (compound)
     ArrayLit {
-        elem_ty: Option<TypeExpr<T>>,
-        init: ArrayLitInit<T>,
+        elem_ty: Option<TypeExpr<D>>,
+        init: ArrayLitInit<D, T>,
     },
-    TupleLit(Vec<Expr<T>>),
+    TupleLit(Vec<Expr<D, T>>),
     StructLit {
         name: String,
-        fields: Vec<StructLitField<T>>,
+        fields: Vec<StructLitField<D, T>>,
     },
     EnumVariant {
         enum_name: String,
         variant: String,
-        payload: Vec<Expr<T>>,
+        payload: Vec<Expr<D, T>>,
     },
 
     // Struct update
     StructUpdate {
-        target: Box<Expr<T>>,
-        fields: Vec<StructUpdateField<T>>,
+        target: Box<Expr<D, T>>,
+        fields: Vec<StructUpdateField<D, T>>,
     },
 
     // Operators
     BinOp {
-        left: Box<Expr<T>>,
+        left: Box<Expr<D, T>>,
         op: BinaryOp,
-        right: Box<Expr<T>>,
+        right: Box<Expr<D, T>>,
     },
     UnaryOp {
         op: UnaryOp,
-        expr: Box<Expr<T>>,
+        expr: Box<Expr<D, T>>,
     },
 
     // Heap allocation
     HeapAlloc {
-        expr: Box<Expr<T>>,
+        expr: Box<Expr<D, T>>,
     },
 
     // Move
     Move {
-        expr: Box<Expr<T>>,
+        expr: Box<Expr<D, T>>,
     },
 
     // Var, array index, tuple field, struct field
     Var {
         ident: String,
-        def_id: T,
+        def_id: D,
     },
     ArrayIndex {
-        target: Box<Expr<T>>,
-        indices: Vec<Expr<T>>,
+        target: Box<Expr<D, T>>,
+        indices: Vec<Expr<D, T>>,
     },
     TupleField {
-        target: Box<Expr<T>>,
+        target: Box<Expr<D, T>>,
         index: usize,
     },
     StructField {
-        target: Box<Expr<T>>,
+        target: Box<Expr<D, T>>,
         field: String,
     },
 
     // Control flow
     If {
-        cond: Box<Expr<T>>,
-        then_body: Box<Expr<T>>,
-        else_body: Box<Expr<T>>,
+        cond: Box<Expr<D, T>>,
+        then_body: Box<Expr<D, T>>,
+        else_body: Box<Expr<D, T>>,
     },
 
     // Range
@@ -606,46 +608,46 @@ pub enum ExprKind<T> {
 
     // Slice
     Slice {
-        target: Box<Expr<T>>,
-        start: Option<Box<Expr<T>>>,
-        end: Option<Box<Expr<T>>>,
+        target: Box<Expr<D, T>>,
+        start: Option<Box<Expr<D, T>>>,
+        end: Option<Box<Expr<D, T>>>,
     },
 
     // Match
     Match {
-        scrutinee: Box<Expr<T>>,
-        arms: Vec<MatchArm<T>>,
+        scrutinee: Box<Expr<D, T>>,
+        arms: Vec<MatchArm<D, T>>,
     },
 
     // Function/Method call
     Call {
-        callee: Box<Expr<T>>,
-        args: Vec<CallArg<T>>,
+        callee: Box<Expr<D, T>>,
+        args: Vec<CallArg<D, T>>,
     },
     MethodCall {
-        callee: Box<Expr<T>>,
+        callee: Box<Expr<D, T>>,
         method_name: String,
-        args: Vec<CallArg<T>>,
+        args: Vec<CallArg<D, T>>,
     },
 
     Closure {
         ident: String,
-        def_id: T,
-        params: Vec<Param<T>>,
-        return_ty: TypeExpr<T>,
-        body: Box<Expr<T>>,
+        def_id: D,
+        params: Vec<Param<D>>,
+        return_ty: TypeExpr<D>,
+        body: Box<Expr<D, T>>,
     },
 }
 
 // -- Array literals ---
 
 #[derive(Clone, Debug)]
-pub enum ArrayLitInit<T> {
-    Elems(Vec<Expr<T>>),
-    Repeat(Box<Expr<T>>, u64),
+pub enum ArrayLitInit<D, T = ()> {
+    Elems(Vec<Expr<D, T>>),
+    Repeat(Box<Expr<D, T>>, u64),
 }
 
-impl<T> ArrayLitInit<T> {
+impl<D, T> ArrayLitInit<D, T> {
     pub fn length(&self) -> usize {
         match self {
             ArrayLitInit::Elems(elems) => elems.len(),
@@ -655,18 +657,18 @@ impl<T> ArrayLitInit<T> {
 }
 
 #[derive(Clone, Debug)]
-pub struct StructLitField<T> {
+pub struct StructLitField<D, T = ()> {
     pub id: NodeId,
     pub name: String,
-    pub value: Expr<T>,
+    pub value: Expr<D, T>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct StructUpdateField<T> {
+pub struct StructUpdateField<D, T = ()> {
     pub id: NodeId,
     pub name: String,
-    pub value: Expr<T>,
+    pub value: Expr<D, T>,
     pub span: Span,
 }
 

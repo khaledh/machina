@@ -1,59 +1,59 @@
 //! HIR model: resolved, tree-shaped nodes with DefIds where available.
 
 use crate::ast::model;
-use crate::ast::stage::HirDef;
+use crate::resolve::DefId;
 
 pub use crate::ast::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
 
 // -- HIR type aliases (AST model specialized with DefId) ---
 
-pub type Module = model::Module<HirDef>;
-pub type TopLevelItem = model::TopLevelItem<HirDef>;
-pub type Decl = model::TopLevelItem<HirDef>;
-pub type CallableRef<'a> = model::CallableRef<'a, HirDef>;
+pub type Module = model::Module<DefId>;
+pub type TopLevelItem = model::TopLevelItem<DefId>;
+pub type Decl = model::TopLevelItem<DefId>;
+pub type CallableRef<'a> = model::CallableRef<'a, DefId>;
 
-pub type TypeDef = model::TypeDef<HirDef>;
-pub type TypeDefKind = model::TypeDefKind<HirDef>;
-pub type StructDefField = model::StructDefField<HirDef>;
-pub type EnumDefVariant = model::EnumDefVariant<HirDef>;
+pub type TypeDef = model::TypeDef<DefId>;
+pub type TypeDefKind = model::TypeDefKind<DefId>;
+pub type StructDefField = model::StructDefField<DefId>;
+pub type EnumDefVariant = model::EnumDefVariant<DefId>;
 
-pub type TypeExpr = model::TypeExpr<HirDef>;
-pub type TypeExprKind = model::TypeExprKind<HirDef>;
-pub type FnTypeParam = model::FnTypeParam<HirDef>;
+pub type TypeExpr = model::TypeExpr<DefId>;
+pub type TypeExprKind = model::TypeExprKind<DefId>;
+pub type FnTypeParam = model::FnTypeParam<DefId>;
 
-pub type StringFmtSegment = model::StringFmtSegment<HirDef>;
+pub type StringFmtSegment = model::StringFmtSegment<DefId>;
 
-pub type FuncDecl = model::FuncDecl<HirDef>;
-pub type FuncDef = model::FuncDef<HirDef>;
-pub type FunctionSig = model::FunctionSig<HirDef>;
+pub type FuncDecl = model::FuncDecl<DefId>;
+pub type FuncDef = model::FuncDef<DefId>;
+pub type FunctionSig = model::FunctionSig<DefId>;
 
-pub type MethodBlock = model::MethodBlock<HirDef>;
-pub type MethodDef = model::MethodDef<HirDef>;
-pub type MethodSig = model::MethodSig<HirDef>;
-pub type SelfParam = model::SelfParam<HirDef>;
+pub type MethodBlock = model::MethodBlock<DefId>;
+pub type MethodDef = model::MethodDef<DefId>;
+pub type MethodSig = model::MethodSig<DefId>;
+pub type SelfParam = model::SelfParam<DefId>;
 
-pub type ClosureDecl = model::ClosureDecl<HirDef>;
-pub type ClosureSig = model::ClosureSig<HirDef>;
+pub type ClosureDecl = model::ClosureDecl<DefId>;
+pub type ClosureSig = model::ClosureSig<DefId>;
 
-pub type Param = model::Param<HirDef>;
-pub type CallArg = model::CallArg<HirDef>;
+pub type Param = model::Param<DefId>;
+pub type CallArg = model::CallArg<DefId>;
 
-pub type BindPattern = model::BindPattern<HirDef>;
-pub type BindPatternKind = model::BindPatternKind<HirDef>;
-pub type StructFieldBindPattern = model::StructFieldBindPattern<HirDef>;
-pub type StructPatternField = model::StructFieldBindPattern<HirDef>;
+pub type BindPattern = model::BindPattern<DefId>;
+pub type BindPatternKind = model::BindPatternKind<DefId>;
+pub type StructFieldBindPattern = model::StructFieldBindPattern<DefId>;
+pub type StructPatternField = model::StructFieldBindPattern<DefId>;
 
-pub type MatchArm = model::MatchArm<HirDef>;
-pub type MatchPattern = model::MatchPattern<HirDef>;
-pub type MatchPatternBinding = model::MatchPatternBinding<HirDef>;
+pub type MatchArm = model::MatchArm<DefId>;
+pub type MatchPattern = model::MatchPattern<DefId>;
+pub type MatchPatternBinding = model::MatchPatternBinding<DefId>;
 
-pub type BlockItem = model::BlockItem<HirDef>;
-pub type StmtExpr = model::StmtExpr<HirDef>;
-pub type StmtExprKind = model::StmtExprKind<HirDef>;
+pub type BlockItem = model::BlockItem<DefId>;
+pub type StmtExpr = model::StmtExpr<DefId>;
+pub type StmtExprKind = model::StmtExprKind<DefId>;
 
-pub type Expr = model::Expr<HirDef>;
-pub type ExprKind = model::ExprKind<HirDef>;
+pub type Expr = model::Expr<DefId>;
+pub type ExprKind = model::ExprKind<DefId>;
 
-pub type ArrayLitInit = model::ArrayLitInit<HirDef>;
-pub type StructLitField = model::StructLitField<HirDef>;
-pub type StructUpdateField = model::StructUpdateField<HirDef>;
+pub type ArrayLitInit = model::ArrayLitInit<DefId>;
+pub type StructLitField = model::StructLitField<DefId>;
+pub type StructUpdateField = model::StructUpdateField<DefId>;

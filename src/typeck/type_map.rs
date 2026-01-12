@@ -1,9 +1,9 @@
 use crate::ast::{NodeId, ParamMode};
 use crate::hir::model::*;
-use crate::hir::{EnumDefVariant, StructDefField, TypeExpr};
+use crate::hir::{EnumDefVariant, StructDefField};
 use crate::resolve::{Def, DefId, DefKind, DefTable};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
+use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeId, TypeTable};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -31,10 +31,10 @@ enum ResolveDepth {
     Shallow,
 }
 
-pub(crate) fn resolve_type_expr(
+pub(crate) fn resolve_type_expr<Ty>(
     def_table: &DefTable,
-    module: &Module,
-    type_expr: &TypeExpr,
+    module: &crate::ast::model::Module<DefId, Ty>,
+    type_expr: &crate::ast::model::TypeExpr<DefId>,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
     resolve_type_expr_impl(
@@ -46,10 +46,10 @@ pub(crate) fn resolve_type_expr(
     )
 }
 
-fn resolve_type_expr_impl(
+fn resolve_type_expr_impl<Ty>(
     def_table: &DefTable,
-    module: &Module,
-    type_expr: &TypeExpr,
+    module: &crate::ast::model::Module<DefId, Ty>,
+    type_expr: &crate::ast::model::TypeExpr<DefId>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -129,10 +129,10 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
     }
 }
 
-fn resolve_named_type(
+fn resolve_named_type<Ty>(
     def_table: &DefTable,
-    module: &Module,
-    type_expr: &TypeExpr,
+    module: &crate::ast::model::Module<DefId, Ty>,
+    type_expr: &crate::ast::model::TypeExpr<DefId>,
     def_id: &DefId,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -166,11 +166,11 @@ fn resolve_named_type(
     }
 }
 
-fn resolve_type_alias(
+fn resolve_type_alias<Ty>(
     def_table: &DefTable,
-    module: &Module,
+    module: &crate::ast::model::Module<DefId, Ty>,
     def: &Def,
-    ty_expr: &TypeExpr,
+    ty_expr: &crate::ast::model::TypeExpr<DefId>,
     in_progress: &mut HashSet<DefId>,
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def.id) {
@@ -182,9 +182,9 @@ fn resolve_type_alias(
     ty
 }
 
-fn resolve_struct_type(
+fn resolve_struct_type<Ty>(
     def_table: &DefTable,
-    module: &Module,
+    module: &crate::ast::model::Module<DefId, Ty>,
     def: &Def,
     fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
@@ -215,9 +215,9 @@ fn resolve_struct_type(
     })
 }
 
-fn resolve_struct_fields(
+fn resolve_struct_fields<Ty>(
     def_table: &DefTable,
-    module: &Module,
+    module: &crate::ast::model::Module<DefId, Ty>,
     fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -235,9 +235,9 @@ fn resolve_struct_fields(
         .collect()
 }
 
-fn resolve_enum_type(
+fn resolve_enum_type<Ty>(
     def_table: &DefTable,
-    module: &Module,
+    module: &crate::ast::model::Module<DefId, Ty>,
     def: &Def,
     variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
@@ -268,9 +268,9 @@ fn resolve_enum_type(
     })
 }
 
-fn resolve_enum_variants(
+fn resolve_enum_variants<Ty>(
     def_table: &DefTable,
-    module: &Module,
+    module: &crate::ast::model::Module<DefId, Ty>,
     variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -293,9 +293,10 @@ fn resolve_enum_variants(
 }
 
 pub struct TypeMapBuilder {
-    node_type: HashMap<NodeId, Type>, // maps node to its type
-    def_type: HashMap<Def, Type>,     // maps def to its type
-    call_def: HashMap<NodeId, DefId>, // maps call expr node id to func def id (overload-resolved)
+    type_table: TypeTable,
+    node_type: HashMap<NodeId, TypeId>, // maps node to its type
+    def_type: HashMap<Def, TypeId>,     // maps def to its type
+    call_def: HashMap<NodeId, DefId>,   // maps call expr node id to func def id (overload-resolved)
     call_sig: HashMap<NodeId, CallSig>,
 }
 
@@ -308,6 +309,7 @@ impl Default for TypeMapBuilder {
 impl TypeMapBuilder {
     pub fn new() -> Self {
         Self {
+            type_table: TypeTable::new(),
             node_type: HashMap::new(),
             def_type: HashMap::new(),
             call_def: HashMap::new(),
@@ -316,11 +318,13 @@ impl TypeMapBuilder {
     }
 
     pub fn record_def_type(&mut self, def: Def, typ: Type) {
-        self.def_type.insert(def, typ);
+        let id = self.type_table.intern(typ);
+        self.def_type.insert(def, id);
     }
 
     pub fn record_node_type(&mut self, node_id: NodeId, typ: Type) {
-        self.node_type.insert(node_id, typ);
+        let id = self.type_table.intern(typ);
+        self.node_type.insert(node_id, id);
     }
 
     pub fn record_call_def(&mut self, node_id: NodeId, def_id: DefId) {
@@ -332,11 +336,18 @@ impl TypeMapBuilder {
     }
 
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
-        self.def_type.get(def).cloned()
+        self.def_type
+            .get(def)
+            .map(|id| self.type_table.get(*id).clone())
+    }
+
+    pub fn lookup_def_type_id(&self, def: &Def) -> Option<TypeId> {
+        self.def_type.get(def).copied()
     }
 
     pub fn finish(self) -> TypeMap {
         TypeMap {
+            type_table: self.type_table,
             def_type: self.def_type,
             node_type: self.node_type,
             call_def: self.call_def,
@@ -359,19 +370,32 @@ pub struct CallParam {
 
 #[derive(Debug, Clone)]
 pub struct TypeMap {
-    def_type: HashMap<Def, Type>,
-    node_type: HashMap<NodeId, Type>,
+    type_table: TypeTable,
+    def_type: HashMap<Def, TypeId>,
+    node_type: HashMap<NodeId, TypeId>,
     call_def: HashMap<NodeId, DefId>,
     call_sig: HashMap<NodeId, CallSig>,
 }
 
 impl TypeMap {
     pub fn lookup_node_type(&self, node: NodeId) -> Option<Type> {
-        self.node_type.get(&node).cloned()
+        self.node_type
+            .get(&node)
+            .map(|id| self.type_table.get(*id).clone())
+    }
+
+    pub fn lookup_node_type_id(&self, node: NodeId) -> Option<TypeId> {
+        self.node_type.get(&node).copied()
     }
 
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
-        self.def_type.get(def).cloned()
+        self.def_type
+            .get(def)
+            .map(|id| self.type_table.get(*id).clone())
+    }
+
+    pub fn lookup_def_type_id(&self, def: &Def) -> Option<TypeId> {
+        self.def_type.get(def).copied()
     }
 
     pub fn lookup_call_def(&self, node: NodeId) -> Option<DefId> {
@@ -381,6 +405,10 @@ impl TypeMap {
     pub fn lookup_call_sig(&self, node: NodeId) -> Option<CallSig> {
         self.call_sig.get(&node).cloned()
     }
+
+    pub fn type_table(&self) -> &TypeTable {
+        &self.type_table
+    }
 }
 
 impl<'a> IntoIterator for &'a TypeMap {
@@ -388,7 +416,11 @@ impl<'a> IntoIterator for &'a TypeMap {
     type IntoIter = std::vec::IntoIter<(&'a Def, &'a Type)>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut items: Vec<_> = self.def_type.iter().collect();
+        let mut items: Vec<_> = self
+            .def_type
+            .iter()
+            .map(|(def, ty_id)| (def, self.type_table.get(*ty_id)))
+            .collect();
         items.sort_by_key(|(def, _)| def.id);
         items.into_iter()
     }
@@ -397,9 +429,10 @@ impl<'a> IntoIterator for &'a TypeMap {
 impl fmt::Display for TypeMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // sort by node id
-        let mut node_type = self.node_type.iter().collect::<Vec<(&NodeId, &Type)>>();
+        let mut node_type = self.node_type.iter().collect::<Vec<(&NodeId, &TypeId)>>();
         node_type.sort_by_key(|(node, _)| node.0);
-        for (node, typ) in node_type {
+        for (node, ty_id) in node_type {
+            let typ = self.type_table.get(*ty_id);
             writeln!(f, "Node [{}] -> Type [{}]", node, typ)?;
         }
         Ok(())

@@ -20,7 +20,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::{AnalyzedContext, LoweredMcirContext};
-use crate::hir::model::*;
 use crate::lower::drop_glue::DropGlueRegistry;
 use crate::lower::errors::LowerError;
 use crate::lower::lower_drop::DropScope;
@@ -29,6 +28,7 @@ use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
+use crate::tir::model::*;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 

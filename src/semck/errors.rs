@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::diag::Span;
-use crate::hir::model::ExprKind;
+use crate::tir::model::TypedExprKind;
 use crate::types::Type;
 
 #[derive(Debug, Clone, Error)]
@@ -16,7 +16,7 @@ pub enum SemCheckError {
     DivisionByZero(Span),
 
     #[error("Invalid callee. Expected a function name, found: {0:?}")]
-    InvalidCallee(ExprKind, Span),
+    InvalidCallee(TypedExprKind, Span),
 
     #[error("Unknown struct type: {0}")]
     UnknownStructType(String, Span),

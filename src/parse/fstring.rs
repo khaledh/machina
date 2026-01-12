@@ -21,6 +21,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::StringLit { value },
+                ty: (),
                 span: self.close(marker),
             });
         }
@@ -28,6 +29,7 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::StringFmt { segments },
+            ty: (),
             span: self.close(marker),
         })
     }

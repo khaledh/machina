@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use crate::hir::model::{Expr, ExprKind};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
+use crate::tir::model::{Expr, ExprKind};
 use crate::types::Type;
 
 #[derive(Debug, Clone)]

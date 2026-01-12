@@ -13,16 +13,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::stage::HirDef;
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{
-    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
-    StmtExprKind,
-};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
-use crate::types::Type;
+use crate::tir::model::{
+    BindPattern, BindPatternKind, ParamMode, TypedCallArg as CallArg, TypedExpr as Expr,
+    TypedExprKind as ExprKind, TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr,
+    TypedStmtExprKind as StmtExprKind,
+};
+use crate::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
@@ -41,7 +41,7 @@ pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
 /// Then walk each block, checking for conflicts where a borrowed base is
 /// mutated/moved while a slice borrowing it is still live.
 fn check_func_def(ctx: &TypeCheckedContext, func_def: &FuncDef, errors: &mut Vec<SemCheckError>) {
-    let cfg = HirCfgBuilder::new().build_from_expr(&func_def.body);
+    let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
     let liveness = analyze_slice_liveness(&cfg, ctx);
     let bindings = analyze_slice_bindings(&cfg, ctx);
 
@@ -94,7 +94,7 @@ fn borrowed_bases_for_active(
 
 fn check_item_for_conflicts(
     ctx: &TypeCheckedContext,
-    item: &HirItem<'_>,
+    item: &HirItem<'_, TypeId>,
     borrowed_bases: &HashSet<DefId>,
     errors: &mut Vec<SemCheckError>,
 ) {
@@ -154,7 +154,10 @@ struct SliceBindingAnalysis {
 }
 
 /// Forward dataflow: track slice -> base bindings through the CFG.
-fn analyze_slice_bindings(cfg: &HirCfg<'_>, ctx: &TypeCheckedContext) -> SliceBindingAnalysis {
+fn analyze_slice_bindings(
+    cfg: &HirCfg<'_, TypeId>,
+    ctx: &TypeCheckedContext,
+) -> SliceBindingAnalysis {
     let entry_state = HashMap::new();
     let bottom = HashMap::new();
 
@@ -187,7 +190,7 @@ fn merge_slice_bindings(states: &[SliceBindings]) -> SliceBindings {
 }
 
 fn apply_block_bindings(
-    node: &HirCfgNode<'_>,
+    node: &HirCfgNode<'_, TypeId>,
     in_state: &SliceBindings,
     ctx: &TypeCheckedContext,
 ) -> SliceBindings {
@@ -198,7 +201,11 @@ fn apply_block_bindings(
     state
 }
 
-fn apply_item_bindings(state: &mut SliceBindings, item: &HirItem<'_>, ctx: &TypeCheckedContext) {
+fn apply_item_bindings(
+    state: &mut SliceBindings,
+    item: &HirItem<'_, TypeId>,
+    ctx: &TypeCheckedContext,
+) {
     let HirItem::Stmt(stmt) = item else {
         return;
     };
@@ -295,7 +302,7 @@ fn slice_bases_for_slice_target(
 fn slice_def_from_expr(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     match &expr.kind {
         ExprKind::Var { def_id, .. } => {
-            let ty = ctx.type_map.lookup_node_type(expr.id)?;
+            let ty = ctx.type_map.type_table().get(expr.ty);
             if !matches!(ty, Type::Slice { .. }) {
                 return None;
             }
@@ -316,7 +323,7 @@ struct SliceLiveness {
 }
 
 /// Backward dataflow: compute which slice locals are live at each point.
-fn analyze_slice_liveness(cfg: &HirCfg<'_>, ctx: &TypeCheckedContext) -> SliceLiveness {
+fn analyze_slice_liveness(cfg: &HirCfg<'_, TypeId>, ctx: &TypeCheckedContext) -> SliceLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -350,7 +357,7 @@ fn analyze_slice_liveness(cfg: &HirCfg<'_>, ctx: &TypeCheckedContext) -> SliceLi
 
 fn compute_live_in(
     ctx: &TypeCheckedContext,
-    node: &HirCfgNode<'_>,
+    node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
     let mut live = live_out.clone();
@@ -364,7 +371,7 @@ fn compute_live_in(
 /// Compute live-after for each item in a block.
 fn compute_live_after(
     ctx: &TypeCheckedContext,
-    node: &HirCfgNode<'_>,
+    node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
     let mut live = live_out.clone();
@@ -378,7 +385,11 @@ fn compute_live_after(
 }
 
 /// Liveness transfer: remove defs, add uses.
-fn apply_item_defs_uses(item: &HirItem<'_>, ctx: &TypeCheckedContext, live: &mut HashSet<DefId>) {
+fn apply_item_defs_uses(
+    item: &HirItem<'_, TypeId>,
+    ctx: &TypeCheckedContext,
+    live: &mut HashSet<DefId>,
+) {
     let mut defs = HashSet::new();
     let mut uses = HashSet::new();
     collect_item_defs_uses(item, ctx, &mut defs, &mut uses);
@@ -392,7 +403,7 @@ fn apply_item_defs_uses(item: &HirItem<'_>, ctx: &TypeCheckedContext, live: &mut
 
 /// Add slice uses from the block terminator (if condition).
 fn add_terminator_uses(
-    term: &HirTerminator<'_>,
+    term: &HirTerminator<'_, TypeId>,
     ctx: &TypeCheckedContext,
     uses: &mut HashSet<DefId>,
 ) {
@@ -403,7 +414,7 @@ fn add_terminator_uses(
 
 /// Collect defs and uses of slice locals from an item.
 fn collect_item_defs_uses(
-    item: &HirItem<'_>,
+    item: &HirItem<'_, TypeId>,
     ctx: &TypeCheckedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
@@ -477,7 +488,7 @@ fn add_def_if_slice(def_id: DefId, ctx: &TypeCheckedContext, defs: &mut HashSet<
 
 /// Collect slice local uses from an item.
 fn collect_item_slice_uses(
-    item: &HirItem<'_>,
+    item: &HirItem<'_, TypeId>,
     ctx: &TypeCheckedContext,
     uses: &mut HashSet<DefId>,
 ) {
@@ -548,7 +559,7 @@ struct SliceUseCollector<'a> {
     uses: &'a mut HashSet<DefId>,
 }
 
-impl Visitor<HirDef> for SliceUseCollector<'_> {
+impl Visitor<DefId, TypeId> for SliceUseCollector<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(def_id) = slice_use_def(expr, self.ctx) {
             self.uses.insert(def_id);
@@ -562,7 +573,7 @@ fn slice_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     let ExprKind::Var { def_id, .. } = expr.kind else {
         return None;
     };
-    let ty = ctx.type_map.lookup_node_type(expr.id)?;
+    let ty = ctx.type_map.type_table().get(expr.ty);
     if !matches!(ty, Type::Slice { .. }) {
         return None;
     }
@@ -632,7 +643,7 @@ impl<'a> BorrowConflictVisitor<'a> {
     }
 }
 
-impl Visitor<HirDef> for BorrowConflictVisitor<'_> {
+impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             // Moving a borrowed base is a conflict.

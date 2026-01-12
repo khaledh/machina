@@ -558,7 +558,12 @@ impl ToHir for ast::Expr {
             },
         };
 
-        hir::Expr { id, span, kind }
+        hir::Expr {
+            id,
+            kind,
+            ty: (),
+            span,
+        }
     }
 }
 
@@ -622,7 +627,12 @@ impl ToHir for ast::StmtExpr {
             },
         };
 
-        hir::StmtExpr { id, span, kind }
+        hir::StmtExpr {
+            id,
+            kind,
+            ty: (),
+            span,
+        }
     }
 }
 

@@ -25,6 +25,7 @@ impl<'a> Parser<'a> {
                 scrutinee: Box::new(scrutinee),
                 arms,
             },
+            ty: (),
             span: self.close(marker),
         })
     }

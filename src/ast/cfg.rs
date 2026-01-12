@@ -7,45 +7,45 @@ use crate::resolve::DefId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);
 
-pub enum CfgItem<'a, T> {
-    Stmt(&'a StmtExpr<T>),
-    Expr(&'a Expr<T>),
+pub enum CfgItem<'a, D, T = ()> {
+    Stmt(&'a StmtExpr<D, T>),
+    Expr(&'a Expr<D, T>),
 }
 
-pub enum CfgTerminator<'a, T> {
+pub enum CfgTerminator<'a, D, T = ()> {
     Goto(AstBlockId),
     If {
-        cond: &'a Expr<T>,
+        cond: &'a Expr<D, T>,
         then_bb: AstBlockId,
         else_bb: AstBlockId,
     },
     End,
 }
 
-pub struct CfgNode<'a, T> {
-    pub items: Vec<CfgItem<'a, T>>,
-    pub term: CfgTerminator<'a, T>,
-    pub loop_inits: Vec<&'a BindPattern<T>>,
+pub struct CfgNode<'a, D, T = ()> {
+    pub items: Vec<CfgItem<'a, D, T>>,
+    pub term: CfgTerminator<'a, D, T>,
+    pub loop_inits: Vec<&'a BindPattern<D>>,
 }
 
-pub struct Cfg<'a, T> {
-    pub nodes: Vec<CfgNode<'a, T>>,
+pub struct Cfg<'a, D, T = ()> {
+    pub nodes: Vec<CfgNode<'a, D, T>>,
     preds: Vec<Vec<AstBlockId>>,
     succs: Vec<Vec<AstBlockId>>,
 }
 
-pub struct CfgBuilder<'a, T> {
-    nodes: Vec<CfgNode<'a, T>>,
+pub struct CfgBuilder<'a, D, T = ()> {
+    nodes: Vec<CfgNode<'a, D, T>>,
     succs: Vec<Vec<AstBlockId>>,
 }
 
-impl<'a, T> Default for CfgBuilder<'a, T> {
+impl<'a, D, T> Default for CfgBuilder<'a, D, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T> CfgBuilder<'a, T> {
+impl<'a, D, T> CfgBuilder<'a, D, T> {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -68,25 +68,25 @@ impl<'a, T> CfgBuilder<'a, T> {
         self.succs[from.0].push(to);
     }
 
-    fn set_term(&mut self, block: AstBlockId, term: CfgTerminator<'a, T>) {
+    fn set_term(&mut self, block: AstBlockId, term: CfgTerminator<'a, D, T>) {
         self.nodes[block.0].term = term;
     }
 
-    fn push_item(&mut self, block: AstBlockId, item: CfgItem<'a, T>) {
+    fn push_item(&mut self, block: AstBlockId, item: CfgItem<'a, D, T>) {
         self.nodes[block.0].items.push(item);
     }
 
-    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a BindPattern<T>) {
+    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a BindPattern<D>) {
         self.nodes[block.0].loop_inits.push(pattern);
     }
 
-    pub fn build_from_expr(self, expr: &'a Expr<T>) -> Cfg<'a, T> {
+    pub fn build_from_expr(self, expr: &'a Expr<D, T>) -> Cfg<'a, D, T> {
         let mut builder = self;
         builder.build_block_expr(expr);
         builder.finish()
     }
 
-    fn build_block_expr(&mut self, expr: &'a Expr<T>) -> AstBlockId {
+    fn build_block_expr(&mut self, expr: &'a Expr<D, T>) -> AstBlockId {
         let ExprKind::Block { items, tail } = &expr.kind else {
             // For now, require a block expression at entry.
             let b = self.new_block();
@@ -121,7 +121,7 @@ impl<'a, T> CfgBuilder<'a, T> {
         curr_bb
     }
 
-    fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr<T>) -> AstBlockId {
+    fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr<D, T>) -> AstBlockId {
         match &stmt.kind {
             StmtExprKind::While { cond, body } => {
                 let cond_bb = self.new_block();
@@ -181,7 +181,7 @@ impl<'a, T> CfgBuilder<'a, T> {
         }
     }
 
-    fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr<T>) -> AstBlockId {
+    fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr<D, T>) -> AstBlockId {
         match &expr.kind {
             ExprKind::If {
                 cond,
@@ -213,7 +213,7 @@ impl<'a, T> CfgBuilder<'a, T> {
         }
     }
 
-    fn finish(self) -> Cfg<'a, T> {
+    fn finish(self) -> Cfg<'a, D, T> {
         let mut preds = vec![vec![]; self.nodes.len()];
         for (idx, outs) in self.succs.iter().enumerate() {
             let src = AstBlockId(idx);
@@ -230,7 +230,7 @@ impl<'a, T> CfgBuilder<'a, T> {
     }
 }
 
-impl<T> DataflowGraph for Cfg<'_, T> {
+impl<D, T> DataflowGraph for Cfg<'_, D, T> {
     type Node = AstBlockId;
 
     fn num_nodes(&self) -> usize {
@@ -254,14 +254,14 @@ impl<T> DataflowGraph for Cfg<'_, T> {
     }
 }
 
-pub type AstItem<'a> = CfgItem<'a, String>;
-pub type AstTerminator<'a> = CfgTerminator<'a, String>;
-pub type AstCfgNode<'a> = CfgNode<'a, String>;
-pub type AstCfg<'a> = Cfg<'a, String>;
-pub type AstCfgBuilder<'a> = CfgBuilder<'a, String>;
+pub type AstItem<'a, Ty = ()> = CfgItem<'a, String, Ty>;
+pub type AstTerminator<'a, Ty = ()> = CfgTerminator<'a, String, Ty>;
+pub type AstCfgNode<'a, Ty = ()> = CfgNode<'a, String, Ty>;
+pub type AstCfg<'a, Ty = ()> = Cfg<'a, String, Ty>;
+pub type AstCfgBuilder<'a, Ty = ()> = CfgBuilder<'a, String, Ty>;
 
-pub type HirItem<'a> = CfgItem<'a, DefId>;
-pub type HirTerminator<'a> = CfgTerminator<'a, DefId>;
-pub type HirCfgNode<'a> = CfgNode<'a, DefId>;
-pub type HirCfg<'a> = Cfg<'a, DefId>;
-pub type HirCfgBuilder<'a> = CfgBuilder<'a, DefId>;
+pub type HirItem<'a, Ty = ()> = CfgItem<'a, DefId, Ty>;
+pub type HirTerminator<'a, Ty = ()> = CfgTerminator<'a, DefId, Ty>;
+pub type HirCfgNode<'a, Ty = ()> = CfgNode<'a, DefId, Ty>;
+pub type HirCfg<'a, Ty = ()> = Cfg<'a, DefId, Ty>;
+pub type HirCfgBuilder<'a, Ty = ()> = CfgBuilder<'a, DefId, Ty>;

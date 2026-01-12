@@ -175,6 +175,7 @@ impl<'a> Parser<'a> {
                 return_ty: return_ty.clone(),
                 body: Box::new(body.clone()), // TODO: see if we can restructure this to avoid cloning
             },
+            ty: (),
             span: self.close(marker),
         };
 

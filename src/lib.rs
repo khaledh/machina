@@ -16,5 +16,6 @@ pub mod resolve;
 pub mod semck;
 pub mod symtab;
 pub mod targets;
+pub mod tir;
 pub mod typeck;
 pub mod types;

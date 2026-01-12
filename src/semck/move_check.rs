@@ -11,16 +11,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::stage::HirDef;
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{
-    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
-    StmtExprKind,
-};
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
+use crate::tir::model::{
+    BindPattern, BindPatternKind, NodeId, ParamMode, TypedExpr as Expr, TypedExprKind as ExprKind,
+    TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr, TypedStmtExprKind as StmtExprKind,
+};
+use crate::types::TypeId;
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,
@@ -47,7 +47,7 @@ fn check_func_def(
     errors: &mut Vec<SemCheckError>,
     implicit_moves: &mut HashSet<NodeId>,
 ) {
-    let cfg = HirCfgBuilder::new().build_from_expr(&func_def.body);
+    let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
 
     // Precompute heap liveness for last-use detection (implicit moves).
     let liveness = ast_liveness::analyze(&cfg, ctx);
@@ -136,7 +136,7 @@ impl<'a> MoveVisitor<'a> {
     }
 
     /// Process a CFG block: check each item with its liveness context.
-    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_>, block_id: AstBlockId) {
+    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_, TypeId>, block_id: AstBlockId) {
         // Precompute per-item info for implicit move detection:
         // - use_counts: how many times each heap var is used in each item
         // - live_after: which heap vars are live after each item
@@ -180,9 +180,7 @@ impl<'a> MoveVisitor<'a> {
                         return;
                     }
                 }
-                let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) else {
-                    return;
-                };
+                let ty = self.ctx.type_map.type_table().get(expr.ty);
                 // Only track moves for types that need ownership tracking.
                 if ty.is_move_tracked() {
                     self.moved.insert(*def_id);
@@ -218,9 +216,7 @@ impl<'a> MoveVisitor<'a> {
     /// For heap-owned values: require explicit `move` unless this is the last use.
     /// Last-use detection: not live after this item AND only used once in this item.
     fn check_heap_move_required(&mut self, expr: &Expr) {
-        if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
-            && ty.is_heap()
-        {
+        if self.ctx.type_map.type_table().get(expr.ty).is_heap() {
             let ExprKind::Var { def_id, .. } = expr.kind else {
                 return;
             };
@@ -336,7 +332,7 @@ impl<'a> MoveVisitor<'a> {
     }
 }
 
-impl<'a> Visitor<HirDef> for MoveVisitor<'a> {
+impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. }

@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
-use crate::hir::model::{Expr, MatchArm, MatchPattern};
+use crate::hir::model::MatchPattern;
 use crate::semck::SemCheckError;
+use crate::tir::model::{TypedExpr as Expr, TypedMatchArm as MatchArm};
 use crate::types::{EnumVariant, Type};
 
 pub(super) fn check_match(
@@ -24,17 +25,14 @@ pub(super) fn check_match(
         )));
     }
 
-    let Some(scrutinee_ty) = ctx.type_map.lookup_node_type(scrutinee.id) else {
-        return;
-    };
-
+    let scrutinee_ty = ctx.type_map.type_table().get(scrutinee.ty);
     let mut peeled_ty = scrutinee_ty.clone();
     while let Type::Heap { elem_ty } = peeled_ty {
         peeled_ty = *elem_ty;
     }
 
     let rule = MatchRuleKind::for_type(&peeled_ty);
-    rule.check(ctx, &scrutinee_ty, arms, span, scrutinee.span, errors);
+    rule.check(ctx, scrutinee_ty, arms, span, scrutinee.span, errors);
 }
 
 enum MatchRuleKind<'a> {

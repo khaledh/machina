@@ -1,8 +1,8 @@
 use crate::context::{AnalyzedContext, SemanticCheckedContext};
-use crate::hir::model::{
+use crate::resolve::{DefId, DefTable};
+use crate::tir::model::{
     ArrayLitInit, BlockItem, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind, StringFmtSegment,
 };
-use crate::resolve::{DefId, DefTable};
 use crate::typeck::type_map::TypeMap;
 
 /// NRVO (Named Return Value Optimization) analyzer.
@@ -20,7 +20,7 @@ impl NrvoAnalyzer {
 
     pub fn analyze(self) -> AnalyzedContext {
         let SemanticCheckedContext {
-            module,
+            module: typed_module,
             def_table,
             type_map,
             symbols,
@@ -31,12 +31,12 @@ impl NrvoAnalyzer {
 
         let mut def_table = def_table;
 
-        for func_def in module.func_defs() {
+        for func_def in typed_module.func_defs() {
             Self::analyze_func_def(&mut def_table, &type_map, func_def);
         }
 
         AnalyzedContext {
-            module,
+            module: typed_module,
             def_table,
             type_map,
             symbols,

@@ -10,17 +10,18 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::stage::HirDef;
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
 use crate::diag::Span;
-use crate::hir::model::{
-    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
-    MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
-};
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
-use crate::types::Type;
+use crate::tir::model::{
+    BindPattern, BindPatternKind, CallArgMode, MatchPattern, MatchPatternBinding, NodeId,
+    ParamMode, TypedArrayLitInit as ArrayLitInit, TypedBlockItem as BlockItem, TypedExpr as Expr,
+    TypedExprKind as ExprKind, TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr,
+    TypedStmtExprKind as StmtExprKind, TypedStringFmtSegment as StringFmtSegment,
+};
+use crate::types::{Type, TypeId};
 
 pub(super) struct DefInitResult {
     pub errors: Vec<SemCheckError>,
@@ -136,7 +137,7 @@ fn check_func(
     init_assigns: &mut HashSet<NodeId>,
     full_init_assigns: &mut HashSet<NodeId>,
 ) {
-    let cfg = HirCfgBuilder::new().build_from_expr(&func_def.body);
+    let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
 
     // Params are initialized at entry, except `out` params which start uninitialized.
     let entry_state = InitState::new(collect_param_defs(func_def, false));
@@ -412,7 +413,7 @@ impl<'a> DefCollector<'a> {
     }
 }
 
-impl<'a> Visitor<HirDef> for DefCollector<'a> {
+impl<'a> Visitor<DefId, TypeId> for DefCollector<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         self.collect_stmt(stmt);
     }
@@ -532,7 +533,7 @@ impl<'a> DefSpanCollector<'a> {
     }
 }
 
-impl<'a> Visitor<HirDef> for DefSpanCollector<'a> {
+impl<'a> Visitor<DefId, TypeId> for DefSpanCollector<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         self.collect_stmt(stmt);
     }
@@ -572,7 +573,7 @@ impl<'a> DefInitChecker<'a> {
         }
     }
 
-    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_>) {
+    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_, TypeId>) {
         // Loop bodies pre-initialize their pattern bindings.
         for pattern in &node.loop_inits {
             self.mark_pattern_initialized(pattern);

@@ -8,6 +8,7 @@ use crate::mcir::GlobalItem;
 use crate::regalloc::AllocationResult;
 use crate::resolve::DefTable;
 use crate::symtab::SymbolTable;
+use crate::tir::model::TypedModule;
 use crate::typeck::type_map::TypeMap;
 
 // -----------------------------------------------------------------------------
@@ -44,9 +45,9 @@ pub struct ResolvedContext {
 }
 
 impl ResolvedContext {
-    pub fn with_type_map(self, type_map: TypeMap) -> TypeCheckedContext {
+    pub fn with_type_map(self, type_map: TypeMap, module: TypedModule) -> TypeCheckedContext {
         TypeCheckedContext {
-            module: self.module,
+            module,
             def_table: self.def_table,
             type_map,
             symbols: self.symbols,
@@ -59,7 +60,7 @@ impl ResolvedContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct TypeCheckedContext {
-    pub module: HirModule,
+    pub module: TypedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -89,7 +90,7 @@ impl TypeCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
-    pub module: HirModule,
+    pub module: TypedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -103,7 +104,7 @@ pub struct SemanticCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
-    pub module: HirModule,
+    pub module: TypedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,

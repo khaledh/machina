@@ -2,11 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_backward;
 use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::stage::HirDef;
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::resolve::DefId;
+use crate::tir::model::{
+    BindPattern, BindPatternKind, TypedExpr as Expr, TypedExprKind as ExprKind,
+    TypedStmtExpr as StmtExpr, TypedStmtExprKind as StmtExprKind,
+};
+use crate::types::TypeId;
 
 // ============================================================================
 // Public API
@@ -22,7 +25,7 @@ pub struct AstLiveness {
 
 /// Compute liveness for heap-owned locals on the AST CFG. This keeps the analysis
 /// lightweight and scoped to the move-checker (we only track heap uses).
-pub fn analyze(cfg: &HirCfg<'_>, ctx: &TypeCheckedContext) -> AstLiveness {
+pub fn analyze(cfg: &HirCfg<'_, TypeId>, ctx: &TypeCheckedContext) -> AstLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -61,7 +64,7 @@ pub fn analyze(cfg: &HirCfg<'_>, ctx: &TypeCheckedContext) -> AstLiveness {
 /// Count heap-owned variable uses within one AST item. This lets move_check
 /// avoid implicit moves when a single item uses the same binding multiple times.
 pub(crate) fn heap_use_counts_for_item(
-    item: &HirItem<'_>,
+    item: &HirItem<'_, TypeId>,
     ctx: &TypeCheckedContext,
 ) -> HashMap<DefId, usize> {
     let mut counts = HashMap::new();
@@ -98,7 +101,7 @@ impl HeapUseAccumulator for HashMap<DefId, usize> {
 
 fn compute_live_in(
     ctx: &TypeCheckedContext,
-    node: &HirCfgNode<'_>,
+    node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
     let mut live = live_out.clone();
@@ -113,7 +116,7 @@ fn compute_live_in(
 /// Per-item live-after sets are used to detect last-use sites inside a block.
 fn compute_live_after(
     ctx: &TypeCheckedContext,
-    node: &HirCfgNode<'_>,
+    node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
     let mut live = live_out.clone();
@@ -126,7 +129,11 @@ fn compute_live_after(
     live_after
 }
 
-fn apply_item_defs_uses(item: &HirItem<'_>, ctx: &TypeCheckedContext, live: &mut HashSet<DefId>) {
+fn apply_item_defs_uses(
+    item: &HirItem<'_, TypeId>,
+    ctx: &TypeCheckedContext,
+    live: &mut HashSet<DefId>,
+) {
     let mut defs = HashSet::new();
     let mut uses = HashSet::new();
     collect_item_defs_uses(item, ctx, &mut defs, &mut uses);
@@ -139,7 +146,7 @@ fn apply_item_defs_uses(item: &HirItem<'_>, ctx: &TypeCheckedContext, live: &mut
 }
 
 fn add_terminator_uses(
-    term: &HirTerminator<'_>,
+    term: &HirTerminator<'_, TypeId>,
     ctx: &TypeCheckedContext,
     uses: &mut HashSet<DefId>,
 ) {
@@ -153,7 +160,7 @@ fn add_terminator_uses(
 // ============================================================================
 
 fn collect_item_defs_uses(
-    item: &HirItem<'_>,
+    item: &HirItem<'_, TypeId>,
     ctx: &TypeCheckedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
@@ -297,7 +304,7 @@ struct HeapUseCollector<'a, A> {
     acc: &'a mut A,
 }
 
-impl<A: HeapUseAccumulator> Visitor<HirDef> for HeapUseCollector<'_, A> {
+impl<A: HeapUseAccumulator> Visitor<DefId, TypeId> for HeapUseCollector<'_, A> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(def_id) = heap_use_def(expr, self.ctx) {
             self.acc.record(def_id);
@@ -311,8 +318,7 @@ fn heap_use_def(expr: &Expr, ctx: &TypeCheckedContext) -> Option<DefId> {
     let ExprKind::Var { def_id, .. } = expr.kind else {
         return None;
     };
-    let ty = ctx.type_map.lookup_node_type(expr.id)?;
-    if !ty.is_heap() {
+    if !ctx.type_map.type_table().get(expr.ty).is_heap() {
         return None;
     }
     Some(def_id)

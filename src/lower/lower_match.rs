@@ -1,10 +1,10 @@
-use crate::hir::model::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
 use crate::lower::decision_tree::{
     ArmDecision, DecisionTreeEmitter, Test, TestKind, build_decision_tree, emit_decision_tree,
 };
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
+use crate::tir::model::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

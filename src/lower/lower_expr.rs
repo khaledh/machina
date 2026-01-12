@@ -1,9 +1,9 @@
-use crate::hir::model::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::lower::lower_util::u64_const;
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
+use crate::tir::model::{ArrayLitInit, BinaryOp, Expr, ExprKind as EK, StructLitField, UnaryOp};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

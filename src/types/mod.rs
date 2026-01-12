@@ -1,10 +1,12 @@
 mod format;
 mod relations;
+mod type_table;
 
 pub use relations::{
     TypeAssignability, ValueAssignability, array_to_slice_assignable, type_assignable,
     value_assignable,
 };
+pub use type_table::{TypeId, TypeTable};
 
 use std::hash::{Hash, Hasher};
 

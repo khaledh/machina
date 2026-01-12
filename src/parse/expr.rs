@@ -17,6 +17,7 @@ impl<'a> Parser<'a> {
                     op: UnaryOp::Neg,
                     expr: Box::new(operand),
                 },
+                ty: (),
                 span: self.close(marker),
             }
         } else if self.curr_token.kind == TK::LogicalNot {
@@ -29,6 +30,7 @@ impl<'a> Parser<'a> {
                     op: UnaryOp::LogicalNot,
                     expr: Box::new(operand),
                 },
+                ty: (),
                 span: self.close(marker),
             }
         } else if self.curr_token.kind == TK::Tilde {
@@ -41,6 +43,7 @@ impl<'a> Parser<'a> {
                     op: UnaryOp::BitNot,
                     expr: Box::new(operand),
                 },
+                ty: (),
                 span: self.close(marker),
             }
         } else if self.curr_token.kind == TK::Caret {
@@ -52,6 +55,7 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::HeapAlloc {
                     expr: Box::new(operand),
                 },
+                ty: (),
                 span: self.close(marker),
             }
         } else if self.curr_token.kind == TK::KwMove {
@@ -63,6 +67,7 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::Move {
                     expr: Box::new(operand),
                 },
+                ty: (),
                 span: self.close(marker),
             }
         } else {
@@ -87,6 +92,7 @@ impl<'a> Parser<'a> {
                     op,
                     right: Box::new(rhs),
                 },
+                ty: (),
                 span: self.close(marker),
             };
         }
@@ -144,6 +150,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::IntLit(*value),
+                    ty: (),
                     span,
                 })
             }
@@ -154,6 +161,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::CharLit(*value),
+                    ty: (),
                     span,
                 })
             }
@@ -164,6 +172,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::StringLit { value: s.clone() },
+                    ty: (),
                     span,
                 })
             }
@@ -189,6 +198,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::BoolLit(*value),
+                    ty: (),
                     span,
                 })
             }
@@ -217,6 +227,7 @@ impl<'a> Parser<'a> {
                         ident: name.clone(),
                         def_id: (),
                     },
+                    ty: (),
                     span: self.close(marker),
                 })
             }
@@ -230,6 +241,7 @@ impl<'a> Parser<'a> {
                         ident: "self".to_string(),
                         def_id: (),
                     },
+                    ty: (),
                     span: self.close(marker),
                 })
             }
@@ -258,6 +270,7 @@ impl<'a> Parser<'a> {
                 callee: Box::new(expr),
                 args,
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -326,6 +339,7 @@ impl<'a> Parser<'a> {
                     start,
                     end,
                 },
+                ty: (),
                 span: self.close(marker),
             })
         } else {
@@ -340,6 +354,7 @@ impl<'a> Parser<'a> {
                     target: Box::new(expr),
                     indices,
                 },
+                ty: (),
                 span: self.close(marker),
             })
         }
@@ -357,6 +372,7 @@ impl<'a> Parser<'a> {
                         target: Box::new(expr),
                         index: *index as usize,
                     },
+                    ty: (),
                     span: self.close(marker),
                 })
             }
@@ -374,6 +390,7 @@ impl<'a> Parser<'a> {
                             method_name: name.clone(),
                             args,
                         },
+                        ty: (),
                         span: self.close(marker),
                     })
                 } else {
@@ -383,6 +400,7 @@ impl<'a> Parser<'a> {
                             target: Box::new(expr),
                             field: name.clone(),
                         },
+                        ty: (),
                         span: self.close(marker),
                     })
                 }
@@ -421,6 +439,7 @@ impl<'a> Parser<'a> {
                 then_body: Box::new(then_body),
                 else_body: Box::new(else_body),
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -435,6 +454,7 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Range { start, end },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -471,6 +491,7 @@ impl<'a> Parser<'a> {
                     elem_ty,
                     init: ArrayLitInit::Elems(Vec::new()),
                 },
+                ty: (),
                 span: self.close(marker),
             });
         }
@@ -501,6 +522,7 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::ArrayLit { elem_ty, init },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -527,6 +549,7 @@ impl<'a> Parser<'a> {
                 variant,
                 payload,
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -559,6 +582,7 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::StructLit { name, fields },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -593,6 +617,7 @@ impl<'a> Parser<'a> {
                 target: Box::new(base),
                 fields,
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -607,6 +632,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::UnitLit,
+                ty: (),
                 span,
             });
         }
@@ -627,6 +653,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::TupleLit(fields),
+                ty: (),
                 span: self.close(marker),
             });
         }

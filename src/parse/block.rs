@@ -38,6 +38,7 @@ impl<'a> Parser<'a> {
                             let semi_span = self.curr_token.span;
                             self.advance();
                             let expr = Expr {
+                                ty: (),
                                 span: Span::new(expr.span.start, semi_span.end),
                                 ..expr
                             };
@@ -57,6 +58,7 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Block { items, tail },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -87,6 +89,7 @@ impl<'a> Parser<'a> {
                 decl_ty,
                 value: Box::new(value),
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -121,6 +124,7 @@ impl<'a> Parser<'a> {
                     decl_ty,
                     value: Box::new(value),
                 },
+                ty: (),
                 span: self.close(marker),
             })
         } else {
@@ -139,6 +143,7 @@ impl<'a> Parser<'a> {
                     def_id: (),
                     decl_ty,
                 },
+                ty: (),
                 span: self.close(marker),
             })
         }
@@ -159,6 +164,7 @@ impl<'a> Parser<'a> {
                 assignee: Box::new(assignee),
                 value: Box::new(value),
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -178,6 +184,7 @@ impl<'a> Parser<'a> {
                 cond: Box::new(cond),
                 body: Box::new(body),
             },
+            ty: (),
             span: self.close(marker),
         })
     }
@@ -210,6 +217,7 @@ impl<'a> Parser<'a> {
                 iter: Box::new(iter),
                 body: Box::new(body),
             },
+            ty: (),
             span: self.close(marker),
         })
     }

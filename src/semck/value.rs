@@ -1,13 +1,14 @@
-use crate::ast::stage::HirDef;
 use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::TypeCheckedContext;
-use crate::hir::model::{
-    BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
-    TypeExpr, TypeExprKind, UnaryOp,
-};
+use crate::resolve::DefId;
 use crate::semck::SemCheckError;
+use crate::tir::model::{
+    BinaryOp, FunctionSig, TypeDef, TypeDefKind, TypeExpr, TypeExprKind, TypedExpr as Expr,
+    TypedExprKind as ExprKind, TypedFuncDef as FuncDef, TypedStmtExpr as StmtExpr,
+    TypedStmtExprKind as StmtExprKind, UnaryOp,
+};
 use crate::typeck::type_map::resolve_type_expr;
-use crate::types::Type;
+use crate::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &TypeCheckedContext) -> Vec<SemCheckError> {
     let mut checker = ValueChecker::new(ctx);
@@ -139,7 +140,7 @@ impl<'a> ValueChecker<'a> {
     }
 }
 
-impl Visitor<HirDef> for ValueChecker<'_> {
+impl Visitor<DefId, TypeId> for ValueChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.current_return_ty = self.resolve_type(&func_def.sig.ret_ty_expr);
         walk_expr(self, &func_def.body);
@@ -185,9 +186,8 @@ impl Visitor<HirDef> for ValueChecker<'_> {
                 self.check_type_expr(decl_ty);
             }
             StmtExprKind::Assign { assignee, value } => {
-                if let Some(assignee_ty) = self.ctx.type_map.lookup_node_type(assignee.id) {
-                    self.check_range_binding_value(value, &assignee_ty);
-                }
+                let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
+                self.check_range_binding_value(value, assignee_ty);
             }
             _ => {}
         }
@@ -199,9 +199,8 @@ impl Visitor<HirDef> for ValueChecker<'_> {
         match &expr.kind {
             ExprKind::IntLit(value) => {
                 // Enforce integer literal ranges based on the resolved type.
-                if let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
-                    && let Type::Int { signed, bits } = ty
-                {
+                let ty = self.ctx.type_map.type_table().get(expr.ty);
+                if let Type::Int { signed, bits } = *ty {
                     let min = if signed {
                         -(1i128 << (bits as u32 - 1))
                     } else {
@@ -226,8 +225,7 @@ impl Visitor<HirDef> for ValueChecker<'_> {
                 op: UnaryOp::Neg, ..
             } => {
                 if let Some(lit_value) = int_lit_value(expr)
-                    && let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id)
-                    && let Type::Int { signed, bits } = ty
+                    && let Type::Int { signed, bits } = *self.ctx.type_map.type_table().get(expr.ty)
                 {
                     let min = if signed {
                         -(1i128 << (bits as u32 - 1))
