@@ -276,7 +276,9 @@ pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExp
             v.visit_expr(value);
         }
         StmtExprKind::VarDecl { .. } => {}
-        StmtExprKind::Assign { assignee, value } => {
+        StmtExprKind::Assign {
+            assignee, value, ..
+        } => {
             v.visit_expr(assignee);
             v.visit_expr(value);
         }

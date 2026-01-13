@@ -108,9 +108,14 @@ fn annotate_stmt_expr(stmt: &hir::StmtExpr, type_map: &TypeMap) -> tir::StmtExpr
             def_id: *def_id,
             decl_ty: decl_ty.clone(),
         },
-        hir::StmtExprKind::Assign { assignee, value } => tir::StmtExprKind::Assign {
+        hir::StmtExprKind::Assign {
+            assignee,
+            value,
+            init,
+        } => tir::StmtExprKind::Assign {
             assignee: Box::new(annotate_expr(assignee, type_map)),
             value: Box::new(annotate_expr(value, type_map)),
+            init: *init,
         },
         hir::StmtExprKind::While { cond, body } => tir::StmtExprKind::While {
             cond: Box::new(annotate_expr(cond, type_map)),
@@ -317,6 +322,7 @@ fn annotate_call_arg(arg: &hir::CallArg, type_map: &TypeMap) -> tir::CallArg {
     tir::CallArg {
         mode: arg.mode,
         expr: annotate_expr(&arg.expr, type_map),
+        init: arg.init,
         span: arg.span,
     }
 }

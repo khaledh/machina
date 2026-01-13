@@ -2,7 +2,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::{BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
+use crate::sir::model::{BlockItem, Expr, ExprKind, InitInfo, NodeId, StmtExpr, StmtExprKind};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -71,7 +71,11 @@ impl<'a> FuncLowerer<'a> {
             StmtExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
             StmtExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
             StmtExprKind::VarDecl { def_id, .. } => self.lower_var_decl(stmt, *def_id),
-            StmtExprKind::Assign { assignee, value } => self.lower_assign(assignee, value),
+            StmtExprKind::Assign {
+                assignee,
+                value,
+                init,
+            } => self.lower_assign(assignee, value, *init),
             StmtExprKind::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
             StmtExprKind::For {
                 pattern,
@@ -82,7 +86,12 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Lower an assignment expression.
-    pub(super) fn lower_assign(&mut self, assignee: &Expr, value: &Expr) -> Result<(), LowerError> {
+    pub(super) fn lower_assign(
+        &mut self,
+        assignee: &Expr,
+        value: &Expr,
+        init: InitInfo,
+    ) -> Result<(), LowerError> {
         let value_ty = self.ty_for_node(value.id)?;
 
         if value_ty.is_scalar() {
@@ -96,12 +105,13 @@ impl<'a> FuncLowerer<'a> {
                 assignee,
                 PlaceAny::Scalar(assignee_place.clone()),
                 &target_ty,
+                init,
                 true,
             );
 
             self.emit_copy_scalar(assignee_place, Rvalue::Use(value_operand));
-            self.mark_initialized_if_needed(assignee);
-            self.mark_full_init_if_needed(assignee);
+            self.mark_initialized_if_needed(assignee, init);
+            self.mark_full_init_if_needed(assignee, init);
         } else {
             // Aggregate assignment (value written directly into place).
             let assignee_place = self.lower_place_agg(assignee)?;
@@ -112,13 +122,14 @@ impl<'a> FuncLowerer<'a> {
                 assignee,
                 PlaceAny::Aggregate(assignee_place.clone()),
                 &target_ty,
+                init,
                 false,
             );
 
             // Write the new value into the assignee place.
             self.lower_agg_value_into(assignee_place, value)?;
-            self.mark_initialized_if_needed(assignee);
-            self.mark_full_init_if_needed(assignee);
+            self.mark_initialized_if_needed(assignee, init);
+            self.mark_full_init_if_needed(assignee, init);
         }
 
         Ok(())
@@ -166,6 +177,7 @@ impl<'a> FuncLowerer<'a> {
         assignee: &Expr,
         place: PlaceAny,
         target_ty: &Type,
+        init: InitInfo,
         clear_moved: bool,
     ) {
         if !target_ty.needs_drop() {
@@ -174,7 +186,7 @@ impl<'a> FuncLowerer<'a> {
 
         if self.is_out_param_assignee(assignee)
             && matches!(assignee.kind, ExprKind::Var { .. })
-            && self.ctx.init_assigns.contains(&assignee.id)
+            && init.is_init
         {
             // First assignment to an out param is a full initialization; skip drop.
             return;
@@ -185,7 +197,7 @@ impl<'a> FuncLowerer<'a> {
             return;
         }
 
-        if self.ctx.init_assigns.contains(&assignee.id) {
+        if init.is_init {
             return;
         }
 
@@ -197,14 +209,17 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    pub(super) fn mark_initialized_if_needed(&mut self, assignee: &Expr) {
+    pub(super) fn mark_initialized_if_needed(&mut self, assignee: &Expr, init: InitInfo) {
+        if !init.is_init {
+            return;
+        }
         if let Some(flag) = self.is_initialized_for_assignee(assignee) {
             self.emit_is_initialized(flag, true);
         }
     }
 
-    pub(super) fn mark_full_init_if_needed(&mut self, assignee: &Expr) {
-        if !self.ctx.full_init_assigns.contains(&assignee.id) {
+    pub(super) fn mark_full_init_if_needed(&mut self, assignee: &Expr, init: InitInfo) {
+        if !init.promotes_full {
             return;
         }
         let Some(def_id) = self.base_def_for_assignee(assignee) else {

@@ -4,7 +4,7 @@ use crate::ast::model;
 use crate::resolve::DefId;
 use crate::types::TypeId;
 
-pub use crate::ast::{BinaryOp, CallArgMode, CoerceKind, NodeId, ParamMode, UnaryOp};
+pub use crate::ast::{BinaryOp, CallArgMode, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
 
 // -- TIR type aliases (AST model specialized with DefId + TypeId) ---
 

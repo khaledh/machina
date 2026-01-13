@@ -2,7 +2,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{ExprValue, FuncLowerer};
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
-use crate::sir::model::{CallArg, CallArgMode, CoerceKind, Expr, ExprKind, ParamMode};
+use crate::sir::model::{CallArg, CallArgMode, CoerceKind, Expr, ExprKind, InitInfo, ParamMode};
 use crate::types::{Type, array_to_slice_assignable};
 
 impl<'a> FuncLowerer<'a> {
@@ -110,6 +110,7 @@ impl<'a> FuncLowerer<'a> {
                         _ => CallArgMode::Default,
                     },
                     expr: receiver_expr.clone(),
+                    init: InitInfo::default(),
                     span: receiver_expr.span,
                 };
                 vals.push(self.lower_call_arg(
@@ -138,10 +139,10 @@ impl<'a> FuncLowerer<'a> {
                 args: arg_vals,
             },
         );
-        for arg in out_args {
+        for (arg, init) in out_args {
             // Mark out args as initialized after the call.
-            self.mark_initialized_if_needed(arg);
-            self.mark_full_init_if_needed(arg);
+            self.mark_initialized_if_needed(arg, init);
+            self.mark_full_init_if_needed(arg, init);
         }
         Ok(())
     }
@@ -202,7 +203,7 @@ impl<'a> FuncLowerer<'a> {
         arg_expr: &'b Expr,
         param: &crate::typeck::type_map::CallParam,
         arg: &CallArg,
-        out_args: &mut Vec<&'b Expr>,
+        out_args: &mut Vec<(&'b Expr, InitInfo)>,
     ) -> Result<PlaceAny, LowerError> {
         let (arg_expr, coerce_kind, implicit_move) = self.peel_coerce_expr(arg_expr);
         if implicit_move {
@@ -212,10 +213,8 @@ impl<'a> FuncLowerer<'a> {
             // Out args are write-only; skip drop only when the call is the first init.
             let place = self.lower_place(arg_expr)?;
             let arg_ty = self.ty_for_node(arg_expr.id)?;
-            if !self.ctx.init_assigns.contains(&arg_expr.id) {
-                self.emit_overwrite_drop(arg_expr, place.clone(), &arg_ty, true);
-            }
-            out_args.push(arg_expr);
+            self.emit_overwrite_drop(arg_expr, place.clone(), &arg_ty, arg.init, true);
+            out_args.push((arg_expr, arg.init));
             return Ok(place);
         }
 

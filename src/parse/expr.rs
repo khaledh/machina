@@ -298,6 +298,7 @@ impl<'a> Parser<'a> {
         Ok(CallArg {
             mode,
             expr,
+            init: InitInfo::default(),
             span: self.close(marker),
         })
     }

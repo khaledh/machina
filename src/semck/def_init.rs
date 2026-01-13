@@ -351,7 +351,9 @@ impl<'a> DefCollector<'a> {
             StmtExprKind::VarDecl { def_id, .. } => {
                 self.defs.insert(*def_id);
             }
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 self.collect_expr(assignee);
                 self.collect_expr(value);
             }
@@ -471,7 +473,9 @@ impl<'a> DefSpanCollector<'a> {
             StmtExprKind::VarDecl { def_id, .. } => {
                 self.spans.entry(*def_id).or_insert(stmt.span);
             }
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 self.collect_expr(assignee);
                 self.collect_expr(value);
             }
@@ -601,7 +605,9 @@ impl<'a> DefInitChecker<'a> {
                 // scope or be re-declared after a conditional init).
                 self.initialized.clear_def(*def_id);
             }
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 self.check_expr(value);
                 self.check_assignment(assignee);
             }

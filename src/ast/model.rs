@@ -362,6 +362,7 @@ pub struct Param<D> {
 pub struct CallArg<D, T = ()> {
     pub mode: CallArgMode,
     pub expr: Expr<D, T>,
+    pub init: InitInfo,
     pub span: Span,
 }
 
@@ -491,6 +492,7 @@ pub enum StmtExprKind<D, T = ()> {
     Assign {
         assignee: Box<Expr<D, T>>,
         value: Box<Expr<D, T>>,
+        init: InitInfo,
     },
     While {
         cond: Box<Expr<D, T>>,
@@ -501,6 +503,12 @@ pub enum StmtExprKind<D, T = ()> {
         iter: Box<Expr<D, T>>,
         body: Box<Expr<D, T>>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InitInfo {
+    pub is_init: bool,
+    pub promotes_full: bool,
 }
 
 // -- Expressions ---

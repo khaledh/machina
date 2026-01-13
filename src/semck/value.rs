@@ -184,7 +184,9 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
             StmtExprKind::VarDecl { decl_ty, .. } => {
                 self.check_type_expr(decl_ty);
             }
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
                 self.check_range_binding_value(value, assignee_ty);
             }

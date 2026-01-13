@@ -136,8 +136,6 @@ pub struct ElaboratedContext {
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub init_assigns: HashSet<NodeId>,
-    pub full_init_assigns: HashSet<NodeId>,
 }
 
 impl From<SemanticCheckedContext> for ElaboratedContext {
@@ -149,8 +147,6 @@ impl From<SemanticCheckedContext> for ElaboratedContext {
             type_map: ctx.type_map,
             symbols: ctx.symbols,
             node_id_gen: ctx.node_id_gen,
-            init_assigns: ctx.init_assigns,
-            full_init_assigns: ctx.full_init_assigns,
         }
     }
 }
@@ -166,8 +162,6 @@ pub struct AnalyzedContext {
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub init_assigns: HashSet<NodeId>,
-    pub full_init_assigns: HashSet<NodeId>,
 }
 
 impl AnalyzedContext {

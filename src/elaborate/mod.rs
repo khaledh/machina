@@ -26,7 +26,13 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
     let mut sir_module = sir_module;
     let mut type_map = type_map;
     let mut node_id_gen = node_id_gen;
-    let mut elaborator = Elaborator::new(&mut type_map, &mut node_id_gen, &implicit_moves);
+    let mut elaborator = Elaborator::new(
+        &mut type_map,
+        &mut node_id_gen,
+        &implicit_moves,
+        &init_assigns,
+        &full_init_assigns,
+    );
     elaborator.visit_module(&mut sir_module);
     ElaboratedContext {
         module,
@@ -35,8 +41,6 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
         type_map,
         symbols,
         node_id_gen,
-        init_assigns,
-        full_init_assigns,
     }
 }
 
@@ -44,6 +48,8 @@ struct Elaborator<'a> {
     type_map: &'a mut TypeMap,
     node_id_gen: &'a mut NodeIdGen,
     implicit_moves: &'a HashSet<NodeId>,
+    init_assigns: &'a HashSet<NodeId>,
+    full_init_assigns: &'a HashSet<NodeId>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -51,11 +57,34 @@ impl<'a> Elaborator<'a> {
         type_map: &'a mut TypeMap,
         node_id_gen: &'a mut NodeIdGen,
         implicit_moves: &'a HashSet<NodeId>,
+        init_assigns: &'a HashSet<NodeId>,
+        full_init_assigns: &'a HashSet<NodeId>,
     ) -> Self {
         Self {
             type_map,
             node_id_gen,
             implicit_moves,
+            init_assigns,
+            full_init_assigns,
+        }
+    }
+
+    fn init_info_for_id(&self, id: NodeId) -> sir::InitInfo {
+        sir::InitInfo {
+            is_init: self.init_assigns.contains(&id),
+            promotes_full: self.full_init_assigns.contains(&id),
+        }
+    }
+
+    fn init_info_for_expr(&self, expr: &sir::Expr) -> sir::InitInfo {
+        let mut current = expr;
+        loop {
+            match &current.kind {
+                sir::ExprKind::Coerce { expr, .. } | sir::ExprKind::ImplicitMove { expr } => {
+                    current = expr.as_ref();
+                }
+                _ => return self.init_info_for_id(current.id),
+            }
         }
     }
 
@@ -92,8 +121,25 @@ impl VisitorMut<DefId, TypeId> for Elaborator<'_> {
         visit_mut::walk_module(self, module);
     }
 
+    fn visit_stmt_expr(&mut self, stmt: &mut sir::StmtExpr) {
+        visit_mut::walk_stmt_expr(self, stmt);
+        if let sir::StmtExprKind::Assign { assignee, init, .. } = &mut stmt.kind {
+            *init = self.init_info_for_expr(assignee);
+        }
+    }
+
     fn visit_expr(&mut self, expr: &mut sir::Expr) {
         visit_mut::walk_expr(self, expr);
+        match &mut expr.kind {
+            sir::ExprKind::Call { args, .. } | sir::ExprKind::MethodCall { args, .. } => {
+                for arg in args {
+                    if arg.mode == sir::CallArgMode::Out {
+                        arg.init = self.init_info_for_expr(&arg.expr);
+                    }
+                }
+            }
+            _ => {}
+        }
         self.maybe_wrap_implicit_move(expr);
     }
 }

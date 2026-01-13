@@ -615,9 +615,14 @@ impl ToHir for ast::StmtExpr {
                 def_id: def_id(def_lookup, id),
                 decl_ty: decl_ty.to_hir(def_lookup),
             },
-            ast::StmtExprKind::Assign { assignee, value } => hir::StmtExprKind::Assign {
+            ast::StmtExprKind::Assign {
+                assignee,
+                value,
+                init,
+            } => hir::StmtExprKind::Assign {
                 assignee: Box::new(assignee.to_hir(def_lookup)),
                 value: Box::new(value.to_hir(def_lookup)),
+                init,
             },
             ast::StmtExprKind::While { cond, body } => hir::StmtExprKind::While {
                 cond: Box::new(cond.to_hir(def_lookup)),
@@ -774,6 +779,7 @@ impl ToHir for ast::CallArg {
         hir::CallArg {
             mode: self.mode,
             expr: self.expr.to_hir(def_lookup),
+            init: self.init,
             span: self.span,
         }
     }

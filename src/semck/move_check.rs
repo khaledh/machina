@@ -341,7 +341,9 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
                 self.clear_pattern_defs(pattern);
             }
             StmtExprKind::VarDecl { .. } => {}
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 self.visit_expr(value);
                 if let ExprKind::Var { def_id, .. } = assignee.kind {
                     // Reassigning a variable clears its moved status.

@@ -26,8 +26,6 @@ impl NrvoAnalyzer {
             type_map,
             symbols,
             node_id_gen,
-            init_assigns,
-            full_init_assigns,
         } = self.ctx;
 
         let mut def_table = def_table;
@@ -43,8 +41,6 @@ impl NrvoAnalyzer {
             type_map,
             symbols,
             node_id_gen,
-            init_assigns,
-            full_init_assigns,
         }
     }
 
@@ -116,7 +112,9 @@ impl NrvoSafetyChecker {
             StmtExprKind::VarDecl { .. } => true,
 
             // Assignment is ok if it's at return position
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 // If this is a write to our variable (lvalue use), that's OK
                 if self.is_lvalue_use(assignee) {
                     // Just check RHS doesn't use our variable as rvalue

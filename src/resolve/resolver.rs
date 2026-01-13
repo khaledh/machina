@@ -673,7 +673,9 @@ impl Visitor<()> for SymbolResolver {
                 self.visit_type_expr(decl_ty);
             }
 
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 self.check_lvalue_mutability(assignee);
                 self.visit_expr(value);
             }

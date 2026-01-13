@@ -1659,7 +1659,9 @@ impl AstFolder<DefId> for TypeChecker {
                 Type::Unit
             }
 
-            StmtExprKind::Assign { assignee, value } => self.check_assign(assignee, value)?,
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => self.check_assign(assignee, value)?,
 
             StmtExprKind::While { cond, body } => self.check_while(cond, body)?,
 

@@ -235,7 +235,9 @@ fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &NormalizedCon
             collect_expr_uses(value, ctx, acc);
         }
         StmtExprKind::VarDecl { .. } => {}
-        StmtExprKind::Assign { assignee, value } => {
+        StmtExprKind::Assign {
+            assignee, value, ..
+        } => {
             collect_expr_uses(value, ctx, acc);
             collect_assignee_uses(assignee, ctx, acc);
         }

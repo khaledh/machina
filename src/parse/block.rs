@@ -163,6 +163,7 @@ impl<'a> Parser<'a> {
             kind: StmtExprKind::Assign {
                 assignee: Box::new(assignee),
                 value: Box::new(value),
+                init: InitInfo::default(),
             },
             ty: (),
             span: self.close(marker),

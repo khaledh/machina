@@ -104,7 +104,9 @@ fn check_item_for_conflicts(
                 visitor.visit_expr(value);
             }
             StmtExprKind::VarDecl { .. } => {}
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 check_write_target(ctx, assignee, borrowed_bases, errors);
                 let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
                 visitor.visit_expr(value);
@@ -220,7 +222,9 @@ fn apply_item_bindings(
                 update_slice_binding(state, *def_id, bases);
             }
         }
-        StmtExprKind::Assign { assignee, value } => {
+        StmtExprKind::Assign {
+            assignee, value, ..
+        } => {
             if let ExprKind::Var { def_id, .. } = assignee.kind
                 && let Some(def) = ctx.def_table.lookup_def(def_id)
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
@@ -502,7 +506,9 @@ fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &NormalizedContext, uses: &mut 
             collect_expr_slice_uses(value, ctx, uses);
         }
         StmtExprKind::VarDecl { .. } => {}
-        StmtExprKind::Assign { assignee, value } => {
+        StmtExprKind::Assign {
+            assignee, value, ..
+        } => {
             collect_expr_slice_uses(value, ctx, uses);
             collect_assignee_uses(assignee, ctx, uses);
         }

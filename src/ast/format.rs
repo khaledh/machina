@@ -455,7 +455,9 @@ impl StmtExpr {
                 writeln!(f, "{}Ident: {}", pad1, ident)?;
                 writeln!(f, "{}Decl Type: {}", pad1, decl_ty)?;
             }
-            StmtExprKind::Assign { assignee, value } => {
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Assign [{}]", pad, self.id)?;
                 writeln!(f, "{}Assignee:", pad1)?;
