@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::solve_backward;
 use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::resolve::DefId;
 use crate::sir::model::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::types::TypeId;
@@ -22,7 +22,7 @@ pub struct AstLiveness {
 
 /// Compute liveness for heap-owned locals on the AST CFG. This keeps the analysis
 /// lightweight and scoped to the move-checker (we only track heap uses).
-pub fn analyze(cfg: &HirCfg<'_, TypeId>, ctx: &ElaboratedContext) -> AstLiveness {
+pub fn analyze(cfg: &HirCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -62,7 +62,7 @@ pub fn analyze(cfg: &HirCfg<'_, TypeId>, ctx: &ElaboratedContext) -> AstLiveness
 /// avoid implicit moves when a single item uses the same binding multiple times.
 pub(crate) fn heap_use_counts_for_item(
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) -> HashMap<DefId, usize> {
     let mut counts = HashMap::new();
     match item {
@@ -97,7 +97,7 @@ impl HeapUseAccumulator for HashMap<DefId, usize> {
 // ============================================================================
 
 fn compute_live_in(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
@@ -112,7 +112,7 @@ fn compute_live_in(
 
 /// Per-item live-after sets are used to detect last-use sites inside a block.
 fn compute_live_after(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
@@ -128,7 +128,7 @@ fn compute_live_after(
 
 fn apply_item_defs_uses(
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     live: &mut HashSet<DefId>,
 ) {
     let mut defs = HashSet::new();
@@ -144,7 +144,7 @@ fn apply_item_defs_uses(
 
 fn add_terminator_uses(
     term: &HirTerminator<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
     if let HirTerminator::If { cond, .. } = term {
@@ -158,7 +158,7 @@ fn add_terminator_uses(
 
 fn collect_item_defs_uses(
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
@@ -170,7 +170,7 @@ fn collect_item_defs_uses(
 
 fn collect_stmt_defs_uses(
     stmt: &StmtExpr,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
@@ -189,7 +189,7 @@ fn collect_stmt_defs_uses(
     }
 }
 
-fn collect_pattern_defs(pattern: &BindPattern, ctx: &ElaboratedContext, defs: &mut HashSet<DefId>) {
+fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     match &pattern.kind {
         BindPatternKind::Name { def_id, .. } => add_def_if_heap(*def_id, ctx, defs),
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
@@ -205,7 +205,7 @@ fn collect_pattern_defs(pattern: &BindPattern, ctx: &ElaboratedContext, defs: &m
     }
 }
 
-fn collect_assignee_defs(assignee: &Expr, ctx: &ElaboratedContext, defs: &mut HashSet<DefId>) {
+fn collect_assignee_defs(assignee: &Expr, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     // Only a plain variable counts as a definition; projections are treated as uses.
     if let ExprKind::Var { def_id, .. } = assignee.kind {
         add_def_if_heap(def_id, ctx, defs);
@@ -213,7 +213,7 @@ fn collect_assignee_defs(assignee: &Expr, ctx: &ElaboratedContext, defs: &mut Ha
 }
 
 /// Only treat heap-owned locals as tracked defs.
-fn add_def_if_heap(def_id: DefId, ctx: &ElaboratedContext, defs: &mut HashSet<DefId>) {
+fn add_def_if_heap(def_id: DefId, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     let Some(def) = ctx.def_table.lookup_def(def_id) else {
         return;
     };
@@ -229,7 +229,7 @@ fn add_def_if_heap(def_id: DefId, ctx: &ElaboratedContext, defs: &mut HashSet<De
 // Generic Use Collection
 // ============================================================================
 
-fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &ElaboratedContext, acc: &mut A) {
+fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &NormalizedContext, acc: &mut A) {
     match &stmt.kind {
         StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             collect_expr_uses(value, ctx, acc);
@@ -252,7 +252,7 @@ fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &ElaboratedCon
 
 fn collect_assignee_uses<A: HeapUseAccumulator>(
     assignee: &Expr,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     acc: &mut A,
 ) {
     match &assignee.kind {
@@ -279,7 +279,7 @@ fn collect_assignee_uses<A: HeapUseAccumulator>(
     }
 }
 
-fn collect_expr_uses<A: HeapUseAccumulator>(expr: &Expr, ctx: &ElaboratedContext, acc: &mut A) {
+fn collect_expr_uses<A: HeapUseAccumulator>(expr: &Expr, ctx: &NormalizedContext, acc: &mut A) {
     let mut collector = HeapUseCollector { ctx, acc };
     collector.visit_expr(expr);
 }
@@ -289,7 +289,7 @@ fn collect_expr_uses<A: HeapUseAccumulator>(expr: &Expr, ctx: &ElaboratedContext
 // ============================================================================
 
 struct HeapUseCollector<'a, A> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     acc: &'a mut A,
 }
 
@@ -303,7 +303,7 @@ impl<A: HeapUseAccumulator> Visitor<DefId, TypeId> for HeapUseCollector<'_, A> {
 }
 
 /// Returns the DefId if `expr` is a plain heap variable read.
-fn heap_use_def(expr: &Expr, ctx: &ElaboratedContext) -> Option<DefId> {
+fn heap_use_def(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     let ExprKind::Var { def_id, .. } = expr.kind else {
         return None;
     };

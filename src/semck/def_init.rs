@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
@@ -108,7 +108,7 @@ enum InitProj {
     Index(u64),
 }
 
-pub(super) fn check(ctx: &ElaboratedContext) -> DefInitResult {
+pub(super) fn check(ctx: &NormalizedContext) -> DefInitResult {
     let mut errors = Vec::new();
     let mut init_assigns = HashSet::new();
     let mut full_init_assigns = HashSet::new();
@@ -130,7 +130,7 @@ pub(super) fn check(ctx: &ElaboratedContext) -> DefInitResult {
 
 fn check_func(
     func_def: &FuncDef,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     errors: &mut Vec<SemCheckError>,
     init_assigns: &mut HashSet<NodeId>,
     full_init_assigns: &mut HashSet<NodeId>,
@@ -217,7 +217,7 @@ fn collect_param_defs(func_def: &FuncDef, include_out: bool) -> HashSet<DefId> {
 
 fn collect_out_param_defs(
     func_def: &FuncDef,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) -> Vec<(DefId, String, Span)> {
     let mut defs = Vec::new();
     for param in &func_def.sig.params {
@@ -238,7 +238,7 @@ fn collect_all_defs(func_def: &FuncDef) -> HashSet<DefId> {
     defs
 }
 
-fn collect_local_defs(func_def: &FuncDef, ctx: &ElaboratedContext) -> HashSet<DefId> {
+fn collect_local_defs(func_def: &FuncDef, ctx: &NormalizedContext) -> HashSet<DefId> {
     collect_all_defs(func_def)
         .into_iter()
         .filter(|def_id| {
@@ -544,7 +544,7 @@ impl<'a> Visitor<DefId, TypeId> for DefSpanCollector<'a> {
 /// Walks a CFG block, checking for uses of uninitialized variables and
 /// updating the initialized set as assignments occur.
 struct DefInitChecker<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     initialized: InitState,
     out_param_defs: &'a HashSet<DefId>,
     errors: &'a mut Vec<SemCheckError>,
@@ -554,7 +554,7 @@ struct DefInitChecker<'a> {
 
 impl<'a> DefInitChecker<'a> {
     fn new(
-        ctx: &'a ElaboratedContext,
+        ctx: &'a NormalizedContext,
         initialized: InitState,
         out_param_defs: &'a HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,

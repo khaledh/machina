@@ -1,5 +1,5 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::sir::model::{
@@ -9,20 +9,20 @@ use crate::sir::model::{
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{Type, TypeId};
 
-pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = ValueChecker::new(ctx);
     checker.check_module();
     checker.errors
 }
 
 struct ValueChecker<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     errors: Vec<SemCheckError>,
     current_return_ty: Option<Type>,
 }
 
 impl<'a> ValueChecker<'a> {
-    fn new(ctx: &'a ElaboratedContext) -> Self {
+    fn new(ctx: &'a NormalizedContext) -> Self {
         Self {
             ctx,
             errors: Vec::new(),

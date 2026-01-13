@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::diag::Span;
 use crate::hir::model::MatchPattern;
 use crate::semck::SemCheckError;
@@ -8,7 +8,7 @@ use crate::sir::model::{Expr, MatchArm};
 use crate::types::{EnumVariant, Type};
 
 pub(super) fn check_match(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     scrutinee: &Expr,
     arms: &[MatchArm],
     span: Span,
@@ -59,7 +59,7 @@ impl<'a> MatchRuleKind<'a> {
 
     fn check(
         &self,
-        _ctx: &ElaboratedContext,
+        _ctx: &NormalizedContext,
         scrutinee_ty: &Type,
         arms: &[MatchArm],
         span: Span,

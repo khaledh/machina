@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use crate::ast::{Module, NodeIdGen};
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
-use crate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::liveness;
 use crate::lower;
 use crate::mcir;
 use crate::mcir::types::GlobalSection;
+use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::opt;
 use crate::parse::Parser;
@@ -142,13 +142,13 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
-    // --- Elaborate (TIR -> SIR) ---
+    // --- Normalize (TIR -> SIR) ---
 
-    let elaborated_context = elaborate::elaborate(type_checked_context);
+    let normalized_context = normalize::normalize(type_checked_context);
 
     // --- Semantic Check ---
 
-    let semantic_checked_context = sem_check(elaborated_context).map_err(|errs| {
+    let semantic_checked_context = sem_check(normalized_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

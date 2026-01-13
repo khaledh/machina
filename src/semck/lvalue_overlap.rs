@@ -5,7 +5,7 @@
 //! Read-only aliasing (`in` mode) is allowed.
 
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
@@ -58,19 +58,19 @@ enum Bound {
     Unspecified, // `arr[..n]` (start omitted) or `arr[n..]` (end omitted)
 }
 
-pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = LvalueOverlapChecker::new(ctx);
     checker.visit_module(&ctx.sir_module);
     checker.errors
 }
 
 struct LvalueOverlapChecker<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     errors: Vec<SemCheckError>,
 }
 
 impl<'a> LvalueOverlapChecker<'a> {
-    fn new(ctx: &'a ElaboratedContext) -> Self {
+    fn new(ctx: &'a NormalizedContext) -> Self {
         Self {
             ctx,
             errors: Vec::new(),

@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::sir::model::{
@@ -23,7 +23,7 @@ use crate::sir::model::{
 };
 use crate::types::{Type, TypeId};
 
-pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
 
     for func_def in ctx.sir_module.func_defs() {
@@ -39,7 +39,7 @@ pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
 ///
 /// Then walk each block, checking for conflicts where a borrowed base is
 /// mutated/moved while a slice borrowing it is still live.
-fn check_func_def(ctx: &ElaboratedContext, func_def: &FuncDef, errors: &mut Vec<SemCheckError>) {
+fn check_func_def(ctx: &NormalizedContext, func_def: &FuncDef, errors: &mut Vec<SemCheckError>) {
     let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
     let liveness = analyze_slice_liveness(&cfg, ctx);
     let bindings = analyze_slice_bindings(&cfg, ctx);
@@ -92,7 +92,7 @@ fn borrowed_bases_for_active(
 }
 
 fn check_item_for_conflicts(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     item: &HirItem<'_, TypeId>,
     borrowed_bases: &HashSet<DefId>,
     errors: &mut Vec<SemCheckError>,
@@ -128,7 +128,7 @@ fn check_item_for_conflicts(
 }
 
 fn check_write_target(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     expr: &Expr,
     borrowed_bases: &HashSet<DefId>,
     errors: &mut Vec<SemCheckError>,
@@ -155,7 +155,7 @@ struct SliceBindingAnalysis {
 /// Forward dataflow: track slice -> base bindings through the CFG.
 fn analyze_slice_bindings(
     cfg: &HirCfg<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) -> SliceBindingAnalysis {
     let entry_state = HashMap::new();
     let bottom = HashMap::new();
@@ -191,7 +191,7 @@ fn merge_slice_bindings(states: &[SliceBindings]) -> SliceBindings {
 fn apply_block_bindings(
     node: &HirCfgNode<'_, TypeId>,
     in_state: &SliceBindings,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) -> SliceBindings {
     let mut state = in_state.clone();
     for item in &node.items {
@@ -203,7 +203,7 @@ fn apply_block_bindings(
 fn apply_item_bindings(
     state: &mut SliceBindings,
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) {
     let HirItem::Stmt(stmt) = item else {
         return;
@@ -246,7 +246,7 @@ fn update_slice_binding(state: &mut SliceBindings, slice_def: DefId, bases: Hash
 fn slice_bases_for_value(
     expr: &Expr,
     state: &SliceBindings,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) -> HashSet<DefId> {
     match &expr.kind {
         ExprKind::Slice { target, .. } => slice_bases_for_slice_target(target, state, ctx),
@@ -283,7 +283,7 @@ fn slice_bases_for_value(
 fn slice_bases_for_slice_target(
     target: &Expr,
     state: &SliceBindings,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
 ) -> HashSet<DefId> {
     // Subslicing another slice: inherit the original's bases.
     if let Some(slice_def) = slice_def_from_expr(target, ctx) {
@@ -299,7 +299,7 @@ fn slice_bases_for_slice_target(
     HashSet::new()
 }
 
-fn slice_def_from_expr(expr: &Expr, ctx: &ElaboratedContext) -> Option<DefId> {
+fn slice_def_from_expr(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     match &expr.kind {
         ExprKind::Var { def_id, .. } => {
             let ty = ctx.type_map.type_table().get(expr.ty);
@@ -324,7 +324,7 @@ struct SliceLiveness {
 }
 
 /// Backward dataflow: compute which slice locals are live at each point.
-fn analyze_slice_liveness(cfg: &HirCfg<'_, TypeId>, ctx: &ElaboratedContext) -> SliceLiveness {
+fn analyze_slice_liveness(cfg: &HirCfg<'_, TypeId>, ctx: &NormalizedContext) -> SliceLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -357,7 +357,7 @@ fn analyze_slice_liveness(cfg: &HirCfg<'_, TypeId>, ctx: &ElaboratedContext) -> 
 }
 
 fn compute_live_in(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
@@ -371,7 +371,7 @@ fn compute_live_in(
 
 /// Compute live-after for each item in a block.
 fn compute_live_after(
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     node: &HirCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
@@ -388,7 +388,7 @@ fn compute_live_after(
 /// Liveness transfer: remove defs, add uses.
 fn apply_item_defs_uses(
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     live: &mut HashSet<DefId>,
 ) {
     let mut defs = HashSet::new();
@@ -405,7 +405,7 @@ fn apply_item_defs_uses(
 /// Add slice uses from the block terminator (if condition).
 fn add_terminator_uses(
     term: &HirTerminator<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
     if let HirTerminator::If { cond, .. } = term {
@@ -416,7 +416,7 @@ fn add_terminator_uses(
 /// Collect defs and uses of slice locals from an item.
 fn collect_item_defs_uses(
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
@@ -429,7 +429,7 @@ fn collect_item_defs_uses(
 /// Collect defs and uses of slice locals from a statement.
 fn collect_stmt_defs_uses(
     stmt: &StmtExpr,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
@@ -447,7 +447,7 @@ fn collect_stmt_defs_uses(
 }
 
 /// Collect slice-typed definitions from a pattern.
-fn collect_pattern_defs(pattern: &BindPattern, ctx: &ElaboratedContext, defs: &mut HashSet<DefId>) {
+fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     match &pattern.kind {
         BindPatternKind::Name { def_id, .. } => add_def_if_slice(*def_id, ctx, defs),
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
@@ -464,14 +464,14 @@ fn collect_pattern_defs(pattern: &BindPattern, ctx: &ElaboratedContext, defs: &m
 }
 
 /// Collect slice-typed definitions from an assignment target.
-fn collect_assignee_defs(assignee: &Expr, ctx: &ElaboratedContext, defs: &mut HashSet<DefId>) {
+fn collect_assignee_defs(assignee: &Expr, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     if let ExprKind::Var { def_id, .. } = assignee.kind {
         add_def_if_slice(def_id, ctx, defs);
     }
 }
 
 /// Add a DefId to the set if it has slice type.
-fn add_def_if_slice(def_id: DefId, ctx: &ElaboratedContext, defs: &mut HashSet<DefId>) {
+fn add_def_if_slice(def_id: DefId, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     let Some(def) = ctx.def_table.lookup_def(def_id) else {
         return;
     };
@@ -486,7 +486,7 @@ fn add_def_if_slice(def_id: DefId, ctx: &ElaboratedContext, defs: &mut HashSet<D
 /// Collect slice local uses from an item.
 fn collect_item_slice_uses(
     item: &HirItem<'_, TypeId>,
-    ctx: &ElaboratedContext,
+    ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
@@ -496,7 +496,7 @@ fn collect_item_slice_uses(
 }
 
 /// Collect slice local uses from a statement.
-fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &ElaboratedContext, uses: &mut HashSet<DefId>) {
+fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &NormalizedContext, uses: &mut HashSet<DefId>) {
     match &stmt.kind {
         StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             collect_expr_slice_uses(value, ctx, uses);
@@ -518,7 +518,7 @@ fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &ElaboratedContext, uses: &mut 
 }
 
 /// Collect slice uses from an assignment target (not the assigned-to var itself).
-fn collect_assignee_uses(assignee: &Expr, ctx: &ElaboratedContext, uses: &mut HashSet<DefId>) {
+fn collect_assignee_uses(assignee: &Expr, ctx: &NormalizedContext, uses: &mut HashSet<DefId>) {
     match &assignee.kind {
         // Assigning to a var doesn't use it.
         ExprKind::Var { .. } => {}
@@ -545,14 +545,14 @@ fn collect_assignee_uses(assignee: &Expr, ctx: &ElaboratedContext, uses: &mut Ha
 }
 
 /// Walk an expression and collect all slice-typed variable uses.
-fn collect_expr_slice_uses(expr: &Expr, ctx: &ElaboratedContext, uses: &mut HashSet<DefId>) {
+fn collect_expr_slice_uses(expr: &Expr, ctx: &NormalizedContext, uses: &mut HashSet<DefId>) {
     let mut collector = SliceUseCollector { ctx, uses };
     collector.visit_expr(expr);
 }
 
 /// Visitor that collects slice-typed variable uses.
 struct SliceUseCollector<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     uses: &'a mut HashSet<DefId>,
 }
 
@@ -566,7 +566,7 @@ impl Visitor<DefId, TypeId> for SliceUseCollector<'_> {
 }
 
 /// If expr is a slice-typed variable use, return its DefId.
-fn slice_use_def(expr: &Expr, ctx: &ElaboratedContext) -> Option<DefId> {
+fn slice_use_def(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     let ExprKind::Var { def_id, .. } = expr.kind else {
         return None;
     };
@@ -583,14 +583,14 @@ fn slice_use_def(expr: &Expr, ctx: &ElaboratedContext) -> Option<DefId> {
 
 /// Visitor that reports errors for moves or mutating calls on borrowed bases.
 struct BorrowConflictVisitor<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     borrowed_bases: &'a HashSet<DefId>,
     errors: &'a mut Vec<SemCheckError>,
 }
 
 impl<'a> BorrowConflictVisitor<'a> {
     fn new(
-        ctx: &'a ElaboratedContext,
+        ctx: &'a NormalizedContext,
         borrowed_bases: &'a HashSet<DefId>,
         errors: &'a mut Vec<SemCheckError>,
     ) -> Self {
@@ -670,7 +670,7 @@ impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
 
 /// Extract the base variable's DefId from an lvalue expression.
 /// E.g., `arr[0].field` -> DefId of `arr`.
-fn base_def_id(expr: &Expr, ctx: &ElaboratedContext) -> Option<DefId> {
+fn base_def_id(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     match &expr.kind {
         ExprKind::Var { def_id, .. } => Some(*def_id),
         ExprKind::ArrayIndex { target, .. }

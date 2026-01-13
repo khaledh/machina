@@ -11,9 +11,9 @@ mod value;
 
 pub use errors::SemCheckError;
 
-use crate::context::{ElaboratedContext, SemanticCheckedContext};
+use crate::context::{NormalizedContext, SemanticCheckedContext};
 
-pub fn sem_check(ctx: ElaboratedContext) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {
+pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {
     let mut errors = Vec::new();
 
     let move_result = move_check::check(&ctx);

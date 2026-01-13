@@ -76,10 +76,10 @@ pub struct TypeCheckedContext {
 }
 
 // -----------------------------------------------------------------------------
-// Elaborated Context
+// Normalized Context
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
-pub struct ElaboratedContext {
+pub struct NormalizedContext {
     pub tir_module: TypedModule,
     pub sir_module: SirModule,
     pub def_table: DefTable,
@@ -88,7 +88,7 @@ pub struct ElaboratedContext {
     pub node_id_gen: NodeIdGen,
 }
 
-impl ElaboratedContext {
+impl NormalizedContext {
     pub fn with_sem_results(
         self,
         implicit_moves: HashSet<NodeId>,

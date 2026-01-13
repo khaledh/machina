@@ -1,7 +1,7 @@
 use crate::ast::NodeIdGen;
 use crate::ast::visit_mut;
 use crate::ast::visit_mut::VisitorMut;
-use crate::context::{ElaboratedContext, TypeCheckedContext};
+use crate::context::{NormalizedContext, TypeCheckedContext};
 use crate::resolve::DefId;
 use crate::sir::builder::build_module as build_sir;
 use crate::sir::model as sir;
@@ -9,17 +9,17 @@ use crate::typeck::type_map::{CallParam, TypeMap};
 use crate::types::TypeId;
 use crate::types::array_to_slice_assignable;
 
-/// Elaborate TIR into SIR.
+/// Normalize TIR into SIR.
 ///
 /// Step 1: 1:1 mapping of the typed tree into SIR, plus explicit array-to-slice
 /// coercions on call arguments.
-pub fn elaborate(ctx: TypeCheckedContext) -> ElaboratedContext {
+pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
     let mut type_map = ctx.type_map;
     let mut sir_module = build_sir(&ctx.module);
     let mut node_id_gen = ctx.node_id_gen;
-    let mut elaborator = Elaborator::new(&mut type_map, &mut node_id_gen);
-    elaborator.visit_module(&mut sir_module);
-    ElaboratedContext {
+    let mut normalizer = Normalizer::new(&mut type_map, &mut node_id_gen);
+    normalizer.visit_module(&mut sir_module);
+    NormalizedContext {
         tir_module: ctx.module,
         sir_module,
         def_table: ctx.def_table,
@@ -29,12 +29,12 @@ pub fn elaborate(ctx: TypeCheckedContext) -> ElaboratedContext {
     }
 }
 
-struct Elaborator<'a> {
+struct Normalizer<'a> {
     type_map: &'a mut TypeMap,
     node_id_gen: &'a mut NodeIdGen,
 }
 
-impl<'a> Elaborator<'a> {
+impl<'a> Normalizer<'a> {
     fn new(type_map: &'a mut TypeMap, node_id_gen: &'a mut NodeIdGen) -> Self {
         Self {
             type_map,
@@ -90,7 +90,7 @@ impl<'a> Elaborator<'a> {
     }
 }
 
-impl VisitorMut<DefId, TypeId> for Elaborator<'_> {
+impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
     fn visit_module(&mut self, module: &mut sir::Module) {
         visit_mut::walk_module(self, module);
     }

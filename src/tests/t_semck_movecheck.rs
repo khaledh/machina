@@ -1,6 +1,6 @@
 use crate::context::ParsedContext;
-use crate::elaborate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
+use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::{SemCheckError, move_check};
@@ -20,9 +20,9 @@ fn move_check_source(source: &str) -> move_check::MoveCheckResult {
     let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
-    let elaborated_context = elaborate(type_checked_context);
+    let normalized_context = normalize(type_checked_context);
 
-    move_check::check(&elaborated_context)
+    move_check::check(&normalized_context)
 }
 
 #[test]

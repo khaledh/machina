@@ -1,23 +1,23 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::sir::model::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
 use crate::types::{Type, TypeId};
 
-pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = SliceEscapeChecker::new(ctx);
     checker.visit_module(&ctx.sir_module);
     checker.errors
 }
 
 struct SliceEscapeChecker<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     errors: Vec<SemCheckError>,
 }
 
 impl<'a> SliceEscapeChecker<'a> {
-    fn new(ctx: &'a ElaboratedContext) -> Self {
+    fn new(ctx: &'a NormalizedContext) -> Self {
         Self {
             ctx,
             errors: Vec::new(),

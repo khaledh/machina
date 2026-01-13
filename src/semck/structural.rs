@@ -1,5 +1,5 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
-use crate::context::ElaboratedContext;
+use crate::context::NormalizedContext;
 use crate::resolve::DefId;
 use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
@@ -13,7 +13,7 @@ use crate::typeck::type_map::{CallSig, resolve_type_expr};
 use crate::types::{Type, TypeId};
 use std::collections::{HashMap, HashSet};
 
-pub(super) fn check(ctx: &ElaboratedContext) -> Vec<SemCheckError> {
+pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     // Structural checks depend on type map + AST shape, not value flow.
     let mut checker = StructuralChecker::new(ctx);
     checker.check_module();
@@ -26,7 +26,7 @@ struct EnumVariantInfo {
 }
 
 struct StructuralChecker<'a> {
-    ctx: &'a ElaboratedContext,
+    ctx: &'a NormalizedContext,
     errors: Vec<SemCheckError>,
     // Cached field/variant shapes from type declarations.
     struct_fields: HashMap<String, Vec<String>>,
@@ -34,7 +34,7 @@ struct StructuralChecker<'a> {
 }
 
 impl<'a> StructuralChecker<'a> {
-    fn new(ctx: &'a ElaboratedContext) -> Self {
+    fn new(ctx: &'a NormalizedContext) -> Self {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 

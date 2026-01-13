@@ -1,11 +1,11 @@
 use super::*;
 use crate::context::ParsedContext;
-use crate::elaborate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::lower::drop_glue::{DropGlueRegistry, GeneratedDropGlue};
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::{GlobalItem, GlobalPayload, GlobalSection};
+use crate::normalize::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
 use crate::resolve::resolve;
@@ -27,8 +27,8 @@ fn analyze(source: &str) -> AnalyzedContext {
     let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
-    let elaborated_context = elaborate(type_checked_context);
-    let sem_checked_context = sem_check(elaborated_context).expect("Failed to semantic check");
+    let normalized_context = normalize(type_checked_context);
+    let sem_checked_context = sem_check(normalized_context).expect("Failed to semantic check");
 
     NrvoAnalyzer::new(sem_checked_context).analyze()
 }
