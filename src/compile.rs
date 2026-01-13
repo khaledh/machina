@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::ast::{Module, NodeIdGen};
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
+use crate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::liveness;
 use crate::lower;
@@ -154,9 +155,13 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             .collect::<Vec<CompileError>>()
     })?;
 
+    // --- Elaborate (SIR -> SIR) ---
+
+    let elaborated_context = elaborate::elaborate(semantic_checked_context);
+
     // --- NRVO Analysis ---
 
-    let analyzed_context = NrvoAnalyzer::new(semantic_checked_context).analyze();
+    let analyzed_context = NrvoAnalyzer::new(elaborated_context).analyze();
 
     if dump_nrvo {
         println!("NRVO:");

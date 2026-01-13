@@ -1,4 +1,4 @@
-use crate::context::{AnalyzedContext, SemanticCheckedContext};
+use crate::context::{AnalyzedContext, ElaboratedContext};
 use crate::resolve::{DefId, DefTable};
 use crate::tir::model::{
     ArrayLitInit, BlockItem, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind, StringFmtSegment,
@@ -10,23 +10,22 @@ use crate::typeck::type_map::TypeMap;
 /// This analyzer checks if the returned value of a function is eligible for NRVO.
 /// If it is, it marks the definition as eligible for NRVO.
 pub struct NrvoAnalyzer {
-    ctx: SemanticCheckedContext,
+    ctx: ElaboratedContext,
 }
 
 impl NrvoAnalyzer {
-    pub fn new(ctx: SemanticCheckedContext) -> Self {
+    pub fn new(ctx: ElaboratedContext) -> Self {
         Self { ctx }
     }
 
     pub fn analyze(self) -> AnalyzedContext {
-        let SemanticCheckedContext {
+        let ElaboratedContext {
             module: typed_module,
             sir_module,
             def_table,
             type_map,
             symbols,
             node_id_gen,
-            implicit_moves,
             init_assigns,
             full_init_assigns,
         } = self.ctx;
@@ -44,7 +43,6 @@ impl NrvoAnalyzer {
             type_map,
             symbols,
             node_id_gen,
-            implicit_moves,
             init_assigns,
             full_init_assigns,
         }
@@ -268,6 +266,8 @@ impl NrvoSafetyChecker {
 
             ExprKind::Coerce { expr, .. } => self.check_expr(expr, false),
 
+            ExprKind::ImplicitMove { expr } => self.check_expr(expr, false),
+
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
 
             ExprKind::BinOp { left, right, .. } => {
@@ -293,6 +293,7 @@ impl NrvoSafetyChecker {
             ExprKind::ArrayIndex { target, .. } => self.is_lvalue_use(target),
             ExprKind::TupleField { target, .. } => self.is_lvalue_use(target),
             ExprKind::Coerce { expr, .. } => self.is_lvalue_use(expr),
+            ExprKind::ImplicitMove { expr } => self.is_lvalue_use(expr),
             _ => false,
         }
     }

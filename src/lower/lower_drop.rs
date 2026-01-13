@@ -88,6 +88,9 @@ impl<'a> FuncLowerer<'a> {
         let ExprKind::Var { def_id, .. } = expr.kind else {
             return;
         };
+        if self.is_moved(def_id) {
+            return;
+        }
         let Ok(ty) = self.ty_for_node(expr.id) else {
             return;
         };
@@ -97,10 +100,18 @@ impl<'a> FuncLowerer<'a> {
         // Mark the binding as moved so we skip drop at scope exit.
         if let Some(flag) = self.is_initialized_for_def(def_id) {
             // For conditional drops, moving clears the init flag so we don't drop.
-            self.set_is_initialized(flag, false);
+            self.emit_is_initialized(flag, false);
+            self.mark_moved(def_id);
             return;
         }
         self.mark_moved(def_id);
+    }
+
+    fn is_moved(&self, def_id: DefId) -> bool {
+        self.drop_scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.moved.contains(&def_id))
     }
 
     fn mark_moved(&mut self, def_id: DefId) {
@@ -223,7 +234,7 @@ impl<'a> FuncLowerer<'a> {
         None
     }
 
-    pub(super) fn set_is_initialized(&mut self, flag: LocalId, value: bool) {
+    pub(super) fn emit_is_initialized(&mut self, flag: LocalId, value: bool) {
         let flag_ty = self.fb.body.locals[flag.0 as usize].ty;
         let flag_place = Place::new(flag, flag_ty, vec![]);
         self.emit_copy_scalar(flag_place, Rvalue::Use(Operand::Const(Const::Bool(value))));

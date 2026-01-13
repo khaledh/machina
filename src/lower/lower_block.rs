@@ -199,7 +199,7 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn mark_initialized_if_needed(&mut self, assignee: &Expr) {
         if let Some(flag) = self.is_initialized_for_assignee(assignee) {
-            self.set_is_initialized(flag, true);
+            self.emit_is_initialized(flag, true);
         }
     }
 
@@ -213,7 +213,7 @@ impl<'a> FuncLowerer<'a> {
         let Some(flag) = self.is_initialized_for_def(def_id) else {
             return;
         };
-        self.set_is_initialized(flag, true);
+        self.emit_is_initialized(flag, true);
     }
 
     fn is_initialized_for_assignee(&self, assignee: &Expr) -> Option<LocalId> {

@@ -443,5 +443,9 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         ExprKind::Coerce { expr, .. } => {
             v.visit_expr(expr);
         }
+
+        ExprKind::ImplicitMove { expr } => {
+            v.visit_expr(expr);
+        }
     }
 }

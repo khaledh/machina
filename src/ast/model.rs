@@ -643,6 +643,9 @@ pub enum ExprKind<D, T = ()> {
         kind: CoerceKind,
         expr: Box<Expr<D, T>>,
     },
+    ImplicitMove {
+        expr: Box<Expr<D, T>>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

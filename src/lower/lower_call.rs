@@ -148,11 +148,7 @@ impl<'a> FuncLowerer<'a> {
 
     /// Lower a call argument into a place (or temp if needed).
     pub(super) fn lower_call_arg_place(&mut self, arg: &Expr) -> Result<PlaceAny, LowerError> {
-        let (arg, _) = self.peel_coerce_expr(arg);
-        if matches!(arg.kind, ExprKind::Var { .. }) && self.ctx.implicit_moves.contains(&arg.id) {
-            // Implicitly moved heap args should skip caller drops.
-            self.record_move(arg);
-        }
+        let (arg, _, _) = self.peel_coerce_expr(arg);
         let ty = self.ty_for_node(arg.id)?;
         let ty_id = self.ty_lowerer.lower_ty(&ty);
 
@@ -182,10 +178,22 @@ impl<'a> FuncLowerer<'a> {
         Ok(array_to_slice_assignable(&arg_ty, param_ty))
     }
 
-    fn peel_coerce_expr<'b>(&self, expr: &'b Expr) -> (&'b Expr, Option<CoerceKind>) {
-        match &expr.kind {
-            ExprKind::Coerce { kind, expr } => (expr.as_ref(), Some(*kind)),
-            _ => (expr, None),
+    fn peel_coerce_expr<'b>(&self, expr: &'b Expr) -> (&'b Expr, Option<CoerceKind>, bool) {
+        let mut current = expr;
+        let mut coerce_kind = None;
+        let mut implicit_move = false;
+        loop {
+            match &current.kind {
+                ExprKind::ImplicitMove { expr } => {
+                    implicit_move = true;
+                    current = expr.as_ref();
+                }
+                ExprKind::Coerce { kind, expr } => {
+                    coerce_kind = Some(*kind);
+                    current = expr.as_ref();
+                }
+                _ => return (current, coerce_kind, implicit_move),
+            }
         }
     }
 
@@ -196,7 +204,10 @@ impl<'a> FuncLowerer<'a> {
         arg: &CallArg,
         out_args: &mut Vec<&'b Expr>,
     ) -> Result<PlaceAny, LowerError> {
-        let (arg_expr, coerce_kind) = self.peel_coerce_expr(arg_expr);
+        let (arg_expr, coerce_kind, implicit_move) = self.peel_coerce_expr(arg_expr);
+        if implicit_move {
+            self.record_move(arg_expr);
+        }
         if param.mode == ParamMode::Out {
             // Out args are write-only; skip drop only when the call is the first init.
             let place = self.lower_place(arg_expr)?;

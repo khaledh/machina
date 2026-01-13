@@ -126,6 +126,36 @@ pub struct SemanticCheckedContext {
 }
 
 // -----------------------------------------------------------------------------
+// Elaborated Context
+// -----------------------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct ElaboratedContext {
+    pub module: TypedModule,
+    pub sir_module: SirModule,
+    pub def_table: DefTable,
+    pub type_map: TypeMap,
+    pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
+    pub init_assigns: HashSet<NodeId>,
+    pub full_init_assigns: HashSet<NodeId>,
+}
+
+impl From<SemanticCheckedContext> for ElaboratedContext {
+    fn from(ctx: SemanticCheckedContext) -> Self {
+        Self {
+            module: ctx.module,
+            sir_module: ctx.sir_module,
+            def_table: ctx.def_table,
+            type_map: ctx.type_map,
+            symbols: ctx.symbols,
+            node_id_gen: ctx.node_id_gen,
+            init_assigns: ctx.init_assigns,
+            full_init_assigns: ctx.full_init_assigns,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Analyzed Context
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
@@ -136,7 +166,6 @@ pub struct AnalyzedContext {
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,
 }

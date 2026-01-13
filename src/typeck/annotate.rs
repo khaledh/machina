@@ -211,6 +211,9 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
             kind: *kind,
             expr: Box::new(annotate_expr(expr, type_map)),
         },
+        hir::ExprKind::ImplicitMove { expr } => tir::ExprKind::ImplicitMove {
+            expr: Box::new(annotate_expr(expr, type_map)),
+        },
         hir::ExprKind::Var { ident, def_id } => tir::ExprKind::Var {
             ident: ident.clone(),
             def_id: *def_id,

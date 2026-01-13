@@ -24,8 +24,8 @@ impl<'a> FuncLowerer<'a> {
 
             EK::Match { scrutinee, arms } => self.lower_match_expr(expr, scrutinee, arms),
 
-            EK::Move { expr } => {
-                // Mark moved heap bindings so drop skips them.
+            EK::Move { expr } | EK::ImplicitMove { expr } => {
+                // Explicit or implicit move: suppress drops for moved heap bindings.
                 self.record_move(expr);
                 self.lower_expr_value(expr)
             }
@@ -54,6 +54,11 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_scalar_expr(&mut self, expr: &Expr) -> Result<Operand, LowerError> {
         match &expr.kind {
             EK::Coerce { expr, .. } => self.lower_scalar_expr(expr),
+            EK::Move { expr } | EK::ImplicitMove { expr } => {
+                // Explicit or implicit move: suppress drops for moved heap bindings.
+                self.record_move(expr);
+                self.lower_scalar_expr(expr)
+            }
 
             // Literals
             EK::IntLit(value) => {
@@ -112,9 +117,6 @@ impl<'a> FuncLowerer<'a> {
                 if matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
                     return Ok(Operand::Const(Const::FuncAddr { def: def.id }));
                 }
-                if self.ctx.implicit_moves.contains(&expr.id) {
-                    self.record_move(expr);
-                }
                 let place = self.lower_place_scalar(expr)?;
                 Ok(Operand::Copy(place))
             }
@@ -134,12 +136,6 @@ impl<'a> FuncLowerer<'a> {
                     let place = self.lower_place_scalar(expr)?;
                     Ok(Operand::Copy(place))
                 }
-            }
-
-            EK::Move { expr } => {
-                // Mark moved heap bindings so drop skips them.
-                self.record_move(expr);
-                self.lower_scalar_expr(expr)
             }
 
             // Unary/Binary ops

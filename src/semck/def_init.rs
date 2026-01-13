@@ -1072,6 +1072,7 @@ impl<'a> DefInitChecker<'a> {
             ExprKind::HeapAlloc { expr } => self.check_expr(expr),
             ExprKind::Move { expr } => self.check_expr(expr),
             ExprKind::Coerce { expr, .. } => self.check_expr(expr),
+            ExprKind::ImplicitMove { expr } => self.check_expr(expr),
             ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
@@ -1117,6 +1118,7 @@ impl<'a> DefInitChecker<'a> {
                 None
             }
             ExprKind::Coerce { expr, .. } => self.check_out_arg(expr),
+            ExprKind::ImplicitMove { expr } => self.check_out_arg(expr),
             _ => {
                 self.check_expr(arg);
                 None

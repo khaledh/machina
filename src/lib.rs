@@ -3,6 +3,7 @@ pub mod ast;
 pub mod compile;
 pub mod context;
 pub mod diag;
+pub mod elaborate;
 pub mod hir;
 pub mod lexer;
 pub mod liveness;

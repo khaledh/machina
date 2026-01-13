@@ -725,6 +725,12 @@ impl Expr {
                 writeln!(f, "{}Expr:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
             }
+            ExprKind::ImplicitMove { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}ImplicitMove [{}]", pad, self.id)?;
+                writeln!(f, "{}Expr:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
         }
         Ok(())
     }
