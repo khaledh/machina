@@ -99,7 +99,11 @@ impl<'a> FuncLowerer<'a> {
 
         let mut out_args = Vec::new();
         let call_sig = self.ctx.type_map.lookup_call_sig(call.id);
-        let arg_vals = if let Some(call_sig) = &call_sig {
+        let Some(call_sig) = &call_sig else {
+            panic!("compiler bug: missing call signature for node {}", call.id);
+        };
+
+        let arg_vals = {
             let mut vals = Vec::with_capacity(args.len() + call_sig.receiver.iter().count());
 
             if let Some(receiver_param) = call_sig.receiver.as_ref() {
@@ -125,10 +129,6 @@ impl<'a> FuncLowerer<'a> {
                 vals.push(self.lower_call_arg(&arg.expr, param, arg, &mut out_args)?);
             }
             vals
-        } else {
-            args.iter()
-                .map(|a| self.lower_call_arg_place(&a.expr))
-                .collect::<Result<Vec<_>, _>>()?
         };
 
         self.fb.push_stmt(
