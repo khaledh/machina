@@ -135,18 +135,6 @@ pub struct ElaboratedContext {
     pub node_id_gen: NodeIdGen,
 }
 
-impl From<SemanticCheckedContext> for ElaboratedContext {
-    fn from(ctx: SemanticCheckedContext) -> Self {
-        Self {
-            module: ctx.module,
-            def_table: ctx.def_table,
-            type_map: ctx.type_map,
-            symbols: ctx.symbols,
-            node_id_gen: ctx.node_id_gen,
-        }
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Analyzed Context
 // -----------------------------------------------------------------------------

@@ -31,9 +31,9 @@ enum ResolveDepth {
     Shallow,
 }
 
-pub(crate) fn resolve_type_expr<Ty>(
+pub(crate) fn resolve_type_expr(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     type_expr: &crate::ast::model::TypeExpr<DefId>,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
@@ -46,9 +46,25 @@ pub(crate) fn resolve_type_expr<Ty>(
     )
 }
 
-fn resolve_type_expr_impl<Ty>(
+pub(crate) trait TypeDefLookup {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::ast::model::TypeDef<DefId>>;
+}
+
+impl<Ty> TypeDefLookup for crate::ast::model::Module<DefId, Ty> {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::ast::model::TypeDef<DefId>> {
+        crate::ast::model::Module::type_def_by_id(self, def_id)
+    }
+}
+
+impl TypeDefLookup for crate::sir::model::Module {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::ast::model::TypeDef<DefId>> {
+        crate::sir::model::Module::type_def_by_id(self, def_id)
+    }
+}
+
+fn resolve_type_expr_impl(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     type_expr: &crate::ast::model::TypeExpr<DefId>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -129,9 +145,9 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
     }
 }
 
-fn resolve_named_type<Ty>(
+fn resolve_named_type(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     type_expr: &crate::ast::model::TypeExpr<DefId>,
     def_id: &DefId,
     in_progress: &mut HashSet<DefId>,
@@ -166,9 +182,9 @@ fn resolve_named_type<Ty>(
     }
 }
 
-fn resolve_type_alias<Ty>(
+fn resolve_type_alias(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     def: &Def,
     ty_expr: &crate::ast::model::TypeExpr<DefId>,
     in_progress: &mut HashSet<DefId>,
@@ -182,9 +198,9 @@ fn resolve_type_alias<Ty>(
     ty
 }
 
-fn resolve_struct_type<Ty>(
+fn resolve_struct_type(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     def: &Def,
     fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
@@ -215,9 +231,9 @@ fn resolve_struct_type<Ty>(
     })
 }
 
-fn resolve_struct_fields<Ty>(
+fn resolve_struct_fields(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     fields: &[StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -235,9 +251,9 @@ fn resolve_struct_fields<Ty>(
         .collect()
 }
 
-fn resolve_enum_type<Ty>(
+fn resolve_enum_type(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     def: &Def,
     variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
@@ -268,9 +284,9 @@ fn resolve_enum_type<Ty>(
     })
 }
 
-fn resolve_enum_variants<Ty>(
+fn resolve_enum_variants(
     def_table: &DefTable,
-    module: &crate::ast::model::Module<DefId, Ty>,
+    module: &impl TypeDefLookup,
     variants: &[EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,

@@ -1,7 +1,7 @@
 use crate::lower::errors::LowerError;
-use crate::lower::lower_ast::{ExprValue, FuncLowerer};
+use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
-use crate::sir::model::{BindPattern, BindPatternKind as PK, Expr, ExprKind as EK};
+use crate::sir::model::{BindPattern, BindPatternKind as PK, ValueExpr, ValueExprKind as VEK};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -10,12 +10,12 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an if expression in value position.
     pub(super) fn lower_if_expr(
         &mut self,
-        cond: &Expr,
-        then_body: &Expr,
-        else_body: &Expr,
-    ) -> Result<ExprValue, LowerError> {
+        cond: &ValueExpr,
+        then_body: &ValueExpr,
+        else_body: &ValueExpr,
+    ) -> Result<Value, LowerError> {
         let cond_op = self.lower_scalar_expr(cond)?;
-        let result_ty = self.ty_for_node(then_body.id)?;
+        let result_ty = self.ty_from_id(then_body.ty);
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
         if result_ty.is_scalar() {
@@ -25,20 +25,20 @@ impl<'a> FuncLowerer<'a> {
             self.lower_if_join(
                 cond_op,
                 |this| {
-                    if let ExprValue::Scalar(op) = this.lower_expr_value(then_body)? {
+                    if let Value::Scalar(op) = this.lower_expr_value(then_body)? {
                         this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
                     }
                     Ok(())
                 },
                 |this| {
-                    if let ExprValue::Scalar(op) = this.lower_expr_value(else_body)? {
+                    if let Value::Scalar(op) = this.lower_expr_value(else_body)? {
                         this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
                     }
                     Ok(())
                 },
             )?;
 
-            Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
+            Ok(Value::Scalar(Operand::Copy(temp_place)))
         } else {
             // Aggregate if-expr: lower both branches into a temp place.
             let temp_place = self.new_temp_aggregate(result_ty_id);
@@ -49,7 +49,7 @@ impl<'a> FuncLowerer<'a> {
                 |this| this.lower_agg_value_into(temp_place.clone(), else_body),
             )?;
 
-            Ok(ExprValue::Aggregate(temp_place))
+            Ok(Value::Aggregate(temp_place))
         }
     }
 
@@ -57,9 +57,9 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_if_expr_into(
         &mut self,
         dst: Place<Aggregate>,
-        cond: &Expr,
-        then_body: &Expr,
-        else_body: &Expr,
+        cond: &ValueExpr,
+        then_body: &ValueExpr,
+        else_body: &ValueExpr,
     ) -> Result<(), LowerError> {
         let cond_op = self.lower_scalar_expr(cond)?;
 
@@ -114,9 +114,9 @@ impl<'a> FuncLowerer<'a> {
     /// Lower a while expression (returns unit).
     pub(super) fn lower_while_expr(
         &mut self,
-        cond: &Expr,
-        body: &Expr,
-    ) -> Result<ExprValue, LowerError> {
+        cond: &ValueExpr,
+        body: &ValueExpr,
+    ) -> Result<Value, LowerError> {
         let loop_cond_bb = self.fb.new_block();
         let loop_body_bb = self.fb.new_block();
         let loop_exit_bb = self.fb.new_block();
@@ -139,7 +139,7 @@ impl<'a> FuncLowerer<'a> {
 
         // Lower body
         self.curr_block = loop_body_bb;
-        let EK::Block { items, tail } = &body.kind else {
+        let VEK::Block { items, tail } = &body.kind else {
             return Err(LowerError::ExpectedBlock(body.id));
         };
         self.lower_block_expr(items, tail.as_deref())?;
@@ -151,20 +151,22 @@ impl<'a> FuncLowerer<'a> {
 
         // while loops return unit
         let c = Const::Unit;
-        Ok(ExprValue::Scalar(Operand::Const(c)))
+        Ok(Value::Scalar(Operand::Const(c)))
     }
 
     /// Lower a for expression (returns unit).
     pub(super) fn lower_for_expr(
         &mut self,
         pattern: &BindPattern,
-        iter: &Expr,
-        body: &Expr,
-    ) -> Result<ExprValue, LowerError> {
-        let iter_ty = self.ty_for_node(iter.id)?;
+        iter: &ValueExpr,
+        body: &ValueExpr,
+    ) -> Result<Value, LowerError> {
+        let iter_ty = self.ty_from_id(iter.ty);
 
         match (&iter.kind, &iter_ty) {
-            (EK::Range { start, end }, _) => self.lower_for_range_expr(*start, *end, pattern, body),
+            (VEK::Range { start, end }, _) => {
+                self.lower_for_range_expr(*start, *end, pattern, body)
+            }
             (_, Type::Array { .. }) => self.lower_for_array_expr(pattern, iter, &iter_ty, body),
             (_, Type::Slice { .. }) => self.lower_for_slice_expr(pattern, iter, &iter_ty, body),
             _ => Err(LowerError::UnsupportedOperandExpr(iter.id)),
@@ -176,8 +178,8 @@ impl<'a> FuncLowerer<'a> {
         start: u64,
         end: u64,
         pattern: &BindPattern,
-        body: &Expr,
-    ) -> Result<ExprValue, LowerError> {
+        body: &ValueExpr,
+    ) -> Result<Value, LowerError> {
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let start_op = Operand::Const(Const::Int {
             signed: false,
@@ -208,14 +210,14 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_for_array_expr(
         &mut self,
         pattern: &BindPattern,
-        iter: &Expr,
+        iter: &ValueExpr,
         iter_ty: &Type,
-        body: &Expr,
-    ) -> Result<ExprValue, LowerError> {
+        body: &ValueExpr,
+    ) -> Result<Value, LowerError> {
         // Evaluate the iterable once
         let iter_place = match self.lower_expr_value(iter)? {
-            ExprValue::Scalar(_) => return Err(LowerError::ExprIsNotAggregate(iter.id)),
-            ExprValue::Aggregate(place) => place,
+            Value::Scalar(_) => return Err(LowerError::ExprIsNotAggregate(iter.id)),
+            Value::Aggregate(place) => place,
         };
 
         // Extract len + item type from array type
@@ -259,14 +261,14 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_for_slice_expr(
         &mut self,
         pattern: &BindPattern,
-        iter: &Expr,
+        iter: &ValueExpr,
         iter_ty: &Type,
-        body: &Expr,
-    ) -> Result<ExprValue, LowerError> {
+        body: &ValueExpr,
+    ) -> Result<Value, LowerError> {
         // Evaluate the iterable once.
         let iter_place = match self.lower_expr_value(iter)? {
-            ExprValue::Scalar(_) => return Err(LowerError::ExprIsNotAggregate(iter.id)),
-            ExprValue::Aggregate(place) => place,
+            Value::Scalar(_) => return Err(LowerError::ExprIsNotAggregate(iter.id)),
+            Value::Aggregate(place) => place,
         };
 
         let Type::Slice { elem_ty } = iter_ty else {
@@ -315,9 +317,9 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         start_op: Operand,
         len_op: Operand,
-        body: &Expr,
+        body: &ValueExpr,
         mut bind_elem: F,
-    ) -> Result<ExprValue, LowerError>
+    ) -> Result<Value, LowerError>
     where
         F: FnMut(&mut Self, &Place<Scalar>) -> Result<(), LowerError>,
     {
@@ -367,7 +369,7 @@ impl<'a> FuncLowerer<'a> {
         self.curr_block = loop_body_bb;
         bind_elem(self, &idx_place)?;
 
-        let EK::Block { items, tail } = &body.kind else {
+        let VEK::Block { items, tail } = &body.kind else {
             return Err(LowerError::ExpectedBlock(body.id));
         };
         self.lower_block_expr(items, tail.as_deref())?;
@@ -395,6 +397,6 @@ impl<'a> FuncLowerer<'a> {
         self.curr_block = loop_exit_bb;
 
         // for loops return unit
-        Ok(ExprValue::Scalar(Operand::Const(Const::Unit)))
+        Ok(Value::Scalar(Operand::Const(Const::Unit)))
     }
 }

@@ -4,6 +4,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::resolve::{Def, DefId};
+use crate::types::TypeId;
 use crate::types::{Type, TypeAssignability, type_assignable};
 
 impl<'a> FuncLowerer<'a> {
@@ -68,6 +69,11 @@ impl<'a> FuncLowerer<'a> {
             .type_map
             .lookup_def_type(def)
             .ok_or(LowerError::ExprTypeNotFound(node_id))
+    }
+
+    /// Lookup a type by TypeId.
+    pub(super) fn ty_from_id(&self, ty_id: TypeId) -> Type {
+        self.ctx.type_map.type_table().get(ty_id).clone()
     }
 
     pub(super) fn def_name(&self, def_id: DefId, node_id: NodeId) -> Result<String, LowerError> {

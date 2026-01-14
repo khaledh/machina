@@ -330,7 +330,6 @@ impl PlaceAny {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operand {
     Copy(Place<Scalar>),
-    #[allow(dead_code)]
     Move(Place<Scalar>),
     Const(Const),
 }

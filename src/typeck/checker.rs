@@ -697,11 +697,7 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.visit_expr(target, None)?;
-        let mut peeled_ty = target_ty.clone();
-        while let Type::Heap { elem_ty } = peeled_ty {
-            peeled_ty = *elem_ty;
-        }
-        peeled_ty = self.expand_shallow_type(&peeled_ty);
+        let peeled_ty = self.expand_shallow_type(&target_ty.peel_heap());
 
         match peeled_ty {
             Type::Tuple { field_tys } => {
@@ -767,11 +763,7 @@ impl TypeChecker {
     fn check_field_access(&mut self, target: &Expr, field: &str) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.visit_expr(target, None)?;
-        let mut peeled_ty = target_ty.clone();
-        while let Type::Heap { elem_ty } = peeled_ty {
-            peeled_ty = *elem_ty;
-        }
-        peeled_ty = self.expand_shallow_type(&peeled_ty);
+        let peeled_ty = self.expand_shallow_type(&target_ty.peel_heap());
 
         match peeled_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
@@ -1210,11 +1202,7 @@ impl TypeChecker {
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
         let callee_ty = self.visit_expr(callee, None)?;
-        let mut peeled_ty = callee_ty.clone();
-        while let Type::Heap { elem_ty } = peeled_ty {
-            peeled_ty = *elem_ty;
-        }
-        peeled_ty = self.expand_shallow_type(&peeled_ty);
+        let peeled_ty = self.expand_shallow_type(&callee_ty.peel_heap());
 
         // Check that the callee type is a struct or enum
         let type_name = match peeled_ty {
@@ -1397,11 +1385,7 @@ impl TypeChecker {
 
     fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<Type, TypeCheckError> {
         let scrutinee_ty = self.visit_expr(scrutinee, None)?;
-        let mut peeled_ty = scrutinee_ty;
-        while let Type::Heap { elem_ty } = peeled_ty {
-            peeled_ty = *elem_ty;
-        }
-        let peeled_ty = self.expand_shallow_type(&peeled_ty);
+        let peeled_ty = self.expand_shallow_type(&scrutinee_ty.peel_heap());
         let mut arm_ty: Option<Type> = None;
 
         match &peeled_ty {
@@ -1736,10 +1720,7 @@ impl AstFolder<DefId> for TypeChecker {
 
                 ExprKind::ArrayIndex { target, indices } => {
                     let target_ty = self.visit_expr(target, None)?;
-                    let mut peeled_ty = target_ty.clone();
-                    while let Type::Heap { elem_ty } = peeled_ty {
-                        peeled_ty = *elem_ty;
-                    }
+                    let peeled_ty = target_ty.peel_heap();
 
                     match peeled_ty {
                         Type::Array { elem_ty, dims } => {

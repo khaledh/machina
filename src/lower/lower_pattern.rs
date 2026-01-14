@@ -1,9 +1,9 @@
 use crate::lower::errors::LowerError;
-use crate::lower::lower_ast::ExprValue;
 use crate::lower::lower_ast::FuncLowerer;
+use crate::lower::lower_ast::Value;
 use crate::mcir::types::*;
 use crate::resolve::{DefId, DefKind};
-use crate::sir::model::{BindPattern, BindPatternKind as PK, Expr};
+use crate::sir::model::{BindPattern, BindPatternKind as PK, ValueExpr};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -13,9 +13,9 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_binding(
         &mut self,
         pattern: &BindPattern,
-        value: &Expr,
+        value: &ValueExpr,
     ) -> Result<(), LowerError> {
-        let value_ty = self.ty_for_node(value.id)?;
+        let value_ty = self.ty_from_id(value.ty);
 
         if value_ty.is_scalar() {
             // Scalar binding: compute operand and assign.
@@ -42,8 +42,8 @@ impl<'a> FuncLowerer<'a> {
         let PK::Name { def_id, .. } = &pattern.kind else {
             // Aggregate destructuring via patterns.
             let src_place = match self.lower_expr_value(value)? {
-                ExprValue::Aggregate(place) => PlaceAny::Aggregate(place),
-                ExprValue::Scalar(_) => {
+                Value::Aggregate(place) => PlaceAny::Aggregate(place),
+                Value::Scalar(_) => {
                     return Err(LowerError::PatternMismatch(pattern.id));
                 }
             };

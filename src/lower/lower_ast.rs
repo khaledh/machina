@@ -19,6 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::ast::{NodeId, ParamMode};
 use crate::context::{AnalyzedContext, LoweredMcirContext};
 use crate::lower::drop_glue::DropGlueRegistry;
 use crate::lower::errors::LowerError;
@@ -28,11 +29,11 @@ use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::*;
+use crate::sir::model::{CallableRef, FuncDef, MethodDef, Param, ValueExpr};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 
-pub(super) enum ExprValue {
+pub(super) enum Value {
     Scalar(Operand),
     Aggregate(Place<Aggregate>),
 }
@@ -63,7 +64,7 @@ pub struct FuncLowerer<'a> {
     pub(super) global_interner: &'a mut GlobalInterner,
     pub(super) func_id: NodeId,
     pub(super) func_name: &'a str,
-    pub(super) func_body: &'a Expr,
+    pub(super) func_body: &'a ValueExpr,
     pub(super) params: Vec<LoweredParam>,
     pub(super) fb: FuncBuilder,
     pub(super) locals: HashMap<DefId, LocalId>,
@@ -167,7 +168,7 @@ impl<'a> FuncLowerer<'a> {
         closure_id: NodeId,
         params: &'a [Param],
         return_ty: Type,
-        body: &'a Expr,
+        body: &'a ValueExpr,
         global_interner: &'a mut GlobalInterner,
         drop_glue: &'a mut DropGlueRegistry,
         trace_alloc: bool,
@@ -203,7 +204,7 @@ impl<'a> FuncLowerer<'a> {
         ctx: &'a AnalyzedContext,
         func_id: NodeId,
         func_name: &'a str,
-        func_body: &'a Expr,
+        func_body: &'a ValueExpr,
         params: Vec<LoweredParam>,
         global_interner: &'a mut GlobalInterner,
         drop_glue: &'a mut DropGlueRegistry,
@@ -302,7 +303,7 @@ impl<'a> FuncLowerer<'a> {
         if body_ty.is_scalar() {
             let ret_place = Place::<Scalar>::new(ret_id, ret_ty, vec![]);
             let body_value = self.lower_expr_value(self.func_body)?;
-            if let ExprValue::Scalar(op) = body_value {
+            if let Value::Scalar(op) = body_value {
                 let ret_ast_ty = self.ret_type()?;
                 self.emit_conversion_check(&body_ty, &ret_ast_ty, &op);
                 self.emit_copy_scalar(ret_place, Rvalue::Use(op));

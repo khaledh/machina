@@ -1,10 +1,13 @@
+use crate::ast::NodeId;
 use crate::lower::decision_tree::{
     ArmDecision, DecisionTreeEmitter, Test, TestKind, build_decision_tree, emit_decision_tree,
 };
 use crate::lower::errors::LowerError;
-use crate::lower::lower_ast::{ExprValue, FuncLowerer};
+use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
-use crate::sir::model::{Expr, MatchArm, MatchPattern, MatchPatternBinding, NodeId};
+use crate::sir::model::{
+    MatchArm, MatchPattern, MatchPatternBinding, ValueExpr, ValueExprKind as VEK,
+};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -12,35 +15,35 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_match_expr(
         &mut self,
-        expr: &Expr,
-        scrutinee: &Expr,
+        expr: &ValueExpr,
+        scrutinee: &ValueExpr,
         arms: &[MatchArm],
-    ) -> Result<ExprValue, LowerError> {
-        let result_ty = self.ty_for_node(expr.id)?;
+    ) -> Result<Value, LowerError> {
+        let result_ty = self.ty_from_id(expr.ty);
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
         if result_ty.is_scalar() {
             let temp_place = self.new_temp_scalar(result_ty_id);
             self.lower_match_into_scalar(temp_place.clone(), scrutinee, arms)?;
-            Ok(ExprValue::Scalar(Operand::Copy(temp_place)))
+            Ok(Value::Scalar(Operand::Copy(temp_place)))
         } else {
             let temp_place = self.new_temp_aggregate(result_ty_id);
             self.lower_match_into_agg(temp_place.clone(), scrutinee, arms)?;
-            Ok(ExprValue::Aggregate(temp_place))
+            Ok(Value::Aggregate(temp_place))
         }
     }
 
     pub(super) fn lower_match_into_scalar(
         &mut self,
         dst: Place<Scalar>,
-        scrutinee: &Expr,
+        scrutinee: &ValueExpr,
         arms: &[MatchArm],
     ) -> Result<(), LowerError> {
         if self.is_tuple_match_scrutinee(scrutinee)? {
             return self.lower_match_with_tuple(scrutinee, arms, |this, arm| {
                 let op = match this.lower_expr_value(&arm.body)? {
-                    ExprValue::Scalar(op) => op,
-                    ExprValue::Aggregate(_) => {
+                    Value::Scalar(op) => op,
+                    Value::Aggregate(_) => {
                         return Err(LowerError::UnsupportedOperandExpr(arm.body.id));
                     }
                 };
@@ -51,8 +54,8 @@ impl<'a> FuncLowerer<'a> {
 
         self.lower_match_with_switch(scrutinee, arms, |this, arm| {
             let op = match this.lower_expr_value(&arm.body)? {
-                ExprValue::Scalar(op) => op,
-                ExprValue::Aggregate(_) => {
+                Value::Scalar(op) => op,
+                Value::Aggregate(_) => {
                     return Err(LowerError::UnsupportedOperandExpr(arm.body.id));
                 }
             };
@@ -64,7 +67,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_match_into_agg(
         &mut self,
         dst: Place<Aggregate>,
-        scrutinee: &Expr,
+        scrutinee: &ValueExpr,
         arms: &[MatchArm],
     ) -> Result<(), LowerError> {
         if self.is_tuple_match_scrutinee(scrutinee)? {
@@ -80,14 +83,14 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_match_with_switch<F>(
         &mut self,
-        scrutinee: &Expr,
+        scrutinee: &ValueExpr,
         arms: &[MatchArm],
         mut emit_arm_body: F,
     ) -> Result<(), LowerError>
     where
         F: FnMut(&mut Self, &MatchArm) -> Result<(), LowerError>,
     {
-        let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
+        let scrutinee_ty = self.ty_from_id(scrutinee.ty);
         let (scrutinee_ty, deref_count) = self.peel_heap_for_match(scrutinee_ty.clone());
 
         // lower scrutinee into a temp place
@@ -178,22 +181,22 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn is_tuple_match_scrutinee(&self, scrutinee: &Expr) -> Result<bool, LowerError> {
-        let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
+    fn is_tuple_match_scrutinee(&self, scrutinee: &ValueExpr) -> Result<bool, LowerError> {
+        let scrutinee_ty = self.ty_from_id(scrutinee.ty);
         let (scrutinee_ty, _) = self.peel_heap_for_match(scrutinee_ty.clone());
         Ok(matches!(scrutinee_ty, Type::Tuple { .. }))
     }
 
     fn lower_match_with_tuple<F>(
         &mut self,
-        scrutinee: &Expr,
+        scrutinee: &ValueExpr,
         arms: &[MatchArm],
         mut emit_arm_body: F,
     ) -> Result<(), LowerError>
     where
         F: FnMut(&mut Self, &MatchArm) -> Result<(), LowerError>,
     {
-        let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
+        let scrutinee_ty = self.ty_from_id(scrutinee.ty);
         let (scrutinee_ty, deref_count) = self.peel_heap_for_match(scrutinee_ty.clone());
         let place = self.lower_match_deref_place(scrutinee, &scrutinee_ty, deref_count)?;
         let PlaceAny::Aggregate(place) = place else {
@@ -253,7 +256,7 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_match_discr(
         &mut self,
-        scrutinee: &Expr,
+        scrutinee: &ValueExpr,
         enum_ty: &Type,
         deref_count: usize,
     ) -> Result<(Operand, Option<Place<Aggregate>>), LowerError> {
@@ -294,24 +297,29 @@ impl<'a> FuncLowerer<'a> {
 
     fn lower_match_deref_place(
         &mut self,
-        scrutinee: &Expr,
+        scrutinee: &ValueExpr,
         enum_ty: &Type,
         deref_count: usize,
     ) -> Result<PlaceAny, LowerError> {
-        let scrutinee_ty = self.ty_for_node(scrutinee.id)?;
-        let place = self
-            .lower_place(scrutinee)
-            .or_else(|_| {
-                self.lower_agg_expr_to_temp(scrutinee)
-                    .map(PlaceAny::Aggregate)
-            })
-            .or_else(|_| {
-                let scrutinee_ty_id = self.ty_lowerer.lower_ty(&scrutinee_ty);
-                let temp = self.new_temp_scalar(scrutinee_ty_id);
-                let op = self.lower_scalar_expr(scrutinee)?;
-                self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
-                Ok(PlaceAny::Scalar(temp))
-            })?;
+        let scrutinee_ty = self.ty_from_id(scrutinee.ty);
+        let place = match &scrutinee.kind {
+            VEK::Load { place } => self.lower_place(place)?,
+            VEK::Move { place } | VEK::ImplicitMove { place } => {
+                self.record_move_place(place);
+                self.lower_place(place)?
+            }
+            _ => {
+                if scrutinee_ty.is_scalar() {
+                    let scrutinee_ty_id = self.ty_lowerer.lower_ty(&scrutinee_ty);
+                    let temp = self.new_temp_scalar(scrutinee_ty_id);
+                    let op = self.lower_scalar_expr(scrutinee)?;
+                    self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
+                    PlaceAny::Scalar(temp)
+                } else {
+                    PlaceAny::Aggregate(self.lower_agg_expr_to_temp(scrutinee)?)
+                }
+            }
+        };
 
         let (base, mut projs) = match place {
             PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),

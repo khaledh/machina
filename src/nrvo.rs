@@ -1,7 +1,8 @@
 use crate::context::{AnalyzedContext, ElaboratedContext};
 use crate::resolve::{DefId, DefTable};
-use crate::tir::model::{
-    ArrayLitInit, BlockItem, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind, StringFmtSegment,
+use crate::sir::model::{
+    ArrayLitInit, BlockItem, CallArg, FuncDef, MethodReceiver, PlaceExpr, PlaceExprKind as PEK,
+    StmtExpr, StmtExprKind as SEK, StringFmtSegment, ValueExpr, ValueExprKind as VEK,
 };
 use crate::typeck::type_map::TypeMap;
 
@@ -63,15 +64,17 @@ impl NrvoAnalyzer {
         }
     }
 
-    fn find_ret_var_def_id(expr: &Expr) -> Option<DefId> {
+    fn find_ret_var_def_id(expr: &ValueExpr) -> Option<DefId> {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => Some(*def_id),
+            VEK::Load { place } | VEK::Move { place } | VEK::ImplicitMove { place } => {
+                Self::place_var_def_id(place)
+            }
 
-            ExprKind::Block { tail, .. } => tail
+            VEK::Block { tail, .. } => tail
                 .as_deref()
                 .and_then(|expr| Self::find_ret_var_def_id(expr)),
 
-            ExprKind::Match { arms, .. } => {
+            VEK::Match { arms, .. } => {
                 let mut arm_def_id = None;
                 for arm in arms {
                     let this_id = Self::find_ret_var_def_id(&arm.body);
@@ -87,9 +90,16 @@ impl NrvoAnalyzer {
         }
     }
 
-    fn is_nrvo_safe(body: &Expr, var_def_id: DefId) -> bool {
+    fn is_nrvo_safe(body: &ValueExpr, var_def_id: DefId) -> bool {
         let checker = NrvoSafetyChecker::new(var_def_id);
         checker.check_expr(body, true) // true = at return position
+    }
+
+    fn place_var_def_id(place: &PlaceExpr) -> Option<DefId> {
+        match &place.kind {
+            PEK::Var { def_id, .. } => Some(*def_id),
+            _ => None,
+        }
     }
 }
 
@@ -104,13 +114,13 @@ impl NrvoSafetyChecker {
 
     fn check_stmt_expr(&self, stmt_expr: &StmtExpr) -> bool {
         match &stmt_expr.kind {
-            StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
+            SEK::LetBind { value, .. } | SEK::VarBind { value, .. } => {
                 self.check_expr(value, false)
             }
-            StmtExprKind::VarDecl { .. } => true,
+            SEK::VarDecl { .. } => true,
 
             // Assignment is ok if it's at return position
-            StmtExprKind::Assign {
+            SEK::Assign {
                 assignee, value, ..
             } => {
                 // If this is a write to our variable (lvalue use), that's OK
@@ -119,17 +129,17 @@ impl NrvoSafetyChecker {
                     self.check_expr(value, false)
                 } else {
                     // Assignment to something else - check both sides don't use our var
-                    self.check_expr(assignee, false) && self.check_expr(value, false)
+                    self.check_place_value(assignee, false) && self.check_expr(value, false)
                 }
             }
 
-            StmtExprKind::While { cond, body } => {
+            SEK::While { cond, body } => {
                 let cond_ok = self.check_expr(cond, false);
                 let body_ok = self.check_expr(body, false);
                 cond_ok && body_ok
             }
 
-            StmtExprKind::For { iter, body, .. } => {
+            SEK::For { iter, body, .. } => {
                 let iter_ok = self.check_expr(iter, false);
                 let body_ok = self.check_expr(body, false);
                 iter_ok && body_ok
@@ -137,19 +147,14 @@ impl NrvoSafetyChecker {
         }
     }
 
-    fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
+    fn check_expr(&self, expr: &ValueExpr, at_return: bool) -> bool {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => {
-                if *def_id == self.var_def_id {
-                    at_return
-                } else {
-                    // Different variable - always OK
-                    true
-                }
+            VEK::Load { place } | VEK::Move { place } | VEK::ImplicitMove { place } => {
+                self.check_place_value(place, at_return)
             }
 
             // Block expression: check all expressions, with last one in return context
-            ExprKind::Block { items, tail } => {
+            VEK::Block { items, tail } => {
                 let items_ok = items.iter().all(|item| match item {
                     BlockItem::Stmt(stmt) => self.check_stmt_expr(stmt),
                     BlockItem::Expr(expr) => self.check_expr(expr, false),
@@ -162,7 +167,7 @@ impl NrvoSafetyChecker {
                 items_ok && tail_ok
             }
 
-            ExprKind::If {
+            VEK::If {
                 cond,
                 then_body,
                 else_body,
@@ -173,48 +178,33 @@ impl NrvoSafetyChecker {
                 cond_ok && then_ok && else_ok
             }
 
-            ExprKind::Match { scrutinee, arms } => {
+            VEK::Match { scrutinee, arms } => {
                 let scrutinee_ok = self.check_expr(scrutinee, false);
                 let arms_ok = arms.iter().all(|arm| self.check_expr(&arm.body, at_return));
                 scrutinee_ok && arms_ok
             }
 
-            ExprKind::Call { callee, args } => {
+            VEK::Call { callee, args } => {
                 let callee_ok = self.check_expr(callee, false);
-                let args_ok = args.iter().all(|arg| match &arg.expr.kind {
-                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                    _ => self.check_expr(&arg.expr, false),
-                });
+                let args_ok = args.iter().all(|arg| self.check_call_arg(arg));
                 callee_ok && args_ok
             }
-            ExprKind::MethodCall { callee, args, .. } => {
-                let target_ok = self.check_expr(callee, false);
-                let args_ok = args.iter().all(|arg| match &arg.expr.kind {
-                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                    _ => self.check_expr(&arg.expr, false),
-                });
-                target_ok && args_ok
+            VEK::MethodCall { receiver, args, .. } => {
+                let receiver_ok = match receiver {
+                    MethodReceiver::ValueExpr(expr) => self.check_expr(expr, false),
+                    MethodReceiver::PlaceExpr(place) => self.check_place_lvalue(place),
+                };
+                let args_ok = args.iter().all(|arg| self.check_call_arg(arg));
+                receiver_ok && args_ok
             }
 
-            ExprKind::ArrayLit { init, .. } => match init {
+            VEK::ArrayLit { init, .. } => match init {
                 ArrayLitInit::Elems(elems) => elems.iter().all(|e| self.check_expr(e, false)),
                 ArrayLitInit::Repeat(expr, _) => self.check_expr(expr, false),
             },
 
-            ExprKind::ArrayIndex { target, indices } => {
-                let target_ok = match &target.kind {
-                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                    _ => self.check_expr(target, false),
-                };
-                let index_ok = indices.iter().all(|index| self.check_expr(index, false));
-                target_ok && index_ok
-            }
-
-            ExprKind::Slice { target, start, end } => {
-                let target_ok = match &target.kind {
-                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                    _ => self.check_expr(target, false),
-                };
+            VEK::Slice { target, start, end } => {
+                let target_ok = self.check_place_lvalue(target);
                 let start_ok = start
                     .as_deref()
                     .is_none_or(|expr| self.check_expr(expr, false));
@@ -224,73 +214,94 @@ impl NrvoSafetyChecker {
                 target_ok && start_ok && end_ok
             }
 
-            ExprKind::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
+            VEK::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
-            ExprKind::TupleField { target, .. } => match &target.kind {
-                ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                _ => self.check_expr(target, false),
-            },
-
-            ExprKind::StructLit { fields, .. } => fields
+            VEK::StructLit { fields, .. } => fields
                 .iter()
                 .all(|field| self.check_expr(&field.value, false)),
 
-            ExprKind::StructField { target, .. } => match &target.kind {
-                ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                _ => self.check_expr(target, false),
-            },
-
-            ExprKind::StructUpdate { target, fields } => {
-                let target_ok = match &target.kind {
-                    ExprKind::Var { def_id, .. } if *def_id == self.var_def_id => true,
-                    _ => self.check_expr(target, false),
-                };
+            VEK::StructUpdate { target, fields } => {
+                let target_ok = self.check_expr(target, false);
                 let fields_ok = fields
                     .iter()
                     .all(|field| self.check_expr(&field.value, false));
                 target_ok && fields_ok
             }
 
-            ExprKind::StringFmt { segments } => segments.iter().all(|segment| match segment {
+            VEK::StringFmt { segments } => segments.iter().all(|segment| match segment {
                 StringFmtSegment::Literal { .. } => true,
                 StringFmtSegment::Expr { expr, .. } => self.check_expr(expr, false),
             }),
 
-            ExprKind::HeapAlloc { expr } => self.check_expr(expr, false),
+            VEK::HeapAlloc { expr } => self.check_expr(expr, false),
 
-            ExprKind::Move { expr } => self.check_expr(expr, false),
+            VEK::Coerce { expr, .. } => self.check_expr(expr, false),
 
-            ExprKind::Coerce { expr, .. } => self.check_expr(expr, false),
+            VEK::UnaryOp { expr, .. } => self.check_expr(expr, false),
 
-            ExprKind::ImplicitMove { expr } => self.check_expr(expr, false),
-
-            ExprKind::UnaryOp { expr, .. } => self.check_expr(expr, false),
-
-            ExprKind::BinOp { left, right, .. } => {
+            VEK::BinOp { left, right, .. } => {
                 let left_ok = self.check_expr(left, false);
                 let right_ok = self.check_expr(right, false);
                 left_ok && right_ok
             }
 
-            ExprKind::UnitLit
-            | ExprKind::IntLit(_)
-            | ExprKind::BoolLit(_)
-            | ExprKind::CharLit(_)
-            | ExprKind::StringLit { .. }
-            | ExprKind::EnumVariant { .. }
-            | ExprKind::Range { .. }
-            | ExprKind::Closure { .. } => true,
+            VEK::UnitLit
+            | VEK::IntLit(_)
+            | VEK::BoolLit(_)
+            | VEK::CharLit(_)
+            | VEK::StringLit { .. }
+            | VEK::EnumVariant { .. }
+            | VEK::Range { .. }
+            | VEK::Closure { .. } => true,
         }
     }
 
-    fn is_lvalue_use(&self, expr: &Expr) -> bool {
+    fn is_lvalue_use(&self, expr: &PlaceExpr) -> bool {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => *def_id == self.var_def_id,
-            ExprKind::ArrayIndex { target, .. } => self.is_lvalue_use(target),
-            ExprKind::TupleField { target, .. } => self.is_lvalue_use(target),
-            ExprKind::Coerce { expr, .. } => self.is_lvalue_use(expr),
-            ExprKind::ImplicitMove { expr } => self.is_lvalue_use(expr),
-            _ => false,
+            PEK::Var { def_id, .. } => *def_id == self.var_def_id,
+            PEK::ArrayIndex { target, .. } => self.is_lvalue_use(target),
+            PEK::TupleField { target, .. } => self.is_lvalue_use(target),
+            PEK::StructField { target, .. } => self.is_lvalue_use(target),
+        }
+    }
+
+    fn check_place_lvalue(&self, place: &PlaceExpr) -> bool {
+        if self.is_lvalue_use(place) {
+            return true;
+        }
+
+        match &place.kind {
+            PEK::ArrayIndex { target, indices } => {
+                self.check_place_lvalue(target)
+                    && indices.iter().all(|index| self.check_expr(index, false))
+            }
+            PEK::TupleField { target, .. } | PEK::StructField { target, .. } => {
+                self.check_place_lvalue(target)
+            }
+            PEK::Var { .. } => true,
+        }
+    }
+
+    fn check_place_value(&self, place: &PlaceExpr, at_return: bool) -> bool {
+        if let PEK::Var { def_id, .. } = &place.kind {
+            if *def_id == self.var_def_id {
+                return at_return;
+            }
+        }
+
+        if self.is_lvalue_use(place) {
+            return false;
+        }
+
+        self.check_place_lvalue(place)
+    }
+
+    fn check_call_arg(&self, arg: &CallArg) -> bool {
+        match arg {
+            CallArg::In { expr, .. } | CallArg::Sink { expr, .. } => self.check_expr(expr, false),
+            CallArg::InOut { place, .. } | CallArg::Out { place, .. } => {
+                self.check_place_lvalue(place)
+            }
         }
     }
 }

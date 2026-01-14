@@ -4,7 +4,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::{Expr, ExprKind};
+use crate::sir::model::{PlaceExpr, PlaceExprKind as PEK};
 use crate::types::Type;
 
 #[derive(Debug, Clone)]
@@ -84,16 +84,14 @@ impl<'a> FuncLowerer<'a> {
         });
     }
 
-    pub(super) fn record_move(&mut self, expr: &Expr) {
-        let ExprKind::Var { def_id, .. } = expr.kind else {
+    pub(super) fn record_move_place(&mut self, place: &PlaceExpr) {
+        let PEK::Var { def_id, .. } = place.kind else {
             return;
         };
         if self.is_moved(def_id) {
             return;
         }
-        let Ok(ty) = self.ty_for_node(expr.id) else {
-            return;
-        };
+        let ty = self.ty_from_id(place.ty);
         if !ty.needs_drop() {
             return;
         }

@@ -1,8 +1,11 @@
+use crate::ast::{InitInfo, NodeId};
 use crate::lower::errors::LowerError;
-use crate::lower::lower_ast::{ExprValue, FuncLowerer};
+use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::{BlockItem, Expr, ExprKind, InitInfo, NodeId, StmtExpr, StmtExprKind};
+use crate::sir::model::{
+    BlockItem, PlaceExpr, PlaceExprKind as PEK, StmtExpr, StmtExprKind as SEK, ValueExpr,
+};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -12,8 +15,8 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_block_expr(
         &mut self,
         items: &[BlockItem],
-        tail: Option<&Expr>,
-    ) -> Result<ExprValue, LowerError> {
+        tail: Option<&ValueExpr>,
+    ) -> Result<Value, LowerError> {
         // Each block introduces a new drop scope for owned locals.
         self.enter_drop_scope();
 
@@ -24,7 +27,7 @@ impl<'a> FuncLowerer<'a> {
 
         let result = match tail {
             Some(expr) => self.lower_expr_value(expr),
-            None => Ok(ExprValue::Scalar(Operand::Const(Const::Unit))),
+            None => Ok(Value::Scalar(Operand::Const(Const::Unit))),
         };
 
         // Drop owned locals before leaving the block.
@@ -37,7 +40,7 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         dst: Place<Aggregate>,
         items: &[BlockItem],
-        tail: Option<&Expr>,
+        tail: Option<&ValueExpr>,
         block_id: NodeId,
     ) -> Result<(), LowerError> {
         // Each block introduces a new drop scope for owned locals.
@@ -68,16 +71,16 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_stmt_expr(&mut self, stmt: &StmtExpr) -> Result<(), LowerError> {
         match &stmt.kind {
-            StmtExprKind::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
-            StmtExprKind::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
-            StmtExprKind::VarDecl { def_id, .. } => self.lower_var_decl(stmt, *def_id),
-            StmtExprKind::Assign {
+            SEK::LetBind { pattern, value, .. } => self.lower_binding(pattern, value),
+            SEK::VarBind { pattern, value, .. } => self.lower_binding(pattern, value),
+            SEK::VarDecl { def_id, .. } => self.lower_var_decl(stmt, *def_id),
+            SEK::Assign {
                 assignee,
                 value,
                 init,
             } => self.lower_assign(assignee, value, *init),
-            StmtExprKind::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
-            StmtExprKind::For {
+            SEK::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
+            SEK::For {
                 pattern,
                 iter,
                 body,
@@ -88,17 +91,17 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an assignment expression.
     pub(super) fn lower_assign(
         &mut self,
-        assignee: &Expr,
-        value: &Expr,
+        assignee: &PlaceExpr,
+        value: &ValueExpr,
         init: InitInfo,
     ) -> Result<(), LowerError> {
-        let value_ty = self.ty_for_node(value.id)?;
+        let value_ty = self.ty_from_id(value.ty);
 
         if value_ty.is_scalar() {
             // Scalar assignment.
             let assignee_place = self.lower_place_scalar(assignee)?;
             let value_operand = self.lower_scalar_expr(value)?;
-            let target_ty = self.ty_for_node(assignee.id)?;
+            let target_ty = self.ty_from_id(assignee.ty);
             self.emit_conversion_check(&value_ty, &target_ty, &value_operand);
 
             self.emit_overwrite_drop(
@@ -117,7 +120,7 @@ impl<'a> FuncLowerer<'a> {
             let assignee_place = self.lower_place_agg(assignee)?;
 
             // Overwrite semantics: free the old heap pointer first.
-            let target_ty = self.ty_for_node(assignee.id)?;
+            let target_ty = self.ty_from_id(assignee.ty);
             self.emit_overwrite_drop(
                 assignee,
                 PlaceAny::Aggregate(assignee_place.clone()),
@@ -174,7 +177,7 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn emit_overwrite_drop(
         &mut self,
-        assignee: &Expr,
+        assignee: &PlaceExpr,
         place: PlaceAny,
         target_ty: &Type,
         init: InitInfo,
@@ -185,7 +188,7 @@ impl<'a> FuncLowerer<'a> {
         }
 
         if self.is_out_param_assignee(assignee)
-            && matches!(assignee.kind, ExprKind::Var { .. })
+            && matches!(assignee.kind, PEK::Var { .. })
             && init.is_init
         {
             // First assignment to an out param is a full initialization; skip drop.
@@ -203,13 +206,13 @@ impl<'a> FuncLowerer<'a> {
 
         self.emit_drop_place(place, target_ty);
         if clear_moved {
-            if let ExprKind::Var { def_id, .. } = assignee.kind {
+            if let PEK::Var { def_id, .. } = assignee.kind {
                 self.clear_moved(def_id);
             }
         }
     }
 
-    pub(super) fn mark_initialized_if_needed(&mut self, assignee: &Expr, init: InitInfo) {
+    pub(super) fn mark_initialized_if_needed(&mut self, assignee: &PlaceExpr, init: InitInfo) {
         if !init.is_init {
             return;
         }
@@ -218,7 +221,7 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    pub(super) fn mark_full_init_if_needed(&mut self, assignee: &Expr, init: InitInfo) {
+    pub(super) fn mark_full_init_if_needed(&mut self, assignee: &PlaceExpr, init: InitInfo) {
         if !init.promotes_full {
             return;
         }
@@ -231,28 +234,26 @@ impl<'a> FuncLowerer<'a> {
         self.emit_is_initialized(flag, true);
     }
 
-    fn is_initialized_for_assignee(&self, assignee: &Expr) -> Option<LocalId> {
-        if let ExprKind::Var { def_id, .. } = assignee.kind {
+    fn is_initialized_for_assignee(&self, assignee: &PlaceExpr) -> Option<LocalId> {
+        if let PEK::Var { def_id, .. } = assignee.kind {
             self.is_initialized_for_def(def_id)
         } else {
             None
         }
     }
 
-    fn is_out_param_assignee(&self, assignee: &Expr) -> bool {
+    fn is_out_param_assignee(&self, assignee: &PlaceExpr) -> bool {
         self.base_def_for_assignee(assignee)
             .map(|def_id| self.out_param_defs.contains(&def_id))
             .unwrap_or(false)
     }
 
-    fn base_def_for_assignee(&self, assignee: &Expr) -> Option<DefId> {
+    fn base_def_for_assignee(&self, assignee: &PlaceExpr) -> Option<DefId> {
         match &assignee.kind {
-            ExprKind::Var { def_id, .. } => Some(*def_id),
-            ExprKind::StructField { target, .. }
-            | ExprKind::TupleField { target, .. }
-            | ExprKind::ArrayIndex { target, .. }
-            | ExprKind::Slice { target, .. } => self.base_def_for_assignee(target),
-            _ => None,
+            PEK::Var { def_id, .. } => Some(*def_id),
+            PEK::StructField { target, .. }
+            | PEK::TupleField { target, .. }
+            | PEK::ArrayIndex { target, .. } => self.base_def_for_assignee(target),
         }
     }
 }

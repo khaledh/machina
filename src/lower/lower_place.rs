@@ -1,40 +1,45 @@
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
-use crate::sir::model::{Expr, ExprKind as EK, TypeDefKind};
+use crate::sir::model::{PlaceExpr, PlaceExprKind as PEK, TypeDefKind, ValueExpr};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{StructField as TypeStructField, Type};
 
 impl<'a> FuncLowerer<'a> {
     // --- Place (Lvalue) ---
 
-    /// Lower an lvalue expression into a place.
-    pub(super) fn lower_place(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
-        match &expr.kind {
-            EK::Var { .. } => self.lower_var(expr),
-            EK::ArrayIndex { target, indices } => self.lower_array_index(expr, target, indices),
-            EK::TupleField { target, index } => self.lower_tuple_field(target, *index),
-            EK::StructField { target, field } => self.lower_struct_field(target, field),
-            _ => Err(LowerError::ExprIsNotPlace(expr.id)),
+    /// Lower a SIR place into a MCIR place.
+    pub(super) fn lower_place(&mut self, place: &PlaceExpr) -> Result<PlaceAny, LowerError> {
+        match &place.kind {
+            PEK::Var { .. } => self.lower_var(place),
+            PEK::ArrayIndex { target, indices } => self.lower_array_index(place, target, indices),
+            PEK::TupleField { target, index } => self.lower_tuple_field(target, *index),
+            PEK::StructField { target, field } => self.lower_struct_field(target, field),
         }
     }
 
     /// Lower an lvalue expression expected to be scalar.
-    pub(super) fn lower_place_scalar(&mut self, expr: &Expr) -> Result<Place<Scalar>, LowerError> {
-        match self.lower_place(expr)? {
+    pub(super) fn lower_place_scalar(
+        &mut self,
+        place: &PlaceExpr,
+    ) -> Result<Place<Scalar>, LowerError> {
+        match self.lower_place(place)? {
             PlaceAny::Scalar(p) => Ok(p),
             PlaceAny::Aggregate(_) => Err(LowerError::PlaceKindMismatch {
-                node_id: expr.id,
+                node_id: place.id,
                 expected: PlaceKind::Scalar,
             }),
         }
     }
 
     /// Lower an lvalue expression expected to be aggregate.
-    pub(super) fn lower_place_agg(&mut self, expr: &Expr) -> Result<Place<Aggregate>, LowerError> {
-        match self.lower_place(expr)? {
+    pub(super) fn lower_place_agg(
+        &mut self,
+        place: &PlaceExpr,
+    ) -> Result<Place<Aggregate>, LowerError> {
+        match self.lower_place(place)? {
             PlaceAny::Scalar(_) => Err(LowerError::PlaceKindMismatch {
-                node_id: expr.id,
+                node_id: place.id,
                 expected: PlaceKind::Aggregate,
             }),
             PlaceAny::Aggregate(p) => Ok(p),
@@ -42,14 +47,14 @@ impl<'a> FuncLowerer<'a> {
     }
 
     /// Resolve a variable reference into its local place.
-    pub(super) fn lower_var(&mut self, expr: &Expr) -> Result<PlaceAny, LowerError> {
-        let EK::Var { def_id, .. } = expr.kind else {
-            return Err(LowerError::ExprIsNotPlace(expr.id));
+    pub(super) fn lower_var(&mut self, place: &PlaceExpr) -> Result<PlaceAny, LowerError> {
+        let PEK::Var { def_id, .. } = place.kind else {
+            return Err(LowerError::ExprIsNotPlace(place.id));
         };
         let local_id = *self
             .locals
             .get(&def_id)
-            .ok_or(LowerError::VarLocalNotFound(expr.id, def_id))?;
+            .ok_or(LowerError::VarLocalNotFound(place.id, def_id))?;
 
         let local_ty = self.fb.body.locals[local_id.0 as usize].ty;
 
@@ -61,20 +66,15 @@ impl<'a> FuncLowerer<'a> {
     /// Lower array indexing into a projected place.
     pub(super) fn lower_array_index(
         &mut self,
-        expr: &Expr,
-        target: &Expr,
-        indices: &[Expr],
+        place: &PlaceExpr,
+        target: &PlaceExpr,
+        indices: &[ValueExpr],
     ) -> Result<PlaceAny, LowerError> {
-        let target_ty = self.ty_for_node(target.id)?;
-        let mut peeled_ty = target_ty;
-        let mut deref_count = 0usize;
-        while let Type::Heap { elem_ty } = peeled_ty {
-            deref_count += 1;
-            peeled_ty = *elem_ty;
-        }
+        let target_ty = self.ty_from_id(target.ty);
+        let (peeled_ty, deref_count) = target_ty.peel_heap_with_count();
 
         if let Type::Slice { elem_ty } = peeled_ty {
-            return self.lower_slice_index(expr, target, indices, *elem_ty, deref_count);
+            return self.lower_slice_index(place, target, indices, *elem_ty, deref_count);
         }
 
         let target_place = self.lower_place(target)?;
@@ -117,7 +117,7 @@ impl<'a> FuncLowerer<'a> {
         }
 
         // Get the element type at the given indices
-        let result_ty = self.ty_for_node(expr.id)?;
+        let result_ty = self.ty_from_id(place.ty);
         let result_ty_id = self.ty_lowerer.lower_ty(&result_ty);
 
         let (base, mut projs) = match target_place {
@@ -140,22 +140,20 @@ impl<'a> FuncLowerer<'a> {
     /// Lower slice indexing into a projected place.
     pub(super) fn lower_slice_index(
         &mut self,
-        expr: &Expr,
-        target: &Expr,
-        indices: &[Expr],
+        place: &PlaceExpr,
+        target: &PlaceExpr,
+        indices: &[ValueExpr],
         elem_ty: Type,
         deref_count: usize,
     ) -> Result<PlaceAny, LowerError> {
         if indices.len() != 1 {
-            return Err(LowerError::UnsupportedOperandExpr(expr.id));
+            return Err(LowerError::UnsupportedOperandExpr(place.id));
         }
 
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
 
-        let target_place = self
-            .lower_place(target)
-            .or_else(|_| self.lower_agg_expr_to_temp(target).map(PlaceAny::Aggregate))?;
+        let target_place = self.lower_place(target)?;
 
         let (base, mut base_projs) = match target_place {
             PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
@@ -211,11 +209,11 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_slice_into(
         &mut self,
         dst: &Place<Aggregate>,
-        target: &Expr,
-        start: &Option<Box<Expr>>,
-        end: &Option<Box<Expr>>,
+        target: &PlaceExpr,
+        start: &Option<Box<ValueExpr>>,
+        end: &Option<Box<ValueExpr>>,
     ) -> Result<(), LowerError> {
-        let target_ty = self.ty_for_node(target.id)?;
+        let target_ty = self.ty_from_id(target.ty);
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
 
         let (base_ptr_op, base_len_op, elem_ty) = match target_ty {
@@ -225,9 +223,7 @@ impl<'a> FuncLowerer<'a> {
                 }
 
                 // Evaluate target into a place
-                let target_place = self
-                    .lower_place_agg(target)
-                    .or_else(|_| self.lower_agg_expr_to_temp(target))?;
+                let target_place = self.lower_place_agg(target)?;
 
                 // base_ptr = &target
                 let base_ptr_place = self.new_temp_scalar(u64_ty_id);
@@ -252,9 +248,7 @@ impl<'a> FuncLowerer<'a> {
                 (base_ptr_op, base_len_op, elem_ty)
             }
             Type::Slice { elem_ty } => {
-                let target_place = self
-                    .lower_place_agg(target)
-                    .or_else(|_| self.lower_agg_expr_to_temp(target))?;
+                let target_place = self.lower_place_agg(target)?;
 
                 let mut ptr_proj = target_place.projections().to_vec();
                 ptr_proj.push(Projection::Field { index: 0 });
@@ -341,17 +335,12 @@ impl<'a> FuncLowerer<'a> {
     /// Lower tuple field access into a projected place.
     pub(super) fn lower_tuple_field(
         &mut self,
-        target: &Expr,
+        target: &PlaceExpr,
         index: usize,
     ) -> Result<PlaceAny, LowerError> {
         let target_place = self.lower_place(target)?;
-        let target_ty = self.ty_for_node(target.id)?;
-        let mut peeled_ty = target_ty;
-        let mut deref_count = 0usize;
-        while let Type::Heap { elem_ty } = peeled_ty {
-            deref_count += 1;
-            peeled_ty = *elem_ty;
-        }
+        let target_ty = self.ty_from_id(target.ty);
+        let (peeled_ty, deref_count) = target_ty.peel_heap_with_count();
 
         let field_ty = peeled_ty.tuple_field_type(index);
         let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
@@ -373,19 +362,13 @@ impl<'a> FuncLowerer<'a> {
     /// Lower struct field access into a projected place.
     pub(super) fn lower_struct_field(
         &mut self,
-        target: &Expr,
+        target: &PlaceExpr,
         field_name: &str,
     ) -> Result<PlaceAny, LowerError> {
         let target_place = self.lower_place(target)?;
-        let target_ty = self.ty_for_node(target.id)?;
-
-        let mut peeled_ty = target_ty.clone();
-        let mut deref_count = 0usize;
-        while let Type::Heap { elem_ty } = peeled_ty {
-            deref_count += 1;
-            peeled_ty = *elem_ty;
-        }
-        peeled_ty = self.expand_shallow_struct(&peeled_ty);
+        let target_ty = self.ty_from_id(target.ty);
+        let (peeled_ty, deref_count) = target_ty.peel_heap_with_count();
+        let peeled_ty = self.expand_shallow_struct(&peeled_ty);
 
         let field_ty = peeled_ty.struct_field_type(field_name);
         let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);

@@ -3,7 +3,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::sir::model::Expr;
+use crate::sir::model::{PlaceExpr, ValueExpr};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -37,12 +37,12 @@ impl<'a> FuncLowerer<'a> {
 
     pub(super) fn lower_string_index(
         &mut self,
-        expr: &Expr,
-        target: &Expr,
-        indices: &[Expr],
+        place: &PlaceExpr,
+        target: &PlaceExpr,
+        indices: &[ValueExpr],
     ) -> Result<Operand, LowerError> {
         if indices.len() != 1 {
-            return Err(LowerError::UnsupportedOperandExpr(expr.id));
+            return Err(LowerError::UnsupportedOperandExpr(place.id));
         }
 
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
@@ -50,24 +50,10 @@ impl<'a> FuncLowerer<'a> {
         let u8_ty_id = self.ty_lowerer.lower_ty(&Type::uint(8));
         let bool_ty_id = self.ty_lowerer.lower_ty(&Type::Bool);
 
-        let target_ty = self.ty_for_node(target.id)?;
-        let mut peeled_ty = target_ty.clone();
-        let mut deref_count = 0usize;
-        while let Type::Heap { elem_ty } = peeled_ty {
-            deref_count += 1;
-            peeled_ty = *elem_ty;
-        }
+        let target_ty = self.ty_from_id(target.ty);
+        let (_peeled_ty, deref_count) = target_ty.peel_heap_with_count();
 
-        let target_place = self
-            .lower_place(target)
-            .or_else(|_| self.lower_agg_expr_to_temp(target).map(PlaceAny::Aggregate))
-            .or_else(|_| {
-                let ty_id = self.ty_lowerer.lower_ty(&target_ty);
-                let temp = self.new_temp_scalar(ty_id);
-                let op = self.lower_scalar_expr(target)?;
-                self.emit_copy_scalar(temp.clone(), Rvalue::Use(op));
-                Ok(PlaceAny::Scalar(temp))
-            })?;
+        let target_place = self.lower_place(target)?;
 
         let (base, mut base_projs) = match target_place {
             PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
@@ -158,25 +144,33 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_string_slice_into(
         &mut self,
         dst: &Place<Aggregate>,
-        target: &Expr,
-        start: &Option<Box<Expr>>,
-        end: &Option<Box<Expr>>,
+        target: &PlaceExpr,
+        start: &Option<Box<ValueExpr>>,
+        end: &Option<Box<ValueExpr>>,
     ) -> Result<(), LowerError> {
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let u32_ty_id = self.ty_lowerer.lower_ty(&Type::uint(32));
 
-        let target_place = self
-            .lower_place_agg(target)
-            .or_else(|_| self.lower_agg_expr_to_temp(target))?;
+        let target_ty = self.ty_from_id(target.ty);
+        let (_peeled_ty, deref_count) = target_ty.peel_heap_with_count();
 
-        let mut ptr_proj = target_place.projections().to_vec();
+        let target_place = self.lower_place(target)?;
+        let (base, mut base_projs) = match target_place {
+            PlaceAny::Scalar(p) => (p.base(), p.projections().to_vec()),
+            PlaceAny::Aggregate(p) => (p.base(), p.projections().to_vec()),
+        };
+        for _ in 0..deref_count {
+            base_projs.push(Projection::Deref);
+        }
+
+        let mut ptr_proj = base_projs.clone();
         ptr_proj.push(Projection::Field { index: 0 });
-        let ptr_place = Place::new(target_place.base(), u64_ty_id, ptr_proj);
+        let ptr_place = Place::new(base, u64_ty_id, ptr_proj);
         let ptr_op = Operand::Copy(ptr_place);
 
-        let mut len_proj = target_place.projections().to_vec();
+        let mut len_proj = base_projs;
         len_proj.push(Projection::Field { index: 1 });
-        let len_place = Place::new(target_place.base(), u32_ty_id, len_proj);
+        let len_place = Place::new(base, u32_ty_id, len_proj);
         let len_u32_op = Operand::Copy(len_place);
 
         let start_op = match start {

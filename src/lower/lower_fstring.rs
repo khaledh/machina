@@ -3,7 +3,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::sir::model::{Expr, ExprKind as EK, StringFmtSegment};
+use crate::sir::model::{StringFmtSegment, ValueExpr, ValueExprKind as VEK};
 use crate::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;
@@ -86,12 +86,12 @@ impl<'a> FuncLowerer<'a> {
                     total = total.saturating_add(value.len());
                 }
                 StringFmtSegment::Expr { expr, .. } => match &expr.kind {
-                    EK::StringLit { value, .. } => {
+                    VEK::StringLit { value } => {
                         total = total.saturating_add(value.len());
                     }
                     _ => {
                         // Non-literal expressions are restricted to integers.
-                        let ty = self.ty_for_node(expr.id)?;
+                        let ty = self.ty_from_id(expr.ty);
                         match ty {
                             Type::Int { .. } => {
                                 total = total.saturating_add(MAX_U64_DEC_LEN);
@@ -129,13 +129,13 @@ impl<'a> FuncLowerer<'a> {
     fn append_expr_segment(
         &mut self,
         fmt: &Place<Aggregate>,
-        expr: &Expr,
+        expr: &ValueExpr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
-            EK::StringLit { value, .. } => self.append_literal_segment(fmt, value),
+            VEK::StringLit { value } => self.append_literal_segment(fmt, value),
             _ => {
                 // Only integer expressions are permitted in f-strings today.
-                let ty = self.ty_for_node(expr.id)?;
+                let ty = self.ty_from_id(expr.ty);
                 if ty.is_int() {
                     self.append_int_segment(fmt, expr)
                 } else {
@@ -179,10 +179,10 @@ impl<'a> FuncLowerer<'a> {
     fn append_int_segment(
         &mut self,
         fmt: &Place<Aggregate>,
-        expr: &Expr,
+        expr: &ValueExpr,
     ) -> Result<(), LowerError> {
         // Normalize to 64-bit so the runtime conversion helpers have a fixed ABI.
-        let ty = self.ty_for_node(expr.id)?;
+        let ty = self.ty_from_id(expr.ty);
         let Type::Int { signed, bits } = ty else {
             return Err(LowerError::UnsupportedStringFmtSegment(expr.id));
         };
@@ -233,8 +233,8 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn coerce_int_to_u64(&mut self, expr: &Expr, op: Operand) -> Result<Operand, LowerError> {
-        let ty = self.ty_for_node(expr.id)?;
+    fn coerce_int_to_u64(&mut self, expr: &ValueExpr, op: Operand) -> Result<Operand, LowerError> {
+        let ty = self.ty_from_id(expr.ty);
         let Type::Int { signed, bits } = ty else {
             return Err(LowerError::UnsupportedStringFmtSegment(expr.id));
         };
@@ -260,7 +260,7 @@ impl<'a> FuncLowerer<'a> {
 
     fn coerce_int_to_i64(
         &mut self,
-        _expr: &Expr,
+        _expr: &ValueExpr,
         op: Operand,
         bits: u8,
     ) -> Result<Operand, LowerError> {
