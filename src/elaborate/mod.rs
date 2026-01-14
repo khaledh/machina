@@ -14,7 +14,6 @@ use std::collections::HashSet;
 pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
     let SemanticCheckedContext {
         module,
-        sir_module,
         def_table,
         type_map,
         symbols,
@@ -23,7 +22,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
         init_assigns,
         full_init_assigns,
     } = ctx;
-    let mut sir_module = sir_module;
+    let mut module = module;
     let mut type_map = type_map;
     let mut node_id_gen = node_id_gen;
     let mut elaborator = Elaborator::new(
@@ -33,10 +32,9 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
         &init_assigns,
         &full_init_assigns,
     );
-    elaborator.visit_module(&mut sir_module);
+    elaborator.visit_module(&mut module);
     ElaboratedContext {
         module,
-        sir_module,
         def_table,
         type_map,
         symbols,

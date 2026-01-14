@@ -13,13 +13,13 @@ use crate::analysis::dataflow::solve_forward;
 use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
-use crate::resolve::{DefId, DefKind};
-use crate::semck::SemCheckError;
-use crate::semck::ast_liveness::{self, AstLiveness};
-use crate::sir::model::{
+use crate::nir::model::{
     BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
     StmtExprKind,
 };
+use crate::resolve::{DefId, DefKind};
+use crate::semck::SemCheckError;
+use crate::semck::ast_liveness::{self, AstLiveness};
 use crate::types::TypeId;
 
 pub struct MoveCheckResult {
@@ -32,7 +32,7 @@ pub struct MoveCheckResult {
 pub fn check(ctx: &NormalizedContext) -> MoveCheckResult {
     let mut errors = Vec::new();
     let mut implicit_moves = HashSet::new();
-    for func_def in ctx.sir_module.func_defs() {
+    for func_def in ctx.module.func_defs() {
         check_func_def(func_def, ctx, &mut errors, &mut implicit_moves);
     }
     MoveCheckResult {

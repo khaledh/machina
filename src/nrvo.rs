@@ -20,8 +20,7 @@ impl NrvoAnalyzer {
 
     pub fn analyze(self) -> AnalyzedContext {
         let ElaboratedContext {
-            module: typed_module,
-            sir_module,
+            module,
             def_table,
             type_map,
             symbols,
@@ -30,13 +29,12 @@ impl NrvoAnalyzer {
 
         let mut def_table = def_table;
 
-        for func_def in typed_module.func_defs() {
+        for func_def in module.func_defs() {
             Self::analyze_func_def(&mut def_table, &type_map, func_def);
         }
 
         AnalyzedContext {
-            module: typed_module,
-            sir_module,
+            module,
             def_table,
             type_map,
             symbols,

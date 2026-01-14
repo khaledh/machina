@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::context::NormalizedContext;
 use crate::diag::Span;
 use crate::hir::model::MatchPattern;
+use crate::nir::model::{Expr, MatchArm};
 use crate::semck::SemCheckError;
-use crate::sir::model::{Expr, MatchArm};
 use crate::types::{EnumVariant, Type};
 
 pub(super) fn check_match(
@@ -26,10 +26,7 @@ pub(super) fn check_match(
     }
 
     let scrutinee_ty = ctx.type_map.type_table().get(scrutinee.ty);
-    let mut peeled_ty = scrutinee_ty.clone();
-    while let Type::Heap { elem_ty } = peeled_ty {
-        peeled_ty = *elem_ty;
-    }
+    let peeled_ty = scrutinee_ty.peel_heap();
 
     let rule = MatchRuleKind::for_type(&peeled_ty);
     rule.check(ctx, scrutinee_ty, arms, span, scrutinee.span, errors);
@@ -275,7 +272,7 @@ impl<'a> TupleRule<'a> {
         }
 
         for (field_ty, pattern) in field_tys.iter().zip(patterns.iter()) {
-            let peeled_ty = peel_heap_type(field_ty.clone());
+            let peeled_ty = field_ty.peel_heap();
             match pattern {
                 MatchPattern::Binding { .. } | MatchPattern::Wildcard { .. } => {}
                 MatchPattern::BoolLit { span, .. } => {
@@ -359,13 +356,6 @@ fn pattern_span(pattern: &MatchPattern) -> Span {
         | MatchPattern::Tuple { span, .. }
         | MatchPattern::EnumVariant { span, .. } => *span,
     }
-}
-
-fn peel_heap_type(mut ty: Type) -> Type {
-    while let Type::Heap { elem_ty } = ty {
-        ty = *elem_ty;
-    }
-    ty
 }
 
 fn pattern_is_irrefutable(pattern: &MatchPattern) -> bool {

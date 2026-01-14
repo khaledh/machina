@@ -15,18 +15,18 @@ use crate::analysis::dataflow::{solve_backward, solve_forward};
 use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::sir::model::{
+use crate::nir::model::{
     BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
     StmtExprKind,
 };
+use crate::resolve::DefId;
+use crate::semck::SemCheckError;
 use crate::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
 
-    for func_def in ctx.sir_module.func_defs() {
+    for func_def in ctx.module.func_defs() {
         check_func_def(ctx, func_def, &mut errors);
     }
 

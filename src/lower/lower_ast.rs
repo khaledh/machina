@@ -338,7 +338,7 @@ pub fn lower_ast(
     let mut drop_glue = DropGlueRegistry::new(ctx.def_table.next_def_id());
 
     // Lower all callables (functions + methods).
-    for callable in ctx.sir_module.callables() {
+    for callable in ctx.module.callables() {
         let (def_id, body) = match callable {
             CallableRef::FuncDecl(_) => continue,
             CallableRef::FuncDef(func_def) => (
@@ -365,7 +365,7 @@ pub fn lower_ast(
             ),
             CallableRef::ClosureDecl(closure_decl) => {
                 let return_ty =
-                    resolve_type_expr(&ctx.def_table, &ctx.sir_module, &closure_decl.sig.return_ty)
+                    resolve_type_expr(&ctx.def_table, &ctx.module, &closure_decl.sig.return_ty)
                         .expect(
                             format!(
                                 "compiler bug: cannot resolve closure return type {:?}",

@@ -5,6 +5,7 @@ use crate::hir::model::Module as HirModule;
 use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
+use crate::nir::model::Module as NirModule;
 use crate::regalloc::AllocationResult;
 use crate::resolve::DefTable;
 use crate::sir::model::Module as SirModule;
@@ -80,8 +81,7 @@ pub struct TypeCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct NormalizedContext {
-    pub tir_module: TypedModule,
-    pub sir_module: SirModule,
+    pub module: NirModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -96,8 +96,7 @@ impl NormalizedContext {
         full_init_assigns: HashSet<NodeId>,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
-            module: self.tir_module,
-            sir_module: self.sir_module,
+            module: self.module,
             def_table: self.def_table,
             type_map: self.type_map,
             symbols: self.symbols,
@@ -114,8 +113,7 @@ impl NormalizedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
-    pub module: TypedModule,
-    pub sir_module: SirModule,
+    pub module: NirModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -130,8 +128,7 @@ pub struct SemanticCheckedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct ElaboratedContext {
-    pub module: TypedModule,
-    pub sir_module: SirModule,
+    pub module: SirModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -142,7 +139,6 @@ impl From<SemanticCheckedContext> for ElaboratedContext {
     fn from(ctx: SemanticCheckedContext) -> Self {
         Self {
             module: ctx.module,
-            sir_module: ctx.sir_module,
             def_table: ctx.def_table,
             type_map: ctx.type_map,
             symbols: ctx.symbols,
@@ -156,8 +152,7 @@ impl From<SemanticCheckedContext> for ElaboratedContext {
 // -----------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
-    pub module: TypedModule,
-    pub sir_module: SirModule,
+    pub module: SirModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,

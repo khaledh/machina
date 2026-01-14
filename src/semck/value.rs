@@ -1,11 +1,11 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::NormalizedContext;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::sir::model::{
+use crate::nir::model::{
     BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
     TypeExpr, TypeExprKind, UnaryOp,
 };
+use crate::resolve::DefId;
+use crate::semck::SemCheckError;
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{Type, TypeId};
 
@@ -31,13 +31,13 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        for type_def in &self.ctx.sir_module.type_defs() {
+        for type_def in &self.ctx.module.type_defs() {
             self.check_type_def(type_def);
         }
-        for func_decl in &self.ctx.sir_module.func_decls() {
+        for func_decl in &self.ctx.module.func_decls() {
             self.check_function_sig(&func_decl.sig);
         }
-        for func_def in self.ctx.sir_module.func_defs() {
+        for func_def in self.ctx.module.func_defs() {
             self.check_function_sig(&func_def.sig);
             self.visit_func_def(func_def);
         }
@@ -117,7 +117,7 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Option<Type> {
-        resolve_type_expr(&self.ctx.def_table, &self.ctx.sir_module, ty).ok()
+        resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ty).ok()
     }
 
     fn check_range_binding_value(&mut self, value: &Expr, ty: &Type) {

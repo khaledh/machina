@@ -1,14 +1,14 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::context::NormalizedContext;
-use crate::resolve::DefId;
-use crate::resolve::DefKind;
-use crate::semck::SemCheckError;
-use crate::semck::match_check;
-use crate::sir::model::{
+use crate::nir::model::{
     BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
     MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
     TypeDefKind,
 };
+use crate::resolve::DefId;
+use crate::resolve::DefKind;
+use crate::semck::SemCheckError;
+use crate::semck::match_check;
 use crate::typeck::type_map::{CallSig, resolve_type_expr};
 use crate::types::{Type, TypeId};
 use std::collections::{HashMap, HashSet};
@@ -38,7 +38,7 @@ impl<'a> StructuralChecker<'a> {
         let mut struct_fields = HashMap::new();
         let mut enum_variants = HashMap::new();
 
-        for type_def in ctx.sir_module.type_defs() {
+        for type_def in ctx.module.type_defs() {
             match &type_def.kind {
                 TypeDefKind::Struct { fields } => {
                     // Collect field names for fast membership checks.
@@ -73,7 +73,7 @@ impl<'a> StructuralChecker<'a> {
     }
 
     fn check_module(&mut self) {
-        self.visit_module(&self.ctx.sir_module);
+        self.visit_module(&self.ctx.module);
     }
 
     fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: crate::diag::Span) {
@@ -189,8 +189,7 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_param_modes(&mut self, params: &[Param]) {
         for param in params {
-            if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.sir_module, &param.typ)
-            {
+            if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ) {
                 if param.mode == ParamMode::InOut && !(ty.is_compound() || ty.is_heap()) {
                     // Only aggregate or heap types can be inout parameters.
                     self.errors.push(SemCheckError::InOutParamNotAggregate(

@@ -372,6 +372,24 @@ impl Type {
         matches!(self, Type::Heap { .. })
     }
 
+    pub fn peel_heap(&self) -> Type {
+        let mut ty = self.clone();
+        while let Type::Heap { elem_ty } = ty {
+            ty = *elem_ty;
+        }
+        ty
+    }
+
+    pub fn peel_heap_with_count(&self) -> (Type, usize) {
+        let mut ty = self.clone();
+        let mut count = 0usize;
+        while let Type::Heap { elem_ty } = ty {
+            count += 1;
+            ty = *elem_ty;
+        }
+        (ty, count)
+    }
+
     pub fn is_move_tracked(&self) -> bool {
         self.is_compound() || self.is_heap()
     }

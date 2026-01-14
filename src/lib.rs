@@ -9,6 +9,7 @@ pub mod lexer;
 pub mod liveness;
 pub mod lower;
 pub mod mcir;
+pub mod nir;
 pub mod normalize;
 pub mod nrvo;
 pub mod opt;

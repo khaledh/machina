@@ -13,12 +13,12 @@ use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTermina
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
 use crate::diag::Span;
-use crate::resolve::{DefId, DefKind};
-use crate::semck::SemCheckError;
-use crate::sir::model::{
+use crate::nir::model::{
     ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
     MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
+use crate::resolve::{DefId, DefKind};
+use crate::semck::SemCheckError;
 use crate::types::{Type, TypeId};
 
 pub(super) struct DefInitResult {
@@ -112,7 +112,7 @@ pub(super) fn check(ctx: &NormalizedContext) -> DefInitResult {
     let mut errors = Vec::new();
     let mut init_assigns = HashSet::new();
     let mut full_init_assigns = HashSet::new();
-    for func_def in ctx.sir_module.func_defs() {
+    for func_def in ctx.module.func_defs() {
         check_func(
             func_def,
             ctx,

@@ -2,29 +2,35 @@ use crate::ast::NodeIdGen;
 use crate::ast::visit_mut;
 use crate::ast::visit_mut::VisitorMut;
 use crate::context::{NormalizedContext, TypeCheckedContext};
+use crate::nir::builder::ToNir;
+use crate::nir::model as nir;
 use crate::resolve::DefId;
-use crate::sir::builder::build_module as build_sir;
-use crate::sir::model as sir;
 use crate::typeck::type_map::{CallParam, TypeMap};
 use crate::types::TypeId;
 use crate::types::array_to_slice_assignable;
 
-/// Normalize TIR into SIR.
+/// Normalize TIR into NIR.
 ///
-/// Step 1: 1:1 mapping of the typed tree into SIR, plus explicit array-to-slice
+/// Step 1: 1:1 mapping of the typed tree into NIR, plus explicit array-to-slice
 /// coercions on call arguments.
 pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
-    let mut type_map = ctx.type_map;
-    let mut sir_module = build_sir(&ctx.module);
-    let mut node_id_gen = ctx.node_id_gen;
-    let mut normalizer = Normalizer::new(&mut type_map, &mut node_id_gen);
-    normalizer.visit_module(&mut sir_module);
-    NormalizedContext {
-        tir_module: ctx.module,
-        sir_module,
-        def_table: ctx.def_table,
+    let TypeCheckedContext {
+        module,
+        def_table,
         type_map,
-        symbols: ctx.symbols,
+        symbols,
+        node_id_gen,
+    } = ctx;
+    let mut module = module.to_nir();
+    let mut type_map = type_map;
+    let mut node_id_gen = node_id_gen;
+    let mut normalizer = Normalizer::new(&mut type_map, &mut node_id_gen);
+    normalizer.visit_module(&mut module);
+    NormalizedContext {
+        module,
+        def_table,
+        type_map,
+        symbols,
         node_id_gen,
     }
 }
@@ -42,7 +48,7 @@ impl<'a> Normalizer<'a> {
         }
     }
 
-    fn coerce_call_args(&mut self, call_id: sir::NodeId, args: &mut [sir::CallArg]) {
+    fn coerce_call_args(&mut self, call_id: nir::NodeId, args: &mut [nir::CallArg]) {
         let Some(call_sig) = self.type_map.lookup_call_sig(call_id) else {
             return;
         };
@@ -51,17 +57,17 @@ impl<'a> Normalizer<'a> {
         }
     }
 
-    fn coerce_array_to_slice(&mut self, param: &CallParam, arg: &mut sir::CallArg) {
+    fn coerce_array_to_slice(&mut self, param: &CallParam, arg: &mut nir::CallArg) {
         if !matches!(
             arg.mode,
-            sir::CallArgMode::Default | sir::CallArgMode::InOut
+            nir::CallArgMode::Default | nir::CallArgMode::InOut
         ) {
             return;
         }
         if matches!(
             arg.expr.kind,
-            sir::ExprKind::Coerce {
-                kind: sir::CoerceKind::ArrayToSlice,
+            nir::ExprKind::Coerce {
+                kind: nir::CoerceKind::ArrayToSlice,
                 ..
             }
         ) {
@@ -78,10 +84,10 @@ impl<'a> Normalizer<'a> {
         let inner = arg.expr.clone();
         let coerce_id = self.node_id_gen.new_id();
         let ty_id = self.type_map.insert_node_type(coerce_id, param.ty.clone());
-        arg.expr = sir::Expr {
+        arg.expr = nir::Expr {
             id: coerce_id,
-            kind: sir::ExprKind::Coerce {
-                kind: sir::CoerceKind::ArrayToSlice,
+            kind: nir::ExprKind::Coerce {
+                kind: nir::CoerceKind::ArrayToSlice,
                 expr: Box::new(inner),
             },
             ty: ty_id,
@@ -91,14 +97,14 @@ impl<'a> Normalizer<'a> {
 }
 
 impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
-    fn visit_module(&mut self, module: &mut sir::Module) {
+    fn visit_module(&mut self, module: &mut nir::Module) {
         visit_mut::walk_module(self, module);
     }
 
-    fn visit_expr(&mut self, expr: &mut sir::Expr) {
+    fn visit_expr(&mut self, expr: &mut nir::Expr) {
         visit_mut::walk_expr(self, expr);
         match &mut expr.kind {
-            sir::ExprKind::Call { args, .. } | sir::ExprKind::MethodCall { args, .. } => {
+            nir::ExprKind::Call { args, .. } | nir::ExprKind::MethodCall { args, .. } => {
                 self.coerce_call_args(expr.id, args);
             }
             _ => {}

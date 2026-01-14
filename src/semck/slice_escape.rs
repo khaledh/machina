@@ -1,13 +1,13 @@
 use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::NormalizedContext;
+use crate::nir::model::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
-use crate::sir::model::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
 use crate::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = SliceEscapeChecker::new(ctx);
-    checker.visit_module(&ctx.sir_module);
+    checker.visit_module(&ctx.module);
     checker.errors
 }
 

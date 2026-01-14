@@ -7,9 +7,9 @@
 use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
 use crate::diag::Span;
+use crate::nir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
-use crate::sir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::types::TypeId;
 
 /// An argument access: its mode, lvalue path, and source location.
@@ -60,7 +60,7 @@ enum Bound {
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = LvalueOverlapChecker::new(ctx);
-    checker.visit_module(&ctx.sir_module);
+    checker.visit_module(&ctx.module);
     checker.errors
 }
 
