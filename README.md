@@ -286,8 +286,9 @@ The compiler is a multi-stage pipeline written in Rust:
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │ Frontend                                                              │
-│   Lexer → Parser → Resolver → Type Check → Sem Check  → NRVO Analysis │
-└────────────────────────────────────┬──────────────────────────────────┘
+│   Lex → Parse → Resolve → Type Check → Normalize                      │
+│       → Semantic Check → Elaborate → NRVO Analysis                    │
+└───────────────────────────────────────┬───────────────────────────────┘
 ┌────────────────────────────────────▼──────────────────────────────────┐
 │ Middle End                                                            │
 │   MCIR Lowering → CFG-Free Opt → Liveness → Dataflow Opt → Liveness   │
@@ -300,15 +301,19 @@ The compiler is a multi-stage pipeline written in Rust:
 
 **Frontend** produces progressively richer context:
 
-- **Lexer/Parser**: Hand-written recursive descent with Pratt parsing for
-  operators
-- **Resolver**: Builds scope tree, records definitions and uses
-- **Type Checker**: Infers and validates types across expressions, resolves
-  function overloading
+- **Lex/Parse**: Hand-written lexer and recursive descent parser with Pratt
+  parsing for operators precedence. Produces AST.
+- **Resolve**: Builds scope tree, records definitions and uses. Produces HIR.
+- **Type Check**: Infers and validates types across expressions, resolves
+  function overloading. Produces TIR.
+- **Normalize**: Converts the typed tree into normalized IR and inserts
+  explicit coercions (e.g., array-to-slice at call sites). Produces NIR.
 - **Semantic Check**: Enforces value rules, structural rules, move restrictions,
   borrow restrictions, definition-before-use (including partial init), slice
   escape/borrow-scope rules, call-argument overlap checks.
-- **NRVO Analysis**: Marks safe copy-elision for aggregate returns
+- **Elaborate**: Converts NIR into SIR (semantic IR) and makes implicit
+  operations explicit (e.g., implicit moves, place/value split). Produces SIR.
+- **NRVO Analysis**: Marks safe copy-elision for aggregate returns.
 
 **Middle End** operates on MCIR (Machina IR), a typed, place-based
 representation:
@@ -326,5 +331,5 @@ representation:
 - **Register Allocation**: Linear scan with AAPCS calling convention
 - **Code Generation**: ARM64 assembly with prologue/epilogue handling
 
-Use `--dump` flags to inspect any stage: `tokens`, `ast`, `defmap`, `typemap`,
+Use `--dump` flags to inspect any stage: `tokens`, `ast`, `deftab`, `typemap`,
 `nrvo`, `ir`, `liveness`, `intervals`, `regalloc`, `asm`.

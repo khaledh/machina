@@ -51,7 +51,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             match item.as_str() {
                 "tokens" => dump_tokens = true,
                 "ast" => dump_ast = true,
-                "deftbl" => dump_def_table = true,
+                "deftab" => dump_def_table = true,
                 "typemap" => dump_type_map = true,
                 "nrvo" => dump_nrvo = true,
                 "ir" => dump_ir = true,
