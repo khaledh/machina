@@ -1,8 +1,8 @@
-use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::NormalizedContext;
-use crate::nir::model::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
+use crate::tree::normalized::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
+use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {

@@ -1,7 +1,7 @@
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
-use crate::sir::model::{BindPattern, BindPatternKind as PK, ValueExpr, ValueExprKind as VEK};
+use crate::tree::semantic::{BindPattern, BindPatternKind as PK, ValueExpr, ValueExprKind as VEK};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

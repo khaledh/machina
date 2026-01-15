@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::ast::{Module, NodeIdGen};
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
 use crate::elaborate;
@@ -19,6 +18,8 @@ use crate::resolve::{DefId, resolve};
 use crate::semck::sem_check;
 use crate::targets;
 use crate::targets::TargetKind;
+use crate::tree::NodeIdGen;
+use crate::tree::parsed::Module;
 use crate::typeck::type_check;
 
 pub struct CompileOptions {
@@ -105,13 +106,13 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let module = Module { top_level_items };
 
     if dump_ast {
-        println!("AST:");
+        println!("Parsed Tree:");
         println!("--------------------------------");
         println!("{}", module);
         println!("--------------------------------");
     }
 
-    // --- Resolve Defs/Uses ---
+    // --- Resolve Defs/Uses (parsed -> resolved) ---
 
     let ast_context = ParsedContext::new(module, id_gen);
 
@@ -128,7 +129,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
-    // --- Type Check ---
+    // --- Type Check (resolved -> type-checked) ---
 
     let type_checked_context = type_check(resolved_context).map_err(|errs| {
         errs.into_iter()
@@ -143,7 +144,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
-    // --- Normalize (TIR -> SIR) ---
+    // --- Normalize (typed -> normalized) ---
 
     let normalized_context = normalize::normalize(type_checked_context);
 
@@ -155,7 +156,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             .collect::<Vec<CompileError>>()
     })?;
 
-    // --- Elaborate (SIR -> SIR) ---
+    // --- Elaborate (normalized -> semantic) ---
 
     let elaborated_context = elaborate::elaborate(semantic_checked_context);
 
@@ -173,6 +174,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     }
 
     // --- Lower to MCIR ---
+
     let lowered_context = lower::lower_ast::lower_ast(analyzed_context, opts.trace_alloc)
         .map_err(|e| vec![e.into()])?;
     if dump_ir {
@@ -194,6 +196,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     }
 
     // --- Optimize MCIR ---
+
     let optimized_context = opt::cfg_free::run(lowered_context);
     let liveness_context = liveness::analyze(optimized_context);
     let optimized_context = opt::dataflow::run(liveness_context);
@@ -246,6 +249,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     }
 
     // --- Register Allocation ---
+
     let target = match opts.target {
         TargetKind::Arm64 => targets::arm64::regs::Arm64Target::new(),
     };
@@ -289,7 +293,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     Ok(CompileOutput { asm, mcir })
 }
 
-// --- stdlib AST injection ---
+// --- stdlib parsed-tree injection ---
 
 fn parse_with_id_gen(
     source: &str,

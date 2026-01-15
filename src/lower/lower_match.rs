@@ -1,11 +1,11 @@
-use crate::ast::NodeId;
 use crate::lower::decision_tree::{
     ArmDecision, DecisionTreeEmitter, Test, TestKind, build_decision_tree, emit_decision_tree,
 };
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
-use crate::sir::model::{
+use crate::tree::NodeId;
+use crate::tree::semantic::{
     MatchArm, MatchPattern, MatchPatternBinding, ValueExpr, ValueExprKind as VEK,
 };
 use crate::types::Type;

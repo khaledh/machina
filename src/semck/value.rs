@@ -1,11 +1,11 @@
-use crate::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::context::NormalizedContext;
-use crate::nir::model::{
+use crate::resolve::DefId;
+use crate::semck::SemCheckError;
+use crate::tree::normalized::{
     BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
     TypeExpr, TypeExprKind, UnaryOp,
 };
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
+use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{Type, TypeId};
 

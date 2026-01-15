@@ -1,6 +1,6 @@
-use crate::context::{AnalyzedContext, ElaboratedContext};
+use crate::context::{AnalyzedContext, SemanticContext};
 use crate::resolve::{DefId, DefTable};
-use crate::sir::model::{
+use crate::tree::semantic::{
     ArrayLitInit, BlockItem, CallArg, FuncDef, MethodReceiver, PlaceExpr, PlaceExprKind as PEK,
     StmtExpr, StmtExprKind as SEK, StringFmtSegment, ValueExpr, ValueExprKind as VEK,
 };
@@ -11,16 +11,16 @@ use crate::typeck::type_map::TypeMap;
 /// This analyzer checks if the returned value of a function is eligible for NRVO.
 /// If it is, it marks the definition as eligible for NRVO.
 pub struct NrvoAnalyzer {
-    ctx: ElaboratedContext,
+    ctx: SemanticContext,
 }
 
 impl NrvoAnalyzer {
-    pub fn new(ctx: ElaboratedContext) -> Self {
+    pub fn new(ctx: SemanticContext) -> Self {
         Self { ctx }
     }
 
     pub fn analyze(self) -> AnalyzedContext {
-        let ElaboratedContext {
+        let SemanticContext {
             module,
             def_table,
             type_map,

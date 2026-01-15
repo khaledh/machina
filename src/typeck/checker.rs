@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::fold::{AstFolder, walk_expr, walk_if};
-use crate::ast::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::context::ResolvedContext;
 use crate::diag::Span;
-use crate::hir::model::*;
 use crate::resolve::{DefId, DefKind};
+use crate::tree::fold::{AstFolder, walk_expr, walk_if};
+use crate::tree::resolved::*;
+use crate::tree::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
 };

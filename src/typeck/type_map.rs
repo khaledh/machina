@@ -1,7 +1,8 @@
-use crate::ast::{NodeId, ParamMode};
-use crate::hir::model::*;
-use crate::hir::{EnumDefVariant, StructDefField};
 use crate::resolve::{Def, DefId, DefKind, DefTable};
+use crate::tree::normalized as norm;
+use crate::tree::resolved as res;
+use crate::tree::semantic as sem;
+use crate::tree::{NodeId, ParamMode};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeId, TypeTable};
 use std::collections::{HashMap, HashSet};
@@ -34,7 +35,7 @@ enum ResolveDepth {
 pub(crate) fn resolve_type_expr(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &crate::ast::model::TypeExpr<DefId>,
+    type_expr: &res::TypeExpr,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
     resolve_type_expr_impl(
@@ -47,33 +48,39 @@ pub(crate) fn resolve_type_expr(
 }
 
 pub(crate) trait TypeDefLookup {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::ast::model::TypeDef<DefId>>;
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef>;
 }
 
-impl<Ty> TypeDefLookup for crate::ast::model::Module<DefId, Ty> {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::ast::model::TypeDef<DefId>> {
-        crate::ast::model::Module::type_def_by_id(self, def_id)
+impl TypeDefLookup for res::Module {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
+        res::Module::type_def_by_id(self, def_id)
     }
 }
 
-impl TypeDefLookup for crate::sir::model::Module {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::ast::model::TypeDef<DefId>> {
-        crate::sir::model::Module::type_def_by_id(self, def_id)
+impl TypeDefLookup for norm::Module {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
+        norm::Module::type_def_by_id(self, def_id)
+    }
+}
+
+impl TypeDefLookup for sem::Module {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
+        sem::Module::type_def_by_id(self, def_id)
     }
 }
 
 fn resolve_type_expr_impl(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &crate::ast::model::TypeExpr<DefId>,
+    type_expr: &res::TypeExpr,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        TypeExprKind::Named { def_id, .. } => {
+        res::TypeExprKind::Named { def_id, .. } => {
             resolve_named_type(def_table, module, type_expr, def_id, in_progress, depth)
         }
-        TypeExprKind::Array { elem_ty_expr, dims } => {
+        res::TypeExprKind::Array { elem_ty_expr, dims } => {
             let elem_ty =
                 resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Array {
@@ -81,32 +88,32 @@ fn resolve_type_expr_impl(
                 dims: dims.clone(),
             })
         }
-        TypeExprKind::Tuple { field_ty_exprs } => {
+        res::TypeExprKind::Tuple { field_ty_exprs } => {
             let field_tys = field_ty_exprs
                 .iter()
                 .map(|f| resolve_type_expr_impl(def_table, module, f, in_progress, depth))
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
         }
-        TypeExprKind::Range { min, max } => Ok(Type::Range {
+        res::TypeExprKind::Range { min, max } => Ok(Type::Range {
             min: *min,
             max: *max,
         }),
-        TypeExprKind::Slice { elem_ty_expr } => {
+        res::TypeExprKind::Slice { elem_ty_expr } => {
             let elem_ty =
                 resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
             })
         }
-        TypeExprKind::Heap { elem_ty_expr } => {
+        res::TypeExprKind::Heap { elem_ty_expr } => {
             let elem_ty =
                 resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
             })
         }
-        TypeExprKind::Fn {
+        res::TypeExprKind::Fn {
             params,
             ret_ty_expr,
         } => {
@@ -148,7 +155,7 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
 fn resolve_named_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &crate::ast::model::TypeExpr<DefId>,
+    type_expr: &res::TypeExpr,
     def_id: &DefId,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
@@ -167,13 +174,13 @@ fn resolve_named_type(
                 .type_def_by_id(*def_id)
                 .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
             match &type_def.kind {
-                TypeDefKind::Alias { aliased_ty } => {
+                res::TypeDefKind::Alias { aliased_ty } => {
                     resolve_type_alias(def_table, module, def, aliased_ty, in_progress)
                 }
-                TypeDefKind::Struct { fields } => {
+                res::TypeDefKind::Struct { fields } => {
                     resolve_struct_type(def_table, module, def, fields, in_progress, depth)
                 }
-                TypeDefKind::Enum { variants } => {
+                res::TypeDefKind::Enum { variants } => {
                     resolve_enum_type(def_table, module, def, variants, in_progress, depth)
                 }
             }
@@ -186,7 +193,7 @@ fn resolve_type_alias(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     def: &Def,
-    ty_expr: &crate::ast::model::TypeExpr<DefId>,
+    ty_expr: &res::TypeExpr,
     in_progress: &mut HashSet<DefId>,
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def.id) {
@@ -202,7 +209,7 @@ fn resolve_struct_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     def: &Def,
-    fields: &[StructDefField],
+    fields: &[res::StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -234,7 +241,7 @@ fn resolve_struct_type(
 fn resolve_struct_fields(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    fields: &[StructDefField],
+    fields: &[res::StructDefField],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
@@ -255,7 +262,7 @@ fn resolve_enum_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     def: &Def,
-    variants: &[EnumDefVariant],
+    variants: &[res::EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -287,7 +294,7 @@ fn resolve_enum_type(
 fn resolve_enum_variants(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    variants: &[EnumDefVariant],
+    variants: &[res::EnumDefVariant],
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {

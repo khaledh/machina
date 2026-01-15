@@ -1,9 +1,9 @@
-use crate::hir::model::{BinaryOp, NodeId, UnaryOp};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::resolve::{Def, DefId};
+use crate::tree::{BinaryOp, NodeId, UnaryOp};
 use crate::types::TypeId;
 use crate::types::{Type, TypeAssignability, type_assignable};
 

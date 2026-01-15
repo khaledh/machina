@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast;
-use crate::ast::*;
 use crate::context::{ParsedContext, ResolvedContext};
 use crate::diag::Span;
-use crate::hir::builder::HirBuilder;
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::resolve::{Def, DefId, DefIdGen, DefKind};
+use crate::tree::ParamMode;
+use crate::tree::parsed::*;
+use crate::tree::resolved::ResolvedTreeBuilder;
+use crate::tree::visit::*;
 use crate::types::BUILTIN_TYPES;
 
 pub struct SymbolResolver {
@@ -292,7 +293,7 @@ impl SymbolResolver {
         }
     }
 
-    fn check_lvalue_mutability(&mut self, expr: &ast::Expr) {
+    fn check_lvalue_mutability(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var { ident: name, .. } => {
                 match self.lookup_symbol(name) {
@@ -844,11 +845,11 @@ pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<Resolv
     let mut resolver = SymbolResolver::new();
     let (def_table, node_def_lookup) = resolver.resolve(&ast_context.module)?;
 
-    // Build HIR from AST + DefTable + NodeDefLookup
-    let hir_builder = HirBuilder::new(&def_table, &node_def_lookup);
-    let hir_module = hir_builder.build_module(ast_context.module.clone());
+    // Build resolved tree from parsed tree + DefTable + NodeDefLookup
+    let res_tree_builder = ResolvedTreeBuilder::new(&def_table, &node_def_lookup);
+    let resolved_module = res_tree_builder.build_module(ast_context.module.clone());
 
-    let resolved_context = ast_context.with_def_table(def_table, hir_module);
+    let resolved_context = ast_context.with_def_table(def_table, resolved_module);
 
     Ok(resolved_context)
 }

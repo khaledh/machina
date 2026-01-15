@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::diag::Span;
-use crate::hir::model::{BindPattern, ExprKind};
+use crate::tree::resolved::{BindPattern, ExprKind};
 use crate::types::Type;
 
 #[derive(Debug, Clone, Error)]

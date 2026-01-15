@@ -1,9 +1,9 @@
-use crate::ast::InitInfo;
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
-use crate::sir::model::{
+use crate::tree::InitInfo;
+use crate::tree::semantic::{
     CallArg, MethodReceiver, PlaceExpr, PlaceExprKind as PEK, ValueExpr, ValueExprKind as VEK,
 };
 use crate::types::Type;

@@ -1,7 +1,7 @@
-//! Generic AST model: parameterized over Def/Ty types.
+//! Generic parsed tree model: parameterized over def/type IDs.
 
-use crate::ast::NodeId;
 use crate::diag::Span;
+use crate::tree::NodeId;
 
 // -- Module ---
 
@@ -646,7 +646,7 @@ pub enum ExprKind<D, T = ()> {
         body: Box<Expr<D, T>>,
     },
 
-    // SIR-only: elaboration inserts these, parser never emits them.
+    // Semantic-tree only: elaboration inserts these, parser never emits them.
     Coerce {
         kind: CoerceKind,
         expr: Box<Expr<D, T>>,

@@ -19,7 +19,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{NodeId, ParamMode};
 use crate::context::{AnalyzedContext, LoweredMcirContext};
 use crate::lower::drop_glue::DropGlueRegistry;
 use crate::lower::errors::LowerError;
@@ -29,7 +28,8 @@ use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::{CallableRef, FuncDef, MethodDef, Param, ValueExpr};
+use crate::tree::semantic::{CallableRef, FuncDef, MethodDef, Param, ValueExpr};
+use crate::tree::{NodeId, ParamMode};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 

@@ -4,12 +4,12 @@
 //! when at least one argument is mutated (inout/out/sink mode).
 //! Read-only aliasing (`in` mode) is allowed.
 
-use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
 use crate::diag::Span;
-use crate::nir::model::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
+use crate::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
+use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::TypeId;
 
 /// An argument access: its mode, lvalue path, and source location.

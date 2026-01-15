@@ -1,35 +1,35 @@
-use crate::hir::model as hir;
-use crate::tir::model as tir;
+use crate::tree::resolved as res;
+use crate::tree::typed::model as typ;
 use crate::typeck::type_map::TypeMap;
 use crate::types::TypeId;
 
-pub fn annotate_module(module: &hir::Module, type_map: &TypeMap) -> tir::Module {
+pub fn annotate_module(module: &res::Module, type_map: &TypeMap) -> typ::Module {
     let top_level_items = module
         .top_level_items
         .iter()
         .map(|item| annotate_top_level_item(item, type_map))
         .collect();
-    tir::Module { top_level_items }
+    typ::Module { top_level_items }
 }
 
-fn annotate_top_level_item(item: &hir::TopLevelItem, type_map: &TypeMap) -> tir::TopLevelItem {
+fn annotate_top_level_item(item: &res::TopLevelItem, type_map: &TypeMap) -> typ::TopLevelItem {
     match item {
-        hir::TopLevelItem::TypeDef(type_def) => tir::TopLevelItem::TypeDef(type_def.clone()),
-        hir::TopLevelItem::FuncDecl(func_decl) => tir::TopLevelItem::FuncDecl(func_decl.clone()),
-        hir::TopLevelItem::FuncDef(func_def) => {
-            tir::TopLevelItem::FuncDef(annotate_func_def(func_def, type_map))
+        res::TopLevelItem::TypeDef(type_def) => typ::TopLevelItem::TypeDef(type_def.clone()),
+        res::TopLevelItem::FuncDecl(func_decl) => typ::TopLevelItem::FuncDecl(func_decl.clone()),
+        res::TopLevelItem::FuncDef(func_def) => {
+            typ::TopLevelItem::FuncDef(annotate_func_def(func_def, type_map))
         }
-        hir::TopLevelItem::MethodBlock(method_block) => {
-            tir::TopLevelItem::MethodBlock(annotate_method_block(method_block, type_map))
+        res::TopLevelItem::MethodBlock(method_block) => {
+            typ::TopLevelItem::MethodBlock(annotate_method_block(method_block, type_map))
         }
-        hir::TopLevelItem::ClosureDecl(closure_decl) => {
-            tir::TopLevelItem::ClosureDecl(annotate_closure_decl(closure_decl, type_map))
+        res::TopLevelItem::ClosureDecl(closure_decl) => {
+            typ::TopLevelItem::ClosureDecl(annotate_closure_decl(closure_decl, type_map))
         }
     }
 }
 
-fn annotate_func_def(func_def: &hir::FuncDef, type_map: &TypeMap) -> tir::FuncDef {
-    tir::FuncDef {
+fn annotate_func_def(func_def: &res::FuncDef, type_map: &TypeMap) -> typ::FuncDef {
+    typ::FuncDef {
         id: func_def.id,
         def_id: func_def.def_id,
         sig: func_def.sig.clone(),
@@ -38,13 +38,13 @@ fn annotate_func_def(func_def: &hir::FuncDef, type_map: &TypeMap) -> tir::FuncDe
     }
 }
 
-fn annotate_method_block(method_block: &hir::MethodBlock, type_map: &TypeMap) -> tir::MethodBlock {
-    let method_defs: Vec<tir::MethodDef> = method_block
+fn annotate_method_block(method_block: &res::MethodBlock, type_map: &TypeMap) -> typ::MethodBlock {
+    let method_defs: Vec<typ::MethodDef> = method_block
         .method_defs
         .iter()
         .map(|method_def| annotate_method_def(method_def, type_map))
         .collect();
-    tir::MethodBlock {
+    typ::MethodBlock {
         id: method_block.id,
         type_name: method_block.type_name.clone(),
         method_defs,
@@ -52,8 +52,8 @@ fn annotate_method_block(method_block: &hir::MethodBlock, type_map: &TypeMap) ->
     }
 }
 
-fn annotate_method_def(method_def: &hir::MethodDef, type_map: &TypeMap) -> tir::MethodDef {
-    tir::MethodDef {
+fn annotate_method_def(method_def: &res::MethodDef, type_map: &TypeMap) -> typ::MethodDef {
+    typ::MethodDef {
         id: method_def.id,
         def_id: method_def.def_id,
         sig: method_def.sig.clone(),
@@ -62,8 +62,8 @@ fn annotate_method_def(method_def: &hir::MethodDef, type_map: &TypeMap) -> tir::
     }
 }
 
-fn annotate_closure_decl(closure_decl: &hir::ClosureDecl, type_map: &TypeMap) -> tir::ClosureDecl {
-    tir::ClosureDecl {
+fn annotate_closure_decl(closure_decl: &res::ClosureDecl, type_map: &TypeMap) -> typ::ClosureDecl {
+    typ::ClosureDecl {
         id: closure_decl.id,
         def_id: closure_decl.def_id,
         sig: closure_decl.sig.clone(),
@@ -72,67 +72,67 @@ fn annotate_closure_decl(closure_decl: &hir::ClosureDecl, type_map: &TypeMap) ->
     }
 }
 
-fn annotate_block_item(item: &hir::BlockItem, type_map: &TypeMap) -> tir::BlockItem {
+fn annotate_block_item(item: &res::BlockItem, type_map: &TypeMap) -> typ::BlockItem {
     match item {
-        hir::BlockItem::Stmt(stmt) => tir::BlockItem::Stmt(annotate_stmt_expr(stmt, type_map)),
-        hir::BlockItem::Expr(expr) => tir::BlockItem::Expr(annotate_expr(expr, type_map)),
+        res::BlockItem::Stmt(stmt) => typ::BlockItem::Stmt(annotate_stmt_expr(stmt, type_map)),
+        res::BlockItem::Expr(expr) => typ::BlockItem::Expr(annotate_expr(expr, type_map)),
     }
 }
 
-fn annotate_stmt_expr(stmt: &hir::StmtExpr, type_map: &TypeMap) -> tir::StmtExpr {
+fn annotate_stmt_expr(stmt: &res::StmtExpr, type_map: &TypeMap) -> typ::StmtExpr {
     let kind = match &stmt.kind {
-        hir::StmtExprKind::LetBind {
+        res::StmtExprKind::LetBind {
             pattern,
             decl_ty,
             value,
-        } => tir::StmtExprKind::LetBind {
+        } => typ::StmtExprKind::LetBind {
             pattern: pattern.clone(),
             decl_ty: decl_ty.clone(),
             value: Box::new(annotate_expr(value, type_map)),
         },
-        hir::StmtExprKind::VarBind {
+        res::StmtExprKind::VarBind {
             pattern,
             decl_ty,
             value,
-        } => tir::StmtExprKind::VarBind {
+        } => typ::StmtExprKind::VarBind {
             pattern: pattern.clone(),
             decl_ty: decl_ty.clone(),
             value: Box::new(annotate_expr(value, type_map)),
         },
-        hir::StmtExprKind::VarDecl {
+        res::StmtExprKind::VarDecl {
             ident,
             def_id,
             decl_ty,
-        } => tir::StmtExprKind::VarDecl {
+        } => typ::StmtExprKind::VarDecl {
             ident: ident.clone(),
             def_id: *def_id,
             decl_ty: decl_ty.clone(),
         },
-        hir::StmtExprKind::Assign {
+        res::StmtExprKind::Assign {
             assignee,
             value,
             init,
-        } => tir::StmtExprKind::Assign {
+        } => typ::StmtExprKind::Assign {
             assignee: Box::new(annotate_expr(assignee, type_map)),
             value: Box::new(annotate_expr(value, type_map)),
             init: *init,
         },
-        hir::StmtExprKind::While { cond, body } => tir::StmtExprKind::While {
+        res::StmtExprKind::While { cond, body } => typ::StmtExprKind::While {
             cond: Box::new(annotate_expr(cond, type_map)),
             body: Box::new(annotate_expr(body, type_map)),
         },
-        hir::StmtExprKind::For {
+        res::StmtExprKind::For {
             pattern,
             iter,
             body,
-        } => tir::StmtExprKind::For {
+        } => typ::StmtExprKind::For {
             pattern: pattern.clone(),
             iter: Box::new(annotate_expr(iter, type_map)),
             body: Box::new(annotate_expr(body, type_map)),
         },
     };
 
-    tir::StmtExpr {
+    typ::StmtExpr {
         id: stmt.id,
         kind,
         ty: node_type_id(type_map, stmt.id),
@@ -140,9 +140,9 @@ fn annotate_stmt_expr(stmt: &hir::StmtExpr, type_map: &TypeMap) -> tir::StmtExpr
     }
 }
 
-fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
+fn annotate_expr(expr: &res::Expr, type_map: &TypeMap) -> typ::Expr {
     let kind = match &expr.kind {
-        hir::ExprKind::Block { items, tail } => tir::ExprKind::Block {
+        res::ExprKind::Block { items, tail } => typ::ExprKind::Block {
             items: items
                 .iter()
                 .map(|item| annotate_block_item(item, type_map))
@@ -151,38 +151,38 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
                 .as_ref()
                 .map(|expr| Box::new(annotate_expr(expr, type_map))),
         },
-        hir::ExprKind::UnitLit => tir::ExprKind::UnitLit,
-        hir::ExprKind::IntLit(value) => tir::ExprKind::IntLit(*value),
-        hir::ExprKind::BoolLit(value) => tir::ExprKind::BoolLit(*value),
-        hir::ExprKind::CharLit(value) => tir::ExprKind::CharLit(*value),
-        hir::ExprKind::StringLit { value } => tir::ExprKind::StringLit {
+        res::ExprKind::UnitLit => typ::ExprKind::UnitLit,
+        res::ExprKind::IntLit(value) => typ::ExprKind::IntLit(*value),
+        res::ExprKind::BoolLit(value) => typ::ExprKind::BoolLit(*value),
+        res::ExprKind::CharLit(value) => typ::ExprKind::CharLit(*value),
+        res::ExprKind::StringLit { value } => typ::ExprKind::StringLit {
             value: value.clone(),
         },
-        hir::ExprKind::StringFmt { segments } => tir::ExprKind::StringFmt {
+        res::ExprKind::StringFmt { segments } => typ::ExprKind::StringFmt {
             segments: segments
                 .iter()
                 .map(|segment| annotate_string_segment(segment, type_map))
                 .collect(),
         },
-        hir::ExprKind::ArrayLit { elem_ty, init } => tir::ExprKind::ArrayLit {
+        res::ExprKind::ArrayLit { elem_ty, init } => typ::ExprKind::ArrayLit {
             elem_ty: elem_ty.clone(),
             init: annotate_array_lit_init(init, type_map),
         },
-        hir::ExprKind::TupleLit(items) => {
-            tir::ExprKind::TupleLit(items.iter().map(|e| annotate_expr(e, type_map)).collect())
+        res::ExprKind::TupleLit(items) => {
+            typ::ExprKind::TupleLit(items.iter().map(|e| annotate_expr(e, type_map)).collect())
         }
-        hir::ExprKind::StructLit { name, fields } => tir::ExprKind::StructLit {
+        res::ExprKind::StructLit { name, fields } => typ::ExprKind::StructLit {
             name: name.clone(),
             fields: fields
                 .iter()
                 .map(|field| annotate_struct_lit_field(field, type_map))
                 .collect(),
         },
-        hir::ExprKind::EnumVariant {
+        res::ExprKind::EnumVariant {
             enum_name,
             variant,
             payload,
-        } => tir::ExprKind::EnumVariant {
+        } => typ::ExprKind::EnumVariant {
             enum_name: enum_name.clone(),
             variant: variant.clone(),
             payload: payload
@@ -190,68 +190,68 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
                 .map(|expr| annotate_expr(expr, type_map))
                 .collect(),
         },
-        hir::ExprKind::StructUpdate { target, fields } => tir::ExprKind::StructUpdate {
+        res::ExprKind::StructUpdate { target, fields } => typ::ExprKind::StructUpdate {
             target: Box::new(annotate_expr(target, type_map)),
             fields: fields
                 .iter()
                 .map(|field| annotate_struct_update_field(field, type_map))
                 .collect(),
         },
-        hir::ExprKind::BinOp { left, op, right } => tir::ExprKind::BinOp {
+        res::ExprKind::BinOp { left, op, right } => typ::ExprKind::BinOp {
             left: Box::new(annotate_expr(left, type_map)),
             op: *op,
             right: Box::new(annotate_expr(right, type_map)),
         },
-        hir::ExprKind::UnaryOp { op, expr } => tir::ExprKind::UnaryOp {
+        res::ExprKind::UnaryOp { op, expr } => typ::ExprKind::UnaryOp {
             op: *op,
             expr: Box::new(annotate_expr(expr, type_map)),
         },
-        hir::ExprKind::HeapAlloc { expr } => tir::ExprKind::HeapAlloc {
+        res::ExprKind::HeapAlloc { expr } => typ::ExprKind::HeapAlloc {
             expr: Box::new(annotate_expr(expr, type_map)),
         },
-        hir::ExprKind::Move { expr } => tir::ExprKind::Move {
+        res::ExprKind::Move { expr } => typ::ExprKind::Move {
             expr: Box::new(annotate_expr(expr, type_map)),
         },
-        hir::ExprKind::Coerce { kind, expr } => tir::ExprKind::Coerce {
+        res::ExprKind::Coerce { kind, expr } => typ::ExprKind::Coerce {
             kind: *kind,
             expr: Box::new(annotate_expr(expr, type_map)),
         },
-        hir::ExprKind::ImplicitMove { expr } => tir::ExprKind::ImplicitMove {
+        res::ExprKind::ImplicitMove { expr } => typ::ExprKind::ImplicitMove {
             expr: Box::new(annotate_expr(expr, type_map)),
         },
-        hir::ExprKind::Var { ident, def_id } => tir::ExprKind::Var {
+        res::ExprKind::Var { ident, def_id } => typ::ExprKind::Var {
             ident: ident.clone(),
             def_id: *def_id,
         },
-        hir::ExprKind::ArrayIndex { target, indices } => tir::ExprKind::ArrayIndex {
+        res::ExprKind::ArrayIndex { target, indices } => typ::ExprKind::ArrayIndex {
             target: Box::new(annotate_expr(target, type_map)),
             indices: indices
                 .iter()
                 .map(|expr| annotate_expr(expr, type_map))
                 .collect(),
         },
-        hir::ExprKind::TupleField { target, index } => tir::ExprKind::TupleField {
+        res::ExprKind::TupleField { target, index } => typ::ExprKind::TupleField {
             target: Box::new(annotate_expr(target, type_map)),
             index: *index,
         },
-        hir::ExprKind::StructField { target, field } => tir::ExprKind::StructField {
+        res::ExprKind::StructField { target, field } => typ::ExprKind::StructField {
             target: Box::new(annotate_expr(target, type_map)),
             field: field.clone(),
         },
-        hir::ExprKind::If {
+        res::ExprKind::If {
             cond,
             then_body,
             else_body,
-        } => tir::ExprKind::If {
+        } => typ::ExprKind::If {
             cond: Box::new(annotate_expr(cond, type_map)),
             then_body: Box::new(annotate_expr(then_body, type_map)),
             else_body: Box::new(annotate_expr(else_body, type_map)),
         },
-        hir::ExprKind::Range { start, end } => tir::ExprKind::Range {
+        res::ExprKind::Range { start, end } => typ::ExprKind::Range {
             start: *start,
             end: *end,
         },
-        hir::ExprKind::Slice { target, start, end } => tir::ExprKind::Slice {
+        res::ExprKind::Slice { target, start, end } => typ::ExprKind::Slice {
             target: Box::new(annotate_expr(target, type_map)),
             start: start
                 .as_ref()
@@ -260,25 +260,25 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
                 .as_ref()
                 .map(|expr| Box::new(annotate_expr(expr, type_map))),
         },
-        hir::ExprKind::Match { scrutinee, arms } => tir::ExprKind::Match {
+        res::ExprKind::Match { scrutinee, arms } => typ::ExprKind::Match {
             scrutinee: Box::new(annotate_expr(scrutinee, type_map)),
             arms: arms
                 .iter()
                 .map(|arm| annotate_match_arm(arm, type_map))
                 .collect(),
         },
-        hir::ExprKind::Call { callee, args } => tir::ExprKind::Call {
+        res::ExprKind::Call { callee, args } => typ::ExprKind::Call {
             callee: Box::new(annotate_expr(callee, type_map)),
             args: args
                 .iter()
                 .map(|arg| annotate_call_arg(arg, type_map))
                 .collect(),
         },
-        hir::ExprKind::MethodCall {
+        res::ExprKind::MethodCall {
             callee,
             method_name,
             args,
-        } => tir::ExprKind::MethodCall {
+        } => typ::ExprKind::MethodCall {
             callee: Box::new(annotate_expr(callee, type_map)),
             method_name: method_name.clone(),
             args: args
@@ -286,13 +286,13 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
                 .map(|arg| annotate_call_arg(arg, type_map))
                 .collect(),
         },
-        hir::ExprKind::Closure {
+        res::ExprKind::Closure {
             ident,
             def_id,
             params,
             return_ty,
             body,
-        } => tir::ExprKind::Closure {
+        } => typ::ExprKind::Closure {
             ident: ident.clone(),
             def_id: *def_id,
             params: params.clone(),
@@ -301,7 +301,7 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
         },
     };
 
-    tir::Expr {
+    typ::Expr {
         id: expr.id,
         kind,
         ty: node_type_id(type_map, expr.id),
@@ -309,8 +309,8 @@ fn annotate_expr(expr: &hir::Expr, type_map: &TypeMap) -> tir::Expr {
     }
 }
 
-fn annotate_match_arm(arm: &hir::MatchArm, type_map: &TypeMap) -> tir::MatchArm {
-    tir::MatchArm {
+fn annotate_match_arm(arm: &res::MatchArm, type_map: &TypeMap) -> typ::MatchArm {
+    typ::MatchArm {
         id: arm.id,
         pattern: arm.pattern.clone(),
         body: annotate_expr(&arm.body, type_map),
@@ -318,8 +318,8 @@ fn annotate_match_arm(arm: &hir::MatchArm, type_map: &TypeMap) -> tir::MatchArm 
     }
 }
 
-fn annotate_call_arg(arg: &hir::CallArg, type_map: &TypeMap) -> tir::CallArg {
-    tir::CallArg {
+fn annotate_call_arg(arg: &res::CallArg, type_map: &TypeMap) -> typ::CallArg {
+    typ::CallArg {
         mode: arg.mode,
         expr: annotate_expr(&arg.expr, type_map),
         init: arg.init,
@@ -327,25 +327,25 @@ fn annotate_call_arg(arg: &hir::CallArg, type_map: &TypeMap) -> tir::CallArg {
     }
 }
 
-fn annotate_array_lit_init(init: &hir::ArrayLitInit, type_map: &TypeMap) -> tir::ArrayLitInit {
+fn annotate_array_lit_init(init: &res::ArrayLitInit, type_map: &TypeMap) -> typ::ArrayLitInit {
     match init {
-        hir::ArrayLitInit::Elems(elems) => tir::ArrayLitInit::Elems(
+        res::ArrayLitInit::Elems(elems) => typ::ArrayLitInit::Elems(
             elems
                 .iter()
                 .map(|expr| annotate_expr(expr, type_map))
                 .collect(),
         ),
-        hir::ArrayLitInit::Repeat(expr, count) => {
-            tir::ArrayLitInit::Repeat(Box::new(annotate_expr(expr, type_map)), *count)
+        res::ArrayLitInit::Repeat(expr, count) => {
+            typ::ArrayLitInit::Repeat(Box::new(annotate_expr(expr, type_map)), *count)
         }
     }
 }
 
 fn annotate_struct_lit_field(
-    field: &hir::StructLitField,
+    field: &res::StructLitField,
     type_map: &TypeMap,
-) -> tir::StructLitField {
-    tir::StructLitField {
+) -> typ::StructLitField {
+    typ::StructLitField {
         id: field.id,
         name: field.name.clone(),
         value: annotate_expr(&field.value, type_map),
@@ -354,10 +354,10 @@ fn annotate_struct_lit_field(
 }
 
 fn annotate_struct_update_field(
-    field: &hir::StructUpdateField,
+    field: &res::StructUpdateField,
     type_map: &TypeMap,
-) -> tir::StructUpdateField {
-    tir::StructUpdateField {
+) -> typ::StructUpdateField {
+    typ::StructUpdateField {
         id: field.id,
         name: field.name.clone(),
         value: annotate_expr(&field.value, type_map),
@@ -366,22 +366,22 @@ fn annotate_struct_update_field(
 }
 
 fn annotate_string_segment(
-    segment: &hir::StringFmtSegment,
+    segment: &res::StringFmtSegment,
     type_map: &TypeMap,
-) -> tir::StringFmtSegment {
+) -> typ::StringFmtSegment {
     match segment {
-        hir::StringFmtSegment::Literal { value, span } => tir::StringFmtSegment::Literal {
+        res::StringFmtSegment::Literal { value, span } => typ::StringFmtSegment::Literal {
             value: value.clone(),
             span: *span,
         },
-        hir::StringFmtSegment::Expr { expr, span } => tir::StringFmtSegment::Expr {
+        res::StringFmtSegment::Expr { expr, span } => typ::StringFmtSegment::Expr {
             expr: Box::new(annotate_expr(expr, type_map)),
             span: *span,
         },
     }
 }
 
-fn node_type_id(type_map: &TypeMap, id: crate::ast::NodeId) -> TypeId {
+fn node_type_id(type_map: &TypeMap, id: crate::tree::NodeId) -> TypeId {
     type_map
         .lookup_node_type_id(id)
         .expect("missing type id for node")

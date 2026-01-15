@@ -1,6 +1,6 @@
-use crate::ast::model::*;
+use crate::tree::*;
 
-/// AST/HIR folder with default traversal helpers.
+/// Tree folder with default traversal helpers.
 ///
 /// Implement the methods you care about (e.g. `visit_expr`) and call the
 /// corresponding `walk_*` function to recurse into children.

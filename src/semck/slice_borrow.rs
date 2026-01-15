@@ -12,15 +12,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{solve_backward, solve_forward};
-use crate::ast::cfg::{AstBlockId, HirCfg, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
-use crate::nir::model::{
+use crate::resolve::DefId;
+use crate::semck::SemCheckError;
+use crate::tree::cfg::{
+    AstBlockId, TreeCfg, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
+};
+use crate::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
     StmtExprKind,
 };
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
+use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
@@ -40,7 +42,7 @@ pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
 /// Then walk each block, checking for conflicts where a borrowed base is
 /// mutated/moved while a slice borrowing it is still live.
 fn check_func_def(ctx: &NormalizedContext, func_def: &FuncDef, errors: &mut Vec<SemCheckError>) {
-    let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
+    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
     let liveness = analyze_slice_liveness(&cfg, ctx);
     let bindings = analyze_slice_bindings(&cfg, ctx);
 
@@ -63,7 +65,7 @@ fn check_func_def(ctx: &NormalizedContext, func_def: &FuncDef, errors: &mut Vec<
             apply_item_bindings(&mut state, item, ctx);
         }
 
-        if let HirTerminator::If { cond, .. } = &node.term {
+        if let TreeCfgTerminator::If { cond, .. } = &node.term {
             let mut active_slices = liveness.live_out[block_idx].clone();
             collect_expr_slice_uses(cond, ctx, &mut active_slices);
 
@@ -93,12 +95,12 @@ fn borrowed_bases_for_active(
 
 fn check_item_for_conflicts(
     ctx: &NormalizedContext,
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     borrowed_bases: &HashSet<DefId>,
     errors: &mut Vec<SemCheckError>,
 ) {
     match item {
-        HirItem::Stmt(stmt) => match &stmt.kind {
+        TreeCfgItem::Stmt(stmt) => match &stmt.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
                 visitor.visit_expr(value);
@@ -122,7 +124,7 @@ fn check_item_for_conflicts(
                 visitor.visit_expr(body);
             }
         },
-        HirItem::Expr(expr) => {
+        TreeCfgItem::Expr(expr) => {
             let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
             visitor.visit_expr(expr);
         }
@@ -156,7 +158,7 @@ struct SliceBindingAnalysis {
 
 /// Forward dataflow: track slice -> base bindings through the CFG.
 fn analyze_slice_bindings(
-    cfg: &HirCfg<'_, TypeId>,
+    cfg: &TreeCfg<'_, TypeId>,
     ctx: &NormalizedContext,
 ) -> SliceBindingAnalysis {
     let entry_state = HashMap::new();
@@ -191,7 +193,7 @@ fn merge_slice_bindings(states: &[SliceBindings]) -> SliceBindings {
 }
 
 fn apply_block_bindings(
-    node: &HirCfgNode<'_, TypeId>,
+    node: &TreeCfgNode<'_, TypeId>,
     in_state: &SliceBindings,
     ctx: &NormalizedContext,
 ) -> SliceBindings {
@@ -204,10 +206,10 @@ fn apply_block_bindings(
 
 fn apply_item_bindings(
     state: &mut SliceBindings,
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
 ) {
-    let HirItem::Stmt(stmt) = item else {
+    let TreeCfgItem::Stmt(stmt) = item else {
         return;
     };
 
@@ -328,7 +330,7 @@ struct SliceLiveness {
 }
 
 /// Backward dataflow: compute which slice locals are live at each point.
-fn analyze_slice_liveness(cfg: &HirCfg<'_, TypeId>, ctx: &NormalizedContext) -> SliceLiveness {
+fn analyze_slice_liveness(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> SliceLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -362,7 +364,7 @@ fn analyze_slice_liveness(cfg: &HirCfg<'_, TypeId>, ctx: &NormalizedContext) -> 
 
 fn compute_live_in(
     ctx: &NormalizedContext,
-    node: &HirCfgNode<'_, TypeId>,
+    node: &TreeCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
     let mut live = live_out.clone();
@@ -376,7 +378,7 @@ fn compute_live_in(
 /// Compute live-after for each item in a block.
 fn compute_live_after(
     ctx: &NormalizedContext,
-    node: &HirCfgNode<'_, TypeId>,
+    node: &TreeCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
     let mut live = live_out.clone();
@@ -391,7 +393,7 @@ fn compute_live_after(
 
 /// Liveness transfer: remove defs, add uses.
 fn apply_item_defs_uses(
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
     live: &mut HashSet<DefId>,
 ) {
@@ -408,25 +410,25 @@ fn apply_item_defs_uses(
 
 /// Add slice uses from the block terminator (if condition).
 fn add_terminator_uses(
-    term: &HirTerminator<'_, TypeId>,
+    term: &TreeCfgTerminator<'_, TypeId>,
     ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
-    if let HirTerminator::If { cond, .. } = term {
+    if let TreeCfgTerminator::If { cond, .. } = term {
         collect_expr_slice_uses(cond, ctx, uses);
     }
 }
 
 /// Collect defs and uses of slice locals from an item.
 fn collect_item_defs_uses(
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        HirItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
-        HirItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
+        TreeCfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
+        TreeCfgItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
     }
 }
 
@@ -489,13 +491,13 @@ fn add_def_if_slice(def_id: DefId, ctx: &NormalizedContext, defs: &mut HashSet<D
 
 /// Collect slice local uses from an item.
 fn collect_item_slice_uses(
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        HirItem::Stmt(stmt) => collect_stmt_slice_uses(stmt, ctx, uses),
-        HirItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
+        TreeCfgItem::Stmt(stmt) => collect_stmt_slice_uses(stmt, ctx, uses),
+        TreeCfgItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
     }
 }
 

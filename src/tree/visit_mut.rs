@@ -1,124 +1,111 @@
-use crate::ast::model::*;
+use crate::tree::*;
 
-/// AST/HIR visitor with default traversal helpers.
+/// Tree mutable visitor with default traversal helpers.
 ///
 /// Implement the methods you care about (e.g. `visit_expr`) and call the
 /// corresponding `walk_*` function to recurse into children.
-/// Example:
-/// ```rust
-/// use machina::ast::visit::{walk_expr, Expr, Visitor};
-///
-/// struct MyVisitor;
-/// impl Visitor for MyVisitor {
-///     fn visit_expr(&mut self, expr: &Expr) {
-///         // pre-visit logic here
-///         walk_expr(self, expr);
-///         // post-visit logic here
-///     }
-/// }
-/// ```
-pub trait Visitor<D = String, T = ()> {
+pub trait VisitorMut<D = String, T = ()> {
     // --- Module ---
 
-    fn visit_module(&mut self, module: &Module<D, T>) {
+    fn visit_module(&mut self, module: &mut Module<D, T>) {
         walk_module(self, module)
     }
 
     // --- Type Definitions ---
 
-    fn visit_type_def(&mut self, type_def: &TypeDef<D>) {
+    fn visit_type_def(&mut self, type_def: &mut TypeDef<D>) {
         walk_type_def(self, type_def)
     }
 
-    fn visit_struct_def_fields(&mut self, fields: &[StructDefField<D>]) {
+    fn visit_struct_def_fields(&mut self, fields: &mut [StructDefField<D>]) {
         walk_struct_def_fields(self, fields)
     }
 
-    fn visit_struct_def_field(&mut self, field: &StructDefField<D>) {
+    fn visit_struct_def_field(&mut self, field: &mut StructDefField<D>) {
         walk_struct_def_field(self, field)
     }
 
-    fn visit_enum_def_variants(&mut self, variants: &[EnumDefVariant<D>]) {
+    fn visit_enum_def_variants(&mut self, variants: &mut [EnumDefVariant<D>]) {
         walk_enum_def_variants(self, variants)
     }
 
-    fn visit_enum_def_variant(&mut self, variant: &EnumDefVariant<D>) {
+    fn visit_enum_def_variant(&mut self, variant: &mut EnumDefVariant<D>) {
         walk_enum_def_variant(self, variant)
     }
 
     // --- Type Expressions ---
 
-    fn visit_type_expr(&mut self, type_expr: &TypeExpr<D>) {
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr<D>) {
         walk_type_expr(self, type_expr)
     }
 
     // --- Function Declarations ---
 
-    fn visit_func_decl(&mut self, func_decl: &FuncDecl<D>) {
+    fn visit_func_decl(&mut self, func_decl: &mut FuncDecl<D>) {
         walk_func_decl(self, func_decl)
     }
 
     // --- Functions ---
 
-    fn visit_func_def(&mut self, func_def: &FuncDef<D, T>) {
+    fn visit_func_def(&mut self, func_def: &mut FuncDef<D, T>) {
         walk_func_def(self, func_def)
     }
 
     // --- Function Signatures ---
 
-    fn visit_func_sig(&mut self, func_sig: &FunctionSig<D>) {
+    fn visit_func_sig(&mut self, func_sig: &mut FunctionSig<D>) {
         walk_func_sig(self, func_sig)
     }
 
     // --- Method Signatures ---
 
-    fn visit_method_sig(&mut self, method_sig: &MethodSig<D>) {
+    fn visit_method_sig(&mut self, method_sig: &mut MethodSig<D>) {
         walk_method_sig(self, method_sig)
     }
 
     // --- Parameters (common) ---
 
-    fn visit_param(&mut self, param: &Param<D>) {
+    fn visit_param(&mut self, param: &mut Param<D>) {
         walk_param(self, param)
     }
 
     // --- Method Blocks ---
 
-    fn visit_method_block(&mut self, method_block: &MethodBlock<D, T>) {
+    fn visit_method_block(&mut self, method_block: &mut MethodBlock<D, T>) {
         walk_method_block(self, method_block)
     }
 
-    fn visit_method_def(&mut self, method_def: &MethodDef<D, T>) {
+    fn visit_method_def(&mut self, method_def: &mut MethodDef<D, T>) {
         walk_method_def(self, method_def)
     }
 
     // --- Closure Declarations ---
 
-    fn visit_closure_decl(&mut self, closure_decl: &ClosureDecl<D, T>) {
+    fn visit_closure_decl(&mut self, closure_decl: &mut ClosureDecl<D, T>) {
         walk_closure_decl(self, closure_decl)
     }
 
     // --- Blocks ---
 
-    fn visit_block_item(&mut self, item: &BlockItem<D, T>) {
+    fn visit_block_item(&mut self, item: &mut BlockItem<D, T>) {
         walk_block_item(self, item)
     }
 
     // --- Expressions ---
 
-    fn visit_stmt_expr(&mut self, stmt: &StmtExpr<D, T>) {
+    fn visit_stmt_expr(&mut self, stmt: &mut StmtExpr<D, T>) {
         walk_stmt_expr(self, stmt)
     }
 
-    fn visit_expr(&mut self, expr: &Expr<D, T>) {
+    fn visit_expr(&mut self, expr: &mut Expr<D, T>) {
         walk_expr(self, expr)
     }
 }
 
 // --- Module ---
 
-pub fn walk_module<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, module: &Module<D, T>) {
-    for item in &module.top_level_items {
+pub fn walk_module<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, module: &mut Module<D, T>) {
+    for item in &mut module.top_level_items {
         match item {
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
@@ -131,52 +118,52 @@ pub fn walk_module<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, module: &Module<D
 
 // --- Type Definitions ---
 
-pub fn walk_type_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_def: &TypeDef<D>) {
-    match &type_def.kind {
+pub fn walk_type_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_def: &mut TypeDef<D>) {
+    match &mut type_def.kind {
         TypeDefKind::Alias { aliased_ty } => v.visit_type_expr(aliased_ty),
         TypeDefKind::Struct { fields } => v.visit_struct_def_fields(fields),
         TypeDefKind::Enum { variants } => v.visit_enum_def_variants(variants),
     }
 }
 
-pub fn walk_struct_def_fields<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_struct_def_fields<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
-    fields: &[StructDefField<D>],
+    fields: &mut [StructDefField<D>],
 ) {
     for field in fields {
         v.visit_struct_def_field(field);
     }
 }
 
-pub fn walk_struct_def_field<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_struct_def_field<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
-    field: &StructDefField<D>,
+    field: &mut StructDefField<D>,
 ) {
-    v.visit_type_expr(&field.ty);
+    v.visit_type_expr(&mut field.ty);
 }
 
-pub fn walk_enum_def_variants<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_enum_def_variants<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
-    variants: &[EnumDefVariant<D>],
+    variants: &mut [EnumDefVariant<D>],
 ) {
     for variant in variants {
         v.visit_enum_def_variant(variant);
     }
 }
 
-pub fn walk_enum_def_variant<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_enum_def_variant<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
-    variant: &EnumDefVariant<D>,
+    variant: &mut EnumDefVariant<D>,
 ) {
-    for payload in &variant.payload {
+    for payload in &mut variant.payload {
         v.visit_type_expr(payload);
     }
 }
 
 // --- Type Expressions ---
 
-pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &TypeExpr<D>) {
-    match &type_expr.kind {
+pub fn walk_type_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &mut TypeExpr<D>) {
+    match &mut type_expr.kind {
         TypeExprKind::Named { .. } => {}
         TypeExprKind::Array { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Tuple { field_ty_exprs } => {
@@ -192,7 +179,7 @@ pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &Ty
             ret_ty_expr,
         } => {
             for param in params {
-                v.visit_type_expr(&param.ty_expr);
+                v.visit_type_expr(&mut param.ty_expr);
             }
             v.visit_type_expr(ret_ty_expr);
         }
@@ -201,67 +188,73 @@ pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &Ty
 
 // --- Function Declarations ---
 
-pub fn walk_func_decl<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, func_decl: &FuncDecl<D>) {
-    v.visit_func_sig(&func_decl.sig);
+pub fn walk_func_decl<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, func_decl: &mut FuncDecl<D>) {
+    v.visit_func_sig(&mut func_decl.sig);
 }
 
 // --- Functions ---
 
-pub fn walk_func_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, func_def: &FuncDef<D, T>) {
-    v.visit_func_sig(&func_def.sig);
-    v.visit_expr(&func_def.body);
+pub fn walk_func_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, func_def: &mut FuncDef<D, T>) {
+    v.visit_func_sig(&mut func_def.sig);
+    v.visit_expr(&mut func_def.body);
 }
 
 // --- Function Signatures ---
 
-pub fn walk_func_sig<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, func_sig: &FunctionSig<D>) {
-    for param in &func_sig.params {
+pub fn walk_func_sig<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, func_sig: &mut FunctionSig<D>) {
+    for param in &mut func_sig.params {
         v.visit_param(param);
     }
 }
 
 // --- Method Signatures ---
 
-pub fn walk_method_sig<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, method_sig: &MethodSig<D>) {
-    for param in &method_sig.params {
+pub fn walk_method_sig<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    method_sig: &mut MethodSig<D>,
+) {
+    for param in &mut method_sig.params {
         v.visit_param(param);
     }
 }
 
 // --- Parameters (common) ---
 
-pub fn walk_param<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, param: &Param<D>) {
-    v.visit_type_expr(&param.typ);
+pub fn walk_param<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, param: &mut Param<D>) {
+    v.visit_type_expr(&mut param.typ);
 }
 
 // --- Method Blocks ---
 
-pub fn walk_method_block<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_method_block<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
-    method_block: &MethodBlock<D, T>,
+    method_block: &mut MethodBlock<D, T>,
 ) {
-    for method in &method_block.method_defs {
+    for method in &mut method_block.method_defs {
         v.visit_method_def(method);
     }
 }
 
-pub fn walk_method_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, method_def: &MethodDef<D, T>) {
-    v.visit_method_sig(&method_def.sig);
-    v.visit_expr(&method_def.body);
+pub fn walk_method_def<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    method_def: &mut MethodDef<D, T>,
+) {
+    v.visit_method_sig(&mut method_def.sig);
+    v.visit_expr(&mut method_def.body);
 }
 
 // --- Closure Declarations ---
 
-pub fn walk_closure_decl<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_closure_decl<V: VisitorMut<D, T> + ?Sized, D, T>(
     _v: &mut V,
-    _closure_decl: &ClosureDecl<D, T>,
+    _closure_decl: &mut ClosureDecl<D, T>,
 ) {
     // Closures are also visited at their expression sites; avoid walking the lifted body twice.
 }
 
 // --- Blocks ---
 
-pub fn walk_block_item<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, item: &BlockItem<D, T>) {
+pub fn walk_block_item<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, item: &mut BlockItem<D, T>) {
     match item {
         BlockItem::Stmt(stmt) => v.visit_stmt_expr(stmt),
         BlockItem::Expr(expr) => v.visit_expr(expr),
@@ -270,8 +263,8 @@ pub fn walk_block_item<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, item: &BlockI
 
 // --- Expressions ---
 
-pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExpr<D, T>) {
-    match &stmt.kind {
+pub fn walk_stmt_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, stmt: &mut StmtExpr<D, T>) {
+    match &mut stmt.kind {
         StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             v.visit_expr(value);
         }
@@ -293,8 +286,8 @@ pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExp
     }
 }
 
-pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) {
-    match &expr.kind {
+pub fn walk_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, expr: &mut Expr<D, T>) {
+    match &mut expr.kind {
         ExprKind::Block { items, tail } => {
             for item in items {
                 v.visit_block_item(item);
@@ -339,7 +332,7 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
 
         ExprKind::StructLit { fields, .. } => {
             for field in fields {
-                v.visit_expr(&field.value);
+                v.visit_expr(&mut field.value);
             }
         }
 
@@ -352,7 +345,7 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         ExprKind::StructUpdate { target, fields } => {
             v.visit_expr(target);
             for field in fields {
-                v.visit_expr(&field.value);
+                v.visit_expr(&mut field.value);
             }
         }
 
@@ -391,7 +384,7 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         ExprKind::MethodCall { callee, args, .. } => {
             v.visit_expr(callee);
             for arg in args {
-                v.visit_expr(&arg.expr);
+                v.visit_expr(&mut arg.expr);
             }
         }
 
@@ -431,14 +424,14 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         ExprKind::Match { scrutinee, arms } => {
             v.visit_expr(scrutinee);
             for arm in arms {
-                v.visit_expr(&arm.body);
+                v.visit_expr(&mut arm.body);
             }
         }
 
         ExprKind::Call { callee, args } => {
             v.visit_expr(callee);
             for arg in args {
-                v.visit_expr(&arg.expr);
+                v.visit_expr(&mut arg.expr);
             }
         }
 

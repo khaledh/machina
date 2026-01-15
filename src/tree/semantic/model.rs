@@ -1,21 +1,21 @@
-//! Semantic IR (SIR): place/value split tree used after semantic checks.
+//! Semantic tree: place/value split tree used after semantic checks.
 
-use crate::ast::model as ast_model;
-use crate::ast::{BinaryOp, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
 use crate::diag::Span;
 use crate::resolve::DefId;
+use crate::tree as ast_model;
+use crate::tree::{BinaryOp, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
 use crate::types::TypeId;
 
-// -- SIR type aliases (reused AST fragments) ---
+// -- Semantic tree type aliases (reused parsed fragments) ---
+
+pub type TypeExpr = ast_model::TypeExpr<DefId>;
+pub type TypeExprKind = ast_model::TypeExprKind<DefId>;
+pub type FnTypeParam = ast_model::FnTypeParam<DefId>;
 
 pub type TypeDef = ast_model::TypeDef<DefId>;
 pub type TypeDefKind = ast_model::TypeDefKind<DefId>;
 pub type StructDefField = ast_model::StructDefField<DefId>;
 pub type EnumDefVariant = ast_model::EnumDefVariant<DefId>;
-
-pub type TypeExpr = ast_model::TypeExpr<DefId>;
-pub type TypeExprKind = ast_model::TypeExprKind<DefId>;
-pub type FnTypeParam = ast_model::FnTypeParam<DefId>;
 
 pub type FunctionSig = ast_model::FunctionSig<DefId>;
 pub type MethodSig = ast_model::MethodSig<DefId>;

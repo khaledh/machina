@@ -4,7 +4,7 @@ use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::FuncLowerer;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::{PlaceExpr, PlaceExprKind as PEK};
+use crate::tree::semantic::{PlaceExpr, PlaceExprKind as PEK};
 use crate::types::Type;
 
 #[derive(Debug, Clone)]

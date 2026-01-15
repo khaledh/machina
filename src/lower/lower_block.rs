@@ -1,11 +1,11 @@
-use crate::ast::{InitInfo, NodeId};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::sir::model::{
+use crate::tree::semantic::{
     BlockItem, PlaceExpr, PlaceExprKind as PEK, StmtExpr, StmtExprKind as SEK, ValueExpr,
 };
+use crate::tree::{InitInfo, NodeId};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {

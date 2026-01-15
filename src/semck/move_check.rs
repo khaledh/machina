@@ -10,16 +10,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
-use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
-use crate::nir::model::{
-    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
-    StmtExprKind,
-};
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
+use crate::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
+use crate::tree::normalized::{
+    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
+    StmtExprKind,
+};
+use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::TypeId;
 
 pub struct MoveCheckResult {
@@ -47,7 +47,7 @@ fn check_func_def(
     errors: &mut Vec<SemCheckError>,
     implicit_moves: &mut HashSet<NodeId>,
 ) {
-    let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
+    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
 
     // Precompute heap liveness for last-use detection (implicit moves).
     let liveness = ast_liveness::analyze(&cfg, ctx);
@@ -136,7 +136,7 @@ impl<'a> MoveVisitor<'a> {
     }
 
     /// Process a CFG block: check each item with its liveness context.
-    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_, TypeId>, block_id: AstBlockId) {
+    fn visit_cfg_node(&mut self, node: &TreeCfgNode<'_, TypeId>, block_id: AstBlockId) {
         // Precompute per-item info for implicit move detection:
         // - use_counts: how many times each heap var is used in each item
         // - live_after: which heap vars are live after each item
@@ -152,8 +152,8 @@ impl<'a> MoveVisitor<'a> {
             self.current_live_after = Some(live_after[idx].clone());
             self.current_use_counts = Some(item_use_counts[idx].clone());
             match item {
-                HirItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
-                HirItem::Expr(expr) => self.visit_expr(expr),
+                TreeCfgItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
+                TreeCfgItem::Expr(expr) => self.visit_expr(expr),
             }
         }
         self.current_live_after = None;
@@ -161,8 +161,8 @@ impl<'a> MoveVisitor<'a> {
 
         // Check terminator condition (if any).
         match &node.term {
-            HirTerminator::If { cond, .. } => self.visit_expr(cond),
-            HirTerminator::Goto(_) | HirTerminator::End => {}
+            TreeCfgTerminator::If { cond, .. } => self.visit_expr(cond),
+            TreeCfgTerminator::Goto(_) | TreeCfgTerminator::End => {}
         }
     }
 

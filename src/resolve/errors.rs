@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-use crate::ast::ExprKind;
 use crate::diag::Span;
 use crate::resolve::symbols::SymbolKind;
+use crate::tree::parsed::ExprKind;
 
 #[derive(Clone, Debug, Error)]
 pub enum ResolveError {

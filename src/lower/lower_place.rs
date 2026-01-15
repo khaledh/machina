@@ -1,7 +1,7 @@
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, PlaceKind};
 use crate::mcir::types::*;
-use crate::sir::model::{PlaceExpr, PlaceExprKind as PEK, TypeDefKind, ValueExpr};
+use crate::tree::semantic::{PlaceExpr, PlaceExprKind as PEK, TypeDefKind, ValueExpr};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{StructField as TypeStructField, Type};
 

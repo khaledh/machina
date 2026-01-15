@@ -1,36 +1,38 @@
 use std::collections::HashSet;
 
-use crate::ast::{Module as AstModule, NodeId, NodeIdGen};
-use crate::hir::model::Module as HirModule;
 use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
-use crate::nir::model::Module as NirModule;
 use crate::regalloc::AllocationResult;
 use crate::resolve::DefTable;
-use crate::sir::model::Module as SirModule;
 use crate::symtab::SymbolTable;
-use crate::tir::model::TypedModule;
+use crate::tree::normalized::Module as NormalizedModule;
+use crate::tree::parsed::Module as ParsedModule;
+use crate::tree::resolved::Module as ResolvedModule;
+use crate::tree::semantic::Module as SemanticModule;
+use crate::tree::typed::Module as TypedModule;
+use crate::tree::{NodeId, NodeIdGen};
 use crate::typeck::type_map::TypeMap;
 
 // -----------------------------------------------------------------------------
 // Parsed Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct ParsedContext {
-    pub module: AstModule,
+    pub module: ParsedModule,
     pub node_id_gen: NodeIdGen,
 }
 
 impl ParsedContext {
-    pub fn new(module: AstModule, node_id_gen: NodeIdGen) -> Self {
+    pub fn new(module: ParsedModule, node_id_gen: NodeIdGen) -> Self {
         Self {
             module,
             node_id_gen,
         }
     }
 
-    pub fn with_def_table(self, def_table: DefTable, module: HirModule) -> ResolvedContext {
+    pub fn with_def_table(self, def_table: DefTable, module: ResolvedModule) -> ResolvedContext {
         let symbols = SymbolTable::new(&module);
         ResolvedContext {
             module,
@@ -44,9 +46,10 @@ impl ParsedContext {
 // -----------------------------------------------------------------------------
 // Resolved Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct ResolvedContext {
-    pub module: HirModule,
+    pub module: ResolvedModule,
     pub def_table: DefTable,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
@@ -67,6 +70,7 @@ impl ResolvedContext {
 // -----------------------------------------------------------------------------
 // Type Checked Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct TypeCheckedContext {
     pub module: TypedModule,
@@ -79,9 +83,10 @@ pub struct TypeCheckedContext {
 // -----------------------------------------------------------------------------
 // Normalized Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct NormalizedContext {
-    pub module: NirModule,
+    pub module: NormalizedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -111,9 +116,10 @@ impl NormalizedContext {
 // -----------------------------------------------------------------------------
 // Semantic Checked Context
 // -----------------------------------------------------------------------------
+
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
-    pub module: NirModule,
+    pub module: NormalizedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -124,11 +130,12 @@ pub struct SemanticCheckedContext {
 }
 
 // -----------------------------------------------------------------------------
-// Elaborated Context
+// Semantic Context
 // -----------------------------------------------------------------------------
+
 #[derive(Debug, Clone)]
-pub struct ElaboratedContext {
-    pub module: SirModule,
+pub struct SemanticContext {
+    pub module: SemanticModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -138,9 +145,10 @@ pub struct ElaboratedContext {
 // -----------------------------------------------------------------------------
 // Analyzed Context
 // -----------------------------------------------------------------------------
+
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
-    pub module: SirModule,
+    pub module: SemanticModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub symbols: SymbolTable,
@@ -164,6 +172,7 @@ impl AnalyzedContext {
 // -----------------------------------------------------------------------------
 // Lowered MCIR Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct LoweredMcirContext {
     pub funcs: Vec<LoweredFunc>,
@@ -188,6 +197,7 @@ impl LoweredMcirContext {
 // -----------------------------------------------------------------------------
 // Optimized MCIR Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct OptimizedMcirContext {
     pub funcs: Vec<LoweredFunc>,
@@ -218,6 +228,7 @@ impl OptimizedMcirContext {
 // -----------------------------------------------------------------------------
 // Liveness Context
 // -----------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct LivenessContext {
     pub funcs: Vec<LoweredFunc>,
@@ -240,6 +251,7 @@ impl LivenessContext {
 // -----------------------------------------------------------------------------
 // Optimized MCIR & Reg Alloc Context
 // -----------------------------------------------------------------------------
+
 pub struct RegAllocatedContext {
     pub funcs: Vec<LoweredFunc>,
     pub alloc_results: Vec<AllocationResult>,

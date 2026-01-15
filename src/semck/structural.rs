@@ -1,14 +1,14 @@
-use crate::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::context::NormalizedContext;
-use crate::nir::model::{
-    BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
-    MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
-    TypeDefKind,
-};
 use crate::resolve::DefId;
 use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
 use crate::semck::match_check;
+use crate::tree::normalized::{
+    BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
+    MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
+    TypeDefKind,
+};
+use crate::tree::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
 use crate::typeck::type_map::{CallSig, resolve_type_expr};
 use crate::types::{Type, TypeId};
 use std::collections::{HashMap, HashSet};

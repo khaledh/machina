@@ -1,12 +1,13 @@
-use crate::context::{ElaboratedContext, SemanticCheckedContext};
+use crate::context::{SemanticCheckedContext, SemanticContext};
 mod elaborator;
 
 use crate::elaborate::elaborator::Elaborator;
 
-/// Elaborate SIR using semantic analysis results.
+/// Elaborate a normalized tree into a semantic tree using semantic
+/// analysis results.
 ///
 /// Step 1: insert implicit move nodes based on semck results.
-pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
+pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     let mut node_id_gen = ctx.node_id_gen;
     let mut elaborator = Elaborator::new(
         &ctx.type_map,
@@ -16,7 +17,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> ElaboratedContext {
         &ctx.full_init_assigns,
     );
     let module = elaborator.elaborate_module(&ctx.module);
-    ElaboratedContext {
+    SemanticContext {
         module,
         def_table: ctx.def_table,
         type_map: ctx.type_map,

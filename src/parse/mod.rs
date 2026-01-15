@@ -1,7 +1,7 @@
-use crate::ast::NodeIdGen;
-use crate::ast::*;
 use crate::diag::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
+use crate::tree::parsed::*;
+use crate::tree::{BinaryOp, CallArgMode, InitInfo, ParamMode, UnaryOp};
 
 mod bind_pattern;
 mod block;

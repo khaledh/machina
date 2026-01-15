@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use crate::context::NormalizedContext;
 use crate::diag::Span;
-use crate::hir::model::MatchPattern;
-use crate::nir::model::{Expr, MatchArm};
 use crate::semck::SemCheckError;
+use crate::tree::normalized::{Expr, MatchArm};
+use crate::tree::resolved::MatchPattern;
 use crate::types::{EnumVariant, Type};
 
 pub(super) fn check_match(

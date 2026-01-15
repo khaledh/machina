@@ -1,5 +1,6 @@
-use super::*;
-use crate::ast::model;
+use crate::tree as model;
+use crate::tree::parsed::*;
+use crate::tree::{BinaryOp, CallArgMode, CoerceKind, ParamMode, UnaryOp};
 
 use std::fmt;
 

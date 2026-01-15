@@ -9,16 +9,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::{DataflowGraph, solve_forward};
-use crate::ast::cfg::{AstBlockId, HirCfgBuilder, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
 use crate::diag::Span;
-use crate::nir::model::{
+use crate::resolve::{DefId, DefKind};
+use crate::semck::SemCheckError;
+use crate::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
+use crate::tree::normalized::{
     ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
     MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
-use crate::resolve::{DefId, DefKind};
-use crate::semck::SemCheckError;
+use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::{Type, TypeId};
 
 pub(super) struct DefInitResult {
@@ -135,7 +135,7 @@ fn check_func(
     init_assigns: &mut HashSet<NodeId>,
     full_init_assigns: &mut HashSet<NodeId>,
 ) {
-    let cfg = HirCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
+    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
 
     // Params are initialized at entry, except `out` params which start uninitialized.
     let entry_state = InitState::new(collect_param_defs(func_def, false));
@@ -575,18 +575,18 @@ impl<'a> DefInitChecker<'a> {
         }
     }
 
-    fn visit_cfg_node(&mut self, node: &HirCfgNode<'_, TypeId>) {
+    fn visit_cfg_node(&mut self, node: &TreeCfgNode<'_, TypeId>) {
         // Loop bodies pre-initialize their pattern bindings.
         for pattern in &node.loop_inits {
             self.mark_pattern_initialized(pattern);
         }
         for item in &node.items {
             match item {
-                HirItem::Stmt(stmt) => self.check_stmt(stmt),
-                HirItem::Expr(expr) => self.check_expr(expr),
+                TreeCfgItem::Stmt(stmt) => self.check_stmt(stmt),
+                TreeCfgItem::Expr(expr) => self.check_expr(expr),
             }
         }
-        if let HirTerminator::If { cond, .. } = &node.term {
+        if let TreeCfgTerminator::If { cond, .. } = &node.term {
             self.check_expr(cond);
         }
     }

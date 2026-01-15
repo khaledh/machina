@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_backward;
-use crate::ast::cfg::{HirCfg, HirCfgNode, HirItem, HirTerminator};
-use crate::ast::visit::{Visitor, walk_expr};
 use crate::context::NormalizedContext;
-use crate::nir::model::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::resolve::DefId;
+use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
+use crate::tree::normalized::{
+    BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind,
+};
+use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::TypeId;
 
 // ============================================================================
@@ -22,7 +24,7 @@ pub struct AstLiveness {
 
 /// Compute liveness for heap-owned locals on the AST CFG. This keeps the analysis
 /// lightweight and scoped to the move-checker (we only track heap uses).
-pub fn analyze(cfg: &HirCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLiveness {
+pub fn analyze(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLiveness {
     let entry = HashSet::new();
     let bottom = HashSet::new();
 
@@ -61,13 +63,13 @@ pub fn analyze(cfg: &HirCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLiveness
 /// Count heap-owned variable uses within one AST item. This lets move_check
 /// avoid implicit moves when a single item uses the same binding multiple times.
 pub(crate) fn heap_use_counts_for_item(
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
 ) -> HashMap<DefId, usize> {
     let mut counts = HashMap::new();
     match item {
-        HirItem::Stmt(stmt) => collect_stmt_uses(stmt, ctx, &mut counts),
-        HirItem::Expr(expr) => collect_expr_uses(expr, ctx, &mut counts),
+        TreeCfgItem::Stmt(stmt) => collect_stmt_uses(stmt, ctx, &mut counts),
+        TreeCfgItem::Expr(expr) => collect_expr_uses(expr, ctx, &mut counts),
     }
     counts
 }
@@ -98,7 +100,7 @@ impl HeapUseAccumulator for HashMap<DefId, usize> {
 
 fn compute_live_in(
     ctx: &NormalizedContext,
-    node: &HirCfgNode<'_, TypeId>,
+    node: &TreeCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> HashSet<DefId> {
     let mut live = live_out.clone();
@@ -113,7 +115,7 @@ fn compute_live_in(
 /// Per-item live-after sets are used to detect last-use sites inside a block.
 fn compute_live_after(
     ctx: &NormalizedContext,
-    node: &HirCfgNode<'_, TypeId>,
+    node: &TreeCfgNode<'_, TypeId>,
     live_out: &HashSet<DefId>,
 ) -> Vec<HashSet<DefId>> {
     let mut live = live_out.clone();
@@ -127,7 +129,7 @@ fn compute_live_after(
 }
 
 fn apply_item_defs_uses(
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
     live: &mut HashSet<DefId>,
 ) {
@@ -143,11 +145,11 @@ fn apply_item_defs_uses(
 }
 
 fn add_terminator_uses(
-    term: &HirTerminator<'_, TypeId>,
+    term: &TreeCfgTerminator<'_, TypeId>,
     ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
-    if let HirTerminator::If { cond, .. } = term {
+    if let TreeCfgTerminator::If { cond, .. } = term {
         collect_expr_uses(cond, ctx, uses);
     }
 }
@@ -157,14 +159,14 @@ fn add_terminator_uses(
 // ============================================================================
 
 fn collect_item_defs_uses(
-    item: &HirItem<'_, TypeId>,
+    item: &TreeCfgItem<'_, TypeId>,
     ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        HirItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
-        HirItem::Expr(expr) => collect_expr_uses(expr, ctx, uses),
+        TreeCfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
+        TreeCfgItem::Expr(expr) => collect_expr_uses(expr, ctx, uses),
     }
 }
 

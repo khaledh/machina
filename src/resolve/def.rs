@@ -1,7 +1,8 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-// Defs store only identifiers and kinds; type structure lives in HIR.
+// Defs store only identifiers and kinds; def kind structure lives in
+// the resolved tree.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(pub u32);

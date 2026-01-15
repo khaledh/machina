@@ -1,8 +1,4 @@
 use super::*;
-use crate::ast::{
-    ArrayLitInit, BindPatternKind, BlockItem, Expr, ExprKind, FuncDef, MatchPattern,
-    MatchPatternBinding, Module, StmtExpr, StmtExprKind, TypeDefKind, TypeExprKind,
-};
 use crate::lexer::{LexError, Lexer, Token};
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
@@ -100,7 +96,7 @@ fn test_parse_multidim_array_type() {
                 TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
-            assert_eq!(dims, &vec![2, 3]);
+            assert_eq!(dims.as_slice(), &[2, 3]);
         }
         _ => panic!("Expected array type"),
     }
@@ -123,7 +119,7 @@ fn test_parse_multidim_array_type_3d() {
                 TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
-            assert_eq!(dims, &vec![2, 3, 4]);
+            assert_eq!(dims.as_slice(), &[2, 3, 4]);
         }
         _ => panic!("Expected array type"),
     }

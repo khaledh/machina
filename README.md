@@ -302,17 +302,18 @@ The compiler is a multi-stage pipeline written in Rust:
 **Frontend** produces progressively richer context:
 
 - **Lex/Parse**: Hand-written lexer and recursive descent parser with Pratt
-  parsing for operators precedence. Produces AST.
-- **Resolve**: Builds scope tree, records definitions and uses. Produces HIR.
+  parsing for operators precedence. Produces the parsed tree.
+- **Resolve**: Builds scope tree, records definitions and uses. Produces the
+  resolved tree.
 - **Type Check**: Infers and validates types across expressions, resolves
-  function overloading. Produces TIR.
-- **Normalize**: Converts the typed tree into normalized IR and inserts
-  explicit coercions (e.g., array-to-slice at call sites). Produces NIR.
+  function overloading. Produces the typed tree.
+- **Normalize**: Converts the typed tree into the normalized tree and inserts
+  explicit coercions (e.g., array-to-slice at call sites).
 - **Semantic Check**: Enforces value rules, structural rules, move restrictions,
   borrow restrictions, definition-before-use (including partial init), slice
   escape/borrow-scope rules, call-argument overlap checks.
-- **Elaborate**: Converts NIR into SIR (semantic IR) and makes implicit
-  operations explicit (e.g., implicit moves, place/value split). Produces SIR.
+- **Elaborate**: Converts the normalized tree into the semantic tree and makes
+  implicit operations explicit (e.g., implicit moves, place/value split).
 - **NRVO Analysis**: Marks safe copy-elision for aggregate returns.
 
 **Middle End** operates on MCIR (Machina IR), a typed, place-based

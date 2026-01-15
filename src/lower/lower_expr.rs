@@ -1,12 +1,12 @@
-use crate::ast::{BinaryOp, UnaryOp};
 use crate::lower::errors::LowerError;
 use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::lower::lower_util::u64_const;
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
-use crate::sir::model::{
+use crate::tree::semantic::{
     ArrayLitInit, PlaceExpr, PlaceExprKind as PEK, StructLitField, ValueExpr, ValueExprKind as VEK,
 };
+use crate::tree::{BinaryOp, CoerceKind, UnaryOp};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -514,7 +514,7 @@ impl<'a> FuncLowerer<'a> {
                 self.lower_agg_lit_into(dst, expr)
             }
             VEK::Coerce { kind, expr } => match kind {
-                crate::ast::CoerceKind::ArrayToSlice => self.lower_array_to_slice_into(&dst, expr),
+                CoerceKind::ArrayToSlice => self.lower_array_to_slice_into(&dst, expr),
             },
             VEK::Load { place } => {
                 let src = self.lower_place_agg(place)?;

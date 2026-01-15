@@ -3,7 +3,7 @@ use crate::lower::lower_ast::FuncLowerer;
 use crate::lower::lower_util::u64_const;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::sir::model::{StringFmtSegment, ValueExpr, ValueExprKind as VEK};
+use crate::tree::semantic::{StringFmtSegment, ValueExpr, ValueExprKind as VEK};
 use crate::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;

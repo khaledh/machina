@@ -1,8 +1,8 @@
-//! AST-based CFG construction.
+//! Parsed-tree-based CFG construction.
 
 use crate::analysis::dataflow::DataflowGraph;
-use crate::ast::model::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::resolve::DefId;
+use crate::tree::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);
@@ -254,14 +254,8 @@ impl<D, T> DataflowGraph for Cfg<'_, D, T> {
     }
 }
 
-pub type AstItem<'a, Ty = ()> = CfgItem<'a, String, Ty>;
-pub type AstTerminator<'a, Ty = ()> = CfgTerminator<'a, String, Ty>;
-pub type AstCfgNode<'a, Ty = ()> = CfgNode<'a, String, Ty>;
-pub type AstCfg<'a, Ty = ()> = Cfg<'a, String, Ty>;
-pub type AstCfgBuilder<'a, Ty = ()> = CfgBuilder<'a, String, Ty>;
-
-pub type HirItem<'a, Ty = ()> = CfgItem<'a, DefId, Ty>;
-pub type HirTerminator<'a, Ty = ()> = CfgTerminator<'a, DefId, Ty>;
-pub type HirCfgNode<'a, Ty = ()> = CfgNode<'a, DefId, Ty>;
-pub type HirCfg<'a, Ty = ()> = Cfg<'a, DefId, Ty>;
-pub type HirCfgBuilder<'a, Ty = ()> = CfgBuilder<'a, DefId, Ty>;
+pub type TreeCfgItem<'a, Ty = ()> = CfgItem<'a, DefId, Ty>;
+pub type TreeCfgTerminator<'a, Ty = ()> = CfgTerminator<'a, DefId, Ty>;
+pub type TreeCfgNode<'a, Ty = ()> = CfgNode<'a, DefId, Ty>;
+pub type TreeCfg<'a, Ty = ()> = Cfg<'a, DefId, Ty>;
+pub type TreeCfgBuilder<'a, Ty = ()> = CfgBuilder<'a, DefId, Ty>;
