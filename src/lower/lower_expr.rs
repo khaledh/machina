@@ -160,7 +160,7 @@ impl<'a> FuncLowerer<'a> {
                 Ok(Operand::Const(variant_tag))
             }
 
-            VEK::Closure { def_id, .. } => Ok(Operand::Const(Const::FuncAddr { def: *def_id })),
+            VEK::ClosureRef { def_id } => Ok(Operand::Const(Const::FuncAddr { def: *def_id })),
 
             // Unary/Binary ops
             VEK::UnaryOp { op, expr: arg_expr } => {

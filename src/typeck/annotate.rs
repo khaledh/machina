@@ -22,8 +22,8 @@ fn annotate_top_level_item(item: &res::TopLevelItem, type_map: &TypeMap) -> typ:
         res::TopLevelItem::MethodBlock(method_block) => {
             typ::TopLevelItem::MethodBlock(annotate_method_block(method_block, type_map))
         }
-        res::TopLevelItem::ClosureDecl(closure_decl) => {
-            typ::TopLevelItem::ClosureDecl(annotate_closure_decl(closure_decl, type_map))
+        res::TopLevelItem::ClosureDef(closure_def) => {
+            typ::TopLevelItem::ClosureDef(annotate_closure_def(closure_def, type_map))
         }
     }
 }
@@ -62,13 +62,13 @@ fn annotate_method_def(method_def: &res::MethodDef, type_map: &TypeMap) -> typ::
     }
 }
 
-fn annotate_closure_decl(closure_decl: &res::ClosureDecl, type_map: &TypeMap) -> typ::ClosureDecl {
-    typ::ClosureDecl {
-        id: closure_decl.id,
-        def_id: closure_decl.def_id,
-        sig: closure_decl.sig.clone(),
-        body: annotate_expr(&closure_decl.body, type_map),
-        span: closure_decl.span,
+fn annotate_closure_def(closure_def: &res::ClosureDef, type_map: &TypeMap) -> typ::ClosureDef {
+    typ::ClosureDef {
+        id: closure_def.id,
+        def_id: closure_def.def_id,
+        sig: closure_def.sig.clone(),
+        body: annotate_expr(&closure_def.body, type_map),
+        span: closure_def.span,
     }
 }
 

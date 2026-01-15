@@ -252,7 +252,7 @@ impl NrvoSafetyChecker {
             | VEK::StringLit { .. }
             | VEK::EnumVariant { .. }
             | VEK::Range { .. }
-            | VEK::Closure { .. } => true,
+            | VEK::ClosureRef { .. } => true,
         }
     }
 

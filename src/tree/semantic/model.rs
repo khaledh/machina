@@ -86,11 +86,11 @@ impl Module {
             .collect()
     }
 
-    pub fn closure_decls(&self) -> Vec<&ClosureDecl> {
+    pub fn closure_defs(&self) -> Vec<&ClosureDef> {
         self.top_level_items
             .iter()
             .filter_map(|item| match item {
-                TopLevelItem::ClosureDecl(closure_decl) => Some(closure_decl),
+                TopLevelItem::ClosureDef(closure_def) => Some(closure_def),
                 _ => None,
             })
             .collect()
@@ -110,8 +110,8 @@ impl Module {
                         method_def,
                     })
                     .collect(),
-                TopLevelItem::ClosureDecl(closure_decl) => {
-                    vec![CallableRef::ClosureDecl(closure_decl)]
+                TopLevelItem::ClosureDef(closure_def) => {
+                    vec![CallableRef::ClosureDef(closure_def)]
                 }
                 TopLevelItem::TypeDef(_) => vec![],
             })
@@ -127,7 +127,7 @@ pub enum TopLevelItem {
     FuncDecl(FuncDecl),
     FuncDef(FuncDef),
     MethodBlock(MethodBlock),
-    ClosureDecl(ClosureDecl),
+    ClosureDef(ClosureDef),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,7 +138,7 @@ pub enum CallableRef<'a> {
         type_name: &'a str,
         method_def: &'a MethodDef,
     },
-    ClosureDecl(&'a ClosureDecl),
+    ClosureDef(&'a ClosureDef),
 }
 
 // -- Functions ---
@@ -182,7 +182,7 @@ pub struct MethodDef {
 // -- Closures ---
 
 #[derive(Clone, Debug)]
-pub struct ClosureDecl {
+pub struct ClosureDef {
     pub id: NodeId,
     pub def_id: DefId,
     pub sig: ClosureSig,
@@ -449,13 +449,9 @@ pub enum ValueExprKind {
         args: Vec<CallArg>,
     },
 
-    // Closure literal
-    Closure {
-        ident: String,
+    // Closure reference (lifted to a top-level definition).
+    ClosureRef {
         def_id: DefId,
-        params: Vec<Param>,
-        return_ty: TypeExpr,
-        body: Box<ValueExpr>,
     },
 }
 

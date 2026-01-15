@@ -86,8 +86,8 @@ impl ToResolved for par::TopLevelItem {
             par::TopLevelItem::MethodBlock(method_block) => {
                 res::TopLevelItem::MethodBlock(method_block.to_resolved(def_lookup))
             }
-            par::TopLevelItem::ClosureDecl(closure_decl) => {
-                res::TopLevelItem::ClosureDecl(closure_decl.to_resolved(def_lookup))
+            par::TopLevelItem::ClosureDef(closure_decl) => {
+                res::TopLevelItem::ClosureDef(closure_decl.to_resolved(def_lookup))
             }
         }
     }
@@ -367,12 +367,12 @@ impl ToResolved for par::MethodSig {
     }
 }
 
-impl ToResolved for par::ClosureDecl {
-    type Output = res::ClosureDecl;
+impl ToResolved for par::ClosureDef {
+    type Output = res::ClosureDef;
 
     fn to_resolved(self, def_lookup: &DefLookup) -> Self::Output {
         let def_id = def_id(def_lookup, self.id);
-        res::ClosureDecl {
+        res::ClosureDef {
             id: self.id,
             def_id,
             sig: self.sig.to_resolved(def_lookup),

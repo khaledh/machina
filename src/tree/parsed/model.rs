@@ -25,7 +25,7 @@ pub type MethodDef = model::MethodDef<()>;
 pub type MethodSig = model::MethodSig<()>;
 pub type SelfParam = model::SelfParam<()>;
 
-pub type ClosureDecl = model::ClosureDecl<()>;
+pub type ClosureDef = model::ClosureDef<()>;
 pub type ClosureSig = model::ClosureSig<()>;
 
 pub type Param = model::Param<()>;

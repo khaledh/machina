@@ -12,7 +12,7 @@ impl fmt::Display for Module {
                 TopLevelItem::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
-                TopLevelItem::ClosureDecl(closure_decl) => closure_decl.fmt_with_indent(f, 0)?,
+                TopLevelItem::ClosureDef(closure_decl) => closure_decl.fmt_with_indent(f, 0)?,
             }
             if i + 1 != self.top_level_items.len() {
                 writeln!(f, "--------------------------------")?;
@@ -186,10 +186,10 @@ impl MethodSig {
     }
 }
 
-impl ClosureDecl {
+impl ClosureDef {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
-        writeln!(f, "{}ClosureDecl [{}]", pad, self.id)?;
+        writeln!(f, "{}ClosureDef [{}]", pad, self.id)?;
         self.sig.fmt_with_indent(f, level + 1)
     }
 }

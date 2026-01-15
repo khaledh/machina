@@ -364,29 +364,29 @@ pub fn lower_ast(
                 )
                 .lower()?,
             ),
-            CallableRef::ClosureDecl(closure_decl) => {
+            CallableRef::ClosureDef(closure_def) => {
                 let return_ty =
-                    resolve_type_expr(&ctx.def_table, &ctx.module, &closure_decl.sig.return_ty)
+                    resolve_type_expr(&ctx.def_table, &ctx.module, &closure_def.sig.return_ty)
                         .expect(
                             format!(
                                 "compiler bug: cannot resolve closure return type {:?}",
-                                closure_decl.sig.return_ty
+                                closure_def.sig.return_ty
                             )
                             .as_str(),
                         );
                 // Non-capturing only: lower to a standalone generated function.
                 let lowered_body = FuncLowerer::new_closure(
                     &ctx,
-                    closure_decl.id,
-                    &closure_decl.sig.params,
+                    closure_def.id,
+                    &closure_def.sig.params,
                     return_ty,
-                    &closure_decl.body,
+                    &closure_def.body,
                     &mut global_interner,
                     &mut drop_glue,
                     trace_alloc,
                 )
                 .lower()?;
-                (closure_decl.def_id, lowered_body)
+                (closure_def.def_id, lowered_body)
             }
         };
 

@@ -14,6 +14,7 @@ pub struct Elaborator<'a> {
     implicit_moves: &'a HashSet<NodeId>,
     init_assigns: &'a HashSet<NodeId>,
     full_init_assigns: &'a HashSet<NodeId>,
+    closure_defs: Vec<sem::ClosureDef>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -30,15 +31,23 @@ impl<'a> Elaborator<'a> {
             implicit_moves,
             init_assigns,
             full_init_assigns,
+            closure_defs: Vec::new(),
         }
     }
 
     pub fn elaborate_module(&mut self, module: &norm::Module) -> sem::Module {
-        let top_level_items = module
+        // Lift closures to top level
+        self.closure_defs.clear();
+        let mut top_level_items: Vec<_> = module
             .top_level_items
             .iter()
             .map(|item| self.elab_top_level_item(item))
             .collect();
+        top_level_items.extend(
+            self.closure_defs
+                .drain(..)
+                .map(sem::TopLevelItem::ClosureDef),
+        );
         sem::Module { top_level_items }
     }
 
@@ -70,14 +79,8 @@ impl<'a> Elaborator<'a> {
                     span: block.span,
                 })
             }
-            norm::TopLevelItem::ClosureDecl(decl) => {
-                sem::TopLevelItem::ClosureDecl(sem::ClosureDecl {
-                    id: decl.id,
-                    def_id: decl.def_id,
-                    sig: decl.sig.clone(),
-                    body: self.elab_value(&decl.body),
-                    span: decl.span,
-                })
+            norm::TopLevelItem::ClosureDef(_) => {
+                panic!("compiler bug: closure definitions should be synthesized in elaborate")
             }
         }
     }
@@ -504,13 +507,23 @@ impl<'a> Elaborator<'a> {
                 params,
                 return_ty,
                 body,
-            } => sem::ValueExprKind::Closure {
-                ident: ident.clone(),
-                def_id: *def_id,
-                params: params.clone(),
-                return_ty: return_ty.clone(),
-                body: Box::new(self.elab_value(body)),
-            },
+            } => {
+                let closure_body = self.elab_value(body);
+                let closure_def = sem::ClosureDef {
+                    id: self.node_id_gen.new_id(),
+                    def_id: *def_id,
+                    sig: sem::ClosureSig {
+                        name: ident.clone(),
+                        params: params.clone(),
+                        return_ty: return_ty.clone(),
+                        span: expr.span,
+                    },
+                    body: closure_body,
+                    span: expr.span,
+                };
+                self.closure_defs.push(closure_def);
+                sem::ValueExprKind::ClosureRef { def_id: *def_id }
+            }
             norm::ExprKind::Coerce { kind, expr } => sem::ValueExprKind::Coerce {
                 kind: *kind,
                 expr: Box::new(self.elab_value(expr)),

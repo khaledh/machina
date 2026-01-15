@@ -90,8 +90,8 @@ impl<D, T> Module<D, T> {
                         method_def,
                     })
                     .collect(),
-                TopLevelItem::ClosureDecl(closure_decl) => {
-                    vec![CallableRef::ClosureDecl(closure_decl)]
+                TopLevelItem::ClosureDef(closure_decl) => {
+                    vec![CallableRef::ClosureDef(closure_decl)]
                 }
                 TopLevelItem::TypeDef(_) => vec![],
             })
@@ -107,7 +107,7 @@ pub enum TopLevelItem<D, T = ()> {
     FuncDecl(FuncDecl<D>),          // function declaration
     FuncDef(FuncDef<D, T>),         // function definition
     MethodBlock(MethodBlock<D, T>), // method definitions
-    ClosureDecl(ClosureDecl<D, T>), // closure declaration (generated)
+    ClosureDef(ClosureDef<D, T>),   // closure definition (generated)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -118,7 +118,7 @@ pub enum CallableRef<'a, D, T = ()> {
         type_name: &'a str,
         method_def: &'a MethodDef<D, T>,
     },
-    ClosureDecl(&'a ClosureDecl<D, T>),
+    ClosureDef(&'a ClosureDef<D, T>),
 }
 
 impl<'a, D, T> CallableRef<'a, D, T> {
@@ -127,7 +127,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
             CallableRef::FuncDecl(func_decl) => func_decl.id,
             CallableRef::FuncDef(func_def) => func_def.id,
             CallableRef::MethodDef { method_def, .. } => method_def.id,
-            CallableRef::ClosureDecl(closure_decl) => closure_decl.id,
+            CallableRef::ClosureDef(closure_def) => closure_def.id,
         }
     }
 
@@ -139,7 +139,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
             CallableRef::FuncDecl(func_decl) => func_decl.def_id,
             CallableRef::FuncDef(func_def) => func_def.def_id,
             CallableRef::MethodDef { method_def, .. } => method_def.def_id,
-            CallableRef::ClosureDecl(closure_decl) => closure_decl.def_id,
+            CallableRef::ClosureDef(closure_def) => closure_def.def_id,
         }
     }
 
@@ -148,7 +148,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
             CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::FuncDef(func_def) => func_def.sig.name.clone(),
             CallableRef::MethodDef { method_def, .. } => method_def.sig.name.clone(),
-            CallableRef::ClosureDecl(closure_decl) => closure_decl.sig.name.clone(),
+            CallableRef::ClosureDef(closure_def) => closure_def.sig.name.clone(),
         }
     }
 
@@ -162,7 +162,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
             } => {
                 format!("{type_name}${}", method_def.sig.name)
             }
-            CallableRef::ClosureDecl(_) => self.name(),
+            CallableRef::ClosureDef(_) => self.name(),
         }
     }
 
@@ -171,7 +171,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
             CallableRef::FuncDecl(func_decl) => func_decl.span,
             CallableRef::FuncDef(func_def) => func_def.span,
             CallableRef::MethodDef { method_def, .. } => method_def.span,
-            CallableRef::ClosureDecl(closure_decl) => closure_decl.span,
+            CallableRef::ClosureDef(closure_def) => closure_def.span,
         }
     }
 }
@@ -325,10 +325,10 @@ pub struct SelfParam<D> {
     pub span: Span,
 }
 
-// -- Closures Decls ---
+// -- Closure Definitions ---
 
 #[derive(Clone, Debug)]
-pub struct ClosureDecl<D, T = ()> {
+pub struct ClosureDef<D, T = ()> {
     pub id: NodeId,
     pub def_id: D,
     pub sig: ClosureSig<D>,

@@ -229,7 +229,7 @@ impl SymbolResolver {
                     self.populate_callable(callable);
                 }
                 CallableRef::MethodDef { .. } => self.populate_callable(callable),
-                CallableRef::ClosureDecl(_) => self.populate_callable(callable),
+                CallableRef::ClosureDef(_) => self.populate_callable(callable),
             }
         }
     }
@@ -240,8 +240,10 @@ impl SymbolResolver {
             id: def_id,
             name: callable.name(),
             kind: match callable {
-                CallableRef::FuncDecl(_) | CallableRef::ClosureDecl(_) => DefKind::FuncDecl,
-                CallableRef::FuncDef(_) | CallableRef::MethodDef { .. } => DefKind::FuncDef,
+                CallableRef::FuncDecl(_) => DefKind::FuncDecl,
+                CallableRef::FuncDef(_)
+                | CallableRef::MethodDef { .. }
+                | CallableRef::ClosureDef(_) => DefKind::FuncDef,
             },
         };
         self.def_table_builder.record_def(def, callable.id());
@@ -811,30 +813,36 @@ impl Visitor<()> for SymbolResolver {
                 return_ty,
                 body,
                 ..
-            } => match self.lookup_symbol(ident) {
-                Some(symbol) => {
-                    self.def_table_builder.record_use(expr.id, symbol.def_id());
-                    for param in params {
-                        self.visit_type_expr(&param.typ);
-                    }
-                    self.visit_type_expr(return_ty);
+            } => {
+                // Closures are resolved at their expression site so they can
+                // refer to the surrounding lexical scope.
+                let def_id = self.def_id_gen.new_id();
+                let def = Def {
+                    id: def_id,
+                    name: ident.clone(),
+                    kind: DefKind::FuncDef,
+                };
+                self.def_table_builder.record_def(def, expr.id);
 
-                    // Enter a new scope for the closure parameters and body
-                    self.with_scope(|resolver| {
-                        for (index, param) in params.iter().enumerate() {
-                            resolver.register_param(
-                                &param.ident,
-                                param.mode.clone(),
-                                param.id,
-                                param.span,
-                                index as u32,
-                            );
-                        }
-                        resolver.visit_expr(body);
-                    });
+                for param in params {
+                    self.visit_type_expr(&param.typ);
                 }
-                None => panic!("compiler bug: closure {} undefined", ident),
-            },
+                self.visit_type_expr(return_ty);
+
+                // Enter a new scope for the closure parameters and body.
+                self.with_scope(|resolver| {
+                    for (index, param) in params.iter().enumerate() {
+                        resolver.register_param(
+                            &param.ident,
+                            param.mode.clone(),
+                            param.id,
+                            param.span,
+                            index as u32,
+                        );
+                    }
+                    resolver.visit_expr(body);
+                });
+            }
 
             _ => walk_expr(self, expr),
         }

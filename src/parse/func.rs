@@ -179,22 +179,6 @@ impl<'a> Parser<'a> {
             span: self.close(marker),
         };
 
-        // Record the closure declaration (to be included in the module decls)
-        let closure_decl = ClosureDecl {
-            id: self.id_gen.new_id(),
-            def_id: (),
-            sig: ClosureSig {
-                name: ident,
-                params,
-                return_ty,
-                span: self.close(marker),
-            },
-            body: body,
-            span: self.close(marker),
-        };
-        self.closure_decls
-            .push(TopLevelItem::ClosureDecl(closure_decl.clone()));
-
         Ok(closure_expr)
     }
 

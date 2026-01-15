@@ -93,10 +93,10 @@ pub trait Visitor<D = String, T = ()> {
         walk_method_def(self, method_def)
     }
 
-    // --- Closure Declarations ---
+    // --- Closure Definitions ---
 
-    fn visit_closure_decl(&mut self, closure_decl: &ClosureDecl<D, T>) {
-        walk_closure_decl(self, closure_decl)
+    fn visit_closure_def(&mut self, closure_def: &ClosureDef<D, T>) {
+        walk_closure_def(self, closure_def)
     }
 
     // --- Blocks ---
@@ -125,7 +125,7 @@ pub fn walk_module<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, module: &Module<D
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
             TopLevelItem::MethodBlock(method_block) => v.visit_method_block(method_block),
-            TopLevelItem::ClosureDecl(closure_decl) => v.visit_closure_decl(closure_decl),
+            TopLevelItem::ClosureDef(closure_def) => v.visit_closure_def(closure_def),
         }
     }
 }
@@ -251,11 +251,11 @@ pub fn walk_method_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, method_def: &
     v.visit_expr(&method_def.body);
 }
 
-// --- Closure Declarations ---
+// --- Closure Definitions ---
 
-pub fn walk_closure_decl<V: Visitor<D, T> + ?Sized, D, T>(
+pub fn walk_closure_def<V: Visitor<D, T> + ?Sized, D, T>(
     _v: &mut V,
-    _closure_decl: &ClosureDecl<D, T>,
+    _closure_def: &ClosureDef<D, T>,
 ) {
     // Closures are also visited at their expression sites; avoid walking the lifted body twice.
 }

@@ -27,7 +27,6 @@ pub struct Parser<'a> {
     curr_token: &'a Token,
     id_gen: NodeIdGen,
     allow_struct_lit: bool,
-    closure_decls: Vec<TopLevelItem>,
     closure_base: Option<String>,
     closure_index: u32,
 }
@@ -40,7 +39,6 @@ impl<'a> Parser<'a> {
             curr_token: &tokens[0],
             id_gen: NodeIdGen::new(),
             allow_struct_lit: true,
-            closure_decls: Vec::new(),
             closure_base: None,
             closure_index: 0,
         }
@@ -53,7 +51,6 @@ impl<'a> Parser<'a> {
             curr_token: &tokens[0],
             id_gen,
             allow_struct_lit: true,
-            closure_decls: Vec::new(),
             closure_base: None,
             closure_index: 0,
         }
@@ -70,9 +67,6 @@ impl<'a> Parser<'a> {
         while self.curr_token.kind != TK::Eof {
             top_level_items.push(self.parse_top_level_item()?);
         }
-
-        // Include the closure declarations (parsed and recorded during parsing)
-        top_level_items.extend(self.closure_decls.clone());
 
         Ok(Module { top_level_items })
     }
