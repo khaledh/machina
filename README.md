@@ -302,35 +302,35 @@ The compiler is a multi-stage pipeline written in Rust:
 **Frontend** produces progressively richer context:
 
 - **Lex/Parse**: Hand-written lexer and recursive descent parser with Pratt
-  parsing for operators precedence. Produces the parsed tree.
-- **Resolve**: Builds scope tree, records definitions and uses. Produces the
+  parsing for operator precedence. Produces a parsed tree.
+- **Resolve**: Uses lexical scope to record definitions and uses. Produces a
   resolved tree.
 - **Type Check**: Infers and validates types across expressions, resolves
-  function overloading. Produces the typed tree.
-- **Normalize**: Converts the typed tree into the normalized tree and inserts
-  explicit coercions (e.g., array-to-slice at call sites).
+  function overloading. Produces a typed tree.
+- **Normalize**: Inserts explicit coercions (e.g., array-to-slice at call
+  sites). Produces a normalized tree.
 - **Semantic Check**: Enforces value rules, structural rules, move restrictions,
   borrow restrictions, definition-before-use (including partial init), slice
   escape/borrow-scope rules, call-argument overlap checks.
-- **Elaborate**: Converts the normalized tree into the semantic tree and makes
-  implicit operations explicit (e.g., implicit moves, place/value split).
+- **Elaborate**: Makes implicit operations explicit (e.g., implicit moves,
+  place/value split). Produces a semantic tree.
 - **NRVO Analysis**: Marks safe copy-elision for aggregate returns.
 
 **Middle End** operates on MCIR (Machina IR), a typed, place-based
 representation:
 
-- Scalars as SSA-like temporaries, aggregates as addressable places
-- Explicit control flow graphs with basic blocks and terminators
+- Scalars as SSA-like temporaries, aggregates as addressable places.
+- Explicit control flow graphs with basic blocks and terminators.
 - **CFG-free optimization**: Constant folding, identity simplification, constant
-  branch elimination, self-copy removal
+  branch elimination, self-copy removal.
 - **Dataflow optimization**: Last-use copy elision for aggregates
 - **Liveness**: Computes live-in/live-out sets per basic block (used for
-  optimization + register allocation)
+  optimization + register allocation).
 
 **Backend** allocates registers and emits machine code:
 
-- **Register Allocation**: Linear scan with AAPCS calling convention
-- **Code Generation**: ARM64 assembly with prologue/epilogue handling
+- **Register Allocation**: Linear scan with AAPCS calling convention.
+- **Code Generation**: ARM64 assembly with prologue/epilogue handling.
 
 Use `--dump` flags to inspect any stage: `tokens`, `ast`, `deftab`, `typemap`,
 `nrvo`, `ir`, `liveness`, `intervals`, `regalloc`, `asm`.
