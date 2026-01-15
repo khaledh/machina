@@ -334,3 +334,7 @@ representation:
 
 Use `--dump` flags to inspect any stage: `tokens`, `ast`, `deftab`, `typemap`,
 `nrvo`, `ir`, `liveness`, `intervals`, `regalloc`, `asm`.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
