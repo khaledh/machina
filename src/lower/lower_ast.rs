@@ -28,9 +28,8 @@ use crate::mcir::func_builder::FuncBuilder;
 use crate::mcir::interner::GlobalInterner;
 use crate::mcir::types::*;
 use crate::resolve::DefId;
-use crate::tree::semantic::{CallableRef, FuncDef, MethodDef, Param, ValueExpr};
+use crate::tree::semantic::{CallableRef, FuncDef, MethodDef, ValueExpr};
 use crate::tree::{NodeId, ParamMode};
-use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 
 pub(super) enum Value {
@@ -160,43 +159,6 @@ impl<'a> FuncLowerer<'a> {
             drop_glue,
             trace_alloc,
             None,
-        )
-    }
-
-    pub fn new_closure(
-        ctx: &'a AnalyzedContext,
-        closure_id: NodeId,
-        params: &'a [Param],
-        return_ty: Type,
-        body: &'a ValueExpr,
-        global_interner: &'a mut GlobalInterner,
-        drop_glue: &'a mut DropGlueRegistry,
-        trace_alloc: bool,
-    ) -> Self {
-        let params = params
-            .iter()
-            .map(|param| {
-                let def = ctx.def_table.lookup_def(param.def_id).unwrap_or_else(|| {
-                    panic!("compiler bug: param def {:?} not found", param.def_id)
-                });
-                LoweredParam {
-                    id: param.id,
-                    def_id: param.def_id,
-                    name: def.name.clone(),
-                    mode: param.mode.clone(),
-                }
-            })
-            .collect::<Vec<_>>();
-        Self::new(
-            ctx,
-            closure_id,
-            "<closure>",
-            body,
-            params,
-            global_interner,
-            drop_glue,
-            trace_alloc,
-            Some(return_ty),
         )
     }
 
@@ -364,30 +326,6 @@ pub fn lower_ast(
                 )
                 .lower()?,
             ),
-            CallableRef::ClosureDef(closure_def) => {
-                let return_ty =
-                    resolve_type_expr(&ctx.def_table, &ctx.module, &closure_def.sig.return_ty)
-                        .expect(
-                            format!(
-                                "compiler bug: cannot resolve closure return type {:?}",
-                                closure_def.sig.return_ty
-                            )
-                            .as_str(),
-                        );
-                // Non-capturing only: lower to a standalone generated function.
-                let lowered_body = FuncLowerer::new_closure(
-                    &ctx,
-                    closure_def.id,
-                    &closure_def.sig.params,
-                    return_ty,
-                    &closure_def.body,
-                    &mut global_interner,
-                    &mut drop_glue,
-                    trace_alloc,
-                )
-                .lower()?;
-                (closure_def.def_id, lowered_body)
-            }
         };
 
         funcs.push(LoweredFunc { def_id, body });

@@ -20,7 +20,6 @@ pub type EnumDefVariant = ast_model::EnumDefVariant<DefId>;
 pub type FunctionSig = ast_model::FunctionSig<DefId>;
 pub type MethodSig = ast_model::MethodSig<DefId>;
 pub type SelfParam = ast_model::SelfParam<DefId>;
-pub type ClosureSig = ast_model::ClosureSig<DefId>;
 pub type Param = ast_model::Param<DefId>;
 
 pub type BindPattern = ast_model::BindPattern<DefId>;
@@ -86,16 +85,6 @@ impl Module {
             .collect()
     }
 
-    pub fn closure_defs(&self) -> Vec<&ClosureDef> {
-        self.top_level_items
-            .iter()
-            .filter_map(|item| match item {
-                TopLevelItem::ClosureDef(closure_def) => Some(closure_def),
-                _ => None,
-            })
-            .collect()
-    }
-
     pub fn callables(&self) -> Vec<CallableRef<'_>> {
         self.top_level_items
             .iter()
@@ -110,9 +99,6 @@ impl Module {
                         method_def,
                     })
                     .collect(),
-                TopLevelItem::ClosureDef(closure_def) => {
-                    vec![CallableRef::ClosureDef(closure_def)]
-                }
                 TopLevelItem::TypeDef(_) => vec![],
             })
             .collect()
@@ -127,7 +113,6 @@ pub enum TopLevelItem {
     FuncDecl(FuncDecl),
     FuncDef(FuncDef),
     MethodBlock(MethodBlock),
-    ClosureDef(ClosureDef),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,7 +123,6 @@ pub enum CallableRef<'a> {
         type_name: &'a str,
         method_def: &'a MethodDef,
     },
-    ClosureDef(&'a ClosureDef),
 }
 
 // -- Functions ---
@@ -175,17 +159,6 @@ pub struct MethodDef {
     pub id: NodeId,
     pub def_id: DefId,
     pub sig: MethodSig,
-    pub body: ValueExpr,
-    pub span: Span,
-}
-
-// -- Closures ---
-
-#[derive(Clone, Debug)]
-pub struct ClosureDef {
-    pub id: NodeId,
-    pub def_id: DefId,
-    pub sig: ClosureSig,
     pub body: ValueExpr,
     pub span: Span,
 }

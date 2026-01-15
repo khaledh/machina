@@ -85,6 +85,12 @@ impl DefTable {
     pub fn next_def_id(&self) -> DefId {
         DefId(self.defs.len() as u32)
     }
+
+    pub fn add_def(&mut self, name: String, kind: DefKind) -> DefId {
+        let id = self.next_def_id();
+        self.defs.push(Def { id, name, kind });
+        id
+    }
 }
 
 impl IntoIterator for DefTable {
