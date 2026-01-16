@@ -1,5 +1,10 @@
 use crate::context::{SemanticCheckedContext, SemanticContext};
+mod calls;
+mod closure;
 mod elaborator;
+mod place;
+mod types;
+mod value;
 
 use crate::elaborate::elaborator::Elaborator;
 
