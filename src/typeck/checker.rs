@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
-use crate::tree::fold::{AstFolder, walk_expr, walk_if};
+use crate::tree::fold::{TreeFolder, walk_expr, walk_if};
 use crate::tree::resolved::*;
 use crate::tree::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::types::{
@@ -1557,7 +1557,7 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
     }
 }
 
-impl AstFolder<DefId> for TypeChecker {
+impl TreeFolder<DefId> for TypeChecker {
     type Error = TypeCheckError;
     type Output = Type;
     type Input = Type;

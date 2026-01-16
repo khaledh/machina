@@ -1,16 +1,44 @@
-use crate::tree::normalized as nir;
-use crate::tree::typed::model as tir;
+//! Build the normalized tree from the typed tree.
+//!
+//! This is the first normalize step: it is a 1:1 mapping of the typed tree,
+//! leaving coercions to the normalize pass.
 
-pub trait ToNormalized {
-    type Output;
+use crate::resolve::DefId;
+use crate::tree::map::TreeMapper;
+use crate::tree::normalized as norm;
+use crate::tree::typed as typ;
+use crate::types::TypeId;
 
-    fn to_normalized(self) -> Self::Output;
+struct NormalizedTreeMapper;
+
+impl TreeMapper for NormalizedTreeMapper {
+    type Context = ();
+    type InD = DefId;
+    type InT = TypeId;
+    type OutD = DefId;
+    type OutT = TypeId;
+
+    fn map_def_id(
+        &mut self,
+        _node_id: norm::NodeId,
+        def_id: &Self::InD,
+        _ctx: &mut Self::Context,
+    ) -> Self::OutD {
+        *def_id
+    }
+
+    fn map_type_payload(
+        &mut self,
+        _node_id: norm::NodeId,
+        payload: &Self::InT,
+        _ctx: &mut Self::Context,
+    ) -> Self::OutT {
+        *payload
+    }
 }
 
-impl ToNormalized for tir::Module {
-    type Output = nir::Module;
-
-    fn to_normalized(self) -> Self::Output {
-        self
-    }
+pub fn build_module(module: &typ::Module) -> norm::Module {
+    let mut ctx = ();
+    let mut mapper = NormalizedTreeMapper;
+    mapper.map_module(module, &mut ctx)
 }

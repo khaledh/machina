@@ -2,7 +2,7 @@ use crate::context::{NormalizedContext, TypeCheckedContext};
 use crate::resolve::DefId;
 use crate::tree::NodeIdGen;
 use crate::tree::normalized as norm;
-use crate::tree::normalized::builder::ToNormalized;
+use crate::tree::normalized::build_module;
 use crate::tree::visit_mut;
 use crate::tree::visit_mut::VisitorMut;
 use crate::typeck::type_map::{CallParam, TypeMap};
@@ -21,7 +21,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         symbols,
         node_id_gen,
     } = ctx;
-    let mut module = module.to_normalized();
+    let mut module = build_module(&module);
     let mut type_map = type_map;
     let mut node_id_gen = node_id_gen;
     let mut normalizer = Normalizer::new(&mut type_map, &mut node_id_gen);

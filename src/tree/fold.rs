@@ -6,10 +6,10 @@ use crate::tree::*;
 /// corresponding `walk_*` function to recurse into children.
 /// Example:
 /// ```rust
-/// use machina::ast::fold::{AstFolder, Expr, ExprKind, StmtExpr};
+/// use machina::tree::fold::{TreeFolder, Expr, ExprKind, StmtExpr};
 ///
 /// struct CountExprs;
-/// impl AstFolder for CountExprs {
+/// impl TreeFolder for CountExprs {
 ///     type Error = ();
 ///     type Output = usize;
 ///     type Input = ();
@@ -29,7 +29,7 @@ use crate::tree::*;
 ///     }
 /// }
 /// ```
-pub trait AstFolder<D = String, T = ()> {
+pub trait TreeFolder<D = String, T = ()> {
     type Error;
     type Output;
     type Input;
@@ -159,7 +159,7 @@ pub trait AstFolder<D = String, T = ()> {
 
 // --- Module ---
 
-pub fn walk_module<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_module<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     module: &Module<D, T>,
 ) -> Result<Vec<F::Output>, F::Error> {
@@ -178,7 +178,7 @@ pub fn walk_module<F: AstFolder<D, T> + ?Sized, D, T>(
 
 // --- Functions ---
 
-pub fn walk_func_def<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_func_def<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     func_def: &FuncDef<D, T>,
 ) -> Result<F::Output, F::Error> {
@@ -187,7 +187,7 @@ pub fn walk_func_def<F: AstFolder<D, T> + ?Sized, D, T>(
 
 // --- Methods ---
 
-pub fn walk_method_block<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_method_block<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     method_block: &MethodBlock<D, T>,
 ) -> Result<Vec<F::Output>, F::Error> {
@@ -198,7 +198,7 @@ pub fn walk_method_block<F: AstFolder<D, T> + ?Sized, D, T>(
         .collect()
 }
 
-pub fn walk_method_def<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_method_def<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     method_def: &MethodDef<D, T>,
 ) -> Result<F::Output, F::Error> {
@@ -207,7 +207,7 @@ pub fn walk_method_def<F: AstFolder<D, T> + ?Sized, D, T>(
 
 // --- Blocks ---
 
-pub fn walk_block_item<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_block_item<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     item: &BlockItem<D, T>,
 ) -> Result<F::Output, F::Error> {
@@ -217,7 +217,7 @@ pub fn walk_block_item<F: AstFolder<D, T> + ?Sized, D, T>(
     }
 }
 
-pub fn walk_block_tail<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_block_tail<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     tail: Option<&Expr<D, T>>,
     expected: Option<&F::Input>,
@@ -229,7 +229,7 @@ pub fn walk_block_tail<F: AstFolder<D, T> + ?Sized, D, T>(
 }
 
 /// Visit a block's items and optional tail expression.
-pub fn walk_block<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_block<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     items: &[BlockItem<D, T>],
     tail: Option<&Expr<D, T>>,
@@ -247,7 +247,7 @@ pub fn walk_block<F: AstFolder<D, T> + ?Sized, D, T>(
 // --- Expressions ---
 
 /// Visit a list of expressions with no input.
-pub fn walk_exprs<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_exprs<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     exprs: &[Expr<D, T>],
 ) -> Result<Vec<F::Output>, F::Error> {
@@ -255,7 +255,7 @@ pub fn walk_exprs<F: AstFolder<D, T> + ?Sized, D, T>(
 }
 
 /// Visit a single expression with no input.
-pub fn walk_expr<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_expr<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     expr: &Expr<D, T>,
 ) -> Result<F::Output, F::Error> {
@@ -263,7 +263,7 @@ pub fn walk_expr<F: AstFolder<D, T> + ?Sized, D, T>(
 }
 
 /// Visit a binary expression's children and return their outputs.
-pub fn walk_binary_expr<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_binary_expr<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     left: &Expr<D, T>,
     right: &Expr<D, T>,
@@ -271,7 +271,7 @@ pub fn walk_binary_expr<F: AstFolder<D, T> + ?Sized, D, T>(
     Ok((walk_expr(f, left)?, walk_expr(f, right)?))
 }
 
-pub fn walk_call<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_call<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     callee: &Expr<D, T>,
     args: &[CallArg<D, T>],
@@ -282,7 +282,7 @@ pub fn walk_call<F: AstFolder<D, T> + ?Sized, D, T>(
     Ok(outputs)
 }
 
-pub fn walk_array_lit_init<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_array_lit_init<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     init: &ArrayLitInit<D, T>,
     expected: Option<&F::Input>,
@@ -299,7 +299,7 @@ pub fn walk_array_lit_init<F: AstFolder<D, T> + ?Sized, D, T>(
 // --- Control Flow ---
 
 /// Visit an if expression's condition and branches.
-pub fn walk_if<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_if<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     cond: &Expr<D, T>,
     then_body: &Expr<D, T>,
@@ -313,7 +313,7 @@ pub fn walk_if<F: AstFolder<D, T> + ?Sized, D, T>(
 }
 
 /// Visit each match arm using a caller-provided hook.
-pub fn walk_match_arms<F: AstFolder<D, T> + ?Sized, D, T, U>(
+pub fn walk_match_arms<F: TreeFolder<D, T> + ?Sized, D, T, U>(
     f: &mut F,
     arms: &[MatchArm<D, T>],
     mut visit_arm: impl FnMut(&mut F, &MatchArm<D, T>) -> Result<U, F::Error>,
@@ -325,7 +325,7 @@ pub fn walk_match_arms<F: AstFolder<D, T> + ?Sized, D, T, U>(
     Ok(outputs)
 }
 
-pub fn walk_match_arm<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_match_arm<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     arm: &MatchArm<D, T>,
 ) -> Result<F::Output, F::Error> {
@@ -335,7 +335,7 @@ pub fn walk_match_arm<F: AstFolder<D, T> + ?Sized, D, T>(
 // --- Calls ---
 
 /// Visit a call's arguments (callee handling is left to the caller).
-pub fn walk_call_args<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_call_args<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     args: &[CallArg<D, T>],
 ) -> Result<Vec<F::Output>, F::Error> {
@@ -345,7 +345,7 @@ pub fn walk_call_args<F: AstFolder<D, T> + ?Sized, D, T>(
 // --- Closures ---
 
 /// Visit a closure body (params/return types are handled by the caller).
-pub fn walk_closure<F: AstFolder<D, T> + ?Sized, D, T>(
+pub fn walk_closure<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     body: &Expr<D, T>,
 ) -> Result<F::Output, F::Error> {

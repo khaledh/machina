@@ -6,5 +6,5 @@
 pub mod builder;
 pub mod model;
 
-pub use builder::ResolvedTreeBuilder;
+pub use builder::build_module;
 pub use model::*;
