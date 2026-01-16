@@ -140,6 +140,12 @@ pub enum SemCheckError {
 
     #[error("Slice target must be an lvalue")]
     SliceTargetNotLvalue(Span),
+
+    #[error("Cannot mutate captured variable `{0}` inside closure")]
+    ClosureCaptureMutate(String, Span),
+
+    #[error("Cannot move captured variable `{0}` inside closure")]
+    ClosureCaptureMove(String, Span),
 }
 
 impl SemCheckError {
@@ -190,6 +196,8 @@ impl SemCheckError {
             SemCheckError::SliceEscapeStore(span) => *span,
             SemCheckError::SliceBorrowConflict(span) => *span,
             SemCheckError::SliceTargetNotLvalue(span) => *span,
+            SemCheckError::ClosureCaptureMutate(_, span) => *span,
+            SemCheckError::ClosureCaptureMove(_, span) => *span,
         }
     }
 }

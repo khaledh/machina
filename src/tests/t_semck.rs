@@ -132,6 +132,47 @@ fn test_range_invalid_bounds() {
 }
 
 #[test]
+fn test_closure_capture_read_only_ok() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 5;
+            let add = |y: u64| -> u64 {
+                x + y
+            };
+            add(2)
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_closure_capture_mutation_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 0;
+            let bump = || {
+                x = x + 1;
+            };
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|err| matches!(err, SemCheckError::ClosureCaptureMutate(_, _))),
+            "Expected ClosureCaptureMutate error, got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
 fn test_struct_pattern_missing_field() {
     let source = r#"
         type Point = { x: u64, y: u64 }

@@ -1,4 +1,5 @@
 mod ast_liveness;
+mod closure_capture;
 mod def_init;
 mod errors;
 mod lvalue_overlap;
@@ -18,12 +19,14 @@ pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<S
 
     let move_result = move_check::check(&ctx);
     let def_init_result = def_init::check(&ctx);
+    let capture_result = closure_capture::check(&ctx);
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
     errors.extend(lvalue_overlap::check(&ctx));
     errors.extend(slice_borrow::check(&ctx));
     errors.extend(def_init_result.errors);
+    errors.extend(capture_result.errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
 
@@ -32,6 +35,7 @@ pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<S
             move_result.implicit_moves,
             def_init_result.init_assigns,
             def_init_result.full_init_assigns,
+            capture_result.captures,
         ))
     } else {
         Err(errors)

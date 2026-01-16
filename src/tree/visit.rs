@@ -105,6 +105,26 @@ pub trait Visitor<D = String, T = ()> {
         walk_block_item(self, item)
     }
 
+    // --- Bind Patterns ---
+
+    fn visit_bind_pattern(&mut self, pattern: &BindPattern<D>) {
+        walk_bind_pattern(self, pattern)
+    }
+
+    // --- Match Patterns ---
+
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern<D>) {
+        walk_match_pattern(self, pattern)
+    }
+
+    fn visit_match_arm(&mut self, arm: &MatchArm<D, T>) {
+        walk_match_arm(self, arm)
+    }
+
+    fn visit_match_pattern_binding(&mut self, binding: &MatchPatternBinding<D>) {
+        walk_match_pattern_binding(self, binding)
+    }
+
     // --- Expressions ---
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr<D, T>) {
@@ -269,11 +289,66 @@ pub fn walk_block_item<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, item: &BlockI
     }
 }
 
+// --- Bind Patterns ---
+
+pub fn walk_bind_pattern<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, pattern: &BindPattern<D>) {
+    match &pattern.kind {
+        BindPatternKind::Name { .. } => {}
+        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
+            for pattern in patterns {
+                v.visit_bind_pattern(pattern);
+            }
+        }
+        BindPatternKind::Struct { fields, .. } => {
+            for field in fields {
+                v.visit_bind_pattern(&field.pattern);
+            }
+        }
+    }
+}
+
+// --- Match Patterns ---
+
+pub fn walk_match_pattern<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, pattern: &MatchPattern<D>) {
+    match pattern {
+        MatchPattern::Tuple { patterns, .. } => {
+            for pattern in patterns {
+                v.visit_match_pattern(pattern);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn walk_match_pattern_bindings<V: Visitor<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    pattern: &MatchPattern<D>,
+) {
+    if let MatchPattern::EnumVariant { bindings, .. } = pattern {
+        for binding in bindings {
+            v.visit_match_pattern_binding(binding);
+        }
+    }
+}
+
+pub fn walk_match_pattern_binding<V: Visitor<D, T> + ?Sized, D, T>(
+    _v: &mut V,
+    _binding: &MatchPatternBinding<D>,
+) {
+}
+
+pub fn walk_match_arm<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, arm: &MatchArm<D, T>) {
+    v.visit_match_pattern(&arm.pattern);
+    v.visit_expr(&arm.body);
+}
+
 // --- Expressions ---
 
 pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExpr<D, T>) {
     match &stmt.kind {
-        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
+        StmtExprKind::LetBind { pattern, value, .. }
+        | StmtExprKind::VarBind { pattern, value, .. } => {
+            v.visit_bind_pattern(pattern);
             v.visit_expr(value);
         }
         StmtExprKind::VarDecl { .. } => {}
@@ -287,7 +362,12 @@ pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExp
             v.visit_expr(cond);
             v.visit_expr(body);
         }
-        StmtExprKind::For { iter, body, .. } => {
+        StmtExprKind::For {
+            pattern,
+            iter,
+            body,
+        } => {
+            v.visit_bind_pattern(pattern);
             v.visit_expr(iter);
             v.visit_expr(body);
         }
@@ -432,7 +512,7 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         ExprKind::Match { scrutinee, arms } => {
             v.visit_expr(scrutinee);
             for arm in arms {
-                v.visit_expr(&arm.body);
+                v.visit_match_arm(arm);
             }
         }
 

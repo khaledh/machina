@@ -58,6 +58,13 @@ impl DefTable {
         self.defs.get(def_id.0 as usize)
     }
 
+    pub fn lookup_type_def_id(&self, name: &str) -> Option<DefId> {
+        self.defs
+            .iter()
+            .find(|def| def.name == name && matches!(def.kind, DefKind::TypeDef))
+            .map(|def| def.id)
+    }
+
     pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
         if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id)
             && let DefKind::LocalVar { nrvo_eligible, .. } = &mut def.kind

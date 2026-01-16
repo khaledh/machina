@@ -10,11 +10,51 @@ use crate::typeck::type_map::{CallParam, CallSig, TypeMap};
 use crate::types::{Type, TypeId};
 
 #[derive(Clone, Debug)]
+struct CaptureField {
+    def_id: DefId,
+    name: String,
+    ty: Type,
+    ty_id: TypeId,
+    ty_expr: sem::TypeExpr,
+}
+
+#[derive(Clone, Debug)]
 struct ClosureInfo {
     type_name: String,
     type_id: TypeId,
     param_modes: Vec<ParamMode>,
     ty: Type,
+    self_def_id: DefId,
+    captures: Vec<CaptureField>,
+}
+
+#[derive(Clone, Debug)]
+struct ClosureContext {
+    self_def_id: DefId,
+    type_id: TypeId,
+    ty: Type,
+    captures: HashMap<DefId, CaptureField>,
+}
+
+impl ClosureContext {
+    fn new(info: &ClosureInfo) -> Self {
+        let captures = info
+            .captures
+            .iter()
+            .cloned()
+            .map(|capture| (capture.def_id, capture))
+            .collect();
+        Self {
+            self_def_id: info.self_def_id,
+            type_id: info.type_id,
+            ty: info.ty.clone(),
+            captures,
+        }
+    }
+
+    fn capture_field(&self, def_id: DefId) -> Option<&CaptureField> {
+        self.captures.get(&def_id)
+    }
 }
 
 pub struct Elaborator<'a> {
@@ -24,10 +64,12 @@ pub struct Elaborator<'a> {
     implicit_moves: &'a HashSet<NodeId>,
     init_assigns: &'a HashSet<NodeId>,
     full_init_assigns: &'a HashSet<NodeId>,
+    closure_captures: &'a HashMap<DefId, Vec<DefId>>,
     closure_types: Vec<sem::TypeDef>,
     closure_methods: Vec<sem::MethodBlock>,
     closure_info: HashMap<DefId, ClosureInfo>,
     closure_bindings: HashMap<DefId, DefId>,
+    closure_stack: Vec<ClosureContext>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -38,6 +80,7 @@ impl<'a> Elaborator<'a> {
         implicit_moves: &'a HashSet<NodeId>,
         init_assigns: &'a HashSet<NodeId>,
         full_init_assigns: &'a HashSet<NodeId>,
+        closure_captures: &'a HashMap<DefId, Vec<DefId>>,
     ) -> Self {
         Self {
             def_table,
@@ -46,10 +89,12 @@ impl<'a> Elaborator<'a> {
             implicit_moves,
             init_assigns,
             full_init_assigns,
+            closure_captures,
             closure_types: Vec::new(),
             closure_methods: Vec::new(),
             closure_info: HashMap::new(),
             closure_bindings: HashMap::new(),
+            closure_stack: Vec::new(),
         }
     }
 
@@ -59,6 +104,7 @@ impl<'a> Elaborator<'a> {
         self.closure_methods.clear();
         self.closure_info.clear();
         self.closure_bindings.clear();
+        self.closure_stack.clear();
         let mut top_level_items: Vec<_> = module
             .top_level_items
             .iter()
@@ -124,19 +170,143 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    fn capture_fields_for(&mut self, closure_def_id: DefId, span: Span) -> Vec<CaptureField> {
+        let Some(captures) = self.closure_captures.get(&closure_def_id) else {
+            return Vec::new();
+        };
+        let mut fields = Vec::with_capacity(captures.len());
+        for def_id in captures {
+            let def = self
+                .def_table
+                .lookup_def(*def_id)
+                .unwrap_or_else(|| panic!("compiler bug: missing def for capture {def_id}"))
+                .clone();
+            let name = def.name.clone();
+            let ty = self
+                .type_map
+                .lookup_def_type(&def)
+                .unwrap_or_else(|| panic!("compiler bug: missing type for capture {def_id}"));
+            let ty_id = self
+                .type_map
+                .lookup_def_type_id(&def)
+                .unwrap_or_else(|| panic!("compiler bug: missing type id for capture {def_id}"));
+            let ty_expr = self.type_expr_from_type(&ty, span);
+            fields.push(CaptureField {
+                def_id: *def_id,
+                name,
+                ty,
+                ty_id,
+                ty_expr,
+            });
+        }
+        fields
+    }
+
+    fn type_expr_from_type(&mut self, ty: &Type, span: Span) -> sem::TypeExpr {
+        let id = self.node_id_gen.new_id();
+        let kind = match ty {
+            Type::Unknown => {
+                panic!("compiler bug: unknown type in closure capture at {}", span)
+            }
+            Type::Unit => self.named_type_expr("()", span),
+            Type::Int { signed, bits } => {
+                let name = match (*signed, *bits) {
+                    (false, 8) => "u8",
+                    (false, 16) => "u16",
+                    (false, 32) => "u32",
+                    (false, 64) => "u64",
+                    (true, 8) => "i8",
+                    (true, 16) => "i16",
+                    (true, 32) => "i32",
+                    (true, 64) => "i64",
+                    _ => {
+                        panic!("compiler bug: unsupported int type signed={signed} bits={bits}")
+                    }
+                };
+                self.named_type_expr(name, span)
+            }
+            Type::Bool => self.named_type_expr("bool", span),
+            Type::Char => self.named_type_expr("char", span),
+            Type::String => self.named_type_expr("string", span),
+            Type::Range { min, max } => sem::TypeExprKind::Range {
+                min: *min,
+                max: *max,
+            },
+            Type::Array { elem_ty, dims } => sem::TypeExprKind::Array {
+                elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
+                dims: dims.clone(),
+            },
+            Type::Tuple { field_tys } => sem::TypeExprKind::Tuple {
+                field_ty_exprs: field_tys
+                    .iter()
+                    .map(|field| self.type_expr_from_type(field, span))
+                    .collect(),
+            },
+            Type::Struct { name, .. } | Type::Enum { name, .. } => self.named_type_expr(name, span),
+            Type::Slice { elem_ty } => sem::TypeExprKind::Slice {
+                elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
+            },
+            Type::Heap { elem_ty } => sem::TypeExprKind::Heap {
+                elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
+            },
+            Type::Fn { params, ret_ty } => sem::TypeExprKind::Fn {
+                params: params
+                    .iter()
+                    .map(|param| sem::FnTypeParam {
+                        mode: match param.mode {
+                            crate::types::FnParamMode::In => ParamMode::In,
+                            crate::types::FnParamMode::InOut => ParamMode::InOut,
+                            crate::types::FnParamMode::Out => ParamMode::Out,
+                            crate::types::FnParamMode::Sink => ParamMode::Sink,
+                        },
+                        ty_expr: self.type_expr_from_type(&param.ty, span),
+                    })
+                    .collect(),
+                ret_ty_expr: Box::new(self.type_expr_from_type(ret_ty, span)),
+            },
+        };
+
+        sem::TypeExpr { id, kind, span }
+    }
+
+    fn named_type_expr(&self, name: &str, span: Span) -> sem::TypeExprKind {
+        let def_id = self
+            .def_table
+            .lookup_type_def_id(name)
+            .unwrap_or_else(|| panic!("compiler bug: missing def id for type {name} at {}", span));
+        sem::TypeExprKind::Named {
+            ident: name.to_string(),
+            def_id,
+        }
+    }
+
     fn new_value(&mut self, kind: sem::ValueExprKind, ty: TypeId, span: Span) -> sem::ValueExpr {
         let id = self.node_id_gen.new_id();
         sem::ValueExpr { id, kind, ty, span }
     }
 
-    fn make_closure_type(&mut self, ident: &str, span: Span) -> (String, TypeId, Type, DefId) {
+    fn make_closure_type(
+        &mut self,
+        ident: &str,
+        span: Span,
+        captures: &[CaptureField],
+    ) -> (String, TypeId, Type, DefId) {
         let type_name = ident.to_string();
         let type_def_id = self.def_table.add_def(type_name.clone(), DefKind::TypeDef);
+        let fields = captures
+            .iter()
+            .map(|capture| sem::StructDefField {
+                id: self.node_id_gen.new_id(),
+                name: capture.name.clone(),
+                ty: capture.ty_expr.clone(),
+                span,
+            })
+            .collect();
         let type_def = sem::TypeDef {
             id: self.node_id_gen.new_id(),
             def_id: type_def_id,
             name: type_name.clone(),
-            kind: sem::TypeDefKind::Struct { fields: Vec::new() },
+            kind: sem::TypeDefKind::Struct { fields },
             span,
         };
         self.closure_types.push(type_def);
@@ -150,9 +320,16 @@ impl<'a> Elaborator<'a> {
             },
         );
 
+        let closure_fields = captures
+            .iter()
+            .map(|capture| crate::types::StructField {
+                name: capture.name.clone(),
+                ty: capture.ty.clone(),
+            })
+            .collect();
         let closure_ty = Type::Struct {
             name: type_name.clone(),
-            fields: Vec::new(),
+            fields: closure_fields,
         };
         let ty_id = self
             .type_map
@@ -180,8 +357,10 @@ impl<'a> Elaborator<'a> {
             return info.clone();
         }
 
-        // Synthesize a zero-field closure struct and an invoke method that uses the closure body.
-        let (type_name, type_id, closure_ty, self_def_id) = self.make_closure_type(ident, span);
+        // Synthesize a closure struct + invoke method for this closure definition.
+        let captures = self.capture_fields_for(def_id, span);
+        let (type_name, type_id, closure_ty, self_def_id) =
+            self.make_closure_type(ident, span, &captures);
         let param_modes = params.iter().map(|param| param.mode.clone()).collect();
 
         let return_ty_val = match self.type_map.lookup_node_type(expr_id) {
@@ -206,6 +385,17 @@ impl<'a> Elaborator<'a> {
         self.type_map
             .insert_node_type(method_id, return_ty_val.clone());
 
+        let info = ClosureInfo {
+            type_name,
+            type_id,
+            param_modes,
+            ty: closure_ty,
+            self_def_id,
+            captures,
+        };
+        self.closure_info.insert(def_id, info.clone());
+
+        self.closure_stack.push(ClosureContext::new(&info));
         let method_def = sem::MethodDef {
             id: method_id,
             def_id,
@@ -219,21 +409,14 @@ impl<'a> Elaborator<'a> {
             body: self.elab_value(body),
             span,
         };
+        self.closure_stack.pop();
 
         self.closure_methods.push(sem::MethodBlock {
             id: self.node_id_gen.new_id(),
-            type_name: type_name.clone(),
+            type_name: info.type_name.clone(),
             method_defs: vec![method_def],
             span,
         });
-
-        let info = ClosureInfo {
-            type_name,
-            type_id,
-            param_modes,
-            ty: closure_ty,
-        };
-        self.closure_info.insert(def_id, info.clone());
         info
     }
 
@@ -313,6 +496,76 @@ impl<'a> Elaborator<'a> {
             }
             _ => None,
         }
+    }
+
+    fn capture_place_for(
+        &mut self,
+        def_id: DefId,
+        place_id: NodeId,
+        span: Span,
+    ) -> Option<sem::PlaceExpr> {
+        let ctx = self.closure_stack.last()?;
+        let field = ctx.capture_field(def_id)?;
+        let env_id = self.node_id_gen.new_id();
+        let env_place = sem::PlaceExpr {
+            id: env_id,
+            kind: sem::PlaceExprKind::Var {
+                ident: "env".to_string(),
+                def_id: ctx.self_def_id,
+            },
+            ty: ctx.type_id,
+            span,
+        };
+        self.type_map.insert_node_type(env_id, ctx.ty.clone());
+        self.type_map.insert_node_type(place_id, field.ty.clone());
+        Some(sem::PlaceExpr {
+            id: place_id,
+            kind: sem::PlaceExprKind::StructField {
+                target: Box::new(env_place),
+                field: field.name.clone(),
+            },
+            ty: field.ty_id,
+            span,
+        })
+    }
+
+    fn value_for_def(&mut self, def_id: DefId, span: Span) -> sem::ValueExpr {
+        let def = self
+            .def_table
+            .lookup_def(def_id)
+            .unwrap_or_else(|| panic!("compiler bug: missing def {def_id}"))
+            .clone();
+        let name = def.name.clone();
+        let ty = self
+            .type_map
+            .lookup_def_type(&def)
+            .unwrap_or_else(|| panic!("compiler bug: missing type for {def_id}"));
+        let ty_id = self
+            .type_map
+            .lookup_def_type_id(&def)
+            .unwrap_or_else(|| panic!("compiler bug: missing type id for {def_id}"));
+        let place_id = self.node_id_gen.new_id();
+        let place = if let Some(place) = self.capture_place_for(def_id, place_id, span) {
+            place
+        } else {
+            self.type_map.insert_node_type(place_id, ty.clone());
+            sem::PlaceExpr {
+                id: place_id,
+                kind: sem::PlaceExprKind::Var {
+                    ident: name,
+                    def_id,
+                },
+                ty: ty_id,
+                span,
+            }
+        };
+        self.new_value(
+            sem::ValueExprKind::Load {
+                place: Box::new(place),
+            },
+            ty_id,
+            span,
+        )
     }
 
     fn elab_block_item(&mut self, item: &norm::BlockItem) -> sem::BlockItem {
@@ -537,6 +790,11 @@ impl<'a> Elaborator<'a> {
     }
 
     fn elab_place(&mut self, expr: &norm::Expr) -> sem::PlaceExpr {
+        if let norm::ExprKind::Var { def_id, .. } = &expr.kind {
+            if let Some(place) = self.capture_place_for(*def_id, expr.id, expr.span) {
+                return place;
+            }
+        }
         let kind = match &expr.kind {
             norm::ExprKind::Var { ident, def_id } => sem::PlaceExprKind::Var {
                 ident: ident.clone(),
@@ -792,11 +1050,20 @@ impl<'a> Elaborator<'a> {
                     ident, *def_id, params, return_ty, body, expr.span, expr.id,
                 );
                 let ty_id = self.type_map.insert_node_type(expr.id, info.ty.clone());
+                let fields = info
+                    .captures
+                    .iter()
+                    .map(|capture| sem::StructLitField {
+                        name: capture.name.clone(),
+                        value: self.value_for_def(capture.def_id, expr.span),
+                        span: expr.span,
+                    })
+                    .collect();
                 return sem::ValueExpr {
                     id: expr.id,
                     kind: sem::ValueExprKind::StructLit {
                         name: info.type_name,
-                        fields: Vec::new(),
+                        fields,
                     },
                     ty: ty_id,
                     span: expr.span,

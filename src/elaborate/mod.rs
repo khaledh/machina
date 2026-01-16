@@ -18,6 +18,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         &ctx.implicit_moves,
         &ctx.init_assigns,
         &ctx.full_init_assigns,
+        &ctx.closure_captures,
     );
 
     let module = elaborator.elaborate_module(&ctx.module);

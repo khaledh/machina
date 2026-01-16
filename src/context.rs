@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::liveness::LiveMap;
 use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
 use crate::regalloc::AllocationResult;
-use crate::resolve::DefTable;
+use crate::resolve::{DefId, DefTable};
 use crate::symtab::SymbolTable;
 use crate::tree::normalized::Module as NormalizedModule;
 use crate::tree::parsed::Module as ParsedModule;
@@ -99,6 +99,7 @@ impl NormalizedContext {
         implicit_moves: HashSet<NodeId>,
         init_assigns: HashSet<NodeId>,
         full_init_assigns: HashSet<NodeId>,
+        closure_captures: HashMap<DefId, Vec<DefId>>,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
             module: self.module,
@@ -109,6 +110,7 @@ impl NormalizedContext {
             implicit_moves,
             init_assigns,
             full_init_assigns,
+            closure_captures,
         }
     }
 }
@@ -127,6 +129,7 @@ pub struct SemanticCheckedContext {
     pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,
+    pub closure_captures: HashMap<DefId, Vec<DefId>>,
 }
 
 // -----------------------------------------------------------------------------
