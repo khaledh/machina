@@ -378,6 +378,12 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
             StmtExprKind::For { iter, .. } => {
                 self.visit_expr(iter);
             }
+            StmtExprKind::Break | StmtExprKind::Continue => {}
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    self.visit_expr(value);
+                }
+            }
         }
     }
 

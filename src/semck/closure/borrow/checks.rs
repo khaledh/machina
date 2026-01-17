@@ -174,6 +174,12 @@ fn check_item_for_conflicts(
                     visitor.visit_expr(iter);
                     visitor.visit_expr(body);
                 }
+                StmtExprKind::Break | StmtExprKind::Continue => {}
+                StmtExprKind::Return { value } => {
+                    if let Some(value) = value {
+                        visitor.visit_expr(value);
+                    }
+                }
             },
             TreeCfgItem::Expr(expr) => visitor.visit_expr(expr),
         }
@@ -204,6 +210,13 @@ fn check_item_for_conflicts(
                     let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
                     visitor.visit_expr(iter);
                     visitor.visit_expr(body);
+                }
+                StmtExprKind::Break | StmtExprKind::Continue => {}
+                StmtExprKind::Return { value } => {
+                    if let Some(value) = value {
+                        let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
+                        visitor.visit_expr(value);
+                    }
                 }
             },
             TreeCfgItem::Expr(expr) => {
@@ -398,6 +411,12 @@ fn check_item_for_escapes(
             StmtExprKind::For { iter, body, .. } => {
                 check_expr_for_escapes(iter, state, capture_map, errors);
                 check_expr_for_escapes(body, state, capture_map, errors);
+            }
+            StmtExprKind::Break | StmtExprKind::Continue => {}
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    check_expr_for_escapes(value, state, capture_map, errors);
+                }
             }
         },
         TreeCfgItem::Expr(expr) => {

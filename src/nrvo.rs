@@ -144,6 +144,10 @@ impl NrvoSafetyChecker {
                 let body_ok = self.check_expr(body, false);
                 iter_ok && body_ok
             }
+            SEK::Break | SEK::Continue => true,
+            SEK::Return { value } => value
+                .as_deref()
+                .is_none_or(|expr| self.check_expr(expr, true)),
         }
     }
 

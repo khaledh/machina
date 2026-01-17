@@ -23,6 +23,9 @@ impl<'a> FuncLowerer<'a> {
                 return Err(LowerError::PatternMismatch(pattern.id));
             };
             let op = self.lower_scalar_expr(value)?;
+            if self.is_curr_block_terminated() {
+                return Ok(());
+            }
             let target_ty = self.def_ty_for_id(*def_id, pattern.id)?;
             self.emit_conversion_check(&value_ty, &target_ty, &op);
 
@@ -47,6 +50,9 @@ impl<'a> FuncLowerer<'a> {
                     return Err(LowerError::PatternMismatch(pattern.id));
                 }
             };
+            if self.is_curr_block_terminated() {
+                return Ok(());
+            }
 
             return self.bind_pattern_with_type(pattern, src_place, &value_ty);
         };
@@ -73,6 +79,9 @@ impl<'a> FuncLowerer<'a> {
             let ret_ty = self.fb.body.locals[ret_id.0 as usize].ty;
             let dst = Place::new(ret_id, ret_ty, vec![]);
             self.lower_agg_value_into(dst, value)?;
+            if self.is_curr_block_terminated() {
+                return Ok(());
+            }
 
             // NRVO still needs drop tracking for owned values.
             let name = self.def_name(def_id, pattern.id)?;
@@ -90,6 +99,9 @@ impl<'a> FuncLowerer<'a> {
         // Lower aggregate into the local place.
         let dst = Place::new(local_id, ty_id, vec![]);
         self.lower_agg_value_into(dst, value)?;
+        if self.is_curr_block_terminated() {
+            return Ok(());
+        }
 
         // Track owned heap values for drop at scope exit.
         let is_initialized = self.create_is_initialized(&name, &value_ty, true);

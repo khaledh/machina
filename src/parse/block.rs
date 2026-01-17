@@ -27,6 +27,18 @@ impl<'a> Parser<'a> {
                     let stmt = self.parse_for()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
+                TK::KwBreak => {
+                    let stmt = self.parse_break()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
+                TK::KwContinue => {
+                    let stmt = self.parse_continue()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
+                TK::KwReturn => {
+                    let stmt = self.parse_return()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
                 _ => {
                     let expr = self.parse_expr(0)?;
                     match self.curr_token.kind {
@@ -175,7 +187,9 @@ impl<'a> Parser<'a> {
 
         self.consume_keyword(TK::KwWhile)?;
 
+        self.allow_struct_lit = false;
         let cond = self.parse_expr(0)?;
+        self.allow_struct_lit = true;
 
         let body = self.parse_block()?;
 
@@ -218,6 +232,55 @@ impl<'a> Parser<'a> {
                 iter: Box::new(iter),
                 body: Box::new(body),
             },
+            ty: (),
+            span: self.close(marker),
+        })
+    }
+
+    pub(super) fn parse_break(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        self.consume_keyword(TK::KwBreak)?;
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::Break,
+            ty: (),
+            span: self.close(marker),
+        })
+    }
+
+    pub(super) fn parse_continue(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        self.consume_keyword(TK::KwContinue)?;
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::Continue,
+            ty: (),
+            span: self.close(marker),
+        })
+    }
+
+    pub(super) fn parse_return(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        self.consume_keyword(TK::KwReturn)?;
+
+        let value = if self.curr_token.kind == TK::Semicolon {
+            None
+        } else {
+            Some(Box::new(self.parse_expr(0)?))
+        };
+
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::Return { value },
             ty: (),
             span: self.close(marker),
         })

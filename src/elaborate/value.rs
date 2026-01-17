@@ -70,6 +70,11 @@ impl<'a> Elaborator<'a> {
                 iter: Box::new(self.elab_value(iter)),
                 body: Box::new(self.elab_value(body)),
             },
+            norm::StmtExprKind::Break => sem::StmtExprKind::Break,
+            norm::StmtExprKind::Continue => sem::StmtExprKind::Continue,
+            norm::StmtExprKind::Return { value } => sem::StmtExprKind::Return {
+                value: value.as_ref().map(|expr| Box::new(self.elab_value(expr))),
+            },
         };
 
         sem::StmtExpr {

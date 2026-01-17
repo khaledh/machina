@@ -137,6 +137,18 @@ fn greet(name: string) {
 }
 ```
 
+Use `return` for early exits or explicit returns:
+
+```
+fn clamp(n: i64) -> i64 {
+    if n < 0 {
+        return 0;
+    } else {
+        n
+    }
+}
+```
+
 ### Parameter Modes
 
 Machina uses explicit parameter modes to control how arguments are passed:

@@ -269,6 +269,11 @@ pub enum StmtExprKind {
         iter: Box<ValueExpr>,
         body: Box<ValueExpr>,
     },
+    Break,
+    Continue,
+    Return {
+        value: Option<Box<ValueExpr>>,
+    },
 }
 
 // -- Places ---

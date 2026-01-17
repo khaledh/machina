@@ -44,18 +44,28 @@ impl<'a> FuncLowerer<'a> {
             return Ok(());
         };
 
-        // Drop remaining owned heap locals in reverse definition order.
-        for info in scope.locals.iter().rev() {
-            if info.is_initialized.is_none() && scope.moved.contains(&info.def_id) {
-                continue;
-            }
-            if info.ty.needs_drop() {
-                if let Some(flag) = info.is_initialized {
-                    self.emit_drop_value_if_initialized(info.def_id, &info.ty, flag)?;
-                } else {
-                    self.emit_drop_value(info.def_id, &info.ty)?;
-                }
-            }
+        self.emit_drop_scope(&scope)?;
+        Ok(())
+    }
+
+    pub(super) fn pop_drop_scope_without_drops(&mut self) {
+        self.drop_scopes.pop();
+    }
+
+    pub(super) fn emit_drops_to_depth(&mut self, depth: usize) -> Result<(), LowerError> {
+        let len = self.drop_scopes.len();
+        if depth >= len {
+            return Ok(());
+        }
+        let scopes = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .take(len - depth)
+            .cloned()
+            .collect::<Vec<_>>();
+        for scope in scopes {
+            self.emit_drop_scope(&scope)?;
         }
         Ok(())
     }
@@ -236,5 +246,21 @@ impl<'a> FuncLowerer<'a> {
         let flag_ty = self.fb.body.locals[flag.0 as usize].ty;
         let flag_place = Place::new(flag, flag_ty, vec![]);
         self.emit_copy_scalar(flag_place, Rvalue::Use(Operand::Const(Const::Bool(value))));
+    }
+
+    fn emit_drop_scope(&mut self, scope: &DropScope) -> Result<(), LowerError> {
+        for info in scope.locals.iter().rev() {
+            if info.is_initialized.is_none() && scope.moved.contains(&info.def_id) {
+                continue;
+            }
+            if info.ty.needs_drop() {
+                if let Some(flag) = info.is_initialized {
+                    self.emit_drop_value_if_initialized(info.def_id, &info.ty, flag)?;
+                } else {
+                    self.emit_drop_value(info.def_id, &info.ty)?;
+                }
+            }
+        }
+        Ok(())
     }
 }

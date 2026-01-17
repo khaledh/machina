@@ -119,7 +119,11 @@ fn collect_stmt_defs_uses(
         StmtExprKind::Assign { assignee, .. } => {
             collect_assignee_defs(assignee, ctx, defs);
         }
-        StmtExprKind::While { .. } | StmtExprKind::For { .. } => {}
+        StmtExprKind::While { .. }
+        | StmtExprKind::For { .. }
+        | StmtExprKind::Break
+        | StmtExprKind::Continue
+        | StmtExprKind::Return { .. } => {}
     }
 }
 
@@ -182,6 +186,12 @@ fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &NormalizedCon
         StmtExprKind::For { iter, body, .. } => {
             collect_expr_uses(iter, ctx, acc);
             collect_expr_uses(body, ctx, acc);
+        }
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+        StmtExprKind::Return { value } => {
+            if let Some(value) = value {
+                collect_expr_uses(value, ctx, acc);
+            }
         }
     }
 }

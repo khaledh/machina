@@ -13,7 +13,10 @@ impl<'a> FuncLowerer<'a> {
     /// Lower an expression in value position into a scalar operand or aggregate place.
     pub(super) fn lower_expr_value(&mut self, expr: &ValueExpr) -> Result<Value, LowerError> {
         match &expr.kind {
-            VEK::Block { items, tail } => self.lower_block_expr(items, tail.as_deref()),
+            VEK::Block { items, tail } => {
+                let block_ty = self.ty_from_id(expr.ty);
+                self.lower_block_expr(&block_ty, items, tail.as_deref())
+            }
 
             VEK::If {
                 cond,

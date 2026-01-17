@@ -19,12 +19,15 @@ be used as identifiers.
 | `move` | Ownership transfer |
 | `out` | Output parameter mode |
 | `range` | Bounded integer type |
+| `return` | Return from a function |
 | `self` | Method receiver |
 | `sink` | Ownership transfer parameter mode |
 | `true` | Boolean true literal |
 | `type` | Type definition |
 | `var` | Mutable variable binding |
 | `while` | While loop |
+| `break` | Exit loop early |
+| `continue` | Skip to next loop iteration |
 
 ## Keywords by Category
 
@@ -43,6 +46,9 @@ be used as identifiers.
 - `while` — While loop
 - `for` — For loop
 - `in` — Used with `for` to iterate
+- `break` — Exit a loop
+- `continue` — Skip to next iteration
+- `return` — Return from a function
 
 ### Parameter Modes
 
@@ -71,9 +77,6 @@ be used as identifiers.
 
 The following words are not currently keywords but may be reserved:
 
-- `return`
-- `break`
-- `continue`
 - `pub`
 - `mod`
 - `use`

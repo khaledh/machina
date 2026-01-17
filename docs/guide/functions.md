@@ -39,6 +39,20 @@ fn square(x: u64) -> u64 {
 }
 ```
 
+Use `return` for early exits or explicit returns:
+
+```
+fn abs(x: i64) -> i64 {
+    if x < 0 {
+        return 0 - x;
+    } else {
+        x
+    }
+}
+```
+
+In `()` functions, `return;` is allowed but optional.
+
 ## Parameter Modes
 
 Machina uses explicit parameter modes to control how arguments are passed. This

@@ -28,6 +28,24 @@ pub enum TypeCheckErrorKind {
     #[error("Condition must be a boolean, found {0}")]
     CondNotBoolean(Type, Span),
 
+    #[error("break used outside of a loop")]
+    BreakOutsideLoop(Span),
+
+    #[error("continue used outside of a loop")]
+    ContinueOutsideLoop(Span),
+
+    #[error("return used outside of a function or closure")]
+    ReturnOutsideFunction(Span),
+
+    #[error("return value missing: expected {0}")]
+    ReturnValueMissing(Type, Span),
+
+    #[error("unexpected return value")]
+    ReturnValueUnexpected(Span),
+
+    #[error("return type mismatch: expected {0}, found {1}")]
+    ReturnTypeMismatch(Type, Type, Span),
+
     #[error("Then and else branches have different types: {0} != {1}")]
     ThenElseTypeMismatch(Type, Type, Span),
 
@@ -181,6 +199,12 @@ impl TypeCheckError {
             TypeCheckErrorKind::NegationOperandNotInt(_, span) => *span,
             TypeCheckErrorKind::LogicalOperandNotBoolean(_, span) => *span,
             TypeCheckErrorKind::CondNotBoolean(_, span) => *span,
+            TypeCheckErrorKind::BreakOutsideLoop(span) => *span,
+            TypeCheckErrorKind::ContinueOutsideLoop(span) => *span,
+            TypeCheckErrorKind::ReturnOutsideFunction(span) => *span,
+            TypeCheckErrorKind::ReturnValueMissing(_, span) => *span,
+            TypeCheckErrorKind::ReturnValueUnexpected(span) => *span,
+            TypeCheckErrorKind::ReturnTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ThenElseTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::AssignTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ArgCountMismatch(_, _, _, span) => *span,

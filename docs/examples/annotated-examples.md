@@ -35,7 +35,7 @@ fn main() {
 
 **Key points:**
 - `if` is an expression that returns a value
-- No explicit `return` keyword; the last expression is returned
+- `return` is available for early exits, but the last expression is still returned implicitly
 - Recursion works naturally
 
 ## Sum of Array

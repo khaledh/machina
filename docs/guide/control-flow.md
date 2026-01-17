@@ -102,6 +102,46 @@ for (a, b) in pairs {
 }
 ```
 
+### break and continue
+
+Use `break` to exit a loop early, and `continue` to skip to the next iteration:
+
+```
+for i in 0..10 {
+    if i == 5 {
+        break;
+    } else {
+        println(i);
+    }
+}
+```
+
+```
+for i in 0..10 {
+    if i % 2 == 1 {
+        continue;
+    } else {
+        println(i);
+    }
+}
+```
+
+### return
+
+The `return` statement exits the current function immediately:
+
+```
+fn clamp_to_even(n: u64) -> u64 {
+    if n % 2 == 0 {
+        return n;
+    } else {
+        return n - 1;
+    }
+}
+```
+
+For `()` functions, use `return;` or let the function end normally.
+
 ## Pattern Matching
 
 ### match

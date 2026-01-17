@@ -5,6 +5,9 @@ use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::tree::fold::{TreeFolder, walk_expr, walk_if};
 use crate::tree::resolved::*;
+use crate::tree::visit::{
+    Visitor, walk_expr as walk_visit_expr, walk_stmt_expr as walk_visit_stmt_expr,
+};
 use crate::tree::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
@@ -23,6 +26,8 @@ pub struct TypeChecker {
     type_defs: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
     halted: bool,
+    return_stack: Vec<Type>,
+    loop_depth_stack: Vec<usize>,
 }
 
 impl TypeChecker {
@@ -35,6 +40,8 @@ impl TypeChecker {
             type_defs: HashMap::new(),
             errors: Vec::new(),
             halted: false,
+            return_stack: Vec::new(),
+            loop_depth_stack: Vec::new(),
         }
     }
 
@@ -52,6 +59,36 @@ impl TypeChecker {
             Ok(builder.finish())
         } else {
             Err(std::mem::take(&mut self.errors))
+        }
+    }
+
+    fn push_control_context(&mut self, return_ty: Type) {
+        self.return_stack.push(return_ty);
+        self.loop_depth_stack.push(0);
+    }
+
+    fn pop_control_context(&mut self) {
+        self.return_stack.pop();
+        self.loop_depth_stack.pop();
+    }
+
+    fn current_return_ty(&self) -> Option<&Type> {
+        self.return_stack.last()
+    }
+
+    fn loop_depth(&self) -> usize {
+        self.loop_depth_stack.last().copied().unwrap_or(0)
+    }
+
+    fn enter_loop(&mut self) {
+        if let Some(depth) = self.loop_depth_stack.last_mut() {
+            *depth += 1;
+        }
+    }
+
+    fn exit_loop(&mut self) {
+        if let Some(depth) = self.loop_depth_stack.last_mut() {
+            *depth = depth.saturating_sub(1);
         }
     }
 
@@ -294,19 +331,25 @@ impl TypeChecker {
             }
         }
 
+        self.push_control_context(ret_type.clone());
         let body_ty = match self.visit_expr(&func_def.body, Some(&ret_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
+                self.pop_control_context();
                 return Err(self.errors.clone());
             }
         };
+        self.pop_control_context();
 
         let return_span = self.function_return_span(&func_def.body);
+        let has_return = self.body_has_return_stmt(&func_def.body);
+        let has_tail = matches!(func_def.body.kind, ExprKind::Block { tail: Some(_), .. });
         if matches!(
             type_assignable(&body_ty, &ret_type),
             TypeAssignability::Incompatible
-        ) {
+        ) && !(has_return && !has_tail)
+        {
             self.errors.push(
                 TypeCheckErrorKind::DeclTypeMismatch(
                     ret_type.clone(),
@@ -320,7 +363,7 @@ impl TypeChecker {
 
         // record return type
         self.type_map_builder
-            .record_node_type(func_def.id, body_ty.clone());
+            .record_node_type(func_def.id, ret_type.clone());
         if self.errors.is_empty() {
             Ok(body_ty)
         } else {
@@ -384,19 +427,25 @@ impl TypeChecker {
             }
         }
 
+        self.push_control_context(ret_type.clone());
         let body_ty = match self.visit_expr(&method_def.body, Some(&ret_type)) {
             Ok(ty) => ty,
             Err(e) => {
                 self.errors.push(e);
+                self.pop_control_context();
                 return Err(self.errors.clone());
             }
         };
+        self.pop_control_context();
 
         let return_span = self.function_return_span(&method_def.body);
+        let has_return = self.body_has_return_stmt(&method_def.body);
+        let has_tail = matches!(method_def.body.kind, ExprKind::Block { tail: Some(_), .. });
         if matches!(
             type_assignable(&body_ty, &ret_type),
             TypeAssignability::Incompatible
-        ) {
+        ) && !(has_return && !has_tail)
+        {
             self.errors.push(
                 TypeCheckErrorKind::DeclTypeMismatch(
                     ret_type.clone(),
@@ -409,7 +458,7 @@ impl TypeChecker {
         }
 
         self.type_map_builder
-            .record_node_type(method_def.id, body_ty.clone());
+            .record_node_type(method_def.id, ret_type.clone());
 
         if self.errors.is_empty() {
             Ok(body_ty)
@@ -440,13 +489,24 @@ impl TypeChecker {
 
         let return_ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, return_ty)?;
 
-        let body_ty = self.visit_expr(body, Some(&return_ty))?;
+        self.push_control_context(return_ty.clone());
+        let body_ty = match self.visit_expr(body, Some(&return_ty)) {
+            Ok(ty) => ty,
+            Err(err) => {
+                self.pop_control_context();
+                return Err(err);
+            }
+        };
+        self.pop_control_context();
 
+        let return_span = self.function_return_span(body);
+        let has_return = self.body_has_return_stmt(body);
+        let has_tail = matches!(body.kind, ExprKind::Block { tail: Some(_), .. });
         if matches!(
             type_assignable(&body_ty, &return_ty),
             TypeAssignability::Incompatible
-        ) {
-            let return_span = self.function_return_span(body);
+        ) && !(has_return && !has_tail)
+        {
             return Err(
                 TypeCheckErrorKind::DeclTypeMismatch(return_ty, body_ty, return_span).into(),
             );
@@ -474,6 +534,12 @@ impl TypeChecker {
             }
             _ => body.span,
         }
+    }
+
+    fn body_has_return_stmt(&self, body: &Expr) -> bool {
+        let mut finder = ReturnStmtFinder { found: false };
+        finder.visit_expr(body);
+        finder.found
     }
 
     fn check_array_lit(
@@ -1343,7 +1409,10 @@ impl TypeChecker {
             return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
-        let _ = self.visit_expr(body, None)?;
+        self.enter_loop();
+        let result = self.visit_expr(body, None);
+        self.exit_loop();
+        let _ = result?;
         Ok(Type::Unit)
     }
 
@@ -1360,7 +1429,10 @@ impl TypeChecker {
         self.check_bind_pattern(pattern, &item_ty)?;
 
         // Type check body
-        let _ = self.visit_expr(body, None)?;
+        self.enter_loop();
+        let result = self.visit_expr(body, None);
+        self.exit_loop();
+        let _ = result?;
 
         Ok(Type::Unit)
     }
@@ -1557,6 +1629,33 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
     }
 }
 
+struct ReturnStmtFinder {
+    found: bool,
+}
+
+impl Visitor<DefId, ()> for ReturnStmtFinder {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+        if self.found {
+            return;
+        }
+        if matches!(stmt.kind, StmtExprKind::Return { .. }) {
+            self.found = true;
+            return;
+        }
+        walk_visit_stmt_expr(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        if self.found {
+            return;
+        }
+        if matches!(expr.kind, ExprKind::Closure { .. }) {
+            return;
+        }
+        walk_visit_expr(self, expr);
+    }
+}
+
 impl TreeFolder<DefId> for TypeChecker {
     type Error = TypeCheckError;
     type Output = Type;
@@ -1654,6 +1753,58 @@ impl TreeFolder<DefId> for TypeChecker {
                 iter,
                 body,
             } => self.check_for(pattern, iter, body)?,
+            StmtExprKind::Break => {
+                if self.loop_depth() == 0 {
+                    return Err(TypeCheckErrorKind::BreakOutsideLoop(stmt.span).into());
+                }
+                Type::Unit
+            }
+            StmtExprKind::Continue => {
+                if self.loop_depth() == 0 {
+                    return Err(TypeCheckErrorKind::ContinueOutsideLoop(stmt.span).into());
+                }
+                Type::Unit
+            }
+            StmtExprKind::Return { value } => {
+                let Some(return_ty) = self.current_return_ty().cloned() else {
+                    if let Some(value) = value {
+                        let _ = self.visit_expr(value, None)?;
+                    }
+                    return Err(TypeCheckErrorKind::ReturnOutsideFunction(stmt.span).into());
+                };
+
+                match value {
+                    Some(value) => {
+                        if return_ty == Type::Unit {
+                            let _ = self.visit_expr(value, None)?;
+                            return Err(
+                                TypeCheckErrorKind::ReturnValueUnexpected(value.span).into()
+                            );
+                        }
+
+                        let value_ty = self.visit_expr(value, Some(&return_ty))?;
+                        if matches!(
+                            type_assignable(&value_ty, &return_ty),
+                            TypeAssignability::Incompatible
+                        ) {
+                            return Err(TypeCheckErrorKind::ReturnTypeMismatch(
+                                return_ty, value_ty, value.span,
+                            )
+                            .into());
+                        }
+                    }
+                    None => {
+                        if return_ty != Type::Unit {
+                            return Err(TypeCheckErrorKind::ReturnValueMissing(
+                                return_ty, stmt.span,
+                            )
+                            .into());
+                        }
+                    }
+                }
+
+                Type::Unit
+            }
         };
 
         self.type_map_builder.record_node_type(stmt.id, ty.clone());

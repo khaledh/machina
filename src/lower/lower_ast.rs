@@ -38,6 +38,13 @@ pub(super) enum Value {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(super) struct LoopContext {
+    pub(super) break_bb: BlockId,
+    pub(super) continue_bb: BlockId,
+    pub(super) drop_depth: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum PlaceKind {
     Scalar,
     Aggregate,
@@ -71,6 +78,7 @@ pub struct FuncLowerer<'a> {
     pub(super) ty_lowerer: TyLowerer,
     pub(super) curr_block: BlockId,
     pub(super) drop_scopes: Vec<DropScope>,
+    pub(super) loop_stack: Vec<LoopContext>,
     pub(super) drop_glue: &'a mut DropGlueRegistry,
     pub(super) trace_alloc: bool,
     func_return_ty: Option<Type>,
@@ -209,18 +217,47 @@ impl<'a> FuncLowerer<'a> {
             ty_lowerer,
             curr_block: entry,
             drop_scopes: Vec::new(),
+            loop_stack: Vec::new(),
             drop_glue,
             trace_alloc,
             func_return_ty,
         }
     }
 
-    fn ret_type(&self) -> Result<Type, LowerError> {
+    pub(super) fn ret_type(&self) -> Result<Type, LowerError> {
         if let Some(ty) = &self.func_return_ty {
             Ok(ty.clone())
         } else {
             self.ty_for_node(self.func_id)
         }
+    }
+
+    pub(super) fn push_loop_context(&mut self, break_bb: BlockId, continue_bb: BlockId) {
+        let drop_depth = self.drop_scopes.len();
+        self.loop_stack.push(LoopContext {
+            break_bb,
+            continue_bb,
+            drop_depth,
+        });
+    }
+
+    pub(super) fn pop_loop_context(&mut self) {
+        self.loop_stack.pop();
+    }
+
+    pub(super) fn current_loop_context(&self) -> Option<LoopContext> {
+        self.loop_stack.last().copied()
+    }
+
+    pub(super) fn is_block_terminated(&self, block: BlockId) -> bool {
+        !matches!(
+            self.fb.body.blocks[block.index()].terminator,
+            Terminator::Unterminated
+        )
+    }
+
+    pub(super) fn is_curr_block_terminated(&self) -> bool {
+        self.is_block_terminated(self.curr_block)
     }
 
     /// Lower the function AST into MCIR.
@@ -265,21 +302,25 @@ impl<'a> FuncLowerer<'a> {
         if body_ty.is_scalar() {
             let ret_place = Place::<Scalar>::new(ret_id, ret_ty, vec![]);
             let body_value = self.lower_expr_value(self.func_body)?;
-            if let Value::Scalar(op) = body_value {
-                let ret_ast_ty = self.ret_type()?;
-                self.emit_conversion_check(&body_ty, &ret_ast_ty, &op);
-                self.emit_copy_scalar(ret_place, Rvalue::Use(op));
+            if !self.is_curr_block_terminated() {
+                if let Value::Scalar(op) = body_value {
+                    let ret_ast_ty = self.ret_type()?;
+                    self.emit_conversion_check(&body_ty, &ret_ast_ty, &op);
+                    self.emit_copy_scalar(ret_place, Rvalue::Use(op));
+                }
             }
-        } else {
+        } else if !self.is_curr_block_terminated() {
             let ret_place = Place::<Aggregate>::new(ret_id, ret_ty, vec![]);
             self.lower_agg_value_into(ret_place, self.func_body)?;
         }
 
         // Drop any remaining owned locals before returning.
-        self.exit_drop_scope()?;
-
-        // Terminate the entry block
-        self.fb.set_terminator(self.curr_block, Terminator::Return);
+        if self.is_curr_block_terminated() {
+            self.drop_scopes.clear();
+        } else {
+            self.exit_drop_scope()?;
+            self.fb.set_terminator(self.curr_block, Terminator::Return);
+        }
 
         self.fb.body.types = std::mem::take(&mut self.ty_lowerer.table);
 

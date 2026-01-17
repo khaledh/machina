@@ -803,6 +803,13 @@ pub fn walk_stmt_expr<M: TreeMapper + ?Sized>(
                 iter: Box::new(mapper.map_expr(iter, ctx)),
                 body: Box::new(mapper.map_expr(body, ctx)),
             },
+            StmtExprKind::Break => StmtExprKind::Break,
+            StmtExprKind::Continue => StmtExprKind::Continue,
+            StmtExprKind::Return { value } => StmtExprKind::Return {
+                value: value
+                    .as_ref()
+                    .map(|expr| Box::new(mapper.map_expr(expr, ctx))),
+            },
         },
         ty: mapper.map_type_payload(stmt.id, &stmt.ty, ctx),
         span: stmt.span,

@@ -68,6 +68,8 @@ fn do_nothing() {
 }
 ```
 
+You can also write `return;` to return `()` explicitly.
+
 ## Compound Types
 
 ### Arrays

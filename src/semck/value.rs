@@ -18,7 +18,7 @@ pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
 struct ValueChecker<'a> {
     ctx: &'a NormalizedContext,
     errors: Vec<SemCheckError>,
-    current_return_ty: Option<Type>,
+    return_stack: Vec<Type>,
 }
 
 impl<'a> ValueChecker<'a> {
@@ -26,8 +26,20 @@ impl<'a> ValueChecker<'a> {
         Self {
             ctx,
             errors: Vec::new(),
-            current_return_ty: None,
+            return_stack: Vec::new(),
         }
+    }
+
+    fn push_return_ty(&mut self, ty: Type) {
+        self.return_stack.push(ty);
+    }
+
+    fn pop_return_ty(&mut self) {
+        self.return_stack.pop();
+    }
+
+    fn current_return_ty(&self) -> Option<&Type> {
+        self.return_stack.last()
     }
 
     fn check_module(&mut self) {
@@ -138,11 +150,32 @@ impl<'a> ValueChecker<'a> {
             }
         }
     }
+
+    fn check_return_value_range(&mut self, expr: &Expr) {
+        let Some(Type::Range { min, max }) = self.current_return_ty() else {
+            return;
+        };
+        if let Some(value) = int_lit_value(expr) {
+            if value < 0 {
+                self.errors.push(SemCheckError::ValueOutOfRange(
+                    value,
+                    *min as i128,
+                    *max as i128,
+                    expr.span,
+                ));
+            } else {
+                self.check_range_value(value as u64, *min, *max, expr.span);
+            }
+        }
+    }
 }
 
 impl Visitor<DefId, TypeId> for ValueChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
-        self.current_return_ty = self.resolve_type(&func_def.sig.ret_ty_expr);
+        let return_ty = self
+            .resolve_type(&func_def.sig.ret_ty_expr)
+            .unwrap_or(Type::Unknown);
+        self.push_return_ty(return_ty);
         walk_expr(self, &func_def.body);
 
         let ret_expr = match &func_def.body.kind {
@@ -152,23 +185,11 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
             ExprKind::Block { tail: None, .. } => None,
             _ => Some(&func_def.body),
         };
-        if let (Some(Type::Range { min, max }), Some(ret_expr)) =
-            (&self.current_return_ty, ret_expr)
-            && let Some(value) = int_lit_value(ret_expr)
-        {
-            if value < 0 {
-                self.errors.push(SemCheckError::ValueOutOfRange(
-                    value,
-                    *min as i128,
-                    *max as i128,
-                    ret_expr.span,
-                ));
-            } else {
-                self.check_range_value(value as u64, *min, *max, ret_expr.span);
-            }
+        if let Some(ret_expr) = ret_expr {
+            self.check_return_value_range(ret_expr);
         }
 
-        self.current_return_ty = None;
+        self.pop_return_ty();
     }
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
@@ -191,6 +212,11 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                 let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
                 self.check_range_binding_value(value, assignee_ty);
             }
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    self.check_return_value_range(value);
+                }
+            }
             _ => {}
         }
 
@@ -198,6 +224,30 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
     }
 
     fn visit_expr(&mut self, expr: &Expr) {
+        if let ExprKind::Closure {
+            return_ty, body, ..
+        } = &expr.kind
+        {
+            let resolved_return_ty = self.resolve_type(return_ty).unwrap_or(Type::Unknown);
+            self.push_return_ty(resolved_return_ty);
+            walk_expr(self, expr);
+
+            let body_expr = body.as_ref();
+            let ret_expr = match &body_expr.kind {
+                ExprKind::Block {
+                    tail: Some(tail), ..
+                } => Some(tail.as_ref()),
+                ExprKind::Block { tail: None, .. } => None,
+                _ => Some(body_expr),
+            };
+            if let Some(ret_expr) = ret_expr {
+                self.check_return_value_range(ret_expr);
+            }
+
+            self.pop_return_ty();
+            return;
+        }
+
         match &expr.kind {
             ExprKind::IntLit(value) => {
                 // Enforce integer literal ranges based on the resolved type.

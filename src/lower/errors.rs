@@ -44,4 +44,7 @@ pub enum LowerError {
 
     #[error("expected block for node {0:?}")]
     ExpectedBlock(NodeId),
+
+    #[error("unsupported statement for node {0:?}")]
+    UnsupportedStmt(NodeId),
 }

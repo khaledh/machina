@@ -498,6 +498,20 @@ impl StmtExpr {
                 writeln!(f, "{}Body:", pad1)?;
                 body.fmt_with_indent(f, level + 2)?;
             }
+            StmtExprKind::Break => {
+                writeln!(f, "{}Break [{}]", pad, self.id)?;
+            }
+            StmtExprKind::Continue => {
+                writeln!(f, "{}Continue [{}]", pad, self.id)?;
+            }
+            StmtExprKind::Return { value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Return [{}]", pad, self.id)?;
+                if let Some(value) = value {
+                    writeln!(f, "{}Value:", pad1)?;
+                    value.fmt_with_indent(f, level + 2)?;
+                }
+            }
         }
         Ok(())
     }

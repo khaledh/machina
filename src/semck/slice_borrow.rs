@@ -124,6 +124,13 @@ fn check_item_for_conflicts(
                 visitor.visit_expr(iter);
                 visitor.visit_expr(body);
             }
+            StmtExprKind::Break | StmtExprKind::Continue => {}
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                    visitor.visit_expr(value);
+                }
+            }
         },
         TreeCfgItem::Expr(expr) => {
             let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
@@ -385,6 +392,8 @@ fn collect_stmt_defs_uses(
             collect_assignee_defs(assignee, ctx, defs);
         }
         StmtExprKind::While { .. } | StmtExprKind::For { .. } => {}
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+        StmtExprKind::Return { .. } => {}
     }
 }
 
@@ -457,6 +466,12 @@ fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &NormalizedContext, uses: &mut 
         StmtExprKind::For { iter, body, .. } => {
             collect_expr_slice_uses(iter, ctx, uses);
             collect_expr_slice_uses(body, ctx, uses);
+        }
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+        StmtExprKind::Return { value } => {
+            if let Some(value) = value {
+                collect_expr_slice_uses(value, ctx, uses);
+            }
         }
     }
 }

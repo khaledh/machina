@@ -26,13 +26,17 @@ impl<'a> FuncLowerer<'a> {
                 cond_op,
                 |this| {
                     if let Value::Scalar(op) = this.lower_expr_value(then_body)? {
-                        this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
+                        if !this.is_curr_block_terminated() {
+                            this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
+                        }
                     }
                     Ok(())
                 },
                 |this| {
                     if let Value::Scalar(op) = this.lower_expr_value(else_body)? {
-                        this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
+                        if !this.is_curr_block_terminated() {
+                            this.emit_copy_scalar(temp_place.clone(), Rvalue::Use(op));
+                        }
                     }
                     Ok(())
                 },
@@ -98,13 +102,17 @@ impl<'a> FuncLowerer<'a> {
 
         self.curr_block = then_bb;
         then_fn(self)?;
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+        if !self.is_curr_block_terminated() {
+            self.fb
+                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+        }
 
         self.curr_block = else_bb;
         else_fn(self)?;
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+        if !self.is_curr_block_terminated() {
+            self.fb
+                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+        }
 
         self.curr_block = join_bb;
 
@@ -142,9 +150,14 @@ impl<'a> FuncLowerer<'a> {
         let VEK::Block { items, tail } = &body.kind else {
             return Err(LowerError::ExpectedBlock(body.id));
         };
-        self.lower_block_expr(items, tail.as_deref())?;
-        self.fb
-            .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
+        let body_ty = self.ty_from_id(body.ty);
+        self.push_loop_context(loop_exit_bb, loop_cond_bb);
+        self.lower_block_expr(&body_ty, items, tail.as_deref())?;
+        self.pop_loop_context();
+        if !self.is_curr_block_terminated() {
+            self.fb
+                .set_terminator(self.curr_block, Terminator::Goto(loop_cond_bb));
+        }
 
         // After loop
         self.curr_block = loop_exit_bb;
@@ -339,6 +352,7 @@ impl<'a> FuncLowerer<'a> {
         // blocks
         let loop_cond_bb = self.fb.new_block();
         let loop_body_bb = self.fb.new_block();
+        let loop_step_bb = self.fb.new_block();
         let loop_exit_bb = self.fb.new_block();
 
         // Jump to loop condition
@@ -372,9 +386,18 @@ impl<'a> FuncLowerer<'a> {
         let VEK::Block { items, tail } = &body.kind else {
             return Err(LowerError::ExpectedBlock(body.id));
         };
-        self.lower_block_expr(items, tail.as_deref())?;
+        let body_ty = self.ty_from_id(body.ty);
+        self.push_loop_context(loop_exit_bb, loop_step_bb);
+        self.lower_block_expr(&body_ty, items, tail.as_deref())?;
+        self.pop_loop_context();
 
         // i = i + 1
+        if !self.is_curr_block_terminated() {
+            self.fb
+                .set_terminator(self.curr_block, Terminator::Goto(loop_step_bb));
+        }
+
+        self.curr_block = loop_step_bb;
         let one_op = Operand::Const(Const::Int {
             signed: false,
             bits: 64,

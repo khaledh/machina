@@ -14,6 +14,7 @@ impl<'a> FuncLowerer<'a> {
     /// Lower a block used as an expression.
     pub(super) fn lower_block_expr(
         &mut self,
+        block_ty: &Type,
         items: &[BlockItem],
         tail: Option<&ValueExpr>,
     ) -> Result<Value, LowerError> {
@@ -21,17 +22,35 @@ impl<'a> FuncLowerer<'a> {
         self.enter_drop_scope();
 
         // Evaluate all but the last expression for side effects.
+        let mut terminated = false;
         for item in items {
             self.lower_block_item(item)?;
+            if self.is_curr_block_terminated() {
+                terminated = true;
+                break;
+            }
         }
 
-        let result = match tail {
-            Some(expr) => self.lower_expr_value(expr),
-            None => Ok(Value::Scalar(Operand::Const(Const::Unit))),
+        let result = if terminated {
+            if block_ty.is_scalar() {
+                Ok(Value::Scalar(Operand::Const(Const::Unit)))
+            } else {
+                let ty_id = self.ty_lowerer.lower_ty(block_ty);
+                Ok(Value::Aggregate(self.new_temp_aggregate(ty_id)))
+            }
+        } else {
+            match tail {
+                Some(expr) => self.lower_expr_value(expr),
+                None => Ok(Value::Scalar(Operand::Const(Const::Unit))),
+            }
         };
 
         // Drop owned locals before leaving the block.
-        self.exit_drop_scope()?;
+        if terminated || self.is_curr_block_terminated() {
+            self.pop_drop_scope_without_drops();
+        } else {
+            self.exit_drop_scope()?;
+        }
         result
     }
 
@@ -49,6 +68,10 @@ impl<'a> FuncLowerer<'a> {
         // Evaluate prefix, then write the tail into dst.
         for item in items {
             self.lower_block_item(item)?;
+            if self.is_curr_block_terminated() {
+                self.pop_drop_scope_without_drops();
+                return Ok(());
+            }
         }
 
         let result = match tail {
@@ -57,7 +80,11 @@ impl<'a> FuncLowerer<'a> {
         };
 
         // Drop owned locals before leaving the block.
-        self.exit_drop_scope()?;
+        if self.is_curr_block_terminated() {
+            self.pop_drop_scope_without_drops();
+        } else {
+            self.exit_drop_scope()?;
+        }
         result
     }
 
@@ -85,7 +112,57 @@ impl<'a> FuncLowerer<'a> {
                 iter,
                 body,
             } => self.lower_for_expr(pattern, iter, body).map(|_| ()),
+            SEK::Break => self.lower_break_stmt(stmt.id),
+            SEK::Continue => self.lower_continue_stmt(stmt.id),
+            SEK::Return { value } => self.lower_return_stmt(stmt.id, value.as_deref()),
         }
+    }
+
+    fn lower_break_stmt(&mut self, node_id: NodeId) -> Result<(), LowerError> {
+        let Some(loop_ctx) = self.current_loop_context() else {
+            return Err(LowerError::UnsupportedStmt(node_id));
+        };
+        self.emit_drops_to_depth(loop_ctx.drop_depth)?;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(loop_ctx.break_bb));
+        Ok(())
+    }
+
+    fn lower_continue_stmt(&mut self, node_id: NodeId) -> Result<(), LowerError> {
+        let Some(loop_ctx) = self.current_loop_context() else {
+            return Err(LowerError::UnsupportedStmt(node_id));
+        };
+        self.emit_drops_to_depth(loop_ctx.drop_depth)?;
+        self.fb
+            .set_terminator(self.curr_block, Terminator::Goto(loop_ctx.continue_bb));
+        Ok(())
+    }
+
+    fn lower_return_stmt(
+        &mut self,
+        _node_id: NodeId,
+        value: Option<&ValueExpr>,
+    ) -> Result<(), LowerError> {
+        if let Some(value) = value {
+            let ret_ty = self.ret_type()?;
+            let ret_id = self.fb.body.ret_local;
+            let ret_ty_id = self.fb.body.locals[ret_id.0 as usize].ty;
+
+            if ret_ty.is_scalar() {
+                let body_ty = self.ty_from_id(value.ty);
+                let op = self.lower_scalar_expr(value)?;
+                self.emit_conversion_check(&body_ty, &ret_ty, &op);
+                let ret_place = Place::<Scalar>::new(ret_id, ret_ty_id, vec![]);
+                self.emit_copy_scalar(ret_place, Rvalue::Use(op));
+            } else {
+                let ret_place = Place::<Aggregate>::new(ret_id, ret_ty_id, vec![]);
+                self.lower_agg_value_into(ret_place, value)?;
+            }
+        }
+
+        self.emit_drops_to_depth(0)?;
+        self.fb.set_terminator(self.curr_block, Terminator::Return);
+        Ok(())
     }
 
     /// Lower an assignment expression.
@@ -101,6 +178,9 @@ impl<'a> FuncLowerer<'a> {
             // Scalar assignment.
             let assignee_place = self.lower_place_scalar(assignee)?;
             let value_operand = self.lower_scalar_expr(value)?;
+            if self.is_curr_block_terminated() {
+                return Ok(());
+            }
             let target_ty = self.ty_from_id(assignee.ty);
             self.emit_conversion_check(&value_ty, &target_ty, &value_operand);
 
@@ -131,6 +211,9 @@ impl<'a> FuncLowerer<'a> {
 
             // Write the new value into the assignee place.
             self.lower_agg_value_into(assignee_place, value)?;
+            if self.is_curr_block_terminated() {
+                return Ok(());
+            }
             self.mark_initialized_if_needed(assignee, init);
             self.mark_full_init_if_needed(assignee, init);
         }

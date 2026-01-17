@@ -64,5 +64,7 @@ fn collect_stmt_defs_uses(stmt: &StmtExpr, defs: &mut HashSet<DefId>, uses: &mut
         StmtExprKind::For { pattern, .. } => {
             collect_bind_pattern_defs(pattern, defs);
         }
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+        StmtExprKind::Return { .. } => {}
     }
 }

@@ -517,6 +517,11 @@ pub enum StmtExprKind<D, T = ()> {
         iter: Box<Expr<D, T>>,
         body: Box<Expr<D, T>>,
     },
+    Break,
+    Continue,
+    Return {
+        value: Option<Box<Expr<D, T>>>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

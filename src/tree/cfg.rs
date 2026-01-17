@@ -37,6 +37,7 @@ pub struct Cfg<'a, D, T = ()> {
 pub struct CfgBuilder<'a, D, T = ()> {
     nodes: Vec<CfgNode<'a, D, T>>,
     succs: Vec<Vec<AstBlockId>>,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl<'a, D, T> Default for CfgBuilder<'a, D, T> {
@@ -45,11 +46,24 @@ impl<'a, D, T> Default for CfgBuilder<'a, D, T> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct LoopContext {
+    break_bb: AstBlockId,
+    continue_bb: AstBlockId,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BlockRange {
+    entry: AstBlockId,
+    exit: AstBlockId,
+}
+
 impl<'a, D, T> CfgBuilder<'a, D, T> {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
             succs: Vec::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -82,19 +96,20 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
 
     pub fn build_from_expr(self, expr: &'a Expr<D, T>) -> Cfg<'a, D, T> {
         let mut builder = self;
-        builder.build_block_expr(expr);
+        let _ = builder.build_block_expr(expr);
         builder.finish()
     }
 
-    fn build_block_expr(&mut self, expr: &'a Expr<D, T>) -> AstBlockId {
+    fn build_block_expr(&mut self, expr: &'a Expr<D, T>) -> BlockRange {
         let ExprKind::Block { items, tail } = &expr.kind else {
             // For now, require a block expression at entry.
             let b = self.new_block();
             self.push_item(b, CfgItem::Expr(expr));
-            return b;
+            return BlockRange { entry: b, exit: b };
         };
 
-        let mut curr_bb = self.new_block();
+        let entry_bb = self.new_block();
+        let mut curr_bb = entry_bb;
 
         for item in items {
             match item {
@@ -118,34 +133,44 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
             curr_bb = self.handle_expr(curr_bb, tail);
         }
 
-        curr_bb
+        BlockRange {
+            entry: entry_bb,
+            exit: curr_bb,
+        }
     }
 
     fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr<D, T>) -> AstBlockId {
         match &stmt.kind {
             StmtExprKind::While { cond, body } => {
                 let cond_bb = self.new_block();
-                let body_bb = self.build_block_expr(body);
                 let exit_bb = self.new_block();
+                let loop_ctx = LoopContext {
+                    break_bb: exit_bb,
+                    continue_bb: cond_bb,
+                };
+                self.loop_stack.push(loop_ctx);
+                let body_range = self.build_block_expr(body);
+                self.loop_stack.pop();
 
                 // current -> cond
                 self.set_term(curr_bb, CfgTerminator::Goto(cond_bb));
+                self.push_edge(curr_bb, cond_bb);
 
                 // cond -> body/exit
                 self.set_term(
                     cond_bb,
                     CfgTerminator::If {
                         cond: cond.as_ref(),
-                        then_bb: body_bb,
+                        then_bb: body_range.entry,
                         else_bb: exit_bb,
                     },
                 );
-                self.push_edge(cond_bb, body_bb);
+                self.push_edge(cond_bb, body_range.entry);
                 self.push_edge(cond_bb, exit_bb);
 
                 // body -> cond
-                self.set_term(body_bb, CfgTerminator::Goto(cond_bb));
-                self.push_edge(body_bb, cond_bb);
+                self.set_term(body_range.exit, CfgTerminator::Goto(cond_bb));
+                self.push_edge(body_range.exit, cond_bb);
 
                 exit_bb
             }
@@ -153,26 +178,57 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
                 // For now, treat like while over an iterator expression.
                 // We can refine to model iter uses or desugaring later.
                 let cond_bb = self.new_block();
-                let body_bb = self.build_block_expr(body);
                 let exit_bb = self.new_block();
+                let loop_ctx = LoopContext {
+                    break_bb: exit_bb,
+                    continue_bb: cond_bb,
+                };
+                self.loop_stack.push(loop_ctx);
+                let body_range = self.build_block_expr(body);
+                self.loop_stack.pop();
 
                 self.set_term(curr_bb, CfgTerminator::Goto(cond_bb));
                 self.push_edge(curr_bb, cond_bb);
 
                 // Placeholder: no explicit condition expr yet, so use End with two edges.
                 self.set_term(cond_bb, CfgTerminator::End);
-                self.push_edge(cond_bb, body_bb);
+                self.push_edge(cond_bb, body_range.entry);
                 self.push_edge(cond_bb, exit_bb);
 
                 // Loop pattern bindings are initialized at the start of each body iteration.
                 if let StmtExprKind::For { pattern, .. } = &stmt.kind {
-                    self.push_loop_init(body_bb, pattern);
+                    self.push_loop_init(body_range.entry, pattern);
                 }
 
-                self.set_term(body_bb, CfgTerminator::Goto(cond_bb));
-                self.push_edge(body_bb, cond_bb);
+                self.set_term(body_range.exit, CfgTerminator::Goto(cond_bb));
+                self.push_edge(body_range.exit, cond_bb);
 
                 exit_bb
+            }
+            StmtExprKind::Break => {
+                self.push_item(curr_bb, CfgItem::Stmt(stmt));
+                if let Some(loop_ctx) = self.loop_stack.last().copied() {
+                    self.set_term(curr_bb, CfgTerminator::Goto(loop_ctx.break_bb));
+                    self.push_edge(curr_bb, loop_ctx.break_bb);
+                } else {
+                    self.set_term(curr_bb, CfgTerminator::End);
+                }
+                self.new_block()
+            }
+            StmtExprKind::Continue => {
+                self.push_item(curr_bb, CfgItem::Stmt(stmt));
+                if let Some(loop_ctx) = self.loop_stack.last().copied() {
+                    self.set_term(curr_bb, CfgTerminator::Goto(loop_ctx.continue_bb));
+                    self.push_edge(curr_bb, loop_ctx.continue_bb);
+                } else {
+                    self.set_term(curr_bb, CfgTerminator::End);
+                }
+                self.new_block()
+            }
+            StmtExprKind::Return { .. } => {
+                self.push_item(curr_bb, CfgItem::Stmt(stmt));
+                self.set_term(curr_bb, CfgTerminator::End);
+                self.new_block()
             }
             _ => {
                 self.push_item(curr_bb, CfgItem::Stmt(stmt));
@@ -188,24 +244,24 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
                 then_body,
                 else_body,
             } => {
-                let then_bb = self.build_block_expr(then_body);
-                let else_bb = self.build_block_expr(else_body);
+                let then_range = self.build_block_expr(then_body);
+                let else_range = self.build_block_expr(else_body);
                 let join = self.new_block();
 
                 self.set_term(
                     cur,
                     CfgTerminator::If {
                         cond: cond.as_ref(),
-                        then_bb,
-                        else_bb,
+                        then_bb: then_range.entry,
+                        else_bb: else_range.entry,
                     },
                 );
-                self.push_edge(cur, then_bb);
-                self.push_edge(cur, else_bb);
+                self.push_edge(cur, then_range.entry);
+                self.push_edge(cur, else_range.entry);
 
                 // Join edges (if blocks don’t already end).
-                self.push_edge(then_bb, join);
-                self.push_edge(else_bb, join);
+                self.push_edge(then_range.exit, join);
+                self.push_edge(else_range.exit, join);
 
                 join
             }

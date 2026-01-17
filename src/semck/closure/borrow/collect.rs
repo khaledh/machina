@@ -62,6 +62,12 @@ pub(super) fn collect_stmt_var_uses(stmt: &StmtExpr, uses: &mut HashSet<DefId>) 
             collect_expr_var_uses(iter, uses);
             collect_expr_var_uses(body, uses);
         }
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+        StmtExprKind::Return { value } => {
+            if let Some(value) = value {
+                collect_expr_var_uses(value, uses);
+            }
+        }
     }
 }
 

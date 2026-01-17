@@ -700,6 +700,12 @@ impl Visitor<()> for SymbolResolver {
                     resolver.visit_expr(body);
                 });
             }
+            StmtExprKind::Break | StmtExprKind::Continue => {}
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    self.visit_expr(value);
+                }
+            }
         }
     }
 

@@ -65,7 +65,8 @@ Block              ::= "{" BlockItem* (Expr ";"?)? "}"
 BlockItem          ::= StmtExpr | Expr ";"
 
 # Statement Expressions
-StmtExpr           ::= LetBind | VarBind | VarDecl | Assign | While | For
+StmtExpr           ::= LetBind | VarBind | VarDecl | Assign
+                     | While | For | Break | Continue | Return
 
 # Variable Binding/Declaration
 LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr ";"
@@ -78,6 +79,11 @@ Assign             ::= PostfixExpr "=" Expr ";"
 # Loops
 While              ::= "while" Expr Block
 For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
+
+# Control flow (statements)
+Break              ::= "break" ";"
+Continue           ::= "continue" ";"
+Return             ::= "return" Expr? ";"
 
 RangeExpr          ::= IntLit ".." IntLit
 

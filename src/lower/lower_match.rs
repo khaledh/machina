@@ -47,7 +47,9 @@ impl<'a> FuncLowerer<'a> {
                         return Err(LowerError::UnsupportedOperandExpr(arm.body.id));
                     }
                 };
-                this.emit_copy_scalar(dst.clone(), Rvalue::Use(op));
+                if !this.is_curr_block_terminated() {
+                    this.emit_copy_scalar(dst.clone(), Rvalue::Use(op));
+                }
                 Ok(())
             });
         }
@@ -59,7 +61,9 @@ impl<'a> FuncLowerer<'a> {
                     return Err(LowerError::UnsupportedOperandExpr(arm.body.id));
                 }
             };
-            this.emit_copy_scalar(dst.clone(), Rvalue::Use(op));
+            if !this.is_curr_block_terminated() {
+                this.emit_copy_scalar(dst.clone(), Rvalue::Use(op));
+            }
             Ok(())
         })
     }
@@ -173,8 +177,10 @@ impl<'a> FuncLowerer<'a> {
             }
 
             emit_arm_body(self, arm)?;
-            self.fb
-                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+            if !self.is_curr_block_terminated() {
+                self.fb
+                    .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+            }
         }
 
         self.curr_block = join_bb;
@@ -246,8 +252,10 @@ impl<'a> FuncLowerer<'a> {
                 self.bind_match_tuple_fields(&scrutinee_ty, &place, patterns, arm.id)?;
             }
             emit_arm_body(self, arm)?;
-            self.fb
-                .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+            if !self.is_curr_block_terminated() {
+                self.fb
+                    .set_terminator(self.curr_block, Terminator::Goto(join_bb));
+            }
         }
 
         self.curr_block = join_bb;
