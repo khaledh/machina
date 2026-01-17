@@ -404,7 +404,7 @@ fn bad(cond: bool) -> Point {
         p = Point { x: 1, y: 2 };
     } else {
         // left uninitialized
-    }
+    };
     p  // error: p might not be initialized
 }
 
@@ -414,7 +414,7 @@ fn ok(cond: bool) -> Point {
         p = Point { x: 1, y: 2 };
     } else {
         p = Point { x: 3, y: 4 };
-    }
+    };
     p  // ok: initialized on all paths
 }
 ```

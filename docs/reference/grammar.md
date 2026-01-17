@@ -1,17 +1,32 @@
-# Machina programming language grammar
+# Grammar
 
-# Top-level
+This is the formal grammar of the Machina programming language in BNF notation.
+
+## Notation
+
+- `::=` means "is defined as"
+- `|` separates alternatives
+- `*` means zero or more
+- `?` means optional (zero or one)
+- `( )` groups elements
+- `"text"` is a literal token
+- `[a-z]` is a character class
+
+## Top-Level
+
+```bnf
 Module             ::= TopLevelItem*
 
 TopLevelItem       ::= TypeDef | FuncDecl | FuncDef | MethodBlock
+```
 
-# Type Definitions
+## Type Definitions
+
+```bnf
 TypeDef            ::= "type" Identifier "=" TypeDefBody
-TypeDefBody        ::= TypeAliasDef
-                     | StructDef
-                     | EnumDef
+TypeDefBody        ::= TypeAliasDef | StructDef | EnumDef
 
-TypeAliasDef       ::=  TypeExpr ";"?
+TypeAliasDef       ::= TypeExpr ";"?
 
 StructDef          ::= "{" StructFieldList? "}"
 StructFieldList    ::= StructField ("," StructField)* ","?
@@ -19,16 +34,19 @@ StructField        ::= Identifier ":" TypeExpr
 
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
+```
 
-# Type Expressions
+## Type Expressions
+
+```bnf
 TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType
                      | TupleType | RangeType | HeapType | FnType
 
 UnitType           ::= "()"
 NamedType          ::= Identifier
 ArrayType          ::= TypeExpr "[" IntLitList "]"
-SliceType          ::= TypeExpr "[" "]"
-TupleType          ::= "(" TypeExpr "," ( TypeExprList )? ")"
+SliceType          ::= TypeExpr "[]"
+TupleType          ::= "(" TypeExpr "," TypeExprList? ")"
 RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
 HeapType           ::= "^" TypeExpr
 FnType             ::= "fn" "(" FnTypeParamList? ")" "->" TypeExpr
@@ -36,52 +54,62 @@ FnType             ::= "fn" "(" FnTypeParamList? ")" "->" TypeExpr
 FnTypeParamList    ::= FnTypeParam ("," FnTypeParam)* ","?
 FnTypeParam        ::= ParamMode? TypeExpr
 
-TypeExprList       ::= TypeExpr ( "," TypeExpr )* ","?
+TypeExprList       ::= TypeExpr ("," TypeExpr)* ","?
 IntLitList         ::= IntLit ("," IntLit)* ","?
+```
 
-# Functions
+## Functions
+
+```bnf
 FuncDecl           ::= FuncSig ";"
-Func               ::= FuncSig Block
+FuncDef            ::= FuncSig Block
 
-FuncSig            ::= "fn" Identifier "(" ParamList? ")" ( "->" TypeExpr )?
+FuncSig            ::= "fn" Identifier "(" ParamList? ")" ("->" TypeExpr)?
 
-# Methods
-MethodBlock        ::= Identifier "::" "{" MethodDef* "}"
-MethodDef          ::= MethodSig Block
-MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
-SelfParam          ::= ParamMode? "self"
-
-# Closures
-ClosureSig         ::= "|" ParamList? "|" ( "->" TypeExpr )?
-ClosureCaptureList ::= "[" "move" Identifier ( "," Identifier )* ","? "]"
-
-# Parameters (common)
 ParamList          ::= Param ("," Param)* ","?
 Param              ::= ParamMode? Identifier ":" TypeExpr
 ParamMode          ::= "inout" | "out" | "sink"
+```
 
-# Blocks
+## Methods
+
+```bnf
+MethodBlock        ::= Identifier "::" "{" MethodDef* "}"
+MethodDef          ::= MethodSig Block
+MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ("->" TypeExpr)?
+SelfParam          ::= ParamMode? "self"
+```
+
+## Closures
+
+```bnf
+ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr
+ClosureSig         ::= "|" ParamList? "|" ("->" TypeExpr)?
+ClosureCaptureList ::= "[" "move" Identifier ("," Identifier)* ","? "]"
+```
+
+## Blocks and Statements
+
+```bnf
 Block              ::= "{" BlockItem* (Expr ";"?)? "}"
 BlockItem          ::= StmtExpr | Expr ";"
 
-# Statement Expressions
 StmtExpr           ::= LetBind | VarBind | VarDecl | Assign | While | For
 
-# Variable Binding/Declaration
-LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr ";"
-VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr ";"
+LetBind            ::= "let" Pattern (":" TypeExpr)? "=" Expr ";"
+VarBind            ::= "var" Pattern (":" TypeExpr)? "=" Expr ";"
 VarDecl            ::= "var" Identifier ":" TypeExpr ";"
 
-# Assignment
 Assign             ::= PostfixExpr "=" Expr ";"
 
-# Loops
 While              ::= "while" Expr Block
 For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
-
 RangeExpr          ::= IntLit ".." IntLit
+```
 
-# Patterns
+## Patterns
+
+```bnf
 Pattern            ::= IdentPattern | ArrayPattern | TuplePattern | StructPattern
 IdentPattern       ::= Identifier
 ArrayPattern       ::= "[" PatternList "]"
@@ -89,70 +117,68 @@ TuplePattern       ::= "(" Pattern "," PatternList? ")"
 StructPattern      ::= Identifier "{" StructPatternFieldList? "}"
 
 StructPatternFieldList ::= StructPatternField ("," StructPatternField)* ","?
-StructPatternField ::= Identifier ( ":" Pattern )?
+StructPatternField ::= Identifier (":" Pattern)?
 
-PatternList        ::= Pattern ( "," Pattern )* ","?
+PatternList        ::= Pattern ("," Pattern)* ","?
+```
 
-# Expressions
+## Expressions
+
+```bnf
 Expr               ::= If | Match | InfixExpr
 
-# Control flow
 If                 ::= "if" Expr IfBody "else" IfBody
 IfBody             ::= Block | Expr
 
-Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
+Match              ::= "match" Expr "{" MatchArm ("," MatchArm)* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr
 MatchPattern       ::= "_" | BoolLit | IntLit | TuplePattern | EnumVariantPattern
 
-EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" MatchBindingList? ")" )?
+EnumVariantPattern ::= Identifier ("::" Identifier)? ("(" MatchBindingList? ")")?
 MatchBindingList   ::= MatchBinding ("," MatchBinding)* ","?
-
-TuplePattern       ::= "(" TuplePatternElemList? ")"
-TuplePatternElemList ::= TuplePatternElem ("," TuplePatternElem)* ","?
-TuplePatternElem   ::= MatchBinding | TuplePattern
-
 MatchBinding       ::= Identifier | "_"
+```
 
-# Operator Precedence (Lowest to Highest)
-# 0. Logical OR (||)
-# 1. Logical AND (&&)
-# 2. Bitwise OR (|)
-# 3. Bitwise XOR (^)
-# 4. Bitwise AND (&)
-# 5. Comparison (==, !=, <, <=, >, >=)
-# 6. Shift (<<, >>)
-# 7. Additive (+, -)
-# 8. Multiplicative (*, /, %)
-# 9. Unary (-, !, ~)
-# 10. Postfix
+## Operator Expressions
 
+Precedence from lowest (1) to highest (10):
+
+```bnf
 InfixExpr          ::= OrExpr
 
-OrExpr             ::= AndExpr ( "||" AndExpr )*
-AndExpr            ::= BitOrExpr ( "&&" BitOrExpr )*
-BitOrExpr          ::= BitXorExpr ( "|" BitXorExpr )*
-BitXorExpr         ::= BitAndExpr ( "^" BitAndExpr )*
-BitAndExpr         ::= CompareExpr ( "&" CompareExpr )*
-CompareExpr        ::= ShiftExpr ( ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) ShiftExpr )*
-ShiftExpr          ::= AddExpr ( ( "<<" | ">>" ) AddExpr )*
-AddExpr            ::= MulExpr ( ( "+" | "-" ) MulExpr )*
-MulExpr            ::= UnaryExpr ( ( "*" | "/" | "%" ) UnaryExpr )*
-UnaryExpr          ::= ( "-" | "!" | "~" | "^" ) UnaryExpr
+OrExpr             ::= AndExpr ("||" AndExpr)*
+AndExpr            ::= BitOrExpr ("&&" BitOrExpr)*
+BitOrExpr          ::= BitXorExpr ("|" BitXorExpr)*
+BitXorExpr         ::= BitAndExpr ("^" BitAndExpr)*
+BitAndExpr         ::= CompareExpr ("&" CompareExpr)*
+CompareExpr        ::= ShiftExpr (("==" | "!=" | "<" | "<=" | ">" | ">=") ShiftExpr)*
+ShiftExpr          ::= AddExpr (("<<" | ">>") AddExpr)*
+AddExpr            ::= MulExpr (("+" | "-") MulExpr)*
+MulExpr            ::= UnaryExpr (("*" | "/" | "%") UnaryExpr)*
+UnaryExpr          ::= ("-" | "!" | "~" | "^") UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
+```
 
-PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange | TupleField | StructField | MethodCall )*
+## Postfix Expressions
+
+```bnf
+PostfixExpr        ::= Primary (Call | ArrayIndex | SliceRange | TupleField | StructField | MethodCall)*
 
 Call               ::= "(" CallArgList? ")"
 CallArgList        ::= CallArg ("," CallArg)* ","?
-CallArg            ::= ( "inout" | "out" | "move" )? Expr
+CallArg            ::= ("inout" | "out" | "move")? Expr
 
 ArrayIndex         ::= "[" ExprList "]"
 SliceRange         ::= "[" Expr? ".." Expr? "]"
 TupleField         ::= "." IntLit
 StructField        ::= "." Identifier
 MethodCall         ::= "." Identifier "(" CallArgList? ")"
+```
 
+## Primary Expressions
+
+```bnf
 Primary            ::= Literal
                      | Identifier
                      | EnumVariant
@@ -161,28 +187,17 @@ Primary            ::= Literal
                      | Block
                      | ClosureExpr
 
-ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr
+EnumVariant        ::= Identifier "::" Identifier ("(" ExprList ")")?
+StructUpdate       ::= "{" Expr "|" StructUpdateField ("," StructUpdateField)* ","? "}"
+StructUpdateField  ::= Identifier ":" Expr
+```
 
+## Literals
+
+```bnf
 Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
                      | ArrayLit | TupleLit | StructLit
 
-ArrayLit           ::= TypeExpr? "[" ExprList "]"
-                     | TypeExpr? "[" Expr ";" IntLit "]"
-TupleLit           ::= "(" Expr "," ExprList? ")"
-
-StructLit          ::= Identifier "{" StructLitFieldList? "}"
-StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
-StructLitField     ::= Identifier ":" Expr
-
-StructUpdate       ::= "{" Expr "|" StructUpdateField ("," StructUpdateField)* ","? "}"
-StructUpdateField  ::= Identifier ":" Expr
-
-EnumVariant        ::= Identifier "::" Identifier ( "(" ExprList ")" )?
-
-# Common
-ExprList           ::= Expr ( "," Expr )* ","?
-
-# Terminals
 UnitLit            ::= "()"
 BoolLit            ::= "true" | "false"
 IntLit             ::= DecimalLit | BinaryLit | OctalLit | HexLit
@@ -190,8 +205,30 @@ DecimalLit         ::= [0-9] ([0-9_])*
 BinaryLit          ::= "0b" [01_]+
 OctalLit           ::= "0o" [0-7_]+
 HexLit             ::= "0x" [0-9a-fA-F_]+
-CharLit            ::= '\'' (char | escape) '\''
+
+CharLit            ::= "'" (char | escape) "'"
 StringLit          ::= '"' (string-char | escape)* '"'
 StringFmt          ::= "f" StringLit
 
-Identifier         ::= [a-zA-Z_][a-zA-Z0-9_]*
+ArrayLit           ::= TypeExpr? "[" ExprList "]"
+                     | TypeExpr? "[" Expr ";" IntLit "]"
+TupleLit           ::= "(" Expr "," ExprList? ")"
+StructLit          ::= Identifier "{" StructLitFieldList? "}"
+StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
+StructLitField     ::= Identifier ":" Expr
+```
+
+## Identifiers and Lists
+
+```bnf
+Identifier         ::= [a-zA-Z_] [a-zA-Z0-9_]*
+ExprList           ::= Expr ("," Expr)* ","?
+```
+
+## Comments
+
+```
+// Single-line comment (to end of line)
+```
+
+Block comments are not supported.
