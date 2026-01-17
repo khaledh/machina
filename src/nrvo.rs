@@ -152,6 +152,7 @@ impl NrvoSafetyChecker {
             VEK::Load { place } | VEK::Move { place } | VEK::ImplicitMove { place } => {
                 self.check_place_value(place, at_return)
             }
+            VEK::AddrOf { place } => self.check_place_value(place, false),
 
             // Block expression: check all expressions, with last one in return context
             VEK::Block { items, tail } => {
@@ -262,6 +263,7 @@ impl NrvoSafetyChecker {
             PEK::ArrayIndex { target, .. } => self.is_lvalue_use(target),
             PEK::TupleField { target, .. } => self.is_lvalue_use(target),
             PEK::StructField { target, .. } => self.is_lvalue_use(target),
+            PEK::Deref { .. } => false,
         }
     }
 
@@ -278,6 +280,7 @@ impl NrvoSafetyChecker {
             PEK::TupleField { target, .. } | PEK::StructField { target, .. } => {
                 self.check_place_lvalue(target)
             }
+            PEK::Deref { value } => self.check_expr(value, false),
             PEK::Var { .. } => true,
         }
     }

@@ -158,7 +158,8 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::Var { .. }
             | norm::ExprKind::ArrayIndex { .. }
             | norm::ExprKind::TupleField { .. }
-            | norm::ExprKind::StructField { .. } => {
+            | norm::ExprKind::StructField { .. }
+            | norm::ExprKind::Deref { .. } => {
                 let place = self.elab_place(expr);
                 let place_ty = place.ty;
                 if self.implicit_moves.contains(&expr.id) {
@@ -374,7 +375,7 @@ impl<'a> Elaborator<'a> {
                     .iter()
                     .map(|capture| sem::StructLitField {
                         name: capture.name.clone(),
-                        value: self.value_for_def(capture.def_id, expr.span),
+                        value: self.capture_value_for_def(capture, expr.span),
                         span: expr.span,
                     })
                     .collect();
@@ -392,12 +393,16 @@ impl<'a> Elaborator<'a> {
                 kind: *kind,
                 expr: Box::new(self.elab_value(expr)),
             },
+            norm::ExprKind::AddrOf { expr } => sem::ValueExprKind::AddrOf {
+                place: Box::new(self.elab_place(expr)),
+            },
             norm::ExprKind::Move { .. }
             | norm::ExprKind::ImplicitMove { .. }
             | norm::ExprKind::Var { .. }
             | norm::ExprKind::ArrayIndex { .. }
             | norm::ExprKind::TupleField { .. }
-            | norm::ExprKind::StructField { .. } => {
+            | norm::ExprKind::StructField { .. }
+            | norm::ExprKind::Deref { .. } => {
                 unreachable!("handled earlier")
             }
         };

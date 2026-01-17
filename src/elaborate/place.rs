@@ -16,6 +16,9 @@ impl<'a> Elaborator<'a> {
                 ident: ident.clone(),
                 def_id: *def_id,
             },
+            norm::ExprKind::Deref { expr } => sem::PlaceExprKind::Deref {
+                value: Box::new(self.elab_value(expr)),
+            },
             norm::ExprKind::ArrayIndex { target, indices } => sem::PlaceExprKind::ArrayIndex {
                 target: Box::new(self.elab_place(target)),
                 indices: indices.iter().map(|index| self.elab_value(index)).collect(),

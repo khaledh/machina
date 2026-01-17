@@ -113,6 +113,17 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
+        res::TypeExprKind::Ref {
+            mutable,
+            elem_ty_expr,
+        } => {
+            let elem_ty =
+                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
+            Ok(Type::Ref {
+                mutable: *mutable,
+                elem_ty: Box::new(elem_ty),
+            })
+        }
         res::TypeExprKind::Fn {
             params,
             ret_ty_expr,

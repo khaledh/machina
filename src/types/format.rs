@@ -71,6 +71,13 @@ impl fmt::Display for Type {
             Type::Heap { elem_ty } => {
                 write!(f, "^{}", elem_ty)
             }
+            Type::Ref { mutable, elem_ty } => {
+                if *mutable {
+                    write!(f, "ref mut {}", elem_ty)
+                } else {
+                    write!(f, "ref {}", elem_ty)
+                }
+            }
         }
     }
 }

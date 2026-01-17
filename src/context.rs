@@ -5,6 +5,7 @@ use crate::lower::LoweredFunc;
 use crate::mcir::GlobalItem;
 use crate::regalloc::AllocationResult;
 use crate::resolve::{DefId, DefTable};
+use crate::semck::closure::capture::ClosureCapture;
 use crate::symtab::SymbolTable;
 use crate::tree::normalized::Module as NormalizedModule;
 use crate::tree::parsed::Module as ParsedModule;
@@ -99,7 +100,7 @@ impl NormalizedContext {
         implicit_moves: HashSet<NodeId>,
         init_assigns: HashSet<NodeId>,
         full_init_assigns: HashSet<NodeId>,
-        closure_captures: HashMap<DefId, Vec<DefId>>,
+        closure_captures: HashMap<DefId, Vec<ClosureCapture>>,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
             module: self.module,
@@ -129,7 +130,7 @@ pub struct SemanticCheckedContext {
     pub implicit_moves: HashSet<NodeId>,
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,
-    pub closure_captures: HashMap<DefId, Vec<DefId>>,
+    pub closure_captures: HashMap<DefId, Vec<ClosureCapture>>,
 }
 
 // -----------------------------------------------------------------------------

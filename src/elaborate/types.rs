@@ -54,6 +54,10 @@ impl<'a> Elaborator<'a> {
             Type::Heap { elem_ty } => sem::TypeExprKind::Heap {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
+            Type::Ref { mutable, elem_ty } => sem::TypeExprKind::Ref {
+                mutable: *mutable,
+                elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
+            },
             Type::Fn { params, ret_ty } => sem::TypeExprKind::Fn {
                 params: params
                     .iter()

@@ -208,6 +208,7 @@ pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &Ty
         TypeExprKind::Range { .. } => {}
         TypeExprKind::Slice { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Heap { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
+        TypeExprKind::Ref { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Fn {
             params,
             ret_ty_expr,
@@ -528,6 +529,12 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         }
 
         ExprKind::ImplicitMove { expr } => {
+            v.visit_expr(expr);
+        }
+        ExprKind::AddrOf { expr } => {
+            v.visit_expr(expr);
+        }
+        ExprKind::Deref { expr } => {
             v.visit_expr(expr);
         }
     }

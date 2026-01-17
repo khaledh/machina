@@ -1875,6 +1875,10 @@ impl TreeFolder<DefId> for TypeChecker {
 
                 ExprKind::ImplicitMove { expr } => walk_expr(self, expr),
 
+                ExprKind::AddrOf { expr } => walk_expr(self, expr),
+
+                ExprKind::Deref { expr } => walk_expr(self, expr),
+
                 ExprKind::Block { items, tail } => {
                     for item in items {
                         let _ = self.visit_block_item(item)?;

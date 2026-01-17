@@ -242,6 +242,10 @@ pub enum TypeExprKind<D> {
     Heap {
         elem_ty_expr: Box<TypeExpr<D>>,
     },
+    Ref {
+        mutable: bool,
+        elem_ty_expr: Box<TypeExpr<D>>,
+    },
     Fn {
         params: Vec<FnTypeParam<D>>,
         ret_ty_expr: Box<TypeExpr<D>>,
@@ -652,6 +656,13 @@ pub enum ExprKind<D, T = ()> {
         expr: Box<Expr<D, T>>,
     },
     ImplicitMove {
+        expr: Box<Expr<D, T>>,
+    },
+    // Internal-only: elaboration inserts these, parser never emits them.
+    AddrOf {
+        expr: Box<Expr<D, T>>,
+    },
+    Deref {
         expr: Box<Expr<D, T>>,
     },
 }

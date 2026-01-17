@@ -400,10 +400,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
             }
             ExprKind::StructField { target, field } => {
                 // Validate struct field access targets early for clearer errors.
-                let mut target_ty = self.ctx.type_map.type_table().get(target.ty).clone();
-                while let Type::Heap { elem_ty } = target_ty {
-                    target_ty = *elem_ty;
-                }
+                let target_ty = self.ctx.type_map.type_table().get(target.ty).peel_heap();
                 if let Type::Struct { fields, .. } = target_ty
                     && !fields.iter().any(|f| f.name == *field)
                 {

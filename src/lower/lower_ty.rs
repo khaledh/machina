@@ -50,6 +50,10 @@ impl TyLowerer {
                 let elem_id = self.lower_ty(elem_ty);
                 self.table.add(TyKind::Ptr { elem_ty: elem_id })
             }
+            Type::Ref { elem_ty, .. } => {
+                let elem_id = self.lower_ty(elem_ty);
+                self.table.add(TyKind::Ptr { elem_ty: elem_id })
+            }
 
             // Aggregate Types
             Type::Array { elem_ty, dims } => {

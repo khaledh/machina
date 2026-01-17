@@ -287,6 +287,9 @@ pub enum PlaceExprKind {
         ident: String,
         def_id: DefId,
     },
+    Deref {
+        value: Box<ValueExpr>,
+    },
     ArrayIndex {
         target: Box<PlaceExpr>,
         indices: Vec<ValueExpr>,
@@ -378,6 +381,10 @@ pub enum ValueExprKind {
     Coerce {
         kind: CoerceKind,
         expr: Box<ValueExpr>,
+    },
+
+    AddrOf {
+        place: Box<PlaceExpr>,
     },
 
     // Place-to-value

@@ -147,7 +147,7 @@ fn test_closure_capture_read_only_ok() {
 }
 
 #[test]
-fn test_closure_capture_mutation_rejected() {
+fn test_closure_capture_mutation_allowed() {
     let source = r#"
         fn test() -> u64 {
             var x = 0;
@@ -158,6 +158,20 @@ fn test_closure_capture_mutation_rejected() {
         }
     "#;
 
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_closure_imm_capture_conflict() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 0;
+            let f = || -> u64 x;
+            x = 1;
+            f()
+        }
+    "#;
+
     let result = sem_check_source(source);
     assert!(result.is_err());
 
@@ -165,8 +179,79 @@ fn test_closure_capture_mutation_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::ClosureCaptureMutate(_, _))),
-            "Expected ClosureCaptureMutate error, got {:?}",
+                .any(|err| matches!(err, SemCheckError::ClosureBorrowConflict(_, _))),
+            "Expected ClosureBorrowConflict error, got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
+fn test_closure_mut_capture_conflict() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 0;
+            let f = || -> u64 {
+                x = x + 1;
+                x
+            };
+            let y = x;
+            f()
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|err| matches!(err, SemCheckError::ClosureBorrowConflict(_, _))),
+            "Expected ClosureBorrowConflict error, got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
+fn test_closure_borrow_after_last_use_allowed() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 0;
+            let f = || -> u64 x;
+            let tmp = f();
+            x = 2;
+            x
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_closure_capture_escape_arg_rejected() {
+    let source = r#"
+        fn apply(f: fn(u64) -> u64) -> u64 {
+            f(1)
+        }
+
+        fn test() -> u64 {
+            var x = 0;
+            let f = |y: u64| -> u64 x + y;
+            apply(f)
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|err| matches!(err, SemCheckError::ClosureEscapeArg(_))),
+            "Expected ClosureEscapeArg error, got {:?}",
             errors
         );
     }

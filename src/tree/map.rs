@@ -405,6 +405,13 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
             TypeExprKind::Heap { elem_ty_expr } => TypeExprKind::Heap {
                 elem_ty_expr: Box::new(mapper.map_type_expr(elem_ty_expr, ctx)),
             },
+            TypeExprKind::Ref {
+                mutable,
+                elem_ty_expr,
+            } => TypeExprKind::Ref {
+                mutable: *mutable,
+                elem_ty_expr: Box::new(mapper.map_type_expr(elem_ty_expr, ctx)),
+            },
             TypeExprKind::Fn {
                 params,
                 ret_ty_expr,
@@ -900,6 +907,12 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
             expr: Box::new(mapper.map_expr(expr, ctx)),
         },
         ExprKind::ImplicitMove { expr } => ExprKind::ImplicitMove {
+            expr: Box::new(mapper.map_expr(expr, ctx)),
+        },
+        ExprKind::AddrOf { expr } => ExprKind::AddrOf {
+            expr: Box::new(mapper.map_expr(expr, ctx)),
+        },
+        ExprKind::Deref { expr } => ExprKind::Deref {
             expr: Box::new(mapper.map_expr(expr, ctx)),
         },
         ExprKind::Var { ident, def_id } => ExprKind::Var {

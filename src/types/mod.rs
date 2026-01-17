@@ -56,6 +56,10 @@ pub enum Type {
     Heap {
         elem_ty: Box<Type>,
     },
+    Ref {
+        mutable: bool,
+        elem_ty: Box<Type>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -137,6 +141,16 @@ impl PartialEq for Type {
             (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
             (Type::Slice { elem_ty: e1 }, Type::Slice { elem_ty: e2 }) => e1 == e2,
             (Type::Heap { elem_ty: e1 }, Type::Heap { elem_ty: e2 }) => e1 == e2,
+            (
+                Type::Ref {
+                    mutable: m1,
+                    elem_ty: e1,
+                },
+                Type::Ref {
+                    mutable: m2,
+                    elem_ty: e2,
+                },
+            ) => m1 == m2 && e1 == e2,
             _ => false,
         }
     }
@@ -200,6 +214,11 @@ impl Hash for Type {
             }
             Type::Heap { elem_ty } => {
                 13u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::Ref { mutable, elem_ty } => {
+                14u8.hash(state);
+                mutable.hash(state);
                 elem_ty.hash(state);
             }
         }
@@ -315,6 +334,7 @@ impl Type {
                 16
             }
             Type::Heap { .. } => 8,
+            Type::Ref { .. } => 8,
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -344,6 +364,7 @@ impl Type {
             }
             Type::Slice { .. } => 8,
             Type::Heap { .. } => 8,
+            Type::Ref { .. } => 8,
             Type::Unknown => panic!("Unknown type"),
         }
     }

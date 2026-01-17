@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::resolve::DefTable;
+use crate::semck::closure::capture::ClosureCapture;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{InitInfo, NodeId, NodeIdGen};
@@ -13,9 +14,11 @@ use crate::types::{Type, TypeId};
 pub(super) struct CaptureField {
     pub(super) def_id: DefId,
     pub(super) name: String,
-    pub(super) ty: Type,
-    pub(super) ty_id: TypeId,
-    pub(super) ty_expr: sem::TypeExpr,
+    pub(super) base_ty: Type,
+    pub(super) base_ty_id: TypeId,
+    pub(super) field_ty: Type,
+    pub(super) field_ty_id: TypeId,
+    pub(super) field_ty_expr: sem::TypeExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -64,7 +67,7 @@ pub struct Elaborator<'a> {
     pub(super) implicit_moves: &'a HashSet<NodeId>,
     pub(super) init_assigns: &'a HashSet<NodeId>,
     pub(super) full_init_assigns: &'a HashSet<NodeId>,
-    pub(super) closure_captures: &'a HashMap<DefId, Vec<DefId>>,
+    pub(super) closure_captures: &'a HashMap<DefId, Vec<ClosureCapture>>,
     pub(super) closure_types: Vec<sem::TypeDef>,
     pub(super) closure_methods: Vec<sem::MethodBlock>,
     pub(super) closure_info: HashMap<DefId, ClosureInfo>,
@@ -80,7 +83,7 @@ impl<'a> Elaborator<'a> {
         implicit_moves: &'a HashSet<NodeId>,
         init_assigns: &'a HashSet<NodeId>,
         full_init_assigns: &'a HashSet<NodeId>,
-        closure_captures: &'a HashMap<DefId, Vec<DefId>>,
+        closure_captures: &'a HashMap<DefId, Vec<ClosureCapture>>,
     ) -> Self {
         Self {
             def_table,

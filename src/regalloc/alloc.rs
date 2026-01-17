@@ -16,22 +16,51 @@ use crate::regalloc::{AllocationResult, LocalAllocMap, LocalClass, MappedLocal};
 
 // --- Local classification ---
 pub(crate) fn classify_locals(body: &FuncBody) -> Vec<LocalClass> {
+    let addr_taken = addr_taken_locals(body);
     body.locals
         .iter()
-        .map(|local| {
+        .enumerate()
+        .map(|(index, local)| {
+            let local_id = LocalId(index as u32);
             let ty_info = body.types.get(local.ty);
-            if (matches!(local.kind, LocalKind::Param { .. })
+            if addr_taken.contains(&local_id) {
+                // Address-taken locals must live in a stack slot so AddrOf is valid.
+                LocalClass::StackAddr
+            } else if (matches!(local.kind, LocalKind::Param { .. })
                 || matches!(local.kind, LocalKind::Return))
                 && ty_info.is_aggregate()
             {
+                // Aggregate params or returns live in a register (passed/returned by reference)
                 LocalClass::Reg
             } else if ty_info.is_aggregate() {
+                // Aggregate locals live in a stack address
                 LocalClass::StackAddr
             } else {
+                // Scalar locals live in a register
                 LocalClass::Reg
             }
         })
         .collect()
+}
+
+fn addr_taken_locals(body: &FuncBody) -> HashSet<LocalId> {
+    let mut out = HashSet::new();
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let Statement::CopyScalar {
+                src: Rvalue::AddrOf(place),
+                ..
+            } = stmt
+            {
+                let base = match place {
+                    PlaceAny::Scalar(p) => p.base(),
+                    PlaceAny::Aggregate(p) => p.base(),
+                };
+                out.insert(base);
+            }
+        }
+    }
+    out
 }
 
 // --- Type sizing helpers ---

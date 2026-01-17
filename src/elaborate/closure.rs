@@ -13,28 +13,38 @@ impl<'a> Elaborator<'a> {
             return Vec::new();
         };
         let mut fields = Vec::with_capacity(captures.len());
-        for def_id in captures {
+        for capture in captures {
+            let def_id = capture.def_id;
             let def = self
                 .def_table
-                .lookup_def(*def_id)
+                .lookup_def(def_id)
                 .unwrap_or_else(|| panic!("compiler bug: missing def for capture {def_id}"))
                 .clone();
             let name = def.name.clone();
-            let ty = self
+            let base_ty = self
                 .type_map
                 .lookup_def_type(&def)
                 .unwrap_or_else(|| panic!("compiler bug: missing type for capture {def_id}"));
-            let ty_id = self
+            let base_ty_id = self
                 .type_map
                 .lookup_def_type_id(&def)
                 .unwrap_or_else(|| panic!("compiler bug: missing type id for capture {def_id}"));
-            let ty_expr = self.type_expr_from_type(&ty, span);
+            let field_ty = Type::Ref {
+                mutable: capture.mode == crate::semck::closure::capture::CaptureMode::MutBorrow,
+                elem_ty: Box::new(base_ty.clone()),
+            };
+            let field_ty_id = self
+                .type_map
+                .insert_node_type(self.node_id_gen.new_id(), field_ty.clone());
+            let field_ty_expr = self.type_expr_from_type(&field_ty, span);
             fields.push(CaptureField {
-                def_id: *def_id,
+                def_id,
                 name,
-                ty,
-                ty_id,
-                ty_expr,
+                base_ty,
+                base_ty_id,
+                field_ty,
+                field_ty_id,
+                field_ty_expr,
             });
         }
         fields
@@ -53,7 +63,7 @@ impl<'a> Elaborator<'a> {
             .map(|capture| sem::StructDefField {
                 id: self.node_id_gen.new_id(),
                 name: capture.name.clone(),
-                ty: capture.ty_expr.clone(),
+                ty: capture.field_ty_expr.clone(),
                 span,
             })
             .collect();
@@ -79,7 +89,7 @@ impl<'a> Elaborator<'a> {
             .iter()
             .map(|capture| StructField {
                 name: capture.name.clone(),
-                ty: capture.ty.clone(),
+                ty: capture.field_ty.clone(),
             })
             .collect();
         let closure_ty = Type::Struct {
@@ -261,7 +271,7 @@ impl<'a> Elaborator<'a> {
     ) -> Option<sem::PlaceExpr> {
         let ctx = self.closure_stack.last()?;
         let field = ctx.capture_field(def_id)?;
-        // Rewrite captured var uses to env.<field> in the invoke body.
+        // Rewrite captured var uses to *env.<field> (env stores ref fields).
         let env_id = self.node_id_gen.new_id();
         let env_place = sem::PlaceExpr {
             id: env_id,
@@ -273,54 +283,72 @@ impl<'a> Elaborator<'a> {
             span,
         };
         self.type_map.insert_node_type(env_id, ctx.ty.clone());
-        self.type_map.insert_node_type(place_id, field.ty.clone());
-        Some(sem::PlaceExpr {
-            id: place_id,
+
+        let field_place_id = self.node_id_gen.new_id();
+        let field_place = sem::PlaceExpr {
+            id: field_place_id,
             kind: sem::PlaceExprKind::StructField {
                 target: Box::new(env_place),
                 field: field.name.clone(),
             },
-            ty: field.ty_id,
+            ty: field.field_ty_id,
+            span,
+        };
+        self.type_map
+            .insert_node_type(field_place_id, field.field_ty.clone());
+
+        let load_id = self.node_id_gen.new_id();
+        let load = sem::ValueExpr {
+            id: load_id,
+            kind: sem::ValueExprKind::Load {
+                place: Box::new(field_place),
+            },
+            ty: field.field_ty_id,
+            span,
+        };
+        self.type_map
+            .insert_node_type(load_id, field.field_ty.clone());
+
+        self.type_map
+            .insert_node_type(place_id, field.base_ty.clone());
+        Some(sem::PlaceExpr {
+            id: place_id,
+            kind: sem::PlaceExprKind::Deref {
+                value: Box::new(load),
+            },
+            ty: field.base_ty_id,
             span,
         })
     }
 
-    pub(super) fn value_for_def(&mut self, def_id: DefId, span: Span) -> sem::ValueExpr {
-        let def = self
-            .def_table
-            .lookup_def(def_id)
-            .unwrap_or_else(|| panic!("compiler bug: missing def {def_id}"))
-            .clone();
-        let name = def.name.clone();
-        let ty = self
-            .type_map
-            .lookup_def_type(&def)
-            .unwrap_or_else(|| panic!("compiler bug: missing type for {def_id}"));
-        let ty_id = self
-            .type_map
-            .lookup_def_type_id(&def)
-            .unwrap_or_else(|| panic!("compiler bug: missing type id for {def_id}"));
+    pub(super) fn capture_value_for_def(
+        &mut self,
+        capture: &CaptureField,
+        span: Span,
+    ) -> sem::ValueExpr {
         let place_id = self.node_id_gen.new_id();
-        let place = if let Some(place) = self.capture_place_for(def_id, place_id, span) {
-            place
-        } else {
-            self.type_map.insert_node_type(place_id, ty.clone());
-            sem::PlaceExpr {
-                id: place_id,
-                kind: sem::PlaceExprKind::Var {
-                    ident: name,
-                    def_id,
-                },
-                ty: ty_id,
-                span,
-            }
+        let place = sem::PlaceExpr {
+            id: place_id,
+            kind: sem::PlaceExprKind::Var {
+                ident: capture.name.clone(),
+                def_id: capture.def_id,
+            },
+            ty: capture.base_ty_id,
+            span,
         };
-        self.new_value(
-            sem::ValueExprKind::Load {
+        self.type_map
+            .insert_node_type(place_id, capture.base_ty.clone());
+
+        let addr_id = self.node_id_gen.new_id();
+        self.type_map
+            .insert_node_type(addr_id, capture.field_ty.clone());
+        sem::ValueExpr {
+            id: addr_id,
+            kind: sem::ValueExprKind::AddrOf {
                 place: Box::new(place),
             },
-            ty_id,
+            ty: capture.field_ty_id,
             span,
-        )
+        }
     }
 }

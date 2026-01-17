@@ -1079,6 +1079,8 @@ impl<'a> DefInitChecker<'a> {
             ExprKind::Move { expr } => self.check_expr(expr),
             ExprKind::Coerce { expr, .. } => self.check_expr(expr),
             ExprKind::ImplicitMove { expr } => self.check_expr(expr),
+            ExprKind::AddrOf { expr } => self.check_expr(expr),
+            ExprKind::Deref { expr } => self.check_expr(expr),
             ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)

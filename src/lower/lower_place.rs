@@ -12,6 +12,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_place(&mut self, place: &PlaceExpr) -> Result<PlaceAny, LowerError> {
         match &place.kind {
             PEK::Var { .. } => self.lower_var(place),
+            PEK::Deref { value } => self.lower_deref(place, value),
             PEK::ArrayIndex { target, indices } => self.lower_array_index(place, target, indices),
             PEK::TupleField { target, index } => self.lower_tuple_field(target, *index),
             PEK::StructField { target, field } => self.lower_struct_field(target, field),
@@ -135,6 +136,31 @@ impl<'a> FuncLowerer<'a> {
 
         let place = self.place_from_ty_id(base, result_ty_id, projs);
         Ok(place)
+    }
+
+    fn lower_deref(
+        &mut self,
+        place: &PlaceExpr,
+        value: &ValueExpr,
+    ) -> Result<PlaceAny, LowerError> {
+        let ptr_op = self.lower_scalar_expr(value)?;
+        let ptr_place = match ptr_op {
+            Operand::Copy(place) | Operand::Move(place) => place,
+            operand => {
+                let ptr_ty = self.ty_from_id(value.ty);
+                let ptr_ty_id = self.ty_lowerer.lower_ty(&ptr_ty);
+                let temp = self.new_temp_scalar(ptr_ty_id);
+                self.emit_copy_scalar(temp.clone(), Rvalue::Use(operand));
+                temp
+            }
+        };
+
+        let elem_ty = self.ty_from_id(place.ty);
+        let elem_ty_id = self.ty_lowerer.lower_ty(&elem_ty);
+
+        let mut projs = ptr_place.projections().to_vec();
+        projs.push(Projection::Deref);
+        Ok(self.place_from_ty_id(ptr_place.base(), elem_ty_id, projs))
     }
 
     /// Lower slice indexing into a projected place.

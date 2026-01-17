@@ -286,13 +286,8 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn peel_heap_for_match(&self, mut ty: Type) -> (Type, usize) {
-        let mut deref_count = 0usize;
-        while let Type::Heap { elem_ty } = ty {
-            deref_count += 1;
-            ty = *elem_ty;
-        }
-        (ty, deref_count)
+    fn peel_heap_for_match(&self, ty: Type) -> (Type, usize) {
+        ty.peel_heap_with_count()
     }
 
     fn lower_match_deref_place(

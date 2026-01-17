@@ -11,10 +11,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::dataflow::{solve_backward, solve_forward};
+use crate::analysis::dataflow::solve_forward;
 use crate::context::NormalizedContext;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
+use crate::semck::liveness_util;
 use crate::tree::cfg::{
     AstBlockId, TreeCfg, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
@@ -331,81 +332,16 @@ struct SliceLiveness {
 
 /// Backward dataflow: compute which slice locals are live at each point.
 fn analyze_slice_liveness(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> SliceLiveness {
-    let entry = HashSet::new();
-    let bottom = HashSet::new();
-
-    let analysis = solve_backward(
+    let analysis = liveness_util::analyze_liveness(
         cfg,
-        entry,
-        bottom,
-        |states| {
-            let mut out = HashSet::new();
-            for state in states {
-                out.extend(state.iter().copied());
-            }
-            out
-        },
-        |block_id, out_state| compute_live_in(ctx, &cfg.nodes[block_id.0], out_state),
+        |term, uses| add_terminator_uses(term, ctx, uses),
+        |item, defs, uses| collect_item_defs_uses(item, ctx, defs, uses),
     );
 
-    let live_out = analysis.out_map;
-    let live_after = cfg
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(idx, node)| compute_live_after(ctx, node, &live_out[idx]))
-        .collect();
-
     SliceLiveness {
-        live_out,
-        live_after,
+        live_out: analysis.live_out,
+        live_after: analysis.live_after,
     }
-}
-
-fn compute_live_in(
-    ctx: &NormalizedContext,
-    node: &TreeCfgNode<'_, TypeId>,
-    live_out: &HashSet<DefId>,
-) -> HashSet<DefId> {
-    let mut live = live_out.clone();
-    add_terminator_uses(&node.term, ctx, &mut live);
-    for item in node.items.iter().rev() {
-        apply_item_defs_uses(item, ctx, &mut live);
-    }
-    live
-}
-
-/// Compute live-after for each item in a block.
-fn compute_live_after(
-    ctx: &NormalizedContext,
-    node: &TreeCfgNode<'_, TypeId>,
-    live_out: &HashSet<DefId>,
-) -> Vec<HashSet<DefId>> {
-    let mut live = live_out.clone();
-    add_terminator_uses(&node.term, ctx, &mut live);
-    let mut live_after = vec![HashSet::new(); node.items.len()];
-    for (idx, item) in node.items.iter().enumerate().rev() {
-        live_after[idx] = live.clone();
-        apply_item_defs_uses(item, ctx, &mut live);
-    }
-    live_after
-}
-
-/// Liveness transfer: remove defs, add uses.
-fn apply_item_defs_uses(
-    item: &TreeCfgItem<'_, TypeId>,
-    ctx: &NormalizedContext,
-    live: &mut HashSet<DefId>,
-) {
-    let mut defs = HashSet::new();
-    let mut uses = HashSet::new();
-    collect_item_defs_uses(item, ctx, &mut defs, &mut uses);
-
-    // Defs kill liveness; uses make it live.
-    for def in defs {
-        live.remove(&def);
-    }
-    live.extend(uses);
 }
 
 /// Add slice uses from the block terminator (if condition).

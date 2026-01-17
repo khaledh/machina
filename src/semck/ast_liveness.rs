@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::dataflow::solve_backward;
 use crate::context::NormalizedContext;
 use crate::resolve::DefId;
-use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
+use crate::semck::liveness_util;
+use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
 use crate::tree::normalized::{
     BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind,
 };
@@ -25,38 +25,16 @@ pub struct AstLiveness {
 /// Compute liveness for heap-owned locals on the AST CFG. This keeps the analysis
 /// lightweight and scoped to the move-checker (we only track heap uses).
 pub fn analyze(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLiveness {
-    let entry = HashSet::new();
-    let bottom = HashSet::new();
-
-    // Backward analysis: live-in = uses ∪ (live-out − defs).
-    let analysis = solve_backward(
+    let analysis = liveness_util::analyze_liveness(
         cfg,
-        entry,
-        bottom,
-        |states| {
-            // May-liveness: a value is live if any successor needs it.
-            let mut out = HashSet::new();
-            for state in states {
-                out.extend(state.iter().cloned());
-            }
-            out
-        },
-        |block_id, out_state| compute_live_in(ctx, &cfg.nodes[block_id.0], out_state),
+        |term, uses| add_terminator_uses(term, ctx, uses),
+        |item, defs, uses| collect_item_defs_uses(item, ctx, defs, uses),
     );
 
-    let live_in = analysis.in_map;
-    let live_out = analysis.out_map;
-    let live_after = cfg
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(idx, node)| compute_live_after(ctx, node, &live_out[idx]))
-        .collect();
-
     AstLiveness {
-        live_in,
-        live_out,
-        live_after,
+        live_in: analysis.live_in,
+        live_out: analysis.live_out,
+        live_after: analysis.live_after,
     }
 }
 
@@ -97,52 +75,6 @@ impl HeapUseAccumulator for HashMap<DefId, usize> {
 // ============================================================================
 // Dataflow Helpers
 // ============================================================================
-
-fn compute_live_in(
-    ctx: &NormalizedContext,
-    node: &TreeCfgNode<'_, TypeId>,
-    live_out: &HashSet<DefId>,
-) -> HashSet<DefId> {
-    let mut live = live_out.clone();
-    // Terminator conditions (if) are evaluated after items in the block.
-    add_terminator_uses(&node.term, ctx, &mut live);
-    for item in node.items.iter().rev() {
-        apply_item_defs_uses(item, ctx, &mut live);
-    }
-    live
-}
-
-/// Per-item live-after sets are used to detect last-use sites inside a block.
-fn compute_live_after(
-    ctx: &NormalizedContext,
-    node: &TreeCfgNode<'_, TypeId>,
-    live_out: &HashSet<DefId>,
-) -> Vec<HashSet<DefId>> {
-    let mut live = live_out.clone();
-    add_terminator_uses(&node.term, ctx, &mut live);
-    let mut live_after = vec![HashSet::new(); node.items.len()];
-    for (idx, item) in node.items.iter().enumerate().rev() {
-        live_after[idx] = live.clone();
-        apply_item_defs_uses(item, ctx, &mut live);
-    }
-    live_after
-}
-
-fn apply_item_defs_uses(
-    item: &TreeCfgItem<'_, TypeId>,
-    ctx: &NormalizedContext,
-    live: &mut HashSet<DefId>,
-) {
-    let mut defs = HashSet::new();
-    let mut uses = HashSet::new();
-    collect_item_defs_uses(item, ctx, &mut defs, &mut uses);
-
-    // Standard liveness transfer: kill defs, then add uses.
-    for def in defs {
-        live.remove(&def);
-    }
-    live.extend(uses);
-}
 
 fn add_terminator_uses(
     term: &TreeCfgTerminator<'_, TypeId>,

@@ -271,6 +271,16 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
             model::TypeExprKind::Heap { elem_ty_expr } => {
                 write!(f, "Heap({})", elem_ty_expr)?;
             }
+            model::TypeExprKind::Ref {
+                mutable,
+                elem_ty_expr,
+            } => {
+                if *mutable {
+                    write!(f, "Ref(mut {})", elem_ty_expr)?;
+                } else {
+                    write!(f, "Ref({})", elem_ty_expr)?;
+                }
+            }
             model::TypeExprKind::Fn {
                 params,
                 ret_ty_expr,
@@ -731,6 +741,18 @@ impl Expr {
             ExprKind::ImplicitMove { expr } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}ImplicitMove [{}]", pad, self.id)?;
+                writeln!(f, "{}Expr:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::AddrOf { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}AddrOf [{}]", pad, self.id)?;
+                writeln!(f, "{}Expr:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Deref { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Deref [{}]", pad, self.id)?;
                 writeln!(f, "{}Expr:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
             }

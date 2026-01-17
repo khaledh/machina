@@ -254,6 +254,7 @@ impl<'a> FuncLowerer<'a> {
             PEK::StructField { target, .. }
             | PEK::TupleField { target, .. }
             | PEK::ArrayIndex { target, .. } => self.base_def_for_assignee(target),
+            PEK::Deref { .. } => None,
         }
     }
 }

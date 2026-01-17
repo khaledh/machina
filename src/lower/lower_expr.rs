@@ -110,6 +110,12 @@ impl<'a> FuncLowerer<'a> {
                 self.lower_scalar_place(place)
             }
             VEK::Load { place } => self.lower_scalar_place(place),
+            VEK::AddrOf { place } => {
+                let ty = self.ty_from_id(expr.ty);
+                let ty_id = self.ty_lowerer.lower_ty(&ty);
+                let place = self.lower_place(place)?;
+                Ok(self.emit_scalar_rvalue(ty_id, Rvalue::AddrOf(place)))
+            }
 
             // Literals
             VEK::IntLit(value) => {
