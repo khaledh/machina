@@ -258,6 +258,33 @@ fn test_closure_capture_escape_arg_rejected() {
 }
 
 #[test]
+fn test_closure_move_capture_use_after_move() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let x = ^Point { x: 1, y: 2 };
+            let f = [move x] || -> u64 x.x;
+            let y = x;
+            f()
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|err| matches!(err, SemCheckError::UseAfterMove(_, _))),
+            "Expected UseAfterMove error, got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
 fn test_struct_pattern_missing_field() {
     let source = r#"
         type Point = { x: u64, y: u64 }

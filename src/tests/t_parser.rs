@@ -1278,12 +1278,14 @@ fn test_parse_closure_expr() {
     match &tail.kind {
         ExprKind::Closure {
             ident,
+            captures,
             params,
             return_ty,
             body,
             ..
         } => {
             assert_eq!(ident, "test$closure$1");
+            assert!(captures.is_empty());
             assert_eq!(params.len(), 2);
             assert_eq!(params[0].ident, "a");
             assert_eq!(params[1].ident, "b");
@@ -1291,7 +1293,13 @@ fn test_parse_closure_expr() {
                 TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named return type"),
             }
-            assert!(matches!(body.kind, ExprKind::BinOp { .. }));
+            match &body.kind {
+                ExprKind::Block { tail, .. } => {
+                    let tail = tail.as_ref().expect("Expected block tail");
+                    assert!(matches!(tail.kind, ExprKind::BinOp { .. }));
+                }
+                _ => panic!("Expected closure body block"),
+            }
         }
         _ => panic!("Expected closure expression"),
     }
@@ -1312,18 +1320,44 @@ fn test_parse_closure_expr_empty_params() {
     match &tail.kind {
         ExprKind::Closure {
             ident,
+            captures,
             params,
             return_ty,
             body,
             ..
         } => {
             assert_eq!(ident, "test$closure$1");
+            assert!(captures.is_empty());
             assert!(params.is_empty());
             match &return_ty.kind {
                 TypeExprKind::Named { ident: ty, .. } => assert_eq!(ty, "()"),
                 _ => panic!("Expected named return type"),
             }
             assert!(matches!(body.kind, ExprKind::Block { .. }));
+        }
+        _ => panic!("Expected closure expression"),
+    }
+}
+
+#[test]
+fn test_parse_closure_capture_list() {
+    let source = r#"
+        fn test() -> u64 {
+            [move x, y] || x + y
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Closure { captures, .. } => {
+            assert_eq!(captures.len(), 2);
+            let CaptureSpec::Move { ident, .. } = &captures[0];
+            assert_eq!(ident, "x");
+            let CaptureSpec::Move { ident, .. } = &captures[1];
+            assert_eq!(ident, "y");
         }
         _ => panic!("Expected closure expression"),
     }

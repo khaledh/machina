@@ -146,6 +146,12 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_closure(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
 
+        let captures = if self.curr_token.kind == TK::LBracket {
+            self.parse_capture_list()?
+        } else {
+            Vec::new()
+        };
+
         let params = if self.curr_token.kind == TK::LogicalOr {
             self.advance();
             Vec::new()
@@ -163,7 +169,21 @@ impl<'a> Parser<'a> {
 
         let return_ty = self.parse_ret_type()?;
 
-        let body = self.parse_expr(0)?;
+        let mut body = self.parse_expr(0)?;
+        if !matches!(body.kind, ExprKind::Block { .. }) {
+            // Normalize closure bodies to blocks so downstream passes have a
+            // consistent shape.
+            let span = body.span;
+            body = Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: Vec::new(),
+                    tail: Some(Box::new(body)),
+                },
+                ty: (),
+                span,
+            };
+        }
         let ident = self.next_closure_ident();
 
         let closure_expr = Expr {
@@ -171,6 +191,7 @@ impl<'a> Parser<'a> {
             kind: ExprKind::Closure {
                 ident: ident.clone(),
                 def_id: (),
+                captures,
                 params: params.clone(),
                 return_ty: return_ty.clone(),
                 body: Box::new(body.clone()), // TODO: see if we can restructure this to avoid cloning
@@ -180,6 +201,28 @@ impl<'a> Parser<'a> {
         };
 
         Ok(closure_expr)
+    }
+
+    fn parse_capture_list(&mut self) -> Result<Vec<CaptureSpec>, ParseError> {
+        self.consume(&TK::LBracket)?;
+        self.consume(&TK::KwMove)?;
+        if self.curr_token.kind == TK::RBracket {
+            return Err(ParseError::ExpectedIdent(self.curr_token.clone()));
+        }
+        let captures = self.parse_list(TK::Comma, TK::RBracket, |parser| {
+            let marker = parser.mark();
+            let ident = parser.parse_ident()?;
+            let id = parser.id_gen.new_id();
+            let span = parser.close(marker);
+            Ok(CaptureSpec::Move {
+                id,
+                ident,
+                def_id: (),
+                span,
+            })
+        })?;
+        self.consume(&TK::RBracket)?;
+        Ok(captures)
     }
 
     fn next_closure_ident(&mut self) -> String {

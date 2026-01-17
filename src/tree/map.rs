@@ -985,18 +985,43 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
         ExprKind::Closure {
             ident,
             def_id,
+            captures,
             params,
             return_ty,
             body,
         } => ExprKind::Closure {
             ident: ident.clone(),
             def_id: mapper.map_def_id(expr_id, def_id, ctx),
+            captures: captures
+                .iter()
+                .map(|spec| map_capture_spec(mapper, spec, ctx))
+                .collect(),
             params: params
                 .iter()
                 .map(|param| mapper.map_param(param, ctx))
                 .collect(),
             return_ty: mapper.map_type_expr(return_ty, ctx),
             body: Box::new(mapper.map_expr(body, ctx)),
+        },
+    }
+}
+
+fn map_capture_spec<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    spec: &CaptureSpec<M::InD>,
+    ctx: &mut M::Context,
+) -> CaptureSpec<M::OutD> {
+    match spec {
+        CaptureSpec::Move {
+            id,
+            ident,
+            def_id,
+            span,
+        } => CaptureSpec::Move {
+            id: *id,
+            ident: ident.clone(),
+            def_id: mapper.map_def_id(*id, def_id, ctx),
+            span: *span,
         },
     }
 }

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::resolve::DefTable;
+use crate::semck::closure::capture::CaptureMode;
 use crate::semck::closure::capture::ClosureCapture;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
@@ -14,6 +15,7 @@ use crate::types::{Type, TypeId};
 pub(super) struct CaptureField {
     pub(super) def_id: DefId,
     pub(super) name: String,
+    pub(super) mode: CaptureMode,
     pub(super) base_ty: Type,
     pub(super) base_ty_id: TypeId,
     pub(super) field_ty: Type,

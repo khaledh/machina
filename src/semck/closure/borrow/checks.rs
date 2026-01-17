@@ -1,3 +1,8 @@
+//! Borrow conflict and escape checks for captured closures.
+//!
+//! This module walks each function CFG, combines closure bindings with
+//! liveness, and enforces that captured bases are not accessed in conflicting
+//! ways while a closure is live. It also rejects escaping captured closures.
 use std::collections::{HashMap, HashSet};
 
 use crate::context::NormalizedContext;
@@ -72,6 +77,8 @@ pub(super) fn check_func_def(
                             CaptureMode::ImmBorrow => {
                                 borrowed_imm.insert(*def_id);
                             }
+                            // Move captures don't contribute to borrow conflicts.
+                            CaptureMode::Move => {}
                         }
                     }
                     if !borrowed_mut.is_empty() {
@@ -104,6 +111,11 @@ fn borrowed_bases_for_active(
     for closure_def in active_closures {
         if let Some(captures) = state.get(closure_def) {
             for (base_def, mode) in captures {
+                // Move captures own the value in the closure env, so they don't
+                // create a borrow conflict with the outer binding.
+                if *mode == CaptureMode::Move {
+                    continue;
+                }
                 borrowed
                     .entry(*base_def)
                     .and_modify(|current| {
@@ -134,6 +146,8 @@ fn check_item_for_conflicts(
             CaptureMode::ImmBorrow => {
                 borrowed_imm.insert(*def_id);
             }
+            // Move captures don't participate in borrow-conflict sets.
+            CaptureMode::Move => {}
         }
     }
 

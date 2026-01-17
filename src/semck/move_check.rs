@@ -16,8 +16,8 @@ use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
 use crate::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
 use crate::tree::normalized::{
-    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExpr,
-    StmtExprKind,
+    BindPattern, BindPatternKind, CaptureSpec, Expr, ExprKind, FuncDef, NodeId, ParamMode,
+    StmtExpr, StmtExprKind,
 };
 use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::TypeId;
@@ -190,6 +190,25 @@ impl<'a> MoveVisitor<'a> {
             _ => self
                 .errors
                 .push(SemCheckError::InvalidMoveTarget(expr.span)),
+        }
+    }
+
+    /// Process an explicit move capture: validate and mark the base as moved.
+    fn handle_move_capture(&mut self, def_id: DefId, span: crate::diag::Span) {
+        let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
+            return;
+        };
+        // Params can only be moved if they're sink params (owned).
+        if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(&def_id) {
+            self.errors.push(SemCheckError::MoveFromParam(span));
+            return;
+        }
+        let Some(ty_id) = self.ctx.type_map.lookup_def_type_id(def) else {
+            return;
+        };
+        let ty = self.ctx.type_map.type_table().get(ty_id);
+        if ty.is_move_tracked() {
+            self.moved.insert(def_id);
         }
     }
 
@@ -459,6 +478,15 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
                     for arg in args {
                         self.visit_expr(&arg.expr);
                     }
+                }
+            }
+            ExprKind::Closure { captures, .. } => {
+                // Visit body first so closure-internal uses don't trigger
+                // use-after-move for explicitly moved captures.
+                walk_expr(self, expr);
+                for capture in captures {
+                    let CaptureSpec::Move { def_id, span, .. } = capture;
+                    self.handle_move_capture(*def_id, *span);
                 }
             }
             _ => walk_expr(self, expr),

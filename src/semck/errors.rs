@@ -144,6 +144,9 @@ pub enum SemCheckError {
     #[error("Cannot move captured variable `{0}` inside closure")]
     ClosureCaptureMove(String, Span),
 
+    #[error("Capture `{0}` is not used inside closure")]
+    ClosureCaptureUnused(String, Span),
+
     #[error("Closure borrow conflicts with use of `{0}`")]
     ClosureBorrowConflict(String, Span),
 
@@ -206,6 +209,7 @@ impl SemCheckError {
             SemCheckError::SliceBorrowConflict(span) => *span,
             SemCheckError::SliceTargetNotLvalue(span) => *span,
             SemCheckError::ClosureCaptureMove(_, span) => *span,
+            SemCheckError::ClosureCaptureUnused(_, span) => *span,
             SemCheckError::ClosureBorrowConflict(_, span) => *span,
             SemCheckError::ClosureEscapeReturn(span) => *span,
             SemCheckError::ClosureEscapeStore(span) => *span,

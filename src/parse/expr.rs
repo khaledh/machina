@@ -254,6 +254,8 @@ impl<'a> Parser<'a> {
 
             TK::Pipe | TK::LogicalOr => self.parse_closure(),
 
+            TK::LBracket if self.is_closure_capture_list() => self.parse_closure(),
+
             TK::LBracket => self.parse_array_lit(),
 
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),

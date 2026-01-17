@@ -1,3 +1,8 @@
+//! Def/use collection helpers for closure borrow analysis.
+//!
+//! These walkers are intentionally small and local to closure borrow checking,
+//! so the analysis can reason about which bindings are defined or referenced
+//! without pulling in the full type checker.
 use std::collections::HashSet;
 
 use crate::resolve::DefId;

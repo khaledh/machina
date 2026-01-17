@@ -584,6 +584,7 @@ impl Expr {
             }
             ExprKind::Closure {
                 ident,
+                captures,
                 params,
                 return_ty,
                 body,
@@ -592,6 +593,17 @@ impl Expr {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Closure [{}]", pad, self.id)?;
                 writeln!(f, "{}Ident: {}", pad1, ident)?;
+                if captures.is_empty() {
+                    writeln!(f, "{}Captures: <none>", pad1)?;
+                } else {
+                    writeln!(f, "{}Captures:", pad1)?;
+                    for capture in captures {
+                        let label = match capture {
+                            CaptureSpec::Move { ident, .. } => format!("move {ident}"),
+                        };
+                        writeln!(f, "{}{}", indent(level + 2), label)?;
+                    }
+                }
                 if params.is_empty() {
                     writeln!(f, "{}Params: <none>", pad1)?;
                 } else {

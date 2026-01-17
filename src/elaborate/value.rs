@@ -90,6 +90,7 @@ impl<'a> Elaborator<'a> {
             params,
             return_ty,
             body,
+            captures: _,
         } = &value.kind
         {
             let info = self.ensure_closure_info(
@@ -364,6 +365,7 @@ impl<'a> Elaborator<'a> {
                 params,
                 return_ty,
                 body,
+                captures: _,
             } => {
                 let info = self.ensure_closure_info(
                     ident, *def_id, params, return_ty, body, expr.span, expr.id,

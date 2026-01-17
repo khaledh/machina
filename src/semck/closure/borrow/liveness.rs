@@ -1,3 +1,8 @@
+//! Liveness for closure-bound locals.
+//!
+//! Computes which local bindings (that may hold captured closures) are live at
+//! each CFG point so borrow conflicts are only enforced while the closure is
+//! still potentially used.
 use std::collections::HashSet;
 
 use crate::resolve::DefId;

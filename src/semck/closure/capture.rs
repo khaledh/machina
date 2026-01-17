@@ -10,8 +10,8 @@ use crate::context::NormalizedContext;
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::tree::normalized::{
-    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, MatchPattern, MatchPatternBinding,
-    Param, ParamMode, StmtExpr, StmtExprKind,
+    BindPattern, BindPatternKind, CallArg, CaptureSpec, Expr, ExprKind, MatchPattern,
+    MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind,
 };
 use crate::tree::visit::{
     Visitor, walk_bind_pattern, walk_expr, walk_match_pattern, walk_match_pattern_binding,
@@ -23,6 +23,7 @@ use crate::types::TypeId;
 pub enum CaptureMode {
     ImmBorrow,
     MutBorrow,
+    Move,
 }
 
 #[derive(Debug, Clone)]
@@ -56,11 +57,12 @@ impl<'a> Visitor<DefId, TypeId> for ClosureCaptureChecker<'a> {
         match &expr.kind {
             ExprKind::Closure {
                 def_id,
+                captures,
                 params,
                 body,
                 ..
             } => {
-                self.check_closure_expr(*def_id, params, body);
+                self.check_closure_expr(*def_id, captures, params, body);
             }
             _ => walk_expr(self, expr),
         }
@@ -76,7 +78,13 @@ impl<'a> ClosureCaptureChecker<'a> {
         }
     }
 
-    fn check_closure_expr(&mut self, def_id: DefId, params: &[Param], body: &Expr) {
+    fn check_closure_expr(
+        &mut self,
+        def_id: DefId,
+        captures: &[CaptureSpec],
+        params: &[Param],
+        body: &Expr,
+    ) {
         // Start with local defs (params + bindings) so we only capture outer defs.
         let mut locals = HashSet::new();
         for param in params {
@@ -85,17 +93,36 @@ impl<'a> ClosureCaptureChecker<'a> {
         let mut collector = LocalCollector::new(&mut locals);
         collector.visit_expr(body);
 
-        // Scan for uses, upgrading captures to mutable on write.
-        let mut captures = HashMap::new();
-        CaptureScan::new(self, &locals, &mut captures).visit_expr(body);
+        // Seed explicit move captures, then scan for inferred borrows.
+        let mut capture_modes = HashMap::new();
+        for spec in captures {
+            let CaptureSpec::Move { def_id, .. } = spec;
+            capture_modes.insert(*def_id, CaptureMode::Move);
+        }
+        let mut used = HashSet::new();
+        CaptureScan::new(self, &locals, &mut capture_modes, &mut used).visit_expr(body);
 
-        // Sort captures by DefId to ensure deterministic output.
-        let mut capture_list: Vec<ClosureCapture> = captures
-            .into_iter()
-            .map(|(def_id, mode)| ClosureCapture { def_id, mode })
-            .collect();
-        capture_list.sort_by_key(|capture| capture.def_id.0);
-        self.captures.insert(def_id, capture_list);
+        // Check for unused move captures.
+        for spec in captures {
+            let (spec_def_id, span) = match spec {
+                CaptureSpec::Move { def_id, span, .. } => (*def_id, *span),
+            };
+            if !used.contains(&spec_def_id) {
+                let name = self.def_name(spec_def_id);
+                self.errors
+                    .push(SemCheckError::ClosureCaptureUnused(name, span));
+            }
+        }
+
+        if !capture_modes.is_empty() {
+            // Sort captures by DefId to ensure deterministic output.
+            let mut capture_list: Vec<ClosureCapture> = capture_modes
+                .into_iter()
+                .map(|(def_id, mode)| ClosureCapture { def_id, mode })
+                .collect();
+            capture_list.sort_by_key(|capture| capture.def_id.0);
+            self.captures.insert(def_id, capture_list);
+        }
     }
 
     fn check_call_mutation(
@@ -105,6 +132,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         receiver: Option<&Expr>,
         locals: &HashSet<DefId>,
         captures: &mut HashMap<DefId, CaptureMode>,
+        used: &mut HashSet<DefId>,
     ) {
         // We only know arg modes after type check, via CallSig.
         let Some(sig) = self.ctx.type_map.lookup_call_sig(call.id) else {
@@ -118,11 +146,19 @@ impl<'a> ClosureCaptureChecker<'a> {
             match receiver_param.mode {
                 ParamMode::InOut | ParamMode::Out => {
                     // Treat inout/out as a write to the receiver base.
-                    self.check_write(receiver_expr, locals, captures, receiver_expr.span);
+                    if let Some(def_id) =
+                        self.check_write(receiver_expr, locals, captures, receiver_expr.span)
+                    {
+                        used.insert(def_id);
+                    }
                 }
                 ParamMode::Sink => {
                     // Sink means ownership transfer (move) of the receiver base.
-                    self.check_move(receiver_expr, locals, captures, receiver_expr.span);
+                    if let Some(def_id) =
+                        self.check_move(receiver_expr, locals, captures, receiver_expr.span)
+                    {
+                        used.insert(def_id);
+                    }
                 }
                 ParamMode::In => {}
             }
@@ -131,10 +167,14 @@ impl<'a> ClosureCaptureChecker<'a> {
         for (param, arg) in sig.params.iter().zip(args) {
             match param.mode {
                 ParamMode::InOut | ParamMode::Out => {
-                    self.check_write(&arg.expr, locals, captures, arg.span);
+                    if let Some(def_id) = self.check_write(&arg.expr, locals, captures, arg.span) {
+                        used.insert(def_id);
+                    }
                 }
                 ParamMode::Sink => {
-                    self.check_move(&arg.expr, locals, captures, arg.span);
+                    if let Some(def_id) = self.check_move(&arg.expr, locals, captures, arg.span) {
+                        used.insert(def_id);
+                    }
                 }
                 ParamMode::In => {}
             }
@@ -147,11 +187,12 @@ impl<'a> ClosureCaptureChecker<'a> {
         locals: &HashSet<DefId>,
         captures: &mut HashMap<DefId, CaptureMode>,
         span: crate::diag::Span,
-    ) {
+    ) -> Option<DefId> {
         let Some(def_id) = Self::lvalue_base_def_id(expr) else {
             panic!("compiler bug: expected lvalue base for write at {}", span);
         };
         self.maybe_capture(def_id, locals, captures, CaptureMode::MutBorrow);
+        Some(def_id)
     }
 
     fn check_move(
@@ -160,7 +201,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         locals: &HashSet<DefId>,
         captures: &mut HashMap<DefId, CaptureMode>,
         span: crate::diag::Span,
-    ) {
+    ) -> Option<DefId> {
         let Some(def_id) = Self::lvalue_base_def_id(expr) else {
             panic!("compiler bug: expected lvalue base for move at {}", span);
         };
@@ -170,6 +211,7 @@ impl<'a> ClosureCaptureChecker<'a> {
             self.errors
                 .push(SemCheckError::ClosureCaptureMove(name, span));
         }
+        Some(def_id)
     }
 
     fn maybe_capture(
@@ -186,11 +228,16 @@ impl<'a> ClosureCaptureChecker<'a> {
         if !self.is_capture_candidate(def_id) {
             return false;
         }
+        // Explicit move capture dominates: don't downgrade to a borrow.
+        if captures.get(&def_id) == Some(&CaptureMode::Move) {
+            return false;
+        }
+        // Upgrade to MutBorrow if needed, otherwise insert the new mode.
         captures
             .entry(def_id)
-            .and_modify(|current| {
+            .and_modify(|cap_mode| {
                 if mode == CaptureMode::MutBorrow {
-                    *current = CaptureMode::MutBorrow;
+                    *cap_mode = CaptureMode::MutBorrow;
                 }
             })
             .or_insert(mode);
@@ -292,6 +339,7 @@ struct CaptureScan<'a, 'b> {
     checker: &'a mut ClosureCaptureChecker<'b>,
     locals: &'a HashSet<DefId>,
     captures: &'a mut HashMap<DefId, CaptureMode>,
+    used: &'a mut HashSet<DefId>,
 }
 
 impl<'a, 'b> CaptureScan<'a, 'b> {
@@ -299,11 +347,13 @@ impl<'a, 'b> CaptureScan<'a, 'b> {
         checker: &'a mut ClosureCaptureChecker<'b>,
         locals: &'a HashSet<DefId>,
         captures: &'a mut HashMap<DefId, CaptureMode>,
+        used: &'a mut HashSet<DefId>,
     ) -> Self {
         Self {
             checker,
             locals,
             captures,
+            used,
         }
     }
 }
@@ -312,6 +362,7 @@ impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Var { def_id, .. } => {
+                self.used.insert(*def_id);
                 // Any outer var use becomes a capture.
                 self.checker.maybe_capture(
                     *def_id,
@@ -322,25 +373,37 @@ impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
             }
             ExprKind::Move { expr: inner } | ExprKind::ImplicitMove { expr: inner } => {
                 // Move is forbidden for captured defs.
-                self.checker
-                    .check_move(inner, self.locals, self.captures, expr.span);
+                if let Some(def_id) =
+                    self.checker
+                        .check_move(inner, self.locals, self.captures, expr.span)
+                {
+                    self.used.insert(def_id);
+                }
                 self.visit_expr(inner);
                 return;
             }
             ExprKind::Closure {
                 def_id,
+                captures,
                 params,
                 body,
                 ..
             } => {
                 // Nested closure: compute captures separately and stop traversal here.
-                self.checker.check_closure_expr(*def_id, params, body);
+                self.checker
+                    .check_closure_expr(*def_id, captures, params, body);
                 return;
             }
             ExprKind::Call { args, .. } => {
                 // Calls may implicitly write/move via arg modes.
-                self.checker
-                    .check_call_mutation(expr, args, None, self.locals, self.captures);
+                self.checker.check_call_mutation(
+                    expr,
+                    args,
+                    None,
+                    self.locals,
+                    self.captures,
+                    self.used,
+                );
             }
             ExprKind::MethodCall { callee, args, .. } => {
                 // Receiver mode also matters for mutation/move.
@@ -350,6 +413,7 @@ impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
                     Some(callee),
                     self.locals,
                     self.captures,
+                    self.used,
                 );
             }
             _ => {}
@@ -360,8 +424,12 @@ impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         // Assignments are explicit writes that mark a mutable capture.
         if let StmtExprKind::Assign { assignee, .. } = &stmt.kind {
-            self.checker
-                .check_write(assignee, self.locals, self.captures, assignee.span);
+            if let Some(def_id) =
+                self.checker
+                    .check_write(assignee, self.locals, self.captures, assignee.span)
+            {
+                self.used.insert(def_id);
+            }
         }
         walk_stmt_expr(self, stmt);
     }

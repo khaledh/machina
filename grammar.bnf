@@ -53,6 +53,7 @@ SelfParam          ::= ParamMode? "self"
 
 # Closures
 ClosureSig         ::= "|" ParamList? "|" ( "->" TypeExpr )?
+ClosureCaptureList ::= "[" "move" Identifier ( "," Identifier )* ","? "]"
 
 # Parameters (common)
 ParamList          ::= Param ("," Param)* ","?
@@ -159,7 +160,7 @@ Primary            ::= Literal
                      | Block
                      | ClosureExpr
 
-ClosureExpr        ::= ClosureSig Expr
+ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr
 
 Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
                      | ArrayLit | TupleLit | StructLit

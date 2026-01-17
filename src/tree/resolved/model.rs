@@ -31,6 +31,7 @@ pub type SelfParam = model::SelfParam<DefId>;
 
 pub type ClosureDef = model::ClosureDef<DefId>;
 pub type ClosureSig = model::ClosureSig<DefId>;
+pub type CaptureSpec = model::CaptureSpec<DefId>;
 
 pub type Param = model::Param<DefId>;
 

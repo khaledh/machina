@@ -1,3 +1,8 @@
+//! Flow-sensitive tracking of which locals are bound to captured closures.
+//!
+//! This pass builds a map from local bindings to the captured bases of the
+//! closure values currently stored in them. The result is used to determine
+//! which captures are "active" at each program point.
 use std::collections::HashMap;
 
 use crate::analysis::dataflow::solve_forward;
@@ -59,19 +64,27 @@ fn merge_closure_bindings(states: &[ClosureBindings]) -> ClosureBindings {
         for (closure_def, captures) in state {
             let entry = merged.entry(*closure_def).or_insert_with(HashMap::new);
             for (base_def, mode) in captures {
-                // Mut-borrow dominates imm-borrow when merging flow paths.
                 entry
                     .entry(*base_def)
-                    .and_modify(|current| {
-                        if *mode == CaptureMode::MutBorrow {
-                            *current = CaptureMode::MutBorrow;
-                        }
+                    .and_modify(|cap_mode| {
+                        *cap_mode = merge_mode(*cap_mode, *mode);
                     })
                     .or_insert(*mode);
             }
         }
     }
     merged
+}
+
+fn merge_mode(current: CaptureMode, incoming: CaptureMode) -> CaptureMode {
+    use CaptureMode::*;
+    // Mut-borrow is most restrictive, then imm-borrow; move captures don't
+    // impose borrow conflicts, so they only win if both sides are move.
+    match (current, incoming) {
+        (MutBorrow, _) | (_, MutBorrow) => MutBorrow,
+        (ImmBorrow, _) | (_, ImmBorrow) => ImmBorrow,
+        (Move, Move) => Move,
+    }
 }
 
 fn apply_block_bindings(

@@ -1,5 +1,6 @@
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
+use crate::semck::closure::capture::CaptureMode;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{NodeId, ParamMode};
@@ -29,17 +30,29 @@ impl<'a> Elaborator<'a> {
                 .type_map
                 .lookup_def_type_id(&def)
                 .unwrap_or_else(|| panic!("compiler bug: missing type id for capture {def_id}"));
-            let field_ty = Type::Ref {
-                mutable: capture.mode == crate::semck::closure::capture::CaptureMode::MutBorrow,
-                elem_ty: Box::new(base_ty.clone()),
+            // Move captures store the value itself; borrow captures store refs.
+            let (field_ty, field_ty_id, field_ty_expr) = match capture.mode {
+                CaptureMode::Move => (
+                    base_ty.clone(),
+                    base_ty_id,
+                    self.type_expr_from_type(&base_ty, span),
+                ),
+                CaptureMode::ImmBorrow | CaptureMode::MutBorrow => {
+                    let field_ty = Type::Ref {
+                        mutable: capture.mode == CaptureMode::MutBorrow,
+                        elem_ty: Box::new(base_ty.clone()),
+                    };
+                    let field_ty_id = self
+                        .type_map
+                        .insert_node_type(self.node_id_gen.new_id(), field_ty.clone());
+                    let field_ty_expr = self.type_expr_from_type(&field_ty, span);
+                    (field_ty, field_ty_id, field_ty_expr)
+                }
             };
-            let field_ty_id = self
-                .type_map
-                .insert_node_type(self.node_id_gen.new_id(), field_ty.clone());
-            let field_ty_expr = self.type_expr_from_type(&field_ty, span);
             fields.push(CaptureField {
                 def_id,
                 name,
+                mode: capture.mode,
                 base_ty,
                 base_ty_id,
                 field_ty,
@@ -235,6 +248,7 @@ impl<'a> Elaborator<'a> {
                 params,
                 return_ty,
                 body,
+                captures: _,
             } => Some((
                 *def_id,
                 self.ensure_closure_info(
@@ -271,7 +285,8 @@ impl<'a> Elaborator<'a> {
     ) -> Option<sem::PlaceExpr> {
         let ctx = self.closure_stack.last()?;
         let field = ctx.capture_field(def_id)?;
-        // Rewrite captured var uses to *env.<field> (env stores ref fields).
+        // Rewrite captured var uses to env.<field> for move captures,
+        // or *env.<field> for borrow captures.
         let env_id = self.node_id_gen.new_id();
         let env_place = sem::PlaceExpr {
             id: env_id,
@@ -288,7 +303,7 @@ impl<'a> Elaborator<'a> {
         let field_place = sem::PlaceExpr {
             id: field_place_id,
             kind: sem::PlaceExprKind::StructField {
-                target: Box::new(env_place),
+                target: Box::new(env_place.clone()),
                 field: field.name.clone(),
             },
             ty: field.field_ty_id,
@@ -296,6 +311,21 @@ impl<'a> Elaborator<'a> {
         };
         self.type_map
             .insert_node_type(field_place_id, field.field_ty.clone());
+
+        if field.mode == CaptureMode::Move {
+            // For move captures, env.<field> is already the place.
+            self.type_map
+                .insert_node_type(place_id, field.base_ty.clone());
+            return Some(sem::PlaceExpr {
+                id: place_id,
+                kind: sem::PlaceExprKind::StructField {
+                    target: Box::new(env_place),
+                    field: field.name.clone(),
+                },
+                ty: field.base_ty_id,
+                span,
+            });
+        }
 
         let load_id = self.node_id_gen.new_id();
         let load = sem::ValueExpr {
@@ -338,6 +368,21 @@ impl<'a> Elaborator<'a> {
         };
         self.type_map
             .insert_node_type(place_id, capture.base_ty.clone());
+
+        if capture.mode == CaptureMode::Move {
+            // Move captures materialize the env field by moving the base.
+            let move_id = self.node_id_gen.new_id();
+            self.type_map
+                .insert_node_type(move_id, capture.base_ty.clone());
+            return sem::ValueExpr {
+                id: move_id,
+                kind: sem::ValueExprKind::Move {
+                    place: Box::new(place),
+                },
+                ty: capture.base_ty_id,
+                span,
+            };
+        }
 
         let addr_id = self.node_id_gen.new_id();
         self.type_map

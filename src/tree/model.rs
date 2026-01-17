@@ -348,6 +348,16 @@ pub struct ClosureSig<D> {
     pub span: Span,
 }
 
+#[derive(Clone, Debug)]
+pub enum CaptureSpec<D> {
+    Move {
+        id: NodeId,
+        ident: String,
+        def_id: D,
+        span: Span,
+    },
+}
+
 // -- Parameters (common) ---
 
 #[derive(Clone, Debug)]
@@ -645,6 +655,7 @@ pub enum ExprKind<D, T = ()> {
     Closure {
         ident: String,
         def_id: D,
+        captures: Vec<CaptureSpec<D>>,
         params: Vec<Param<D>>,
         return_ty: TypeExpr<D>,
         body: Box<Expr<D, T>>,

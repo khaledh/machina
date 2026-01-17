@@ -808,6 +808,7 @@ impl Visitor<()> for SymbolResolver {
 
             ExprKind::Closure {
                 ident,
+                captures,
                 params,
                 return_ty,
                 body,
@@ -822,6 +823,27 @@ impl Visitor<()> for SymbolResolver {
                     kind: DefKind::FuncDef,
                 };
                 self.def_table_builder.record_def(def, expr.id);
+
+                if !captures.is_empty() {
+                    for capture in captures {
+                        let (cap_id, cap_name, cap_span) = match capture {
+                            CaptureSpec::Move {
+                                id,
+                                ident: name,
+                                span,
+                                ..
+                            } => (id, name, span),
+                        };
+                        match self.lookup_symbol(cap_name) {
+                            Some(symbol) => {
+                                self.def_table_builder.record_use(*cap_id, symbol.def_id());
+                            }
+                            None => self
+                                .errors
+                                .push(ResolveError::VarUndefined(cap_name.to_string(), *cap_span)),
+                        }
+                    }
+                }
 
                 for param in params {
                     self.visit_type_expr(&param.typ);

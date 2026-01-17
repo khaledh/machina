@@ -211,6 +211,39 @@ impl<'a> Parser<'a> {
 
         false
     }
+
+    fn is_closure_capture_list(&self) -> bool {
+        if self.curr_token.kind != TK::LBracket {
+            return false;
+        }
+        if self.tokens.get(self.pos + 1).map(|t| &t.kind) != Some(&TK::KwMove) {
+            return false;
+        }
+        let Some(close_idx) = self.matching_rbracket_index(self.pos) else {
+            return false;
+        };
+        matches!(
+            self.tokens.get(close_idx + 1).map(|t| &t.kind),
+            Some(TK::Pipe | TK::LogicalOr)
+        )
+    }
+
+    fn matching_rbracket_index(&self, start: usize) -> Option<usize> {
+        let mut depth = 0isize;
+        for (idx, token) in self.tokens.iter().enumerate().skip(start) {
+            match token.kind {
+                TK::LBracket => depth += 1,
+                TK::RBracket => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
