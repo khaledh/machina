@@ -7,12 +7,21 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 #[derive(ClapParser)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    name = "Machina Compiler",
+    version,
+    long_version = concat!(
+        env!("CARGO_PKG_VERSION"), "\n",
+        "Copyright (c) 2025 ", env!("CARGO_PKG_AUTHORS")
+    ),
+    about,
+    long_about = None
+)]
 struct Args {
     #[clap(subcommand)]
     cmd: Command,
 
-    /// Comma-separated list of compiler debug dumps: [tokens, ast, defmap,
+    /// Comma-separated list of compiler debug dumps: [tokens, ast, deftab,
     /// typemap, nrvo, ir, liveness, intervals, regalloc, asm]
     #[clap(long, global = true)]
     dump: Option<String>,

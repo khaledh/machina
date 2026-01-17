@@ -1,2 +1,3 @@
 [alias]
 mcc = "run --bin mcc --"
+mcr = "mcc run"

@@ -2,6 +2,8 @@
 name = "machina"
 version = "0.1.0"
 edition = "2024"
+authors = ["Khaled Hammouda"]
+description = "Machina Compiler"
 
 [[bin]]
 name = "mcc"

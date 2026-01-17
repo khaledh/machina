@@ -30,9 +30,16 @@ fn main() {
 
 ## Compile and Run
 
+_Note: the `mcc` command is an alias for `cargo run --bin mcc --`. It is defined
+in the `.cargo/config.toml` file._
+
 ```sh
-cargo run --release -- hello.mc -o hello
+cargo mcc build -o hello hello.mc
 ./hello
+
+# or
+
+cargo mcc run hello.mc
 ```
 
 You should see:
