@@ -1,12 +1,12 @@
 // If/else blocks with optional else and else-if chains
 
-fn classify(n: u64) -> u64 {
+fn classify(n: u64) -> string {
     if n == 0 {
-        0
+        "zero"
     } else if n < 10 {
-        1
+        "small"
     } else {
-        2
+        "big"
     }
 }
 

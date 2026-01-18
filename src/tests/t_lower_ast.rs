@@ -1548,6 +1548,33 @@ fn test_lower_fstring_signed_uses_i64_runtime() {
 }
 
 #[test]
+fn test_lower_fstring_with_string_expr_uses_append() {
+    let source = r#"
+        fn main() -> string {
+            let s = "hi";
+            f"say {s}"
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
+
+    let saw_append = body.blocks.iter().any(|block| {
+        block.stmts.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::StringAppendBytes),
+                    ..
+                }
+            )
+        })
+    });
+    assert!(saw_append, "expected __mc_string_append_bytes call");
+}
+
+#[test]
 fn test_lower_bitwise_ops() {
     let source = r#"
         fn main() -> u64 {
