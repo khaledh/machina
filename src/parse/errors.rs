@@ -27,6 +27,9 @@ pub enum ParseError {
     #[error("Expected integer literal, found: {0}")]
     ExpectedIntLit(Token),
 
+    #[error("Expected string literal, found: {0}")]
+    ExpectedStringLit(Token),
+
     #[error("Expected pattern, found: {0}")]
     ExpectedPattern(Token),
 
@@ -44,6 +47,12 @@ pub enum ParseError {
 
     #[error("Expected array index or slice range, found: {0}")]
     ExpectedArrayIndexOrRange(Token),
+
+    #[error("Unknown attribute `{0}`")]
+    UnknownAttribute(String, Span),
+
+    #[error("Attribute not allowed here")]
+    AttributeNotAllowed(Span),
 
     #[error("Unmatched format brace at {0}")]
     UnmatchedFormatBrace(Span),
@@ -68,12 +77,15 @@ impl ParseError {
             ParseError::ExpectedType(token) => token.span,
             ParseError::ExpectedPrimary(token) => token.span,
             ParseError::ExpectedIntLit(token) => token.span,
+            ParseError::ExpectedStringLit(token) => token.span,
             ParseError::ExpectedPattern(token) => token.span,
             ParseError::SingleFieldTupleMissingComma(token) => token.span,
             ParseError::ExpectedStructField(token) => token.span,
             ParseError::ExpectedMatchArm(token) => token.span,
             ParseError::ExpectedMatchPattern(token) => token.span,
             ParseError::ExpectedArrayIndexOrRange(token) => token.span,
+            ParseError::UnknownAttribute(_, span) => *span,
+            ParseError::AttributeNotAllowed(span) => *span,
             ParseError::UnmatchedFormatBrace(span) => *span,
             ParseError::InvalidFormatExpr(span) => *span,
             ParseError::EmptyFormatExpr(span) => *span,

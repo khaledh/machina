@@ -186,7 +186,7 @@ impl<'a> FuncLowerer<'a> {
             {
                 if let PEK::Var { def_id, .. } = place.kind {
                     let def = self.def_for_id(def_id, place.id)?;
-                    if !matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
+                    if !matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. }) {
                         if matches!(expr.kind, VEK::Move { .. } | VEK::ImplicitMove { .. }) {
                             self.record_move_place(place);
                         }

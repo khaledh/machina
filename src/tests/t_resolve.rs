@@ -91,3 +91,73 @@ fn test_resolve_function_decl_conflicts_with_def() {
         );
     }
 }
+
+#[test]
+fn test_resolve_unknown_attribute() {
+    let source = "@[nope] fn foo() -> u64 { 0 }";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::UnknownAttribute(name, _) if name == "nope"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_attr_wrong_args_intrinsic() {
+    let source = "@[intrinsic(\"x\")] fn foo() -> u64 { 0 }";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::AttrWrongArgCount(name, 0, 1, _) if name == "intrinsic"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_attr_wrong_args_link_name() {
+    let source = "@[link_name] fn foo() -> u64 { 0 }";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::AttrWrongArgCount(name, 1, 0, _) if name == "link_name"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_attr_not_allowed_on_type() {
+    let source = "@[link_name(\"x\")] type Foo = {}";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::AttrNotAllowed(name, _, _) if name == "link_name"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_attr_duplicate() {
+    let source = "@[intrinsic, intrinsic] fn foo() -> u64 { 0 }";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::AttrDuplicate(name, _) if name == "intrinsic"
+        )));
+    }
+}

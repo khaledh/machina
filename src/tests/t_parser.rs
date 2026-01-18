@@ -1442,3 +1442,80 @@ fn test_parse_closure_capture_list() {
         _ => panic!("Expected closure expression"),
     }
 }
+
+#[test]
+fn test_parse_intrinsic_func_attr() {
+    let source = "@[intrinsic] fn foo() { 1 }";
+    let funcs = parse_source(source).expect("Failed to parse");
+
+    assert_eq!(funcs.len(), 1);
+    assert_eq!(funcs[0].attrs.len(), 1);
+    assert_eq!(funcs[0].attrs[0].name, "intrinsic");
+    assert!(funcs[0].attrs[0].args.is_empty());
+}
+
+#[test]
+fn test_parse_intrinsic_method_attr() {
+    let source = r#"
+        type Foo = {}
+        Foo :: {
+            @[intrinsic] fn bar(self) { 1 }
+        }
+    "#;
+    let module = parse_module(source).expect("Failed to parse");
+    let method_blocks = module.method_blocks();
+
+    assert_eq!(method_blocks.len(), 1);
+    assert_eq!(method_blocks[0].method_items.len(), 1);
+    match &method_blocks[0].method_items[0] {
+        MethodItem::Def(method_def) => {
+            assert_eq!(method_def.attrs.len(), 1);
+            assert_eq!(method_def.attrs[0].name, "intrinsic");
+            assert!(method_def.attrs[0].args.is_empty());
+        }
+        MethodItem::Decl(_) => panic!("Expected method definition"),
+    }
+}
+
+#[test]
+fn test_parse_link_name_attr() {
+    let source = "@[link_name(\"__mc_foo\")] fn foo() { 1 }";
+    let funcs = parse_source(source).expect("Failed to parse");
+
+    assert_eq!(funcs.len(), 1);
+    assert_eq!(funcs[0].attrs.len(), 1);
+    assert_eq!(funcs[0].attrs[0].name, "link_name");
+    assert_eq!(funcs[0].attrs[0].args.len(), 1);
+    match &funcs[0].attrs[0].args[0] {
+        AttrArg::String(value) => assert_eq!(value, "__mc_foo"),
+    }
+}
+
+#[test]
+fn test_parse_method_decl() {
+    let source = r#"
+        type Foo = {}
+        Foo :: {
+            @[intrinsic] fn len(self) -> u64;
+        }
+    "#;
+    let module = parse_module(source).expect("Failed to parse");
+    let method_blocks = module.method_blocks();
+
+    assert_eq!(method_blocks.len(), 1);
+    assert_eq!(method_blocks[0].method_items.len(), 1);
+    match &method_blocks[0].method_items[0] {
+        MethodItem::Decl(method_decl) => {
+            assert_eq!(method_decl.sig.name, "len");
+        }
+        MethodItem::Def(_) => panic!("Expected method declaration"),
+    }
+}
+
+#[test]
+fn test_parse_attr_on_method_block_rejected() {
+    let source = "@[intrinsic] Foo :: { fn bar(self) { 1 } }";
+    let result = parse_module(source);
+
+    assert!(matches!(result, Err(ParseError::AttributeNotAllowed(_))));
+}

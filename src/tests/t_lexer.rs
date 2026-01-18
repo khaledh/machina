@@ -108,10 +108,23 @@ fn test_lex_bitwise_operators() {
 
 #[test]
 fn test_lex_unexpected_character() {
-    let mut lexer = Lexer::new("@");
+    let mut lexer = Lexer::new("#");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::UnexpectedCharacter('@', _))));
+    assert!(matches!(result, Err(LexError::UnexpectedCharacter('#', _))));
+}
+
+#[test]
+fn test_lex_attribute_prefix() {
+    let mut lexer = Lexer::new("@intrinsic");
+
+    let t1 = lexer.next_token().unwrap();
+    let t2 = lexer.next_token().unwrap();
+    let t3 = lexer.next_token().unwrap();
+
+    assert_eq!(t1.kind, TokenKind::At);
+    assert_eq!(t2.kind, TokenKind::Ident("intrinsic".to_string()));
+    assert_eq!(t3.kind, TokenKind::Eof);
 }
 
 #[test]

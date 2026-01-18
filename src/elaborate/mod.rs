@@ -1,4 +1,5 @@
 use crate::context::{SemanticCheckedContext, SemanticContext};
+use crate::tree::semantic as sem;
 mod calls;
 mod closure;
 mod elaborator;
@@ -34,7 +35,11 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         symbols.def_names.values().cloned().collect();
     for method_block in module.method_blocks() {
         let type_name = method_block.type_name.as_str();
-        for method_def in &method_block.method_defs {
+        for method_item in &method_block.method_items {
+            let method_def = match method_item {
+                sem::MethodItem::Def(method_def) => method_def,
+                sem::MethodItem::Decl(_) => continue,
+            };
             if symbols.def_names.contains_key(&method_def.def_id) {
                 continue;
             }

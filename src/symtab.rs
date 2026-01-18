@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::resolve::DefId;
+use crate::resolve::{DefId, DefTable};
 use crate::tree::resolved::Module;
 
 #[derive(Debug, Clone)]
@@ -9,16 +9,24 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn new(module: &Module) -> Self {
+    pub fn new(module: &Module, def_table: &DefTable) -> Self {
         // Collect overloads
         let mut overloads: HashMap<String, Vec<DefId>> = HashMap::new();
+        let mut fixed_names: HashMap<DefId, String> = HashMap::new();
         for callable in module.callables() {
             let def_id = callable.def_id();
+            if let Some(def) = def_table.lookup_def(def_id)
+                && let Some(link_name) = def.link_name()
+            {
+                fixed_names.insert(def_id, link_name.to_string());
+                continue;
+            }
+
             let name = callable.symbol_base_name();
             overloads.entry(name).or_default().push(def_id);
         }
 
-        let mut def_names = HashMap::new();
+        let mut def_names = fixed_names;
 
         // defs: suffix only if overloaded
         for (name, def_ids) in overloads {

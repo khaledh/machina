@@ -7,6 +7,9 @@ pub type Module = model::Module<()>;
 
 pub type TopLevelItem = model::TopLevelItem<()>;
 
+pub type Attribute = model::Attribute;
+pub type AttrArg = model::AttrArg;
+
 pub type TypeExpr = model::TypeExpr<()>;
 pub type TypeExprKind = model::TypeExprKind<()>;
 pub type FnTypeParam = model::FnTypeParam<()>;
@@ -21,6 +24,8 @@ pub type FuncDef = model::FuncDef<()>;
 pub type FunctionSig = model::FunctionSig<()>;
 
 pub type MethodBlock = model::MethodBlock<()>;
+pub type MethodItem = model::MethodItem<()>;
+pub type MethodDecl = model::MethodDecl<()>;
 pub type MethodDef = model::MethodDef<()>;
 pub type MethodSig = model::MethodSig<()>;
 pub type SelfParam = model::SelfParam<()>;

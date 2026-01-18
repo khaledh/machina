@@ -85,7 +85,7 @@ impl<'a> FuncLowerer<'a> {
         match &place.kind {
             PEK::Var { def_id, .. } => {
                 let def = self.def_for_id(*def_id, place.id)?;
-                if matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl) {
+                if matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. }) {
                     return Ok(Operand::Const(Const::FuncAddr { def: def.id }));
                 }
             }

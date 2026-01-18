@@ -113,6 +113,22 @@ pub trait TreeMapper {
         walk_method_block(self, method_block, ctx)
     }
 
+    fn map_method_item(
+        &mut self,
+        method_item: &MethodItem<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> MethodItem<Self::OutD, Self::OutT> {
+        walk_method_item(self, method_item, ctx)
+    }
+
+    fn map_method_decl(
+        &mut self,
+        method_decl: &MethodDecl<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> MethodDecl<Self::OutD> {
+        walk_method_decl(self, method_decl, ctx)
+    }
+
     fn map_method_def(
         &mut self,
         method_def: &MethodDef<Self::InD, Self::InT>,
@@ -321,6 +337,7 @@ pub fn walk_type_def<M: TreeMapper + ?Sized>(
     TypeDef {
         id: type_def.id,
         def_id: mapper.map_def_id(type_def.id, &type_def.def_id, ctx),
+        attrs: type_def.attrs.clone(),
         name: type_def.name.clone(),
         kind: match &type_def.kind {
             TypeDefKind::Alias { aliased_ty } => TypeDefKind::Alias {
@@ -446,6 +463,7 @@ pub fn walk_func_decl<M: TreeMapper + ?Sized>(
     FuncDecl {
         id: func_decl.id,
         def_id: mapper.map_def_id(func_decl.id, &func_decl.def_id, ctx),
+        attrs: func_decl.attrs.clone(),
         sig: mapper.map_func_sig(&func_decl.sig, ctx),
         span: func_decl.span,
     }
@@ -459,6 +477,7 @@ pub fn walk_func_def<M: TreeMapper + ?Sized>(
     FuncDef {
         id: func_def.id,
         def_id: mapper.map_def_id(func_def.id, &func_def.def_id, ctx),
+        attrs: func_def.attrs.clone(),
         sig: mapper.map_func_sig(&func_def.sig, ctx),
         body: mapper.map_expr(&func_def.body, ctx),
         span: func_def.span,
@@ -490,12 +509,37 @@ pub fn walk_method_block<M: TreeMapper + ?Sized>(
     MethodBlock {
         id: method_block.id,
         type_name: method_block.type_name.clone(),
-        method_defs: method_block
-            .method_defs
+        method_items: method_block
+            .method_items
             .iter()
-            .map(|method| mapper.map_method_def(method, ctx))
+            .map(|method_item| mapper.map_method_item(method_item, ctx))
             .collect(),
         span: method_block.span,
+    }
+}
+
+pub fn walk_method_item<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    method_item: &MethodItem<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> MethodItem<M::OutD, M::OutT> {
+    match method_item {
+        MethodItem::Decl(method_decl) => MethodItem::Decl(mapper.map_method_decl(method_decl, ctx)),
+        MethodItem::Def(method_def) => MethodItem::Def(mapper.map_method_def(method_def, ctx)),
+    }
+}
+
+pub fn walk_method_decl<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    method_decl: &MethodDecl<M::InD>,
+    ctx: &mut M::Context,
+) -> MethodDecl<M::OutD> {
+    MethodDecl {
+        id: method_decl.id,
+        def_id: mapper.map_def_id(method_decl.id, &method_decl.def_id, ctx),
+        attrs: method_decl.attrs.clone(),
+        sig: mapper.map_method_sig(&method_decl.sig, ctx),
+        span: method_decl.span,
     }
 }
 
@@ -507,6 +551,7 @@ pub fn walk_method_def<M: TreeMapper + ?Sized>(
     MethodDef {
         id: method_def.id,
         def_id: mapper.map_def_id(method_def.id, &method_def.def_id, ctx),
+        attrs: method_def.attrs.clone(),
         sig: mapper.map_method_sig(&method_def.sig, ctx),
         body: mapper.map_expr(&method_def.body, ctx),
         span: method_def.span,

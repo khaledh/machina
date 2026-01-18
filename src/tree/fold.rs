@@ -192,9 +192,12 @@ pub fn walk_method_block<F: TreeFolder<D, T> + ?Sized, D, T>(
     method_block: &MethodBlock<D, T>,
 ) -> Result<Vec<F::Output>, F::Error> {
     method_block
-        .method_defs
+        .method_items
         .iter()
-        .map(|method| f.visit_method_def(method))
+        .filter_map(|method_item| match method_item {
+            MethodItem::Decl(_) => None,
+            MethodItem::Def(method_def) => Some(f.visit_method_def(method_def)),
+        })
         .collect()
 }
 

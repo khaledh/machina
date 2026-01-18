@@ -34,7 +34,7 @@ impl ParsedContext {
     }
 
     pub fn with_def_table(self, def_table: DefTable, module: ResolvedModule) -> ResolvedContext {
-        let symbols = SymbolTable::new(&module);
+        let symbols = SymbolTable::new(&module, &def_table);
         ResolvedContext {
             module,
             def_table,

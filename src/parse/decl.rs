@@ -2,17 +2,22 @@ use super::*;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_top_level_item(&mut self) -> Result<TopLevelItem, ParseError> {
+        let attrs = self.parse_attribute_list()?;
         match &self.curr_token.kind {
-            TK::KwType => self.parse_type_def().map(TopLevelItem::TypeDef),
-            TK::KwFn => self.parse_func(),
+            TK::KwType => self.parse_type_def(attrs).map(TopLevelItem::TypeDef),
+            TK::KwFn => self.parse_func(attrs),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
-                self.parse_method_block()
+                if attrs.is_empty() {
+                    self.parse_method_block()
+                } else {
+                    Err(ParseError::AttributeNotAllowed(attrs[0].span))
+                }
             }
             _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }
     }
 
-    fn parse_type_def(&mut self) -> Result<TypeDef, ParseError> {
+    fn parse_type_def(&mut self, attrs: Vec<Attribute>) -> Result<TypeDef, ParseError> {
         let marker = self.mark();
 
         self.consume_keyword(TK::KwType)?;
@@ -42,6 +47,7 @@ impl<'a> Parser<'a> {
         Ok(TypeDef {
             id: self.id_gen.new_id(),
             def_id: (),
+            attrs,
             name,
             kind,
             span: self.close(marker),

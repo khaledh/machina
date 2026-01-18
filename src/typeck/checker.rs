@@ -184,15 +184,18 @@ impl TypeChecker {
     fn populate_method_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
         for method_block in self.ctx.module.method_blocks() {
             let type_name = method_block.type_name.clone();
-            for method in &method_block.method_defs {
-                let def_id = method.def_id;
-                let params = self.build_param_sigs(&method.sig.params)?;
-                let ret_type = self.resolve_ret_type(&method.sig.ret_ty_expr)?;
+            for method_item in &method_block.method_items {
+                let (def_id, sig) = match method_item {
+                    MethodItem::Decl(method_decl) => (method_decl.def_id, &method_decl.sig),
+                    MethodItem::Def(method_def) => (method_def.def_id, &method_def.sig),
+                };
+                let params = self.build_param_sigs(&sig.params)?;
+                let ret_type = self.resolve_ret_type(&sig.ret_ty_expr)?;
 
                 self.method_sigs
                     .entry(type_name.clone())
                     .or_default()
-                    .entry(method.sig.name.clone())
+                    .entry(sig.name.clone())
                     .or_default()
                     .push(OverloadSig {
                         def_id,
@@ -1185,7 +1188,7 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         if let ExprKind::Var { def_id, .. } = &callee.kind
             && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
-            && matches!(def.kind, DefKind::FuncDef | DefKind::FuncDecl)
+            && matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
         {
             let name = def.name.clone();
             return self.check_named_call(&name, call_expr, callee, args);
@@ -1298,9 +1301,18 @@ impl TypeChecker {
 
     fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
         for block in self.ctx.module.method_blocks() {
-            for method in &block.method_defs {
-                if method.def_id == def_id {
-                    return method.sig.self_param.mode.clone();
+            for method_item in &block.method_items {
+                match method_item {
+                    MethodItem::Decl(method_decl) => {
+                        if method_decl.def_id == def_id {
+                            return method_decl.sig.self_param.mode.clone();
+                        }
+                    }
+                    MethodItem::Def(method_def) => {
+                        if method_def.def_id == def_id {
+                            return method_def.sig.self_param.mode.clone();
+                        }
+                    }
                 }
             }
         }
@@ -1682,8 +1694,12 @@ impl TreeFolder<DefId> for TypeChecker {
         }
 
         let mut outputs = Vec::new();
-        for method in &method_block.method_defs {
-            if self.check_method(method_block, method).is_err() {
+        for method_item in &method_block.method_items {
+            let method_def = match method_item {
+                MethodItem::Decl(_) => continue,
+                MethodItem::Def(method_def) => method_def,
+            };
+            if self.check_method(method_block, method_def).is_err() {
                 self.halted = true;
                 break;
             }

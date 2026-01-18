@@ -17,7 +17,14 @@ This is the formal grammar of the Machina programming language in BNF notation.
 ```bnf
 Module             ::= TopLevelItem*
 
-TopLevelItem       ::= TypeDef | FuncDecl | FuncDef | MethodBlock
+TopLevelItem       ::= (AttributeList (TypeDef | FuncDecl | FuncDef)) | MethodBlock
+```
+
+## Attributes
+
+```bnf
+AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
+AttributeItem      ::= Identifier ("(" StringLit ("," StringLit)* ")")?
 ```
 
 ## Type Definitions
@@ -74,8 +81,10 @@ ParamMode          ::= "inout" | "out" | "sink"
 ## Methods
 
 ```bnf
-MethodBlock        ::= Identifier "::" "{" MethodDef* "}"
-MethodDef          ::= MethodSig Block
+MethodBlock        ::= Identifier "::" "{" MethodItem* "}"
+MethodItem         ::= MethodDecl | MethodDef
+MethodDecl         ::= AttributeList MethodSig ";"
+MethodDef          ::= AttributeList MethodSig Block
 MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ("->" TypeExpr)?
 SelfParam          ::= ParamMode? "self"
 ```

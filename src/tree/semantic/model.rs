@@ -92,11 +92,17 @@ impl Module {
                 TopLevelItem::FuncDecl(func_decl) => vec![CallableRef::FuncDecl(func_decl)],
                 TopLevelItem::FuncDef(func_def) => vec![CallableRef::FuncDef(func_def)],
                 TopLevelItem::MethodBlock(method_block) => method_block
-                    .method_defs
+                    .method_items
                     .iter()
-                    .map(|method_def| CallableRef::MethodDef {
-                        type_name: &method_block.type_name,
-                        method_def,
+                    .filter_map(|method_item| match method_item {
+                        MethodItem::Decl(method_decl) => Some(CallableRef::MethodDecl {
+                            type_name: &method_block.type_name,
+                            method_decl,
+                        }),
+                        MethodItem::Def(method_def) => Some(CallableRef::MethodDef {
+                            type_name: &method_block.type_name,
+                            method_def,
+                        }),
                     })
                     .collect(),
                 TopLevelItem::TypeDef(_) => vec![],
@@ -119,6 +125,10 @@ pub enum TopLevelItem {
 pub enum CallableRef<'a> {
     FuncDecl(&'a FuncDecl),
     FuncDef(&'a FuncDef),
+    MethodDecl {
+        type_name: &'a str,
+        method_decl: &'a MethodDecl,
+    },
     MethodDef {
         type_name: &'a str,
         method_def: &'a MethodDef,
@@ -131,6 +141,7 @@ pub enum CallableRef<'a> {
 pub struct FuncDecl {
     pub id: NodeId,
     pub def_id: DefId,
+    pub attrs: Vec<ast_model::Attribute>,
     pub sig: FunctionSig,
     pub span: Span,
 }
@@ -139,6 +150,7 @@ pub struct FuncDecl {
 pub struct FuncDef {
     pub id: NodeId,
     pub def_id: DefId,
+    pub attrs: Vec<ast_model::Attribute>,
     pub sig: FunctionSig,
     pub body: ValueExpr,
     pub span: Span,
@@ -150,7 +162,22 @@ pub struct FuncDef {
 pub struct MethodBlock {
     pub id: NodeId,
     pub type_name: String,
-    pub method_defs: Vec<MethodDef>,
+    pub method_items: Vec<MethodItem>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum MethodItem {
+    Decl(MethodDecl),
+    Def(MethodDef),
+}
+
+#[derive(Clone, Debug)]
+pub struct MethodDecl {
+    pub id: NodeId,
+    pub def_id: DefId,
+    pub attrs: Vec<ast_model::Attribute>,
+    pub sig: MethodSig,
     pub span: Span,
 }
 
@@ -158,6 +185,7 @@ pub struct MethodBlock {
 pub struct MethodDef {
     pub id: NodeId,
     pub def_id: DefId,
+    pub attrs: Vec<ast_model::Attribute>,
     pub sig: MethodSig,
     pub body: ValueExpr,
     pub span: Span,

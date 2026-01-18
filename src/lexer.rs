@@ -105,6 +105,8 @@ pub enum TokenKind {
     DoubleColon,
     #[display(";")]
     Semicolon,
+    #[display("@")]
+    At,
     #[display("|")]
     Pipe,
     #[display("_")]
@@ -620,6 +622,10 @@ impl<'a> Lexer<'a> {
             Some(&';') => {
                 self.advance();
                 Ok(TokenKind::Semicolon)
+            }
+            Some(&'@') => {
+                self.advance();
+                Ok(TokenKind::At)
             }
             Some(&'{') => {
                 self.advance();

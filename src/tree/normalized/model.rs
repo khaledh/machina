@@ -13,6 +13,9 @@ pub type TopLevelItem = model::TopLevelItem<DefId, TypeId>;
 pub type Decl = model::TopLevelItem<DefId, TypeId>;
 pub type CallableRef<'a> = model::CallableRef<'a, DefId, TypeId>;
 
+pub type Attribute = model::Attribute;
+pub type AttrArg = model::AttrArg;
+
 pub type TypeDef = model::TypeDef<DefId>;
 pub type TypeDefKind = model::TypeDefKind<DefId>;
 pub type StructDefField = model::StructDefField<DefId>;
@@ -29,6 +32,8 @@ pub type FuncDef = model::FuncDef<DefId, TypeId>;
 pub type FunctionSig = model::FunctionSig<DefId>;
 
 pub type MethodBlock = model::MethodBlock<DefId, TypeId>;
+pub type MethodItem = model::MethodItem<DefId, TypeId>;
+pub type MethodDecl = model::MethodDecl<DefId>;
 pub type MethodDef = model::MethodDef<DefId, TypeId>;
 pub type MethodSig = model::MethodSig<DefId>;
 pub type SelfParam = model::SelfParam<DefId>;

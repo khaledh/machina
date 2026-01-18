@@ -58,10 +58,15 @@ impl DefTable {
         self.defs.get(def_id.0 as usize)
     }
 
+    pub fn is_intrinsic(&self, def_id: DefId) -> bool {
+        self.lookup_def(def_id)
+            .is_some_and(|def| def.is_intrinsic())
+    }
+
     pub fn lookup_type_def_id(&self, name: &str) -> Option<DefId> {
         self.defs
             .iter()
-            .find(|def| def.name == name && matches!(def.kind, DefKind::TypeDef))
+            .find(|def| def.name == name && matches!(def.kind, DefKind::TypeDef { .. }))
             .map(|def| def.id)
     }
 

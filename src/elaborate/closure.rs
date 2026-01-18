@@ -1,5 +1,5 @@
 use crate::diag::Span;
-use crate::resolve::{DefId, DefKind};
+use crate::resolve::{DefId, DefKind, TypeAttrs};
 use crate::semck::closure::capture::CaptureMode;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
@@ -70,7 +70,12 @@ impl<'a> Elaborator<'a> {
         captures: &[CaptureField],
     ) -> (String, TypeId, Type, DefId) {
         let type_name = ident.to_string();
-        let type_def_id = self.def_table.add_def(type_name.clone(), DefKind::TypeDef);
+        let type_def_id = self.def_table.add_def(
+            type_name.clone(),
+            DefKind::TypeDef {
+                attrs: TypeAttrs::default(),
+            },
+        );
         let fields = captures
             .iter()
             .map(|capture| sem::StructDefField {
@@ -83,6 +88,7 @@ impl<'a> Elaborator<'a> {
         let type_def = sem::TypeDef {
             id: self.node_id_gen.new_id(),
             def_id: type_def_id,
+            attrs: Vec::new(),
             name: type_name.clone(),
             kind: sem::TypeDefKind::Struct { fields },
             span,
@@ -176,6 +182,7 @@ impl<'a> Elaborator<'a> {
         let method_def = sem::MethodDef {
             id: method_id,
             def_id,
+            attrs: Vec::new(),
             sig: sem::MethodSig {
                 name: "invoke".to_string(),
                 self_param,
@@ -191,7 +198,7 @@ impl<'a> Elaborator<'a> {
         self.closure_methods.push(sem::MethodBlock {
             id: self.node_id_gen.new_id(),
             type_name: info.type_name.clone(),
-            method_defs: vec![method_def],
+            method_items: vec![sem::MethodItem::Def(method_def)],
             span,
         });
         info

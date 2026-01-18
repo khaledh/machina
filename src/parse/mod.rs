@@ -157,6 +157,46 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_string_lit(&mut self) -> Result<String, ParseError> {
+        if let TK::StringLit(value) = &self.curr_token.kind {
+            self.advance();
+            Ok(value.clone())
+        } else {
+            Err(ParseError::ExpectedStringLit(self.curr_token.clone()))
+        }
+    }
+
+    fn parse_attribute_list(&mut self) -> Result<Vec<Attribute>, ParseError> {
+        if self.curr_token.kind != TK::At {
+            return Ok(Vec::new());
+        }
+
+        self.advance();
+        self.consume(&TK::LBracket)?;
+
+        let attrs = self.parse_list(TK::Comma, TK::RBracket, |parser| {
+            let marker = parser.mark();
+            let name = parser.parse_ident()?;
+            let mut args = Vec::new();
+            if parser.curr_token.kind == TK::LParen {
+                parser.advance();
+                args = parser.parse_list(TK::Comma, TK::RParen, |parser| {
+                    let value = parser.parse_string_lit()?;
+                    Ok(AttrArg::String(value))
+                })?;
+                parser.consume(&TK::RParen)?;
+            }
+            Ok(Attribute {
+                name,
+                args,
+                span: parser.close(marker),
+            })
+        })?;
+
+        self.consume(&TK::RBracket)?;
+        Ok(attrs)
+    }
+
     fn lookahead_for(&self, target: TokenKind, stop_at: TokenKind) -> bool {
         let mut brace = 0usize;
         let mut bracket = 0usize;

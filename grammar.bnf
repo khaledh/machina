@@ -3,7 +3,11 @@
 # Top-level
 Module             ::= TopLevelItem*
 
-TopLevelItem       ::= TypeDef | FuncDecl | FuncDef | MethodBlock
+TopLevelItem       ::= (AttributeList (TypeDef | FuncDecl | FuncDef)) | MethodBlock
+
+# Attributes
+AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
+AttributeItem      ::= Identifier ("(" StringLit ("," StringLit)* ")")?
 
 # Type Definitions
 TypeDef            ::= "type" Identifier "=" TypeDefBody
@@ -46,8 +50,10 @@ Func               ::= FuncSig Block
 FuncSig            ::= "fn" Identifier "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
-MethodBlock        ::= Identifier "::" "{" MethodDef* "}"
-MethodDef          ::= MethodSig Block
+MethodBlock        ::= Identifier "::" "{" MethodItem* "}"
+MethodItem         ::= MethodDecl | MethodDef
+MethodDecl         ::= AttributeList MethodSig ";"
+MethodDef          ::= AttributeList MethodSig Block
 MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
 SelfParam          ::= ParamMode? "self"
 

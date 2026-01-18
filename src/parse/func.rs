@@ -3,7 +3,7 @@ use super::*;
 impl<'a> Parser<'a> {
     // --- Functions ---
 
-    pub(super) fn parse_func(&mut self) -> Result<TopLevelItem, ParseError> {
+    pub(super) fn parse_func(&mut self, attrs: Vec<Attribute>) -> Result<TopLevelItem, ParseError> {
         let marker = self.mark();
 
         let sig = self.parse_func_sig()?;
@@ -13,6 +13,7 @@ impl<'a> Parser<'a> {
             Ok(TopLevelItem::FuncDecl(FuncDecl {
                 id: self.id_gen.new_id(),
                 def_id: (),
+                attrs,
                 sig,
                 span: self.close(marker),
             }))
@@ -30,6 +31,7 @@ impl<'a> Parser<'a> {
             Ok(TopLevelItem::FuncDef(FuncDef {
                 id: self.id_gen.new_id(),
                 def_id: (),
+                attrs,
                 sig,
                 body,
                 span: self.close(marker),
@@ -66,41 +68,54 @@ impl<'a> Parser<'a> {
         self.consume(&TK::DoubleColon)?;
         self.consume(&TK::LBrace)?;
 
-        let mut methods = Vec::new();
+        let mut method_items = Vec::new();
         while self.curr_token.kind != TK::RBrace {
-            methods.push(self.parse_method(&type_name)?);
+            method_items.push(self.parse_method_item(&type_name)?);
         }
         self.consume(&TK::RBrace)?;
 
         Ok(TopLevelItem::MethodBlock(MethodBlock {
             id: self.id_gen.new_id(),
             type_name,
-            method_defs: methods,
+            method_items,
             span: self.close(marker),
         }))
     }
 
-    fn parse_method(&mut self, type_name: &str) -> Result<MethodDef, ParseError> {
+    fn parse_method_item(&mut self, type_name: &str) -> Result<MethodItem, ParseError> {
         let marker = self.mark();
+        let attrs = self.parse_attribute_list()?;
         let sig = self.parse_method_sig()?;
 
-        let prev_base = self.closure_base.clone();
-        let prev_index = self.closure_index;
-        self.closure_base = Some(format!("{}${}", type_name, sig.name));
-        self.closure_index = 0;
+        if self.curr_token.kind == TK::Semicolon {
+            self.advance();
+            Ok(MethodItem::Decl(MethodDecl {
+                id: self.id_gen.new_id(),
+                def_id: (),
+                attrs,
+                sig,
+                span: self.close(marker),
+            }))
+        } else {
+            let prev_base = self.closure_base.clone();
+            let prev_index = self.closure_index;
+            self.closure_base = Some(format!("{}${}", type_name, sig.name));
+            self.closure_index = 0;
 
-        let body = self.parse_block()?;
+            let body = self.parse_block()?;
 
-        self.closure_base = prev_base;
-        self.closure_index = prev_index;
+            self.closure_base = prev_base;
+            self.closure_index = prev_index;
 
-        Ok(MethodDef {
-            id: self.id_gen.new_id(),
-            def_id: (),
-            sig,
-            body,
-            span: self.close(marker),
-        })
+            Ok(MethodItem::Def(MethodDef {
+                id: self.id_gen.new_id(),
+                def_id: (),
+                attrs,
+                sig,
+                body,
+                span: self.close(marker),
+            }))
+        }
     }
 
     fn parse_method_sig(&mut self) -> Result<MethodSig, ParseError> {

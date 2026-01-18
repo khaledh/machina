@@ -3,6 +3,20 @@
 use crate::diag::Span;
 use crate::tree::NodeId;
 
+// -- Attributes --
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttrArg {
+    String(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Attribute {
+    pub name: String,
+    pub args: Vec<AttrArg>,
+    pub span: Span,
+}
+
 // -- Module ---
 
 #[derive(Clone, Debug)]
@@ -83,11 +97,17 @@ impl<D, T> Module<D, T> {
                     vec![CallableRef::FuncDef(func_def)]
                 }
                 TopLevelItem::MethodBlock(method_block) => method_block
-                    .method_defs
+                    .method_items
                     .iter()
-                    .map(|method_def| CallableRef::MethodDef {
-                        type_name: &method_block.type_name,
-                        method_def,
+                    .filter_map(|method_item| match method_item {
+                        MethodItem::Decl(method_decl) => Some(CallableRef::MethodDecl {
+                            type_name: &method_block.type_name,
+                            method_decl,
+                        }),
+                        MethodItem::Def(method_def) => Some(CallableRef::MethodDef {
+                            type_name: &method_block.type_name,
+                            method_def,
+                        }),
                     })
                     .collect(),
                 TopLevelItem::ClosureDef(closure_decl) => {
@@ -106,7 +126,7 @@ pub enum TopLevelItem<D, T = ()> {
     TypeDef(TypeDef<D>),
     FuncDecl(FuncDecl<D>),          // function declaration
     FuncDef(FuncDef<D, T>),         // function definition
-    MethodBlock(MethodBlock<D, T>), // method definitions
+    MethodBlock(MethodBlock<D, T>), // method declarations/definitions
     ClosureDef(ClosureDef<D, T>),   // closure definition (generated)
 }
 
@@ -114,6 +134,10 @@ pub enum TopLevelItem<D, T = ()> {
 pub enum CallableRef<'a, D, T = ()> {
     FuncDecl(&'a FuncDecl<D>),
     FuncDef(&'a FuncDef<D, T>),
+    MethodDecl {
+        type_name: &'a str,
+        method_decl: &'a MethodDecl<D>,
+    },
     MethodDef {
         type_name: &'a str,
         method_def: &'a MethodDef<D, T>,
@@ -126,6 +150,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.id,
             CallableRef::FuncDef(func_def) => func_def.id,
+            CallableRef::MethodDecl { method_decl, .. } => method_decl.id,
             CallableRef::MethodDef { method_def, .. } => method_def.id,
             CallableRef::ClosureDef(closure_def) => closure_def.id,
         }
@@ -138,6 +163,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.def_id,
             CallableRef::FuncDef(func_def) => func_def.def_id,
+            CallableRef::MethodDecl { method_decl, .. } => method_decl.def_id,
             CallableRef::MethodDef { method_def, .. } => method_def.def_id,
             CallableRef::ClosureDef(closure_def) => closure_def.def_id,
         }
@@ -147,6 +173,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.sig.name.clone(),
             CallableRef::FuncDef(func_def) => func_def.sig.name.clone(),
+            CallableRef::MethodDecl { method_decl, .. } => method_decl.sig.name.clone(),
             CallableRef::MethodDef { method_def, .. } => method_def.sig.name.clone(),
             CallableRef::ClosureDef(closure_def) => closure_def.sig.name.clone(),
         }
@@ -156,6 +183,12 @@ impl<'a, D, T> CallableRef<'a, D, T> {
         match self {
             CallableRef::FuncDecl(_) => self.name(),
             CallableRef::FuncDef(_) => self.name(),
+            CallableRef::MethodDecl {
+                type_name,
+                method_decl,
+            } => {
+                format!("{type_name}${}", method_decl.sig.name)
+            }
             CallableRef::MethodDef {
                 type_name,
                 method_def,
@@ -170,6 +203,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
         match self {
             CallableRef::FuncDecl(func_decl) => func_decl.span,
             CallableRef::FuncDef(func_def) => func_def.span,
+            CallableRef::MethodDecl { method_decl, .. } => method_decl.span,
             CallableRef::MethodDef { method_def, .. } => method_def.span,
             CallableRef::ClosureDef(closure_def) => closure_def.span,
         }
@@ -182,6 +216,7 @@ impl<'a, D, T> CallableRef<'a, D, T> {
 pub struct TypeDef<D> {
     pub id: NodeId,
     pub def_id: D,
+    pub attrs: Vec<Attribute>,
     pub name: String,
     pub kind: TypeDefKind<D>,
     pub span: Span,
@@ -272,6 +307,7 @@ pub enum StringFmtSegment<D, T = ()> {
 pub struct FuncDecl<D> {
     pub id: NodeId,
     pub def_id: D,
+    pub attrs: Vec<Attribute>,
     pub sig: FunctionSig<D>,
     pub span: Span,
 }
@@ -280,6 +316,7 @@ pub struct FuncDecl<D> {
 pub struct FuncDef<D, T = ()> {
     pub id: NodeId,
     pub def_id: D,
+    pub attrs: Vec<Attribute>,
     pub sig: FunctionSig<D>,
     pub body: Expr<D, T>,
     pub span: Span,
@@ -299,7 +336,22 @@ pub struct FunctionSig<D> {
 pub struct MethodBlock<D, T = ()> {
     pub id: NodeId,
     pub type_name: String,
-    pub method_defs: Vec<MethodDef<D, T>>,
+    pub method_items: Vec<MethodItem<D, T>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum MethodItem<D, T = ()> {
+    Decl(MethodDecl<D>),
+    Def(MethodDef<D, T>),
+}
+
+#[derive(Clone, Debug)]
+pub struct MethodDecl<D> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub attrs: Vec<Attribute>,
+    pub sig: MethodSig<D>,
     pub span: Span,
 }
 
@@ -307,6 +359,7 @@ pub struct MethodBlock<D, T = ()> {
 pub struct MethodDef<D, T = ()> {
     pub id: NodeId,
     pub def_id: D,
+    pub attrs: Vec<Attribute>,
     pub sig: MethodSig<D>,
     pub body: Expr<D, T>,
     pub span: Span,

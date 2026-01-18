@@ -345,6 +345,7 @@ pub fn lower_ast(
     for callable in ctx.module.callables() {
         let (def_id, body) = match callable {
             CallableRef::FuncDecl(_) => continue,
+            CallableRef::MethodDecl { .. } => continue,
             CallableRef::FuncDef(func_def) => (
                 func_def.def_id,
                 FuncLowerer::new_function(

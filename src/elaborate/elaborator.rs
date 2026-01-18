@@ -130,12 +130,14 @@ impl<'a> Elaborator<'a> {
             norm::TopLevelItem::FuncDecl(decl) => sem::TopLevelItem::FuncDecl(sem::FuncDecl {
                 id: decl.id,
                 def_id: decl.def_id,
+                attrs: decl.attrs.clone(),
                 sig: decl.sig.clone(),
                 span: decl.span,
             }),
             norm::TopLevelItem::FuncDef(def) => sem::TopLevelItem::FuncDef(sem::FuncDef {
                 id: def.id,
                 def_id: def.def_id,
+                attrs: def.attrs.clone(),
                 sig: def.sig.clone(),
                 body: self.elab_value(&def.body),
                 span: def.span,
@@ -144,10 +146,17 @@ impl<'a> Elaborator<'a> {
                 sem::TopLevelItem::MethodBlock(sem::MethodBlock {
                     id: block.id,
                     type_name: block.type_name.clone(),
-                    method_defs: block
-                        .method_defs
+                    method_items: block
+                        .method_items
                         .iter()
-                        .map(|method| self.elab_method_def(method))
+                        .map(|method_item| match method_item {
+                            norm::MethodItem::Decl(method_decl) => {
+                                sem::MethodItem::Decl(self.elab_method_decl(method_decl))
+                            }
+                            norm::MethodItem::Def(method_def) => {
+                                sem::MethodItem::Def(self.elab_method_def(method_def))
+                            }
+                        })
                         .collect(),
                     span: block.span,
                 })
@@ -162,9 +171,20 @@ impl<'a> Elaborator<'a> {
         sem::MethodDef {
             id: def.id,
             def_id: def.def_id,
+            attrs: def.attrs.clone(),
             sig: def.sig.clone(),
             body: self.elab_value(&def.body),
             span: def.span,
+        }
+    }
+
+    fn elab_method_decl(&mut self, decl: &norm::MethodDecl) -> sem::MethodDecl {
+        sem::MethodDecl {
+            id: decl.id,
+            def_id: decl.def_id,
+            attrs: decl.attrs.clone(),
+            sig: decl.sig.clone(),
+            span: decl.span,
         }
     }
 

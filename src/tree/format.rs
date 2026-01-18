@@ -156,10 +156,21 @@ impl MethodBlock {
         let pad1 = indent(level + 1);
         writeln!(f, "{}Type: {}", pad1, self.type_name)?;
         writeln!(f, "{}Methods:", pad1)?;
-        for method in &self.method_defs {
-            method.fmt_with_indent(f, level + 2)?;
+        for method_item in &self.method_items {
+            match method_item {
+                MethodItem::Decl(method_decl) => method_decl.fmt_with_indent(f, level + 2)?,
+                MethodItem::Def(method_def) => method_def.fmt_with_indent(f, level + 2)?,
+            }
         }
         Ok(())
+    }
+}
+
+impl MethodDecl {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}MethodDecl [{}]", pad, self.id)?;
+        self.sig.fmt_with_indent(f, level + 1)
     }
 }
 

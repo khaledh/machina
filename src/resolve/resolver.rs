@@ -5,11 +5,11 @@ use crate::diag::Span;
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
-use crate::resolve::{Def, DefId, DefIdGen, DefKind};
+use crate::resolve::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TypeAttrs};
 use crate::tree::ParamMode;
 use crate::tree::parsed::*;
 use crate::tree::visit::*;
-use crate::types::BUILTIN_TYPES;
+use crate::types::{BUILTIN_TYPES, Type};
 
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
@@ -17,6 +17,8 @@ pub struct SymbolResolver {
     def_id_gen: DefIdGen,
     def_table_builder: DefTableBuilder,
     func_decl_names: HashSet<String>,
+    intrinsic_type_defs: HashSet<DefId>,
+    callable_attrs: HashMap<NodeId, FuncAttrs>,
 }
 
 impl Default for SymbolResolver {
@@ -35,6 +37,8 @@ impl SymbolResolver {
             def_id_gen: DefIdGen::new(),
             def_table_builder: DefTableBuilder::new(),
             func_decl_names: HashSet::new(),
+            intrinsic_type_defs: HashSet::new(),
+            callable_attrs: HashMap::new(),
         }
     }
 
@@ -110,28 +114,130 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::TypeAlias { .. } => DefKind::TypeDef,
-            SymbolKind::StructDef { .. } => DefKind::TypeDef,
-            SymbolKind::Func { .. } => DefKind::FuncDef,
+            SymbolKind::TypeAlias { .. } => DefKind::TypeDef {
+                attrs: TypeAttrs::default(),
+            },
+            SymbolKind::StructDef { .. } => DefKind::TypeDef {
+                attrs: TypeAttrs::default(),
+            },
+            SymbolKind::Func { .. } => DefKind::FuncDef {
+                attrs: FuncAttrs::default(),
+            },
             SymbolKind::Var { is_mutable, .. } => DefKind::LocalVar {
                 nrvo_eligible: false,
                 is_mutable: *is_mutable,
             },
-            SymbolKind::EnumDef { .. } => DefKind::TypeDef,
+            SymbolKind::EnumDef { .. } => DefKind::TypeDef {
+                attrs: TypeAttrs::default(),
+            },
         }
     }
 
-    fn add_built_in_symbol<F>(&mut self, name: &str, kind_fn: F)
+    fn resolve_type_attrs(&mut self, attrs: &[Attribute]) -> TypeAttrs {
+        let mut resolved = TypeAttrs::default();
+        let mut seen = HashSet::new();
+
+        for attr in attrs {
+            if !seen.insert(attr.name.clone()) {
+                self.errors
+                    .push(ResolveError::AttrDuplicate(attr.name.clone(), attr.span));
+                continue;
+            }
+            match attr.name.as_str() {
+                "intrinsic" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.intrinsic = true;
+                    }
+                }
+                "link_name" => {
+                    self.errors.push(ResolveError::AttrNotAllowed(
+                        attr.name.clone(),
+                        "type definition",
+                        attr.span,
+                    ));
+                }
+                _ => self
+                    .errors
+                    .push(ResolveError::UnknownAttribute(attr.name.clone(), attr.span)),
+            }
+        }
+
+        resolved
+    }
+
+    fn resolve_func_attrs(&mut self, attrs: &[Attribute]) -> FuncAttrs {
+        let mut resolved = FuncAttrs::default();
+        let mut seen = HashSet::new();
+
+        for attr in attrs {
+            if !seen.insert(attr.name.clone()) {
+                self.errors
+                    .push(ResolveError::AttrDuplicate(attr.name.clone(), attr.span));
+                continue;
+            }
+            match attr.name.as_str() {
+                "intrinsic" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.intrinsic = true;
+                    }
+                }
+                "link_name" => {
+                    if attr.args.len() != 1 {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            1,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                        continue;
+                    }
+                    let Some(AttrArg::String(name)) = attr.args.first() else {
+                        self.errors
+                            .push(ResolveError::AttrWrongArgType(attr.name.clone(), attr.span));
+                        continue;
+                    };
+                    resolved.link_name = Some(name.clone());
+                }
+                _ => self
+                    .errors
+                    .push(ResolveError::UnknownAttribute(attr.name.clone(), attr.span)),
+            }
+        }
+
+        resolved
+    }
+
+    fn add_built_in_symbol<F>(&mut self, name: &str, intrinsic: bool, kind_fn: F)
     where
         F: FnOnce(DefId) -> SymbolKind,
     {
         let def_id = self.def_id_gen.new_id();
         let kind = kind_fn(def_id);
-        let def = Def {
+        let mut def = Def {
             id: def_id,
             name: name.to_string(),
             kind: Self::map_symbol_kind_to_def_kind(&kind),
         };
+        if intrinsic {
+            if let DefKind::TypeDef { attrs } = &mut def.kind {
+                attrs.intrinsic = true;
+                self.intrinsic_type_defs.insert(def_id);
+            }
+        }
         self.def_table_builder.record_def(def, NodeId(0));
         self.insert_symbol(
             name,
@@ -154,25 +260,32 @@ impl SymbolResolver {
     fn populate_type_defs(&mut self, type_defs: &[&TypeDef]) {
         for &type_def in type_defs {
             let def_id = self.def_id_gen.new_id();
+            let type_attrs = self.resolve_type_attrs(&type_def.attrs);
 
             // Map type def kind to a (def kind, symbol kind) pair
             let (def_kind, symbol_kind) = match &type_def.kind {
                 TypeDefKind::Alias { aliased_ty } => (
-                    DefKind::TypeDef,
+                    DefKind::TypeDef {
+                        attrs: type_attrs.clone(),
+                    },
                     SymbolKind::TypeAlias {
                         def_id,
                         ty_expr: aliased_ty.clone(),
                     },
                 ),
                 TypeDefKind::Struct { fields } => (
-                    DefKind::TypeDef,
+                    DefKind::TypeDef {
+                        attrs: type_attrs.clone(),
+                    },
                     SymbolKind::StructDef {
                         def_id,
                         fields: fields.clone(),
                     },
                 ),
                 TypeDefKind::Enum { variants } => (
-                    DefKind::TypeDef,
+                    DefKind::TypeDef {
+                        attrs: type_attrs.clone(),
+                    },
                     SymbolKind::EnumDef {
                         def_id,
                         variants: variants.clone(),
@@ -189,6 +302,10 @@ impl SymbolResolver {
 
             // Record the def
             self.def_table_builder.record_def(def, type_def.id);
+
+            if type_attrs.intrinsic {
+                self.intrinsic_type_defs.insert(def_id);
+            }
 
             // Insert the symbol
             self.insert_symbol(
@@ -227,6 +344,7 @@ impl SymbolResolver {
                     }
                     self.populate_callable(callable);
                 }
+                CallableRef::MethodDecl { .. } => self.populate_callable(callable),
                 CallableRef::MethodDef { .. } => self.populate_callable(callable),
                 CallableRef::ClosureDef(_) => self.populate_callable(callable),
             }
@@ -235,14 +353,26 @@ impl SymbolResolver {
 
     fn populate_callable(&mut self, callable: &CallableRef) {
         let def_id = self.def_id_gen.new_id();
+        let func_attrs = match callable {
+            CallableRef::FuncDecl(func_decl) => self.resolve_func_attrs(&func_decl.attrs),
+            CallableRef::FuncDef(func_def) => self.resolve_func_attrs(&func_def.attrs),
+            CallableRef::MethodDecl { method_decl, .. } => {
+                self.resolve_func_attrs(&method_decl.attrs)
+            }
+            CallableRef::MethodDef { method_def, .. } => self.resolve_func_attrs(&method_def.attrs),
+            CallableRef::ClosureDef(_) => FuncAttrs::default(),
+        };
+        self.callable_attrs
+            .insert(callable.id(), func_attrs.clone());
         let def = Def {
             id: def_id,
             name: callable.name(),
             kind: match callable {
-                CallableRef::FuncDecl(_) => DefKind::FuncDecl,
+                CallableRef::FuncDecl(_) => DefKind::FuncDecl { attrs: func_attrs },
+                CallableRef::MethodDecl { .. } => DefKind::FuncDecl { attrs: func_attrs },
                 CallableRef::FuncDef(_)
                 | CallableRef::MethodDef { .. }
-                | CallableRef::ClosureDef(_) => DefKind::FuncDef,
+                | CallableRef::ClosureDef(_) => DefKind::FuncDef { attrs: func_attrs },
             },
         };
         self.def_table_builder.record_def(def, callable.id());
@@ -268,7 +398,8 @@ impl SymbolResolver {
             // add built-in types
             for ty in BUILTIN_TYPES {
                 let ty_name = ty.to_string();
-                resolver.add_built_in_symbol(&ty_name, |def_id| SymbolKind::TypeAlias {
+                let intrinsic = matches!(ty, Type::String);
+                resolver.add_built_in_symbol(&ty_name, intrinsic, |def_id| SymbolKind::TypeAlias {
                     def_id,
                     ty_expr: TypeExpr {
                         id: NodeId(0),
@@ -493,23 +624,80 @@ impl SymbolResolver {
         );
     }
 
-    fn check_method_block_type(&mut self, method_block: &MethodBlock) {
+    fn check_method_block_type(&mut self, method_block: &MethodBlock) -> Option<DefId> {
         match self.lookup_symbol(&method_block.type_name) {
             Some(symbol) => match &symbol.kind {
-                SymbolKind::TypeAlias { .. }
-                | SymbolKind::StructDef { .. }
-                | SymbolKind::EnumDef { .. } => {}
-                other => self.errors.push(ResolveError::ExpectedType(
-                    method_block.type_name.clone(),
-                    other.clone(),
-                    method_block.span,
-                )),
+                SymbolKind::TypeAlias { def_id, .. }
+                | SymbolKind::StructDef { def_id, .. }
+                | SymbolKind::EnumDef { def_id, .. } => Some(*def_id),
+                other => {
+                    self.errors.push(ResolveError::ExpectedType(
+                        method_block.type_name.clone(),
+                        other.clone(),
+                        method_block.span,
+                    ));
+                    None
+                }
             },
-            None => self.errors.push(ResolveError::TypeUndefined(
-                method_block.type_name.clone(),
-                method_block.span,
-            )),
+            None => {
+                self.errors.push(ResolveError::TypeUndefined(
+                    method_block.type_name.clone(),
+                    method_block.span,
+                ));
+                None
+            }
         }
+    }
+
+    fn visit_method_decl_in_block(
+        &mut self,
+        method_block: &MethodBlock,
+        method_decl: &MethodDecl,
+        is_intrinsic_type: Option<bool>,
+    ) {
+        if matches!(is_intrinsic_type, Some(false)) {
+            self.errors.push(ResolveError::MethodDeclOnNonIntrinsicType(
+                method_block.type_name.clone(),
+                method_decl.span,
+            ));
+        }
+
+        let func_attrs = self
+            .callable_attrs
+            .get(&method_decl.id)
+            .cloned()
+            .unwrap_or_default();
+        if !func_attrs.intrinsic {
+            self.errors.push(ResolveError::MethodDeclMissingIntrinsic(
+                method_decl.sig.name.clone(),
+                method_decl.span,
+            ));
+        }
+
+        self.visit_type_expr(&method_decl.sig.ret_ty_expr);
+        for param in &method_decl.sig.params {
+            self.visit_type_expr(&param.typ);
+        }
+
+        self.with_scope(|resolver| {
+            resolver.register_param(
+                "self",
+                method_decl.sig.self_param.mode.clone(),
+                method_decl.sig.self_param.id,
+                method_decl.sig.self_param.span,
+                0,
+            );
+
+            for (index, param) in method_decl.sig.params.iter().enumerate() {
+                resolver.register_param(
+                    &param.ident,
+                    param.mode.clone(),
+                    param.id,
+                    param.span,
+                    index as u32 + 1,
+                );
+            }
+        });
     }
 }
 
@@ -582,8 +770,18 @@ impl Visitor<()> for SymbolResolver {
     }
 
     fn visit_method_block(&mut self, method_block: &MethodBlock) {
-        self.check_method_block_type(method_block);
-        walk_method_block(self, method_block);
+        let type_def_id = self.check_method_block_type(method_block);
+        let is_intrinsic_type =
+            type_def_id.map(|def_id| self.intrinsic_type_defs.contains(&def_id));
+
+        for method_item in &method_block.method_items {
+            match method_item {
+                MethodItem::Decl(method_decl) => {
+                    self.visit_method_decl_in_block(method_block, method_decl, is_intrinsic_type);
+                }
+                MethodItem::Def(method_def) => self.visit_method_def(method_def),
+            }
+        }
     }
 
     fn visit_method_def(&mut self, method_def: &MethodDef) {
@@ -826,7 +1024,9 @@ impl Visitor<()> for SymbolResolver {
                 let def = Def {
                     id: def_id,
                     name: ident.clone(),
-                    kind: DefKind::FuncDef,
+                    kind: DefKind::FuncDef {
+                        attrs: FuncAttrs::default(),
+                    },
                 };
                 self.def_table_builder.record_def(def, expr.id);
 

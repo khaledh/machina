@@ -75,6 +75,14 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_method_block(self, method_block)
     }
 
+    fn visit_method_item(&mut self, method_item: &mut MethodItem<D, T>) {
+        walk_method_item(self, method_item)
+    }
+
+    fn visit_method_decl(&mut self, method_decl: &mut MethodDecl<D>) {
+        walk_method_decl(self, method_decl)
+    }
+
     fn visit_method_def(&mut self, method_def: &mut MethodDef<D, T>) {
         walk_method_def(self, method_def)
     }
@@ -251,9 +259,26 @@ pub fn walk_method_block<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
     method_block: &mut MethodBlock<D, T>,
 ) {
-    for method in &mut method_block.method_defs {
-        v.visit_method_def(method);
+    for method_item in &mut method_block.method_items {
+        v.visit_method_item(method_item);
     }
+}
+
+pub fn walk_method_item<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    method_item: &mut MethodItem<D, T>,
+) {
+    match method_item {
+        MethodItem::Decl(method_decl) => v.visit_method_decl(method_decl),
+        MethodItem::Def(method_def) => v.visit_method_def(method_def),
+    }
+}
+
+pub fn walk_method_decl<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    method_decl: &mut MethodDecl<D>,
+) {
+    v.visit_method_sig(&mut method_decl.sig);
 }
 
 pub fn walk_method_def<V: VisitorMut<D, T> + ?Sized, D, T>(

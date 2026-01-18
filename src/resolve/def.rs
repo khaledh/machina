@@ -37,9 +37,15 @@ impl DefIdGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
-    TypeDef,
-    FuncDef,
-    FuncDecl,
+    TypeDef {
+        attrs: TypeAttrs,
+    },
+    FuncDef {
+        attrs: FuncAttrs,
+    },
+    FuncDecl {
+        attrs: FuncAttrs,
+    },
     LocalVar {
         nrvo_eligible: bool,
         is_mutable: bool,
@@ -50,12 +56,38 @@ pub enum DefKind {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeAttrs {
+    pub intrinsic: bool,
+}
+
+impl Default for TypeAttrs {
+    fn default() -> Self {
+        Self { intrinsic: false }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FuncAttrs {
+    pub intrinsic: bool,
+    pub link_name: Option<String>,
+}
+
+impl Default for FuncAttrs {
+    fn default() -> Self {
+        Self {
+            intrinsic: false,
+            link_name: None,
+        }
+    }
+}
+
 impl fmt::Display for DefKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DefKind::TypeDef => write!(f, "TypeDef"),
-            DefKind::FuncDef => write!(f, "FuncDef"),
-            DefKind::FuncDecl => write!(f, "FuncDecl"),
+            DefKind::TypeDef { .. } => write!(f, "TypeDef"),
+            DefKind::FuncDef { .. } => write!(f, "FuncDef"),
+            DefKind::FuncDecl { .. } => write!(f, "FuncDecl"),
             DefKind::LocalVar {
                 nrvo_eligible,
                 is_mutable,
@@ -109,5 +141,22 @@ impl PartialOrd for Def {
 impl fmt::Display for Def {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Def [{}] {}: {}", self.id, self.name, self.kind)
+    }
+}
+
+impl Def {
+    pub fn is_intrinsic(&self) -> bool {
+        match &self.kind {
+            DefKind::TypeDef { attrs } => attrs.intrinsic,
+            DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.intrinsic,
+            _ => false,
+        }
+    }
+
+    pub fn link_name(&self) -> Option<&str> {
+        match &self.kind {
+            DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.link_name.as_deref(),
+            _ => None,
+        }
     }
 }

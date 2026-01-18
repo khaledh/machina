@@ -180,7 +180,7 @@ fn resolve_named_type(
     }
 
     match &def.kind {
-        DefKind::TypeDef => {
+        DefKind::TypeDef { .. } => {
             let type_def = module
                 .type_def_by_id(*def_id)
                 .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
