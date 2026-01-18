@@ -91,6 +91,9 @@ See [Types](guide/types.md) for the complete type system.
 let max = if a > b { a } else { b };
 ```
 
+Bodies are always blocks. The `else` branch is optional; if omitted, the `if`
+expression has type `()`.
+
 ### Loops
 
 ```

@@ -17,13 +17,13 @@ if x > 0 {
 }
 ```
 
-In the current syntax, `if` always requires an `else` branch. Use an empty
-block if you don't need a real `else`:
+Both the `then` and `else` bodies are blocks. The `else` branch is optional.
+If you omit it, the `if` expression has type `()` and is mainly used for side
+effects:
 
 ```
 if debug {
     println("debug mode");
-} else {
 }
 ```
 
@@ -35,7 +35,8 @@ if debug {
 let max = if a > b { a } else { b };
 ```
 
-When used as an expression, both branches must have the same type.
+When used as an expression, both branches must have the same type. If the
+`else` is omitted, the type must be `()`.
 
 ### Chained Conditions
 

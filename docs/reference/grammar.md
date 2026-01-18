@@ -127,8 +127,8 @@ PatternList        ::= Pattern ("," Pattern)* ","?
 ```bnf
 Expr               ::= If | Match | InfixExpr
 
-If                 ::= "if" Expr IfBody "else" IfBody
-IfBody             ::= Block | Expr
+If                 ::= "if" Expr Block IfTail?
+IfTail             ::= "else" (Block | If)
 
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm)* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr

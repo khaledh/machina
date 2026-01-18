@@ -103,8 +103,8 @@ PatternList        ::= Pattern ( "," Pattern )* ","?
 Expr               ::= If | Match | InfixExpr
 
 # Control flow
-If                 ::= "if" Expr IfBody "else" IfBody
-IfBody             ::= Block | Expr
+If                 ::= "if" Expr Block IfTail?
+IfTail             ::= "else" (Block | If)
 
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr

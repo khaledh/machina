@@ -137,11 +137,11 @@ fn test_parse_multi_index_expr() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
 
-    let (items, tail) = block_parts(&func.body);
+    let (items, block_tail) = block_parts(&func.body);
     assert_eq!(items.len(), 1);
 
-    let tail = tail.expect("Expected block to have a tail expr");
-    if let ExprKind::ArrayIndex { target, indices } = &tail.kind {
+    let block_tail = block_tail.expect("Expected block to have a tail expr");
+    if let ExprKind::ArrayIndex { target, indices } = &block_tail.kind {
         // Check target is Var
         match &target.kind {
             ExprKind::Var { ident: name, .. } => assert_eq!(name, "arr"),
@@ -1261,6 +1261,86 @@ fn test_parse_for_array_loop() {
 
     let tail = tail.expect("Expected block to have a tail expr");
     assert!(matches!(tail.kind, ExprKind::IntLit(0)));
+}
+
+#[test]
+fn test_parse_if_optional_else_block() {
+    let source = r#"
+        fn test() -> () {
+            if true { };
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, tail) = block_parts(&func.body);
+    let item = match &items[0] {
+        BlockItem::Expr(expr) => expr,
+        _ => panic!("Expected expr block item"),
+    };
+
+    let ExprKind::If {
+        then_body,
+        else_body,
+        ..
+    } = &item.kind
+    else {
+        panic!("Expected if expression");
+    };
+
+    let ExprKind::Block {
+        items: then_items,
+        tail: then_tail,
+    } = &then_body.kind
+    else {
+        panic!("Expected block then body");
+    };
+    assert!(then_items.is_empty());
+    assert!(then_tail.is_none());
+
+    let ExprKind::Block {
+        items: else_items,
+        tail: else_tail,
+    } = &else_body.kind
+    else {
+        panic!("Expected block else body");
+    };
+    assert!(else_items.is_empty());
+    assert!(else_tail.is_none());
+
+    let tail = tail.expect("Expected block to have a tail expr");
+    assert!(matches!(tail.kind, ExprKind::UnitLit));
+}
+
+#[test]
+fn test_parse_else_if_wraps_in_block() {
+    let source = r#"
+        fn test() -> () {
+            if true { } else if false { } else { };
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let item = match &items[0] {
+        BlockItem::Expr(expr) => expr,
+        _ => panic!("Expected expr block item"),
+    };
+
+    let ExprKind::If { else_body, .. } = &item.kind else {
+        panic!("Expected if expression");
+    };
+
+    let ExprKind::Block { tail, .. } = &else_body.kind else {
+        panic!("Expected block else body");
+    };
+    let tail = tail.as_deref().expect("Expected nested if tail");
+    assert!(matches!(tail.kind, ExprKind::If { .. }));
 }
 
 #[test]

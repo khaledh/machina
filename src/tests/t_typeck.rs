@@ -124,6 +124,31 @@ fn test_struct_field_access_through_heap() {
 }
 
 #[test]
+fn test_if_without_else_requires_unit() {
+    let source = r#"
+        fn test() -> () {
+            if true { 1 };
+            ()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_if_without_else_unit_ok() {
+    let source = r#"
+        fn test() -> () {
+            if true { };
+            ()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_tuple_field_access_through_heap() {
     let source = r#"
         fn test() -> u64 {

@@ -417,22 +417,44 @@ impl<'a> Parser<'a> {
 
         self.consume_keyword(TK::KwIf)?;
 
+        // Parse condition
         self.allow_struct_lit = false;
         let cond = self.parse_expr(0)?;
         self.allow_struct_lit = true;
 
-        let then_body = if self.curr_token.kind == TK::LBrace {
-            self.parse_block()?
-        } else {
-            self.parse_expr(0)?
-        };
+        // Parse then body
+        let then_body = self.parse_block()?;
 
-        self.consume_keyword(TK::KwElse)?;
-
-        let else_body = if self.curr_token.kind == TK::LBrace {
-            self.parse_block()?
+        // Parse else body (if present)
+        let else_body = if self.curr_token.kind == TK::KwElse {
+            self.advance();
+            if self.curr_token.kind == TK::KwIf {
+                // Recursively parse else-if and wrap in a block expression.
+                let nested = self.parse_if()?;
+                let nested_span = nested.span;
+                Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: Vec::new(),
+                        tail: Some(Box::new(nested)),
+                    },
+                    ty: (),
+                    span: nested_span,
+                }
+            } else {
+                self.parse_block()?
+            }
         } else {
-            self.parse_expr(0)?
+            // No else branch; create an empty block
+            Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: Vec::new(),
+                    tail: None,
+                },
+                ty: (),
+                span: then_body.span,
+            }
         };
 
         Ok(Expr {
