@@ -4,13 +4,34 @@
 typedef struct mc_string {
   uint64_t ptr;     // address of bytes
   uint32_t len;     // byte length
-  uint32_t cap;     // capacity (0 means view/static)
+  uint32_t cap;     // capacity (high bit marks owned)
 } mc_string_t;
+
+#define MC_CAP_OWNED 0x80000000u
+#define MC_CAP_MASK  0x7fffffffu
+
+static inline uint32_t mc_cap_value(uint32_t cap) {
+  return cap & MC_CAP_MASK;
+}
+
+static inline uint8_t mc_cap_is_owned(uint32_t cap) {
+  return (cap & MC_CAP_OWNED) != 0;
+}
+
+static inline uint32_t mc_cap_with_owned(uint32_t cap) {
+  return (cap & MC_CAP_MASK) | MC_CAP_OWNED;
+}
 
 typedef struct mc_slice {
   uint64_t ptr;     // address of bytes
   uint64_t len;     // byte length
 } mc_slice_t;
+
+typedef struct mc_dyn_array {
+  uint64_t ptr;     // address of elements
+  uint32_t len;     // element length
+  uint32_t cap;     // element capacity (high bit marks owned)
+} mc_dyn_array_t;
 
 typedef struct mc_fmt {
   uint64_t ptr;     // buffer address

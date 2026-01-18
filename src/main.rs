@@ -312,7 +312,13 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
 }
 
 const RUNTIME_SOURCE_FILES: &[&str] = &[
-    "alloc.c", "conv.c", "mem.c", "print.c", "string.c", "trap.c",
+    "alloc.c",
+    "conv.c",
+    "dyn_array.c",
+    "mem.c",
+    "print.c",
+    "string.c",
+    "trap.c",
 ];
 
 fn runtime_source_paths() -> Vec<PathBuf> {
