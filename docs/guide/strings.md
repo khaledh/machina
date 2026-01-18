@@ -90,6 +90,26 @@ let name = "World";
 println(f"Hello, {name}!");
 ```
 
+## Appending
+
+Strings support in-place appending via methods:
+
+```
+var s = "hello";
+s.append(" world");
+println(s);
+```
+
+You can also append raw bytes with `append_bytes`, which expects UTF-8:
+
+```
+let bytes = u8[33];
+var s = "hi";
+s.append_bytes(bytes[..]);
+```
+
+Appending may promote a string view to an owned, growable buffer as needed.
+
 ## String Indexing
 
 Strings are indexed as bytes (`u8`):

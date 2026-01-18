@@ -77,6 +77,8 @@ let y = pair.1;        // true
 let s = "hello";
 let name = "world";
 let msg = f"hello, {name}!";   // formatted string
+var greeting = "hi";
+greeting.append("!");
 ```
 
 See [Types](guide/types.md) for the complete type system.

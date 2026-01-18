@@ -141,6 +141,19 @@ fn emit_drop_for_type(
     }
 
     match ty {
+        Type::String => {
+            let string_ty_id = ty_lowerer.lower_ty(ty);
+            let string_place = Place::new(base, string_ty_id, vec![]);
+            fb.push_stmt(
+                block,
+                Statement::Call {
+                    dst: None,
+                    callee: Callee::Runtime(RuntimeFn::StringDrop),
+                    args: vec![PlaceAny::Aggregate(string_place)],
+                },
+            );
+        }
+
         Type::Heap { elem_ty } => {
             let ptr_ty_id = ty_lowerer.lower_ty(ty);
             let ptr_place = Place::new(base, ptr_ty_id, vec![]);

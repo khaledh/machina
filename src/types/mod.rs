@@ -418,13 +418,13 @@ impl Type {
     pub fn needs_drop(&self) -> bool {
         match self {
             Type::Heap { .. } => true,
+            Type::String => true,
             Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
             Type::Tuple { field_tys } => field_tys.iter().any(Type::needs_drop),
             Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.needs_drop()),
             Type::Enum { variants, .. } => variants
                 .iter()
                 .any(|v| v.payload.iter().any(Type::needs_drop)),
-            // Note: Keep string/slice as non-dropping for now.
             _ => false,
         }
     }

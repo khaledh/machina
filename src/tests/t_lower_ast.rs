@@ -352,6 +352,40 @@ fn test_lower_drop_glue_emits_free() {
 }
 
 #[test]
+fn test_lower_string_drop_uses_runtime() {
+    let source = r#"
+        fn main() -> u64 {
+            let s = "hi";
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let (_body, generated) = lower_body_with_drop_glue(&analyzed, func_def);
+
+    let mut saw_string_drop = false;
+    for entry in &generated {
+        for block in &entry.body.blocks {
+            for stmt in &block.stmts {
+                if let Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::StringDrop),
+                    ..
+                } = stmt
+                {
+                    saw_string_drop = true;
+                }
+            }
+        }
+    }
+
+    assert!(
+        saw_string_drop,
+        "expected drop glue to call runtime string drop"
+    );
+}
+
+#[test]
 fn test_lower_sink_param_dropped() {
     let source = r#"
         fn consume(sink p: ^u64) -> u64 {
@@ -510,6 +544,73 @@ fn test_lower_string_index_emits_memcpy() {
 
     assert!(has_memcpy, "expected string index to emit MemCopy");
     assert!(has_trap, "expected bounds check to emit Trap call");
+}
+
+#[test]
+fn test_lower_string_append_uses_runtime() {
+    let source = r#"
+        string :: {
+            @[intrinsic, link_name("__mc_string_append_bytes")]
+            fn append(inout self, other: string);
+        }
+
+        fn main() -> u64 {
+            var s = "hi";
+            s.append("!");
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
+
+    let saw_append = body.blocks.iter().any(|block| {
+        block.stmts.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::StringAppendBytes),
+                    ..
+                }
+            )
+        })
+    });
+    assert!(saw_append, "expected __mc_string_append_bytes call");
+}
+
+#[test]
+fn test_lower_string_append_bytes_uses_runtime() {
+    let source = r#"
+        string :: {
+            @[intrinsic, link_name("__mc_string_append_bytes")]
+            fn append_bytes(inout self, bytes: u8[]);
+        }
+
+        fn main() -> u64 {
+            var s = "hi";
+            let buf = u8[1, 2, 3];
+            s.append_bytes(buf[..]);
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let (body, _) = lower_body_with_globals(&analyzed, func_def);
+
+    let saw_append = body.blocks.iter().any(|block| {
+        block.stmts.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Statement::Call {
+                    callee: Callee::Runtime(RuntimeFn::StringAppendBytes),
+                    ..
+                }
+            )
+        })
+    });
+    assert!(saw_append, "expected __mc_string_append_bytes call");
 }
 
 #[test]

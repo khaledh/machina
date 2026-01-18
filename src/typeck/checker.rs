@@ -1276,6 +1276,7 @@ impl TypeChecker {
         // Check that the callee type is a struct or enum
         let type_name = match peeled_ty {
             Type::Struct { name, .. } | Type::Enum { name, .. } => name,
+            Type::String => "string".to_string(),
             _ => {
                 return Err(
                     TypeCheckErrorKind::InvalidStructFieldTarget(callee_ty, callee.span).into(),

@@ -14,7 +14,15 @@ fn string_from_bytes(bytes: u8[]) -> string {
   s
 }
 
-// Stdlib wrappers (string only for now)
+string :: {
+  @[intrinsic, link_name("__mc_string_append_bytes")]
+  fn append(inout self, other: string);
+
+  @[intrinsic, link_name("__mc_string_append_bytes")]
+  fn append_bytes(inout self, bytes: u8[]);
+}
+
+// Stdlib wrappers
 fn print(s: string) {
   __mc_print(s, 0);
 }
