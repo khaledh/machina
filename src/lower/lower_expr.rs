@@ -512,7 +512,7 @@ impl<'a> FuncLowerer<'a> {
         expr: &ValueExpr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
-            VEK::StringFmt { segments } => self.lower_string_fmt_into(dst, segments),
+            VEK::StringFmt { plan } => self.lower_string_fmt_into(dst, plan),
             VEK::StringLit { .. }
             | VEK::ArrayLit { .. }
             | VEK::TupleLit(..)

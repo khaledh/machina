@@ -14,25 +14,36 @@ use crate::elaborate::elaborator::Elaborator;
 ///
 /// Step 1: insert implicit move nodes based on semck results.
 pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
-    let mut node_id_gen = ctx.node_id_gen;
-    let mut def_table = ctx.def_table;
-    let mut type_map = ctx.type_map;
-    let call_sigs = ctx.call_sigs;
+    let SemanticCheckedContext {
+        module,
+        def_table,
+        type_map,
+        call_sigs,
+        symbols,
+        node_id_gen,
+        implicit_moves,
+        init_assigns,
+        full_init_assigns,
+        closure_captures,
+    } = ctx;
+    let mut node_id_gen = node_id_gen;
+    let mut def_table = def_table;
+    let mut type_map = type_map;
     let mut elaborator = Elaborator::new(
         &mut def_table,
         &mut type_map,
         &call_sigs,
         &mut node_id_gen,
-        &ctx.implicit_moves,
-        &ctx.init_assigns,
-        &ctx.full_init_assigns,
-        &ctx.closure_captures,
+        &implicit_moves,
+        &init_assigns,
+        &full_init_assigns,
+        &closure_captures,
     );
 
-    let module = elaborator.elaborate_module(&ctx.module);
+    let module = elaborator.elaborate_module(&module);
 
     // Generate method names for lifted closures and add them to the symbol table
-    let mut symbols = ctx.symbols;
+    let mut symbols = symbols;
     let mut used_names: std::collections::HashSet<String> =
         symbols.def_names.values().cloned().collect();
     for method_block in module.method_blocks() {

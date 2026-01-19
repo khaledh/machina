@@ -2,7 +2,7 @@ use crate::context::{AnalyzedContext, SemanticContext};
 use crate::resolve::{DefId, DefTable};
 use crate::tree::semantic::{
     ArrayLitInit, BlockItem, CallArg, FuncDef, MethodReceiver, PlaceExpr, PlaceExprKind as PEK,
-    StmtExpr, StmtExprKind as SEK, StringFmtSegment, ValueExpr, ValueExprKind as VEK,
+    SegmentKind, StmtExpr, StmtExprKind as SEK, ValueExpr, ValueExprKind as VEK,
 };
 use crate::typeck::type_map::TypeMap;
 
@@ -233,9 +233,11 @@ impl NrvoSafetyChecker {
                 target_ok && fields_ok
             }
 
-            VEK::StringFmt { segments } => segments.iter().all(|segment| match segment {
-                StringFmtSegment::Literal { .. } => true,
-                StringFmtSegment::Expr { expr, .. } => self.check_expr(expr, false),
+            VEK::StringFmt { plan } => plan.segments.iter().all(|segment| match segment {
+                SegmentKind::LiteralBytes(_) => true,
+                SegmentKind::Int { expr, .. } | SegmentKind::StringValue { expr } => {
+                    self.check_expr(expr, false)
+                }
             }),
 
             VEK::HeapAlloc { expr } => self.check_expr(expr, false),

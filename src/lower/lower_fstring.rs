@@ -3,7 +3,7 @@ use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::lower::lower_util::u64_const;
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
-use crate::tree::semantic::{StringFmtSegment, ValueExpr, ValueExprKind as VEK};
+use crate::tree::semantic::{FmtKind, LenTerm, SegmentKind, StringFmtPlan, ValueExpr};
 use crate::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;
@@ -18,15 +18,15 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_string_fmt_into(
         &mut self,
         dst: Place<Aggregate>,
-        segments: &[StringFmtSegment],
+        plan: &StringFmtPlan,
     ) -> Result<(), LowerError> {
-        if self.fstring_requires_owned_builder(segments) {
-            return self.lower_string_fmt_owned_into(dst, segments);
+        if matches!(plan.kind, FmtKind::Owned) {
+            return self.lower_string_fmt_owned_into(dst, plan);
         }
 
         // Lower f-strings by allocating a fixed-size buffer on the stack and
         // driving a runtime formatter that appends each segment into it.
-        let total_len = self.string_fmt_total_len(segments)?;
+        let total_len = self.string_fmt_plan_len(plan);
         let buf_len = total_len.max(1);
 
         let buf_ty = Type::Array {
@@ -63,13 +63,14 @@ impl<'a> FuncLowerer<'a> {
 
         // Append each segment: literals become byte appends, expressions become
         // integer appends (string variables are not supported yet).
-        for segment in segments {
+        for segment in &plan.segments {
             match segment {
-                StringFmtSegment::Literal { value, .. } => {
-                    self.append_literal_segment(&fmt, value)?;
+                SegmentKind::LiteralBytes(value) => self.append_literal_segment(&fmt, value)?,
+                SegmentKind::Int { expr, signed, bits } => {
+                    self.append_int_segment(&fmt, expr, *signed, *bits)?
                 }
-                StringFmtSegment::Expr { expr, .. } => {
-                    self.append_expr_segment(&fmt, expr)?;
+                SegmentKind::StringValue { .. } => {
+                    panic!("compiler bug: view f-string received string segment");
                 }
             }
         }
@@ -87,49 +88,22 @@ impl<'a> FuncLowerer<'a> {
         Ok(())
     }
 
-    fn fstring_requires_owned_builder(&mut self, segments: &[StringFmtSegment]) -> bool {
-        for segment in segments {
-            let StringFmtSegment::Expr { expr, .. } = segment else {
-                continue;
-            };
-            if matches!(expr.kind, VEK::StringLit { .. }) {
-                continue;
-            }
-            if matches!(self.ty_from_id(expr.ty), Type::String) {
-                return true;
-            }
-        }
-        false
-    }
-
     // --- Compile-time formatter ---
 
-    fn string_fmt_total_len(&mut self, segments: &[StringFmtSegment]) -> Result<usize, LowerError> {
+    fn string_fmt_plan_len(&self, plan: &StringFmtPlan) -> usize {
         // Compute a conservative upper bound for the output buffer.
         let mut total = 0usize;
-        for segment in segments {
-            match segment {
-                StringFmtSegment::Literal { value, .. } => {
-                    total = total.saturating_add(value.len());
+        for term in &plan.reserve_terms {
+            match term {
+                LenTerm::Literal(value) => {
+                    total = total.saturating_add(*value);
                 }
-                StringFmtSegment::Expr { expr, .. } => match &expr.kind {
-                    VEK::StringLit { value } => {
-                        total = total.saturating_add(value.len());
-                    }
-                    _ => {
-                        // Non-literal expressions are restricted to integers.
-                        let ty = self.ty_from_id(expr.ty);
-                        match ty {
-                            Type::Int { .. } => {
-                                total = total.saturating_add(MAX_U64_DEC_LEN);
-                            }
-                            _ => return Err(LowerError::UnsupportedStringFmtSegment(expr.id)),
-                        }
-                    }
-                },
+                LenTerm::StringValue { .. } => {
+                    panic!("compiler bug: view f-string has dynamic length term");
+                }
             }
         }
-        Ok(total)
+        total
     }
 
     fn fmt_ty_id(&mut self) -> TyId {
@@ -151,25 +125,6 @@ impl<'a> FuncLowerer<'a> {
                 },
             ],
         })
-    }
-
-    fn append_expr_segment(
-        &mut self,
-        fmt: &Place<Aggregate>,
-        expr: &ValueExpr,
-    ) -> Result<(), LowerError> {
-        match &expr.kind {
-            VEK::StringLit { value } => self.append_literal_segment(fmt, value),
-            _ => {
-                // Only integer expressions are permitted in f-strings today.
-                let ty = self.ty_from_id(expr.ty);
-                if ty.is_int() {
-                    self.append_int_segment(fmt, expr)
-                } else {
-                    Err(LowerError::UnsupportedStringFmtSegment(expr.id))
-                }
-            }
-        }
     }
 
     fn append_literal_segment(
@@ -207,13 +162,10 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         fmt: &Place<Aggregate>,
         expr: &ValueExpr,
+        signed: bool,
+        bits: u8,
     ) -> Result<(), LowerError> {
         // Normalize to 64-bit so the runtime conversion helpers have a fixed ABI.
-        let ty = self.ty_from_id(expr.ty);
-        let Type::Int { signed, bits } = ty else {
-            return Err(LowerError::UnsupportedStringFmtSegment(expr.id));
-        };
-
         let value_op = self.lower_scalar_expr(expr)?;
         if !signed {
             let value_op = self.coerce_int_to_u64(expr, value_op)?;
@@ -265,11 +217,11 @@ impl<'a> FuncLowerer<'a> {
     fn lower_string_fmt_owned_into(
         &mut self,
         dst: Place<Aggregate>,
-        segments: &[StringFmtSegment],
+        plan: &StringFmtPlan,
     ) -> Result<(), LowerError> {
-        let owned_segments = self.collect_owned_segments(segments)?;
+        let (owned_segments, string_places) = self.collect_owned_segments(plan)?;
         self.init_empty_string(&dst)?;
-        self.reserve_owned_string_capacity(&dst, &owned_segments)?;
+        self.reserve_owned_string_capacity(&dst, plan, &string_places)?;
 
         for segment in owned_segments {
             match segment {
@@ -290,68 +242,65 @@ impl<'a> FuncLowerer<'a> {
 
     fn collect_owned_segments(
         &mut self,
-        segments: &[StringFmtSegment],
-    ) -> Result<Vec<OwnedFmtSegment>, LowerError> {
-        let mut owned_segments = Vec::with_capacity(segments.len());
+        plan: &StringFmtPlan,
+    ) -> Result<(Vec<OwnedFmtSegment>, Vec<Option<Place<Aggregate>>>), LowerError> {
+        let mut owned_segments = Vec::with_capacity(plan.segments.len());
+        let mut string_places = vec![None; plan.segments.len()];
 
-        for segment in segments {
+        for (index, segment) in plan.segments.iter().enumerate() {
             match segment {
-                StringFmtSegment::Literal { value, .. } => {
+                SegmentKind::LiteralBytes(value) => {
                     owned_segments.push(OwnedFmtSegment::Literal(value.clone()));
                 }
-                StringFmtSegment::Expr { expr, .. } => match &expr.kind {
-                    VEK::StringLit { value } => {
-                        owned_segments.push(OwnedFmtSegment::Literal(value.clone()));
-                    }
-                    _ => {
-                        let ty = self.ty_from_id(expr.ty);
-                        match ty {
-                            Type::String => {
-                                let value = self.lower_expr_value(expr)?;
-                                let Value::Aggregate(place) = value else {
-                                    return Err(LowerError::UnsupportedStringFmtSegment(expr.id));
-                                };
-                                owned_segments.push(OwnedFmtSegment::StringValue(place));
-                            }
-                            Type::Int { signed, bits } => {
-                                let op = self.lower_scalar_expr(expr)?;
-                                owned_segments.push(OwnedFmtSegment::IntValue { op, signed, bits });
-                            }
-                            _ => return Err(LowerError::UnsupportedStringFmtSegment(expr.id)),
-                        }
-                    }
-                },
+                SegmentKind::StringValue { expr } => {
+                    let value = self.lower_expr_value(expr)?;
+                    let Value::Aggregate(place) = value else {
+                        return Err(LowerError::UnsupportedStringFmtSegment(expr.id));
+                    };
+                    string_places[index] = Some(place.clone());
+                    owned_segments.push(OwnedFmtSegment::StringValue(place));
+                }
+                SegmentKind::Int { expr, signed, bits } => {
+                    let op = self.lower_scalar_expr(expr)?;
+                    owned_segments.push(OwnedFmtSegment::IntValue {
+                        op,
+                        signed: *signed,
+                        bits: *bits,
+                    });
+                }
             }
         }
 
-        Ok(owned_segments)
+        Ok((owned_segments, string_places))
     }
 
     fn reserve_owned_string_capacity(
         &mut self,
         dst: &Place<Aggregate>,
-        segments: &[OwnedFmtSegment],
+        plan: &StringFmtPlan,
+        string_places: &[Option<Place<Aggregate>>],
     ) -> Result<(), LowerError> {
         let mut base_total = 0u64;
-        for segment in segments {
-            match segment {
-                OwnedFmtSegment::Literal(value) => {
-                    base_total = base_total.saturating_add(value.len() as u64);
+        for term in &plan.reserve_terms {
+            match term {
+                LenTerm::Literal(len) => {
+                    base_total = base_total.saturating_add(*len as u64);
                 }
-                OwnedFmtSegment::IntValue { .. } => {
-                    base_total = base_total.saturating_add(MAX_U64_DEC_LEN as u64);
-                }
-                OwnedFmtSegment::StringValue(_) => {}
+                LenTerm::StringValue { .. } => {}
             }
         }
 
         let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
         let mut total_op = u64_const(base_total);
 
-        for segment in segments {
-            let OwnedFmtSegment::StringValue(place) = segment else {
+        for term in &plan.reserve_terms {
+            let LenTerm::StringValue { segment_index } = term else {
                 continue;
             };
+            let place = string_places
+                .get(*segment_index)
+                .and_then(|place| place.as_ref())
+                .unwrap_or_else(|| panic!("compiler bug: missing string segment for reserve term"));
             let (_, len_op) = self.string_ptr_len_ops(place);
             total_op = self.emit_scalar_rvalue(
                 u64_ty_id,

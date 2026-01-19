@@ -4,6 +4,8 @@
 
 pub mod call_plan;
 pub mod model;
+pub mod string_fmt;
 
 pub use call_plan::*;
 pub use model::*;
+pub use string_fmt::*;

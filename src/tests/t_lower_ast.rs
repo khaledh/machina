@@ -133,9 +133,11 @@ fn find_method_call_id(expr: &sem::ValueExpr) -> Option<crate::tree::NodeId> {
         sem::ValueExprKind::Slice { target, start, end } => find_method_call_in_place(target)
             .or_else(|| start.as_deref().and_then(find_method_call_id))
             .or_else(|| end.as_deref().and_then(find_method_call_id)),
-        sem::ValueExprKind::StringFmt { segments } => segments.iter().find_map(|seg| match seg {
-            sem::StringFmtSegment::Literal { .. } => None,
-            sem::StringFmtSegment::Expr { expr, .. } => find_method_call_id(expr),
+        sem::ValueExprKind::StringFmt { plan } => plan.segments.iter().find_map(|seg| match seg {
+            sem::SegmentKind::LiteralBytes(_) => None,
+            sem::SegmentKind::Int { expr, .. } | sem::SegmentKind::StringValue { expr } => {
+                find_method_call_id(expr)
+            }
         }),
         sem::ValueExprKind::Range { .. }
         | sem::ValueExprKind::UnitLit
@@ -172,6 +174,127 @@ fn find_method_call_in_stmt(stmt: &sem::StmtExpr) -> Option<crate::tree::NodeId>
         sem::StmtExprKind::VarDecl { .. }
         | sem::StmtExprKind::Break
         | sem::StmtExprKind::Continue => None,
+    }
+}
+
+fn find_string_fmt_plan(expr: &sem::ValueExpr) -> Option<&sem::StringFmtPlan> {
+    match &expr.kind {
+        sem::ValueExprKind::StringFmt { plan } => Some(plan),
+        sem::ValueExprKind::Block { items, tail } => items
+            .iter()
+            .find_map(find_string_fmt_plan_in_block_item)
+            .or_else(|| tail.as_deref().and_then(find_string_fmt_plan)),
+        sem::ValueExprKind::Call { callee, args } => find_string_fmt_plan(callee)
+            .or_else(|| args.iter().find_map(find_string_fmt_plan_in_call_arg)),
+        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
+            find_string_fmt_plan_in_receiver(receiver)
+                .or_else(|| args.iter().find_map(find_string_fmt_plan_in_call_arg))
+        }
+        sem::ValueExprKind::If {
+            cond,
+            then_body,
+            else_body,
+        } => find_string_fmt_plan(cond)
+            .or_else(|| find_string_fmt_plan(then_body))
+            .or_else(|| find_string_fmt_plan(else_body)),
+        sem::ValueExprKind::Match { scrutinee, arms } => find_string_fmt_plan(scrutinee)
+            .or_else(|| arms.iter().find_map(|arm| find_string_fmt_plan(&arm.body))),
+        sem::ValueExprKind::ArrayLit { init, .. } => match init {
+            sem::ArrayLitInit::Elems(elems) => elems.iter().find_map(find_string_fmt_plan),
+            sem::ArrayLitInit::Repeat(expr, _) => find_string_fmt_plan(expr),
+        },
+        sem::ValueExprKind::TupleLit(items) => items.iter().find_map(find_string_fmt_plan),
+        sem::ValueExprKind::StructLit { fields, .. } => fields
+            .iter()
+            .map(|field| &field.value)
+            .find_map(find_string_fmt_plan),
+        sem::ValueExprKind::EnumVariant { payload, .. } => {
+            payload.iter().find_map(find_string_fmt_plan)
+        }
+        sem::ValueExprKind::StructUpdate { target, fields } => find_string_fmt_plan(target)
+            .or_else(|| {
+                fields
+                    .iter()
+                    .map(|field| &field.value)
+                    .find_map(find_string_fmt_plan)
+            }),
+        sem::ValueExprKind::BinOp { left, right, .. } => {
+            find_string_fmt_plan(left).or_else(|| find_string_fmt_plan(right))
+        }
+        sem::ValueExprKind::UnaryOp { expr, .. }
+        | sem::ValueExprKind::HeapAlloc { expr }
+        | sem::ValueExprKind::Coerce { expr, .. } => find_string_fmt_plan(expr),
+        sem::ValueExprKind::Move { place }
+        | sem::ValueExprKind::ImplicitMove { place }
+        | sem::ValueExprKind::Load { place }
+        | sem::ValueExprKind::AddrOf { place } => find_string_fmt_plan_in_place(place),
+        sem::ValueExprKind::Slice { target, start, end } => find_string_fmt_plan_in_place(target)
+            .or_else(|| start.as_deref().and_then(find_string_fmt_plan))
+            .or_else(|| end.as_deref().and_then(find_string_fmt_plan)),
+        sem::ValueExprKind::Range { .. }
+        | sem::ValueExprKind::UnitLit
+        | sem::ValueExprKind::IntLit(..)
+        | sem::ValueExprKind::BoolLit(..)
+        | sem::ValueExprKind::CharLit(..)
+        | sem::ValueExprKind::StringLit { .. }
+        | sem::ValueExprKind::ClosureRef { .. } => None,
+    }
+}
+
+fn find_string_fmt_plan_in_block_item(item: &sem::BlockItem) -> Option<&sem::StringFmtPlan> {
+    match item {
+        sem::BlockItem::Stmt(stmt) => find_string_fmt_plan_in_stmt(stmt),
+        sem::BlockItem::Expr(expr) => find_string_fmt_plan(expr),
+    }
+}
+
+fn find_string_fmt_plan_in_stmt(stmt: &sem::StmtExpr) -> Option<&sem::StringFmtPlan> {
+    match &stmt.kind {
+        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+            find_string_fmt_plan(value)
+        }
+        sem::StmtExprKind::Assign {
+            assignee, value, ..
+        } => find_string_fmt_plan_in_place(assignee).or_else(|| find_string_fmt_plan(value)),
+        sem::StmtExprKind::While { cond, body } => {
+            find_string_fmt_plan(cond).or_else(|| find_string_fmt_plan(body))
+        }
+        sem::StmtExprKind::For { iter, body, .. } => {
+            find_string_fmt_plan(iter).or_else(|| find_string_fmt_plan(body))
+        }
+        sem::StmtExprKind::Return { value } => value.as_deref().and_then(find_string_fmt_plan),
+        sem::StmtExprKind::VarDecl { .. }
+        | sem::StmtExprKind::Break
+        | sem::StmtExprKind::Continue => None,
+    }
+}
+
+fn find_string_fmt_plan_in_call_arg(arg: &sem::CallArg) -> Option<&sem::StringFmtPlan> {
+    match arg {
+        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+            find_string_fmt_plan(expr)
+        }
+        sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+            find_string_fmt_plan_in_place(place)
+        }
+    }
+}
+
+fn find_string_fmt_plan_in_receiver(receiver: &sem::MethodReceiver) -> Option<&sem::StringFmtPlan> {
+    match receiver {
+        sem::MethodReceiver::ValueExpr(expr) => find_string_fmt_plan(expr),
+        sem::MethodReceiver::PlaceExpr(place) => find_string_fmt_plan_in_place(place),
+    }
+}
+
+fn find_string_fmt_plan_in_place(place: &sem::PlaceExpr) -> Option<&sem::StringFmtPlan> {
+    match &place.kind {
+        sem::PlaceExprKind::Var { .. } => None,
+        sem::PlaceExprKind::Deref { value } => find_string_fmt_plan(value),
+        sem::PlaceExprKind::ArrayIndex { target, indices } => find_string_fmt_plan_in_place(target)
+            .or_else(|| indices.iter().find_map(find_string_fmt_plan)),
+        sem::PlaceExprKind::TupleField { target, .. }
+        | sem::PlaceExprKind::StructField { target, .. } => find_string_fmt_plan_in_place(target),
     }
 }
 
@@ -834,6 +957,32 @@ fn test_call_plan_string_append_bytes_len_bits_64() {
             len_bits: 64
         }
     ));
+}
+
+#[test]
+fn test_string_fmt_plan_owned() {
+    let source = r#"
+        fn main() {
+            let name = "machina";
+            let msg = f"{name}!";
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let plan = find_string_fmt_plan(&func_def.body).expect("expected f-string plan");
+
+    assert!(matches!(plan.kind, sem::FmtKind::Owned));
+    assert!(
+        plan.segments
+            .iter()
+            .any(|segment| matches!(segment, sem::SegmentKind::StringValue { .. }))
+    );
+    assert!(
+        plan.reserve_terms
+            .iter()
+            .any(|term| matches!(term, sem::LenTerm::StringValue { .. }))
+    );
 }
 
 #[test]

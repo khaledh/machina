@@ -1,5 +1,6 @@
 //! Semantic tree: place/value split tree used after semantic checks.
 
+use super::StringFmtPlan;
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::tree as ast_model;
@@ -191,14 +192,6 @@ pub struct MethodDef {
     pub span: Span,
 }
 
-// -- String Literals ---
-
-#[derive(Clone, Debug)]
-pub enum StringFmtSegment {
-    Literal { value: String, span: Span },
-    Expr { expr: Box<ValueExpr>, span: Span },
-}
-
 // -- Call Args ---
 
 #[derive(Clone, Debug)]
@@ -363,7 +356,7 @@ pub enum ValueExprKind {
         value: String,
     },
     StringFmt {
-        segments: Vec<StringFmtSegment>,
+        plan: StringFmtPlan,
     },
 
     // Literals (compound)
