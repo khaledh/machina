@@ -1,3 +1,19 @@
+//! Main value expression elaboration.
+//!
+//! Transforms normalized expressions into semantic value expressions.
+//! The elaboration handles several special cases in priority order:
+//!
+//! 1. **Lvalue expressions** (vars, field access, indexing, deref): Convert
+//!    to place expressions and wrap in Load or Move based on semck results
+//!
+//! 2. **Closure expressions**: Lift to struct types and replace with struct
+//!    literals that capture the environment
+//!
+//! 3. **Call expressions**: Build call plans and elaborate arguments
+//!
+//! 4. **Simple expressions**: Direct translation of literals, operators,
+//!    control flow, etc.
+
 use crate::elaborate::elaborator::Elaborator;
 use crate::tree::ParamMode;
 use crate::tree::normalized as norm;
@@ -5,6 +21,10 @@ use crate::tree::semantic as sem;
 use crate::typeck::type_map::{CallParam, CallSig};
 
 impl<'a> Elaborator<'a> {
+    /// Main entry point for elaborating a value expression.
+    ///
+    /// Dispatches to specialized handlers based on expression kind,
+    /// with lvalue and closure cases taking priority.
     pub(in crate::elaborate) fn elab_value(&mut self, expr: &norm::Expr) -> sem::ValueExpr {
         if let Some(value) = self.elab_lvalue_expr(expr) {
             return value;
@@ -28,6 +48,10 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    /// Handle expressions that denote memory locations (lvalues).
+    ///
+    /// Wraps the place in either a Load (for copies) or ImplicitMove
+    /// (when semck determined the value should be moved).
     fn elab_lvalue_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
         match &expr.kind {
             norm::ExprKind::Var { .. }
@@ -82,6 +106,11 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    /// Transform a closure expression into a struct literal.
+    ///
+    /// The closure's struct type and invoke method are created lazily via
+    /// `ensure_closure_info`. The closure literal becomes a struct literal
+    /// that initializes each capture field.
     fn elab_closure_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
         let norm::ExprKind::Closure {
             ident,
@@ -98,8 +127,6 @@ impl<'a> Elaborator<'a> {
         let info =
             self.ensure_closure_info(ident, *def_id, params, return_ty, body, expr.span, expr.id);
         let ty_id = self.type_map.insert_node_type(expr.id, info.ty.clone());
-
-        // Closure literals become struct literals with capture fields.
         let fields = info
             .captures
             .iter()
@@ -308,10 +335,15 @@ impl<'a> Elaborator<'a> {
                 start: start.as_ref().map(|expr| Box::new(self.elab_value(expr))),
                 end: end.as_ref().map(|expr| Box::new(self.elab_value(expr))),
             },
-            norm::ExprKind::Match { scrutinee, arms } => sem::ValueExprKind::Match {
-                scrutinee: Box::new(self.elab_value(scrutinee)),
-                arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
-            },
+            norm::ExprKind::Match { scrutinee, arms } => {
+                // Pre-compute match tests + bindings so lowering only emits the plan.
+                let plan = self.build_match_plan(expr.id, scrutinee, arms);
+                self.type_map.insert_match_plan(expr.id, plan);
+                sem::ValueExprKind::Match {
+                    scrutinee: Box::new(self.elab_value(scrutinee)),
+                    arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
+                }
+            }
             norm::ExprKind::Coerce { kind, expr } => sem::ValueExprKind::Coerce {
                 kind: *kind,
                 expr: Box::new(self.elab_value(expr)),

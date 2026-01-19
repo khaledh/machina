@@ -1,8 +1,21 @@
+//! Block item and statement elaboration.
+//!
+//! Handles the contents of block expressions: statements and trailing
+//! expressions. Special cases include:
+//!
+//! - `for` loops are desugared into `while` loops (delegated to `for_loop`)
+//! - Closure bindings record the mapping for later reference resolution
+//! - Assignments carry initialization info from semck
+
 use crate::elaborate::elaborator::Elaborator;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 
 impl<'a> Elaborator<'a> {
+    /// Elaborate a single block item (statement or expression).
+    ///
+    /// For loops receive special handling: they're desugared into while
+    /// loops and returned as expressions rather than statements.
     pub(in crate::elaborate::value) fn elab_block_item(
         &mut self,
         item: &norm::BlockItem,
@@ -88,6 +101,11 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    /// Elaborate the value in a let/var binding, with special handling for closures.
+    ///
+    /// When binding a closure, records the mapping from the bound variable(s)
+    /// to the closure's DefId so that later references can be resolved to the
+    /// correct closure type.
     fn elab_bind_value(
         &mut self,
         pattern: &norm::BindPattern,

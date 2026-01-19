@@ -1,18 +1,46 @@
+//! Elaboration pass: transform a normalized tree into a semantic tree.
+//!
+//! This pass sits between semantic checking and lowering. Its job is to
+//! pre-compute semantic constructs so that lowering can focus on code
+//! generation without making semantic decisions. Key responsibilities:
+//!
+//! - **Closure lifting**: Transform inline closures into struct types with
+//!   captured fields and `invoke` methods. This makes closures first-class
+//!   values that lowering can treat uniformly.
+//!
+//! - **Call planning**: Pre-compute how each call should be lowered, including
+//!   argument passing modes, receiver handling, and intrinsic dispatch.
+//!
+//! - **Match planning**: Build decision trees for pattern matching that encode
+//!   the exact sequence of tests and bindings needed at runtime.
+//!
+//! - **For loop desugaring**: Rewrite `for` loops into `while` loops with
+//!   explicit index management, so lowering sees only `while`.
+//!
+//! - **String format planning**: Pre-compute string interpolation strategies
+//!   (view vs owned formatting) and reserve length calculations.
+//!
+//! - **Place/value separation**: Distinguish between place expressions (lvalues)
+//!   and value expressions, inserting explicit load/move nodes based on
+//!   semantic analysis results.
+//!
+//! The output semantic tree contains all information needed for lowering to
+//! proceed without further semantic reasoning.
+
 use crate::context::{SemanticCheckedContext, SemanticContext};
 use crate::tree::semantic as sem;
 mod calls;
 mod closure;
 mod elaborator;
+mod match_plan;
 mod place;
 mod types;
 mod value;
 
 use crate::elaborate::elaborator::Elaborator;
 
-/// Elaborate a normalized tree into a semantic tree using semantic
-/// analysis results.
-///
-/// Step 1: insert implicit move nodes based on semck results.
+/// Transform a normalized tree into a semantic tree using the results from
+/// semantic analysis.
 pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     let SemanticCheckedContext {
         module,

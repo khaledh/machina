@@ -1,11 +1,33 @@
+//! String interpolation planning.
+//!
+//! Pre-computes the strategy for formatting f-strings (`f"..."`) so that
+//! lowering can emit efficient code without re-analyzing segment types.
+//!
+//! ## Formatting strategies
+//!
+//! - **View formatting**: When all segments are literals or integers, we can
+//!   write directly into a pre-sized buffer. This is the fast path.
+//!
+//! - **Owned formatting**: When any segment is a string value, we need to
+//!   handle potential allocation and ownership. This uses a different code path.
+//!
+//! ## Reserve length calculation
+//!
+//! The plan includes reserve terms that let lowering pre-allocate the output
+//! buffer. Literal segments contribute their exact length; integer segments
+//! use a conservative upper bound (20 chars for u64); string segments require
+//! runtime length queries.
+
 use crate::elaborate::elaborator::Elaborator;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
+/// Maximum decimal digits in a u64 (used for reserve length estimation).
 const MAX_U64_DEC_LEN: usize = 20;
 
 impl<'a> Elaborator<'a> {
+    /// Build a formatting plan for a string interpolation expression.
     pub(in crate::elaborate::value) fn elab_string_fmt_plan(
         &mut self,
         segments: &[norm::StringFmtSegment],

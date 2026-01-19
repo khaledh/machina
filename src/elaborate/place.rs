@@ -1,12 +1,25 @@
+//! Place expression elaboration.
+//!
+//! Place expressions (lvalues) represent memory locations that can be read
+//! from or written to. This module transforms normalized expressions that
+//! appear in lvalue position into explicit `PlaceExpr` nodes.
+//!
+//! Key transformation: Inside closure bodies, references to captured
+//! variables are rewritten to access the closure's environment struct
+//! (`env.<field>` for move captures, `*env.<field>` for borrow captures).
+
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 
 use super::elaborator::Elaborator;
 
 impl<'a> Elaborator<'a> {
+    /// Elaborate a normalized expression into a place expression.
+    ///
+    /// When inside a closure body, captured variable references are
+    /// rewritten to access the `env` parameter's struct fields.
     pub(super) fn elab_place(&mut self, expr: &norm::Expr) -> sem::PlaceExpr {
         if let norm::ExprKind::Var { def_id, .. } = &expr.kind {
-            // In closure bodies, rewrite captured vars to env.<field>.
             if let Some(place) = self.capture_place_for(*def_id, expr.id, expr.span) {
                 return place;
             }

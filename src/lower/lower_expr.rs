@@ -586,7 +586,7 @@ impl<'a> FuncLowerer<'a> {
                 then_body,
                 else_body,
             } => self.lower_if_expr_into(dst, cond, then_body, else_body),
-            VEK::Match { scrutinee, arms } => self.lower_match_into_agg(dst, scrutinee, arms),
+            VEK::Match { scrutinee, arms } => self.lower_match_into_agg(expr, dst, scrutinee, arms),
             _ => match self.lower_expr_value(expr)? {
                 Value::Aggregate(place) => {
                     self.emit_copy_aggregate(dst, place);

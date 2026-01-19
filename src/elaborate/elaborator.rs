@@ -1,3 +1,11 @@
+//! The core elaboration driver and shared state.
+//!
+//! The `Elaborator` struct holds all context needed during elaboration:
+//! references to the definition table, type map, semantic analysis results,
+//! and accumulated closure transformations. It provides the entry point
+//! for module elaboration and shared helper methods used across the
+//! elaboration submodules.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::diag::Span;
@@ -11,6 +19,9 @@ use crate::tree::{InitInfo, NodeId, NodeIdGen};
 use crate::typeck::type_map::{CallSigMap, TypeMap};
 use crate::types::{Type, TypeId};
 
+/// Information about a single captured variable in a closure's environment.
+/// Used to build the closure struct fields and rewrite captured variable
+/// accesses inside closure bodies.
 #[derive(Clone, Debug)]
 pub(super) struct CaptureField {
     pub(super) def_id: DefId,
@@ -23,6 +34,9 @@ pub(super) struct CaptureField {
     pub(super) field_ty_expr: sem::TypeExpr,
 }
 
+/// Complete metadata for a lifted closure, including its generated struct
+/// type and the `invoke` method signature. Created once per closure definition
+/// and reused for all references to that closure.
 #[derive(Clone, Debug)]
 pub(super) struct ClosureInfo {
     pub(super) type_name: String,
@@ -33,6 +47,9 @@ pub(super) struct ClosureInfo {
     pub(super) captures: Vec<CaptureField>,
 }
 
+/// Active context when elaborating inside a closure body. Pushed onto
+/// `closure_stack` when entering a closure and popped when exiting.
+/// Used to rewrite references to captured variables as `env.<field>`.
 #[derive(Clone, Debug)]
 pub(super) struct ClosureContext {
     pub(super) self_def_id: DefId,
@@ -62,15 +79,29 @@ impl ClosureContext {
     }
 }
 
+/// The main driver for the elaboration pass.
+///
+/// Holds references to shared compiler state (def table, type map, semantic
+/// analysis results) plus mutable state accumulated during elaboration
+/// (lifted closure types, method blocks, binding mappings).
+///
+/// The elaborator traverses the normalized tree recursively, transforming
+/// each node into its semantic equivalent while applying the elaboration
+/// rules defined in the submodules.
 pub struct Elaborator<'a> {
+    // Shared compiler state (borrowed)
     pub(super) def_table: &'a mut DefTable,
     pub(super) type_map: &'a mut TypeMap,
     pub(super) call_sigs: &'a CallSigMap,
     pub(super) node_id_gen: &'a mut NodeIdGen,
+
+    // Semantic analysis results from semck
     pub(super) implicit_moves: &'a HashSet<NodeId>,
     pub(super) init_assigns: &'a HashSet<NodeId>,
     pub(super) full_init_assigns: &'a HashSet<NodeId>,
     pub(super) closure_captures: &'a HashMap<DefId, Vec<ClosureCapture>>,
+
+    // Accumulated closure lifting results
     pub(super) closure_types: Vec<sem::TypeDef>,
     pub(super) closure_methods: Vec<sem::MethodBlock>,
     pub(super) closure_info: HashMap<DefId, ClosureInfo>,
@@ -106,18 +137,24 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    /// Elaborate an entire module, returning the transformed semantic tree.
+    ///
+    /// Processes all top-level items and appends any closure struct types
+    /// and method blocks that were generated during elaboration.
     pub fn elaborate_module(&mut self, module: &norm::Module) -> sem::Module {
-        // Lift closures to top level
         self.closure_types.clear();
         self.closure_methods.clear();
         self.closure_info.clear();
         self.closure_bindings.clear();
         self.closure_stack.clear();
+
         let mut top_level_items: Vec<_> = module
             .top_level_items
             .iter()
             .map(|item| self.elab_top_level_item(item))
             .collect();
+
+        // Append lifted closure types and their invoke methods
         top_level_items.extend(self.closure_types.drain(..).map(sem::TopLevelItem::TypeDef));
         top_level_items.extend(
             self.closure_methods
@@ -191,21 +228,25 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    /// Retrieve initialization status for an assignment target from semck.
+    /// Used by lowering to determine whether an assignment is an initial
+    /// write (for out-params) or a full initialization (for partial init).
     pub(super) fn init_info_for_id(&self, id: NodeId) -> InitInfo {
-        // Pull init tracking from semck for out-param and partial-init lowering.
         InitInfo {
             is_init: self.init_assigns.contains(&id),
             promotes_full: self.full_init_assigns.contains(&id),
         }
     }
 
+    /// Create a new value expression with a fresh node ID.
+    /// Used when elaboration synthesizes new nodes (e.g., implicit moves,
+    /// closure captures, desugared loops).
     pub(super) fn new_value(
         &mut self,
         kind: sem::ValueExprKind,
         ty: TypeId,
         span: Span,
     ) -> sem::ValueExpr {
-        // Elaborate often synthesizes new nodes; always allocate fresh ids.
         let id = self.node_id_gen.new_id();
         sem::ValueExpr { id, kind, ty, span }
     }

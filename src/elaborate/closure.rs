@@ -1,3 +1,45 @@
+//! Closure lifting: transform closures into struct types with invoke methods.
+//!
+//! Closures in the source language capture variables from their environment.
+//! This module "lifts" each closure into:
+//!
+//! 1. A struct type containing the captured variables as fields
+//! 2. An `invoke` method that takes the struct as `self` and the original params
+//!
+//! The closure literal becomes a struct literal that initializes the capture
+//! fields, and closure calls become method calls on that struct.
+//!
+//! ## Capture modes
+//!
+//! - **Move captures**: For aggregate types, the value is moved into the
+//!   struct field. Syntax: `[move x] |params| body`. Access inside the
+//!   closure body is `env.<field>`.
+//!
+//! - **Borrow captures**: A reference is stored in the struct field.
+//!   Access inside the closure body is `*env.<field>`.
+//!
+//! ## Example transformation
+//!
+//! ```text
+//! fn main() {
+//!     let data = SomeStruct { ... };
+//!     let f = [move data] |y| data.field + y;
+//!     f(10);
+//! }
+//! ```
+//!
+//! Becomes:
+//!
+//! ```text
+//! struct main$closure$1 { data: SomeStruct }
+//! impl main$closure$1 { fn invoke(env: Self, y: i32) -> i32 { env.data.field + y } }
+//! fn main() {
+//!     let data = SomeStruct { ... };
+//!     let f = main$closure$1 { data: move data };
+//!     f.invoke(10);
+//! }
+//! ```
+
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind, TypeAttrs};
 use crate::semck::closure::capture::CaptureMode;
@@ -9,6 +51,7 @@ use crate::types::{StructField, Type, TypeId};
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
 
 impl<'a> Elaborator<'a> {
+    /// Build capture field metadata for all variables captured by a closure.
     fn capture_fields_for(&mut self, closure_def_id: DefId, span: Span) -> Vec<CaptureField> {
         let Some(captures) = self.closure_captures.get(&closure_def_id) else {
             return Vec::new();
@@ -63,6 +106,8 @@ impl<'a> Elaborator<'a> {
         fields
     }
 
+    /// Generate the struct type definition for a lifted closure.
+    /// Returns the type name, type ID, Type value, and the `env` parameter's DefId.
     fn make_closure_type(
         &mut self,
         ident: &str,
@@ -127,6 +172,12 @@ impl<'a> Elaborator<'a> {
         (type_name, ty_id, closure_ty, self_def_id)
     }
 
+    /// Ensure that closure metadata exists for a given closure definition.
+    ///
+    /// On first encounter, this creates the closure struct type, generates
+    /// the `invoke` method, and caches the result. Subsequent calls return
+    /// the cached info. This lazy approach handles forward references to
+    /// closures that haven't been elaborated yet.
     pub(super) fn ensure_closure_info(
         &mut self,
         ident: &str,
@@ -141,7 +192,7 @@ impl<'a> Elaborator<'a> {
             return info.clone();
         }
 
-        // Synthesize the closure struct and its invoke method on first sight.
+        // First encounter: synthesize the closure struct and its invoke method.
         let captures = self.capture_fields_for(def_id, span);
         let (type_name, type_id, closure_ty, self_def_id) =
             self.make_closure_type(ident, span, &captures);
@@ -204,6 +255,11 @@ impl<'a> Elaborator<'a> {
         info
     }
 
+    /// Record a mapping from bound variable(s) to the closure they hold.
+    ///
+    /// When a closure is bound to a variable (or destructured into multiple),
+    /// this records the mapping so that later references to those variables
+    /// can be resolved to the closure's struct type.
     pub(super) fn record_closure_binding(
         &mut self,
         pattern: &norm::BindPattern,
@@ -244,6 +300,10 @@ impl<'a> Elaborator<'a> {
             .map(|info| info.type_id)
     }
 
+    /// Check if a callee expression refers to a closure and return its info.
+    ///
+    /// Handles direct closure literals, variables bound to closures, and
+    /// move/implicit-move wrappers around either.
     pub(super) fn closure_call_info(
         &mut self,
         callee: &norm::Expr,
@@ -284,6 +344,11 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    /// Rewrite a reference to a captured variable as an access through `env`.
+    ///
+    /// Returns `Some(place)` if `def_id` refers to a captured variable in the
+    /// current closure context. The place is either `env.<field>` for move
+    /// captures or `*env.<field>` for borrow captures.
     pub(super) fn capture_place_for(
         &mut self,
         def_id: DefId,
@@ -292,8 +357,6 @@ impl<'a> Elaborator<'a> {
     ) -> Option<sem::PlaceExpr> {
         let ctx = self.closure_stack.last()?;
         let field = ctx.capture_field(def_id)?;
-        // Rewrite captured var uses to env.<field> for move captures,
-        // or *env.<field> for borrow captures.
         let env_id = self.node_id_gen.new_id();
         let env_place = sem::PlaceExpr {
             id: env_id,
@@ -358,6 +421,10 @@ impl<'a> Elaborator<'a> {
         })
     }
 
+    /// Generate the value expression for a capture field initializer.
+    ///
+    /// For move captures, produces `move <var>`. For borrow captures,
+    /// produces `addr_of <var>`.
     pub(super) fn capture_value_for_def(
         &mut self,
         capture: &CaptureField,
@@ -377,7 +444,6 @@ impl<'a> Elaborator<'a> {
             .insert_node_type(place_id, capture.base_ty.clone());
 
         if capture.mode == CaptureMode::Move {
-            // Move captures materialize the env field by moving the base.
             let move_id = self.node_id_gen.new_id();
             self.type_map
                 .insert_node_type(move_id, capture.base_ty.clone());

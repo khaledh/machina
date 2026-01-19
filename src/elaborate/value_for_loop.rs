@@ -1,3 +1,34 @@
+//! For loop desugaring.
+//!
+//! Transforms `for` loops into `while` loops with explicit index management.
+//! This simplifies lowering by eliminating the need for special iterator
+//! handling—lowering only needs to handle `while` loops.
+//!
+//! ## Desugaring pattern
+//!
+//! A for loop over an array or slice:
+//! ```text
+//! for elem in arr { body }
+//! ```
+//!
+//! Becomes:
+//! ```text
+//! {
+//!     let iter = arr;
+//!     let len = len(iter);    // or constant for fixed-size arrays
+//!     var idx: u64 = 0;
+//!     while idx < len {
+//!         let cur = idx;
+//!         idx = idx + 1;      // increment before body (so `continue` works)
+//!         let elem = iter[cur];
+//!         body
+//!     }
+//! }
+//! ```
+//!
+//! For range loops (`for i in 0..10`), the iterator binding is omitted
+//! and the element is just the current index value.
+
 use crate::diag::Span;
 use crate::elaborate::elaborator::Elaborator;
 use crate::resolve::{DefId, DefKind};
@@ -6,6 +37,7 @@ use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
+/// Metadata for a synthesized local variable in the desugared loop.
 struct ForLocal {
     def_id: DefId,
     name: String,
@@ -14,6 +46,7 @@ struct ForLocal {
 }
 
 impl<'a> Elaborator<'a> {
+    /// Desugar a for loop into a while loop with explicit index management.
     pub(in crate::elaborate::value) fn elab_for_expr(
         &mut self,
         stmt: &norm::StmtExpr,

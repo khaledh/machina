@@ -1,3 +1,17 @@
+//! Call elaboration and planning.
+//!
+//! This module pre-computes how each function/method call should be lowered.
+//! The `CallPlan` captures:
+//!
+//! - **Target**: Direct call, indirect call, or intrinsic dispatch
+//! - **Argument lowering**: How each argument maps to call inputs (direct pass,
+//!   pointer+length split for slices, etc.)
+//! - **Drop mask**: Which inputs need drop calls after the call returns
+//! - **Receiver handling**: Whether there's a `self` receiver and its mode
+//!
+//! By computing this plan during elaboration, lowering can emit call code
+//! without re-examining signatures or type information.
+
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{CallArgMode, NodeId, ParamMode};
@@ -7,7 +21,10 @@ use crate::types::Type;
 use super::elaborator::Elaborator;
 
 impl<'a> Elaborator<'a> {
-    /// Build a lowering plan for a call using the resolved call signature and def metadata.
+    /// Build a `CallPlan` that describes how to lower a call site.
+    ///
+    /// The plan includes target dispatch (direct/indirect/intrinsic),
+    /// argument lowering strategy, and post-call drop requirements.
     pub(super) fn build_call_plan(&mut self, call_id: NodeId, call_sig: &CallSig) -> sem::CallPlan {
         let def_id = call_sig.def_id;
         let mut target = def_id
@@ -100,16 +117,22 @@ impl<'a> Elaborator<'a> {
             .unwrap_or_else(|| panic!("compiler bug: missing call signature for {call_id:?}"))
     }
 
+    /// Elaborate a call argument using the parameter's passing mode.
     pub(super) fn elab_call_arg(&mut self, param: &CallParam, arg: &norm::CallArg) -> sem::CallArg {
         self.elab_call_arg_mode(param.mode.clone(), arg)
     }
 
+    /// Convert a call argument into its semantic form based on passing mode.
+    ///
+    /// - `In`: pass by value (elaborated as a value expression)
+    /// - `InOut`: pass by mutable reference (elaborated as a place)
+    /// - `Out`: uninitialized output (elaborated as a place with init info)
+    /// - `Sink`: transfer ownership (may wrap in explicit move)
     pub(super) fn elab_call_arg_mode(
         &mut self,
         mode: ParamMode,
         arg: &norm::CallArg,
     ) -> sem::CallArg {
-        // Convert argument passing mode into the explicit semantic form.
         match mode {
             ParamMode::In => sem::CallArg::In {
                 expr: self.elab_value(&arg.expr),

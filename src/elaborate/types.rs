@@ -1,3 +1,13 @@
+//! Type expression synthesis.
+//!
+//! When elaboration generates new definitions (e.g., closure struct fields),
+//! it needs to produce `TypeExpr` AST nodes that represent those types.
+//! This module provides the machinery to convert internal `Type` values
+//! back into syntactic `TypeExpr` nodes that can appear in the semantic tree.
+//!
+//! This is essentially the inverse of type checking: given a resolved type,
+//! produce the AST representation that would parse to that type.
+
 use crate::diag::Span;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -6,9 +16,12 @@ use crate::types::Type;
 use super::elaborator::Elaborator;
 
 impl<'a> Elaborator<'a> {
+    /// Convert an internal `Type` value into a `TypeExpr` AST node.
+    ///
+    /// Used when synthesizing new definitions that need type annotations,
+    /// such as closure struct fields and method signatures.
     pub(super) fn type_expr_from_type(&mut self, ty: &Type, span: Span) -> sem::TypeExpr {
         let id = self.node_id_gen.new_id();
-        // Build a semantic TypeExpr tree for synthesized defs (e.g. closure fields).
         let kind = match ty {
             Type::Unknown => {
                 panic!("compiler bug: unknown type in closure capture at {}", span)

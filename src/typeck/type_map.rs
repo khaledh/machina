@@ -2,7 +2,7 @@ use crate::resolve::{Def, DefId, DefKind, DefTable};
 use crate::tree::normalized as norm;
 use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
-use crate::tree::semantic::CallPlan;
+use crate::tree::semantic::{CallPlan, MatchPlan};
 use crate::tree::{NodeId, ParamMode};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeId, TypeTable};
@@ -382,6 +382,7 @@ impl TypeMapBuilder {
                 def_type: self.def_type,
                 node_type: self.node_type,
                 call_plan: HashMap::new(),
+                match_plan: HashMap::new(),
             },
             call_sigs,
         )
@@ -409,6 +410,7 @@ pub struct TypeMap {
     def_type: HashMap<Def, TypeId>,
     node_type: HashMap<NodeId, TypeId>,
     call_plan: HashMap<NodeId, CallPlan>,
+    match_plan: HashMap<NodeId, MatchPlan>,
 }
 
 impl TypeMap {
@@ -436,6 +438,10 @@ impl TypeMap {
         self.call_plan.get(&node).cloned()
     }
 
+    pub fn lookup_match_plan(&self, node: NodeId) -> Option<MatchPlan> {
+        self.match_plan.get(&node).cloned()
+    }
+
     pub fn insert_def_type(&mut self, def: Def, typ: Type) -> TypeId {
         let id = self.type_table.intern(typ);
         self.def_type.insert(def, id);
@@ -450,6 +456,10 @@ impl TypeMap {
 
     pub fn insert_call_plan(&mut self, node: NodeId, plan: CallPlan) {
         self.call_plan.insert(node, plan);
+    }
+
+    pub fn insert_match_plan(&mut self, node: NodeId, plan: MatchPlan) {
+        self.match_plan.insert(node, plan);
     }
 
     pub fn type_table(&self) -> &TypeTable {
