@@ -167,7 +167,8 @@ impl<'a> Elaborator<'a> {
             self.make_load_expr(index_place, elem_ty.clone(), span)
         };
 
-        let pattern_stmt = self.make_let_bind_stmt(pattern.clone(), elem_expr, span);
+        let pattern = self.elab_bind_pattern(pattern, &elem_ty);
+        let pattern_stmt = self.make_let_bind_stmt(pattern, elem_expr, span);
         loop_items.push(sem::BlockItem::Stmt(pattern_stmt));
 
         loop_items.push(sem::BlockItem::Expr(self.elab_value(body)));

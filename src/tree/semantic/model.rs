@@ -23,13 +23,51 @@ pub type MethodSig = ast_model::MethodSig<DefId>;
 pub type SelfParam = ast_model::SelfParam<DefId>;
 pub type Param = ast_model::Param<DefId>;
 
-pub type BindPattern = ast_model::BindPattern<DefId>;
-pub type BindPatternKind = ast_model::BindPatternKind<DefId>;
-pub type StructFieldBindPattern = ast_model::StructFieldBindPattern<DefId>;
-pub type StructPatternField = ast_model::StructFieldBindPattern<DefId>;
-
 pub type MatchPattern = ast_model::MatchPattern<DefId>;
 pub type MatchPatternBinding = ast_model::MatchPatternBinding<DefId>;
+
+// -- Bind patterns (semantic) ---
+
+#[derive(Clone, Debug)]
+pub struct BindPattern {
+    pub id: NodeId,
+    pub kind: BindPatternKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum BindPatternKind {
+    Name {
+        ident: String,
+        def_id: DefId,
+    },
+    Array {
+        patterns: Vec<BindPattern>,
+    },
+    Tuple {
+        fields: Vec<TupleFieldBindPattern>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<StructFieldBindPattern>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct TupleFieldBindPattern {
+    pub index: usize,
+    pub pattern: BindPattern,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructFieldBindPattern {
+    pub name: String,
+    pub field_index: usize,
+    pub pattern: BindPattern,
+    pub span: Span,
+}
+
+pub type StructPatternField = StructFieldBindPattern;
 
 // -- Module ---
 

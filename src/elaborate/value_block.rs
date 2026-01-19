@@ -47,15 +47,17 @@ impl<'a> Elaborator<'a> {
                 value,
             } => {
                 let value = self.elab_bind_value(pattern, value);
+                let bind_ty = self.type_map.type_table().get(value.ty).clone();
+                let pattern = self.elab_bind_pattern(pattern, &bind_ty);
                 if is_let {
                     sem::StmtExprKind::LetBind {
-                        pattern: pattern.clone(),
+                        pattern,
                         decl_ty: decl_ty.clone(),
                         value,
                     }
                 } else {
                     sem::StmtExprKind::VarBind {
-                        pattern: pattern.clone(),
+                        pattern,
                         decl_ty: decl_ty.clone(),
                         value,
                     }

@@ -29,6 +29,7 @@
 
 use crate::context::{SemanticCheckedContext, SemanticContext};
 use crate::tree::semantic as sem;
+mod bind_pattern;
 mod calls;
 mod closure;
 mod elaborator;

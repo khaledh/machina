@@ -130,7 +130,7 @@ impl<'a> FuncLowerer<'a> {
                 self.bind_ident(*def_id, name, src_ty_id, src_place)
             }
 
-            PK::Tuple { patterns } => {
+            PK::Tuple { fields } => {
                 // Destructure tuple by projecting each field.
                 let src_place = match src_place {
                     PlaceAny::Aggregate(place) => place,
@@ -140,16 +140,19 @@ impl<'a> FuncLowerer<'a> {
                 let Type::Tuple { field_tys } = src_ty else {
                     unreachable!("compiler bug: non-tuple pattern");
                 };
-                debug_assert_eq!(patterns.len(), field_tys.len(), "pattern arity mismatch");
+                debug_assert_eq!(fields.len(), field_tys.len(), "pattern arity mismatch");
 
-                for (i, pat) in patterns.iter().enumerate() {
-                    let field_ty = &field_tys[i];
+                for field in fields {
+                    let field_ty = &field_tys[field.index];
                     let field_ty_id = self.ty_lowerer.lower_ty(field_ty);
 
-                    let field_place =
-                        self.project_place(&src_place, Projection::Field { index: i }, field_ty_id);
+                    let field_place = self.project_place(
+                        &src_place,
+                        Projection::Field { index: field.index },
+                        field_ty_id,
+                    );
 
-                    self.bind_pattern_with_type(pat, field_place, field_ty)?;
+                    self.bind_pattern_with_type(&field.pattern, field_place, field_ty)?;
                 }
 
                 Ok(())
@@ -195,18 +198,31 @@ impl<'a> FuncLowerer<'a> {
                     _ => return Err(LowerError::PatternMismatch(pattern.id)),
                 };
 
-                let Type::Struct { .. } = src_ty else {
+                let Type::Struct {
+                    fields: struct_fields,
+                    ..
+                } = src_ty
+                else {
                     unreachable!("compiler bug: non-struct pattern");
                 };
 
                 for field in fields {
-                    let field_ty = src_ty.struct_field_type(&field.name);
+                    let field_ty = struct_fields
+                        .get(field.field_index)
+                        .map(|field| field.ty.clone())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "compiler bug: missing struct field index {}",
+                                field.field_index
+                            )
+                        });
                     let field_ty_id = self.ty_lowerer.lower_ty(&field_ty);
-                    let field_index = src_ty.struct_field_index(&field.name);
 
                     let field_place = self.project_place(
                         &src_place,
-                        Projection::Field { index: field_index },
+                        Projection::Field {
+                            index: field.field_index,
+                        },
                         field_ty_id,
                     );
 
