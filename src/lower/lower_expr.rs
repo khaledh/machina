@@ -119,6 +119,24 @@ impl<'a> FuncLowerer<'a> {
                 let place = self.lower_place(place)?;
                 Ok(self.emit_scalar_rvalue(ty_id, Rvalue::AddrOf(place)))
             }
+            VEK::Len { place } => {
+                let place_ty = self.ty_from_id(place.ty);
+                match place_ty {
+                    Type::Array { dims, .. } => {
+                        let len = dims
+                            .first()
+                            .copied()
+                            .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
+                        Ok(u64_const(len as u64))
+                    }
+                    Type::Slice { .. } => {
+                        let place = self.lower_place_agg(place)?;
+                        let (_, len_op) = self.slice_ptr_len_ops(&place);
+                        Ok(len_op)
+                    }
+                    _ => Err(LowerError::UnsupportedOperandExpr(expr.id)),
+                }
+            }
 
             // Literals
             VEK::IntLit(value) => {

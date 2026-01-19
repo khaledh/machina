@@ -107,11 +107,9 @@ impl<'a> FuncLowerer<'a> {
                 init,
             } => self.lower_assign(assignee, value, *init),
             SEK::While { cond, body } => self.lower_while_expr(cond, body).map(|_| ()),
-            SEK::For {
-                pattern,
-                iter,
-                body,
-            } => self.lower_for_expr(pattern, iter, body).map(|_| ()),
+            SEK::For { .. } => {
+                unreachable!("for loops should be desugared during elaboration")
+            }
             SEK::Break => self.lower_break_stmt(stmt.id),
             SEK::Continue => self.lower_continue_stmt(stmt.id),
             SEK::Return { value } => self.lower_return_stmt(stmt.id, value.as_deref()),

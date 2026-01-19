@@ -437,6 +437,9 @@ pub enum ValueExprKind {
         start: Option<Box<ValueExpr>>,
         end: Option<Box<ValueExpr>>,
     },
+    Len {
+        place: Box<PlaceExpr>,
+    },
 
     // Match
     Match {

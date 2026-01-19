@@ -219,6 +219,8 @@ impl NrvoSafetyChecker {
                 target_ok && start_ok && end_ok
             }
 
+            VEK::Len { place } => self.check_place_lvalue(place),
+
             VEK::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
             VEK::StructLit { fields, .. } => fields

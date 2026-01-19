@@ -133,6 +133,7 @@ fn find_method_call_id(expr: &sem::ValueExpr) -> Option<crate::tree::NodeId> {
         sem::ValueExprKind::Slice { target, start, end } => find_method_call_in_place(target)
             .or_else(|| start.as_deref().and_then(find_method_call_id))
             .or_else(|| end.as_deref().and_then(find_method_call_id)),
+        sem::ValueExprKind::Len { place } => find_method_call_in_place(place),
         sem::ValueExprKind::StringFmt { plan } => plan.segments.iter().find_map(|seg| match seg {
             sem::SegmentKind::LiteralBytes(_) => None,
             sem::SegmentKind::Int { expr, .. } | sem::SegmentKind::StringValue { expr } => {
@@ -231,6 +232,7 @@ fn find_string_fmt_plan(expr: &sem::ValueExpr) -> Option<&sem::StringFmtPlan> {
         sem::ValueExprKind::Slice { target, start, end } => find_string_fmt_plan_in_place(target)
             .or_else(|| start.as_deref().and_then(find_string_fmt_plan))
             .or_else(|| end.as_deref().and_then(find_string_fmt_plan)),
+        sem::ValueExprKind::Len { place } => find_string_fmt_plan_in_place(place),
         sem::ValueExprKind::Range { .. }
         | sem::ValueExprKind::UnitLit
         | sem::ValueExprKind::IntLit(..)
