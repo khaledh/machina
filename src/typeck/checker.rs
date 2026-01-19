@@ -1238,6 +1238,7 @@ impl TypeChecker {
         self.type_map_builder.record_call_sig(
             call_expr.id,
             CallSig {
+                def_id: None,
                 receiver: None,
                 params,
             },
@@ -1407,9 +1408,14 @@ impl TypeChecker {
             .map(|(mode, ty)| CallParam { mode, ty })
             .collect::<Vec<_>>();
 
-        self.type_map_builder.record_call_def(call_expr.id, def_id);
-        self.type_map_builder
-            .record_call_sig(call_expr.id, CallSig { receiver, params });
+        self.type_map_builder.record_call_sig(
+            call_expr.id,
+            CallSig {
+                def_id: Some(def_id),
+                receiver,
+                params,
+            },
+        );
 
         self.check_call_arg_types(args, &param_types)?;
 

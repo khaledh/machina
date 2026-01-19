@@ -9,7 +9,7 @@ use super::elaborator::Elaborator;
 impl<'a> Elaborator<'a> {
     /// Build a lowering plan for a call using the resolved call signature and def metadata.
     pub(super) fn build_call_plan(&mut self, call_id: NodeId, call_sig: &CallSig) -> sem::CallPlan {
-        let def_id = self.type_map.lookup_call_def(call_id);
+        let def_id = call_sig.def_id;
         let mut target = def_id
             .map(sem::CallTarget::Direct)
             .unwrap_or(sem::CallTarget::Indirect);

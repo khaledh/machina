@@ -307,10 +307,9 @@ impl<'a> Elaborator<'a> {
                 );
             }
 
-            self.type_map.insert_call_def(expr.id, closure_def_id);
-
             // The semantic call plan uses the canonical receiver+args order.
             let plan_sig = CallSig {
+                def_id: Some(closure_def_id),
                 receiver: Some(CallParam {
                     mode: ParamMode::In,
                     ty: info.ty.clone(),
