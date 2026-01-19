@@ -2,11 +2,97 @@ use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{CallArgMode, NodeId, ParamMode};
 use crate::typeck::type_map::{CallParam, CallSig};
+use crate::types::Type;
 
 use super::elaborator::Elaborator;
 
 impl<'a> Elaborator<'a> {
-    pub(super) fn call_sig(&self, call_id: NodeId) -> CallSig {
+    /// Build a lowering plan for a call using the resolved call signature and def metadata.
+    pub(super) fn build_call_plan(&mut self, call_id: NodeId, call_sig: &CallSig) -> sem::CallPlan {
+        let def_id = self.type_map.lookup_call_def(call_id);
+        let mut target = def_id
+            .map(sem::CallTarget::Direct)
+            .unwrap_or(sem::CallTarget::Indirect);
+
+        if let Some(def_id) = def_id {
+            let def = self
+                .def_table
+                .lookup_def(def_id)
+                .unwrap_or_else(|| panic!("compiler bug: missing def for call {call_id:?}"));
+            // Intrinsics override the normal direct-call target with a lowering intent.
+            if def.is_intrinsic() && matches!(def.link_name(), Some("__mc_string_append_bytes")) {
+                target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes);
+            }
+        }
+
+        let has_receiver = call_sig.receiver.is_some();
+        let mut drop_mask = Vec::new();
+        if let Some(receiver) = &call_sig.receiver {
+            // Receiver sits at input index 0 when present.
+            drop_mask.push(receiver.mode == ParamMode::In && receiver.ty.needs_drop());
+        }
+        for param in &call_sig.params {
+            // Non-receiver inputs follow in order.
+            drop_mask.push(param.mode == ParamMode::In && param.ty.needs_drop());
+        }
+
+        let args = match target {
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic string append missing receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic string append expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                // Pre-decide whether the length comes from a u32 (string) or u64 (slice).
+                let len_bits = match &call_sig.params[0].ty {
+                    Type::String => 32,
+                    Type::Slice { elem_ty }
+                        if matches!(
+                            **elem_ty,
+                            Type::Int {
+                                signed: false,
+                                bits: 8
+                            }
+                        ) =>
+                    {
+                        64
+                    }
+                    _ => panic!("compiler bug: invalid intrinsic param type"),
+                };
+                vec![
+                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
+                    sem::ArgLowering::PtrLen {
+                        input: sem::CallInput::Arg(0),
+                        len_bits,
+                    },
+                ]
+            }
+            _ => {
+                // Default lowering passes inputs straight through in ABI order.
+                let mut args = Vec::new();
+                if has_receiver {
+                    args.push(sem::ArgLowering::Direct(sem::CallInput::Receiver));
+                }
+                for index in 0..call_sig.params.len() {
+                    args.push(sem::ArgLowering::Direct(sem::CallInput::Arg(index)));
+                }
+                args
+            }
+        };
+
+        sem::CallPlan {
+            target,
+            args,
+            drop_mask,
+            has_receiver,
+        }
+    }
+
+    pub(super) fn get_call_sig(&self, call_id: NodeId) -> CallSig {
         // Type checker should have recorded a signature for every call.
         self.type_map
             .lookup_call_sig(call_id)

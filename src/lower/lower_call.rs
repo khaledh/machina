@@ -3,11 +3,11 @@ use crate::lower::lower_ast::{FuncLowerer, Value};
 use crate::mcir::abi::RuntimeFn;
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
+use crate::tree::InitInfo;
 use crate::tree::semantic::{
-    CallArg, MethodReceiver, PlaceExpr, PlaceExprKind as PEK, ValueExpr, ValueExprKind as VEK,
+    ArgLowering, CallArg, CallInput, CallPlan, CallTarget, IntrinsicCall, MethodReceiver,
+    PlaceExpr, PlaceExprKind as PEK, ValueExpr, ValueExprKind as VEK,
 };
-use crate::tree::{InitInfo, ParamMode};
-use crate::typeck::type_map::CallParam;
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -99,24 +99,24 @@ impl<'a> FuncLowerer<'a> {
         receiver: Option<&MethodReceiver>,
         args: &[CallArg],
     ) -> Result<(), LowerError> {
+        let call_plan = self.call_plan_for(call)?;
+        let callee = self.lower_call_target(callee, &call_plan)?;
+
+        let mut out_args = Vec::new();
+        let mut inputs = Vec::with_capacity(args.len() + receiver.iter().count());
+
         if let Some(receiver) = receiver {
-            if self.try_lower_intrinsic_method_call(call, receiver, args, dst.as_ref())? {
-                return Ok(());
-            }
+            inputs.push(self.lower_method_receiver(receiver)?);
         }
 
-        let callee = match self.ctx.type_map.lookup_call_def(call.id) {
-            Some(def_id) => Callee::Def(def_id),
-            None => {
-                let Some(callee) = callee else {
-                    panic!("compiler bug: missing callee value for indirect call");
-                };
-                Callee::Value(self.lower_scalar_expr(callee)?)
-            }
-        };
+        for arg in args {
+            inputs.push(self.lower_call_arg(arg, &mut out_args)?);
+        }
+
+        let arg_vals = self.lower_call_args_from_plan(call, &call_plan, &inputs)?;
 
         if let Callee::Runtime(runtime_fn) = &callee
-            && runtime_fn.sig().arg_count != args.len() as u8
+            && runtime_fn.sig().arg_count != arg_vals.len() as u8
         {
             panic!(
                 concat!(
@@ -125,22 +125,9 @@ impl<'a> FuncLowerer<'a> {
                 ),
                 runtime_fn.sig().name,
                 runtime_fn.sig().arg_count,
-                args.len()
+                arg_vals.len()
             );
         }
-
-        let mut out_args = Vec::new();
-        let mut arg_vals = Vec::with_capacity(args.len() + receiver.iter().count());
-
-        if let Some(receiver) = receiver {
-            arg_vals.push(self.lower_method_receiver(receiver)?);
-        }
-
-        for arg in args {
-            arg_vals.push(self.lower_call_arg(arg, &mut out_args)?);
-        }
-
-        let temp_drops = self.collect_temp_arg_drops(call, receiver.is_some(), &arg_vals);
 
         self.fb.push_stmt(
             self.curr_block,
@@ -157,97 +144,103 @@ impl<'a> FuncLowerer<'a> {
             self.mark_full_init_if_needed(arg, init);
         }
 
-        for (place, ty) in temp_drops {
+        for (place, ty) in self.collect_temp_drops_from_plan(call, &call_plan, &inputs) {
             self.emit_drop_place(place, &ty);
         }
         Ok(())
     }
 
-    fn try_lower_intrinsic_method_call(
-        &mut self,
-        call: &ValueExpr,
-        receiver: &MethodReceiver,
-        args: &[CallArg],
-        dst: Option<&PlaceAny>,
-    ) -> Result<bool, LowerError> {
-        let Some(def_id) = self.ctx.type_map.lookup_call_def(call.id) else {
-            return Ok(false);
-        };
-        let def = self.def_for_id(def_id, call.id)?;
-        if !def.is_intrinsic() {
-            return Ok(false);
-        }
-        let Some(link_name) = def.link_name() else {
-            return Ok(false);
-        };
+    fn call_plan_for(&mut self, call: &ValueExpr) -> Result<CallPlan, LowerError> {
+        self.ctx
+            .type_map
+            .lookup_call_plan(call.id)
+            .ok_or_else(|| LowerError::UnsupportedOperandExpr(call.id))
+    }
 
-        match link_name {
-            "__mc_string_append_bytes" => {
-                self.lower_intrinsic_string_append(call, receiver, args, dst)?;
-                Ok(true)
+    fn lower_call_target(
+        &mut self,
+        callee: Option<&ValueExpr>,
+        call_plan: &CallPlan,
+    ) -> Result<Callee, LowerError> {
+        match &call_plan.target {
+            CallTarget::Direct(def_id) => Ok(Callee::Def(*def_id)),
+            CallTarget::Indirect => {
+                let Some(callee) = callee else {
+                    panic!("compiler bug: missing callee value for indirect call");
+                };
+                Ok(Callee::Value(self.lower_scalar_expr(callee)?))
             }
-            _ => Ok(false),
+            CallTarget::Intrinsic(intrinsic) => {
+                Ok(Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?))
+            }
         }
     }
 
-    fn lower_intrinsic_string_append(
+    fn runtime_for_intrinsic(
+        &mut self,
+        intrinsic: &IntrinsicCall,
+    ) -> Result<RuntimeFn, LowerError> {
+        match intrinsic {
+            IntrinsicCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
+        }
+    }
+
+    fn lower_call_args_from_plan(
         &mut self,
         call: &ValueExpr,
-        receiver: &MethodReceiver,
-        args: &[CallArg],
-        dst: Option<&PlaceAny>,
-    ) -> Result<(), LowerError> {
-        if dst.is_some() || args.len() != 1 {
-            return Err(LowerError::UnsupportedOperandExpr(call.id));
+        call_plan: &CallPlan,
+        inputs: &[PlaceAny],
+    ) -> Result<Vec<PlaceAny>, LowerError> {
+        let mut args = Vec::new();
+        for lowering in &call_plan.args {
+            match lowering {
+                ArgLowering::Direct(input) => {
+                    args.push(self.call_input_place(call, call_plan, inputs, input)?);
+                }
+                ArgLowering::PtrLen { input, len_bits } => {
+                    let place = self.call_input_place(call, call_plan, inputs, input)?;
+                    let PlaceAny::Aggregate(place) = place else {
+                        return Err(LowerError::UnsupportedOperandExpr(call.id));
+                    };
+                    let (ptr_op, len_op) = match len_bits {
+                        32 => self.string_ptr_len_ops(&place),
+                        64 => self.slice_ptr_len_ops(&place),
+                        _ => panic!("compiler bug: invalid ptr/len width"),
+                    };
+                    args.push(self.runtime_arg_place(ptr_op));
+                    args.push(self.runtime_arg_place(len_op));
+                }
+            }
         }
+        Ok(args)
+    }
 
-        let receiver_place = self.lower_method_receiver(receiver)?;
-        let PlaceAny::Aggregate(receiver_place) = receiver_place else {
-            return Err(LowerError::UnsupportedOperandExpr(call.id));
-        };
-
-        let (arg_expr, arg_ty) = match &args[0] {
-            CallArg::In { expr, .. } | CallArg::Sink { expr, .. } => {
-                (expr, self.ty_from_id(expr.ty))
+    fn call_input_place(
+        &mut self,
+        call: &ValueExpr,
+        call_plan: &CallPlan,
+        inputs: &[PlaceAny],
+        input: &CallInput,
+    ) -> Result<PlaceAny, LowerError> {
+        let index = match input {
+            CallInput::Receiver => {
+                if !call_plan.has_receiver {
+                    return Err(LowerError::UnsupportedOperandExpr(call.id));
+                }
+                0
             }
-            CallArg::InOut { .. } | CallArg::Out { .. } => {
-                return Err(LowerError::UnsupportedOperandExpr(call.id));
+            CallInput::Arg(arg_index) => {
+                if call_plan.has_receiver {
+                    1 + *arg_index
+                } else {
+                    *arg_index
+                }
             }
         };
-
-        let arg_place = self.lower_call_arg_value(arg_expr)?;
-        let PlaceAny::Aggregate(arg_place) = arg_place else {
-            return Err(LowerError::UnsupportedOperandExpr(call.id));
-        };
-
-        let (ptr_op, len_op) = match arg_ty {
-            Type::String => self.string_ptr_len_ops(&arg_place),
-            Type::Slice { elem_ty }
-                if matches!(
-                    *elem_ty,
-                    Type::Int {
-                        signed: false,
-                        bits: 8
-                    }
-                ) =>
-            {
-                self.slice_ptr_len_ops(&arg_place)
-            }
-            _ => return Err(LowerError::UnsupportedOperandExpr(call.id)),
-        };
-        let ptr_arg = self.runtime_arg_place(ptr_op);
-        let len_arg = self.runtime_arg_place(len_op);
-
-        self.fb.push_stmt(
-            self.curr_block,
-            Statement::Call {
-                dst: None,
-                callee: Callee::Runtime(RuntimeFn::StringAppendBytes),
-                args: vec![PlaceAny::Aggregate(receiver_place), ptr_arg, len_arg],
-            },
-        );
-
-        Ok(())
+        inputs
+            .get(index)
+            .cloned()
+            .ok_or_else(|| LowerError::UnsupportedOperandExpr(call.id))
     }
 
     pub(super) fn string_ptr_len_ops(
@@ -354,39 +347,40 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn collect_temp_arg_drops(
+    fn collect_temp_drops_from_plan(
         &mut self,
         call: &ValueExpr,
-        has_receiver: bool,
-        args: &[PlaceAny],
+        call_plan: &CallPlan,
+        inputs: &[PlaceAny],
     ) -> Vec<(PlaceAny, Type)> {
         let Some(call_sig) = self.ctx.type_map.lookup_call_sig(call.id) else {
             return Vec::new();
         };
 
-        let mut params = Vec::new();
-        if has_receiver {
-            if let Some(receiver) = call_sig.receiver {
-                params.push(receiver);
-            }
+        let mut input_types = Vec::new();
+        if let Some(receiver) = call_sig.receiver {
+            input_types.push(receiver.ty);
         }
-        params.extend(call_sig.params);
+        input_types.extend(call_sig.params.into_iter().map(|param| param.ty));
 
-        args.iter()
-            .zip(params.iter())
-            .filter_map(|(place, param)| self.temp_drop_for_arg(place, param))
+        if input_types.len() != inputs.len() || input_types.len() != call_plan.drop_mask.len() {
+            panic!("compiler bug: call input mismatch");
+        }
+
+        input_types
+            .into_iter()
+            .zip(inputs.iter())
+            .zip(call_plan.drop_mask.iter().copied())
+            .filter_map(|((ty, place), should_drop)| {
+                if !should_drop || !ty.needs_drop() {
+                    return None;
+                }
+                self.temp_drop_for_input(place, ty)
+            })
             .collect()
     }
 
-    fn temp_drop_for_arg(
-        &mut self,
-        place: &PlaceAny,
-        param: &CallParam,
-    ) -> Option<(PlaceAny, Type)> {
-        if param.mode != ParamMode::In || !param.ty.needs_drop() {
-            return None;
-        }
-
+    fn temp_drop_for_input(&mut self, place: &PlaceAny, ty: Type) -> Option<(PlaceAny, Type)> {
         let base = match place {
             PlaceAny::Scalar(p) => p.base(),
             PlaceAny::Aggregate(p) => p.base(),
@@ -395,6 +389,6 @@ impl<'a> FuncLowerer<'a> {
             return None;
         }
 
-        Some((place.clone(), param.ty.clone()))
+        Some((place.clone(), ty))
     }
 }

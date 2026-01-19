@@ -1,6 +1,8 @@
 use super::elaborator::Elaborator;
+use crate::tree::ParamMode;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
+use crate::typeck::type_map::{CallParam, CallSig};
 
 impl<'a> Elaborator<'a> {
     fn elab_block_item(&mut self, item: &norm::BlockItem) -> sem::BlockItem {
@@ -298,6 +300,7 @@ impl<'a> Elaborator<'a> {
                 arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
             },
             norm::ExprKind::Call { callee, args } => {
+                let call_sig = self.get_call_sig(expr.id);
                 if let Some((closure_def_id, info)) = self.closure_call_info(callee) {
                     // Rewrite closure calls into method calls on the generated closure struct.
                     if info.param_modes.len() != args.len() {
@@ -317,19 +320,31 @@ impl<'a> Elaborator<'a> {
                         .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), arg))
                         .collect();
                     self.type_map.insert_call_def(expr.id, closure_def_id);
+                    // The semantic call plan uses the canonical receiver+args order.
+                    let plan_sig = CallSig {
+                        receiver: Some(CallParam {
+                            mode: ParamMode::In,
+                            ty: info.ty.clone(),
+                        }),
+                        params: call_sig.params.clone(),
+                    };
+                    self.type_map.insert_call_sig(expr.id, plan_sig.clone());
+                    let plan = self.build_call_plan(expr.id, &plan_sig);
+                    self.type_map.insert_call_plan(expr.id, plan);
                     sem::ValueExprKind::MethodCall {
                         receiver,
                         method_name: "invoke".to_string(),
                         args,
                     }
                 } else {
-                    let call_sig = self.call_sig(expr.id);
                     let args = call_sig
                         .params
                         .iter()
                         .zip(args.iter())
                         .map(|(param, arg)| self.elab_call_arg(param, arg))
                         .collect();
+                    let plan = self.build_call_plan(expr.id, &call_sig);
+                    self.type_map.insert_call_plan(expr.id, plan);
                     sem::ValueExprKind::Call {
                         callee: Box::new(self.elab_value(callee)),
                         args,
@@ -341,7 +356,7 @@ impl<'a> Elaborator<'a> {
                 method_name,
                 args,
             } => {
-                let call_sig = self.call_sig(expr.id);
+                let call_sig = self.get_call_sig(expr.id);
                 let receiver = call_sig
                     .receiver
                     .as_ref()
@@ -358,6 +373,8 @@ impl<'a> Elaborator<'a> {
                     .zip(args.iter())
                     .map(|(param, arg)| self.elab_call_arg(param, arg))
                     .collect();
+                let plan = self.build_call_plan(expr.id, &call_sig);
+                self.type_map.insert_call_plan(expr.id, plan);
                 sem::ValueExprKind::MethodCall {
                     receiver,
                     method_name: method_name.clone(),

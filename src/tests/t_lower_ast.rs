@@ -11,6 +11,7 @@ use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
+use crate::tree::semantic as sem;
 use crate::typeck::type_check;
 use std::collections::HashSet;
 
@@ -57,6 +58,143 @@ fn lower_body_with_drop_glue(
         FuncLowerer::new_function(ctx, func_def, &mut interner, &mut drop_glue, false);
     let body = lowerer.lower().expect("Failed to lower function");
     (body, drop_glue.drain())
+}
+
+fn find_method_call_id(expr: &sem::ValueExpr) -> Option<crate::tree::NodeId> {
+    match &expr.kind {
+        sem::ValueExprKind::MethodCall { .. } => Some(expr.id),
+        sem::ValueExprKind::Block { items, tail } => {
+            for item in items {
+                if let Some(id) = find_method_call_in_block_item(item) {
+                    return Some(id);
+                }
+            }
+            tail.as_deref().and_then(find_method_call_id)
+        }
+        sem::ValueExprKind::Call { callee, args } => {
+            if let Some(id) = find_method_call_id(callee) {
+                return Some(id);
+            }
+            for arg in args {
+                if let Some(id) = find_method_call_in_call_arg(arg) {
+                    return Some(id);
+                }
+            }
+            None
+        }
+        sem::ValueExprKind::If {
+            cond,
+            then_body,
+            else_body,
+        } => find_method_call_id(cond)
+            .or_else(|| find_method_call_id(then_body))
+            .or_else(|| find_method_call_id(else_body)),
+        sem::ValueExprKind::Match { scrutinee, arms } => {
+            if let Some(id) = find_method_call_id(scrutinee) {
+                return Some(id);
+            }
+            for arm in arms {
+                if let Some(id) = find_method_call_id(&arm.body) {
+                    return Some(id);
+                }
+            }
+            None
+        }
+        sem::ValueExprKind::ArrayLit { init, .. } => match init {
+            sem::ArrayLitInit::Elems(elems) => elems.iter().find_map(find_method_call_id),
+            sem::ArrayLitInit::Repeat(expr, _) => find_method_call_id(expr),
+        },
+        sem::ValueExprKind::TupleLit(items) => items.iter().find_map(find_method_call_id),
+        sem::ValueExprKind::StructLit { fields, .. } => fields
+            .iter()
+            .map(|field| &field.value)
+            .find_map(find_method_call_id),
+        sem::ValueExprKind::EnumVariant { payload, .. } => {
+            payload.iter().find_map(find_method_call_id)
+        }
+        sem::ValueExprKind::StructUpdate { target, fields } => {
+            find_method_call_id(target).or_else(|| {
+                fields
+                    .iter()
+                    .map(|field| &field.value)
+                    .find_map(find_method_call_id)
+            })
+        }
+        sem::ValueExprKind::BinOp { left, right, .. } => {
+            find_method_call_id(left).or_else(|| find_method_call_id(right))
+        }
+        sem::ValueExprKind::UnaryOp { expr, .. }
+        | sem::ValueExprKind::HeapAlloc { expr }
+        | sem::ValueExprKind::Coerce { expr, .. } => find_method_call_id(expr),
+        sem::ValueExprKind::Move { place }
+        | sem::ValueExprKind::ImplicitMove { place }
+        | sem::ValueExprKind::Load { place }
+        | sem::ValueExprKind::AddrOf { place } => find_method_call_in_place(place),
+        sem::ValueExprKind::Slice { target, start, end } => find_method_call_in_place(target)
+            .or_else(|| start.as_deref().and_then(find_method_call_id))
+            .or_else(|| end.as_deref().and_then(find_method_call_id)),
+        sem::ValueExprKind::StringFmt { segments } => segments.iter().find_map(|seg| match seg {
+            sem::StringFmtSegment::Literal { .. } => None,
+            sem::StringFmtSegment::Expr { expr, .. } => find_method_call_id(expr),
+        }),
+        sem::ValueExprKind::Range { .. }
+        | sem::ValueExprKind::UnitLit
+        | sem::ValueExprKind::IntLit(..)
+        | sem::ValueExprKind::BoolLit(..)
+        | sem::ValueExprKind::CharLit(..)
+        | sem::ValueExprKind::StringLit { .. }
+        | sem::ValueExprKind::ClosureRef { .. } => None,
+    }
+}
+
+fn find_method_call_in_block_item(item: &sem::BlockItem) -> Option<crate::tree::NodeId> {
+    match item {
+        sem::BlockItem::Stmt(stmt) => find_method_call_in_stmt(stmt),
+        sem::BlockItem::Expr(expr) => find_method_call_id(expr),
+    }
+}
+
+fn find_method_call_in_stmt(stmt: &sem::StmtExpr) -> Option<crate::tree::NodeId> {
+    match &stmt.kind {
+        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+            find_method_call_id(value)
+        }
+        sem::StmtExprKind::Assign {
+            assignee, value, ..
+        } => find_method_call_in_place(assignee).or_else(|| find_method_call_id(value)),
+        sem::StmtExprKind::While { cond, body } => {
+            find_method_call_id(cond).or_else(|| find_method_call_id(body))
+        }
+        sem::StmtExprKind::For { iter, body, .. } => {
+            find_method_call_id(iter).or_else(|| find_method_call_id(body))
+        }
+        sem::StmtExprKind::Return { value } => value.as_deref().and_then(find_method_call_id),
+        sem::StmtExprKind::VarDecl { .. }
+        | sem::StmtExprKind::Break
+        | sem::StmtExprKind::Continue => None,
+    }
+}
+
+fn find_method_call_in_call_arg(arg: &sem::CallArg) -> Option<crate::tree::NodeId> {
+    match arg {
+        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+            find_method_call_id(expr)
+        }
+        sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+            find_method_call_in_place(place)
+        }
+    }
+}
+
+fn find_method_call_in_place(place: &sem::PlaceExpr) -> Option<crate::tree::NodeId> {
+    match &place.kind {
+        sem::PlaceExprKind::Var { .. } => None,
+        sem::PlaceExprKind::Deref { value } => find_method_call_id(value),
+        sem::PlaceExprKind::ArrayIndex { target, indices } => find_method_call_in_place(target)
+            .or_else(|| indices.iter().find_map(find_method_call_id)),
+        sem::PlaceExprKind::TupleField { target, .. }
+        | sem::PlaceExprKind::StructField { target, .. } => find_method_call_in_place(target),
+    }
 }
 
 #[test]
@@ -611,6 +749,91 @@ fn test_lower_string_append_bytes_uses_runtime() {
         })
     });
     assert!(saw_append, "expected __mc_string_append_bytes call");
+}
+
+#[test]
+fn test_call_plan_string_append_len_bits_32() {
+    let source = r#"
+        string :: {
+            @[intrinsic, link_name("__mc_string_append_bytes")]
+            fn append(inout self, other: string);
+        }
+
+        fn main() -> u64 {
+            var s = "hi";
+            s.append("!");
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let call_id = find_method_call_id(&func_def.body).expect("expected a method call in main");
+    let plan = analyzed
+        .type_map
+        .lookup_call_plan(call_id)
+        .expect("expected a call plan");
+
+    assert!(matches!(
+        plan.target,
+        sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes)
+    ));
+    assert!(plan.has_receiver);
+    assert_eq!(plan.args.len(), 2);
+    assert!(matches!(
+        plan.args[0],
+        sem::ArgLowering::Direct(sem::CallInput::Receiver)
+    ));
+    assert!(matches!(
+        plan.args[1],
+        sem::ArgLowering::PtrLen {
+            input: sem::CallInput::Arg(0),
+            len_bits: 32
+        }
+    ));
+}
+
+#[test]
+fn test_call_plan_string_append_bytes_len_bits_64() {
+    let source = r#"
+        string :: {
+            @[intrinsic, link_name("__mc_string_append_bytes")]
+            fn append_bytes(inout self, bytes: u8[]);
+        }
+
+        fn main() -> u64 {
+            var s = "hi";
+            let buf = u8[1, 2, 3];
+            s.append_bytes(buf[..]);
+            0
+        }
+    "#;
+
+    let analyzed = analyze(source);
+    let func_def = analyzed.module.func_defs()[0];
+    let call_id = find_method_call_id(&func_def.body).expect("expected a method call in main");
+    let plan = analyzed
+        .type_map
+        .lookup_call_plan(call_id)
+        .expect("expected a call plan");
+
+    assert!(matches!(
+        plan.target,
+        sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes)
+    ));
+    assert!(plan.has_receiver);
+    assert_eq!(plan.args.len(), 2);
+    assert!(matches!(
+        plan.args[0],
+        sem::ArgLowering::Direct(sem::CallInput::Receiver)
+    ));
+    assert!(matches!(
+        plan.args[1],
+        sem::ArgLowering::PtrLen {
+            input: sem::CallInput::Arg(0),
+            len_bits: 64
+        }
+    ));
 }
 
 #[test]
