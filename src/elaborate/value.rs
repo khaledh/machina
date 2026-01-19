@@ -161,7 +161,29 @@ impl<'a> Elaborator<'a> {
     }
 
     pub(super) fn elab_value(&mut self, expr: &norm::Expr) -> sem::ValueExpr {
-        // First handle lvalue forms so we can wrap them as load/move/implicit-move.
+        if let Some(value) = self.elab_lvalue_expr(expr) {
+            return value;
+        }
+
+        if let Some(value) = self.elab_closure_expr(expr) {
+            return value;
+        }
+
+        let kind = if let Some(kind) = self.elab_call_kind(expr) {
+            kind
+        } else {
+            self.elab_simple_value_kind(expr)
+        };
+
+        sem::ValueExpr {
+            id: expr.id,
+            kind,
+            ty: expr.ty,
+            span: expr.span,
+        }
+    }
+
+    fn elab_lvalue_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
         match &expr.kind {
             norm::ExprKind::Var { .. }
             | norm::ExprKind::ArrayIndex { .. }
@@ -171,50 +193,201 @@ impl<'a> Elaborator<'a> {
                 let place = self.elab_place(expr);
                 let place_ty = place.ty;
                 if self.implicit_moves.contains(&expr.id) {
-                    return self.new_value(
+                    return Some(self.new_value(
                         sem::ValueExprKind::ImplicitMove {
                             place: Box::new(place),
                         },
                         place_ty,
                         expr.span,
-                    );
+                    ));
                 }
-                return self.new_value(
+                Some(self.new_value(
                     sem::ValueExprKind::Load {
                         place: Box::new(place),
                     },
                     place_ty,
                     expr.span,
-                );
+                ))
             }
             norm::ExprKind::Move { expr: inner } => {
                 let place = self.elab_place(inner);
                 let place_ty = place.ty;
-                return sem::ValueExpr {
+                Some(sem::ValueExpr {
                     id: expr.id,
                     kind: sem::ValueExprKind::Move {
                         place: Box::new(place),
                     },
                     ty: place_ty,
                     span: expr.span,
-                };
+                })
             }
             norm::ExprKind::ImplicitMove { expr: inner } => {
                 let place = self.elab_place(inner);
                 let place_ty = place.ty;
-                return sem::ValueExpr {
+                Some(sem::ValueExpr {
                     id: expr.id,
                     kind: sem::ValueExprKind::ImplicitMove {
                         place: Box::new(place),
                     },
                     ty: place_ty,
                     span: expr.span,
-                };
+                })
             }
-            _ => {}
+            _ => None,
         }
+    }
 
-        let kind = match &expr.kind {
+    fn elab_closure_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
+        let norm::ExprKind::Closure {
+            ident,
+            def_id,
+            params,
+            return_ty,
+            body,
+            captures: _,
+        } = &expr.kind
+        else {
+            return None;
+        };
+
+        let info =
+            self.ensure_closure_info(ident, *def_id, params, return_ty, body, expr.span, expr.id);
+        let ty_id = self.type_map.insert_node_type(expr.id, info.ty.clone());
+
+        // Closure literals become struct literals with capture fields.
+        let fields = info
+            .captures
+            .iter()
+            .map(|capture| sem::StructLitField {
+                name: capture.name.clone(),
+                value: self.capture_value_for_def(capture, expr.span),
+                span: expr.span,
+            })
+            .collect();
+
+        Some(sem::ValueExpr {
+            id: expr.id,
+            kind: sem::ValueExprKind::StructLit {
+                name: info.type_name,
+                fields,
+            },
+            ty: ty_id,
+            span: expr.span,
+        })
+    }
+
+    fn elab_call_kind(&mut self, expr: &norm::Expr) -> Option<sem::ValueExprKind> {
+        match &expr.kind {
+            norm::ExprKind::Call { callee, args } => Some(self.elab_call_expr(expr, callee, args)),
+            norm::ExprKind::MethodCall {
+                callee,
+                method_name,
+                args,
+            } => Some(self.elab_method_call_expr(expr, callee, method_name, args)),
+            _ => None,
+        }
+    }
+
+    fn elab_call_expr(
+        &mut self,
+        expr: &norm::Expr,
+        callee: &norm::Expr,
+        args: &[norm::CallArg],
+    ) -> sem::ValueExprKind {
+        let call_sig = self.get_call_sig(expr.id);
+
+        if let Some((closure_def_id, info)) = self.closure_call_info(callee) {
+            // Rewrite closure calls into method calls on the generated closure struct.
+            if info.param_modes.len() != args.len() {
+                panic!(
+                    "compiler bug: closure call {call_id:?} expects {} args, got {}",
+                    info.param_modes.len(),
+                    args.len(),
+                    call_id = expr.id
+                );
+            }
+
+            self.type_map.insert_call_def(expr.id, closure_def_id);
+
+            // The semantic call plan uses the canonical receiver+args order.
+            let plan_sig = CallSig {
+                receiver: Some(CallParam {
+                    mode: ParamMode::In,
+                    ty: info.ty.clone(),
+                }),
+                params: call_sig.params.clone(),
+            };
+            self.type_map.insert_call_sig(expr.id, plan_sig.clone());
+
+            let plan = self.build_call_plan(expr.id, &plan_sig);
+            self.type_map.insert_call_plan(expr.id, plan);
+
+            let receiver = sem::MethodReceiver::ValueExpr(Box::new(self.elab_value(callee)));
+            let args = info
+                .param_modes
+                .iter()
+                .zip(args.iter())
+                .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), arg))
+                .collect();
+
+            sem::ValueExprKind::MethodCall {
+                receiver,
+                method_name: "invoke".to_string(),
+                args,
+            }
+        } else {
+            let plan = self.build_call_plan(expr.id, &call_sig);
+            self.type_map.insert_call_plan(expr.id, plan);
+
+            let args = call_sig
+                .params
+                .iter()
+                .zip(args.iter())
+                .map(|(param, arg)| self.elab_call_arg(param, arg))
+                .collect();
+
+            sem::ValueExprKind::Call {
+                callee: Box::new(self.elab_value(callee)),
+                args,
+            }
+        }
+    }
+
+    fn elab_method_call_expr(
+        &mut self,
+        expr: &norm::Expr,
+        callee: &norm::Expr,
+        method_name: &str,
+        args: &[norm::CallArg],
+    ) -> sem::ValueExprKind {
+        let call_sig = self.get_call_sig(expr.id);
+        let receiver = call_sig
+            .receiver
+            .as_ref()
+            .map(|receiver| self.elab_method_receiver(receiver, callee))
+            .unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: missing receiver in method call {call_id:?}",
+                    call_id = expr.id
+                )
+            });
+        let args = call_sig
+            .params
+            .iter()
+            .zip(args.iter())
+            .map(|(param, arg)| self.elab_call_arg(param, arg))
+            .collect();
+        let plan = self.build_call_plan(expr.id, &call_sig);
+        self.type_map.insert_call_plan(expr.id, plan);
+        sem::ValueExprKind::MethodCall {
+            receiver,
+            method_name: method_name.to_string(),
+            args,
+        }
+    }
+
+    fn elab_simple_value_kind(&mut self, expr: &norm::Expr) -> sem::ValueExprKind {
+        match &expr.kind {
             norm::ExprKind::Block { items, tail } => sem::ValueExprKind::Block {
                 items: items
                     .iter()
@@ -299,120 +472,6 @@ impl<'a> Elaborator<'a> {
                 scrutinee: Box::new(self.elab_value(scrutinee)),
                 arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
             },
-            norm::ExprKind::Call { callee, args } => {
-                let call_sig = self.get_call_sig(expr.id);
-                if let Some((closure_def_id, info)) = self.closure_call_info(callee) {
-                    // Rewrite closure calls into method calls on the generated closure struct.
-                    if info.param_modes.len() != args.len() {
-                        panic!(
-                            "compiler bug: closure call {call_id:?} expects {} args, got {}",
-                            info.param_modes.len(),
-                            args.len(),
-                            call_id = expr.id
-                        );
-                    }
-                    let receiver =
-                        sem::MethodReceiver::ValueExpr(Box::new(self.elab_value(callee)));
-                    let args = info
-                        .param_modes
-                        .iter()
-                        .zip(args.iter())
-                        .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), arg))
-                        .collect();
-                    self.type_map.insert_call_def(expr.id, closure_def_id);
-                    // The semantic call plan uses the canonical receiver+args order.
-                    let plan_sig = CallSig {
-                        receiver: Some(CallParam {
-                            mode: ParamMode::In,
-                            ty: info.ty.clone(),
-                        }),
-                        params: call_sig.params.clone(),
-                    };
-                    self.type_map.insert_call_sig(expr.id, plan_sig.clone());
-                    let plan = self.build_call_plan(expr.id, &plan_sig);
-                    self.type_map.insert_call_plan(expr.id, plan);
-                    sem::ValueExprKind::MethodCall {
-                        receiver,
-                        method_name: "invoke".to_string(),
-                        args,
-                    }
-                } else {
-                    let args = call_sig
-                        .params
-                        .iter()
-                        .zip(args.iter())
-                        .map(|(param, arg)| self.elab_call_arg(param, arg))
-                        .collect();
-                    let plan = self.build_call_plan(expr.id, &call_sig);
-                    self.type_map.insert_call_plan(expr.id, plan);
-                    sem::ValueExprKind::Call {
-                        callee: Box::new(self.elab_value(callee)),
-                        args,
-                    }
-                }
-            }
-            norm::ExprKind::MethodCall {
-                callee,
-                method_name,
-                args,
-            } => {
-                let call_sig = self.get_call_sig(expr.id);
-                let receiver = call_sig
-                    .receiver
-                    .as_ref()
-                    .map(|receiver| self.elab_method_receiver(receiver, callee))
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "compiler bug: missing receiver in method call {call_id:?}",
-                            call_id = expr.id
-                        )
-                    });
-                let args = call_sig
-                    .params
-                    .iter()
-                    .zip(args.iter())
-                    .map(|(param, arg)| self.elab_call_arg(param, arg))
-                    .collect();
-                let plan = self.build_call_plan(expr.id, &call_sig);
-                self.type_map.insert_call_plan(expr.id, plan);
-                sem::ValueExprKind::MethodCall {
-                    receiver,
-                    method_name: method_name.clone(),
-                    args,
-                }
-            }
-            norm::ExprKind::Closure {
-                ident,
-                def_id,
-                params,
-                return_ty,
-                body,
-                captures: _,
-            } => {
-                let info = self.ensure_closure_info(
-                    ident, *def_id, params, return_ty, body, expr.span, expr.id,
-                );
-                let ty_id = self.type_map.insert_node_type(expr.id, info.ty.clone());
-                // Closure literals become struct literals with capture fields.
-                let fields = info
-                    .captures
-                    .iter()
-                    .map(|capture| sem::StructLitField {
-                        name: capture.name.clone(),
-                        value: self.capture_value_for_def(capture, expr.span),
-                        span: expr.span,
-                    })
-                    .collect();
-                return sem::ValueExpr {
-                    id: expr.id,
-                    kind: sem::ValueExprKind::StructLit {
-                        name: info.type_name,
-                        fields,
-                    },
-                    ty: ty_id,
-                    span: expr.span,
-                };
-            }
             norm::ExprKind::Coerce { kind, expr } => sem::ValueExprKind::Coerce {
                 kind: *kind,
                 expr: Box::new(self.elab_value(expr)),
@@ -420,22 +479,16 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::AddrOf { expr } => sem::ValueExprKind::AddrOf {
                 place: Box::new(self.elab_place(expr)),
             },
-            norm::ExprKind::Move { .. }
+            norm::ExprKind::Call { .. }
+            | norm::ExprKind::MethodCall { .. }
+            | norm::ExprKind::Closure { .. }
+            | norm::ExprKind::Move { .. }
             | norm::ExprKind::ImplicitMove { .. }
             | norm::ExprKind::Var { .. }
             | norm::ExprKind::ArrayIndex { .. }
             | norm::ExprKind::TupleField { .. }
             | norm::ExprKind::StructField { .. }
-            | norm::ExprKind::Deref { .. } => {
-                unreachable!("handled earlier")
-            }
-        };
-
-        sem::ValueExpr {
-            id: expr.id,
-            kind,
-            ty: expr.ty,
-            span: expr.span,
+            | norm::ExprKind::Deref { .. } => unreachable!("handled earlier"),
         }
     }
 }
