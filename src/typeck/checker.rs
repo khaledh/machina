@@ -16,7 +16,7 @@ use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
 use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
-use super::type_map::{CallParam, CallSig, TypeMap, TypeMapBuilder, resolve_type_expr};
+use super::type_map::{CallParam, CallSig, CallSigMap, TypeMap, TypeMapBuilder, resolve_type_expr};
 
 pub struct TypeChecker {
     ctx: ResolvedContext,
@@ -45,7 +45,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn check(&mut self) -> Result<TypeMap, Vec<TypeCheckError>> {
+    pub fn check(&mut self) -> Result<(TypeMap, CallSigMap), Vec<TypeCheckError>> {
         self.populate_type_symbols()?;
         self.populate_function_symbols()?;
         self.populate_method_symbols()?;

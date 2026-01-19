@@ -309,7 +309,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                 self.check_type_expr(elem_ty);
             }
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     for (arg, param) in args.iter().zip(sig.params.iter()) {
                         self.check_range_binding_value(&arg.expr, &param.ty);
                     }

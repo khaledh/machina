@@ -94,8 +94,9 @@ impl<'a> Elaborator<'a> {
 
     pub(super) fn get_call_sig(&self, call_id: NodeId) -> CallSig {
         // Type checker should have recorded a signature for every call.
-        self.type_map
-            .lookup_call_sig(call_id)
+        self.call_sigs
+            .get(&call_id)
+            .cloned()
             .unwrap_or_else(|| panic!("compiler bug: missing call signature for {call_id:?}"))
     }
 

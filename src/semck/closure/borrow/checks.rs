@@ -315,7 +315,7 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
     }
 
     fn check_call(&mut self, call: &Expr, args: &[CallArg], receiver: Option<&Expr>) {
-        let Some(sig) = self.ctx.type_map.lookup_call_sig(call.id) else {
+        let Some(sig) = self.ctx.call_sigs.get(&call.id) else {
             panic!(
                 "compiler bug: missing call signature for call node {}",
                 call.id

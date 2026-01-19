@@ -562,7 +562,7 @@ impl<'a> BorrowConflictVisitor<'a> {
 
     /// Check call arguments: error if passing a borrowed base to inout/out/sink.
     fn check_call(&mut self, call: &Expr, args: &[CallArg], receiver: Option<&Expr>) {
-        let Some(sig) = self.ctx.type_map.lookup_call_sig(call.id) else {
+        let Some(sig) = self.ctx.call_sigs.get(&call.id) else {
             return;
         };
 

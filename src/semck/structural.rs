@@ -434,7 +434,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                 }
 
                 // Validate call-site argument modes and lvalue requirements.
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     self.check_call_arg_modes(&sig, args);
                 }
                 self.visit_expr(callee);
@@ -445,7 +445,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
             }
 
             ExprKind::MethodCall { callee, args, .. } => {
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     if let Some(receiver) = sig.receiver.as_ref() {
                         match receiver.mode {
                             ParamMode::In => {}

@@ -13,7 +13,7 @@ use crate::tree::resolved::Module as ResolvedModule;
 use crate::tree::semantic::Module as SemanticModule;
 use crate::tree::typed::Module as TypedModule;
 use crate::tree::{NodeId, NodeIdGen};
-use crate::typeck::type_map::TypeMap;
+use crate::typeck::type_map::{CallSigMap, TypeMap};
 
 // -----------------------------------------------------------------------------
 // Parsed Context
@@ -57,11 +57,17 @@ pub struct ResolvedContext {
 }
 
 impl ResolvedContext {
-    pub fn with_type_map(self, type_map: TypeMap, module: TypedModule) -> TypeCheckedContext {
+    pub fn with_type_map(
+        self,
+        type_map: TypeMap,
+        call_sigs: CallSigMap,
+        module: TypedModule,
+    ) -> TypeCheckedContext {
         TypeCheckedContext {
             module,
             def_table: self.def_table,
             type_map,
+            call_sigs,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
         }
@@ -77,6 +83,7 @@ pub struct TypeCheckedContext {
     pub module: TypedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
+    pub call_sigs: CallSigMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
@@ -90,6 +97,7 @@ pub struct NormalizedContext {
     pub module: NormalizedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
+    pub call_sigs: CallSigMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
@@ -106,6 +114,7 @@ impl NormalizedContext {
             module: self.module,
             def_table: self.def_table,
             type_map: self.type_map,
+            call_sigs: self.call_sigs,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
             implicit_moves,
@@ -125,6 +134,7 @@ pub struct SemanticCheckedContext {
     pub module: NormalizedModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
+    pub call_sigs: CallSigMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub implicit_moves: HashSet<NodeId>,

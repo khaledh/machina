@@ -8,7 +8,7 @@ use crate::semck::closure::capture::ClosureCapture;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{InitInfo, NodeId, NodeIdGen};
-use crate::typeck::type_map::TypeMap;
+use crate::typeck::type_map::{CallSigMap, TypeMap};
 use crate::types::{Type, TypeId};
 
 #[derive(Clone, Debug)]
@@ -65,6 +65,7 @@ impl ClosureContext {
 pub struct Elaborator<'a> {
     pub(super) def_table: &'a mut DefTable,
     pub(super) type_map: &'a mut TypeMap,
+    pub(super) call_sigs: &'a CallSigMap,
     pub(super) node_id_gen: &'a mut NodeIdGen,
     pub(super) implicit_moves: &'a HashSet<NodeId>,
     pub(super) init_assigns: &'a HashSet<NodeId>,
@@ -81,6 +82,7 @@ impl<'a> Elaborator<'a> {
     pub fn new(
         def_table: &'a mut DefTable,
         type_map: &'a mut TypeMap,
+        call_sigs: &'a CallSigMap,
         node_id_gen: &'a mut NodeIdGen,
         implicit_moves: &'a HashSet<NodeId>,
         init_assigns: &'a HashSet<NodeId>,
@@ -90,6 +92,7 @@ impl<'a> Elaborator<'a> {
         Self {
             def_table,
             type_map,
+            call_sigs,
             node_id_gen,
             implicit_moves,
             init_assigns,

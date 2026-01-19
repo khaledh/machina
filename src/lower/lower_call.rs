@@ -104,13 +104,16 @@ impl<'a> FuncLowerer<'a> {
 
         let mut out_args = Vec::new();
         let mut inputs = Vec::with_capacity(args.len() + receiver.iter().count());
+        let mut input_types = Vec::with_capacity(args.len() + receiver.iter().count());
 
         if let Some(receiver) = receiver {
             inputs.push(self.lower_method_receiver(receiver)?);
+            input_types.push(self.receiver_type(receiver));
         }
 
         for arg in args {
             inputs.push(self.lower_call_arg(arg, &mut out_args)?);
+            input_types.push(self.call_arg_type(arg));
         }
 
         let arg_vals = self.lower_call_args_from_plan(call, &call_plan, &inputs)?;
@@ -144,7 +147,7 @@ impl<'a> FuncLowerer<'a> {
             self.mark_full_init_if_needed(arg, init);
         }
 
-        for (place, ty) in self.collect_temp_drops_from_plan(call, &call_plan, &inputs) {
+        for (place, ty) in self.collect_temp_drops_from_plan(&call_plan, &inputs, &input_types) {
             self.emit_drop_place(place, &ty);
         }
         Ok(())
@@ -349,26 +352,17 @@ impl<'a> FuncLowerer<'a> {
 
     fn collect_temp_drops_from_plan(
         &mut self,
-        call: &ValueExpr,
         call_plan: &CallPlan,
         inputs: &[PlaceAny],
+        input_types: &[Type],
     ) -> Vec<(PlaceAny, Type)> {
-        let Some(call_sig) = self.ctx.type_map.lookup_call_sig(call.id) else {
-            return Vec::new();
-        };
-
-        let mut input_types = Vec::new();
-        if let Some(receiver) = call_sig.receiver {
-            input_types.push(receiver.ty);
-        }
-        input_types.extend(call_sig.params.into_iter().map(|param| param.ty));
-
         if input_types.len() != inputs.len() || input_types.len() != call_plan.drop_mask.len() {
             panic!("compiler bug: call input mismatch");
         }
 
         input_types
-            .into_iter()
+            .iter()
+            .cloned()
             .zip(inputs.iter())
             .zip(call_plan.drop_mask.iter().copied())
             .filter_map(|((ty, place), should_drop)| {
@@ -378,6 +372,20 @@ impl<'a> FuncLowerer<'a> {
                 self.temp_drop_for_input(place, ty)
             })
             .collect()
+    }
+
+    fn receiver_type(&self, receiver: &MethodReceiver) -> Type {
+        match receiver {
+            MethodReceiver::ValueExpr(expr) => self.ty_from_id(expr.ty),
+            MethodReceiver::PlaceExpr(place) => self.ty_from_id(place.ty),
+        }
+    }
+
+    fn call_arg_type(&self, arg: &CallArg) -> Type {
+        match arg {
+            CallArg::In { expr, .. } | CallArg::Sink { expr, .. } => self.ty_from_id(expr.ty),
+            CallArg::InOut { place, .. } | CallArg::Out { place, .. } => self.ty_from_id(place.ty),
+        }
     }
 
     fn temp_drop_for_input(&mut self, place: &PlaceAny, ty: Type) -> Option<(PlaceAny, Type)> {

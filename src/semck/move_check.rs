@@ -425,7 +425,7 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
             ExprKind::Call { callee, args } => {
                 self.visit_expr(callee);
                 // Check args based on param mode: in/inout borrow, sink consumes.
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     for (param, arg) in sig.params.iter().zip(args) {
                         let arg_expr = &arg.expr;
                         match param.mode {
@@ -448,7 +448,7 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
             }
 
             ExprKind::MethodCall { callee, args, .. } => {
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     if let Some(receiver) = sig.receiver.as_ref() {
                         match receiver.mode {
                             ParamMode::In | ParamMode::InOut => {

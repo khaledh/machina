@@ -1008,7 +1008,7 @@ impl<'a> DefInitChecker<'a> {
             }
             ExprKind::Call { callee, args } => {
                 self.check_expr(callee);
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     let mut out_defs = Vec::new();
                     for (param, arg) in sig.params.iter().zip(args) {
                         if param.mode == ParamMode::Out && arg.mode == CallArgMode::Out {
@@ -1032,7 +1032,7 @@ impl<'a> DefInitChecker<'a> {
 
             ExprKind::MethodCall { callee, args, .. } => {
                 self.check_expr(callee);
-                if let Some(sig) = self.ctx.type_map.lookup_call_sig(expr.id) {
+                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
                     let mut out_defs = Vec::new();
                     for (param, arg) in sig.params.iter().zip(args) {
                         if param.mode == ParamMode::Out && arg.mode == CallArgMode::Out {

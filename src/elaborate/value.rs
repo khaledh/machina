@@ -316,7 +316,6 @@ impl<'a> Elaborator<'a> {
                 }),
                 params: call_sig.params.clone(),
             };
-            self.type_map.insert_call_sig(expr.id, plan_sig.clone());
 
             let plan = self.build_call_plan(expr.id, &plan_sig);
             self.type_map.insert_call_plan(expr.id, plan);

@@ -17,9 +17,11 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     let mut node_id_gen = ctx.node_id_gen;
     let mut def_table = ctx.def_table;
     let mut type_map = ctx.type_map;
+    let call_sigs = ctx.call_sigs;
     let mut elaborator = Elaborator::new(
         &mut def_table,
         &mut type_map,
+        &call_sigs,
         &mut node_id_gen,
         &ctx.implicit_moves,
         &ctx.init_assigns,

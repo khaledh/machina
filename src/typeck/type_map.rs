@@ -331,7 +331,7 @@ pub struct TypeMapBuilder {
     type_table: TypeTable,
     node_type: HashMap<NodeId, TypeId>, // maps node to its type
     def_type: HashMap<Def, TypeId>,     // maps def to its type
-    call_sig: HashMap<NodeId, CallSig>,
+    call_sigs: HashMap<NodeId, CallSig>,
 }
 
 impl Default for TypeMapBuilder {
@@ -346,7 +346,7 @@ impl TypeMapBuilder {
             type_table: TypeTable::new(),
             node_type: HashMap::new(),
             def_type: HashMap::new(),
-            call_sig: HashMap::new(),
+            call_sigs: HashMap::new(),
         }
     }
 
@@ -361,7 +361,7 @@ impl TypeMapBuilder {
     }
 
     pub fn record_call_sig(&mut self, node_id: NodeId, sig: CallSig) {
-        self.call_sig.insert(node_id, sig);
+        self.call_sigs.insert(node_id, sig);
     }
 
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
@@ -374,14 +374,17 @@ impl TypeMapBuilder {
         self.def_type.get(def).copied()
     }
 
-    pub fn finish(self) -> TypeMap {
-        TypeMap {
-            type_table: self.type_table,
-            def_type: self.def_type,
-            node_type: self.node_type,
-            call_sig: self.call_sig,
-            call_plan: HashMap::new(),
-        }
+    pub fn finish(self) -> (TypeMap, CallSigMap) {
+        let call_sigs = self.call_sigs;
+        (
+            TypeMap {
+                type_table: self.type_table,
+                def_type: self.def_type,
+                node_type: self.node_type,
+                call_plan: HashMap::new(),
+            },
+            call_sigs,
+        )
     }
 }
 
@@ -391,6 +394,8 @@ pub struct CallSig {
     pub receiver: Option<CallParam>,
     pub params: Vec<CallParam>,
 }
+
+pub type CallSigMap = HashMap<NodeId, CallSig>;
 
 #[derive(Debug, Clone)]
 pub struct CallParam {
@@ -403,7 +408,6 @@ pub struct TypeMap {
     type_table: TypeTable,
     def_type: HashMap<Def, TypeId>,
     node_type: HashMap<NodeId, TypeId>,
-    call_sig: HashMap<NodeId, CallSig>,
     call_plan: HashMap<NodeId, CallPlan>,
 }
 
@@ -428,10 +432,6 @@ impl TypeMap {
         self.def_type.get(def).copied()
     }
 
-    pub fn lookup_call_sig(&self, node: NodeId) -> Option<CallSig> {
-        self.call_sig.get(&node).cloned()
-    }
-
     pub fn lookup_call_plan(&self, node: NodeId) -> Option<CallPlan> {
         self.call_plan.get(&node).cloned()
     }
@@ -446,10 +446,6 @@ impl TypeMap {
         let id = self.type_table.intern(typ);
         self.node_type.insert(node, id);
         id
-    }
-
-    pub fn insert_call_sig(&mut self, node: NodeId, sig: CallSig) {
-        self.call_sig.insert(node, sig);
     }
 
     pub fn insert_call_plan(&mut self, node: NodeId, plan: CallPlan) {

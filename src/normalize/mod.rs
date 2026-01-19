@@ -5,7 +5,7 @@ use crate::tree::normalized as norm;
 use crate::tree::normalized::build_module;
 use crate::tree::visit_mut;
 use crate::tree::visit_mut::VisitorMut;
-use crate::typeck::type_map::{CallParam, TypeMap};
+use crate::typeck::type_map::{CallParam, CallSigMap, TypeMap};
 use crate::types::TypeId;
 use crate::types::array_to_slice_assignable;
 
@@ -18,18 +18,20 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         module,
         def_table,
         type_map,
+        call_sigs,
         symbols,
         node_id_gen,
     } = ctx;
     let mut module = build_module(&module);
     let mut type_map = type_map;
     let mut node_id_gen = node_id_gen;
-    let mut normalizer = Normalizer::new(&mut type_map, &mut node_id_gen);
+    let mut normalizer = Normalizer::new(&mut type_map, &call_sigs, &mut node_id_gen);
     normalizer.visit_module(&mut module);
     NormalizedContext {
         module,
         def_table,
         type_map,
+        call_sigs,
         symbols,
         node_id_gen,
     }
@@ -37,19 +39,25 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
 
 struct Normalizer<'a> {
     type_map: &'a mut TypeMap,
+    call_sigs: &'a CallSigMap,
     node_id_gen: &'a mut NodeIdGen,
 }
 
 impl<'a> Normalizer<'a> {
-    fn new(type_map: &'a mut TypeMap, node_id_gen: &'a mut NodeIdGen) -> Self {
+    fn new(
+        type_map: &'a mut TypeMap,
+        call_sigs: &'a CallSigMap,
+        node_id_gen: &'a mut NodeIdGen,
+    ) -> Self {
         Self {
             type_map,
+            call_sigs,
             node_id_gen,
         }
     }
 
     fn coerce_call_args(&mut self, call_id: norm::NodeId, args: &mut [norm::CallArg]) {
-        let Some(call_sig) = self.type_map.lookup_call_sig(call_id) else {
+        let Some(call_sig) = self.call_sigs.get(&call_id) else {
             return;
         };
         for (param, arg) in call_sig.params.iter().zip(args.iter_mut()) {
