@@ -1,0 +1,321 @@
+//! SSA + explicit-memory IR data model.
+//!
+//! Defines the core SSA entities (functions, blocks, values, instructions) and
+//! the type table used by the formatter and early SSA lowering.
+
+use std::fmt;
+
+use crate::resolve::DefId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeId(pub u32);
+
+impl TypeId {
+    #[inline]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeKind {
+    Unit,
+    Bool,
+    Int { signed: bool, bits: u8 },
+    Ptr { elem: TypeId },
+    Array { elem: TypeId, dims: Vec<u64> },
+    Tuple { fields: Vec<TypeId> },
+    Struct { fields: Vec<StructField> },
+    Fn { params: Vec<TypeId>, ret: TypeId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeInfo {
+    pub kind: TypeKind,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TypeTable {
+    types: Vec<TypeInfo>,
+}
+
+impl TypeTable {
+    pub fn new() -> Self {
+        Self { types: Vec::new() }
+    }
+
+    pub fn add(&mut self, kind: TypeKind) -> TypeId {
+        let id = TypeId(self.types.len() as u32);
+        self.types.push(TypeInfo { kind, name: None });
+        id
+    }
+
+    pub fn add_named(&mut self, kind: TypeKind, name: String) -> TypeId {
+        let id = TypeId(self.types.len() as u32);
+        self.types.push(TypeInfo {
+            kind,
+            name: Some(name),
+        });
+        id
+    }
+
+    pub fn get(&self, id: TypeId) -> &TypeInfo {
+        &self.types[id.index()]
+    }
+
+    pub fn kind(&self, id: TypeId) -> &TypeKind {
+        &self.get(id).kind
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ValueId(pub u32);
+
+impl ValueId {
+    #[inline]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockId(pub u32);
+
+impl BlockId {
+    #[inline]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocalId(pub u32);
+
+impl LocalId {
+    #[inline]
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueDef {
+    pub id: ValueId,
+    pub ty: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockParam {
+    pub value: ValueDef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    pub id: BlockId,
+    pub params: Vec<BlockParam>,
+    pub insts: Vec<Instruction>,
+    pub term: Terminator,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    pub def_id: DefId,
+    pub name: String,
+    pub sig: FunctionSig,
+    pub locals: Vec<Local>,
+    pub blocks: Vec<Block>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSig {
+    pub params: Vec<TypeId>,
+    pub ret: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Local {
+    pub id: LocalId,
+    pub ty: TypeId,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobalId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConstValue {
+    Unit,
+    Bool(bool),
+    Int { value: i128, signed: bool, bits: u8 },
+    GlobalAddr { id: GlobalId },
+    FuncAddr { def: DefId },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    Neg,
+    Not,
+    BitNot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CastKind {
+    IntTrunc,
+    IntExtend { signed: bool },
+    PtrToInt,
+    IntToPtr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Callee {
+    Direct(DefId),
+    Value(ValueId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Instruction {
+    pub result: Option<ValueDef>,
+    pub kind: InstKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstKind {
+    Const {
+        value: ConstValue,
+    },
+    BinOp {
+        op: BinOp,
+        lhs: ValueId,
+        rhs: ValueId,
+    },
+    UnOp {
+        op: UnOp,
+        value: ValueId,
+    },
+    Cmp {
+        op: CmpOp,
+        lhs: ValueId,
+        rhs: ValueId,
+    },
+    Cast {
+        kind: CastKind,
+        value: ValueId,
+        ty: TypeId,
+    },
+    AddrOfLocal {
+        local: LocalId,
+    },
+    FieldAddr {
+        base: ValueId,
+        index: usize,
+    },
+    IndexAddr {
+        base: ValueId,
+        index: ValueId,
+    },
+    Load {
+        ptr: ValueId,
+    },
+    Store {
+        ptr: ValueId,
+        value: ValueId,
+    },
+    MemCopy {
+        dst: ValueId,
+        src: ValueId,
+        len: ValueId,
+    },
+    MemSet {
+        dst: ValueId,
+        byte: ValueId,
+        len: ValueId,
+    },
+    Call {
+        callee: Callee,
+        args: Vec<ValueId>,
+    },
+    Drop {
+        ptr: ValueId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchCase {
+    pub value: ConstValue,
+    pub target: BlockId,
+    pub args: Vec<ValueId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Terminator {
+    Br {
+        target: BlockId,
+        args: Vec<ValueId>,
+    },
+    CondBr {
+        cond: ValueId,
+        then_bb: BlockId,
+        then_args: Vec<ValueId>,
+        else_bb: BlockId,
+        else_args: Vec<ValueId>,
+    },
+    Switch {
+        value: ValueId,
+        cases: Vec<SwitchCase>,
+        default: BlockId,
+        default_args: Vec<ValueId>,
+    },
+    Return {
+        value: Option<ValueId>,
+    },
+    Unreachable,
+}
+
+impl fmt::Display for TypeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeKind::Unit => write!(f, "()"),
+            TypeKind::Bool => write!(f, "bool"),
+            TypeKind::Int { signed, bits } => {
+                let prefix = if *signed { "i" } else { "u" };
+                write!(f, "{}{}", prefix, bits)
+            }
+            TypeKind::Ptr { elem } => write!(f, "ptr<{:?}>", elem),
+            TypeKind::Array { elem, dims } => write!(f, "array<{:?}; {:?}>", elem, dims),
+            TypeKind::Tuple { fields } => write!(f, "tuple<{:?}>", fields),
+            TypeKind::Struct { fields } => write!(f, "struct<{:?}>", fields),
+            TypeKind::Fn { params, ret } => write!(f, "fn({:?}) -> {:?}", params, ret),
+        }
+    }
+}

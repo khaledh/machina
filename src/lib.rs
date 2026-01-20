@@ -14,6 +14,7 @@ pub mod parse;
 pub mod regalloc;
 pub mod resolve;
 pub mod semck;
+pub mod ssa;
 pub mod symtab;
 pub mod targets;
 pub mod tree;
