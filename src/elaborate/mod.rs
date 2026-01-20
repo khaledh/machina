@@ -33,6 +33,7 @@ mod bind_pattern;
 mod calls;
 mod closure;
 mod elaborator;
+mod index_plan;
 mod match_plan;
 mod place;
 mod types;

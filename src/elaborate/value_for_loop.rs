@@ -270,14 +270,21 @@ impl<'a> Elaborator<'a> {
         elem_ty: Type,
         span: Span,
     ) -> sem::PlaceExpr {
-        self.make_place_expr(
-            sem::PlaceExprKind::ArrayIndex {
+        let id = self.node_id_gen.new_id();
+        let target_ty = self.type_map.type_table().get(target.ty).clone();
+        let plan = self.build_index_plan(&target_ty);
+        self.type_map.insert_index_plan(id, plan);
+        let ty_id = self.type_map.insert_node_type(id, elem_ty);
+
+        sem::PlaceExpr {
+            id,
+            kind: sem::PlaceExprKind::ArrayIndex {
                 target: Box::new(target),
                 indices: vec![index],
             },
-            elem_ty,
+            ty: ty_id,
             span,
-        )
+        }
     }
 
     fn make_load_expr(&mut self, place: sem::PlaceExpr, ty: Type, span: Span) -> sem::ValueExpr {

@@ -15,9 +15,9 @@
 //!    control flow, etc.
 
 use crate::elaborate::elaborator::Elaborator;
-use crate::tree::ParamMode;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
+use crate::tree::{CoerceKind, ParamMode};
 use crate::typeck::type_map::{CallParam, CallSig};
 
 impl<'a> Elaborator<'a> {
@@ -330,11 +330,19 @@ impl<'a> Elaborator<'a> {
                 start: *start,
                 end: *end,
             },
-            norm::ExprKind::Slice { target, start, end } => sem::ValueExprKind::Slice {
-                target: Box::new(self.elab_place(target)),
-                start: start.as_ref().map(|expr| Box::new(self.elab_value(expr))),
-                end: end.as_ref().map(|expr| Box::new(self.elab_value(expr))),
-            },
+            norm::ExprKind::Slice { target, start, end } => {
+                let target_place = self.elab_place(target);
+                let target_ty = self.type_map.type_table().get(target_place.ty).clone();
+                let slice_ty = self.type_map.type_table().get(expr.ty).clone();
+                let plan = self.build_slice_plan(&target_ty, &slice_ty);
+                self.type_map.insert_slice_plan(expr.id, plan);
+
+                sem::ValueExprKind::Slice {
+                    target: Box::new(target_place),
+                    start: start.as_ref().map(|expr| Box::new(self.elab_value(expr))),
+                    end: end.as_ref().map(|expr| Box::new(self.elab_value(expr))),
+                }
+            }
             norm::ExprKind::Match { scrutinee, arms } => {
                 // Pre-compute match tests + bindings so lowering only emits the plan.
                 let plan = self.build_match_plan(expr.id, scrutinee, arms);
@@ -344,10 +352,18 @@ impl<'a> Elaborator<'a> {
                     arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
                 }
             }
-            norm::ExprKind::Coerce { kind, expr } => sem::ValueExprKind::Coerce {
-                kind: *kind,
-                expr: Box::new(self.elab_value(expr)),
-            },
+            norm::ExprKind::Coerce { kind, expr: inner } => {
+                if matches!(kind, CoerceKind::ArrayToSlice) {
+                    let target_ty = self.type_map.type_table().get(inner.ty).clone();
+                    let slice_ty = self.type_map.type_table().get(expr.ty).clone();
+                    let plan = self.build_slice_plan(&target_ty, &slice_ty);
+                    self.type_map.insert_slice_plan(expr.id, plan);
+                }
+                sem::ValueExprKind::Coerce {
+                    kind: *kind,
+                    expr: Box::new(self.elab_value(inner)),
+                }
+            }
             norm::ExprKind::AddrOf { expr } => sem::ValueExprKind::AddrOf {
                 place: Box::new(self.elab_place(expr)),
             },

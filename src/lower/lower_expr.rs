@@ -4,9 +4,10 @@ use crate::lower::lower_util::u64_const;
 use crate::mcir::types::*;
 use crate::resolve::DefKind;
 use crate::tree::semantic::{
-    ArrayLitInit, PlaceExpr, PlaceExprKind as PEK, StructLitField, ValueExpr, ValueExprKind as VEK,
+    ArrayLitInit, IndexBaseKind, PlaceExpr, PlaceExprKind as PEK, SliceBaseKind, StructLitField,
+    ValueExpr, ValueExprKind as VEK,
 };
-use crate::tree::{BinaryOp, CoerceKind, UnaryOp};
+use crate::tree::{BinaryOp, CoerceKind, NodeId, UnaryOp};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
@@ -65,10 +66,9 @@ impl<'a> FuncLowerer<'a> {
 
     fn lower_place_value(&mut self, place: &PlaceExpr) -> Result<Value, LowerError> {
         if let PEK::ArrayIndex { target, indices } = &place.kind {
-            let target_ty = self.ty_from_id(target.ty);
-            let peeled_ty = target_ty.peel_heap();
-            if matches!(peeled_ty, Type::String) {
-                let op = self.lower_string_index(place, target, indices)?;
+            let plan = self.index_plan_for(place)?;
+            if let IndexBaseKind::String { deref_count } = plan.base {
+                let op = self.lower_string_index(place, target, indices, deref_count)?;
                 return Ok(Value::Scalar(op));
             }
         }
@@ -90,10 +90,9 @@ impl<'a> FuncLowerer<'a> {
                 }
             }
             PEK::ArrayIndex { target, indices } => {
-                let target_ty = self.ty_from_id(target.ty);
-                let peeled_ty = target_ty.peel_heap();
-                if matches!(peeled_ty, Type::String) {
-                    return self.lower_string_index(place, target, indices);
+                let plan = self.index_plan_for(place)?;
+                if let IndexBaseKind::String { deref_count } = plan.base {
+                    return self.lower_string_index(place, target, indices, deref_count);
                 }
             }
             _ => {}
@@ -540,8 +539,8 @@ impl<'a> FuncLowerer<'a> {
                 // Aggregate literal: build in place.
                 self.lower_agg_lit_into(dst, expr)
             }
-            VEK::Coerce { kind, expr } => match kind {
-                CoerceKind::ArrayToSlice => self.lower_array_to_slice_into(&dst, expr),
+            VEK::Coerce { kind, expr: inner } => match kind {
+                CoerceKind::ArrayToSlice => self.lower_array_to_slice_into(&dst, expr.id, inner),
             },
             VEK::Load { place } => {
                 let src = self.lower_place_agg(place)?;
@@ -560,7 +559,9 @@ impl<'a> FuncLowerer<'a> {
                 self.emit_copy_aggregate(dst, src);
                 Ok(())
             }
-            VEK::Slice { target, start, end } => self.lower_slice_into(&dst, target, start, end),
+            VEK::Slice { target, start, end } => {
+                self.lower_slice_into(&dst, expr.id, target, start, end)
+            }
             VEK::Call { callee, args } => {
                 // Aggregate call result: direct into destination.
                 self.lower_call_into(
@@ -600,25 +601,21 @@ impl<'a> FuncLowerer<'a> {
     fn lower_array_to_slice_into(
         &mut self,
         dst: &Place<Aggregate>,
+        plan_id: NodeId,
         expr: &ValueExpr,
     ) -> Result<(), LowerError> {
         match &expr.kind {
-            VEK::Load { place } => self.lower_slice_into(dst, place, &None, &None),
+            VEK::Load { place } => self.lower_slice_into(dst, plan_id, place, &None, &None),
             VEK::Move { place } | VEK::ImplicitMove { place } => {
                 self.record_move_place(place);
-                self.lower_slice_into(dst, place, &None, &None)
+                self.lower_slice_into(dst, plan_id, place, &None, &None)
             }
             _ => {
-                let array_ty = self.ty_from_id(expr.ty);
-                let Type::Array { dims, .. } = array_ty else {
+                let array_place = self.lower_agg_expr_to_temp(expr)?;
+                let plan = self.slice_plan_for(plan_id)?;
+                let SliceBaseKind::Array { len, .. } = plan.base else {
                     return Err(LowerError::UnsupportedAggregateRhs(expr.id));
                 };
-                if dims.is_empty() {
-                    return Err(LowerError::UnsupportedAggregateRhs(expr.id));
-                }
-
-                let array_place = self.lower_agg_expr_to_temp(expr)?;
-                let len = dims[0];
                 let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
 
                 let base_ptr_place = self.new_temp_scalar(u64_ty_id);

@@ -2,7 +2,7 @@ use crate::resolve::{Def, DefId, DefKind, DefTable};
 use crate::tree::normalized as norm;
 use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
-use crate::tree::semantic::{CallPlan, MatchPlan};
+use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
 use crate::tree::{NodeId, ParamMode};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeId, TypeTable};
@@ -382,7 +382,9 @@ impl TypeMapBuilder {
                 def_type: self.def_type,
                 node_type: self.node_type,
                 call_plan: HashMap::new(),
+                index_plan: HashMap::new(),
                 match_plan: HashMap::new(),
+                slice_plan: HashMap::new(),
             },
             call_sigs,
         )
@@ -410,7 +412,9 @@ pub struct TypeMap {
     def_type: HashMap<Def, TypeId>,
     node_type: HashMap<NodeId, TypeId>,
     call_plan: HashMap<NodeId, CallPlan>,
+    index_plan: HashMap<NodeId, IndexPlan>,
     match_plan: HashMap<NodeId, MatchPlan>,
+    slice_plan: HashMap<NodeId, SlicePlan>,
 }
 
 impl TypeMap {
@@ -438,8 +442,16 @@ impl TypeMap {
         self.call_plan.get(&node).cloned()
     }
 
+    pub fn lookup_index_plan(&self, node: NodeId) -> Option<IndexPlan> {
+        self.index_plan.get(&node).cloned()
+    }
+
     pub fn lookup_match_plan(&self, node: NodeId) -> Option<MatchPlan> {
         self.match_plan.get(&node).cloned()
+    }
+
+    pub fn lookup_slice_plan(&self, node: NodeId) -> Option<SlicePlan> {
+        self.slice_plan.get(&node).cloned()
     }
 
     pub fn insert_def_type(&mut self, def: Def, typ: Type) -> TypeId {
@@ -458,8 +470,16 @@ impl TypeMap {
         self.call_plan.insert(node, plan);
     }
 
+    pub fn insert_index_plan(&mut self, node: NodeId, plan: IndexPlan) {
+        self.index_plan.insert(node, plan);
+    }
+
     pub fn insert_match_plan(&mut self, node: NodeId, plan: MatchPlan) {
         self.match_plan.insert(node, plan);
+    }
+
+    pub fn insert_slice_plan(&mut self, node: NodeId, plan: SlicePlan) {
+        self.slice_plan.insert(node, plan);
     }
 
     pub fn type_table(&self) -> &TypeTable {

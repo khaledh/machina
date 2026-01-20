@@ -32,10 +32,16 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::Deref { expr } => sem::PlaceExprKind::Deref {
                 value: Box::new(self.elab_value(expr)),
             },
-            norm::ExprKind::ArrayIndex { target, indices } => sem::PlaceExprKind::ArrayIndex {
-                target: Box::new(self.elab_place(target)),
-                indices: indices.iter().map(|index| self.elab_value(index)).collect(),
-            },
+            norm::ExprKind::ArrayIndex { target, indices } => {
+                let target_place = self.elab_place(target);
+                let target_ty = self.type_map.type_table().get(target_place.ty).clone();
+                let plan = self.build_index_plan(&target_ty);
+                self.type_map.insert_index_plan(expr.id, plan);
+                sem::PlaceExprKind::ArrayIndex {
+                    target: Box::new(target_place),
+                    indices: indices.iter().map(|index| self.elab_value(index)).collect(),
+                }
+            }
             norm::ExprKind::TupleField { target, index } => sem::PlaceExprKind::TupleField {
                 target: Box::new(self.elab_place(target)),
                 index: *index,
