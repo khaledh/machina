@@ -8,8 +8,8 @@ use crate::ssa::model::ir::{
     BinOp, BlockId, CmpOp, Function, FunctionSig, Terminator, TypeId, TypeKind, TypeTable, UnOp,
     ValueId,
 };
-use crate::tree::{BinaryOp, UnaryOp};
 use crate::tree::semantic as sem;
+use crate::tree::{BinaryOp, UnaryOp};
 use crate::typeck::type_map::TypeMap;
 use crate::types::Type;
 
@@ -18,20 +18,28 @@ pub struct LoweredFunction {
     pub types: TypeTable,
 }
 
+/// Lowers a trivial function body into SSA for smoke testing.
 pub fn lower_const_return(func: &sem::FuncDef, type_map: &TypeMap) -> LoweredFunction {
     if !func.sig.params.is_empty() {
         panic!("ssa lower_const_return only supports functions without params");
     }
 
     let ret_ty = type_map.type_table().get(func.body.ty).clone();
-    let (signed, bits) = match ret_ty {
-        Type::Int { signed, bits } => (signed, bits),
-        _ => panic!("ssa lower_const_return only supports integer returns"),
-    };
-
     let mut types = TypeTable::new();
-    let ret_id = types.add(TypeKind::Int { signed, bits });
     let bool_id = types.add(TypeKind::Bool);
+    let (ret_id, int_id, signed, bits) = match ret_ty {
+        Type::Int { signed, bits } => {
+            let int_id = types.add(TypeKind::Int { signed, bits });
+            (int_id, int_id, signed, bits)
+        }
+        Type::Bool => {
+            let signed = false;
+            let bits = 64;
+            let int_id = types.add(TypeKind::Int { signed, bits });
+            (bool_id, int_id, signed, bits)
+        }
+        _ => panic!("ssa lower_const_return only supports integer or bool returns"),
+    };
     let sig = FunctionSig {
         params: Vec::new(),
         ret: ret_id,
@@ -43,7 +51,7 @@ pub fn lower_const_return(func: &sem::FuncDef, type_map: &TypeMap) -> LoweredFun
         &mut builder,
         entry,
         &func.body,
-        ret_id,
+        int_id,
         bool_id,
         signed,
         bits,
@@ -61,6 +69,7 @@ pub fn lower_const_return(func: &sem::FuncDef, type_map: &TypeMap) -> LoweredFun
     }
 }
 
+/// Lowers a scalar-only expression subtree into SSA values.
 fn lower_scalar_expr(
     builder: &mut FunctionBuilder,
     block: BlockId,
@@ -74,6 +83,7 @@ fn lower_scalar_expr(
         sem::ValueExprKind::IntLit(value) => {
             builder.const_int(block, *value as i128, signed, bits, int_ty)
         }
+        sem::ValueExprKind::BoolLit(value) => builder.const_bool(block, *value, bool_ty),
         sem::ValueExprKind::Block { items, tail } if items.is_empty() => {
             let tail = tail
                 .as_ref()
@@ -105,6 +115,7 @@ fn lower_scalar_expr(
     }
 }
 
+/// Maps Machina binary ops to SSA arithmetic and bitwise ops.
 fn map_binop(op: BinaryOp) -> Option<BinOp> {
     match op {
         BinaryOp::Add => Some(BinOp::Add),
@@ -121,6 +132,7 @@ fn map_binop(op: BinaryOp) -> Option<BinOp> {
     }
 }
 
+/// Maps Machina comparison ops to SSA comparison ops.
 fn map_cmp(op: BinaryOp) -> Option<CmpOp> {
     match op {
         BinaryOp::Eq => Some(CmpOp::Eq),

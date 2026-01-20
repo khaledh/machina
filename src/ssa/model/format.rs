@@ -96,13 +96,7 @@ impl<'a> Formatter<'a> {
                 self.write_const(value);
             }
             InstKind::BinOp { op, lhs, rhs } => {
-                let _ = write!(
-                    &mut self.out,
-                    "{} %v{}, %v{}",
-                    op_name(op),
-                    lhs.0,
-                    rhs.0
-                );
+                let _ = write!(&mut self.out, "{} %v{}, %v{}", op_name(op), lhs.0, rhs.0);
             }
             InstKind::UnOp { op, value } => {
                 let _ = write!(&mut self.out, "{} %v{}", unop_name(op), value.0);

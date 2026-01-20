@@ -51,12 +51,14 @@ impl TypeTable {
         Self { types: Vec::new() }
     }
 
+    /// Adds an anonymous type definition to the table.
     pub fn add(&mut self, kind: TypeKind) -> TypeId {
         let id = TypeId(self.types.len() as u32);
         self.types.push(TypeInfo { kind, name: None });
         id
     }
 
+    /// Adds a named type definition to the table.
     pub fn add_named(&mut self, kind: TypeKind, name: String) -> TypeId {
         let id = TypeId(self.types.len() as u32);
         self.types.push(TypeInfo {

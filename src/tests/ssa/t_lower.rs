@@ -82,3 +82,21 @@ fn test_lower_unop_return() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_unop_not_return() {
+    let ctx = analyze("fn main() -> bool { !true }");
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_const_return(func_def, &ctx.type_map);
+    let text = format_function(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> bool {
+          bb0():
+            %v0: bool = const true
+            %v1: bool = not %v0
+            ret %v1
+        }
+    "};
+    assert_eq!(text, expected);
+}
