@@ -1601,5 +1601,5 @@ impl<'a> FuncCodegen<'a> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/t_arm64.rs"]
+#[path = "../../tests/targets/arm64/t_codegen.rs"]
 mod tests;

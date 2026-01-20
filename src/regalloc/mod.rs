@@ -93,5 +93,5 @@ impl AllocationResult {
 
 pub mod stack;
 #[cfg(test)]
-#[path = "../tests/t_regalloc.rs"]
+#[path = "../tests/regalloc/t_regalloc.rs"]
 mod tests;

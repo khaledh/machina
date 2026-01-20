@@ -46,9 +46,9 @@ pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<S
 }
 
 #[cfg(test)]
-#[path = "../tests/t_semck.rs"]
+#[path = "../tests/semck/t_semck.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "../tests/t_semck_movecheck.rs"]
+#[path = "../tests/semck/t_move_check.rs"]
 mod move_tests;

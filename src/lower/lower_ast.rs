@@ -388,5 +388,5 @@ pub fn lower_ast(
 }
 
 #[cfg(test)]
-#[path = "../tests/t_lower_ast.rs"]
+#[path = "../tests/lower/t_lower_ast.rs"]
 mod tests;

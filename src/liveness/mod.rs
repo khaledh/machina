@@ -354,5 +354,5 @@ fn format_live_set(set: &HashSet<LocalId>) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/t_liveness.rs"]
+#[path = "../tests/liveness/t_liveness.rs"]
 mod tests;

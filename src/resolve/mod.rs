@@ -11,5 +11,5 @@ pub use resolver::{SymbolResolver, resolve};
 pub use symbols::SymbolKind;
 
 #[cfg(test)]
-#[path = "../tests/t_resolve.rs"]
+#[path = "../tests/resolve/t_resolve.rs"]
 mod tests;

@@ -15,5 +15,5 @@ pub fn run(ctx: LivenessContext) -> OptimizedMcirContext {
 }
 
 #[cfg(test)]
-#[path = "../../tests/t_opt_dataflow.rs"]
+#[path = "../../tests/opt/dataflow/t_dataflow.rs"]
 mod tests;
