@@ -5,8 +5,8 @@ use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
-use crate::ssa::lower::lower_const_return;
-use crate::ssa::model::format::format_function;
+use crate::ssa::lower::lower_func;
+use crate::ssa::model::format::formact_func;
 use crate::typeck::type_check;
 use indoc::indoc;
 
@@ -33,8 +33,8 @@ fn analyze(source: &str) -> crate::context::SemanticContext {
 fn test_lower_const_return() {
     let ctx = analyze("fn main() -> u64 { 42 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_const_return(func_def, &ctx.type_map);
-    let text = format_function(&lowered.func, &lowered.types);
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -50,8 +50,8 @@ fn test_lower_const_return() {
 fn test_lower_binop_return() {
     let ctx = analyze("fn main() -> u64 { 1 + 2 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_const_return(func_def, &ctx.type_map);
-    let text = format_function(&lowered.func, &lowered.types);
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -69,8 +69,8 @@ fn test_lower_binop_return() {
 fn test_lower_unop_return() {
     let ctx = analyze("fn main() -> u64 { ~1 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_const_return(func_def, &ctx.type_map);
-    let text = format_function(&lowered.func, &lowered.types);
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -87,8 +87,8 @@ fn test_lower_unop_return() {
 fn test_lower_unop_not_return() {
     let ctx = analyze("fn main() -> bool { !true }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_const_return(func_def, &ctx.type_map);
-    let text = format_function(&lowered.func, &lowered.types);
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> bool {
@@ -96,6 +96,83 @@ fn test_lower_unop_not_return() {
             %v0: bool = const true
             %v1: bool = not %v0
             ret %v1
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_cmp_return() {
+    let ctx = analyze("fn main() -> bool { 1 < 2 }");
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> bool {
+          bb0():
+            %v0: u64 = const 1:u64
+            %v1: u64 = const 2:u64
+            %v2: bool = cmp.lt %v0, %v1
+            ret %v2
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_if_return() {
+    let ctx = analyze("fn main() -> u64 { if true { 1 } else { 2 } }");
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v0: bool = const true
+            cbr %v0, bb1, bb2
+
+          bb1():
+            %v2: u64 = const 1:u64
+            br bb3(%v2)
+
+          bb2():
+            %v3: u64 = const 2:u64
+            br bb3(%v3)
+
+          bb3(%v1: u64):
+            ret %v1
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_if_cmp_return() {
+    let ctx = analyze("fn main() -> u64 { if 1 < 2 { 3 } else { 4 } }");
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.type_map);
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v0: u64 = const 1:u64
+            %v1: u64 = const 2:u64
+            %v2: bool = cmp.lt %v0, %v1
+            cbr %v2, bb1, bb2
+
+          bb1():
+            %v4: u64 = const 3:u64
+            br bb3(%v4)
+
+          bb2():
+            %v5: u64 = const 4:u64
+            br bb3(%v5)
+
+          bb3(%v3: u64):
+            ret %v3
         }
     "};
     assert_eq!(text, expected);

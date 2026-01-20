@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use super::ir::*;
 
-pub fn format_function(func: &Function, types: &TypeTable) -> String {
+pub fn formact_func(func: &Function, types: &TypeTable) -> String {
     let mut formatter = Formatter::new(types);
     formatter.write_function(func);
     formatter.finish()

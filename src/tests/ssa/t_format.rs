@@ -1,6 +1,6 @@
 use crate::resolve::DefId;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::format::format_function;
+use crate::ssa::model::format::formact_func;
 use crate::ssa::model::ir::{FunctionSig, Terminator, TypeKind, TypeTable};
 use indoc::indoc;
 
@@ -25,7 +25,7 @@ fn test_format_const_return() {
     builder.set_terminator(entry, Terminator::Return { value: Some(value) });
     let func = builder.finish();
 
-    let text = format_function(&func, &types);
+    let text = formact_func(&func, &types);
     let expected = indoc! {"
         fn const_42() -> u64 {
           bb0():
