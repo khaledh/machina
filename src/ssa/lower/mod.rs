@@ -27,6 +27,12 @@ pub struct LoweredFunction {
 
 type LinearValue = ValueId;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct LocalValue {
+    value: ValueId,
+    ty: TypeId,
+}
+
 struct BranchingValue {
     value: ValueId,
     block: BlockId,
@@ -82,7 +88,7 @@ impl<'a> LowerCtx<'a> {
 struct FuncLowerer<'a> {
     ctx: LowerCtx<'a>,
     builder: FunctionBuilder,
-    locals: HashMap<DefId, ValueId>,
+    locals: HashMap<DefId, LocalValue>,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -117,6 +123,12 @@ impl<'a> FuncLowerer<'a> {
             sem::ValueExprKind::Block { items, tail } => {
                 let mut cur_block = block;
                 for item in items {
+                    if let sem::BlockItem::Stmt(stmt) = item {
+                        if let sem::StmtExprKind::While { cond, body } = &stmt.kind {
+                            cur_block = self.lower_while_stmt(cur_block, cond, body)?;
+                            continue;
+                        }
+                    }
                     // Linearize block items so we can guarantee straight-line lowering.
                     let item = linearize_block_item(item)?;
                     match item {
@@ -238,7 +250,7 @@ impl<'a> FuncLowerer<'a> {
                 .builder
                 .const_unit(block, self.ctx.ssa_type_for_type_id(expr.ty))),
 
-                sem::LinearExprKind::IntLit(value) => {
+            sem::LinearExprKind::IntLit(value) => {
                 let ty = self.ctx.ssa_type_for_type_id(expr.ty);
                 let (signed, bits) = self.ctx.int_info_for_type_id(expr.ty);
                 Ok(self
@@ -280,7 +292,7 @@ impl<'a> FuncLowerer<'a> {
             }
 
             sem::LinearExprKind::Load { place } => match &place.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id)),
+                sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id).value),
                 _ => Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)),
             },
 
@@ -309,17 +321,21 @@ impl<'a> FuncLowerer<'a> {
         match &stmt.kind {
             sem::LinearStmtKind::LetBind { pattern, value, .. }
             | sem::LinearStmtKind::VarBind { pattern, value, .. } => {
-                let value = self.lower_linear_expr(block, value)?;
-                self.bind_pattern(pattern, value)?;
+                let value_expr = value;
+                let value = self.lower_linear_expr(block, value_expr)?;
+                let ty = self.ctx.ssa_type_for_type_id(value_expr.ty);
+                self.bind_pattern(pattern, LocalValue { value, ty })?;
                 Ok(block)
             }
 
             sem::LinearStmtKind::Assign { assignee, value } => {
-                let value = self.lower_linear_expr(block, value)?;
+                let value_expr = value;
+                let value = self.lower_linear_expr(block, value_expr)?;
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         // Assignments currently model locals as SSA values.
-                        self.locals.insert(*def_id, value);
+                        let ty = self.ctx.ssa_type_for_type_id(value_expr.ty);
+                        self.locals.insert(*def_id, LocalValue { value, ty });
                         Ok(block)
                     }
                     _ => Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)),
@@ -332,10 +348,73 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    fn lower_while_stmt(
+        &mut self,
+        block: BlockId,
+        cond: &sem::ValueExpr,
+        body: &sem::ValueExpr,
+    ) -> Result<BlockId, sem::LinearizeError> {
+        let locals_snapshot = self.ordered_locals();
+        let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
+        let tys: Vec<TypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
+        let args: Vec<ValueId> = locals_snapshot
+            .iter()
+            .map(|(_, local)| local.value)
+            .collect();
+
+        let header_bb = self.builder.add_block();
+        let body_bb = self.builder.add_block();
+        let exit_bb = self.builder.add_block();
+        let header_params: Vec<ValueId> = tys
+            .iter()
+            .map(|ty| self.builder.add_block_param(header_bb, *ty))
+            .collect();
+        let exit_params: Vec<ValueId> = tys
+            .iter()
+            .map(|ty| self.builder.add_block_param(exit_bb, *ty))
+            .collect();
+
+        self.builder.set_terminator(
+            block,
+            Terminator::Br {
+                target: header_bb,
+                args,
+            },
+        );
+
+        self.set_locals_from_params(&defs, &tys, &header_params);
+        let cond_value = self.lower_linear_expr_value(header_bb, cond)?;
+        let exit_args = self.locals_args(&defs, cond.span)?;
+
+        self.builder.set_terminator(
+            header_bb,
+            Terminator::CondBr {
+                cond: cond_value,
+                then_bb: body_bb,
+                then_args: Vec::new(),
+                else_bb: exit_bb,
+                else_args: exit_args,
+            },
+        );
+
+        let _body_value = self.lower_branching_expr(body_bb, body)?;
+        let loop_args = self.locals_args(&defs, body.span)?;
+        self.builder.set_terminator(
+            body_bb,
+            Terminator::Br {
+                target: header_bb,
+                args: loop_args,
+            },
+        );
+
+        self.set_locals_from_params(&defs, &tys, &exit_params);
+        Ok(exit_bb)
+    }
+
     fn bind_pattern(
         &mut self,
         pattern: &sem::BindPattern,
-        value: ValueId,
+        value: LocalValue,
     ) -> Result<(), sem::LinearizeError> {
         match &pattern.kind {
             sem::BindPatternKind::Name { def_id, .. } => {
@@ -364,7 +443,44 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn lookup_local(&self, def_id: DefId) -> ValueId {
+    fn ordered_locals(&self) -> Vec<(DefId, LocalValue)> {
+        let mut locals: Vec<_> = self
+            .locals
+            .iter()
+            .map(|(def, local)| (*def, *local))
+            .collect();
+        locals.sort_by_key(|(def, _)| def.0);
+        locals
+    }
+
+    fn locals_args(&self, defs: &[DefId], span: Span) -> Result<Vec<ValueId>, sem::LinearizeError> {
+        if self.locals.len() != defs.len() {
+            return Err(self.err_span(span, sem::LinearizeErrorKind::UnsupportedExpr));
+        }
+        let mut args = Vec::with_capacity(defs.len());
+        for def in defs {
+            let Some(local) = self.locals.get(def) else {
+                return Err(self.err_span(span, sem::LinearizeErrorKind::UnsupportedExpr));
+            };
+            args.push(local.value);
+        }
+        Ok(args)
+    }
+
+    fn set_locals_from_params(&mut self, defs: &[DefId], tys: &[TypeId], params: &[ValueId]) {
+        self.locals.clear();
+        for ((def, ty), value) in defs.iter().zip(tys.iter()).zip(params.iter()) {
+            self.locals.insert(
+                *def,
+                LocalValue {
+                    value: *value,
+                    ty: *ty,
+                },
+            );
+        }
+    }
+
+    fn lookup_local(&self, def_id: DefId) -> LocalValue {
         *self
             .locals
             .get(&def_id)

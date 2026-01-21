@@ -31,7 +31,11 @@ fn analyze(source: &str) -> crate::context::SemanticContext {
 
 #[test]
 fn test_lower_const_return() {
-    let ctx = analyze("fn main() -> u64 { 42 }");
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            42
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -48,7 +52,11 @@ fn test_lower_const_return() {
 
 #[test]
 fn test_lower_binop_return() {
-    let ctx = analyze("fn main() -> u64 { 1 + 2 }");
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            1 + 2
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -67,7 +75,11 @@ fn test_lower_binop_return() {
 
 #[test]
 fn test_lower_unop_return() {
-    let ctx = analyze("fn main() -> u64 { ~1 }");
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            ~1
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -85,7 +97,11 @@ fn test_lower_unop_return() {
 
 #[test]
 fn test_lower_unop_not_return() {
-    let ctx = analyze("fn main() -> bool { !true }");
+    let ctx = analyze(indoc! {"
+        fn main() -> bool {
+            !true
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -103,7 +119,11 @@ fn test_lower_unop_not_return() {
 
 #[test]
 fn test_lower_cmp_return() {
-    let ctx = analyze("fn main() -> bool { 1 < 2 }");
+    let ctx = analyze(indoc! {"
+        fn main() -> bool {
+            1 < 2
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -122,7 +142,15 @@ fn test_lower_cmp_return() {
 
 #[test]
 fn test_lower_if_return() {
-    let ctx = analyze("fn main() -> u64 { if true { 1 } else { 2 } }");
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            if true {
+                1
+            } else {
+                2
+            }
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -150,7 +178,15 @@ fn test_lower_if_return() {
 
 #[test]
 fn test_lower_if_cmp_return() {
-    let ctx = analyze("fn main() -> u64 { if 1 < 2 { 3 } else { 4 } }");
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            if 1 < 2 {
+                3
+            } else {
+                4
+            }
+        }
+    "});
     let func_def = ctx.module.func_defs()[0];
     let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
@@ -173,6 +209,45 @@ fn test_lower_if_cmp_return() {
 
           bb3(%v3: u64):
             ret %v3
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_while_stmt() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            var i = 0;
+            while i < 2 {
+                i = i + 1;
+            }
+            i
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v0: u64 = const 0:u64
+            br bb1(%v0)
+
+          bb1(%v1: u64):
+            %v3: u64 = const 2:u64
+            %v4: bool = cmp.lt %v1, %v3
+            cbr %v4, bb2, bb3(%v1)
+
+          bb2():
+            %v5: u64 = const 1:u64
+            %v6: u64 = add %v1, %v5
+            %v7: () = const ()
+            br bb1(%v6)
+
+          bb3(%v2: u64):
+            ret %v2
         }
     "};
     assert_eq!(text, expected);
