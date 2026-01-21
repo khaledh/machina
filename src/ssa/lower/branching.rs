@@ -87,16 +87,7 @@ impl<'a> FuncLowerer<'a> {
                 // Build the control-flow skeleton and join parameters up front.
                 let then_bb = self.builder.add_block();
                 let else_bb = self.builder.add_block();
-                let join_bb = self.builder.add_block();
-                let join_ty = self.ctx.ssa_type_for_expr(expr);
-                let join_value = self.builder.add_block_param(join_bb, join_ty);
-                let locals_snapshot = self.ordered_locals();
-                let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
-                let tys: Vec<TypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
-                let join_local_params: Vec<ValueId> = tys
-                    .iter()
-                    .map(|ty| self.builder.add_block_param(join_bb, *ty))
-                    .collect();
+                let join_plan = self.build_join_plan(expr);
 
                 self.builder.set_terminator(
                     block,
@@ -115,17 +106,7 @@ impl<'a> FuncLowerer<'a> {
                 match self.lower_branching_expr(then_bb, then_body)? {
                     BranchResult::Value(value) => {
                         then_value = Some(value.value);
-                        let local_args = self.locals_args(&defs, expr.span)?;
-                        let mut args = Vec::with_capacity(1 + local_args.len());
-                        args.push(value.value);
-                        args.extend(local_args);
-                        self.builder.set_terminator(
-                            then_bb,
-                            Terminator::Br {
-                                target: join_bb,
-                                args,
-                            },
-                        );
+                        self.emit_join_branch(then_bb, &join_plan, value.value, expr.span)?;
                     }
                     BranchResult::Return => {
                         self.locals = saved_locals.clone();
@@ -138,17 +119,7 @@ impl<'a> FuncLowerer<'a> {
                 match self.lower_branching_expr(else_bb, else_body)? {
                     BranchResult::Value(value) => {
                         else_value = Some(value.value);
-                        let local_args = self.locals_args(&defs, expr.span)?;
-                        let mut args = Vec::with_capacity(1 + local_args.len());
-                        args.push(value.value);
-                        args.extend(local_args);
-                        self.builder.set_terminator(
-                            else_bb,
-                            Terminator::Br {
-                                target: join_bb,
-                                args,
-                            },
-                        );
+                        self.emit_join_branch(else_bb, &join_plan, value.value, expr.span)?;
                     }
                     BranchResult::Return => {
                         self.locals = saved_locals;
@@ -161,10 +132,14 @@ impl<'a> FuncLowerer<'a> {
                 }
 
                 // Install the join locals so subsequent lowering sees merged values.
-                self.set_locals_from_params(&defs, &tys, &join_local_params);
+                self.set_locals_from_params(
+                    &join_plan.defs,
+                    &join_plan.tys,
+                    &join_plan.join_local_params,
+                );
                 Ok(BranchResult::Value(BranchingValue {
-                    value: join_value,
-                    block: join_bb,
+                    value: join_plan.join_value,
+                    block: join_plan.join_bb,
                 }))
             }
             _ => {

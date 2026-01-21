@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::ssa::model::ir::{TypeId, TypeKind, TypeTable};
+use crate::ssa::model::ir::{self, TypeId, TypeKind, TypeTable};
 use crate::tree::{NodeId, semantic as sem};
 use crate::typeck::type_map::TypeMap;
 use crate::types::{Type, TypeId as TcTypeId};
@@ -64,15 +64,15 @@ impl<'a> LowerCtx<'a> {
                     bits: 32,
                 });
                 let fields = vec![
-                    crate::ssa::model::ir::StructField {
+                    ir::StructField {
                         name: "ptr".to_string(),
                         ty: ptr,
                     },
-                    crate::ssa::model::ir::StructField {
+                    ir::StructField {
                         name: "len".to_string(),
                         ty: u32,
                     },
-                    crate::ssa::model::ir::StructField {
+                    ir::StructField {
                         name: "cap".to_string(),
                         ty: u32,
                     },
@@ -95,7 +95,7 @@ impl<'a> LowerCtx<'a> {
             Type::Struct { name, fields } => {
                 let fields = fields
                     .iter()
-                    .map(|field| crate::ssa::model::ir::StructField {
+                    .map(|field| ir::StructField {
                         name: field.name.clone(),
                         ty: self.ssa_type_for_type(&field.ty),
                     })

@@ -3,7 +3,7 @@
 use crate::ssa::lower::linearize::linearize_expr;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, LocalValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
-use crate::ssa::model::ir::{BlockId, Callee, Terminator, UnOp};
+use crate::ssa::model::ir::{BlockId, Callee, Terminator, UnOp, ValueId};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 
@@ -87,33 +87,35 @@ impl<'a> FuncLowerer<'a> {
                 sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id).value),
                 _ => Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)),
             },
-            sem::LinearExprKind::Call { callee, args } => {
-                // Resolve the callee to a direct target or reject unsupported forms.
-                let callee = match &callee.kind {
-                    sem::LinearExprKind::Load { place } => match &place.kind {
-                        sem::PlaceExprKind::Var { def_id, .. } => Callee::Direct(*def_id),
-                        _ => {
-                            return Err(
-                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
-                            );
-                        }
-                    },
-                    sem::LinearExprKind::ClosureRef { def_id } => Callee::Direct(*def_id),
-                    _ => {
+            sem::LinearExprKind::Call { callee: _, args } => {
+                let call_plan = self.ctx.call_plan_for(expr.id).ok_or_else(|| {
+                    self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                })?;
+
+                if call_plan.has_receiver {
+                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                }
+
+                // Resolve the callee using the call plan (direct calls only for now).
+                let callee = match &call_plan.target {
+                    sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
+                    sem::CallTarget::Indirect | sem::CallTarget::Intrinsic(_) => {
                         return Err(
                             self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
                         );
                     }
                 };
 
-                // Lower arguments in order, then emit the call instruction.
+                // Lower arguments in order and apply the call plan.
                 let mut arg_values = Vec::with_capacity(args.len());
                 for arg in args {
                     arg_values.push(self.lower_linear_expr(block, arg)?);
                 }
 
+                let call_args =
+                    self.lower_call_args_from_plan(expr, &call_plan, None, &arg_values)?;
                 let ty = self.ctx.ssa_type_for_type_id(expr.ty);
-                Ok(self.builder.call(block, callee, arg_values, ty))
+                Ok(self.builder.call(block, callee, call_args, ty))
             }
             sem::LinearExprKind::MethodCall { receiver, args, .. } => {
                 let call_plan = self.ctx.call_plan_for(expr.id).ok_or_else(|| {
@@ -151,29 +153,12 @@ impl<'a> FuncLowerer<'a> {
                     arg_values.push(self.lower_linear_expr(block, arg)?);
                 }
 
-                // Apply the call plan so we only emit supported argument lowering forms.
-                let mut call_args = Vec::with_capacity(call_plan.args.len());
-                for lowering in &call_plan.args {
-                    match lowering {
-                        sem::ArgLowering::Direct(input) => {
-                            let value = match input {
-                                sem::CallInput::Receiver => receiver_value,
-                                sem::CallInput::Arg(index) => {
-                                    *arg_values.get(*index).unwrap_or_else(|| {
-                                        panic!("ssa method call arg index out of range: {index}")
-                                    })
-                                }
-                            };
-                            call_args.push(value);
-                        }
-                        sem::ArgLowering::PtrLen { .. } => {
-                            return Err(
-                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
-                            );
-                        }
-                    }
-                }
-
+                let call_args = self.lower_call_args_from_plan(
+                    expr,
+                    &call_plan,
+                    Some(receiver_value),
+                    &arg_values,
+                )?;
                 let ty = self.ctx.ssa_type_for_type_id(expr.ty);
                 Ok(self.builder.call(block, callee, call_args, ty))
             }
@@ -249,5 +234,38 @@ impl<'a> FuncLowerer<'a> {
                 span: pattern.span,
             }),
         }
+    }
+
+    fn lower_call_args_from_plan(
+        &self,
+        expr: &sem::LinearExpr,
+        call_plan: &sem::CallPlan,
+        receiver_value: Option<ValueId>,
+        arg_values: &[ValueId],
+    ) -> Result<Vec<ValueId>, sem::LinearizeError> {
+        if call_plan.has_receiver != receiver_value.is_some() {
+            return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+        }
+
+        let mut call_args = Vec::with_capacity(call_plan.args.len());
+        for lowering in &call_plan.args {
+            match lowering {
+                sem::ArgLowering::Direct(input) => {
+                    let value = match input {
+                        sem::CallInput::Receiver => receiver_value.unwrap_or_else(|| {
+                            panic!("ssa call plan missing receiver value for {:?}", expr.id)
+                        }),
+                        sem::CallInput::Arg(index) => *arg_values
+                            .get(*index)
+                            .unwrap_or_else(|| panic!("ssa call arg index out of range: {index}")),
+                    };
+                    call_args.push(value);
+                }
+                sem::ArgLowering::PtrLen { .. } => {
+                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                }
+            }
+        }
+        Ok(call_args)
     }
 }
