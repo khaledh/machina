@@ -5,8 +5,14 @@
 
 use crate::tree::semantic as sem;
 
+/// Converts a semantic expression to a linear (single-block) form.
+///
+/// Linear expressions can be lowered within a single basic block without
+/// introducing control flow. Returns an error for expressions that require
+/// branching (if/else, match, loops) or are not yet supported.
 pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::LinearizeError> {
     match &expr.kind {
+        // Block: recursively linearize items and tail expression.
         sem::ValueExprKind::Block { items, tail } => {
             let mut linear_items = Vec::with_capacity(items.len());
             for item in items {
@@ -26,6 +32,8 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
                 span: expr.span,
             })
         }
+
+        // Literals: trivially linear.
         sem::ValueExprKind::UnitLit => Ok(wrap_simple(expr, sem::LinearExprKind::UnitLit)),
         sem::ValueExprKind::IntLit(value) => {
             Ok(wrap_simple(expr, sem::LinearExprKind::IntLit(*value)))
@@ -36,6 +44,8 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
         sem::ValueExprKind::CharLit(value) => {
             Ok(wrap_simple(expr, sem::LinearExprKind::CharLit(*value)))
         }
+
+        // Operators: linear if operands are linear.
         sem::ValueExprKind::UnaryOp { op, expr } => {
             let value_expr = linearize_expr(expr)?;
             Ok(sem::LinearExpr {
@@ -62,6 +72,8 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
                 span: expr.span,
             })
         }
+
+        // Load from a place (variable read).
         sem::ValueExprKind::Load { place } => Ok(sem::LinearExpr {
             id: expr.id,
             kind: sem::LinearExprKind::Load {
@@ -70,8 +82,10 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
             ty: expr.ty,
             span: expr.span,
         }),
+
+        // Function call: linear if callee and all arguments are linear.
+        // Only `in` and `sink` argument modes are supported.
         sem::ValueExprKind::Call { callee, args } => {
-            // Calls stay linear as long as the callee and args are linear.
             let callee = Box::new(linearize_expr(callee)?);
             let mut linear_args = Vec::with_capacity(args.len());
             for arg in args {
@@ -97,12 +111,13 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
                 span: expr.span,
             })
         }
+
+        // Method call: linear if receiver and arguments are linear.
         sem::ValueExprKind::MethodCall {
             receiver,
             method_name,
             args,
         } => {
-            // Method calls stay linear for now when the receiver and args are linear.
             let receiver = linearize_method_receiver(receiver)?;
             let mut linear_args = Vec::with_capacity(args.len());
             for arg in args {
@@ -129,18 +144,24 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
                 span: expr.span,
             })
         }
+
+        // Closure reference: trivially linear.
         sem::ValueExprKind::ClosureRef { def_id } => Ok(sem::LinearExpr {
             id: expr.id,
             kind: sem::LinearExprKind::ClosureRef { def_id: *def_id },
             ty: expr.ty,
             span: expr.span,
         }),
+
+        // Unsupported expressions (not yet implemented).
         sem::ValueExprKind::HeapAlloc { .. }
         | sem::ValueExprKind::Coerce { .. }
         | sem::ValueExprKind::Len { .. } => Err(sem::LinearizeError {
             kind: sem::LinearizeErrorKind::UnsupportedExpr,
             span: expr.span,
         }),
+
+        // Branching expressions: require multi-block lowering.
         sem::ValueExprKind::If { .. }
         | sem::ValueExprKind::Match { .. }
         | sem::ValueExprKind::Range { .. }
@@ -170,8 +191,13 @@ pub fn linearize_block_item(
     }
 }
 
+/// Converts a semantic statement to linear form.
+///
+/// Bindings and assignments are linear if their value expressions are linear.
+/// Loop control statements (while, for, break, continue) require branching.
 pub fn linearize_stmt(stmt: &sem::StmtExpr) -> Result<sem::LinearStmt, sem::LinearizeError> {
     let kind = match &stmt.kind {
+        // Let/var bindings: linearize the initializer expression.
         sem::StmtExprKind::LetBind {
             pattern,
             decl_ty,
@@ -190,6 +216,8 @@ pub fn linearize_stmt(stmt: &sem::StmtExpr) -> Result<sem::LinearStmt, sem::Line
             decl_ty: decl_ty.clone(),
             value: Box::new(linearize_expr(value)?),
         },
+
+        // Variable declaration without initializer.
         sem::StmtExprKind::VarDecl {
             ident,
             def_id,
@@ -199,18 +227,24 @@ pub fn linearize_stmt(stmt: &sem::StmtExpr) -> Result<sem::LinearStmt, sem::Line
             def_id: *def_id,
             decl_ty: decl_ty.clone(),
         },
+
+        // Assignment: linearize the value expression.
         sem::StmtExprKind::Assign {
             assignee, value, ..
         } => sem::LinearStmtKind::Assign {
             assignee: assignee.clone(),
             value: Box::new(linearize_expr(value)?),
         },
+
+        // Return: linearize the optional return value.
         sem::StmtExprKind::Return { value } => sem::LinearStmtKind::Return {
             value: match value {
                 Some(value) => Some(Box::new(linearize_expr(value)?)),
                 None => None,
             },
         },
+
+        // Loop control statements require branching.
         sem::StmtExprKind::While { .. }
         | sem::StmtExprKind::For { .. }
         | sem::StmtExprKind::Break
@@ -229,6 +263,7 @@ pub fn linearize_stmt(stmt: &sem::StmtExpr) -> Result<sem::LinearStmt, sem::Line
     })
 }
 
+/// Wraps a simple expression kind into a LinearExpr, preserving metadata.
 fn wrap_simple(expr: &sem::ValueExpr, kind: sem::LinearExprKind) -> sem::LinearExpr {
     sem::LinearExpr {
         id: expr.id,
@@ -238,6 +273,7 @@ fn wrap_simple(expr: &sem::ValueExpr, kind: sem::LinearExprKind) -> sem::LinearE
     }
 }
 
+/// Linearizes a method receiver. Only value receivers are supported.
 fn linearize_method_receiver(
     receiver: &sem::MethodReceiver,
 ) -> Result<sem::LinearMethodReceiver, sem::LinearizeError> {
@@ -246,6 +282,7 @@ fn linearize_method_receiver(
             let value = linearize_expr(expr)?;
             Ok(sem::LinearMethodReceiver::Value(Box::new(value)))
         }
+        // Place receivers (e.g., &self, &mut self) not yet supported.
         sem::MethodReceiver::PlaceExpr(place) => Err(sem::LinearizeError {
             kind: sem::LinearizeErrorKind::UnsupportedExpr,
             span: place.span,

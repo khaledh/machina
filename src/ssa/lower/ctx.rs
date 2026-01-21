@@ -7,6 +7,12 @@ use crate::tree::{NodeId, semantic as sem};
 use crate::typeck::type_map::TypeMap;
 use crate::types::{Type, TypeId as TcTypeId};
 
+/// Lowering context that manages type conversion and caching.
+///
+/// Converts type-checker types into SSA IR types, caching results to avoid
+/// redundant allocations. Maintains two caches:
+/// - `type_cache`: Maps type-checker type IDs to SSA type IDs
+/// - `type_cache_by_kind`: Maps type structures to SSA type IDs (for structural dedup)
 pub(super) struct LowerCtx<'a> {
     type_map: &'a TypeMap,
     pub(super) types: TypeTable,
@@ -28,32 +34,43 @@ impl<'a> LowerCtx<'a> {
         self.ssa_type_for_type_id(expr.ty)
     }
 
+    /// Converts a type-checker type ID to an SSA type ID, caching the result.
     pub(super) fn ssa_type_for_type_id(&mut self, ty_id: TcTypeId) -> TypeId {
+        // Check cache first to avoid redundant type creation.
         if let Some(id) = self.type_cache.get(&ty_id) {
             return *id;
         }
 
+        // Look up the type structure and convert it.
         let ty = self.type_map.type_table().get(ty_id);
         let id = self.ssa_type_for_type(ty);
 
+        // Cache the mapping for future lookups.
         self.type_cache.insert(ty_id, id);
         id
     }
 
+    /// Converts a type-checker Type to an SSA TypeId.
+    ///
+    /// Handles primitive types directly, and recursively converts compound types
+    /// (tuples, arrays, structs). Pointer types (Heap, Ref) become SSA Ptr types.
     pub(super) fn ssa_type_for_type(&mut self, ty: &Type) -> TypeId {
+        // Check structural cache to deduplicate identical type structures.
         if let Some(id) = self.type_cache_by_kind.get(ty) {
             return *id;
         }
 
         let id = match ty {
+            // Primitive types map directly to their SSA equivalents.
             Type::Unit => self.types.add(TypeKind::Unit),
             Type::Bool => self.types.add(TypeKind::Bool),
             Type::Int { signed, bits } => self.types.add(TypeKind::Int {
                 signed: *signed,
                 bits: *bits,
             }),
+
+            // String is lowered as a struct with pointer, length, and capacity.
             Type::String => {
-                // Model string as a named struct for now (ptr + len + cap).
                 let byte = self.ssa_type_for_type(&Type::Int {
                     signed: false,
                     bits: 8,
@@ -80,6 +97,8 @@ impl<'a> LowerCtx<'a> {
                 self.types
                     .add_named(TypeKind::Struct { fields }, "string".to_string())
             }
+
+            // Compound types: recursively convert element/field types.
             Type::Tuple { field_tys } => {
                 let fields = field_tys
                     .iter()
@@ -103,6 +122,8 @@ impl<'a> LowerCtx<'a> {
                 self.types
                     .add_named(TypeKind::Struct { fields }, name.clone())
             }
+
+            // Pointer-like types (heap allocations, references) become SSA pointers.
             Type::Heap { elem_ty }
             | Type::Ref {
                 elem_ty,
@@ -114,6 +135,7 @@ impl<'a> LowerCtx<'a> {
             other => panic!("ssa lower_func unsupported type {:?}", other),
         };
 
+        // Cache the result for structural deduplication.
         self.type_cache_by_kind.insert(ty.clone(), id);
         id
     }
