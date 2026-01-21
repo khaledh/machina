@@ -346,6 +346,11 @@ impl<'a> Elaborator<'a> {
     }
 
     fn make_block_expr(&mut self, items: Vec<sem::BlockItem>, span: Span) -> sem::ValueExpr {
+        for item in &items {
+            if let sem::BlockItem::Expr(expr) = item {
+                self.record_block_expr_plan(expr);
+            }
+        }
         self.make_value_expr(
             sem::ValueExprKind::Block { items, tail: None },
             Type::Unit,

@@ -26,10 +26,18 @@ impl<'a> Elaborator<'a> {
                     pattern,
                     iter,
                     body,
-                } => sem::BlockItem::Expr(self.elab_for_expr(stmt, pattern, iter, body)),
+                } => {
+                    let expr = self.elab_for_expr(stmt, pattern, iter, body);
+                    self.record_block_expr_plan(&expr);
+                    sem::BlockItem::Expr(expr)
+                }
                 _ => sem::BlockItem::Stmt(self.elab_stmt_expr(stmt)),
             },
-            norm::BlockItem::Expr(expr) => sem::BlockItem::Expr(self.elab_value(expr)),
+            norm::BlockItem::Expr(expr) => {
+                let expr = self.elab_value(expr);
+                self.record_block_expr_plan(&expr);
+                sem::BlockItem::Expr(expr)
+            }
         }
     }
 

@@ -26,12 +26,13 @@ pub fn lower_func(
     func: &sem::FuncDef,
     def_table: &DefTable,
     type_map: &TypeMap,
+    block_expr_plans: &sem::BlockExprPlanMap,
 ) -> Result<LoweredFunction, sem::LinearizeError> {
     if !func.sig.params.is_empty() {
         panic!("ssa lower_func only supports functions without params");
     }
 
-    let mut lowerer = FuncLowerer::new(func, def_table, type_map);
+    let mut lowerer = FuncLowerer::new(func, def_table, type_map, block_expr_plans);
     let entry = lowerer.builder.add_block();
     let result = lowerer.lower_branching_expr(entry, &func.body)?;
     if let BranchResult::Value(result) = result {

@@ -30,6 +30,7 @@
 use crate::context::{SemanticCheckedContext, SemanticContext};
 use crate::tree::semantic as sem;
 mod bind_pattern;
+mod block_expr_plan;
 mod calls;
 mod closure;
 mod elaborator;
@@ -71,6 +72,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     );
 
     let module = elaborator.elaborate_module(&module);
+    let block_expr_plans = std::mem::take(&mut elaborator.block_expr_plans);
 
     // Generate method names for lifted closures and add them to the symbol table
     let mut symbols = symbols;
@@ -101,6 +103,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         module,
         def_table,
         type_map,
+        block_expr_plans,
         symbols,
         node_id_gen,
     }

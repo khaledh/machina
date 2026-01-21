@@ -8,6 +8,7 @@ use crate::ssa::lower::LoweredFunction;
 use crate::ssa::lower::ctx::LowerCtx;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{BlockId, FunctionSig, TypeId, ValueId};
+use crate::tree::NodeId;
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
 use crate::types::Type;
@@ -39,10 +40,16 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) ctx: LowerCtx<'a>,
     pub(super) builder: FunctionBuilder,
     pub(super) locals: HashMap<DefId, LocalValue>,
+    pub(super) block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
 }
 
 impl<'a> FuncLowerer<'a> {
-    pub(super) fn new(func: &sem::FuncDef, def_table: &DefTable, type_map: &'a TypeMap) -> Self {
+    pub(super) fn new(
+        func: &sem::FuncDef,
+        def_table: &DefTable,
+        type_map: &'a TypeMap,
+        block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
+    ) -> Self {
         let mut ctx = LowerCtx::new(type_map);
         let def = def_table
             .lookup_def(func.def_id)
@@ -64,6 +71,7 @@ impl<'a> FuncLowerer<'a> {
             ctx,
             builder,
             locals: HashMap::new(),
+            block_expr_plans,
         }
     }
 
@@ -89,9 +97,6 @@ impl<'a> FuncLowerer<'a> {
         defs: &[DefId],
         span: Span,
     ) -> Result<Vec<ValueId>, sem::LinearizeError> {
-        if self.locals.len() != defs.len() {
-            return Err(self.err_span(span, sem::LinearizeErrorKind::UnsupportedExpr));
-        }
         let mut args = Vec::with_capacity(defs.len());
         for def in defs {
             let Some(local) = self.locals.get(def) else {

@@ -1,7 +1,7 @@
 //! Branching (multi-block) lowering routines.
 
 use crate::resolve::DefId;
-use crate::ssa::lower::linearize::{linearize_block_item, linearize_expr};
+use crate::ssa::lower::linearize::{linearize_expr, linearize_stmt};
 use crate::ssa::lower::lowerer::{BranchResult, BranchingValue, FuncLowerer, StmtOutcome};
 use crate::ssa::model::ir::{BlockId, Terminator, TypeId, ValueId};
 use crate::tree::semantic as sem;
@@ -22,10 +22,9 @@ impl<'a> FuncLowerer<'a> {
                             continue;
                         }
                     }
-                    // Linearize block items so we can guarantee straight-line lowering.
-                    let item = linearize_block_item(item)?;
                     match item {
-                        sem::LinearBlockItem::Stmt(stmt) => {
+                        sem::BlockItem::Stmt(stmt) => {
+                            let stmt = linearize_stmt(stmt)?;
                             match self.lower_linear_stmt(cur_block, &stmt)? {
                                 StmtOutcome::Continue(next_block) => {
                                     cur_block = next_block;
@@ -35,9 +34,33 @@ impl<'a> FuncLowerer<'a> {
                                 }
                             }
                         }
-                        sem::LinearBlockItem::Expr(expr) => {
-                            // Drop the value; we only care about side effects in statements.
-                            let _ = self.lower_linear_expr(cur_block, &expr)?;
+                        sem::BlockItem::Expr(expr) => {
+                            let plan = self.block_expr_plans.get(&expr.id).unwrap_or_else(|| {
+                                panic!("ssa lower_func missing block expr plan {:?}", expr.id)
+                            });
+                            match plan {
+                                sem::BlockExprPlan::Linear => {
+                                    let linear = linearize_expr(expr).unwrap_or_else(|err| {
+                                        panic!(
+                                            "ssa lower_func block expr plan mismatch {:?}: {:?}",
+                                            expr.id, err
+                                        )
+                                    });
+                                    // Drop the value; we only care about side effects in statements.
+                                    let _ = self.lower_linear_expr(cur_block, &linear)?;
+                                }
+                                sem::BlockExprPlan::Branching => {
+                                    let result = self.lower_branching_expr(cur_block, expr)?;
+                                    match result {
+                                        BranchResult::Value(value) => {
+                                            cur_block = value.block;
+                                        }
+                                        BranchResult::Return => {
+                                            return Ok(BranchResult::Return);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -64,6 +87,13 @@ impl<'a> FuncLowerer<'a> {
                 let join_bb = self.builder.add_block();
                 let join_ty = self.ctx.ssa_type_for_expr(expr);
                 let join_value = self.builder.add_block_param(join_bb, join_ty);
+                let locals_snapshot = self.ordered_locals();
+                let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
+                let tys: Vec<TypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
+                let join_local_params: Vec<ValueId> = tys
+                    .iter()
+                    .map(|ty| self.builder.add_block_param(join_bb, *ty))
+                    .collect();
 
                 self.builder.set_terminator(
                     block,
@@ -76,22 +106,20 @@ impl<'a> FuncLowerer<'a> {
                     },
                 );
 
-                // For now, require that locals don't change across branches.
                 let saved_locals = self.locals.clone();
                 let mut then_value = None;
                 match self.lower_branching_expr(then_bb, then_body)? {
                     BranchResult::Value(value) => {
-                        if self.locals != saved_locals {
-                            return Err(
-                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
-                            );
-                        }
                         then_value = Some(value.value);
+                        let local_args = self.locals_args(&defs, expr.span)?;
+                        let mut args = Vec::with_capacity(1 + local_args.len());
+                        args.push(value.value);
+                        args.extend(local_args);
                         self.builder.set_terminator(
                             then_bb,
                             Terminator::Br {
                                 target: join_bb,
-                                args: vec![value.value],
+                                args,
                             },
                         );
                     }
@@ -100,20 +128,20 @@ impl<'a> FuncLowerer<'a> {
                     }
                 }
 
+                self.locals = saved_locals.clone();
                 let mut else_value = None;
                 match self.lower_branching_expr(else_bb, else_body)? {
                     BranchResult::Value(value) => {
-                        if self.locals != saved_locals {
-                            return Err(
-                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
-                            );
-                        }
                         else_value = Some(value.value);
+                        let local_args = self.locals_args(&defs, expr.span)?;
+                        let mut args = Vec::with_capacity(1 + local_args.len());
+                        args.push(value.value);
+                        args.extend(local_args);
                         self.builder.set_terminator(
                             else_bb,
                             Terminator::Br {
                                 target: join_bb,
-                                args: vec![value.value],
+                                args,
                             },
                         );
                     }
@@ -126,6 +154,7 @@ impl<'a> FuncLowerer<'a> {
                     return Ok(BranchResult::Return);
                 }
 
+                self.set_locals_from_params(&defs, &tys, &join_local_params);
                 Ok(BranchResult::Value(BranchingValue {
                     value: join_value,
                     block: join_bb,

@@ -107,6 +107,7 @@ pub struct Elaborator<'a> {
     pub(super) closure_info: HashMap<DefId, ClosureInfo>,
     pub(super) closure_bindings: HashMap<DefId, DefId>,
     pub(super) closure_stack: Vec<ClosureContext>,
+    pub(super) block_expr_plans: HashMap<NodeId, sem::BlockExprPlan>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -134,6 +135,7 @@ impl<'a> Elaborator<'a> {
             closure_info: HashMap::new(),
             closure_bindings: HashMap::new(),
             closure_stack: Vec::new(),
+            block_expr_plans: HashMap::new(),
         }
     }
 
@@ -147,6 +149,7 @@ impl<'a> Elaborator<'a> {
         self.closure_info.clear();
         self.closure_bindings.clear();
         self.closure_stack.clear();
+        self.block_expr_plans.clear();
 
         let mut top_level_items: Vec<_> = module
             .top_level_items
