@@ -86,6 +86,19 @@ impl FunctionBuilder {
         result
     }
 
+    /// Emits a unit constant instruction in the given block.
+    pub fn const_unit(&mut self, block: BlockId, ty: TypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        let block = self.block_mut(block);
+        block.insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::Const {
+                value: ConstValue::Unit,
+            },
+        });
+        result
+    }
+
     /// Emits a boolean constant instruction in the given block.
     pub fn const_bool(&mut self, block: BlockId, value: bool, ty: TypeId) -> ValueId {
         let result = self.alloc_value(ty);

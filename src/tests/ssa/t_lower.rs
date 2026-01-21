@@ -33,7 +33,7 @@ fn analyze(source: &str) -> crate::context::SemanticContext {
 fn test_lower_const_return() {
     let ctx = analyze("fn main() -> u64 { 42 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -50,7 +50,7 @@ fn test_lower_const_return() {
 fn test_lower_binop_return() {
     let ctx = analyze("fn main() -> u64 { 1 + 2 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -69,7 +69,7 @@ fn test_lower_binop_return() {
 fn test_lower_unop_return() {
     let ctx = analyze("fn main() -> u64 { ~1 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -87,7 +87,7 @@ fn test_lower_unop_return() {
 fn test_lower_unop_not_return() {
     let ctx = analyze("fn main() -> bool { !true }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -105,7 +105,7 @@ fn test_lower_unop_not_return() {
 fn test_lower_cmp_return() {
     let ctx = analyze("fn main() -> bool { 1 < 2 }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -124,7 +124,7 @@ fn test_lower_cmp_return() {
 fn test_lower_if_return() {
     let ctx = analyze("fn main() -> u64 { if true { 1 } else { 2 } }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -152,7 +152,7 @@ fn test_lower_if_return() {
 fn test_lower_if_cmp_return() {
     let ctx = analyze("fn main() -> u64 { if 1 < 2 { 3 } else { 4 } }");
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.type_map);
+    let lowered = lower_func(func_def, &ctx.type_map).expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"

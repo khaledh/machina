@@ -5,6 +5,11 @@
 
 use std::collections::HashMap;
 
+use crate::diag::Span;
+mod linearize;
+
+use crate::resolve::DefId;
+use crate::ssa::lower::linearize::{linearize_block_item, linearize_expr};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{
     BinOp, BlockId, CmpOp, Function, FunctionSig, Terminator, TypeId, TypeKind, TypeTable, UnOp,
@@ -20,7 +25,9 @@ pub struct LoweredFunction {
     pub types: TypeTable,
 }
 
-struct LoweredValue {
+type LinearValue = ValueId;
+
+struct BranchingValue {
     value: ValueId,
     block: BlockId,
 }
@@ -64,8 +71,8 @@ impl<'a> LowerCtx<'a> {
         id
     }
 
-    fn int_info_for_expr(&self, expr: &sem::ValueExpr) -> (bool, u8) {
-        match self.type_map.type_table().get(expr.ty) {
+    fn int_info_for_type_id(&self, ty_id: TcTypeId) -> (bool, u8) {
+        match self.type_map.type_table().get(ty_id) {
             Type::Int { signed, bits } => (*signed, *bits),
             other => panic!("ssa lower_func expected int type, found {:?}", other),
         }
@@ -75,6 +82,7 @@ impl<'a> LowerCtx<'a> {
 struct FuncLowerer<'a> {
     ctx: LowerCtx<'a>,
     builder: FunctionBuilder,
+    locals: HashMap<DefId, ValueId>,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -86,7 +94,11 @@ impl<'a> FuncLowerer<'a> {
             ret: ret_id,
         };
         let builder = FunctionBuilder::new(func.def_id, func.sig.name.clone(), sig);
-        Self { ctx, builder }
+        Self {
+            ctx,
+            builder,
+            locals: HashMap::new(),
+        }
     }
 
     fn finish(self) -> LoweredFunction {
@@ -96,70 +108,44 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    fn lower_expr(&mut self, block: BlockId, expr: &sem::ValueExpr) -> LoweredValue {
+    fn lower_branching_expr(
+        &mut self,
+        block: BlockId,
+        expr: &sem::ValueExpr,
+    ) -> Result<BranchingValue, sem::LinearizeError> {
         match &expr.kind {
-            sem::ValueExprKind::IntLit(value) => {
+            sem::ValueExprKind::Block { items, tail } => {
+                let mut cur_block = block;
+                for item in items {
+                    // Linearize block items so we can guarantee straight-line lowering.
+                    let item = linearize_block_item(item)?;
+                    match item {
+                        sem::LinearBlockItem::Stmt(stmt) => {
+                            cur_block = self.lower_linear_stmt(cur_block, &stmt)?;
+                        }
+                        sem::LinearBlockItem::Expr(expr) => {
+                            // Drop the value; we only care about side effects in statements.
+                            let _ = self.lower_linear_expr(cur_block, &expr)?;
+                        }
+                    }
+                }
+                if let Some(tail) = tail {
+                    return self.lower_branching_expr(cur_block, tail);
+                }
+                // Empty blocks produce unit.
                 let ty = self.ctx.ssa_type_for_expr(expr);
-                let (signed, bits) = self.ctx.int_info_for_expr(expr);
-                let value = self
-                    .builder
-                    .const_int(block, *value as i128, signed, bits, ty);
-                LoweredValue { value, block }
-            }
-            sem::ValueExprKind::BoolLit(value) => {
-                let ty = self.ctx.ssa_type_for_expr(expr);
-                let value = self.builder.const_bool(block, *value, ty);
-                LoweredValue { value, block }
-            }
-            sem::ValueExprKind::Block { items, tail } if items.is_empty() => {
-                let tail = tail
-                    .as_ref()
-                    .unwrap_or_else(|| panic!("ssa lower_func missing block tail"));
-                self.lower_expr(block, tail)
-            }
-            sem::ValueExprKind::BinOp { left, op, right } => {
-                if let Some(binop) = map_binop(*op) {
-                    let lhs = self.lower_pure_expr(block, left, "binary ops");
-                    let rhs = self.lower_pure_expr(block, right, "binary ops");
-                    let ty = self.ctx.ssa_type_for_expr(expr);
-                    let value = self.builder.binop(block, binop, lhs, rhs, ty);
-                    return LoweredValue { value, block };
-                }
-                if let Some(cmp) = map_cmp(*op) {
-                    let lhs = self.lower_pure_expr(block, left, "comparisons");
-                    let rhs = self.lower_pure_expr(block, right, "comparisons");
-                    let ty = self.ctx.ssa_type_for_expr(expr);
-                    let value = self.builder.cmp(block, cmp, lhs, rhs, ty);
-                    return LoweredValue { value, block };
-                }
-                panic!("ssa lower_func unsupported binary op");
-            }
-            sem::ValueExprKind::UnaryOp { op, expr } => {
-                let value = self.lower_pure_expr(block, expr, "unary ops");
-                match op {
-                    UnaryOp::Neg => {
-                        let ty = self.ctx.ssa_type_for_expr(expr);
-                        let value = self.builder.unop(block, UnOp::Neg, value, ty);
-                        LoweredValue { value, block }
-                    }
-                    UnaryOp::LogicalNot => {
-                        let ty = self.ctx.ssa_type_for_expr(expr);
-                        let value = self.builder.unop(block, UnOp::Not, value, ty);
-                        LoweredValue { value, block }
-                    }
-                    UnaryOp::BitNot => {
-                        let ty = self.ctx.ssa_type_for_expr(expr);
-                        let value = self.builder.unop(block, UnOp::BitNot, value, ty);
-                        LoweredValue { value, block }
-                    }
-                }
+                let value = self.builder.const_unit(cur_block, ty);
+                return Ok(BranchingValue {
+                    value,
+                    block: cur_block,
+                });
             }
             sem::ValueExprKind::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                let cond_value = self.lower_pure_expr(block, cond, "if conditions");
+                let cond_value = self.lower_linear_expr_value(block, cond)?;
 
                 let then_bb = self.builder.add_block();
                 let else_bb = self.builder.add_block();
@@ -178,7 +164,13 @@ impl<'a> FuncLowerer<'a> {
                     },
                 );
 
-                let then_value = self.lower_expr(then_bb, then_body);
+                // For now, require that locals don't change across branches.
+                let saved_locals = self.locals.clone();
+                let then_value = self.lower_branching_expr(then_bb, then_body)?;
+                if self.locals != saved_locals {
+                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                }
+                self.locals = saved_locals.clone();
                 self.builder.set_terminator(
                     then_bb,
                     Terminator::Br {
@@ -187,7 +179,11 @@ impl<'a> FuncLowerer<'a> {
                     },
                 );
 
-                let else_value = self.lower_expr(else_bb, else_body);
+                let else_value = self.lower_branching_expr(else_bb, else_body)?;
+                if self.locals != saved_locals {
+                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                }
+                self.locals = saved_locals;
                 self.builder.set_terminator(
                     else_bb,
                     Terminator::Br {
@@ -196,38 +192,197 @@ impl<'a> FuncLowerer<'a> {
                     },
                 );
 
-                LoweredValue {
+                Ok(BranchingValue {
                     value: join_value,
                     block: join_bb,
-                }
+                })
             }
-            _ => panic!("ssa lower_func requires a scalar expression body"),
+            _ => {
+                // Fall back to the linear subset for everything else.
+                let linear = linearize_expr(expr)?;
+                let value = self.lower_linear_expr(block, &linear)?;
+                Ok(BranchingValue { value, block })
+            }
         }
     }
 
-    fn lower_pure_expr(
+    fn lower_linear_expr(
+        &mut self,
+        block: BlockId,
+        expr: &sem::LinearExpr,
+    ) -> Result<LinearValue, sem::LinearizeError> {
+        match &expr.kind {
+            sem::LinearExprKind::Block { items, tail } => {
+                let mut cur_block = block;
+                for item in items {
+                    match item {
+                        sem::LinearBlockItem::Stmt(stmt) => {
+                            cur_block = self.lower_linear_stmt(cur_block, stmt)?;
+                        }
+                        sem::LinearBlockItem::Expr(expr) => {
+                            let _ = self.lower_linear_expr(cur_block, expr)?;
+                        }
+                    }
+                }
+                if let Some(tail) = tail {
+                    return self.lower_linear_expr(cur_block, tail);
+                }
+                // Linear blocks without a tail evaluate to unit.
+                let value = self
+                    .builder
+                    .const_unit(cur_block, self.ctx.ssa_type_for_type_id(expr.ty));
+                Ok(value)
+            }
+
+            sem::LinearExprKind::UnitLit => Ok(self
+                .builder
+                .const_unit(block, self.ctx.ssa_type_for_type_id(expr.ty))),
+
+                sem::LinearExprKind::IntLit(value) => {
+                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                let (signed, bits) = self.ctx.int_info_for_type_id(expr.ty);
+                Ok(self
+                    .builder
+                    .const_int(block, *value as i128, signed, bits, ty))
+            }
+
+            sem::LinearExprKind::BoolLit(value) => {
+                Ok(self
+                    .builder
+                    .const_bool(block, *value, self.ctx.ssa_type_for_type_id(expr.ty)))
+            }
+
+            sem::LinearExprKind::UnaryOp { op, expr } => {
+                let value = self.lower_linear_expr(block, expr)?;
+                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                let value = match op {
+                    UnaryOp::Neg => self.builder.unop(block, UnOp::Neg, value, ty),
+                    UnaryOp::LogicalNot => self.builder.unop(block, UnOp::Not, value, ty),
+                    UnaryOp::BitNot => self.builder.unop(block, UnOp::BitNot, value, ty),
+                };
+                Ok(value)
+            }
+
+            sem::LinearExprKind::BinOp { left, op, right } => {
+                if let Some(binop) = map_binop(*op) {
+                    let lhs = self.lower_linear_expr(block, left)?;
+                    let rhs = self.lower_linear_expr(block, right)?;
+                    let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                    return Ok(self.builder.binop(block, binop, lhs, rhs, ty));
+                }
+                if let Some(cmp) = map_cmp(*op) {
+                    let lhs = self.lower_linear_expr(block, left)?;
+                    let rhs = self.lower_linear_expr(block, right)?;
+                    let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                    return Ok(self.builder.cmp(block, cmp, lhs, rhs, ty));
+                }
+                Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
+            }
+
+            sem::LinearExprKind::Load { place } => match &place.kind {
+                sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id)),
+                _ => Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)),
+            },
+
+            sem::LinearExprKind::CharLit(_)
+            | sem::LinearExprKind::Call { .. }
+            | sem::LinearExprKind::ClosureRef { .. } => {
+                Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
+            }
+        }
+    }
+
+    fn lower_linear_expr_value(
         &mut self,
         block: BlockId,
         expr: &sem::ValueExpr,
-        context: &'static str,
-    ) -> ValueId {
-        let lowered = self.lower_expr(block, expr);
-        if lowered.block != block {
-            panic!("ssa lower_func does not support control flow in {context}");
+    ) -> Result<LinearValue, sem::LinearizeError> {
+        let linear = linearize_expr(expr)?;
+        self.lower_linear_expr(block, &linear)
+    }
+
+    fn lower_linear_stmt(
+        &mut self,
+        block: BlockId,
+        stmt: &sem::LinearStmt,
+    ) -> Result<BlockId, sem::LinearizeError> {
+        match &stmt.kind {
+            sem::LinearStmtKind::LetBind { pattern, value, .. }
+            | sem::LinearStmtKind::VarBind { pattern, value, .. } => {
+                let value = self.lower_linear_expr(block, value)?;
+                self.bind_pattern(pattern, value)?;
+                Ok(block)
+            }
+
+            sem::LinearStmtKind::Assign { assignee, value } => {
+                let value = self.lower_linear_expr(block, value)?;
+                match &assignee.kind {
+                    sem::PlaceExprKind::Var { def_id, .. } => {
+                        // Assignments currently model locals as SSA values.
+                        self.locals.insert(*def_id, value);
+                        Ok(block)
+                    }
+                    _ => Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)),
+                }
+            }
+
+            sem::LinearStmtKind::VarDecl { .. } | sem::LinearStmtKind::Return { .. } => {
+                Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt))
+            }
         }
-        lowered.value
+    }
+
+    fn bind_pattern(
+        &mut self,
+        pattern: &sem::BindPattern,
+        value: ValueId,
+    ) -> Result<(), sem::LinearizeError> {
+        match &pattern.kind {
+            sem::BindPatternKind::Name { def_id, .. } => {
+                self.locals.insert(*def_id, value);
+                Ok(())
+            }
+            _ => Err(sem::LinearizeError {
+                kind: sem::LinearizeErrorKind::UnsupportedStmt,
+                span: pattern.span,
+            }),
+        }
+    }
+
+    fn err_span(&self, span: Span, kind: sem::LinearizeErrorKind) -> sem::LinearizeError {
+        sem::LinearizeError { kind, span }
+    }
+
+    fn err_stmt(
+        &self,
+        stmt: &sem::LinearStmt,
+        kind: sem::LinearizeErrorKind,
+    ) -> sem::LinearizeError {
+        sem::LinearizeError {
+            kind,
+            span: stmt.span,
+        }
+    }
+
+    fn lookup_local(&self, def_id: DefId) -> ValueId {
+        *self
+            .locals
+            .get(&def_id)
+            .unwrap_or_else(|| panic!("ssa lower_func missing local {:?}", def_id))
     }
 }
 
-/// Lowers a trivial function body into SSA for smoke testing.
-pub fn lower_func(func: &sem::FuncDef, type_map: &TypeMap) -> LoweredFunction {
+pub fn lower_func(
+    func: &sem::FuncDef,
+    type_map: &TypeMap,
+) -> Result<LoweredFunction, sem::LinearizeError> {
     if !func.sig.params.is_empty() {
         panic!("ssa lower_func only supports functions without params");
     }
 
     let mut lowerer = FuncLowerer::new(func, type_map);
     let entry = lowerer.builder.add_block();
-    let result = lowerer.lower_expr(entry, &func.body);
+    let result = lowerer.lower_branching_expr(entry, &func.body)?;
     lowerer.builder.set_terminator(
         result.block,
         Terminator::Return {
@@ -235,7 +390,7 @@ pub fn lower_func(func: &sem::FuncDef, type_map: &TypeMap) -> LoweredFunction {
         },
     );
 
-    lowerer.finish()
+    Ok(lowerer.finish())
 }
 
 /// Maps Machina binary ops to SSA arithmetic and bitwise ops.
