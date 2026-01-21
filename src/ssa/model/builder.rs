@@ -159,6 +159,23 @@ impl FunctionBuilder {
         result
     }
 
+    pub fn call(
+        &mut self,
+        block: BlockId,
+        callee: Callee,
+        args: Vec<ValueId>,
+        ty: TypeId,
+    ) -> ValueId {
+        // Calls are modeled as pure SSA instructions returning a value.
+        let result = self.alloc_value(ty);
+        let block = self.block_mut(block);
+        block.insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::Call { callee, args },
+        });
+        result
+    }
+
     /// Sets the terminator for a block.
     pub fn set_terminator(&mut self, block: BlockId, term: Terminator) {
         let block = self.block_mut(block);

@@ -36,8 +36,21 @@ fn is_linear_value_expr(expr: &sem::ValueExpr) -> bool {
             is_linear_value_expr(left) && is_linear_value_expr(right)
         }
         sem::ValueExprKind::Load { .. } => true,
+        sem::ValueExprKind::Call { callee, args } => {
+            is_linear_value_expr(callee) && args.iter().all(is_linear_call_arg)
+        }
         sem::ValueExprKind::ClosureRef { .. } => true,
         _ => false,
+    }
+}
+
+fn is_linear_call_arg(arg: &sem::CallArg) -> bool {
+    match arg {
+        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+            // Only value-style arguments can remain in the linear subset.
+            is_linear_value_expr(expr)
+        }
+        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
     }
 }
 

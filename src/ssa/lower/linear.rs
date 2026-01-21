@@ -3,7 +3,7 @@
 use crate::ssa::lower::linearize::linearize_expr;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, LocalValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
-use crate::ssa::model::ir::{BlockId, Terminator, UnOp};
+use crate::ssa::model::ir::{BlockId, Callee, Terminator, UnOp};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 
@@ -87,9 +87,35 @@ impl<'a> FuncLowerer<'a> {
                 sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id).value),
                 _ => Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)),
             },
-            sem::LinearExprKind::CharLit(_)
-            | sem::LinearExprKind::Call { .. }
-            | sem::LinearExprKind::ClosureRef { .. } => {
+            sem::LinearExprKind::Call { callee, args } => {
+                // Resolve the callee to a direct target or reject unsupported forms.
+                let callee = match &callee.kind {
+                    sem::LinearExprKind::Load { place } => match &place.kind {
+                        sem::PlaceExprKind::Var { def_id, .. } => Callee::Direct(*def_id),
+                        _ => {
+                            return Err(
+                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                            );
+                        }
+                    },
+                    sem::LinearExprKind::ClosureRef { def_id } => Callee::Direct(*def_id),
+                    _ => {
+                        return Err(
+                            self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                        );
+                    }
+                };
+
+                // Lower arguments in order, then emit the call instruction.
+                let mut arg_values = Vec::with_capacity(args.len());
+                for arg in args {
+                    arg_values.push(self.lower_linear_expr(block, arg)?);
+                }
+
+                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                Ok(self.builder.call(block, callee, arg_values, ty))
+            }
+            sem::LinearExprKind::CharLit(_) | sem::LinearExprKind::ClosureRef { .. } => {
                 Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
             }
         }

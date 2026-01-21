@@ -70,10 +70,33 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
             ty: expr.ty,
             span: expr.span,
         }),
-        sem::ValueExprKind::Call { .. } => Err(sem::LinearizeError {
-            kind: sem::LinearizeErrorKind::UnsupportedExpr,
-            span: expr.span,
-        }),
+        sem::ValueExprKind::Call { callee, args } => {
+            // Calls stay linear as long as the callee and args are linear.
+            let callee = Box::new(linearize_expr(callee)?);
+            let mut linear_args = Vec::with_capacity(args.len());
+            for arg in args {
+                match arg {
+                    sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                        linear_args.push(linearize_expr(expr)?);
+                    }
+                    sem::CallArg::InOut { span, .. } | sem::CallArg::Out { span, .. } => {
+                        return Err(sem::LinearizeError {
+                            kind: sem::LinearizeErrorKind::UnsupportedExpr,
+                            span: *span,
+                        });
+                    }
+                }
+            }
+            Ok(sem::LinearExpr {
+                id: expr.id,
+                kind: sem::LinearExprKind::Call {
+                    callee,
+                    args: linear_args,
+                },
+                ty: expr.ty,
+                span: expr.span,
+            })
+        }
         sem::ValueExprKind::ClosureRef { def_id } => Ok(sem::LinearExpr {
             id: expr.id,
             kind: sem::LinearExprKind::ClosureRef { def_id: *def_id },
