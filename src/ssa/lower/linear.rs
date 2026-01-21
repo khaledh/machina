@@ -1,9 +1,9 @@
 //! Straight-line (single-block) lowering routines.
 
 use crate::ssa::lower::linearize::linearize_expr;
-use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, LocalValue};
+use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, LocalValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
-use crate::ssa::model::ir::{BlockId, UnOp};
+use crate::ssa::model::ir::{BlockId, Terminator, UnOp};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 
@@ -19,7 +19,15 @@ impl<'a> FuncLowerer<'a> {
                 for item in items {
                     match item {
                         sem::LinearBlockItem::Stmt(stmt) => {
-                            cur_block = self.lower_linear_stmt(cur_block, stmt)?;
+                            match self.lower_linear_stmt(cur_block, stmt)? {
+                                StmtOutcome::Continue(next_block) => {
+                                    cur_block = next_block;
+                                }
+                                StmtOutcome::Return => {
+                                    return Err(self
+                                        .err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt));
+                                }
+                            }
                         }
                         sem::LinearBlockItem::Expr(expr) => {
                             let _ = self.lower_linear_expr(cur_block, expr)?;
@@ -100,7 +108,7 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         block: BlockId,
         stmt: &sem::LinearStmt,
-    ) -> Result<BlockId, sem::LinearizeError> {
+    ) -> Result<StmtOutcome, sem::LinearizeError> {
         match &stmt.kind {
             sem::LinearStmtKind::LetBind { pattern, value, .. }
             | sem::LinearStmtKind::VarBind { pattern, value, .. } => {
@@ -108,7 +116,7 @@ impl<'a> FuncLowerer<'a> {
                 let value = self.lower_linear_expr(block, value_expr)?;
                 let ty = self.ctx.ssa_type_for_type_id(value_expr.ty);
                 self.bind_pattern(pattern, LocalValue { value, ty })?;
-                Ok(block)
+                Ok(StmtOutcome::Continue(block))
             }
             sem::LinearStmtKind::Assign { assignee, value } => {
                 let value_expr = value;
@@ -118,12 +126,21 @@ impl<'a> FuncLowerer<'a> {
                         // Assignments currently model locals as SSA values.
                         let ty = self.ctx.ssa_type_for_type_id(value_expr.ty);
                         self.locals.insert(*def_id, LocalValue { value, ty });
-                        Ok(block)
+                        Ok(StmtOutcome::Continue(block))
                     }
                     _ => Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)),
                 }
             }
-            sem::LinearStmtKind::VarDecl { .. } | sem::LinearStmtKind::Return { .. } => {
+            sem::LinearStmtKind::Return { value } => {
+                let value = match value {
+                    Some(expr) => Some(self.lower_linear_expr(block, expr)?),
+                    None => None,
+                };
+                self.builder
+                    .set_terminator(block, Terminator::Return { value });
+                Ok(StmtOutcome::Return)
+            }
+            sem::LinearStmtKind::VarDecl { .. } => {
                 Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt))
             }
         }

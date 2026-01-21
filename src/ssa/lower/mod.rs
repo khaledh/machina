@@ -10,6 +10,8 @@ mod linearize;
 mod lowerer;
 mod mapping;
 
+use crate::resolve::DefTable;
+use crate::ssa::lower::lowerer::BranchResult;
 use crate::ssa::model::ir::{Function, Terminator, TypeTable};
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
@@ -22,21 +24,24 @@ pub struct LoweredFunction {
 
 pub fn lower_func(
     func: &sem::FuncDef,
+    def_table: &DefTable,
     type_map: &TypeMap,
 ) -> Result<LoweredFunction, sem::LinearizeError> {
     if !func.sig.params.is_empty() {
         panic!("ssa lower_func only supports functions without params");
     }
 
-    let mut lowerer = FuncLowerer::new(func, type_map);
+    let mut lowerer = FuncLowerer::new(func, def_table, type_map);
     let entry = lowerer.builder.add_block();
     let result = lowerer.lower_branching_expr(entry, &func.body)?;
-    lowerer.builder.set_terminator(
-        result.block,
-        Terminator::Return {
-            value: Some(result.value),
-        },
-    );
+    if let BranchResult::Value(result) = result {
+        lowerer.builder.set_terminator(
+            result.block,
+            Terminator::Return {
+                value: Some(result.value),
+            },
+        );
+    }
 
     Ok(lowerer.finish())
 }

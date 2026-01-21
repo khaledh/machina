@@ -2,7 +2,7 @@
 
 use crate::resolve::DefId;
 use crate::ssa::lower::linearize::{linearize_block_item, linearize_expr};
-use crate::ssa::lower::lowerer::{BranchingValue, FuncLowerer};
+use crate::ssa::lower::lowerer::{BranchResult, BranchingValue, FuncLowerer, StmtOutcome};
 use crate::ssa::model::ir::{BlockId, Terminator, TypeId, ValueId};
 use crate::tree::semantic as sem;
 
@@ -11,7 +11,7 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         block: BlockId,
         expr: &sem::ValueExpr,
-    ) -> Result<BranchingValue, sem::LinearizeError> {
+    ) -> Result<BranchResult, sem::LinearizeError> {
         match &expr.kind {
             sem::ValueExprKind::Block { items, tail } => {
                 let mut cur_block = block;
@@ -26,7 +26,14 @@ impl<'a> FuncLowerer<'a> {
                     let item = linearize_block_item(item)?;
                     match item {
                         sem::LinearBlockItem::Stmt(stmt) => {
-                            cur_block = self.lower_linear_stmt(cur_block, &stmt)?;
+                            match self.lower_linear_stmt(cur_block, &stmt)? {
+                                StmtOutcome::Continue(next_block) => {
+                                    cur_block = next_block;
+                                }
+                                StmtOutcome::Return => {
+                                    return Ok(BranchResult::Return);
+                                }
+                            }
                         }
                         sem::LinearBlockItem::Expr(expr) => {
                             // Drop the value; we only care about side effects in statements.
@@ -40,10 +47,10 @@ impl<'a> FuncLowerer<'a> {
                 // Empty blocks produce unit.
                 let ty = self.ctx.ssa_type_for_expr(expr);
                 let value = self.builder.const_unit(cur_block, ty);
-                return Ok(BranchingValue {
+                return Ok(BranchResult::Value(BranchingValue {
                     value,
                     block: cur_block,
-                });
+                }));
             }
             sem::ValueExprKind::If {
                 cond,
@@ -71,42 +78,64 @@ impl<'a> FuncLowerer<'a> {
 
                 // For now, require that locals don't change across branches.
                 let saved_locals = self.locals.clone();
-                let then_value = self.lower_branching_expr(then_bb, then_body)?;
-                if self.locals != saved_locals {
-                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                let mut then_value = None;
+                match self.lower_branching_expr(then_bb, then_body)? {
+                    BranchResult::Value(value) => {
+                        if self.locals != saved_locals {
+                            return Err(
+                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                            );
+                        }
+                        then_value = Some(value.value);
+                        self.builder.set_terminator(
+                            then_bb,
+                            Terminator::Br {
+                                target: join_bb,
+                                args: vec![value.value],
+                            },
+                        );
+                    }
+                    BranchResult::Return => {
+                        self.locals = saved_locals.clone();
+                    }
                 }
-                self.locals = saved_locals.clone();
-                self.builder.set_terminator(
-                    then_bb,
-                    Terminator::Br {
-                        target: join_bb,
-                        args: vec![then_value.value],
-                    },
-                );
 
-                let else_value = self.lower_branching_expr(else_bb, else_body)?;
-                if self.locals != saved_locals {
-                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                let mut else_value = None;
+                match self.lower_branching_expr(else_bb, else_body)? {
+                    BranchResult::Value(value) => {
+                        if self.locals != saved_locals {
+                            return Err(
+                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                            );
+                        }
+                        else_value = Some(value.value);
+                        self.builder.set_terminator(
+                            else_bb,
+                            Terminator::Br {
+                                target: join_bb,
+                                args: vec![value.value],
+                            },
+                        );
+                    }
+                    BranchResult::Return => {
+                        self.locals = saved_locals;
+                    }
                 }
-                self.locals = saved_locals;
-                self.builder.set_terminator(
-                    else_bb,
-                    Terminator::Br {
-                        target: join_bb,
-                        args: vec![else_value.value],
-                    },
-                );
 
-                Ok(BranchingValue {
+                if then_value.is_none() && else_value.is_none() {
+                    return Ok(BranchResult::Return);
+                }
+
+                Ok(BranchResult::Value(BranchingValue {
                     value: join_value,
                     block: join_bb,
-                })
+                }))
             }
             _ => {
                 // Fall back to the linear subset for everything else.
                 let linear = linearize_expr(expr)?;
                 let value = self.lower_linear_expr(block, &linear)?;
-                Ok(BranchingValue { value, block })
+                Ok(BranchResult::Value(BranchingValue { value, block }))
             }
         }
     }
@@ -160,15 +189,17 @@ impl<'a> FuncLowerer<'a> {
             },
         );
 
-        let _body_value = self.lower_branching_expr(body_bb, body)?;
-        let loop_args = self.locals_args(&defs, body.span)?;
-        self.builder.set_terminator(
-            body_bb,
-            Terminator::Br {
-                target: header_bb,
-                args: loop_args,
-            },
-        );
+        let body_result = self.lower_branching_expr(body_bb, body)?;
+        if let BranchResult::Value(_) = body_result {
+            let loop_args = self.locals_args(&defs, body.span)?;
+            self.builder.set_terminator(
+                body_bb,
+                Terminator::Br {
+                    target: header_bb,
+                    args: loop_args,
+                },
+            );
+        }
 
         self.set_locals_from_params(&defs, &tys, &exit_params);
         Ok(exit_bb)

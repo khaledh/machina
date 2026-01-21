@@ -11,6 +11,7 @@ pub(super) struct LowerCtx<'a> {
     type_map: &'a TypeMap,
     pub(super) types: TypeTable,
     type_cache: HashMap<TcTypeId, TypeId>,
+    type_cache_by_kind: HashMap<Type, TypeId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -19,6 +20,7 @@ impl<'a> LowerCtx<'a> {
             type_map,
             types: TypeTable::new(),
             type_cache: HashMap::new(),
+            type_cache_by_kind: HashMap::new(),
         }
     }
 
@@ -32,6 +34,17 @@ impl<'a> LowerCtx<'a> {
         }
 
         let ty = self.type_map.type_table().get(ty_id);
+        let id = self.ssa_type_for_type(ty);
+
+        self.type_cache.insert(ty_id, id);
+        id
+    }
+
+    pub(super) fn ssa_type_for_type(&mut self, ty: &Type) -> TypeId {
+        if let Some(id) = self.type_cache_by_kind.get(ty) {
+            return *id;
+        }
+
         let id = match ty {
             Type::Unit => self.types.add(TypeKind::Unit),
             Type::Bool => self.types.add(TypeKind::Bool),
@@ -42,7 +55,7 @@ impl<'a> LowerCtx<'a> {
             other => panic!("ssa lower_func unsupported type {:?}", other),
         };
 
-        self.type_cache.insert(ty_id, id);
+        self.type_cache_by_kind.insert(ty.clone(), id);
         id
     }
 

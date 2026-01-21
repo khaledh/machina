@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 
 use crate::diag::Span;
-use crate::resolve::DefId;
+use crate::resolve::{DefId, DefTable};
 use crate::ssa::lower::LoweredFunction;
 use crate::ssa::lower::ctx::LowerCtx;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{BlockId, FunctionSig, TypeId, ValueId};
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
+use crate::types::Type;
 
 pub(super) type LinearValue = ValueId;
 
@@ -24,6 +25,16 @@ pub(super) struct BranchingValue {
     pub(super) block: BlockId,
 }
 
+pub(super) enum BranchResult {
+    Value(BranchingValue),
+    Return,
+}
+
+pub(super) enum StmtOutcome {
+    Continue(BlockId),
+    Return,
+}
+
 pub(super) struct FuncLowerer<'a> {
     pub(super) ctx: LowerCtx<'a>,
     pub(super) builder: FunctionBuilder,
@@ -31,9 +42,19 @@ pub(super) struct FuncLowerer<'a> {
 }
 
 impl<'a> FuncLowerer<'a> {
-    pub(super) fn new(func: &sem::FuncDef, type_map: &'a TypeMap) -> Self {
+    pub(super) fn new(func: &sem::FuncDef, def_table: &DefTable, type_map: &'a TypeMap) -> Self {
         let mut ctx = LowerCtx::new(type_map);
-        let ret_id = ctx.ssa_type_for_type_id(func.body.ty);
+        let def = def_table
+            .lookup_def(func.def_id)
+            .unwrap_or_else(|| panic!("ssa lower_func missing def {:?}", func.def_id));
+        let func_ty = type_map
+            .lookup_def_type(def)
+            .unwrap_or_else(|| panic!("ssa lower_func missing def type {:?}", func.def_id));
+        let ret_ty = match func_ty {
+            Type::Fn { ret_ty, .. } => ret_ty,
+            other => panic!("ssa lower_func expected fn type, found {:?}", other),
+        };
+        let ret_id = ctx.ssa_type_for_type(&ret_ty);
         let sig = FunctionSig {
             params: Vec::new(),
             ret: ret_id,
