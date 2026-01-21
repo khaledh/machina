@@ -113,6 +113,33 @@ fn test_lower_binop_return() {
 }
 
 #[test]
+fn test_lower_param_binop_return() {
+    let ctx = analyze(indoc! {"
+        fn main(a: u64, b: u64) -> u64 {
+            a + b
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.block_expr_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(u64, u64) -> u64 {
+          bb0(%v0: u64, %v1: u64):
+            %v2: u64 = add %v0, %v1
+            ret %v2
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_unop_return() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {

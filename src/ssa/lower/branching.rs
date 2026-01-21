@@ -22,6 +22,8 @@ impl<'a> FuncLowerer<'a> {
                             continue;
                         }
                     }
+
+                    // Use the precomputed plan to decide linear vs branching lowering.
                     match item {
                         sem::BlockItem::Stmt(stmt) => {
                             let stmt = linearize_stmt(stmt)?;
@@ -82,6 +84,7 @@ impl<'a> FuncLowerer<'a> {
             } => {
                 let cond_value = self.lower_linear_expr_value(block, cond)?;
 
+                // Build the control-flow skeleton and join parameters up front.
                 let then_bb = self.builder.add_block();
                 let else_bb = self.builder.add_block();
                 let join_bb = self.builder.add_block();
@@ -106,6 +109,7 @@ impl<'a> FuncLowerer<'a> {
                     },
                 );
 
+                // Lower the then branch and pass its value + locals to the join.
                 let saved_locals = self.locals.clone();
                 let mut then_value = None;
                 match self.lower_branching_expr(then_bb, then_body)? {
@@ -128,6 +132,7 @@ impl<'a> FuncLowerer<'a> {
                     }
                 }
 
+                // Reset locals so the else branch starts from the same snapshot.
                 self.locals = saved_locals.clone();
                 let mut else_value = None;
                 match self.lower_branching_expr(else_bb, else_body)? {
@@ -150,10 +155,12 @@ impl<'a> FuncLowerer<'a> {
                     }
                 }
 
+                // If both branches return, there is no join to emit.
                 if then_value.is_none() && else_value.is_none() {
                     return Ok(BranchResult::Return);
                 }
 
+                // Install the join locals so subsequent lowering sees merged values.
                 self.set_locals_from_params(&defs, &tys, &join_local_params);
                 Ok(BranchResult::Value(BranchingValue {
                     value: join_value,
@@ -183,6 +190,7 @@ impl<'a> FuncLowerer<'a> {
             .map(|(_, local)| local.value)
             .collect();
 
+        // Allocate the loop blocks and their parameter lists.
         let header_bb = self.builder.add_block();
         let body_bb = self.builder.add_block();
         let exit_bb = self.builder.add_block();
@@ -203,6 +211,7 @@ impl<'a> FuncLowerer<'a> {
             },
         );
 
+        // Thread locals through the header and use them when lowering the condition.
         self.set_locals_from_params(&defs, &tys, &header_params);
         let cond_value = self.lower_linear_expr_value(header_bb, cond)?;
         let exit_args = self.locals_args(&defs, cond.span)?;
@@ -218,6 +227,7 @@ impl<'a> FuncLowerer<'a> {
             },
         );
 
+        // Only re-loop when the body produces a value (return short-circuits).
         let body_result = self.lower_branching_expr(body_bb, body)?;
         if let BranchResult::Value(_) = body_result {
             let loop_args = self.locals_args(&defs, body.span)?;

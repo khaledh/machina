@@ -9,6 +9,7 @@ use crate::ssa::lower::ctx::LowerCtx;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{BlockId, FunctionSig, TypeId, ValueId};
 use crate::tree::NodeId;
+use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
 use crate::types::Type;
@@ -41,6 +42,8 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) builder: FunctionBuilder,
     pub(super) locals: HashMap<DefId, LocalValue>,
     pub(super) block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
+    pub(super) param_defs: Vec<DefId>,
+    pub(super) param_tys: Vec<TypeId>,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -51,6 +54,8 @@ impl<'a> FuncLowerer<'a> {
         block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
     ) -> Self {
         let mut ctx = LowerCtx::new(type_map);
+
+        // Look up the function signature type to seed the SSA signature.
         let def = def_table
             .lookup_def(func.def_id)
             .unwrap_or_else(|| panic!("ssa lower_func missing def {:?}", func.def_id));
@@ -61,9 +66,32 @@ impl<'a> FuncLowerer<'a> {
             Type::Fn { ret_ty, .. } => ret_ty,
             other => panic!("ssa lower_func expected fn type, found {:?}", other),
         };
+
+        // Collect parameter defs/types and map them into SSA types.
+        let mut param_defs = Vec::with_capacity(func.sig.params.len());
+        let mut param_tys = Vec::with_capacity(func.sig.params.len());
+        for param in &func.sig.params {
+            if param.mode != ParamMode::In {
+                panic!(
+                    "ssa lower_func only supports in params, found {:?} for {:?}",
+                    param.mode, param.ident
+                );
+            }
+            let def = def_table
+                .lookup_def(param.def_id)
+                .unwrap_or_else(|| panic!("ssa lower_func missing param def {:?}", param.def_id));
+            let param_ty = type_map
+                .lookup_def_type(def)
+                .unwrap_or_else(|| panic!("ssa lower_func missing param type {:?}", param.def_id));
+            let param_ty_id = ctx.ssa_type_for_type(&param_ty);
+            param_defs.push(param.def_id);
+            param_tys.push(param_ty_id);
+        }
+
+        // Build the SSA function signature from parameter and return types.
         let ret_id = ctx.ssa_type_for_type(&ret_ty);
         let sig = FunctionSig {
-            params: Vec::new(),
+            params: param_tys.clone(),
             ret: ret_id,
         };
         let builder = FunctionBuilder::new(func.def_id, func.sig.name.clone(), sig);
@@ -72,6 +100,8 @@ impl<'a> FuncLowerer<'a> {
             builder,
             locals: HashMap::new(),
             block_expr_plans,
+            param_defs,
+            param_tys,
         }
     }
 
@@ -97,6 +127,7 @@ impl<'a> FuncLowerer<'a> {
         defs: &[DefId],
         span: Span,
     ) -> Result<Vec<ValueId>, sem::LinearizeError> {
+        // Emit the current SSA values for a fixed def ordering.
         let mut args = Vec::with_capacity(defs.len());
         for def in defs {
             let Some(local) = self.locals.get(def) else {
@@ -113,6 +144,7 @@ impl<'a> FuncLowerer<'a> {
         tys: &[TypeId],
         params: &[ValueId],
     ) {
+        // Reset locals to a fresh mapping based on block params.
         self.locals.clear();
         for ((def, ty), value) in defs.iter().zip(tys.iter()).zip(params.iter()) {
             self.locals.insert(

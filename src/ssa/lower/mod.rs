@@ -28,12 +28,18 @@ pub fn lower_func(
     type_map: &TypeMap,
     block_expr_plans: &sem::BlockExprPlanMap,
 ) -> Result<LoweredFunction, sem::LinearizeError> {
-    if !func.sig.params.is_empty() {
-        panic!("ssa lower_func only supports functions without params");
-    }
-
     let mut lowerer = FuncLowerer::new(func, def_table, type_map, block_expr_plans);
     let entry = lowerer.builder.add_block();
+
+    // Seed the entry block with SSA params and map them to locals.
+    let param_defs = lowerer.param_defs.clone();
+    let param_tys = lowerer.param_tys.clone();
+    let mut param_values = Vec::with_capacity(param_tys.len());
+    for ty in &param_tys {
+        param_values.push(lowerer.builder.add_block_param(entry, *ty));
+    }
+    lowerer.set_locals_from_params(&param_defs, &param_tys, &param_values);
+
     let result = lowerer.lower_branching_expr(entry, &func.body)?;
     if let BranchResult::Value(result) = result {
         lowerer.builder.set_terminator(
