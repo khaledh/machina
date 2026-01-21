@@ -7,6 +7,7 @@ use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::ssa::lower::lower_func;
 use crate::ssa::model::format::formact_func;
+use crate::tree::semantic::MethodItem;
 use crate::typeck::type_check;
 use indoc::indoc;
 
@@ -215,6 +216,58 @@ fn test_lower_call_stmt() {
             }}
         "},
         add_id
+    );
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_method_call_param() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        Pair :: {
+            fn sum(self) -> u64 {
+                self.a + self.b
+            }
+        }
+
+        fn main(p: Pair) -> u64 {
+            p.sum()
+        }
+    "});
+
+    let method_def = ctx
+        .module
+        .method_blocks()
+        .iter()
+        .flat_map(|block| block.method_items.iter())
+        .find_map(|item| match item {
+            MethodItem::Def(def) => Some(def),
+            MethodItem::Decl(_) => None,
+        })
+        .expect("missing method def");
+    let method_def_id = method_def.def_id;
+
+    let main_def = ctx.module.func_defs()[0];
+
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.block_expr_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = format!(
+        indoc! {"
+            fn main(Pair) -> u64 {{
+              bb0(%v0: Pair):
+                %v1: u64 = call @{}(%v0)
+                ret %v1
+            }}
+        "},
+        method_def_id
     );
     assert_eq!(text, expected);
 }

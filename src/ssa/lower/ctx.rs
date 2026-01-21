@@ -52,6 +52,65 @@ impl<'a> LowerCtx<'a> {
                 signed: *signed,
                 bits: *bits,
             }),
+            Type::String => {
+                // Model string as a named struct for now (ptr + len + cap).
+                let byte = self.ssa_type_for_type(&Type::Int {
+                    signed: false,
+                    bits: 8,
+                });
+                let ptr = self.types.add(TypeKind::Ptr { elem: byte });
+                let u32 = self.ssa_type_for_type(&Type::Int {
+                    signed: false,
+                    bits: 32,
+                });
+                let fields = vec![
+                    crate::ssa::model::ir::StructField {
+                        name: "ptr".to_string(),
+                        ty: ptr,
+                    },
+                    crate::ssa::model::ir::StructField {
+                        name: "len".to_string(),
+                        ty: u32,
+                    },
+                    crate::ssa::model::ir::StructField {
+                        name: "cap".to_string(),
+                        ty: u32,
+                    },
+                ];
+                self.types
+                    .add_named(TypeKind::Struct { fields }, "string".to_string())
+            }
+            Type::Tuple { field_tys } => {
+                let fields = field_tys
+                    .iter()
+                    .map(|field| self.ssa_type_for_type(field))
+                    .collect();
+                self.types.add(TypeKind::Tuple { fields })
+            }
+            Type::Array { elem_ty, dims } => {
+                let elem = self.ssa_type_for_type(elem_ty);
+                let dims = dims.iter().map(|dim| *dim as u64).collect();
+                self.types.add(TypeKind::Array { elem, dims })
+            }
+            Type::Struct { name, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| crate::ssa::model::ir::StructField {
+                        name: field.name.clone(),
+                        ty: self.ssa_type_for_type(&field.ty),
+                    })
+                    .collect();
+                self.types
+                    .add_named(TypeKind::Struct { fields }, name.clone())
+            }
+            Type::Heap { elem_ty }
+            | Type::Ref {
+                elem_ty,
+                mutable: _,
+            } => {
+                let elem = self.ssa_type_for_type(elem_ty);
+                self.types.add(TypeKind::Ptr { elem })
+            }
             other => panic!("ssa lower_func unsupported type {:?}", other),
         };
 
