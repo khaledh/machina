@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::ssa::model::ir::{TypeId, TypeKind, TypeTable};
-use crate::tree::semantic as sem;
+use crate::tree::{NodeId, semantic as sem};
 use crate::typeck::type_map::TypeMap;
 use crate::types::{Type, TypeId as TcTypeId};
 
@@ -64,5 +64,9 @@ impl<'a> LowerCtx<'a> {
             Type::Int { signed, bits } => (*signed, *bits),
             other => panic!("ssa lower_func expected int type, found {:?}", other),
         }
+    }
+
+    pub(super) fn call_plan_for(&self, node_id: NodeId) -> Option<sem::CallPlan> {
+        self.type_map.lookup_call_plan(node_id)
     }
 }

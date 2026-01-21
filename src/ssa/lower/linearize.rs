@@ -97,6 +97,38 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
                 span: expr.span,
             })
         }
+        sem::ValueExprKind::MethodCall {
+            receiver,
+            method_name,
+            args,
+        } => {
+            // Method calls stay linear for now when the receiver and args are linear.
+            let receiver = linearize_method_receiver(receiver)?;
+            let mut linear_args = Vec::with_capacity(args.len());
+            for arg in args {
+                match arg {
+                    sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                        linear_args.push(linearize_expr(expr)?);
+                    }
+                    sem::CallArg::InOut { span, .. } | sem::CallArg::Out { span, .. } => {
+                        return Err(sem::LinearizeError {
+                            kind: sem::LinearizeErrorKind::UnsupportedExpr,
+                            span: *span,
+                        });
+                    }
+                }
+            }
+            Ok(sem::LinearExpr {
+                id: expr.id,
+                kind: sem::LinearExprKind::MethodCall {
+                    receiver,
+                    method_name: method_name.clone(),
+                    args: linear_args,
+                },
+                ty: expr.ty,
+                span: expr.span,
+            })
+        }
         sem::ValueExprKind::ClosureRef { def_id } => Ok(sem::LinearExpr {
             id: expr.id,
             kind: sem::LinearExprKind::ClosureRef { def_id: *def_id },
@@ -110,7 +142,6 @@ pub fn linearize_expr(expr: &sem::ValueExpr) -> Result<sem::LinearExpr, sem::Lin
             span: expr.span,
         }),
         sem::ValueExprKind::If { .. }
-        | sem::ValueExprKind::MethodCall { .. }
         | sem::ValueExprKind::Match { .. }
         | sem::ValueExprKind::Range { .. }
         | sem::ValueExprKind::Slice { .. }
@@ -204,5 +235,20 @@ fn wrap_simple(expr: &sem::ValueExpr, kind: sem::LinearExprKind) -> sem::LinearE
         kind,
         ty: expr.ty,
         span: expr.span,
+    }
+}
+
+fn linearize_method_receiver(
+    receiver: &sem::MethodReceiver,
+) -> Result<sem::LinearMethodReceiver, sem::LinearizeError> {
+    match receiver {
+        sem::MethodReceiver::ValueExpr(expr) => {
+            let value = linearize_expr(expr)?;
+            Ok(sem::LinearMethodReceiver::Value(Box::new(value)))
+        }
+        sem::MethodReceiver::PlaceExpr(place) => Err(sem::LinearizeError {
+            kind: sem::LinearizeErrorKind::UnsupportedExpr,
+            span: place.span,
+        }),
     }
 }

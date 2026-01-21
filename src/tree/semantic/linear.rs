@@ -49,11 +49,22 @@ pub enum LinearExprKind {
         callee: Box<LinearExpr>,
         args: Vec<LinearExpr>,
     },
+    MethodCall {
+        receiver: LinearMethodReceiver,
+        method_name: String,
+        args: Vec<LinearExpr>,
+    },
 
     // Closure reference (lifted to a top-level definition).
     ClosureRef {
         def_id: DefId,
     },
+}
+
+#[derive(Clone, Debug)]
+pub enum LinearMethodReceiver {
+    Value(Box<LinearExpr>),
+    Place(PlaceExpr),
 }
 
 #[derive(Clone, Debug)]

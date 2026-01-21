@@ -115,6 +115,68 @@ impl<'a> FuncLowerer<'a> {
                 let ty = self.ctx.ssa_type_for_type_id(expr.ty);
                 Ok(self.builder.call(block, callee, arg_values, ty))
             }
+            sem::LinearExprKind::MethodCall { receiver, args, .. } => {
+                let call_plan = self.ctx.call_plan_for(expr.id).ok_or_else(|| {
+                    self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                })?;
+
+                if !call_plan.has_receiver {
+                    return Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr));
+                }
+
+                // Method calls use the resolved call target from the plan.
+                let callee = match &call_plan.target {
+                    sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
+                    sem::CallTarget::Indirect | sem::CallTarget::Intrinsic(_) => {
+                        return Err(
+                            self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                        );
+                    }
+                };
+
+                // Lower the receiver and argument values in source order.
+                let receiver_value = match receiver {
+                    sem::LinearMethodReceiver::Value(expr) => {
+                        self.lower_linear_expr(block, expr)?
+                    }
+                    sem::LinearMethodReceiver::Place(_) => {
+                        return Err(
+                            self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                        );
+                    }
+                };
+
+                let mut arg_values = Vec::with_capacity(args.len());
+                for arg in args {
+                    arg_values.push(self.lower_linear_expr(block, arg)?);
+                }
+
+                // Apply the call plan so we only emit supported argument lowering forms.
+                let mut call_args = Vec::with_capacity(call_plan.args.len());
+                for lowering in &call_plan.args {
+                    match lowering {
+                        sem::ArgLowering::Direct(input) => {
+                            let value = match input {
+                                sem::CallInput::Receiver => receiver_value,
+                                sem::CallInput::Arg(index) => {
+                                    *arg_values.get(*index).unwrap_or_else(|| {
+                                        panic!("ssa method call arg index out of range: {index}")
+                                    })
+                                }
+                            };
+                            call_args.push(value);
+                        }
+                        sem::ArgLowering::PtrLen { .. } => {
+                            return Err(
+                                self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
+                            );
+                        }
+                    }
+                }
+
+                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                Ok(self.builder.call(block, callee, call_args, ty))
+            }
             sem::LinearExprKind::CharLit(_) | sem::LinearExprKind::ClosureRef { .. } => {
                 Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
             }
