@@ -4,6 +4,7 @@
 //! pipeline is built out incrementally.
 
 mod branching;
+mod calls;
 mod linear;
 mod linearize;
 mod lowerer;
