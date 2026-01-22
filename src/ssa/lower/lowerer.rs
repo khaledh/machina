@@ -37,6 +37,11 @@ pub(super) struct JoinPlan {
     pub(super) join_local_params: Vec<ValueId>,
 }
 
+pub(super) struct JoinSession {
+    plan: JoinPlan,
+    saved_locals: HashMap<DefId, LocalValue>,
+}
+
 /// Result of lowering a branching expression.
 ///
 /// After lowering, the builder's cursor is at the "ending block" where
@@ -228,6 +233,13 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    pub(super) fn begin_join(&mut self, expr: &sem::ValueExpr) -> JoinSession {
+        JoinSession {
+            plan: self.build_join_plan(expr),
+            saved_locals: self.locals.clone(),
+        }
+    }
+
     /// Emits a branch from the current block to the join block.
     ///
     /// Passes the branch's result value followed by current local variable values
@@ -275,5 +287,33 @@ impl<'a> FuncLowerer<'a> {
             kind,
             span: stmt.span,
         }
+    }
+}
+
+impl JoinSession {
+    pub(super) fn join_value(&self) -> ValueId {
+        self.plan.join_value
+    }
+
+    pub(super) fn restore_locals(&self, lowerer: &mut FuncLowerer<'_>) {
+        lowerer.locals = self.saved_locals.clone();
+    }
+
+    pub(super) fn emit_branch(
+        &self,
+        lowerer: &mut FuncLowerer<'_>,
+        value: ValueId,
+        span: Span,
+    ) -> Result<(), sem::LinearizeError> {
+        lowerer.emit_join_branch(&self.plan, value, span)
+    }
+
+    pub(super) fn finalize(self, lowerer: &mut FuncLowerer<'_>) {
+        lowerer.builder.select_block(self.plan.join_bb);
+        lowerer.set_locals_from_params(
+            &self.plan.defs,
+            &self.plan.tys,
+            &self.plan.join_local_params,
+        );
     }
 }

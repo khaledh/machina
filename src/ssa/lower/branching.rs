@@ -97,7 +97,7 @@ impl<'a> FuncLowerer<'a> {
                 // Create the control-flow structure: then block, else block, join block.
                 let then_bb = self.builder.add_block();
                 let else_bb = self.builder.add_block();
-                let join_plan = self.build_join_plan(expr);
+                let join = self.begin_join(expr);
 
                 // Emit the conditional branch from current block.
                 self.builder.terminate(Terminator::CondBr {
@@ -108,16 +108,13 @@ impl<'a> FuncLowerer<'a> {
                     else_args: Vec::new(),
                 });
 
-                // Save locals before lowering branches (each branch starts fresh).
-                let saved_locals = self.locals.clone();
-
                 // Lower the then branch.
                 self.builder.select_block(then_bb);
                 let mut then_returned = false;
                 match self.lower_branching_expr(then_body)? {
                     BranchResult::Value(value) => {
                         // Cursor is at end of then branch; emit branch to join.
-                        self.emit_join_branch(&join_plan, value, expr.span)?;
+                        join.emit_branch(self, value, expr.span)?;
                     }
                     BranchResult::Return => {
                         then_returned = true;
@@ -125,13 +122,13 @@ impl<'a> FuncLowerer<'a> {
                 }
 
                 // Lower the else branch (start from saved locals snapshot).
-                self.locals = saved_locals.clone();
+                join.restore_locals(self);
                 self.builder.select_block(else_bb);
                 let mut else_returned = false;
                 match self.lower_branching_expr(else_body)? {
                     BranchResult::Value(value) => {
                         // Cursor is at end of else branch; emit branch to join.
-                        self.emit_join_branch(&join_plan, value, expr.span)?;
+                        join.emit_branch(self, value, expr.span)?;
                     }
                     BranchResult::Return => {
                         else_returned = true;
@@ -144,13 +141,9 @@ impl<'a> FuncLowerer<'a> {
                 }
 
                 // Select join block and install its parameters as the new local values.
-                self.builder.select_block(join_plan.join_bb);
-                self.set_locals_from_params(
-                    &join_plan.defs,
-                    &join_plan.tys,
-                    &join_plan.join_local_params,
-                );
-                Ok(BranchResult::Value(join_plan.join_value))
+                let join_value = join.join_value();
+                join.finalize(self);
+                Ok(BranchResult::Value(join_value))
             }
 
             // Other expressions: try linear lowering.
