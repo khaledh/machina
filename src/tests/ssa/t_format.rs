@@ -1,13 +1,14 @@
 use crate::resolve::DefId;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::format::formact_func;
-use crate::ssa::model::ir::{FunctionSig, Terminator, TypeKind, TypeTable};
+use crate::ssa::model::ir::{FunctionSig, Terminator};
+use crate::ssa::{IrTypeCache, IrTypeKind};
 use indoc::indoc;
 
 #[test]
 fn test_format_const_return() {
-    let mut types = TypeTable::new();
-    let u64_ty = types.add(TypeKind::Int {
+    let mut types = IrTypeCache::new();
+    let u64_ty = types.add(IrTypeKind::Int {
         signed: false,
         bits: 64,
     });

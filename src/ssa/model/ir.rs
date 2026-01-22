@@ -6,76 +6,7 @@
 use std::fmt;
 
 use crate::resolve::DefId;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TypeId(pub u32);
-
-impl TypeId {
-    #[inline]
-    pub fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeKind {
-    Unit,
-    Bool,
-    Int { signed: bool, bits: u8 },
-    Ptr { elem: TypeId },
-    Array { elem: TypeId, dims: Vec<u64> },
-    Tuple { fields: Vec<TypeId> },
-    Struct { fields: Vec<StructField> },
-    Fn { params: Vec<TypeId>, ret: TypeId },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructField {
-    pub name: String,
-    pub ty: TypeId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeInfo {
-    pub kind: TypeKind,
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct TypeTable {
-    types: Vec<TypeInfo>,
-}
-
-impl TypeTable {
-    pub fn new() -> Self {
-        Self { types: Vec::new() }
-    }
-
-    /// Adds an anonymous type definition to the table.
-    pub fn add(&mut self, kind: TypeKind) -> TypeId {
-        let id = TypeId(self.types.len() as u32);
-        self.types.push(TypeInfo { kind, name: None });
-        id
-    }
-
-    /// Adds a named type definition to the table.
-    pub fn add_named(&mut self, kind: TypeKind, name: String) -> TypeId {
-        let id = TypeId(self.types.len() as u32);
-        self.types.push(TypeInfo {
-            kind,
-            name: Some(name),
-        });
-        id
-    }
-
-    pub fn get(&self, id: TypeId) -> &TypeInfo {
-        &self.types[id.index()]
-    }
-
-    pub fn kind(&self, id: TypeId) -> &TypeKind {
-        &self.get(id).kind
-    }
-}
+use crate::ssa::{IrTypeId, IrTypeKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValueId(pub u32);
@@ -110,7 +41,7 @@ impl LocalId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValueDef {
     pub id: ValueId,
-    pub ty: TypeId,
+    pub ty: IrTypeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,14 +68,14 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionSig {
-    pub params: Vec<TypeId>,
-    pub ret: TypeId,
+    pub params: Vec<IrTypeId>,
+    pub ret: IrTypeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Local {
     pub id: LocalId,
-    pub ty: TypeId,
+    pub ty: IrTypeId,
     pub name: Option<String>,
 }
 
@@ -233,7 +164,7 @@ pub enum InstKind {
     Cast {
         kind: CastKind,
         value: ValueId,
-        ty: TypeId,
+        ty: IrTypeId,
     },
     AddrOfLocal {
         local: LocalId,
@@ -304,20 +235,20 @@ pub enum Terminator {
     Unreachable,
 }
 
-impl fmt::Display for TypeKind {
+impl fmt::Display for IrTypeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TypeKind::Unit => write!(f, "()"),
-            TypeKind::Bool => write!(f, "bool"),
-            TypeKind::Int { signed, bits } => {
+            IrTypeKind::Unit => write!(f, "()"),
+            IrTypeKind::Bool => write!(f, "bool"),
+            IrTypeKind::Int { signed, bits } => {
                 let prefix = if *signed { "i" } else { "u" };
                 write!(f, "{}{}", prefix, bits)
             }
-            TypeKind::Ptr { elem } => write!(f, "ptr<{:?}>", elem),
-            TypeKind::Array { elem, dims } => write!(f, "array<{:?}; {:?}>", elem, dims),
-            TypeKind::Tuple { fields } => write!(f, "tuple<{:?}>", fields),
-            TypeKind::Struct { fields } => write!(f, "struct<{:?}>", fields),
-            TypeKind::Fn { params, ret } => write!(f, "fn({:?}) -> {:?}", params, ret),
+            IrTypeKind::Ptr { elem } => write!(f, "ptr<{:?}>", elem),
+            IrTypeKind::Array { elem, dims } => write!(f, "array<{:?}; {:?}>", elem, dims),
+            IrTypeKind::Tuple { fields } => write!(f, "tuple<{:?}>", fields),
+            IrTypeKind::Struct { fields } => write!(f, "struct<{:?}>", fields),
+            IrTypeKind::Fn { params, ret } => write!(f, "fn({:?}) -> {:?}", params, ret),
         }
     }
 }

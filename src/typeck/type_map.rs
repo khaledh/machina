@@ -5,7 +5,7 @@ use crate::tree::semantic as sem;
 use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
 use crate::tree::{NodeId, ParamMode};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeId, TypeTable};
+use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeCache, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -328,7 +328,7 @@ fn resolve_enum_variants(
 }
 
 pub struct TypeMapBuilder {
-    type_table: TypeTable,
+    type_table: TypeCache,
     node_type: HashMap<NodeId, TypeId>, // maps node to its type
     def_type: HashMap<Def, TypeId>,     // maps def to its type
     call_sigs: HashMap<NodeId, CallSig>,
@@ -343,7 +343,7 @@ impl Default for TypeMapBuilder {
 impl TypeMapBuilder {
     pub fn new() -> Self {
         Self {
-            type_table: TypeTable::new(),
+            type_table: TypeCache::new(),
             node_type: HashMap::new(),
             def_type: HashMap::new(),
             call_sigs: HashMap::new(),
@@ -408,7 +408,7 @@ pub struct CallParam {
 
 #[derive(Debug, Clone)]
 pub struct TypeMap {
-    type_table: TypeTable,
+    type_table: TypeCache,
     def_type: HashMap<Def, TypeId>,
     node_type: HashMap<NodeId, TypeId>,
     call_plan: HashMap<NodeId, CallPlan>,
@@ -482,7 +482,7 @@ impl TypeMap {
         self.slice_plan.insert(node, plan);
     }
 
-    pub fn type_table(&self) -> &TypeTable {
+    pub fn type_table(&self) -> &TypeCache {
         &self.type_table
     }
 }

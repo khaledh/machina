@@ -5,6 +5,7 @@
 
 use super::ir::*;
 use crate::resolve::DefId;
+use crate::ssa::IrTypeId;
 
 /// Constructs SSA functions while managing ID allocation.
 pub struct FunctionBuilder {
@@ -45,7 +46,7 @@ impl FunctionBuilder {
     }
 
     /// Adds a local slot to the function locals list.
-    pub fn add_local(&mut self, ty: TypeId, name: Option<String>) -> LocalId {
+    pub fn add_local(&mut self, ty: IrTypeId, name: Option<String>) -> LocalId {
         let id = LocalId(self.next_local);
         self.next_local += 1;
         self.func.locals.push(Local { id, ty, name });
@@ -53,7 +54,7 @@ impl FunctionBuilder {
     }
 
     /// Adds a parameter to the given block and returns the SSA value ID.
-    pub fn add_block_param(&mut self, block: BlockId, ty: TypeId) -> ValueId {
+    pub fn add_block_param(&mut self, block: BlockId, ty: IrTypeId) -> ValueId {
         let value = self.alloc_value(ty);
         let block = self.block_mut(block);
         block.params.push(BlockParam {
@@ -69,7 +70,7 @@ impl FunctionBuilder {
         value: i128,
         signed: bool,
         bits: u8,
-        ty: TypeId,
+        ty: IrTypeId,
     ) -> ValueId {
         let result = self.alloc_value(ty);
         let block = self.block_mut(block);
@@ -87,7 +88,7 @@ impl FunctionBuilder {
     }
 
     /// Emits a unit constant instruction in the given block.
-    pub fn const_unit(&mut self, block: BlockId, ty: TypeId) -> ValueId {
+    pub fn const_unit(&mut self, block: BlockId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
         let block = self.block_mut(block);
         block.insts.push(Instruction {
@@ -100,7 +101,7 @@ impl FunctionBuilder {
     }
 
     /// Emits a boolean constant instruction in the given block.
-    pub fn const_bool(&mut self, block: BlockId, value: bool, ty: TypeId) -> ValueId {
+    pub fn const_bool(&mut self, block: BlockId, value: bool, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
         let block = self.block_mut(block);
         block.insts.push(Instruction {
@@ -119,7 +120,7 @@ impl FunctionBuilder {
         op: BinOp,
         lhs: ValueId,
         rhs: ValueId,
-        ty: TypeId,
+        ty: IrTypeId,
     ) -> ValueId {
         let result = self.alloc_value(ty);
         let block = self.block_mut(block);
@@ -137,7 +138,7 @@ impl FunctionBuilder {
         op: CmpOp,
         lhs: ValueId,
         rhs: ValueId,
-        ty: TypeId,
+        ty: IrTypeId,
     ) -> ValueId {
         let result = self.alloc_value(ty);
         let block = self.block_mut(block);
@@ -149,7 +150,7 @@ impl FunctionBuilder {
     }
 
     /// Emits a unary operation instruction in the given block.
-    pub fn unop(&mut self, block: BlockId, op: UnOp, value: ValueId, ty: TypeId) -> ValueId {
+    pub fn unop(&mut self, block: BlockId, op: UnOp, value: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
         let block = self.block_mut(block);
         block.insts.push(Instruction {
@@ -164,7 +165,7 @@ impl FunctionBuilder {
         block: BlockId,
         callee: Callee,
         args: Vec<ValueId>,
-        ty: TypeId,
+        ty: IrTypeId,
     ) -> ValueId {
         // Calls are modeled as pure SSA instructions returning a value.
         let result = self.alloc_value(ty);
@@ -188,7 +189,7 @@ impl FunctionBuilder {
     }
 
     /// Allocates a fresh SSA value ID.
-    fn alloc_value(&mut self, _ty: TypeId) -> ValueId {
+    fn alloc_value(&mut self, _ty: IrTypeId) -> ValueId {
         let id = ValueId(self.next_value);
         self.next_value += 1;
         id

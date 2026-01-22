@@ -12,12 +12,12 @@ impl TypeId {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct TypeTable {
+pub struct TypeCache {
     types: Vec<Type>,
     ids: HashMap<Type, TypeId>,
 }
 
-impl TypeTable {
+impl TypeCache {
     pub fn new() -> Self {
         Self::default()
     }

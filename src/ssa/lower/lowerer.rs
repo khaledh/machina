@@ -4,10 +4,11 @@ use std::collections::HashMap;
 
 use crate::diag::Span;
 use crate::resolve::{DefId, DefTable};
+use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweredFunction;
-use crate::ssa::lower::ctx::LowerCtx;
+use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{BlockId, FunctionSig, Terminator, TypeId, ValueId};
+use crate::ssa::model::ir::{BlockId, FunctionSig, Terminator, ValueId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -21,7 +22,7 @@ pub(super) type LinearValue = ValueId;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct LocalValue {
     pub(super) value: ValueId,
-    pub(super) ty: TypeId,
+    pub(super) ty: IrTypeId,
 }
 
 /// Result of lowering a branching expression: the produced value and the block it ends in.
@@ -38,7 +39,7 @@ pub(super) struct JoinPlan {
     pub(super) join_bb: BlockId,
     pub(super) join_value: ValueId,
     pub(super) defs: Vec<DefId>,
-    pub(super) tys: Vec<TypeId>,
+    pub(super) tys: Vec<IrTypeId>,
     pub(super) join_local_params: Vec<ValueId>,
 }
 
@@ -66,13 +67,14 @@ pub(super) enum StmtOutcome {
 /// - Current SSA values for local variables (updated on assignment/join)
 /// - Expression plans from semantic analysis (linear vs branching)
 pub(super) struct FuncLowerer<'a> {
-    pub(super) ctx: LowerCtx<'a>,
+    pub(super) type_lowerer: TypeLowerer<'a>,
+    pub(crate) type_map: &'a TypeMap,
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
     pub(super) locals: HashMap<DefId, LocalValue>,
     pub(super) block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
     pub(super) param_defs: Vec<DefId>,
-    pub(super) param_tys: Vec<TypeId>,
+    pub(super) param_tys: Vec<IrTypeId>,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -86,7 +88,7 @@ impl<'a> FuncLowerer<'a> {
         type_map: &'a TypeMap,
         block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
     ) -> Self {
-        let mut ctx = LowerCtx::new(type_map);
+        let mut type_lowerer = TypeLowerer::new(type_map);
 
         // Look up the function's type to extract parameter and return types.
         let def = def_table
@@ -116,20 +118,21 @@ impl<'a> FuncLowerer<'a> {
             let param_ty = type_map
                 .lookup_def_type(def)
                 .unwrap_or_else(|| panic!("ssa lower_func missing param type {:?}", param.def_id));
-            let param_ty_id = ctx.ssa_type_for_type(&param_ty);
+            let param_ty_id = type_lowerer.lower_type(&param_ty);
             param_defs.push(param.def_id);
             param_tys.push(param_ty_id);
         }
 
         // Build the SSA function signature and initialize the builder.
-        let ret_id = ctx.ssa_type_for_type(&ret_ty);
+        let ret_id = type_lowerer.lower_type(&ret_ty);
         let sig = FunctionSig {
             params: param_tys.clone(),
             ret: ret_id,
         };
         let builder = FunctionBuilder::new(func.def_id, func.sig.name.clone(), sig);
         Self {
-            ctx,
+            type_map,
+            type_lowerer,
             builder,
             locals: HashMap::new(),
             block_expr_plans,
@@ -141,7 +144,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn finish(self) -> LoweredFunction {
         LoweredFunction {
             func: self.builder.finish(),
-            types: self.ctx.types,
+            types: self.type_lowerer.ir_type_cache,
         }
     }
 
@@ -179,7 +182,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn set_locals_from_params(
         &mut self,
         defs: &[DefId],
-        tys: &[TypeId],
+        tys: &[IrTypeId],
         params: &[ValueId],
     ) {
         self.locals.clear();
@@ -205,13 +208,13 @@ impl<'a> FuncLowerer<'a> {
         let join_bb = self.builder.add_block();
 
         // Add parameter for the expression's result value.
-        let join_ty = self.ctx.ssa_type_for_expr(expr);
+        let join_ty = self.type_lowerer.lower_type_id(expr.ty);
         let join_value = self.builder.add_block_param(join_bb, join_ty);
 
         // Snapshot current locals in deterministic order.
         let locals_snapshot = self.ordered_locals();
         let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
-        let tys: Vec<TypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
+        let tys: Vec<IrTypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
 
         // Add parameters for threading local variable values.
         let join_local_params: Vec<ValueId> = tys

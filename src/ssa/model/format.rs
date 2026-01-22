@@ -1,22 +1,22 @@
 //! Text formatter for SSA IR.
 
+use super::ir::*;
+use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
 use std::fmt::Write as _;
 
-use super::ir::*;
-
-pub fn formact_func(func: &Function, types: &TypeTable) -> String {
+pub fn formact_func(func: &Function, types: &IrTypeCache) -> String {
     let mut formatter = Formatter::new(types);
     formatter.write_function(func);
     formatter.finish()
 }
 
 struct Formatter<'a> {
-    types: &'a TypeTable,
+    types: &'a IrTypeCache,
     out: String,
 }
 
 impl<'a> Formatter<'a> {
-    fn new(types: &'a TypeTable) -> Self {
+    fn new(types: &'a IrTypeCache) -> Self {
         Self {
             types,
             out: String::new(),
@@ -263,29 +263,29 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    fn write_type(&mut self, ty: TypeId) {
+    fn write_type(&mut self, ty: IrTypeId) {
         let info = self.types.get(ty);
         if let Some(name) = &info.name {
             let _ = write!(&mut self.out, "{}", name);
             return;
         }
         match &info.kind {
-            TypeKind::Unit => {
+            IrTypeKind::Unit => {
                 let _ = write!(&mut self.out, "()");
             }
-            TypeKind::Bool => {
+            IrTypeKind::Bool => {
                 let _ = write!(&mut self.out, "bool");
             }
-            TypeKind::Int { signed, bits } => {
+            IrTypeKind::Int { signed, bits } => {
                 let prefix = if *signed { "i" } else { "u" };
                 let _ = write!(&mut self.out, "{}{}", prefix, bits);
             }
-            TypeKind::Ptr { elem } => {
+            IrTypeKind::Ptr { elem } => {
                 let _ = write!(&mut self.out, "ptr<");
                 self.write_type(*elem);
                 let _ = write!(&mut self.out, ">");
             }
-            TypeKind::Array { elem, dims } => {
+            IrTypeKind::Array { elem, dims } => {
                 self.write_type(*elem);
                 let _ = write!(&mut self.out, "[");
                 for (i, dim) in dims.iter().enumerate() {
@@ -296,7 +296,7 @@ impl<'a> Formatter<'a> {
                 }
                 let _ = write!(&mut self.out, "]");
             }
-            TypeKind::Tuple { fields } => {
+            IrTypeKind::Tuple { fields } => {
                 let _ = write!(&mut self.out, "(");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {
@@ -306,7 +306,7 @@ impl<'a> Formatter<'a> {
                 }
                 let _ = write!(&mut self.out, ")");
             }
-            TypeKind::Struct { fields } => {
+            IrTypeKind::Struct { fields } => {
                 let _ = write!(&mut self.out, "struct {{ ");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {
@@ -317,7 +317,7 @@ impl<'a> Formatter<'a> {
                 }
                 let _ = write!(&mut self.out, " }}");
             }
-            TypeKind::Fn { params, ret } => {
+            IrTypeKind::Fn { params, ret } => {
                 let _ = write!(&mut self.out, "fn(");
                 for (i, param) in params.iter().enumerate() {
                     if i > 0 {

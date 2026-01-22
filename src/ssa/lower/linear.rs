@@ -46,17 +46,17 @@ impl<'a> FuncLowerer<'a> {
                 // No tail: produce unit.
                 let value = self
                     .builder
-                    .const_unit(cur_block, self.ctx.ssa_type_for_type_id(expr.ty));
+                    .const_unit(cur_block, self.type_lowerer.lower_type_id(expr.ty));
                 Ok(value)
             }
 
             // Literals: emit constant instructions.
             sem::LinearExprKind::UnitLit => Ok(self
                 .builder
-                .const_unit(block, self.ctx.ssa_type_for_type_id(expr.ty))),
+                .const_unit(block, self.type_lowerer.lower_type_id(expr.ty))),
             sem::LinearExprKind::IntLit(value) => {
-                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
-                let (signed, bits) = self.ctx.int_info_for_type_id(expr.ty);
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                let (signed, bits) = self.type_lowerer.int_info(expr.ty);
                 Ok(self
                     .builder
                     .const_int(block, *value as i128, signed, bits, ty))
@@ -64,13 +64,13 @@ impl<'a> FuncLowerer<'a> {
             sem::LinearExprKind::BoolLit(value) => {
                 Ok(self
                     .builder
-                    .const_bool(block, *value, self.ctx.ssa_type_for_type_id(expr.ty)))
+                    .const_bool(block, *value, self.type_lowerer.lower_type_id(expr.ty)))
             }
 
             // Unary operators: lower operand and emit unary instruction.
             sem::LinearExprKind::UnaryOp { op, expr } => {
                 let value = self.lower_linear_expr(block, expr)?;
-                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let value = match op {
                     UnaryOp::Neg => self.builder.unop(block, UnOp::Neg, value, ty),
                     UnaryOp::LogicalNot => self.builder.unop(block, UnOp::Not, value, ty),
@@ -85,14 +85,14 @@ impl<'a> FuncLowerer<'a> {
                 if let Some(binop) = map_binop(*op) {
                     let lhs = self.lower_linear_expr(block, left)?;
                     let rhs = self.lower_linear_expr(block, right)?;
-                    let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                    let ty = self.type_lowerer.lower_type_id(expr.ty);
                     return Ok(self.builder.binop(block, binop, lhs, rhs, ty));
                 }
                 // Try comparison operation.
                 if let Some(cmp) = map_cmp(*op) {
                     let lhs = self.lower_linear_expr(block, left)?;
                     let rhs = self.lower_linear_expr(block, right)?;
-                    let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                    let ty = self.type_lowerer.lower_type_id(expr.ty);
                     return Ok(self.builder.cmp(block, cmp, lhs, rhs, ty));
                 }
                 Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
@@ -106,7 +106,7 @@ impl<'a> FuncLowerer<'a> {
             // Function call: resolve callee from call plan and emit call instruction.
             sem::LinearExprKind::Call { callee: _, args } => {
                 // Retrieve the call plan from type-checking (contains resolved target).
-                let call_plan = self.ctx.call_plan_for(expr.id).ok_or_else(|| {
+                let call_plan = self.type_map.lookup_call_plan(expr.id).ok_or_else(|| {
                     self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
                 })?;
 
@@ -134,14 +134,14 @@ impl<'a> FuncLowerer<'a> {
                 // Apply the call plan to reorder/transform arguments.
                 let call_args =
                     self.lower_call_args_from_plan(expr, &call_plan, None, &arg_values)?;
-                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.call(block, callee, call_args, ty))
             }
 
             // Method call: similar to function call but with a receiver.
             sem::LinearExprKind::MethodCall { receiver, args, .. } => {
                 // Retrieve the call plan (contains resolved method target).
-                let call_plan = self.ctx.call_plan_for(expr.id).ok_or_else(|| {
+                let call_plan = self.type_map.lookup_call_plan(expr.id).ok_or_else(|| {
                     self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
                 })?;
 
@@ -185,7 +185,7 @@ impl<'a> FuncLowerer<'a> {
                     Some(receiver_value),
                     &arg_values,
                 )?;
-                let ty = self.ctx.ssa_type_for_type_id(expr.ty);
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.call(block, callee, call_args, ty))
             }
             sem::LinearExprKind::CharLit(_) | sem::LinearExprKind::ClosureRef { .. } => {
@@ -216,7 +216,7 @@ impl<'a> FuncLowerer<'a> {
             | sem::LinearStmtKind::VarBind { pattern, value, .. } => {
                 let value_expr = value;
                 let value = self.lower_linear_expr(block, value_expr)?;
-                let ty = self.ctx.ssa_type_for_type_id(value_expr.ty);
+                let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                 self.bind_pattern(pattern, LocalValue { value, ty })?;
                 Ok(StmtOutcome::Continue(block))
             }
@@ -228,7 +228,7 @@ impl<'a> FuncLowerer<'a> {
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         // Update the local to the new SSA value.
-                        let ty = self.ctx.ssa_type_for_type_id(value_expr.ty);
+                        let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         self.locals.insert(*def_id, LocalValue { value, ty });
                         Ok(StmtOutcome::Continue(block))
                     }

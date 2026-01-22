@@ -4,22 +4,23 @@
 //! pipeline is built out incrementally.
 
 mod branching;
-mod ctx;
 mod linear;
 mod linearize;
 mod lowerer;
 mod mapping;
+mod types;
 
 use crate::resolve::DefTable;
+use crate::ssa::IrTypeCache;
 use crate::ssa::lower::lowerer::BranchResult;
-use crate::ssa::model::ir::{Function, Terminator, TypeTable};
+use crate::ssa::model::ir::{Function, Terminator};
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
 use lowerer::FuncLowerer;
 
 pub struct LoweredFunction {
     pub func: Function,
-    pub types: TypeTable,
+    pub types: IrTypeCache,
 }
 
 /// Lowers a semantic function definition into SSA IR.

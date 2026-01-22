@@ -1,12 +1,12 @@
 mod format;
 mod relations;
-mod type_table;
+mod type_cache;
 
 pub use relations::{
     TypeAssignability, ValueAssignability, array_to_slice_assignable, type_assignable,
     value_assignable,
 };
-pub use type_table::{TypeId, TypeTable};
+pub use type_cache::{TypeCache, TypeId};
 
 use std::hash::{Hash, Hasher};
 

@@ -1,9 +1,10 @@
 //! Branching (multi-block) lowering routines.
 
 use crate::resolve::DefId;
+use crate::ssa::IrTypeId;
 use crate::ssa::lower::linearize::{linearize_expr, linearize_stmt};
 use crate::ssa::lower::lowerer::{BranchResult, BranchingValue, FuncLowerer, StmtOutcome};
-use crate::ssa::model::ir::{BlockId, Terminator, TypeId, ValueId};
+use crate::ssa::model::ir::{BlockId, Terminator, ValueId};
 use crate::tree::semantic as sem;
 
 impl<'a> FuncLowerer<'a> {
@@ -83,7 +84,7 @@ impl<'a> FuncLowerer<'a> {
                 }
 
                 // Blocks without a tail produce unit.
-                let ty = self.ctx.ssa_type_for_expr(expr);
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let value = self.builder.const_unit(cur_block, ty);
                 return Ok(BranchResult::Value(BranchingValue {
                     value,
@@ -190,7 +191,7 @@ impl<'a> FuncLowerer<'a> {
         // Snapshot current locals for threading through the loop.
         let locals_snapshot = self.ordered_locals();
         let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
-        let tys: Vec<TypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
+        let tys: Vec<IrTypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
         let args: Vec<ValueId> = locals_snapshot
             .iter()
             .map(|(_, local)| local.value)
