@@ -13,6 +13,7 @@ fn test_format_const_return() {
         bits: 64,
     });
 
+    // Builder starts with cursor at entry block (block 0).
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "const_42",
@@ -21,9 +22,8 @@ fn test_format_const_return() {
             ret: u64_ty,
         },
     );
-    let entry = builder.add_block();
-    let value = builder.const_int(entry, 42, false, 64, u64_ty);
-    builder.set_terminator(entry, Terminator::Return { value: Some(value) });
+    let value = builder.const_int(42, false, 64, u64_ty);
+    builder.terminate(Terminator::Return { value: Some(value) });
     let func = builder.finish();
 
     let text = formact_func(&func, &types);

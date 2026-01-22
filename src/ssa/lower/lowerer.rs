@@ -8,7 +8,7 @@ use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweredFunction;
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{BlockId, FunctionSig, Terminator, ValueId};
+use crate::ssa::model::ir::{FunctionSig, Terminator, ValueId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -25,18 +25,12 @@ pub(super) struct LocalValue {
     pub(super) ty: IrTypeId,
 }
 
-/// Result of lowering a branching expression: the produced value and the block it ends in.
-pub(super) struct BranchingValue {
-    pub(super) value: ValueId,
-    pub(super) block: BlockId,
-}
-
 /// Plan for joining control flow from multiple branches (e.g., if/else arms).
 ///
 /// Contains the join block, the phi-like parameter for the expression value,
 /// and parameters for threading local variable values through the join point.
 pub(super) struct JoinPlan {
-    pub(super) join_bb: BlockId,
+    pub(super) join_bb: crate::ssa::model::ir::BlockId,
     pub(super) join_value: ValueId,
     pub(super) defs: Vec<DefId>,
     pub(super) tys: Vec<IrTypeId>,
@@ -44,17 +38,20 @@ pub(super) struct JoinPlan {
 }
 
 /// Result of lowering a branching expression.
+///
+/// After lowering, the builder's cursor is at the "ending block" where
+/// execution continues.
 pub(super) enum BranchResult {
-    /// Expression produced a value in the given block.
-    Value(BranchingValue),
+    /// Expression produced a value. Cursor is at the ending block.
+    Value(ValueId),
     /// Expression terminates with a return (no continuation).
     Return,
 }
 
 /// Outcome of lowering a statement.
 pub(super) enum StmtOutcome {
-    /// Continue execution in the given block.
-    Continue(BlockId),
+    /// Continue execution in the current block.
+    Continue,
     /// Statement terminates with a return.
     Return,
 }
@@ -231,13 +228,12 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    /// Emits a branch from a source block to the join block.
+    /// Emits a branch from the current block to the join block.
     ///
     /// Passes the branch's result value followed by current local variable values
     /// as arguments to the join block's parameters.
     pub(super) fn emit_join_branch(
         &mut self,
-        from_bb: BlockId,
         plan: &JoinPlan,
         value: ValueId,
         span: Span,
@@ -248,13 +244,10 @@ impl<'a> FuncLowerer<'a> {
         args.push(value);
         args.extend(local_args);
 
-        self.builder.set_terminator(
-            from_bb,
-            Terminator::Br {
-                target: plan.join_bb,
-                args,
-            },
-        );
+        self.builder.terminate(Terminator::Br {
+            target: plan.join_bb,
+            args,
+        });
         Ok(())
     }
 

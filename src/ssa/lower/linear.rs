@@ -3,97 +3,88 @@
 use crate::ssa::lower::linearize::linearize_expr;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, LocalValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
-use crate::ssa::model::ir::{BlockId, Callee, Terminator, UnOp, ValueId};
+use crate::ssa::model::ir::{Callee, Terminator, UnOp, ValueId};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 
 impl<'a> FuncLowerer<'a> {
-    /// Lowers a linear expression within a single basic block.
+    /// Lowers a linear expression at the current block cursor.
     ///
     /// Linear expressions don't introduce control flow, so all instructions
-    /// are emitted to the same block.
+    /// are emitted to the current block without changing the cursor.
     pub(super) fn lower_linear_expr(
         &mut self,
-        block: BlockId,
         expr: &sem::LinearExpr,
     ) -> Result<LinearValue, sem::LinearizeError> {
         match &expr.kind {
             // Block: process items sequentially, return tail value or unit.
             sem::LinearExprKind::Block { items, tail } => {
-                let mut cur_block = block;
                 for item in items {
                     match item {
-                        sem::LinearBlockItem::Stmt(stmt) => {
-                            match self.lower_linear_stmt(cur_block, stmt)? {
-                                StmtOutcome::Continue(next_block) => {
-                                    cur_block = next_block;
-                                }
-                                StmtOutcome::Return => {
-                                    return Err(self
-                                        .err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt));
-                                }
+                        sem::LinearBlockItem::Stmt(stmt) => match self.lower_linear_stmt(stmt)? {
+                            StmtOutcome::Continue => {}
+                            StmtOutcome::Return => {
+                                return Err(
+                                    self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)
+                                );
                             }
-                        }
+                        },
                         sem::LinearBlockItem::Expr(expr) => {
                             // Side-effect only; discard the value.
-                            let _ = self.lower_linear_expr(cur_block, expr)?;
+                            let _ = self.lower_linear_expr(expr)?;
                         }
                     }
                 }
                 if let Some(tail) = tail {
-                    return self.lower_linear_expr(cur_block, tail);
+                    return self.lower_linear_expr(tail);
                 }
                 // No tail: produce unit.
-                let value = self
-                    .builder
-                    .const_unit(cur_block, self.type_lowerer.lower_type_id(expr.ty));
-                Ok(value)
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_unit(ty))
             }
 
             // Literals: emit constant instructions.
-            sem::LinearExprKind::UnitLit => Ok(self
-                .builder
-                .const_unit(block, self.type_lowerer.lower_type_id(expr.ty))),
+            sem::LinearExprKind::UnitLit => {
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_unit(ty))
+            }
             sem::LinearExprKind::IntLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let (signed, bits) = self.type_lowerer.int_info(expr.ty);
-                Ok(self
-                    .builder
-                    .const_int(block, *value as i128, signed, bits, ty))
+                Ok(self.builder.const_int(*value as i128, signed, bits, ty))
             }
             sem::LinearExprKind::BoolLit(value) => {
-                Ok(self
-                    .builder
-                    .const_bool(block, *value, self.type_lowerer.lower_type_id(expr.ty)))
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_bool(*value, ty))
             }
 
             // Unary operators: lower operand and emit unary instruction.
-            sem::LinearExprKind::UnaryOp { op, expr } => {
-                let value = self.lower_linear_expr(block, expr)?;
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
-                let value = match op {
-                    UnaryOp::Neg => self.builder.unop(block, UnOp::Neg, value, ty),
-                    UnaryOp::LogicalNot => self.builder.unop(block, UnOp::Not, value, ty),
-                    UnaryOp::BitNot => self.builder.unop(block, UnOp::BitNot, value, ty),
+            sem::LinearExprKind::UnaryOp { op, expr: inner } => {
+                let value = self.lower_linear_expr(inner)?;
+                let ty = self.type_lowerer.lower_type_id(inner.ty);
+                let result = match op {
+                    UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
+                    UnaryOp::LogicalNot => self.builder.unop(UnOp::Not, value, ty),
+                    UnaryOp::BitNot => self.builder.unop(UnOp::BitNot, value, ty),
                 };
-                Ok(value)
+                Ok(result)
             }
 
             // Binary operators: lower operands and emit binop/cmp instruction.
             sem::LinearExprKind::BinOp { left, op, right } => {
                 // Try arithmetic/logical binary operation.
                 if let Some(binop) = map_binop(*op) {
-                    let lhs = self.lower_linear_expr(block, left)?;
-                    let rhs = self.lower_linear_expr(block, right)?;
+                    let lhs = self.lower_linear_expr(left)?;
+                    let rhs = self.lower_linear_expr(right)?;
                     let ty = self.type_lowerer.lower_type_id(expr.ty);
-                    return Ok(self.builder.binop(block, binop, lhs, rhs, ty));
+                    return Ok(self.builder.binop(binop, lhs, rhs, ty));
                 }
                 // Try comparison operation.
                 if let Some(cmp) = map_cmp(*op) {
-                    let lhs = self.lower_linear_expr(block, left)?;
-                    let rhs = self.lower_linear_expr(block, right)?;
+                    let lhs = self.lower_linear_expr(left)?;
+                    let rhs = self.lower_linear_expr(right)?;
                     let ty = self.type_lowerer.lower_type_id(expr.ty);
-                    return Ok(self.builder.cmp(block, cmp, lhs, rhs, ty));
+                    return Ok(self.builder.cmp(cmp, lhs, rhs, ty));
                 }
                 Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
             }
@@ -103,6 +94,7 @@ impl<'a> FuncLowerer<'a> {
                 sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id).value),
                 _ => Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)),
             },
+
             // Function call: resolve callee from call plan and emit call instruction.
             sem::LinearExprKind::Call { callee: _, args } => {
                 // Retrieve the call plan from type-checking (contains resolved target).
@@ -128,14 +120,14 @@ impl<'a> FuncLowerer<'a> {
                 // Lower argument expressions.
                 let mut arg_values = Vec::with_capacity(args.len());
                 for arg in args {
-                    arg_values.push(self.lower_linear_expr(block, arg)?);
+                    arg_values.push(self.lower_linear_expr(arg)?);
                 }
 
                 // Apply the call plan to reorder/transform arguments.
                 let call_args =
                     self.lower_call_args_from_plan(expr, &call_plan, None, &arg_values)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.call(block, callee, call_args, ty))
+                Ok(self.builder.call(callee, call_args, ty))
             }
 
             // Method call: similar to function call but with a receiver.
@@ -162,9 +154,7 @@ impl<'a> FuncLowerer<'a> {
 
                 // Lower the receiver (value receivers only).
                 let receiver_value = match receiver {
-                    sem::LinearMethodReceiver::Value(expr) => {
-                        self.lower_linear_expr(block, expr)?
-                    }
+                    sem::LinearMethodReceiver::Value(expr) => self.lower_linear_expr(expr)?,
                     sem::LinearMethodReceiver::Place(_) => {
                         return Err(
                             self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)
@@ -175,7 +165,7 @@ impl<'a> FuncLowerer<'a> {
                 // Lower argument expressions.
                 let mut arg_values = Vec::with_capacity(args.len());
                 for arg in args {
-                    arg_values.push(self.lower_linear_expr(block, arg)?);
+                    arg_values.push(self.lower_linear_expr(arg)?);
                 }
 
                 // Apply the call plan to build final argument list.
@@ -186,8 +176,9 @@ impl<'a> FuncLowerer<'a> {
                     &arg_values,
                 )?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.call(block, callee, call_args, ty))
+                Ok(self.builder.call(callee, call_args, ty))
             }
+
             sem::LinearExprKind::CharLit(_) | sem::LinearExprKind::ClosureRef { .. } => {
                 Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
             }
@@ -197,17 +188,15 @@ impl<'a> FuncLowerer<'a> {
     /// Convenience: linearize a ValueExpr and lower it in one step.
     pub(super) fn lower_linear_expr_value(
         &mut self,
-        block: BlockId,
         expr: &sem::ValueExpr,
     ) -> Result<LinearValue, sem::LinearizeError> {
         let linear = linearize_expr(expr)?;
-        self.lower_linear_expr(block, &linear)
+        self.lower_linear_expr(&linear)
     }
 
     /// Lowers a linear statement, emitting instructions and updating locals.
     pub(super) fn lower_linear_stmt(
         &mut self,
-        block: BlockId,
         stmt: &sem::LinearStmt,
     ) -> Result<StmtOutcome, sem::LinearizeError> {
         match &stmt.kind {
@@ -215,22 +204,22 @@ impl<'a> FuncLowerer<'a> {
             sem::LinearStmtKind::LetBind { pattern, value, .. }
             | sem::LinearStmtKind::VarBind { pattern, value, .. } => {
                 let value_expr = value;
-                let value = self.lower_linear_expr(block, value_expr)?;
+                let value = self.lower_linear_expr(value_expr)?;
                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                 self.bind_pattern(pattern, LocalValue { value, ty })?;
-                Ok(StmtOutcome::Continue(block))
+                Ok(StmtOutcome::Continue)
             }
 
             // Assignment: lower the value and update the local's SSA value.
             sem::LinearStmtKind::Assign { assignee, value } => {
                 let value_expr = value;
-                let value = self.lower_linear_expr(block, value_expr)?;
+                let value = self.lower_linear_expr(value_expr)?;
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         // Update the local to the new SSA value.
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         self.locals.insert(*def_id, LocalValue { value, ty });
-                        Ok(StmtOutcome::Continue(block))
+                        Ok(StmtOutcome::Continue)
                     }
                     _ => Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)),
                 }
@@ -239,11 +228,10 @@ impl<'a> FuncLowerer<'a> {
             // Return: emit return terminator.
             sem::LinearStmtKind::Return { value } => {
                 let value = match value {
-                    Some(expr) => Some(self.lower_linear_expr(block, expr)?),
+                    Some(expr) => Some(self.lower_linear_expr(expr)?),
                     None => None,
                 };
-                self.builder
-                    .set_terminator(block, Terminator::Return { value });
+                self.builder.terminate(Terminator::Return { value });
                 Ok(StmtOutcome::Return)
             }
 
