@@ -76,5 +76,5 @@ pub fn lower_func(
 }
 
 #[cfg(test)]
-#[path = "../../tests/ssa/t_lower.rs"]
+#[path = "../../tests/ssa/lower/mod.rs"]
 mod tests;
