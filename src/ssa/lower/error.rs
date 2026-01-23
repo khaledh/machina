@@ -6,6 +6,7 @@ use crate::diag::Span;
 pub enum LoweringErrorKind {
     UnsupportedExpr,
     UnsupportedStmt,
+    UnimplementedBranching,
 }
 
 #[derive(Clone, Debug)]

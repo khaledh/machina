@@ -6,7 +6,9 @@
 mod branching;
 mod calls;
 mod error;
+mod join;
 mod linear;
+mod locals;
 mod lowerer;
 mod mapping;
 mod types;
@@ -53,7 +55,9 @@ pub fn lower_func(
     for ty in &param_tys {
         param_values.push(lowerer.builder.add_block_param(entry, *ty));
     }
-    lowerer.set_locals_from_params(&param_defs, &param_tys, &param_values);
+    lowerer
+        .locals
+        .set_from_params(&param_defs, &param_tys, &param_values);
 
     // Lower the function body. This may produce multiple basic blocks
     // for control flow (if/else, loops, etc.). The cursor ends at the

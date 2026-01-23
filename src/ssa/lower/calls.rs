@@ -15,11 +15,11 @@ impl<'a> FuncLowerer<'a> {
         let call_plan = self
             .type_map
             .lookup_call_plan(expr.id)
-            .ok_or_else(|| self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))?;
+            .unwrap_or_else(|| panic!("ssa lower_call_expr missing call plan {:?}", expr.id));
 
         // Direct calls (no receiver) only for now.
         if call_plan.has_receiver {
-            return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+            panic!("ssa lower_call_expr expected no receiver for {:?}", expr.id);
         }
 
         // Resolve the callee (only direct calls supported).
@@ -56,14 +56,16 @@ impl<'a> FuncLowerer<'a> {
         receiver: &sem::MethodReceiver,
         args: &[sem::CallArg],
     ) -> Result<LinearValue, LoweringError> {
-        let call_plan = self
-            .type_map
-            .lookup_call_plan(expr.id)
-            .ok_or_else(|| self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))?;
+        let call_plan = self.type_map.lookup_call_plan(expr.id).unwrap_or_else(|| {
+            panic!("ssa lower_method_call_expr missing call plan {:?}", expr.id)
+        });
 
         // Method calls must have a receiver.
         if !call_plan.has_receiver {
-            return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+            panic!(
+                "ssa lower_method_call_expr missing receiver for {:?}",
+                expr.id
+            );
         }
 
         // Resolve the callee (only direct calls supported).
@@ -116,7 +118,10 @@ impl<'a> FuncLowerer<'a> {
         arg_values: &[ValueId],
     ) -> Result<Vec<ValueId>, LoweringError> {
         if call_plan.has_receiver != receiver_value.is_some() {
-            return Err(self.err_span(span, LoweringErrorKind::UnsupportedExpr));
+            panic!(
+                "ssa lower_call_args_from_plan receiver mismatch for {:?}",
+                expr_id
+            );
         }
 
         let mut call_args = Vec::with_capacity(call_plan.args.len());

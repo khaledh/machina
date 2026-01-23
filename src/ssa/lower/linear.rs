@@ -1,6 +1,7 @@
 //! Straight-line (single-block) lowering routines.
 
-use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, LocalValue, StmtOutcome};
+use crate::ssa::lower::locals::LocalValue;
+use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, UnOp};
@@ -22,7 +23,10 @@ impl<'a> FuncLowerer<'a> {
                         sem::BlockItem::Stmt(stmt) => match self.lower_stmt_expr_linear(stmt)? {
                             StmtOutcome::Continue => {}
                             StmtOutcome::Return => {
-                                return Err(self.err_stmt(stmt, LoweringErrorKind::UnsupportedStmt));
+                                panic!(
+                                    "ssa lower_value_expr_linear hit return in linear block at {:?}",
+                                    stmt.span
+                                );
                             }
                         },
                         sem::BlockItem::Expr(expr) => {
@@ -154,7 +158,10 @@ impl<'a> FuncLowerer<'a> {
         match self.lower_value_expr(expr)? {
             BranchResult::Value(value) => Ok(value),
             BranchResult::Return => {
-                Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
+                panic!(
+                    "ssa lower_linear_expr_value hit return in linear context at {:?}",
+                    expr.span
+                );
             }
         }
     }

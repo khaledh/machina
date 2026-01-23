@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefTable};
 use crate::ssa::IrTypeId;
+use crate::ssa::lower::locals::{LocalMap, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{FunctionSig, Terminator, ValueId};
+use crate::ssa::model::ir::{FunctionSig, ValueId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -17,30 +18,6 @@ use crate::types::Type;
 
 /// An SSA value produced by linear (single-block) expression lowering.
 pub(super) type LinearValue = ValueId;
-
-/// A local variable's current SSA value and type.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct LocalValue {
-    pub(super) value: ValueId,
-    pub(super) ty: IrTypeId,
-}
-
-/// Plan for joining control flow from multiple branches (e.g., if/else arms).
-///
-/// Contains the join block, the phi-like parameter for the expression value,
-/// and parameters for threading local variable values through the join point.
-pub(super) struct JoinPlan {
-    pub(super) join_bb: crate::ssa::model::ir::BlockId,
-    pub(super) join_value: ValueId,
-    pub(super) defs: Vec<DefId>,
-    pub(super) tys: Vec<IrTypeId>,
-    pub(super) join_local_params: Vec<ValueId>,
-}
-
-pub(super) struct JoinSession {
-    plan: JoinPlan,
-    saved_locals: HashMap<DefId, LocalValue>,
-}
 
 /// Result of lowering a branching expression.
 ///
@@ -73,7 +50,7 @@ pub(super) struct FuncLowerer<'a> {
     pub(crate) type_map: &'a TypeMap,
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
-    pub(super) locals: HashMap<DefId, LocalValue>,
+    pub(super) locals: LocalMap,
     pub(super) lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
@@ -136,7 +113,7 @@ impl<'a> FuncLowerer<'a> {
             type_map,
             type_lowerer,
             builder,
-            locals: HashMap::new(),
+            locals: LocalMap::new(),
             lowering_plans,
             param_defs,
             param_tys,
@@ -178,123 +155,9 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
-    /// Returns locals in a deterministic order (sorted by DefId).
-    /// This ensures consistent ordering when threading locals through join blocks.
-    pub(super) fn ordered_locals(&self) -> Vec<(DefId, LocalValue)> {
-        let mut locals: Vec<_> = self
-            .locals
-            .iter()
-            .map(|(def, local)| (*def, *local))
-            .collect();
-        locals.sort_by_key(|(def, _)| def.0);
-        locals
-    }
-
-    /// Collects current SSA values for the given defs in order.
-    /// Used when building branch arguments for join blocks.
-    pub(super) fn locals_args(
-        &self,
-        defs: &[DefId],
-        span: Span,
-    ) -> Result<Vec<ValueId>, LoweringError> {
-        let mut args = Vec::with_capacity(defs.len());
-        for def in defs {
-            let Some(local) = self.locals.get(def) else {
-                return Err(self.err_span(span, LoweringErrorKind::UnsupportedExpr));
-            };
-            args.push(local.value);
-        }
-        Ok(args)
-    }
-
-    /// Resets the locals map to use values from block parameters.
-    /// Called after entering a new block (entry, loop header, join block).
-    pub(super) fn set_locals_from_params(
-        &mut self,
-        defs: &[DefId],
-        tys: &[IrTypeId],
-        params: &[ValueId],
-    ) {
-        self.locals.clear();
-        for ((def, ty), value) in defs.iter().zip(tys.iter()).zip(params.iter()) {
-            self.locals.insert(
-                *def,
-                LocalValue {
-                    value: *value,
-                    ty: *ty,
-                },
-            );
-        }
-    }
-
-    /// Builds a join plan for merging control flow from multiple branches.
-    ///
-    /// Creates the join block with:
-    /// 1. A parameter for the expression's result value
-    /// 2. Parameters for each local variable (to thread SSA values through)
-    ///
-    /// The caller is responsible for emitting branches to this join block.
-    pub(super) fn build_join_plan(&mut self, expr: &sem::ValueExpr) -> JoinPlan {
-        let join_bb = self.builder.add_block();
-
-        // Add parameter for the expression's result value.
-        let join_ty = self.type_lowerer.lower_type_id(expr.ty);
-        let join_value = self.builder.add_block_param(join_bb, join_ty);
-
-        // Snapshot current locals in deterministic order.
-        let locals_snapshot = self.ordered_locals();
-        let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
-        let tys: Vec<IrTypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
-
-        // Add parameters for threading local variable values.
-        let join_local_params: Vec<ValueId> = tys
-            .iter()
-            .map(|ty| self.builder.add_block_param(join_bb, *ty))
-            .collect();
-
-        JoinPlan {
-            join_bb,
-            join_value,
-            defs,
-            tys,
-            join_local_params,
-        }
-    }
-
-    pub(super) fn begin_join(&mut self, expr: &sem::ValueExpr) -> JoinSession {
-        JoinSession {
-            plan: self.build_join_plan(expr),
-            saved_locals: self.locals.clone(),
-        }
-    }
-
-    /// Emits a branch from the current block to the join block.
-    ///
-    /// Passes the branch's result value followed by current local variable values
-    /// as arguments to the join block's parameters.
-    pub(super) fn emit_join_branch(
-        &mut self,
-        plan: &JoinPlan,
-        value: ValueId,
-        span: Span,
-    ) -> Result<(), LoweringError> {
-        // Build arguments: result value + locals in stable order.
-        let local_args = self.locals_args(&plan.defs, span)?;
-        let mut args = Vec::with_capacity(1 + local_args.len());
-        args.push(value);
-        args.extend(local_args);
-
-        self.builder.terminate(Terminator::Br {
-            target: plan.join_bb,
-            args,
-        });
-        Ok(())
-    }
-
     pub(super) fn lookup_local(&self, def_id: DefId) -> LocalValue {
-        *self
-            .locals
-            .get(&def_id)
+        self.locals
+            .get(def_id)
             .unwrap_or_else(|| panic!("ssa lower_func missing local {:?}", def_id))
     }
 
@@ -307,33 +170,5 @@ impl<'a> FuncLowerer<'a> {
             kind,
             span: stmt.span,
         }
-    }
-}
-
-impl JoinSession {
-    pub(super) fn join_value(&self) -> ValueId {
-        self.plan.join_value
-    }
-
-    pub(super) fn restore_locals(&self, lowerer: &mut FuncLowerer<'_>) {
-        lowerer.locals = self.saved_locals.clone();
-    }
-
-    pub(super) fn emit_branch(
-        &self,
-        lowerer: &mut FuncLowerer<'_>,
-        value: ValueId,
-        span: Span,
-    ) -> Result<(), LoweringError> {
-        lowerer.emit_join_branch(&self.plan, value, span)
-    }
-
-    pub(super) fn finalize(self, lowerer: &mut FuncLowerer<'_>) {
-        lowerer.builder.select_block(self.plan.join_bb);
-        lowerer.set_locals_from_params(
-            &self.plan.defs,
-            &self.plan.tys,
-            &self.plan.join_local_params,
-        );
     }
 }
