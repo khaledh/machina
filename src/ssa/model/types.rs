@@ -1,3 +1,5 @@
+use super::layout::{IrLayout, IrLayoutCache};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IrTypeId(pub u32);
 
@@ -50,11 +52,15 @@ pub struct IrTypeInfo {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IrTypeCache {
     types: Vec<IrTypeInfo>,
+    layout_cache: IrLayoutCache,
 }
 
 impl IrTypeCache {
     pub fn new() -> Self {
-        Self { types: Vec::new() }
+        Self {
+            types: Vec::new(),
+            layout_cache: IrLayoutCache::new(),
+        }
     }
 
     /// Adds an anonymous type definition to the table.
@@ -80,5 +86,10 @@ impl IrTypeCache {
 
     pub fn kind(&self, id: IrTypeId) -> &IrTypeKind {
         &self.get(id).kind
+    }
+
+    /// Returns layout information for a type, computing it on demand.
+    pub fn layout(&mut self, id: IrTypeId) -> IrLayout {
+        self.layout_cache.layout(&self.types, id)
     }
 }
