@@ -225,6 +225,91 @@ fn test_lower_struct_lit_return() {
 }
 
 #[test]
+fn test_lower_struct_update_return() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        fn main() -> Pair {
+            let p = Pair { a: 1, b: 2 };
+            { p | b: 5 }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> Pair {
+          locals:
+            %l0: Pair
+            %l1: Pair
+          bb0():
+            %v0: ptr<Pair> = addr_of %l0
+            %v1: u64 = const 1:u64
+            %v2: ptr<u64> = field_addr %v0, 0
+            store %v2, %v1
+            %v3: u64 = const 2:u64
+            %v4: ptr<u64> = field_addr %v0, 1
+            store %v4, %v3
+            %v5: Pair = load %v0
+            %v6: ptr<Pair> = addr_of %l1
+            store %v6, %v5
+            %v7: u64 = const 5:u64
+            %v8: ptr<u64> = field_addr %v6, 1
+            store %v8, %v7
+            %v9: Pair = load %v6
+            ret %v9
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_struct_update_multi_field_return() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        fn main() -> Pair {
+            let p = Pair { a: 1, b: 2 };
+            { p | b: 5, a: 3 }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> Pair {
+          locals:
+            %l0: Pair
+            %l1: Pair
+          bb0():
+            %v0: ptr<Pair> = addr_of %l0
+            %v1: u64 = const 1:u64
+            %v2: ptr<u64> = field_addr %v0, 0
+            store %v2, %v1
+            %v3: u64 = const 2:u64
+            %v4: ptr<u64> = field_addr %v0, 1
+            store %v4, %v3
+            %v5: Pair = load %v0
+            %v6: ptr<Pair> = addr_of %l1
+            store %v6, %v5
+            %v7: u64 = const 5:u64
+            %v8: ptr<u64> = field_addr %v6, 1
+            store %v8, %v7
+            %v9: u64 = const 3:u64
+            %v10: ptr<u64> = field_addr %v6, 0
+            store %v10, %v9
+            %v11: Pair = load %v6
+            ret %v11
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_array_lit_elems_return() {
     let ctx = analyze(indoc! {"
         fn main() -> u64[3] {

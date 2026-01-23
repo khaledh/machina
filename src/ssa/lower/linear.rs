@@ -135,6 +135,30 @@ impl<'a> FuncLowerer<'a> {
                 Ok(self.builder.load(addr, struct_ty))
             }
 
+            sem::ValueExprKind::StructUpdate { target, fields } => {
+                // Allocate a local for the updated struct and get its address
+                let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let local = self.builder.add_local(struct_ty, None);
+                let ptr_ty = self.type_lowerer.ptr_to(struct_ty);
+                let addr = self.builder.addr_of_local(local, ptr_ty);
+
+                // Copy the base struct
+                let base_value = self.lower_value_expr_linear(target)?;
+                self.builder.store(addr, base_value);
+
+                // Overwrite the updated fields
+                for field in fields.iter() {
+                    let value = self.lower_value_expr_linear(&field.value)?;
+                    let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
+                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ty);
+                    let field_addr = self.builder.field_addr(addr, field_index, field_ptr_ty);
+                    self.builder.store(field_addr, value);
+                }
+
+                // Load the updated struct value
+                Ok(self.builder.load(addr, struct_ty))
+            }
+
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
                 let value = self.lower_value_expr_linear(inner)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);

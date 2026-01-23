@@ -249,38 +249,60 @@ impl<'a> LoweringPlanBuilder<'a> {
                         .map(|tail| self.is_linear_value_expr(tail))
                         .unwrap_or(true)
             }
+
             sem::ValueExprKind::UnitLit
             | sem::ValueExprKind::IntLit(_)
             | sem::ValueExprKind::BoolLit(_)
             | sem::ValueExprKind::CharLit(_) => true,
-            sem::ValueExprKind::TupleLit(items) => {
-                items.iter().all(|item| self.is_linear_value_expr(item))
-            }
-            sem::ValueExprKind::StructLit { fields, .. } => fields
-                .iter()
-                .all(|field| self.is_linear_value_expr(&field.value)),
+
             sem::ValueExprKind::ArrayLit { init, .. } => match init {
                 sem::ArrayLitInit::Elems(elems) => {
                     elems.iter().all(|elem| self.is_linear_value_expr(elem))
                 }
                 sem::ArrayLitInit::Repeat(expr, _) => self.is_linear_value_expr(expr),
             },
+
+            sem::ValueExprKind::TupleLit(items) => {
+                items.iter().all(|item| self.is_linear_value_expr(item))
+            }
+
+            sem::ValueExprKind::StructLit { fields, .. } => fields
+                .iter()
+                .all(|field| self.is_linear_value_expr(&field.value)),
+
+            sem::ValueExprKind::StructUpdate { target, fields } => {
+                self.is_linear_value_expr(target)
+                    && fields
+                        .iter()
+                        .all(|field| self.is_linear_value_expr(&field.value))
+            }
+
             sem::ValueExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
+
             sem::ValueExprKind::BinOp { left, right, .. } => {
                 self.is_linear_value_expr(left) && self.is_linear_value_expr(right)
             }
-            sem::ValueExprKind::Load { .. } => true,
+
+            sem::ValueExprKind::Load { place } => self.is_linear_place_expr(place),
+
+            sem::ValueExprKind::AddrOf { place } => self.is_linear_place_expr(place),
+
             sem::ValueExprKind::Call { callee, args } => {
                 self.is_linear_value_expr(callee)
                     && args.iter().all(|arg| self.is_linear_call_arg(arg))
                     && self.is_linear_call_plan(expr.id, false)
             }
+
             sem::ValueExprKind::MethodCall { receiver, args, .. } => {
                 self.is_linear_method_receiver(receiver)
                     && args.iter().all(|arg| self.is_linear_call_arg(arg))
                     && self.is_linear_call_plan(expr.id, true)
             }
-            sem::ValueExprKind::ClosureRef { .. } => true,
+
+            // SSA lowering doesn't emit closure refs yet; keep this branching
+            // so we surface an explicit unimplemented error.
+            sem::ValueExprKind::ClosureRef { .. } => false,
+
             _ => false,
         }
     }
@@ -298,6 +320,19 @@ impl<'a> LoweringPlanBuilder<'a> {
         match receiver {
             sem::MethodReceiver::ValueExpr(expr) => self.is_linear_value_expr(expr),
             sem::MethodReceiver::PlaceExpr(_) => false,
+        }
+    }
+
+    fn is_linear_place_expr(&self, place: &sem::PlaceExpr) -> bool {
+        match &place.kind {
+            sem::PlaceExprKind::Var { .. } => true,
+            sem::PlaceExprKind::Deref { value } => self.is_linear_value_expr(value),
+            sem::PlaceExprKind::TupleField { target, .. }
+            | sem::PlaceExprKind::StructField { target, .. } => self.is_linear_place_expr(target),
+            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+                self.is_linear_place_expr(target)
+                    && indices.iter().all(|index| self.is_linear_value_expr(index))
+            }
         }
     }
 
