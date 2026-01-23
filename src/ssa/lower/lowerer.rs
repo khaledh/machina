@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefTable};
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::LoweredFunction;
 use crate::ssa::lower::types::TypeLowerer;
+use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{FunctionSig, Terminator, ValueId};
 use crate::tree::NodeId;
@@ -74,7 +74,7 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
     pub(super) locals: HashMap<DefId, LocalValue>,
-    pub(super) block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
+    pub(super) lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
 }
@@ -88,7 +88,7 @@ impl<'a> FuncLowerer<'a> {
         func: &sem::FuncDef,
         def_table: &DefTable,
         type_map: &'a TypeMap,
-        block_expr_plans: &'a HashMap<NodeId, sem::BlockExprPlan>,
+        lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
 
@@ -137,7 +137,7 @@ impl<'a> FuncLowerer<'a> {
             type_lowerer,
             builder,
             locals: HashMap::new(),
-            block_expr_plans,
+            lowering_plans,
             param_defs,
             param_tys,
         }
@@ -147,6 +147,34 @@ impl<'a> FuncLowerer<'a> {
         LoweredFunction {
             func: self.builder.finish(),
             types: self.type_lowerer.ir_type_cache,
+        }
+    }
+
+    /// Lowers a value expression by consulting its precomputed lowering plan.
+    ///
+    /// Linear expressions are lowered in the current block. Branching expressions
+    /// delegate to the multi-block lowering path.
+    pub(super) fn lower_value_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+    ) -> Result<BranchResult, LoweringError> {
+        let plan = self
+            .lowering_plans
+            .get(&expr.id)
+            .unwrap_or_else(|| panic!("ssa lower_func missing lowering plan {:?}", expr.id));
+
+        match plan {
+            sem::LoweringPlan::Linear => {
+                // The plan guarantees linearity; any failure here is a compiler bug.
+                let value = self.lower_value_expr_linear(expr).unwrap_or_else(|err| {
+                    panic!(
+                        "ssa lower_func lowering plan mismatch {:?}: {:?}",
+                        expr.id, err
+                    )
+                });
+                Ok(BranchResult::Value(value))
+            }
+            sem::LoweringPlan::Branching => self.lower_branching_expr(expr),
         }
     }
 
@@ -168,11 +196,11 @@ impl<'a> FuncLowerer<'a> {
         &self,
         defs: &[DefId],
         span: Span,
-    ) -> Result<Vec<ValueId>, sem::LinearizeError> {
+    ) -> Result<Vec<ValueId>, LoweringError> {
         let mut args = Vec::with_capacity(defs.len());
         for def in defs {
             let Some(local) = self.locals.get(def) else {
-                return Err(self.err_span(span, sem::LinearizeErrorKind::UnsupportedExpr));
+                return Err(self.err_span(span, LoweringErrorKind::UnsupportedExpr));
             };
             args.push(local.value);
         }
@@ -249,7 +277,7 @@ impl<'a> FuncLowerer<'a> {
         plan: &JoinPlan,
         value: ValueId,
         span: Span,
-    ) -> Result<(), sem::LinearizeError> {
+    ) -> Result<(), LoweringError> {
         // Build arguments: result value + locals in stable order.
         let local_args = self.locals_args(&plan.defs, span)?;
         let mut args = Vec::with_capacity(1 + local_args.len());
@@ -270,20 +298,12 @@ impl<'a> FuncLowerer<'a> {
             .unwrap_or_else(|| panic!("ssa lower_func missing local {:?}", def_id))
     }
 
-    pub(super) fn err_span(
-        &self,
-        span: Span,
-        kind: sem::LinearizeErrorKind,
-    ) -> sem::LinearizeError {
-        sem::LinearizeError { kind, span }
+    pub(super) fn err_span(&self, span: Span, kind: LoweringErrorKind) -> LoweringError {
+        LoweringError { kind, span }
     }
 
-    pub(super) fn err_stmt(
-        &self,
-        stmt: &sem::LinearStmt,
-        kind: sem::LinearizeErrorKind,
-    ) -> sem::LinearizeError {
-        sem::LinearizeError {
+    pub(super) fn err_stmt(&self, stmt: &sem::StmtExpr, kind: LoweringErrorKind) -> LoweringError {
+        LoweringError {
             kind,
             span: stmt.span,
         }
@@ -304,7 +324,7 @@ impl JoinSession {
         lowerer: &mut FuncLowerer<'_>,
         value: ValueId,
         span: Span,
-    ) -> Result<(), sem::LinearizeError> {
+    ) -> Result<(), LoweringError> {
         lowerer.emit_join_branch(&self.plan, value, span)
     }
 

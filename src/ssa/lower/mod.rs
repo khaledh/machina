@@ -5,8 +5,8 @@
 
 mod branching;
 mod calls;
+mod error;
 mod linear;
-mod linearize;
 mod lowerer;
 mod mapping;
 mod types;
@@ -24,6 +24,8 @@ pub struct LoweredFunction {
     pub types: IrTypeCache,
 }
 
+pub use error::{LoweringError, LoweringErrorKind};
+
 /// Lowers a semantic function definition into SSA IR.
 ///
 /// This is the main entry point for SSA lowering. The process:
@@ -36,11 +38,11 @@ pub fn lower_func(
     func: &sem::FuncDef,
     def_table: &DefTable,
     type_map: &TypeMap,
-    block_expr_plans: &sem::BlockExprPlanMap,
-) -> Result<LoweredFunction, sem::LinearizeError> {
+    lowering_plans: &sem::LoweringPlanMap,
+) -> Result<LoweredFunction, LoweringError> {
     // Initialize the lowerer with function metadata and type information.
     // The builder starts with the cursor at the entry block (block 0).
-    let mut lowerer = FuncLowerer::new(func, def_table, type_map, block_expr_plans);
+    let mut lowerer = FuncLowerer::new(func, def_table, type_map, lowering_plans);
 
     // Add function parameters as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.

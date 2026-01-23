@@ -1,67 +1,61 @@
 //! Straight-line (single-block) lowering routines.
 
-use crate::ssa::lower::linearize::linearize_expr;
-use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, LocalValue, StmtOutcome};
+use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, LocalValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
+use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, UnOp};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 
 impl<'a> FuncLowerer<'a> {
-    /// Lowers a linear expression at the current block cursor.
+    /// Lowers a linear value expression directly from the semantic tree.
     ///
-    /// Linear expressions don't introduce control flow, so all instructions
-    /// are emitted to the current block without changing the cursor.
-    pub(super) fn lower_linear_expr(
+    /// This avoids constructing a parallel linear AST for the common cases.
+    pub(super) fn lower_value_expr_linear(
         &mut self,
-        expr: &sem::LinearExpr,
-    ) -> Result<LinearValue, sem::LinearizeError> {
+        expr: &sem::ValueExpr,
+    ) -> Result<LinearValue, LoweringError> {
         match &expr.kind {
-            // Block: process items sequentially, return tail value or unit.
-            sem::LinearExprKind::Block { items, tail } => {
+            sem::ValueExprKind::Block { items, tail } => {
                 for item in items {
                     match item {
-                        sem::LinearBlockItem::Stmt(stmt) => match self.lower_linear_stmt(stmt)? {
+                        sem::BlockItem::Stmt(stmt) => match self.lower_stmt_expr_linear(stmt)? {
                             StmtOutcome::Continue => {}
                             StmtOutcome::Return => {
-                                return Err(
-                                    self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)
-                                );
+                                return Err(self.err_stmt(stmt, LoweringErrorKind::UnsupportedStmt));
                             }
                         },
-                        sem::LinearBlockItem::Expr(expr) => {
-                            // Side-effect only; discard the value.
-                            let _ = self.lower_linear_expr(expr)?;
+                        sem::BlockItem::Expr(expr) => {
+                            let _ = self.lower_value_expr_linear(expr)?;
                         }
                     }
                 }
+
                 if let Some(tail) = tail {
-                    return self.lower_linear_expr(tail);
+                    return self.lower_value_expr_linear(tail);
                 }
-                // No tail: produce unit.
+
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.const_unit(ty))
             }
 
-            // Literals: emit constant instructions.
-            sem::LinearExprKind::UnitLit => {
+            sem::ValueExprKind::UnitLit => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.const_unit(ty))
             }
-            sem::LinearExprKind::IntLit(value) => {
+            sem::ValueExprKind::IntLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let (signed, bits) = self.type_lowerer.int_info(expr.ty);
                 Ok(self.builder.const_int(*value as i128, signed, bits, ty))
             }
-            sem::LinearExprKind::BoolLit(value) => {
+            sem::ValueExprKind::BoolLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.const_bool(*value, ty))
             }
 
-            // Unary operators: lower operand and emit unary instruction.
-            sem::LinearExprKind::UnaryOp { op, expr: inner } => {
-                let value = self.lower_linear_expr(inner)?;
-                let ty = self.type_lowerer.lower_type_id(inner.ty);
+            sem::ValueExprKind::UnaryOp { op, expr: inner } => {
+                let value = self.lower_value_expr_linear(inner)?;
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = match op {
                     UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
                     UnaryOp::LogicalNot => self.builder.unop(UnOp::Not, value, ty),
@@ -70,94 +64,97 @@ impl<'a> FuncLowerer<'a> {
                 Ok(result)
             }
 
-            // Binary operators: lower operands and emit binop/cmp instruction.
-            sem::LinearExprKind::BinOp { left, op, right } => {
-                let lhs = self.lower_linear_expr(left)?;
-                let rhs = self.lower_linear_expr(right)?;
+            sem::ValueExprKind::BinOp { left, op, right } => {
+                let lhs = self.lower_value_expr_linear(left)?;
+                let rhs = self.lower_value_expr_linear(right)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
 
-                // Try arithmetic/logical binary operation.
                 if let Some(binop) = map_binop(*op) {
                     return Ok(self.builder.binop(binop, lhs, rhs, ty));
                 }
-                // Try comparison operation.
                 if let Some(cmp) = map_cmp(*op) {
                     return Ok(self.builder.cmp(cmp, lhs, rhs, ty));
                 }
-                Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
+                Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
             }
 
-            // Load from variable: look up current SSA value.
-            sem::LinearExprKind::Load { place } => match &place.kind {
+            sem::ValueExprKind::Load { place } => match &place.kind {
                 sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id).value),
-                _ => Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr)),
+                _ => Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr)),
             },
 
-            sem::LinearExprKind::Call { callee: _, args } => self.lower_call_expr(expr, args),
+            sem::ValueExprKind::Call { callee: _, args } => self.lower_call_expr(expr, args),
 
-            sem::LinearExprKind::MethodCall { receiver, args, .. } => {
+            sem::ValueExprKind::MethodCall { receiver, args, .. } => {
                 self.lower_method_call_expr(expr, receiver, args)
             }
 
-            sem::LinearExprKind::CharLit(_) | sem::LinearExprKind::ClosureRef { .. } => {
-                Err(self.err_span(expr.span, sem::LinearizeErrorKind::UnsupportedExpr))
+            sem::ValueExprKind::ClosureRef { .. } => {
+                Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
             }
+
+            _ => Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr)),
         }
     }
 
-    /// Convenience: linearize a ValueExpr and lower it in one step.
-    pub(super) fn lower_linear_expr_value(
+    /// Lowers a linear statement directly from the semantic tree.
+    pub(super) fn lower_stmt_expr_linear(
         &mut self,
-        expr: &sem::ValueExpr,
-    ) -> Result<LinearValue, sem::LinearizeError> {
-        let linear = linearize_expr(expr)?;
-        self.lower_linear_expr(&linear)
-    }
-
-    /// Lowers a linear statement, emitting instructions and updating locals.
-    pub(super) fn lower_linear_stmt(
-        &mut self,
-        stmt: &sem::LinearStmt,
-    ) -> Result<StmtOutcome, sem::LinearizeError> {
+        stmt: &sem::StmtExpr,
+    ) -> Result<StmtOutcome, LoweringError> {
         match &stmt.kind {
-            // Let/var binding: lower the value and bind the pattern.
-            sem::LinearStmtKind::LetBind { pattern, value, .. }
-            | sem::LinearStmtKind::VarBind { pattern, value, .. } => {
+            sem::StmtExprKind::LetBind { pattern, value, .. }
+            | sem::StmtExprKind::VarBind { pattern, value, .. } => {
                 let value_expr = value;
-                let value = self.lower_linear_expr(value_expr)?;
+                let value = self.lower_value_expr_linear(value_expr)?;
                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                 self.bind_pattern(pattern, LocalValue { value, ty })?;
                 Ok(StmtOutcome::Continue)
             }
 
-            // Assignment: lower the value and update the local's SSA value.
-            sem::LinearStmtKind::Assign { assignee, value } => {
+            sem::StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
                 let value_expr = value;
-                let value = self.lower_linear_expr(value_expr)?;
+                let value = self.lower_value_expr_linear(value_expr)?;
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
-                        // Update the local to the new SSA value.
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         self.locals.insert(*def_id, LocalValue { value, ty });
                         Ok(StmtOutcome::Continue)
                     }
-                    _ => Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt)),
+                    _ => Err(self.err_stmt(stmt, LoweringErrorKind::UnsupportedStmt)),
                 }
             }
 
-            // Return: emit return terminator.
-            sem::LinearStmtKind::Return { value } => {
+            sem::StmtExprKind::Return { value } => {
                 let value = match value {
-                    Some(expr) => Some(self.lower_linear_expr(expr)?),
+                    Some(expr) => Some(self.lower_value_expr_linear(expr)?),
                     None => None,
                 };
                 self.builder.terminate(Terminator::Return { value });
                 Ok(StmtOutcome::Return)
             }
 
-            // Variable declaration without initializer: not yet supported.
-            sem::LinearStmtKind::VarDecl { .. } => {
-                Err(self.err_stmt(stmt, sem::LinearizeErrorKind::UnsupportedStmt))
+            sem::StmtExprKind::VarDecl { .. }
+            | sem::StmtExprKind::While { .. }
+            | sem::StmtExprKind::For { .. }
+            | sem::StmtExprKind::Break
+            | sem::StmtExprKind::Continue => {
+                Err(self.err_stmt(stmt, LoweringErrorKind::UnsupportedStmt))
+            }
+        }
+    }
+
+    /// Convenience: lower a ValueExpr and return its value in one step.
+    pub(super) fn lower_linear_expr_value(
+        &mut self,
+        expr: &sem::ValueExpr,
+    ) -> Result<LinearValue, LoweringError> {
+        match self.lower_value_expr(expr)? {
+            BranchResult::Value(value) => Ok(value),
+            BranchResult::Return => {
+                Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
             }
         }
     }
@@ -168,14 +165,14 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         pattern: &sem::BindPattern,
         value: LocalValue,
-    ) -> Result<(), sem::LinearizeError> {
+    ) -> Result<(), LoweringError> {
         match &pattern.kind {
             sem::BindPatternKind::Name { def_id, .. } => {
                 self.locals.insert(*def_id, value);
                 Ok(())
             }
-            _ => Err(sem::LinearizeError {
-                kind: sem::LinearizeErrorKind::UnsupportedStmt,
+            _ => Err(LoweringError {
+                kind: LoweringErrorKind::UnsupportedStmt,
                 span: pattern.span,
             }),
         }

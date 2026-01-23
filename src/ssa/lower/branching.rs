@@ -2,8 +2,8 @@
 
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::linearize::{linearize_expr, linearize_stmt};
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, StmtOutcome};
+use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, ValueId};
 use crate::tree::semantic as sem;
 
@@ -16,7 +16,7 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_branching_expr(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<BranchResult, sem::LinearizeError> {
+    ) -> Result<BranchResult, LoweringError> {
         match &expr.kind {
             // Block expression: process items sequentially.
             sem::ValueExprKind::Block { items, tail } => {
@@ -32,9 +32,8 @@ impl<'a> FuncLowerer<'a> {
                     // Dispatch based on precomputed plan (linear vs branching).
                     match item {
                         sem::BlockItem::Stmt(stmt) => {
-                            // Statements are linearized and lowered.
-                            let stmt = linearize_stmt(stmt)?;
-                            match self.lower_linear_stmt(&stmt)? {
+                            // Statements are lowered directly in linear form.
+                            match self.lower_stmt_expr_linear(stmt)? {
                                 StmtOutcome::Continue => {}
                                 StmtOutcome::Return => {
                                     return Ok(BranchResult::Return);
@@ -42,32 +41,11 @@ impl<'a> FuncLowerer<'a> {
                             }
                         }
                         sem::BlockItem::Expr(expr) => {
-                            // Look up the precomputed plan for this expression.
-                            let plan = self.block_expr_plans.get(&expr.id).unwrap_or_else(|| {
-                                panic!("ssa lower_func missing block expr plan {:?}", expr.id)
-                            });
-                            match plan {
-                                sem::BlockExprPlan::Linear => {
-                                    // Linear: can be lowered in the current block.
-                                    let linear = linearize_expr(expr).unwrap_or_else(|err| {
-                                        panic!(
-                                            "ssa lower_func block expr plan mismatch {:?}: {:?}",
-                                            expr.id, err
-                                        )
-                                    });
-                                    // Side-effect only; discard the value.
-                                    let _ = self.lower_linear_expr(&linear)?;
-                                }
-                                sem::BlockExprPlan::Branching => {
-                                    // Branching: may create new blocks and move cursor.
-                                    match self.lower_branching_expr(expr)? {
-                                        BranchResult::Value(_) => {
-                                            // Cursor is now at the ending block.
-                                        }
-                                        BranchResult::Return => {
-                                            return Ok(BranchResult::Return);
-                                        }
-                                    }
+                            // Statement-position expression: lower using the plan.
+                            match self.lower_value_expr(expr)? {
+                                BranchResult::Value(_) => {}
+                                BranchResult::Return => {
+                                    return Ok(BranchResult::Return);
                                 }
                             }
                         }
@@ -76,7 +54,7 @@ impl<'a> FuncLowerer<'a> {
 
                 // Lower the tail expression if present.
                 if let Some(tail) = tail {
-                    return self.lower_branching_expr(tail);
+                    return self.lower_value_expr(tail);
                 }
 
                 // Blocks without a tail produce unit.
@@ -146,11 +124,20 @@ impl<'a> FuncLowerer<'a> {
                 Ok(BranchResult::Value(join_value))
             }
 
-            // Other expressions: try linear lowering.
+            // Other expressions: lower using their plan.
             _ => {
-                let linear = linearize_expr(expr)?;
-                let value = self.lower_linear_expr(&linear)?;
-                Ok(BranchResult::Value(value))
+                let plan = self.lowering_plans.get(&expr.id).unwrap_or_else(|| {
+                    panic!("ssa lower_func missing lowering plan {:?}", expr.id)
+                });
+                match plan {
+                    sem::LoweringPlan::Linear => {
+                        let value = self.lower_value_expr_linear(expr)?;
+                        Ok(BranchResult::Value(value))
+                    }
+                    sem::LoweringPlan::Branching => {
+                        Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
+                    }
+                }
             }
         }
     }
@@ -168,7 +155,7 @@ impl<'a> FuncLowerer<'a> {
         &mut self,
         cond: &sem::ValueExpr,
         body: &sem::ValueExpr,
-    ) -> Result<(), sem::LinearizeError> {
+    ) -> Result<(), LoweringError> {
         // Snapshot current locals for threading through the loop.
         let locals_snapshot = self.ordered_locals();
         let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();

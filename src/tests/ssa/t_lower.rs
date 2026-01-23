@@ -38,13 +38,8 @@ fn test_lower_const_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -65,13 +60,8 @@ fn test_lower_return_stmt() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -92,13 +82,8 @@ fn test_lower_binop_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -121,13 +106,8 @@ fn test_lower_param_binop_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -155,13 +135,8 @@ fn test_lower_call_with_params() {
     let main_def = ctx.module.func_defs()[1];
     let add_id = add_def.def_id;
 
-    let lowered = lower_func(
-        main_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -195,13 +170,8 @@ fn test_lower_call_stmt() {
     let main_def = ctx.module.func_defs()[1];
     let add_id = add_def.def_id;
 
-    let lowered = lower_func(
-        main_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -250,13 +220,8 @@ fn test_lower_method_call_param() {
 
     let main_def = ctx.module.func_defs()[0];
 
-    let lowered = lower_func(
-        main_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -280,13 +245,8 @@ fn test_lower_unop_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -308,13 +268,8 @@ fn test_lower_unop_not_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -336,13 +291,8 @@ fn test_lower_cmp_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -369,13 +319,8 @@ fn test_lower_if_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -411,13 +356,8 @@ fn test_lower_if_return_stmt() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -453,13 +393,8 @@ fn test_lower_if_stmt_side_effect() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -498,13 +433,8 @@ fn test_lower_if_cmp_return() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -542,13 +472,8 @@ fn test_lower_while_stmt() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -587,13 +512,8 @@ fn test_lower_while_return_stmt() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.block_expr_plans,
-    )
-    .expect("failed to lower");
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"

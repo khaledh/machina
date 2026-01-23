@@ -10,7 +10,7 @@ use crate::symtab::SymbolTable;
 use crate::tree::normalized::Module as NormalizedModule;
 use crate::tree::parsed::Module as ParsedModule;
 use crate::tree::resolved::Module as ResolvedModule;
-use crate::tree::semantic::BlockExprPlanMap;
+use crate::tree::semantic::LoweringPlanMap;
 use crate::tree::semantic::Module as SemanticModule;
 use crate::tree::typed::Module as TypedModule;
 use crate::tree::{NodeId, NodeIdGen};
@@ -153,7 +153,7 @@ pub struct SemanticContext {
     pub module: SemanticModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
-    pub block_expr_plans: BlockExprPlanMap,
+    pub lowering_plans: LoweringPlanMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
@@ -167,7 +167,7 @@ pub struct AnalyzedContext {
     pub module: SemanticModule,
     pub def_table: DefTable,
     pub type_map: TypeMap,
-    pub block_expr_plans: BlockExprPlanMap,
+    pub lowering_plans: LoweringPlanMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
