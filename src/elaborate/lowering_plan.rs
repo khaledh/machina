@@ -253,6 +253,12 @@ impl<'a> LoweringPlanBuilder<'a> {
             | sem::ValueExprKind::IntLit(_)
             | sem::ValueExprKind::BoolLit(_)
             | sem::ValueExprKind::CharLit(_) => true,
+            sem::ValueExprKind::TupleLit(items) => {
+                items.iter().all(|item| self.is_linear_value_expr(item))
+            }
+            sem::ValueExprKind::StructLit { fields, .. } => fields
+                .iter()
+                .all(|field| self.is_linear_value_expr(&field.value)),
             sem::ValueExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
             sem::ValueExprKind::BinOp { left, right, .. } => {
                 self.is_linear_value_expr(left) && self.is_linear_value_expr(right)

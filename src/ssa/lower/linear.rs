@@ -57,6 +57,46 @@ impl<'a> FuncLowerer<'a> {
                 Ok(self.builder.const_bool(*value, ty))
             }
 
+            sem::ValueExprKind::TupleLit(items) => {
+                // Allocate a local for the tuple and get its address
+                let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let local = self.builder.add_local(tuple_ty, None);
+                let ptr_ty = self.type_lowerer.ptr_to(tuple_ty);
+                let addr = self.builder.addr_of_local(local, ptr_ty);
+
+                // Store each field
+                for (i, elem_expr) in items.iter().enumerate() {
+                    let value = self.lower_value_expr_linear(elem_expr)?;
+                    let field_ty = self.lower_tuple_field_ty(expr.ty, i);
+                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ty);
+                    let field_addr = self.builder.field_addr(addr, i, field_ptr_ty);
+                    self.builder.store(field_addr, value);
+                }
+
+                // Load the aggregate value
+                Ok(self.builder.load(addr, tuple_ty))
+            }
+
+            sem::ValueExprKind::StructLit { fields, .. } => {
+                // Allocate a local for the struct and get its address
+                let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let local = self.builder.add_local(struct_ty, None);
+                let ptr_ty = self.type_lowerer.ptr_to(struct_ty);
+                let addr = self.builder.addr_of_local(local, ptr_ty);
+
+                // Store each field
+                for field in fields.iter() {
+                    let value = self.lower_value_expr_linear(&field.value)?;
+                    let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
+                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ty);
+                    let field_addr = self.builder.field_addr(addr, field_index, field_ptr_ty);
+                    self.builder.store(field_addr, value);
+                }
+
+                // Load the aggregate value
+                Ok(self.builder.load(addr, struct_ty))
+            }
+
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
                 let value = self.lower_value_expr_linear(inner)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);

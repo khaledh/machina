@@ -100,7 +100,7 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
     }
 
     /// Resolves a tuple field type from the semantic type table.
-    fn lower_tuple_field_ty(
+    pub(super) fn lower_tuple_field_ty(
         &mut self,
         ty_id: crate::types::TypeId,
         index: usize,
@@ -117,7 +117,7 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
     }
 
     /// Resolves a struct field index and type from the semantic type table.
-    fn lower_struct_field_ty(
+    pub(super) fn lower_struct_field_ty(
         &mut self,
         ty_id: crate::types::TypeId,
         field: &str,
