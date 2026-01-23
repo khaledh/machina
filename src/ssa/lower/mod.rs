@@ -11,6 +11,7 @@ mod linear;
 mod locals;
 mod lowerer;
 mod mapping;
+mod place;
 mod types;
 
 use crate::resolve::DefTable;

@@ -6,11 +6,49 @@ use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
 use crate::ssa::model::ir::ValueId;
 
-/// A local variable's current SSA value and type.
+/// Storage kind for a local variable.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum LocalStorage {
+    /// The local is tracked as a pure SSA value.
+    Value(ValueId),
+    /// The local lives in memory; this is the address of the slot.
+    Addr(ValueId),
+}
+
+/// A local variable's current storage and value type.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct LocalValue {
-    pub(super) value: ValueId,
-    pub(super) ty: IrTypeId,
+    pub(super) storage: LocalStorage,
+    pub(super) value_ty: IrTypeId,
+}
+
+impl LocalValue {
+    pub(super) fn value(value: ValueId, value_ty: IrTypeId) -> Self {
+        Self {
+            storage: LocalStorage::Value(value),
+            value_ty,
+        }
+    }
+
+    pub(super) fn addr(addr: ValueId, value_ty: IrTypeId) -> Self {
+        Self {
+            storage: LocalStorage::Addr(addr),
+            value_ty,
+        }
+    }
+
+    pub(super) fn storage_value(self) -> ValueId {
+        match self.storage {
+            LocalStorage::Value(value) | LocalStorage::Addr(value) => value,
+        }
+    }
+
+    pub(super) fn with_storage(self, storage: LocalStorage) -> Self {
+        Self {
+            storage,
+            value_ty: self.value_ty,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -62,7 +100,7 @@ impl LocalMap {
         let mut args = Vec::with_capacity(defs.len());
         for def in defs {
             let local = self.values.get(def)?;
-            args.push(local.value);
+            args.push(local.storage_value());
         }
         Some(args)
     }
@@ -71,13 +109,24 @@ impl LocalMap {
     pub(super) fn set_from_params(&mut self, defs: &[DefId], tys: &[IrTypeId], params: &[ValueId]) {
         self.values.clear();
         for ((def, ty), value) in defs.iter().zip(tys.iter()).zip(params.iter()) {
-            self.values.insert(
-                *def,
-                LocalValue {
-                    value: *value,
-                    ty: *ty,
-                },
-            );
+            self.values.insert(*def, LocalValue::value(*value, *ty));
+        }
+    }
+
+    /// Resets locals from block parameters, preserving storage kinds and value types.
+    pub(super) fn set_from_params_like(
+        &mut self,
+        defs: &[DefId],
+        locals: &[LocalValue],
+        params: &[ValueId],
+    ) {
+        self.values.clear();
+        for ((def, local), value) in defs.iter().zip(locals.iter()).zip(params.iter()) {
+            let storage = match local.storage {
+                LocalStorage::Value(_) => LocalStorage::Value(*value),
+                LocalStorage::Addr(_) => LocalStorage::Addr(*value),
+            };
+            self.values.insert(*def, local.with_storage(storage));
         }
     }
 }

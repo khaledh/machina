@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefTable};
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::locals::{LocalMap, LocalValue};
+use crate::ssa::lower::locals::{LocalMap, LocalStorage, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
@@ -159,6 +159,69 @@ impl<'a> FuncLowerer<'a> {
         self.locals
             .get(def_id)
             .unwrap_or_else(|| panic!("ssa lower_func missing local {:?}", def_id))
+    }
+
+    /// Returns the IR type used to thread a local through control flow.
+    ///
+    /// Value locals use their value type; address locals use a pointer type.
+    pub(super) fn local_storage_ty(&mut self, local: LocalValue) -> IrTypeId {
+        match local.storage {
+            LocalStorage::Value(_) => local.value_ty,
+            LocalStorage::Addr(_) => self.type_lowerer.ptr_to(local.value_ty),
+        }
+    }
+
+    /// Ensures a local has an addressable slot and returns its address.
+    pub(super) fn ensure_local_addr(&mut self, def_id: DefId, value_ty: IrTypeId) -> ValueId {
+        let local = self.lookup_local(def_id);
+        if local.value_ty != value_ty {
+            panic!(
+                "ssa ensure_local_addr type mismatch for {:?}: {:?} vs {:?}",
+                def_id, local.value_ty, value_ty
+            );
+        }
+
+        match local.storage {
+            LocalStorage::Addr(addr) => addr,
+            LocalStorage::Value(value) => {
+                let local_id = self.builder.add_local(value_ty, None);
+                let ptr_ty = self.type_lowerer.ptr_to(value_ty);
+                let addr = self.builder.addr_of_local(local_id, ptr_ty);
+                self.builder.store(addr, value);
+                self.locals.insert(def_id, LocalValue::addr(addr, value_ty));
+                addr
+            }
+        }
+    }
+
+    /// Loads a local's current value, emitting a load when stored in memory.
+    pub(super) fn load_local_value(&mut self, def_id: DefId) -> ValueId {
+        let local = self.lookup_local(def_id);
+        match local.storage {
+            LocalStorage::Value(value) => value,
+            LocalStorage::Addr(addr) => self.builder.load(addr, local.value_ty),
+        }
+    }
+
+    /// Assigns a new value to a local, storing when it is address-taken.
+    pub(super) fn assign_local_value(&mut self, def_id: DefId, value: ValueId, value_ty: IrTypeId) {
+        let local = self.lookup_local(def_id);
+        if local.value_ty != value_ty {
+            panic!(
+                "ssa assign_local_value type mismatch for {:?}: {:?} vs {:?}",
+                def_id, local.value_ty, value_ty
+            );
+        }
+
+        match local.storage {
+            LocalStorage::Value(_) => {
+                self.locals
+                    .insert(def_id, LocalValue::value(value, value_ty));
+            }
+            LocalStorage::Addr(addr) => {
+                self.builder.store(addr, value);
+            }
+        }
     }
 
     pub(super) fn err_span(&self, span: Span, kind: LoweringErrorKind) -> LoweringError {

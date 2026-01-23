@@ -16,6 +16,7 @@ pub(super) struct TypeLowerer<'a> {
     pub(super) ir_type_cache: IrTypeCache,
     by_type_id: HashMap<TypeId, IrTypeId>,
     by_type: HashMap<Type, IrTypeId>,
+    ptr_cache: HashMap<IrTypeId, IrTypeId>,
 }
 
 impl<'a> TypeLowerer<'a> {
@@ -25,6 +26,7 @@ impl<'a> TypeLowerer<'a> {
             ir_type_cache: IrTypeCache::new(),
             by_type_id: HashMap::new(),
             by_type: HashMap::new(),
+            ptr_cache: HashMap::new(),
         }
     }
 
@@ -131,6 +133,17 @@ impl<'a> TypeLowerer<'a> {
 
         // Cache the result for structural deduplication.
         self.by_type.insert(ty.clone(), id);
+        id
+    }
+
+    /// Returns a pointer type to the given SSA type, caching per element type.
+    pub(super) fn ptr_to(&mut self, elem: IrTypeId) -> IrTypeId {
+        if let Some(id) = self.ptr_cache.get(&elem) {
+            return *id;
+        }
+
+        let id = self.ir_type_cache.add(IrTypeKind::Ptr { elem });
+        self.ptr_cache.insert(elem, id);
         id
     }
 

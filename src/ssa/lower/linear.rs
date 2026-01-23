@@ -83,9 +83,17 @@ impl<'a> FuncLowerer<'a> {
             }
 
             sem::ValueExprKind::Load { place } => match &place.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => Ok(self.lookup_local(*def_id).value),
-                _ => Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr)),
+                sem::PlaceExprKind::Var { def_id, .. } => Ok(self.load_local_value(*def_id)),
+                _ => {
+                    let place_addr = self.lower_place_addr(place)?;
+                    Ok(self.builder.load(place_addr.addr, place_addr.value_ty))
+                }
             },
+
+            sem::ValueExprKind::AddrOf { place } => {
+                let place_addr = self.lower_place_addr(place)?;
+                Ok(place_addr.addr)
+            }
 
             sem::ValueExprKind::Call { callee: _, args } => self.lower_call_expr(expr, args),
 
@@ -112,7 +120,7 @@ impl<'a> FuncLowerer<'a> {
                 let value_expr = value;
                 let value = self.lower_value_expr_linear(value_expr)?;
                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                self.bind_pattern(pattern, LocalValue { value, ty })?;
+                self.bind_pattern(pattern, LocalValue::value(value, ty))?;
                 Ok(StmtOutcome::Continue)
             }
 
@@ -124,10 +132,14 @@ impl<'a> FuncLowerer<'a> {
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                        self.locals.insert(*def_id, LocalValue { value, ty });
+                        self.assign_local_value(*def_id, value, ty);
                         Ok(StmtOutcome::Continue)
                     }
-                    _ => Err(self.err_stmt(stmt, LoweringErrorKind::UnsupportedStmt)),
+                    _ => {
+                        let place_addr = self.lower_place_addr(assignee)?;
+                        self.builder.store(place_addr.addr, value);
+                        Ok(StmtOutcome::Continue)
+                    }
                 }
             }
 

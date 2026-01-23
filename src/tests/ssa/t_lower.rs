@@ -238,6 +238,71 @@ fn test_lower_method_call_param() {
 }
 
 #[test]
+fn test_lower_struct_field_load() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        fn main(p: Pair) -> u64 {
+            p.a
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(Pair) -> u64 {
+          locals:
+            %l0: Pair
+          bb0(%v0: Pair):
+            %v1: ptr<Pair> = addr_of %l0
+            store %v1, %v0
+            %v2: ptr<u64> = field_addr %v1, 0
+            %v3: u64 = load %v2
+            ret %v3
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_struct_field_assign() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        fn main(p: Pair) -> u64 {
+            var q = p;
+            q.a = 5;
+            q.a
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(Pair) -> u64 {
+          locals:
+            %l0: Pair
+          bb0(%v0: Pair):
+            %v1: u64 = const 5:u64
+            %v2: ptr<Pair> = addr_of %l0
+            store %v2, %v0
+            %v3: ptr<u64> = field_addr %v2, 0
+            store %v3, %v1
+            %v4: ptr<u64> = field_addr %v2, 0
+            %v5: u64 = load %v4
+            ret %v5
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_unop_return() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {

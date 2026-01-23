@@ -180,6 +180,54 @@ impl FunctionBuilder {
         result
     }
 
+    /// Emits an addr-of-local instruction at the cursor.
+    pub fn addr_of_local(&mut self, local: LocalId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::AddrOfLocal { local },
+        });
+        result
+    }
+
+    /// Emits a field-address (GEP) instruction at the cursor.
+    pub fn field_addr(&mut self, base: ValueId, index: usize, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::FieldAddr { base, index },
+        });
+        result
+    }
+
+    /// Emits an index-address (GEP) instruction at the cursor.
+    pub fn index_addr(&mut self, base: ValueId, index: ValueId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::IndexAddr { base, index },
+        });
+        result
+    }
+
+    /// Emits a load instruction at the cursor.
+    pub fn load(&mut self, ptr: ValueId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::Load { ptr },
+        });
+        result
+    }
+
+    /// Emits a store instruction at the cursor.
+    pub fn store(&mut self, ptr: ValueId, value: ValueId) {
+        self.current_block_mut().insts.push(Instruction {
+            result: None,
+            kind: InstKind::Store { ptr, value },
+        });
+    }
+
     /// Sets the terminator for the current block.
     pub fn terminate(&mut self, term: Terminator) {
         self.current_block_mut().term = term;

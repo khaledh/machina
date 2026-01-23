@@ -159,11 +159,12 @@ impl<'a> FuncLowerer<'a> {
         // Snapshot current locals for threading through the loop.
         let locals_snapshot = self.locals.ordered();
         let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
-        let tys: Vec<IrTypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
-        let args: Vec<ValueId> = locals_snapshot
+        let locals: Vec<_> = locals_snapshot.iter().map(|(_, local)| *local).collect();
+        let tys: Vec<IrTypeId> = locals
             .iter()
-            .map(|(_, local)| local.value)
+            .map(|local| self.local_storage_ty(*local))
             .collect();
+        let args: Vec<ValueId> = locals.iter().map(|local| local.storage_value()).collect();
 
         // Create the loop structure: header, body, and exit blocks.
         let header_bb = self.builder.add_block();
@@ -188,7 +189,8 @@ impl<'a> FuncLowerer<'a> {
 
         // Lower the condition in the header block.
         self.builder.select_block(header_bb);
-        self.locals.set_from_params(&defs, &tys, &header_params);
+        self.locals
+            .set_from_params_like(&defs, &locals, &header_params);
         let cond_value = self.lower_linear_expr_value(cond)?;
         let Some(exit_args) = self.locals.args_for(&defs) else {
             panic!("ssa lower_while_stmt missing locals args for loop exit");
@@ -219,7 +221,8 @@ impl<'a> FuncLowerer<'a> {
 
         // Set up locals for code after the loop and move cursor to exit block.
         self.builder.select_block(exit_bb);
-        self.locals.set_from_params(&defs, &tys, &exit_params);
+        self.locals
+            .set_from_params_like(&defs, &locals, &exit_params);
         Ok(())
     }
 }

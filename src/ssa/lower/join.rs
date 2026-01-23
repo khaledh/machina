@@ -4,7 +4,7 @@ use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweringError;
-use crate::ssa::lower::locals::LocalSnapshot;
+use crate::ssa::lower::locals::{LocalSnapshot, LocalValue};
 use crate::ssa::model::ir::{BlockId, Terminator, ValueId};
 use crate::tree::semantic as sem;
 
@@ -16,7 +16,7 @@ pub(super) struct JoinPlan {
     pub(super) join_bb: BlockId,
     pub(super) join_value: ValueId,
     pub(super) defs: Vec<DefId>,
-    pub(super) tys: Vec<IrTypeId>,
+    pub(super) locals: Vec<LocalValue>,
     pub(super) join_local_params: Vec<ValueId>,
 }
 
@@ -43,7 +43,11 @@ impl crate::ssa::lower::lowerer::FuncLowerer<'_> {
         // Snapshot current locals in deterministic order.
         let locals_snapshot = self.locals.ordered();
         let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
-        let tys: Vec<IrTypeId> = locals_snapshot.iter().map(|(_, local)| local.ty).collect();
+        let locals: Vec<LocalValue> = locals_snapshot.iter().map(|(_, local)| *local).collect();
+        let tys: Vec<IrTypeId> = locals
+            .iter()
+            .map(|local| self.local_storage_ty(*local))
+            .collect();
 
         // Add parameters for threading local variable values.
         let join_local_params: Vec<ValueId> = tys
@@ -55,7 +59,7 @@ impl crate::ssa::lower::lowerer::FuncLowerer<'_> {
             join_bb,
             join_value,
             defs,
-            tys,
+            locals,
             join_local_params,
         }
     }
@@ -114,9 +118,9 @@ impl JoinSession {
 
     pub(super) fn finalize(self, lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_>) {
         lowerer.builder.select_block(self.plan.join_bb);
-        lowerer.locals.set_from_params(
+        lowerer.locals.set_from_params_like(
             &self.plan.defs,
-            &self.plan.tys,
+            &self.plan.locals,
             &self.plan.join_local_params,
         );
     }
