@@ -48,8 +48,72 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
                     value_ty: field_ty,
                 })
             }
-            sem::PlaceExprKind::ArrayIndex { .. } => {
-                Err(self.err_span(place.span, LoweringErrorKind::UnsupportedExpr))
+            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+                let plan = self
+                    .type_map
+                    .lookup_index_plan(place.id)
+                    .unwrap_or_else(|| panic!("ssa array index missing index plan {:?}", place.id));
+
+                let (dims, deref_count) = match plan.base {
+                    sem::IndexBaseKind::Array { dims, deref_count } => (dims, deref_count),
+                    sem::IndexBaseKind::Slice { .. } | sem::IndexBaseKind::String { .. } => {
+                        return Err(self.err_span(target.span, LoweringErrorKind::UnsupportedExpr));
+                    }
+                };
+
+                let mut base = self.lower_place_addr(target)?;
+
+                // Peel heap/ref indirections using the plan's deref count.
+                let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
+
+                for _ in 0..deref_count {
+                    let elem_ty = match curr_ty {
+                        Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                        other => panic!("ssa array index on non-heap/ref type {:?}", other),
+                    };
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                    base.addr = self.builder.load(base.addr, ptr_ir_ty);
+                    curr_ty = (*elem_ty).clone();
+                }
+
+                if indices.len() > dims.len() {
+                    panic!("ssa array index has too many indices for dims {:?}", dims);
+                }
+
+                // Walk indices and compute element/sub-array type in each step.
+                for (i, index_expr) in indices.iter().enumerate() {
+                    let index_val = self.lower_value_expr_linear(index_expr)?;
+
+                    let remaining_dims = &dims[(i + 1)..];
+                    let elem_ty = if remaining_dims.is_empty() {
+                        match curr_ty {
+                            Type::Array { elem_ty, .. } => (*elem_ty).clone(),
+                            other => panic!("ssa array index on non-array type {:?}", other),
+                        }
+                    } else {
+                        let elem_ty = match curr_ty {
+                            Type::Array { elem_ty, .. } => (*elem_ty).clone(),
+                            other => panic!("ssa array index on non-array type {:?}", other),
+                        };
+                        Type::Array {
+                            elem_ty: Box::new(elem_ty.clone()),
+                            dims: remaining_dims.iter().map(|d| *d as usize).collect(),
+                        }
+                    };
+
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                    let elem_addr = self.builder.index_addr(base.addr, index_val, ptr_ty);
+                    base.addr = elem_addr;
+
+                    curr_ty = elem_ty; // for multi-dimensional arrays
+                }
+
+                Ok(PlaceAddr {
+                    addr: base.addr,
+                    value_ty: self.type_lowerer.lower_type_id(place.ty),
+                })
             }
         }
     }
