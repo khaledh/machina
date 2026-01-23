@@ -7,6 +7,7 @@ use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, UnOp};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
+use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
     /// Lowers a linear value expression directly from the semantic tree.
@@ -57,6 +58,43 @@ impl<'a> FuncLowerer<'a> {
                 Ok(self.builder.const_bool(*value, ty))
             }
 
+            sem::ValueExprKind::ArrayLit { init, .. } => {
+                // Allocate a local for the array and get its address
+                let array_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let local = self.builder.add_local(array_ty, None);
+                let ptr_ty = self.type_lowerer.ptr_to(array_ty);
+                let addr = self.builder.addr_of_local(local, ptr_ty);
+
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+
+                // Store each element
+                match init {
+                    sem::ArrayLitInit::Elems(elems) => {
+                        for (i, elem_expr) in elems.iter().enumerate() {
+                            let value = self.lower_value_expr_linear(elem_expr)?;
+                            let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
+                            let elem_ty = self.type_lowerer.lower_type_id(elem_expr.ty);
+                            let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
+                            let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
+                            self.builder.store(elem_addr, value);
+                        }
+                    }
+                    sem::ArrayLitInit::Repeat(expr, count) => {
+                        let value = self.lower_value_expr_linear(expr)?;
+                        let elem_ty = self.type_lowerer.lower_type_id(expr.ty);
+                        for i in 0..*count {
+                            let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
+                            let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
+                            let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
+                            self.builder.store(elem_addr, value);
+                        }
+                    }
+                }
+
+                // Load the array value
+                Ok(self.builder.load(addr, array_ty))
+            }
+
             sem::ValueExprKind::TupleLit(items) => {
                 // Allocate a local for the tuple and get its address
                 let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
@@ -73,7 +111,7 @@ impl<'a> FuncLowerer<'a> {
                     self.builder.store(field_addr, value);
                 }
 
-                // Load the aggregate value
+                // Load the tuple value
                 Ok(self.builder.load(addr, tuple_ty))
             }
 
@@ -93,7 +131,7 @@ impl<'a> FuncLowerer<'a> {
                     self.builder.store(field_addr, value);
                 }
 
-                // Load the aggregate value
+                // Load the struct value
                 Ok(self.builder.load(addr, struct_ty))
             }
 
