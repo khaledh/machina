@@ -317,6 +317,9 @@ impl<'a> Formatter<'a> {
                 }
                 let _ = write!(&mut self.out, " }}");
             }
+            IrTypeKind::Blob { size, align } => {
+                let _ = write!(&mut self.out, "blob<{}, align={}>", size, align);
+            }
             IrTypeKind::Fn { params, ret } => {
                 let _ = write!(&mut self.out, "fn(");
                 for (i, param) in params.iter().enumerate() {

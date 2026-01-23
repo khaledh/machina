@@ -31,6 +31,10 @@ pub enum IrTypeKind {
     Struct {
         fields: Vec<IrStructField>,
     },
+    Blob {
+        size: u64,
+        align: u64,
+    },
     Fn {
         params: Vec<IrTypeId>,
         ret: IrTypeId,

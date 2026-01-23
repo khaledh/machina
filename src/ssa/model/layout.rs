@@ -102,6 +102,12 @@ impl IrLayoutCache {
             IrTypeKind::Struct { fields } => {
                 self.layout_fields(types, fields.iter().map(|field| field.ty))
             }
+            IrTypeKind::Blob { size, align } => IrLayout {
+                size: *size,
+                align: *align,
+                field_offsets: Vec::new(),
+                stride: *size,
+            },
         }
     }
 

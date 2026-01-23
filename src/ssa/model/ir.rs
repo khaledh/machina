@@ -248,6 +248,7 @@ impl fmt::Display for IrTypeKind {
             IrTypeKind::Array { elem, dims } => write!(f, "array<{:?}; {:?}>", elem, dims),
             IrTypeKind::Tuple { fields } => write!(f, "tuple<{:?}>", fields),
             IrTypeKind::Struct { fields } => write!(f, "struct<{:?}>", fields),
+            IrTypeKind::Blob { size, align } => write!(f, "blob<{}, align={}>", size, align),
             IrTypeKind::Fn { params, ret } => write!(f, "fn({:?}) -> {:?}", params, ret),
         }
     }

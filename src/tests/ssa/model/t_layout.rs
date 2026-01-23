@@ -82,3 +82,16 @@ fn test_layout_array_stride() {
     assert_eq!(layout.field_offsets(), &[]);
     assert_eq!(layout.stride(), 8);
 }
+
+#[test]
+fn test_layout_blob() {
+    let mut types = IrTypeCache::new();
+    let blob_ty = types.add(IrTypeKind::Blob { size: 24, align: 8 });
+
+    let layout = types.layout(blob_ty);
+
+    assert_eq!(layout.size(), 24);
+    assert_eq!(layout.align(), 8);
+    assert_eq!(layout.field_offsets(), &[]);
+    assert_eq!(layout.stride(), 24);
+}
