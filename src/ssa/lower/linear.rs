@@ -4,7 +4,7 @@ use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{BinOp, Terminator, UnOp};
+use crate::ssa::model::ir::{BinOp, CastKind, Terminator, UnOp};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -267,8 +267,25 @@ impl<'a> FuncLowerer<'a> {
                         let len_val = self.builder.load(len_addr, u64_ty);
                         (ptr, len_val)
                     }
-                    sem::SliceBaseKind::String { .. } => {
-                        return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+                    sem::SliceBaseKind::String { deref_count } => {
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::String = base_ty else {
+                            panic!("ssa slice on non-string base {:?}", base_ty);
+                        };
+
+                        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
+                        let ptr = self.builder.load(ptr_addr, elem_ptr_ty);
+
+                        let len_field_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                        let len_addr = self.field_addr_typed(base_addr, 1, len_field_ty);
+                        let len_val_u32 = self.builder.load(len_addr, len_field_ty);
+                        let len_val = self.builder.cast(
+                            CastKind::IntExtend { signed: false },
+                            len_val_u32,
+                            u64_ty,
+                        );
+
+                        (ptr, len_val)
                     }
                 };
 

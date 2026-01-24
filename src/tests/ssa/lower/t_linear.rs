@@ -506,3 +506,45 @@ fn test_lower_slice_expr_array() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_slice_expr_string() {
+    let ctx = analyze(indoc! {"
+        fn main(s: string) -> u64 {
+            let t: u8[] = s[1..];
+            0
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(string) -> u64 {
+          locals:
+            %l0: string
+            %l1: struct { ptr: ptr<u8>, len: u64 }
+          bb0(%v0: string):
+            %v1: ptr<string> = addr_of %l0
+            store %v1, %v0
+            %v2: ptr<ptr<u8>> = field_addr %v1, 0
+            %v3: ptr<u8> = load %v2
+            %v4: ptr<u32> = field_addr %v1, 1
+            %v5: u32 = load %v4
+            %v6: u64 = cast.IntExtend { signed: false } %v5 to u64
+            %v7: u64 = const 1:u64
+            %v8: ptr<u8> = index_addr %v3, %v7
+            %v9: u64 = sub %v6, %v7
+            %v10: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l1
+            %v11: ptr<ptr<u8>> = field_addr %v10, 0
+            store %v11, %v8
+            %v12: ptr<u64> = field_addr %v10, 1
+            store %v12, %v9
+            %v13: struct { ptr: ptr<u8>, len: u64 } = load %v10
+            %v14: u64 = const 0:u64
+            ret %v14
+        }
+    "};
+    assert_eq!(text, expected);
+}

@@ -160,6 +160,16 @@ impl FunctionBuilder {
         result
     }
 
+    /// Emits a cast instruction at the cursor.
+    pub fn cast(&mut self, kind: CastKind, value: ValueId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::Cast { kind, value, ty },
+        });
+        result
+    }
+
     /// Emits a unary operation instruction at the cursor.
     pub fn unop(&mut self, op: UnOp, value: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
