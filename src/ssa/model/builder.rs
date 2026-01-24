@@ -140,6 +140,18 @@ impl FunctionBuilder {
         result
     }
 
+    /// Emits a global address constant instruction at the cursor.
+    pub fn const_global_addr(&mut self, id: GlobalId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::Const {
+                value: ConstValue::GlobalAddr { id },
+            },
+        });
+        result
+    }
+
     /// Emits a binary operation instruction at the cursor.
     pub fn binop(&mut self, op: BinOp, lhs: ValueId, rhs: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);

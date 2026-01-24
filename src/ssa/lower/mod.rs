@@ -18,7 +18,7 @@ mod types;
 use crate::resolve::DefTable;
 use crate::ssa::IrTypeCache;
 use crate::ssa::lower::lowerer::BranchResult;
-use crate::ssa::model::ir::{Function, Terminator};
+use crate::ssa::model::ir::{Function, GlobalData, Terminator};
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
 use lowerer::FuncLowerer;
@@ -26,6 +26,7 @@ use lowerer::FuncLowerer;
 pub struct LoweredFunction {
     pub func: Function,
     pub types: IrTypeCache,
+    pub globals: Vec<GlobalData>,
 }
 
 pub use error::{LoweringError, LoweringErrorKind};

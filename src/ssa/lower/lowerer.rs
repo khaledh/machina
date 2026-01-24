@@ -10,7 +10,8 @@ use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{
-    BinOp, BlockId, Callee, CastKind, CmpOp, FunctionSig, RuntimeFn, Terminator, ValueId,
+    BinOp, BlockId, Callee, CastKind, CmpOp, FunctionSig, GlobalData, GlobalId, RuntimeFn,
+    Terminator, ValueId,
 };
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
@@ -64,6 +65,8 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
     pub(super) loop_stack: Vec<LoopContext>,
+    pub(super) globals: Vec<GlobalData>,
+    next_global: u32,
 }
 
 /// Base pointer + length pair for slice-like lowering.
@@ -140,6 +143,8 @@ impl<'a> FuncLowerer<'a> {
             param_defs,
             param_tys,
             loop_stack: Vec::new(),
+            globals: Vec::new(),
+            next_global: 0,
         }
     }
 
@@ -147,7 +152,20 @@ impl<'a> FuncLowerer<'a> {
         LoweredFunction {
             func: self.builder.finish(),
             types: self.type_lowerer.ir_type_cache,
+            globals: self.globals,
         }
+    }
+
+    /// Registers a byte blob as a global and returns its ID.
+    pub(super) fn add_global_bytes(&mut self, bytes: Vec<u8>) -> GlobalId {
+        let id = GlobalId(self.next_global);
+        self.next_global += 1;
+        self.globals.push(GlobalData {
+            id,
+            bytes,
+            align: 1,
+        });
+        id
     }
 
     /// Lowers a value expression by consulting its precomputed lowering plan.

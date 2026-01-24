@@ -159,6 +159,40 @@ fn test_lower_char_lit() {
 }
 
 #[test]
+fn test_lower_string_lit() {
+    let ctx = analyze(indoc! {"
+        fn main() -> string {
+            \"hi\"
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> string {
+          locals:
+            %l0: string
+          bb0():
+            %v0: ptr<string> = addr_of %l0
+            %v1: ptr<u8> = const @g0
+            %v2: u32 = const 2:u32
+            %v3: u32 = const 0:u32
+            %v4: ptr<ptr<u8>> = field_addr %v0, 0
+            store %v4, %v1
+            %v5: ptr<u32> = field_addr %v0, 1
+            store %v5, %v2
+            %v6: ptr<u32> = field_addr %v0, 2
+            store %v6, %v3
+            %v7: string = load %v0
+            ret %v7
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_cmp() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {

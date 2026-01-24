@@ -83,6 +83,13 @@ pub struct Local {
 pub struct GlobalId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalData {
+    pub id: GlobalId,
+    pub bytes: Vec<u8>,
+    pub align: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstValue {
     Unit,
     Bool(bool),

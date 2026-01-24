@@ -65,6 +65,30 @@ impl<'a> FuncLowerer<'a> {
                     .builder
                     .const_int(*value as u32 as i128, signed, bits, ty))
             }
+            sem::ValueExprKind::StringLit { value } => {
+                let string_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let slot = self.alloc_value_slot(string_ty);
+
+                // pointer to global bytes
+                let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+                let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+                let global_id = self.add_global_bytes(value.as_bytes().to_vec());
+                let ptr_val = self.builder.const_global_addr(global_id, u8_ptr_ty);
+
+                // length and capacity (same for string literals)
+                let len_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                let len_val = self
+                    .builder
+                    .const_int(value.len() as i128, false, 32, len_ty);
+                let cap_val = self.builder.const_int(0, false, 32, len_ty);
+
+                // store fields in string struct
+                self.store_field(slot.addr, 0, u8_ptr_ty, ptr_val);
+                self.store_field(slot.addr, 1, len_ty, len_val);
+                self.store_field(slot.addr, 2, len_ty, cap_val);
+
+                Ok(self.load_slot(&slot))
+            }
 
             sem::ValueExprKind::ArrayLit { init, .. } => {
                 // Allocate a local for the array and get its address

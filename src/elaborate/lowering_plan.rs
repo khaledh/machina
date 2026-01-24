@@ -253,7 +253,8 @@ impl<'a> LoweringPlanBuilder<'a> {
             sem::ValueExprKind::UnitLit
             | sem::ValueExprKind::IntLit(_)
             | sem::ValueExprKind::BoolLit(_)
-            | sem::ValueExprKind::CharLit(_) => true,
+            | sem::ValueExprKind::CharLit(_)
+            | sem::ValueExprKind::StringLit { .. } => true,
 
             sem::ValueExprKind::ArrayLit { init, .. } => match init {
                 sem::ArrayLitInit::Elems(elems) => {
