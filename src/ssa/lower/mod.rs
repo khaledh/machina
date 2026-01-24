@@ -72,6 +72,23 @@ pub fn lower_module(
         funcs.push(lowered);
     }
 
+    for method_block in module.method_blocks() {
+        for method_item in &method_block.method_items {
+            let sem::MethodItem::Def(method_def) = method_item else {
+                continue;
+            };
+            let lowered = lower_method_def_with_globals(
+                method_block,
+                method_def,
+                def_table,
+                type_map,
+                lowering_plans,
+                &mut globals,
+            )?;
+            funcs.push(lowered);
+        }
+    }
+
     Ok(LoweredModule {
         funcs,
         globals: globals.into_globals(),
@@ -110,6 +127,58 @@ fn lower_func_with_globals(
     let result = lowerer.lower_branching_expr(&func.body)?;
 
     // If the body produces a value (not an early return), emit the final return.
+    if let BranchResult::Value(value) = result {
+        lowerer
+            .builder
+            .terminate(Terminator::Return { value: Some(value) });
+    }
+
+    let (func, types) = lowerer.finish();
+    let globals = globals.slice_from(globals_start);
+
+    Ok(LoweredFunction {
+        func,
+        types,
+        globals,
+    })
+}
+
+fn lower_method_def_with_globals(
+    method_block: &sem::MethodBlock,
+    method_def: &sem::MethodDef,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    globals: &mut GlobalArena,
+) -> Result<LoweredFunction, LoweringError> {
+    let globals_start = globals.len();
+
+    // Initialize the lowerer with method metadata and type information.
+    // The builder starts with the cursor at the entry block (block 0).
+    let mut lowerer = FuncLowerer::new_method(
+        &method_block.type_name,
+        method_def,
+        def_table,
+        type_map,
+        lowering_plans,
+        globals,
+    );
+
+    // Add method parameters (including `self`) as block parameters to the entry block,
+    // then establish the initial locals mapping from parameters.
+    let entry = lowerer.builder.current_block();
+    let param_defs = lowerer.param_defs.clone();
+    let param_tys = lowerer.param_tys.clone();
+    let mut param_values = Vec::with_capacity(param_tys.len());
+    for ty in &param_tys {
+        param_values.push(lowerer.builder.add_block_param(entry, *ty));
+    }
+    lowerer
+        .locals
+        .set_from_params(&param_defs, &param_tys, &param_values);
+
+    // Lower the method body and emit the final return if it yields a value.
+    let result = lowerer.lower_branching_expr(&method_def.body)?;
     if let BranchResult::Value(value) = result {
         lowerer
             .builder

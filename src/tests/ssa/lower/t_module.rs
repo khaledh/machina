@@ -1,4 +1,5 @@
 use super::{analyze, formact_func, indoc, lower_module};
+use std::collections::HashMap;
 
 #[test]
 fn test_lower_module_globals() {
@@ -28,4 +29,82 @@ fn test_lower_module_globals() {
 
     assert!(a_text.contains("@g0"));
     assert!(b_text.contains("@g1"));
+}
+
+#[test]
+fn test_lower_module_method_defs() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        Pair :: {
+            fn sum(self) -> u64 {
+                self.a + self.b
+            }
+        }
+
+        fn main(p: Pair) -> u64 {
+            p.sum()
+        }
+    "});
+
+    let method_def_id = ctx
+        .module
+        .method_blocks()
+        .iter()
+        .flat_map(|block| block.method_items.iter())
+        .find_map(|item| match item {
+            crate::tree::semantic::MethodItem::Def(def) => Some(def.def_id),
+            crate::tree::semantic::MethodItem::Decl(_) => None,
+        })
+        .expect("missing method def");
+
+    let lowered = lower_module(
+        &ctx.module,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+    )
+    .unwrap();
+
+    let mut func_texts = HashMap::new();
+    for lowered_func in &lowered.funcs {
+        let text = formact_func(&lowered_func.func, &lowered_func.types);
+        func_texts.insert(lowered_func.func.name.clone(), text);
+    }
+
+    let main_text = func_texts
+        .get("main")
+        .unwrap_or_else(|| panic!("missing lowered function for main"));
+    let sum_text = func_texts
+        .get("Pair$sum")
+        .unwrap_or_else(|| panic!("missing lowered function for Pair$sum"));
+
+    let expected_main = format!(
+        indoc! {"
+            fn main(Pair) -> u64 {{
+              bb0(%v0: Pair):
+                %v1: u64 = call @{}(%v0)
+                ret %v1
+            }}
+        "},
+        method_def_id
+    );
+    assert_eq!(main_text, &expected_main);
+
+    let expected_sum = indoc! {"
+        fn Pair$sum(Pair) -> u64 {
+          locals:
+            %l0: Pair
+          bb0(%v0: Pair):
+            %v1: ptr<Pair> = addr_of %l0
+            store %v1, %v0
+            %v2: ptr<u64> = field_addr %v1, 0
+            %v3: u64 = load %v2
+            %v4: ptr<u64> = field_addr %v1, 1
+            %v5: u64 = load %v4
+            %v6: u64 = add %v3, %v5
+            ret %v6
+        }
+    "};
+    assert_eq!(sum_text, expected_sum);
 }

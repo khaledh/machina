@@ -148,6 +148,95 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
+    /// Creates a new function lowerer for a method definition.
+    ///
+    /// Methods include an explicit `self` parameter that is lowered as the
+    /// first SSA parameter before the user-declared parameters.
+    pub(super) fn new_method(
+        type_name: &str,
+        method_def: &sem::MethodDef,
+        def_table: &DefTable,
+        type_map: &'a TypeMap,
+        lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        globals: &'g mut GlobalArena,
+    ) -> Self {
+        let mut type_lowerer = TypeLowerer::new(type_map);
+
+        let ret_ty = type_map.lookup_node_type(method_def.id).unwrap_or_else(|| {
+            panic!(
+                "ssa lower_method missing return type for {:?}",
+                method_def.id
+            )
+        });
+
+        // Lower the explicit `self` parameter first.
+        if method_def.sig.self_param.mode != ParamMode::In {
+            panic!(
+                "ssa lower_method only supports in self param, found {:?}",
+                method_def.sig.self_param.mode
+            );
+        }
+        let self_def = def_table
+            .lookup_def(method_def.sig.self_param.def_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "ssa lower_method missing self def {:?}",
+                    method_def.sig.self_param.def_id
+                )
+            });
+        let self_ty = type_map.lookup_def_type(self_def).unwrap_or_else(|| {
+            panic!(
+                "ssa lower_method missing self type {:?}",
+                method_def.sig.self_param.def_id
+            )
+        });
+        let self_ty_id = type_lowerer.lower_type(&self_ty);
+
+        let mut param_defs = Vec::with_capacity(method_def.sig.params.len() + 1);
+        let mut param_tys = Vec::with_capacity(method_def.sig.params.len() + 1);
+        param_defs.push(method_def.sig.self_param.def_id);
+        param_tys.push(self_ty_id);
+
+        // Convert each method parameter to SSA types. Only `in` mode is supported for now.
+        for param in &method_def.sig.params {
+            if param.mode != ParamMode::In {
+                panic!(
+                    "ssa lower_method only supports in params, found {:?} for {:?}",
+                    param.mode, param.ident
+                );
+            }
+            let def = def_table
+                .lookup_def(param.def_id)
+                .unwrap_or_else(|| panic!("ssa lower_method missing param def {:?}", param.def_id));
+            let param_ty = type_map.lookup_def_type(def).unwrap_or_else(|| {
+                panic!("ssa lower_method missing param type {:?}", param.def_id)
+            });
+            let param_ty_id = type_lowerer.lower_type(&param_ty);
+            param_defs.push(param.def_id);
+            param_tys.push(param_ty_id);
+        }
+
+        // Build the SSA function signature and initialize the builder.
+        let ret_id = type_lowerer.lower_type(&ret_ty);
+        let sig = FunctionSig {
+            params: param_tys.clone(),
+            ret: ret_id,
+        };
+        let name = format!("{type_name}${}", method_def.sig.name);
+        let builder = FunctionBuilder::new(method_def.def_id, name, sig);
+        Self {
+            type_map,
+            type_lowerer,
+            builder,
+            locals: LocalMap::new(),
+            lowering_plans,
+            param_defs,
+            param_tys,
+            loop_stack: Vec::new(),
+            globals,
+        }
+    }
+
     pub(super) fn finish(self) -> (Function, IrTypeCache) {
         (self.builder.finish(), self.type_lowerer.ir_type_cache)
     }
