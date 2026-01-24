@@ -9,7 +9,7 @@ use crate::ssa::lower::locals::{LocalMap, LocalStorage, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{FunctionSig, ValueId};
+use crate::ssa::model::ir::{BlockId, FunctionSig, ValueId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -38,6 +38,13 @@ pub(super) enum StmtOutcome {
     Return,
 }
 
+/// Loop context for break/continue lowering.
+pub(super) struct LoopContext {
+    pub(super) header_bb: BlockId,
+    pub(super) exit_bb: BlockId,
+    pub(super) defs: Vec<DefId>,
+}
+
 /// Main state for lowering a single function to SSA IR.
 ///
 /// Tracks:
@@ -54,6 +61,7 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
+    pub(super) loop_stack: Vec<LoopContext>,
 }
 
 impl<'a> FuncLowerer<'a> {
@@ -117,6 +125,7 @@ impl<'a> FuncLowerer<'a> {
             lowering_plans,
             param_defs,
             param_tys,
+            loop_stack: Vec::new(),
         }
     }
 
@@ -159,6 +168,13 @@ impl<'a> FuncLowerer<'a> {
         self.locals
             .get(def_id)
             .unwrap_or_else(|| panic!("ssa lower_func missing local {:?}", def_id))
+    }
+
+    /// Returns the innermost loop context, panicking if no loop is active.
+    pub(super) fn current_loop(&self) -> &LoopContext {
+        self.loop_stack
+            .last()
+            .unwrap_or_else(|| panic!("ssa break/continue outside of loop"))
     }
 
     /// Returns the IR type used to thread a local through control flow.

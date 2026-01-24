@@ -231,3 +231,77 @@ fn test_lower_while_return_stmt() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_while_break_stmt() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            var i = 0;
+            while i < 2 {
+                break;
+            }
+            i
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v0: u64 = const 0:u64
+            br bb1(%v0)
+
+          bb1(%v1: u64):
+            %v3: u64 = const 2:u64
+            %v4: bool = cmp.lt %v1, %v3
+            cbr %v4, bb2, bb3(%v1)
+
+          bb2():
+            br bb3(%v1)
+
+          bb3(%v2: u64):
+            ret %v2
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_while_continue_stmt() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            var i = 0;
+            while i < 2 {
+                continue;
+            }
+            i
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v0: u64 = const 0:u64
+            br bb1(%v0)
+
+          bb1(%v1: u64):
+            %v3: u64 = const 2:u64
+            %v4: bool = cmp.lt %v1, %v3
+            cbr %v4, bb2, bb3(%v1)
+
+          bb2():
+            br bb1(%v1)
+
+          bb3(%v2: u64):
+            ret %v2
+        }
+    "};
+    assert_eq!(text, expected);
+}

@@ -2,7 +2,7 @@
 
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, StmtOutcome};
+use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::ssa::lower::r#match::MatchLowerer;
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, ValueId};
@@ -33,6 +33,13 @@ impl<'a> FuncLowerer<'a> {
                     // Dispatch based on precomputed plan (linear vs branching).
                     match item {
                         sem::BlockItem::Stmt(stmt) => {
+                            if let sem::StmtExprKind::Break = &stmt.kind {
+                                return self.lower_break_stmt();
+                            }
+                            if let sem::StmtExprKind::Continue = &stmt.kind {
+                                return self.lower_continue_stmt();
+                            }
+
                             // Statements are lowered directly in linear form.
                             match self.lower_stmt_expr_linear(stmt)? {
                                 StmtOutcome::Continue => {}
@@ -211,9 +218,16 @@ impl<'a> FuncLowerer<'a> {
             else_args: exit_args,
         });
 
-        // Lower the body and add back-edge to header (unless body returns).
+        // Lower the body and add back-edge to header (unless the body terminates).
         self.builder.select_block(body_bb);
-        let body_result = self.lower_branching_expr(body)?;
+        self.loop_stack.push(LoopContext {
+            header_bb,
+            exit_bb,
+            defs: defs.clone(),
+        });
+        let body_result = self.lower_branching_expr(body);
+        self.loop_stack.pop();
+        let body_result = body_result?;
         if let BranchResult::Value(_) = body_result {
             // Collect updated locals and branch back to header.
             let Some(loop_args) = self.locals.args_for(&defs) else {
@@ -230,5 +244,31 @@ impl<'a> FuncLowerer<'a> {
         self.locals
             .set_from_params_like(&defs, &locals, &exit_params);
         Ok(())
+    }
+
+    /// Lowers a `break` statement by branching to the loop exit block.
+    fn lower_break_stmt(&mut self) -> Result<BranchResult, LoweringError> {
+        let ctx = self.current_loop();
+        let Some(exit_args) = self.locals.args_for(&ctx.defs) else {
+            panic!("ssa break missing locals args for loop exit");
+        };
+        self.builder.terminate(Terminator::Br {
+            target: ctx.exit_bb,
+            args: exit_args,
+        });
+        Ok(BranchResult::Return)
+    }
+
+    /// Lowers a `continue` statement by branching to the loop header block.
+    fn lower_continue_stmt(&mut self) -> Result<BranchResult, LoweringError> {
+        let ctx = self.current_loop();
+        let Some(loop_args) = self.locals.args_for(&ctx.defs) else {
+            panic!("ssa continue missing locals args for loop header");
+        };
+        self.builder.terminate(Terminator::Br {
+            target: ctx.header_bb,
+            args: loop_args,
+        });
+        Ok(BranchResult::Return)
     }
 }
