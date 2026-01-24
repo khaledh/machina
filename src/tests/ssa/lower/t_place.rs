@@ -221,6 +221,45 @@ fn test_lower_slice_index_load() {
 }
 
 #[test]
+fn test_lower_slice_index_assign() {
+    let ctx = analyze(indoc! {"
+        fn main(s: u64[]) -> u64 {
+            var t = s;
+            t[1] = 9;
+            t[1]
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(struct { ptr: ptr<u64>, len: u64 }) -> u64 {
+          locals:
+            %l0: struct { ptr: ptr<u64>, len: u64 }
+          bb0(%v0: struct { ptr: ptr<u64>, len: u64 }):
+            %v1: u64 = const 9:u64
+            %v2: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l0
+            store %v2, %v0
+            %v3: ptr<ptr<u64>> = field_addr %v2, 0
+            %v4: ptr<u64> = load %v3
+            %v5: u64 = const 1:u64
+            %v6: ptr<u64> = index_addr %v4, %v5
+            store %v6, %v1
+            %v7: ptr<ptr<u64>> = field_addr %v2, 0
+            %v8: ptr<u64> = load %v7
+            %v9: u64 = const 1:u64
+            %v10: ptr<u64> = index_addr %v8, %v9
+            %v11: u64 = load %v10
+            ret %v11
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_string_index_load() {
     let ctx = analyze(indoc! {"
         fn main(s: string) -> u8 {
