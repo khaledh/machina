@@ -130,7 +130,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
             self.lower_bindings(&arm_plan.bindings)?;
 
-            match self.lowerer.lower_branching_expr(&arm.body)? {
+            match self.lowerer.lower_branching_value_expr(&arm.body)? {
                 BranchResult::Value(value) => {
                     join.emit_branch(self.lowerer, value, arm.body.span)?;
                 }

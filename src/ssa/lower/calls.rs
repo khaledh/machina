@@ -44,7 +44,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let value = self.lower_value_expr_linear(expr)?;
+                    let value = self.lower_linear_value_expr(expr)?;
                     let ty = self.type_map.type_table().get(expr.ty).clone();
                     arg_values.push(CallInputValue { value, ty });
                 }
@@ -98,7 +98,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Lower the receiver (value receivers only).
         let receiver_value = match receiver {
             sem::MethodReceiver::ValueExpr(expr) => {
-                let value = self.lower_value_expr_linear(expr)?;
+                let value = self.lower_linear_value_expr(expr)?;
                 let ty = self.type_map.type_table().get(expr.ty).clone();
                 CallInputValue { value, ty }
             }
@@ -117,7 +117,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let value = self.lower_value_expr_linear(expr)?;
+                    let value = self.lower_linear_value_expr(expr)?;
                     let ty = self.type_map.type_table().get(expr.ty).clone();
                     arg_values.push(CallInputValue { value, ty });
                 }

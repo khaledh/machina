@@ -17,6 +17,7 @@ mod r#match;
 mod place;
 mod slots;
 mod types;
+mod util;
 
 use crate::resolve::DefTable;
 use crate::ssa::IrTypeCache;
@@ -125,7 +126,7 @@ fn lower_func_with_globals(
     // Lower the function body. This may produce multiple basic blocks
     // for control flow (if/else, loops, etc.). The cursor ends at the
     // final block where execution continues.
-    let result = lowerer.lower_branching_expr(&func.body)?;
+    let result = lowerer.lower_branching_value_expr(&func.body)?;
 
     // If the body produces a value (not an early return), emit the final return.
     if let BranchResult::Value(value) = result {
@@ -179,7 +180,7 @@ fn lower_method_def_with_globals(
         .set_from_params(&param_defs, &param_tys, &param_values);
 
     // Lower the method body and emit the final return if it yields a value.
-    let result = lowerer.lower_branching_expr(&method_def.body)?;
+    let result = lowerer.lower_branching_value_expr(&method_def.body)?;
     if let BranchResult::Value(value) = result {
         lowerer
             .builder

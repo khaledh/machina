@@ -14,7 +14,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Emits instructions starting at the current block cursor. May create new blocks
     /// and switch the cursor. On return, the cursor is at the "ending block" where
     /// execution continues after this expression.
-    pub(super) fn lower_branching_expr(
+    pub(super) fn lower_branching_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
     ) -> Result<BranchResult, LoweringError> {
@@ -77,7 +77,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 // Lower the then branch.
                 self.builder.select_block(then_bb);
                 let mut then_returned = false;
-                match self.lower_branching_expr(then_body)? {
+                match self.lower_branching_value_expr(then_body)? {
                     BranchResult::Value(value) => {
                         // Cursor is at end of then branch; emit branch to join.
                         join.emit_branch(self, value, expr.span)?;
@@ -91,7 +91,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 join.restore_locals(self);
                 self.builder.select_block(else_bb);
                 let mut else_returned = false;
-                match self.lower_branching_expr(else_body)? {
+                match self.lower_branching_value_expr(else_body)? {
                     BranchResult::Value(value) => {
                         // Cursor is at end of else branch; emit branch to join.
                         join.emit_branch(self, value, expr.span)?;
@@ -178,7 +178,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 });
                 match plan {
                     sem::LoweringPlan::Linear => {
-                        let value = self.lower_value_expr_linear(expr)?;
+                        let value = self.lower_linear_value_expr(expr)?;
                         Ok(BranchResult::Value(value))
                     }
                     sem::LoweringPlan::Branching => {
@@ -278,7 +278,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             exit_bb,
             defs: defs.clone(),
         });
-        let body_result = self.lower_branching_expr(body);
+        let body_result = self.lower_branching_value_expr(body);
         self.loop_stack.pop();
         let body_result = body_result?;
         if let BranchResult::Value(_) = body_result {

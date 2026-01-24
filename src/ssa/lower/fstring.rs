@@ -260,14 +260,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     });
                 }
                 sem::SegmentKind::StringValue { expr } => {
-                    let value = self.lower_value_expr_linear(expr)?;
+                    let value = self.lower_linear_value_expr(expr)?;
                     let (ptr, len) =
                         self.lower_ptr_len_from_value(expr.span, value, &Type::String, 32)?;
                     string_lens[index] = Some(len);
                     segments.push(LoweredFmtSegment::StringValue { ptr, len });
                 }
                 sem::SegmentKind::Int { expr, signed, bits } => {
-                    let value = self.lower_value_expr_linear(expr)?;
+                    let value = self.lower_linear_value_expr(expr)?;
                     let target_ty = self.type_lowerer.lower_type(&Type::Int {
                         signed: *signed,
                         bits: 64,

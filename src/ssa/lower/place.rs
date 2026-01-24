@@ -24,7 +24,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
                 Ok(PlaceAddr { addr, value_ty })
             }
             sem::PlaceExprKind::Deref { value } => {
-                let addr = self.lower_value_expr_linear(value)?;
+                let addr = self.lower_linear_value_expr(value)?;
                 let value_ty = self.type_lowerer.lower_type_id(place.ty);
                 Ok(PlaceAddr { addr, value_ty })
             }
@@ -59,7 +59,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
 
                         // Walk indices and compute element/sub-array type in each step.
                         for index_expr in indices {
-                            let index_val = self.lower_value_expr_linear(index_expr)?;
+                            let index_val = self.lower_linear_value_expr(index_expr)?;
                             let next_ty = curr_ty.array_item_type().unwrap_or_else(|| {
                                 panic!("ssa array index too many indices for {:?}", curr_ty);
                             });
@@ -90,7 +90,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
                         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
                         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                         let view = self.load_slice_view(base_addr, elem_ptr_ty);
-                        let index_val = self.lower_value_expr_linear(&indices[0])?;
+                        let index_val = self.lower_linear_value_expr(&indices[0])?;
                         let addr = self.index_with_bounds(view, index_val, elem_ptr_ty);
                         Ok(PlaceAddr {
                             addr,
@@ -111,7 +111,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
                         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
                         let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
                         let view = self.load_string_view(base_addr);
-                        let index_val = self.lower_value_expr_linear(&indices[0])?;
+                        let index_val = self.lower_linear_value_expr(&indices[0])?;
                         let addr = self.index_with_bounds(view, index_val, u8_ptr_ty);
                         Ok(PlaceAddr {
                             addr,

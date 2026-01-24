@@ -13,7 +13,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a linear value expression directly from the semantic tree.
     ///
     /// This avoids constructing a parallel linear AST for the common cases.
-    pub(super) fn lower_value_expr_linear(
+    pub(super) fn lower_linear_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
     ) -> Result<LinearValue, LoweringError> {
@@ -25,19 +25,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             StmtOutcome::Continue => {}
                             StmtOutcome::Return => {
                                 panic!(
-                                    "ssa lower_value_expr_linear hit return in linear block at {:?}",
+                                    "ssa lower_linear_value_expr hit return in linear block at {:?}",
                                     stmt.span
                                 );
                             }
                         },
                         sem::BlockItem::Expr(expr) => {
-                            let _ = self.lower_value_expr_linear(expr)?;
+                            let _ = self.lower_linear_value_expr(expr)?;
                         }
                     }
                 }
 
                 if let Some(tail) = tail {
-                    return self.lower_value_expr_linear(tail);
+                    return self.lower_linear_value_expr(tail);
                 }
 
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
@@ -115,7 +115,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 match init {
                     sem::ArrayLitInit::Elems(elems) => {
                         for (i, elem_expr) in elems.iter().enumerate() {
-                            let value = self.lower_value_expr_linear(elem_expr)?;
+                            let value = self.lower_linear_value_expr(elem_expr)?;
                             let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
                             let elem_ty = self.type_lowerer.lower_type_id(elem_expr.ty);
                             let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
@@ -124,7 +124,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         }
                     }
                     sem::ArrayLitInit::Repeat(expr, count) => {
-                        let value = self.lower_value_expr_linear(expr)?;
+                        let value = self.lower_linear_value_expr(expr)?;
                         let elem_ty = self.type_lowerer.lower_type_id(expr.ty);
                         for i in 0..*count {
                             let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
@@ -146,7 +146,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Store each field
                 for (i, elem_expr) in items.iter().enumerate() {
-                    let value = self.lower_value_expr_linear(elem_expr)?;
+                    let value = self.lower_linear_value_expr(elem_expr)?;
                     let field_ty = self.lower_tuple_field_ty(expr.ty, i);
                     self.store_field(slot.addr, i, field_ty, value);
                 }
@@ -162,7 +162,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Store each field
                 for field in fields.iter() {
-                    let value = self.lower_value_expr_linear(&field.value)?;
+                    let value = self.lower_linear_value_expr(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
                     self.store_field(slot.addr, field_index, field_ty, value);
                 }
@@ -177,12 +177,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let slot = self.alloc_value_slot(struct_ty);
 
                 // Copy the base struct
-                let base_value = self.lower_value_expr_linear(target)?;
+                let base_value = self.lower_linear_value_expr(target)?;
                 self.builder.store(slot.addr, base_value);
 
                 // Overwrite the updated fields
                 for field in fields.iter() {
-                    let value = self.lower_value_expr_linear(&field.value)?;
+                    let value = self.lower_linear_value_expr(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
                     self.store_field(slot.addr, field_index, field_ty, value);
                 }
@@ -236,7 +236,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .zip(field_offsets.iter())
                     .zip(field_tys.iter().copied())
                 {
-                    let value = self.lower_value_expr_linear(value_expr)?;
+                    let value = self.lower_linear_value_expr(value_expr)?;
                     self.store_into_blob(payload_ptr, *offset, value, value_ty);
                 }
 
@@ -244,7 +244,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
-                let value = self.lower_value_expr_linear(inner)?;
+                let value = self.lower_linear_value_expr(inner)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = match op {
                     UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
@@ -255,8 +255,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             sem::ValueExprKind::BinOp { left, op, right } => {
-                let lhs = self.lower_value_expr_linear(left)?;
-                let rhs = self.lower_value_expr_linear(right)?;
+                let lhs = self.lower_linear_value_expr(left)?;
+                let rhs = self.lower_linear_value_expr(right)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
 
                 if let Some(binop) = map_binop(*op) {
@@ -313,11 +313,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Evaluate bounds (default start=0, end=base_len).
                 let start_val = match start {
-                    Some(expr) => self.lower_value_expr_linear(expr)?,
+                    Some(expr) => self.lower_linear_value_expr(expr)?,
                     None => self.builder.const_int(0, false, 64, u64_ty),
                 };
                 let end_val = match end {
-                    Some(expr) => self.lower_value_expr_linear(expr)?,
+                    Some(expr) => self.lower_linear_value_expr(expr)?,
                     None => base_len,
                 };
 
@@ -413,7 +413,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                                     self.resolve_deref_base(place, deref_count)?
                                 }
                                 _ => {
-                                    let value = self.lower_value_expr_linear(inner)?;
+                                    let value = self.lower_linear_value_expr(inner)?;
                                     if deref_count == 0 {
                                         let array_ty = self.type_lowerer.lower_type_id(inner.ty);
                                         let addr = self.alloc_local_addr(array_ty);
@@ -490,7 +490,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             sem::StmtExprKind::LetBind { pattern, value, .. }
             | sem::StmtExprKind::VarBind { pattern, value, .. } => {
                 let value_expr = value;
-                let value = self.lower_value_expr_linear(value_expr)?;
+                let value = self.lower_linear_value_expr(value_expr)?;
                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                 self.bind_pattern(pattern, LocalValue::value(value, ty))?;
                 Ok(StmtOutcome::Continue)
@@ -500,7 +500,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 assignee, value, ..
             } => {
                 let value_expr = value;
-                let value = self.lower_value_expr_linear(value_expr)?;
+                let value = self.lower_linear_value_expr(value_expr)?;
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
@@ -517,7 +517,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             sem::StmtExprKind::Return { value } => {
                 let value = match value {
-                    Some(expr) => Some(self.lower_value_expr_linear(expr)?),
+                    Some(expr) => Some(self.lower_linear_value_expr(expr)?),
                     None => None,
                 };
                 self.builder.terminate(Terminator::Return { value });
