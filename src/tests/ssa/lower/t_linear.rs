@@ -450,3 +450,59 @@ fn test_lower_array_lit_repeat() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_slice_expr_array() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            let arr = [1, 2, 3];
+            let s: u64[] = arr[1..];
+            0
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          locals:
+            %l0: u64[3]
+            %l1: u64[3]
+            %l2: struct { ptr: ptr<u64>, len: u64 }
+          bb0():
+            %v0: ptr<u64[3]> = addr_of %l0
+            %v1: u64 = const 1:u64
+            %v2: u64 = const 0:u64
+            %v3: ptr<u64> = index_addr %v0, %v2
+            store %v3, %v1
+            %v4: u64 = const 2:u64
+            %v5: u64 = const 1:u64
+            %v6: ptr<u64> = index_addr %v0, %v5
+            store %v6, %v4
+            %v7: u64 = const 3:u64
+            %v8: u64 = const 2:u64
+            %v9: ptr<u64> = index_addr %v0, %v8
+            store %v9, %v7
+            %v10: u64[3] = load %v0
+            %v11: ptr<u64[3]> = addr_of %l1
+            store %v11, %v10
+            %v12: u64 = const 0:u64
+            %v13: ptr<u64> = index_addr %v11, %v12
+            %v14: u64 = const 3:u64
+            %v15: u64 = const 1:u64
+            %v16: ptr<u64> = index_addr %v13, %v15
+            %v17: u64 = sub %v14, %v15
+            %v18: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l2
+            %v19: ptr<ptr<u64>> = field_addr %v18, 0
+            store %v19, %v16
+            %v20: ptr<u64> = field_addr %v18, 1
+            store %v20, %v17
+            %v21: struct { ptr: ptr<u64>, len: u64 } = load %v18
+            %v22: u64 = const 0:u64
+            ret %v22
+        }
+    "};
+    assert_eq!(text, expected);
+}

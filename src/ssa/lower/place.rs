@@ -31,8 +31,7 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
             sem::PlaceExprKind::TupleField { target, index } => {
                 let base = self.lower_place_addr(target)?;
                 let field_ty = self.lower_tuple_field_ty(target.ty, *index);
-                let ptr_ty = self.type_lowerer.ptr_to(field_ty);
-                let addr = self.builder.field_addr(base.addr, *index, ptr_ty);
+                let addr = self.field_addr_typed(base.addr, *index, field_ty);
                 Ok(PlaceAddr {
                     addr,
                     value_ty: field_ty,
@@ -41,8 +40,7 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
             sem::PlaceExprKind::StructField { target, field } => {
                 let base = self.lower_place_addr(target)?;
                 let (field_index, field_ty) = self.lower_struct_field_ty(target.ty, field);
-                let ptr_ty = self.type_lowerer.ptr_to(field_ty);
-                let addr = self.builder.field_addr(base.addr, field_index, ptr_ty);
+                let addr = self.field_addr_typed(base.addr, field_index, field_ty);
                 Ok(PlaceAddr {
                     addr,
                     value_ty: field_ty,
@@ -61,21 +59,8 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
                     }
                 };
 
-                let mut base = self.lower_place_addr(target)?;
-
-                // Peel heap/ref indirections using the plan's deref count.
-                let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
-
-                for _ in 0..deref_count {
-                    let elem_ty = match curr_ty {
-                        Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
-                        other => panic!("ssa array index on non-heap/ref type {:?}", other),
-                    };
-                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                    let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                    base.addr = self.builder.load(base.addr, ptr_ir_ty);
-                    curr_ty = (*elem_ty).clone();
-                }
+                let (mut base_addr, mut curr_ty) =
+                    self.resolve_deref_base(target, deref_count)?;
 
                 // Walk indices and compute element/sub-array type in each step.
                 for index_expr in indices {
@@ -86,13 +71,13 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
 
                     let elem_ir_ty = self.type_lowerer.lower_type(&next_ty);
                     let ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                    base.addr = self.builder.index_addr(base.addr, index_val, ptr_ty);
+                    base_addr = self.builder.index_addr(base_addr, index_val, ptr_ty);
 
                     curr_ty = next_ty;
                 }
 
                 Ok(PlaceAddr {
-                    addr: base.addr,
+                    addr: base_addr,
                     value_ty: self.type_lowerer.lower_type_id(place.ty),
                 })
             }

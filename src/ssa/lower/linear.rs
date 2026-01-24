@@ -4,7 +4,7 @@ use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{Terminator, UnOp};
+use crate::ssa::model::ir::{BinOp, Terminator, UnOp};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -102,8 +102,7 @@ impl<'a> FuncLowerer<'a> {
                 for (i, elem_expr) in items.iter().enumerate() {
                     let value = self.lower_value_expr_linear(elem_expr)?;
                     let field_ty = self.lower_tuple_field_ty(expr.ty, i);
-                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ty);
-                    let field_addr = self.builder.field_addr(addr, i, field_ptr_ty);
+                    let field_addr = self.field_addr_typed(addr, i, field_ty);
                     self.builder.store(field_addr, value);
                 }
 
@@ -120,8 +119,7 @@ impl<'a> FuncLowerer<'a> {
                 for field in fields.iter() {
                     let value = self.lower_value_expr_linear(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ty);
-                    let field_addr = self.builder.field_addr(addr, field_index, field_ptr_ty);
+                    let field_addr = self.field_addr_typed(addr, field_index, field_ty);
                     self.builder.store(field_addr, value);
                 }
 
@@ -142,8 +140,7 @@ impl<'a> FuncLowerer<'a> {
                 for field in fields.iter() {
                     let value = self.lower_value_expr_linear(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ty);
-                    let field_addr = self.builder.field_addr(addr, field_index, field_ptr_ty);
+                    let field_addr = self.field_addr_typed(addr, field_index, field_ty);
                     self.builder.store(field_addr, value);
                 }
 
@@ -173,16 +170,14 @@ impl<'a> FuncLowerer<'a> {
                 let addr = self.alloc_local_addr(enum_ty);
 
                 // Store the tag in field 0.
-                let tag_ptr_ty = self.type_lowerer.ptr_to(tag_ty);
-                let tag_ptr = self.builder.field_addr(addr, 0, tag_ptr_ty);
+                let tag_ptr = self.field_addr_typed(addr, 0, tag_ty);
                 let tag_val = self
                     .builder
                     .const_int(variant_tag as i128, false, 32, tag_ty);
                 self.builder.store(tag_ptr, tag_val);
 
                 // Store each payload field into the blob (field 1) at its offset.
-                let payload_ptr_ty = self.type_lowerer.ptr_to(blob_ty);
-                let payload_ptr = self.builder.field_addr(addr, 1, payload_ptr_ty);
+                let payload_ptr = self.field_addr_typed(addr, 1, blob_ty);
 
                 if field_offsets.len() != payload.len() || field_tys.len() != payload.len() {
                     panic!(
@@ -231,6 +226,79 @@ impl<'a> FuncLowerer<'a> {
                 Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
             }
 
+            sem::ValueExprKind::Slice { target, start, end } => {
+                // Build a slice value { ptr, len } from a place and optional bounds.
+                let plan = self.type_map.lookup_slice_plan(expr.id).unwrap_or_else(|| {
+                    panic!("ssa slice missing plan for expr {:?}", expr.id);
+                });
+
+                let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
+                else {
+                    panic!("ssa slice expr has non-slice type");
+                };
+
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+
+                // Resolve the base pointer and length from the slice plan.
+                let (base_ptr, base_len) = match plan.base {
+                    sem::SliceBaseKind::Array { len, deref_count } => {
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::Array { .. } = base_ty else {
+                            panic!("ssa slice on non-array base {:?}", base_ty);
+                        };
+
+                        let zero = self.builder.const_int(0, false, 64, u64_ty);
+                        let ptr = self.builder.index_addr(base_addr, zero, elem_ptr_ty);
+                        let len_val = self.builder.const_int(len as i128, false, 64, u64_ty);
+                        (ptr, len_val)
+                    }
+                    sem::SliceBaseKind::Slice { deref_count } => {
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::Slice { .. } = base_ty else {
+                            panic!("ssa slice on non-slice base {:?}", base_ty);
+                        };
+
+                        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
+                        let ptr = self.builder.load(ptr_addr, elem_ptr_ty);
+
+                        let len_addr = self.field_addr_typed(base_addr, 1, u64_ty);
+                        let len_val = self.builder.load(len_addr, u64_ty);
+                        (ptr, len_val)
+                    }
+                    sem::SliceBaseKind::String { .. } => {
+                        return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+                    }
+                };
+
+                // Evaluate bounds (default start=0, end=base_len).
+                let start_val = match start {
+                    Some(expr) => self.lower_value_expr_linear(expr)?,
+                    None => self.builder.const_int(0, false, 64, u64_ty),
+                };
+                let end_val = match end {
+                    Some(expr) => self.lower_value_expr_linear(expr)?,
+                    None => base_len,
+                };
+
+                // Compute the resulting slice pointer and length.
+                let ptr_at = self.builder.index_addr(base_ptr, start_val, elem_ptr_ty);
+                let len_at = self.builder.binop(BinOp::Sub, end_val, start_val, u64_ty);
+
+                // Materialize the slice struct and load it as a value.
+                let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let addr = self.alloc_local_addr(slice_ty);
+
+                let ptr_field = self.field_addr_typed(addr, 0, elem_ptr_ty);
+                self.builder.store(ptr_field, ptr_at);
+
+                let len_field = self.field_addr_typed(addr, 1, u64_ty);
+                self.builder.store(len_field, len_at);
+
+                Ok(self.builder.load(addr, slice_ty))
+            }
+
             sem::ValueExprKind::Len { place } => {
                 // Length is an internal node for array/slice iteration.
                 let place_ty = self.type_map.type_table().get(place.ty).clone();
@@ -246,8 +314,7 @@ impl<'a> FuncLowerer<'a> {
                     Type::Slice { .. } => {
                         let place_addr = self.lower_place_addr(place)?;
                         let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                        let len_ptr_ty = self.type_lowerer.ptr_to(len_ty);
-                        let len_addr = self.builder.field_addr(place_addr.addr, 1, len_ptr_ty);
+                        let len_addr = self.field_addr_typed(place_addr.addr, 1, len_ty);
                         Ok(self.builder.load(len_addr, len_ty))
                     }
                     other => panic!("ssa len on unsupported type {:?}", other),

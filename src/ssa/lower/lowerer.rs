@@ -178,6 +178,41 @@ impl<'a> FuncLowerer<'a> {
         self.builder.addr_of_local(local_id, ptr_ty)
     }
 
+    /// Computes a typed field address for a struct/tuple value.
+    pub(super) fn field_addr_typed(
+        &mut self,
+        base: ValueId,
+        index: usize,
+        field_ty: IrTypeId,
+    ) -> ValueId {
+        let ptr_ty = self.type_lowerer.ptr_to(field_ty);
+        self.builder.field_addr(base, index, ptr_ty)
+    }
+
+    /// Resolves a place to its base address after peeling heap/ref indirections.
+    pub(super) fn resolve_deref_base(
+        &mut self,
+        target: &sem::PlaceExpr,
+        deref_count: usize,
+    ) -> Result<(ValueId, Type), LoweringError> {
+        let mut base = self.lower_place_addr(target)?;
+        let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
+
+        for _ in 0..deref_count {
+            let elem_ty = match curr_ty {
+                Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                other => panic!("ssa resolve_deref_base on non-heap/ref {:?}", other),
+            };
+
+            let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+            let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+            base.addr = self.builder.load(base.addr, ptr_ir_ty);
+            curr_ty = (*elem_ty).clone();
+        }
+
+        Ok((base.addr, curr_ty))
+    }
+
     /// Ensures a local has an addressable slot and returns its address.
     pub(super) fn ensure_local_addr(&mut self, def_id: DefId, value_ty: IrTypeId) -> ValueId {
         let local = self.lookup_local(def_id);

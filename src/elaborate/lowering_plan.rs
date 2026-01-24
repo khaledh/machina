@@ -291,6 +291,20 @@ impl<'a> LoweringPlanBuilder<'a> {
 
             sem::ValueExprKind::AddrOf { place } => self.is_linear_place_expr(place),
 
+            sem::ValueExprKind::Len { place } => self.is_linear_place_expr(place),
+
+            sem::ValueExprKind::Slice { target, start, end } => {
+                self.is_linear_place_expr(target)
+                    && start
+                        .as_deref()
+                        .map(|expr| self.is_linear_value_expr(expr))
+                        .unwrap_or(true)
+                    && end
+                        .as_deref()
+                        .map(|expr| self.is_linear_value_expr(expr))
+                        .unwrap_or(true)
+            }
+
             sem::ValueExprKind::Call { callee, args } => {
                 self.is_linear_value_expr(callee)
                     && args.iter().all(|arg| self.is_linear_call_arg(arg))

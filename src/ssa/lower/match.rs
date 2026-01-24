@@ -171,8 +171,7 @@ impl<'a, 'b> MatchLowerer<'a, 'b> {
                 let layout = self.lowerer.type_lowerer.enum_layout(enum_ty_id);
                 layout.tag_ty
             };
-            let tag_ptr_ty = self.lowerer.type_lowerer.ptr_to(tag_ty);
-            let tag_ptr = self.lowerer.builder.field_addr(addr, 0, tag_ptr_ty);
+            let tag_ptr = self.lowerer.field_addr_typed(addr, 0, tag_ty);
             let tag_val = self.lowerer.builder.load(tag_ptr, tag_ty);
             return Ok((
                 tag_val,
@@ -239,8 +238,7 @@ impl<'a, 'b> MatchLowerer<'a, 'b> {
                             .unwrap_or_else(|| panic!("ssa match tuple field out of range {index}"))
                             .clone();
                         let field_ir_ty = self.lowerer.type_lowerer.lower_type(&field_ty);
-                        let ptr_ty = self.lowerer.type_lowerer.ptr_to(field_ir_ty);
-                        addr = self.lowerer.builder.field_addr(addr, *index, ptr_ty);
+                        addr = self.lowerer.field_addr_typed(addr, *index, field_ir_ty);
                         curr_ty = field_ty;
                     }
                     Type::Struct { fields, .. } => {
@@ -249,8 +247,7 @@ impl<'a, 'b> MatchLowerer<'a, 'b> {
                         });
                         let field_ty = field.ty.clone();
                         let field_ir_ty = self.lowerer.type_lowerer.lower_type(&field_ty);
-                        let ptr_ty = self.lowerer.type_lowerer.ptr_to(field_ir_ty);
-                        addr = self.lowerer.builder.field_addr(addr, *index, ptr_ty);
+                        addr = self.lowerer.field_addr_typed(addr, *index, field_ir_ty);
                         curr_ty = field_ty;
                     }
                     Type::Enum { .. } => {
@@ -271,8 +268,7 @@ impl<'a, 'b> MatchLowerer<'a, 'b> {
                             1 => blob_ty,
                             _ => panic!("ssa match enum field out of range {index}"),
                         };
-                        let ptr_ty = self.lowerer.type_lowerer.ptr_to(field_ir_ty);
-                        addr = self.lowerer.builder.field_addr(addr, *index, ptr_ty);
+                        addr = self.lowerer.field_addr_typed(addr, *index, field_ir_ty);
                         curr_ty = match *index {
                             0 => Type::Int {
                                 signed: false,
