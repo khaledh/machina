@@ -1,7 +1,7 @@
 use super::{analyze, formact_func, indoc, lower_func};
 
 #[test]
-fn test_lower_const_return() {
+fn test_lower_const() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
             42
@@ -23,7 +23,7 @@ fn test_lower_const_return() {
 }
 
 #[test]
-fn test_lower_return_stmt() {
+fn test_lower_stmt() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
             return 42;
@@ -45,7 +45,7 @@ fn test_lower_return_stmt() {
 }
 
 #[test]
-fn test_lower_binop_return() {
+fn test_lower_binop() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
             1 + 2
@@ -69,7 +69,7 @@ fn test_lower_binop_return() {
 }
 
 #[test]
-fn test_lower_param_binop_return() {
+fn test_lower_param_binop() {
     let ctx = analyze(indoc! {"
         fn main(a: u64, b: u64) -> u64 {
             a + b
@@ -91,7 +91,7 @@ fn test_lower_param_binop_return() {
 }
 
 #[test]
-fn test_lower_unop_return() {
+fn test_lower_unop() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
             ~1
@@ -114,7 +114,7 @@ fn test_lower_unop_return() {
 }
 
 #[test]
-fn test_lower_unop_not_return() {
+fn test_lower_unop_not() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {
             !true
@@ -137,7 +137,7 @@ fn test_lower_unop_not_return() {
 }
 
 #[test]
-fn test_lower_cmp_return() {
+fn test_lower_cmp() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {
             1 < 2
@@ -161,7 +161,7 @@ fn test_lower_cmp_return() {
 }
 
 #[test]
-fn test_lower_tuple_lit_return() {
+fn test_lower_tuple_lit() {
     let ctx = analyze(indoc! {"
         fn main() -> (u64, bool) {
             (1, true)
@@ -192,7 +192,7 @@ fn test_lower_tuple_lit_return() {
 }
 
 #[test]
-fn test_lower_struct_lit_return() {
+fn test_lower_struct_lit() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64, b: u64 }
 
@@ -225,7 +225,7 @@ fn test_lower_struct_lit_return() {
 }
 
 #[test]
-fn test_lower_struct_update_return() {
+fn test_lower_struct_update() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64, b: u64 }
 
@@ -266,7 +266,7 @@ fn test_lower_struct_update_return() {
 }
 
 #[test]
-fn test_lower_struct_update_multi_field_return() {
+fn test_lower_struct_update_multi_field() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64, b: u64 }
 
@@ -310,7 +310,77 @@ fn test_lower_struct_update_multi_field_return() {
 }
 
 #[test]
-fn test_lower_array_lit_elems_return() {
+fn test_lower_enum_variant_no_payload() {
+    let ctx = analyze(indoc! {"
+        type Flag = Off | On
+
+        fn main() -> Flag {
+            Flag::On
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> Flag {
+          locals:
+            %l0: Flag
+          bb0():
+            %v0: ptr<Flag> = addr_of %l0
+            %v1: ptr<u32> = field_addr %v0, 0
+            %v2: u32 = const 1:u32
+            store %v1, %v2
+            %v3: ptr<blob<0, align=1>> = field_addr %v0, 1
+            %v4: Flag = load %v0
+            ret %v4
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_enum_variant_payload() {
+    let ctx = analyze(indoc! {"
+        type Option = None | Some(u64)
+
+        fn main() -> Option {
+            Option::Some(42)
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> Option {
+          locals:
+            %l0: Option
+            %l1: u64
+          bb0():
+            %v0: ptr<Option> = addr_of %l0
+            %v1: ptr<u32> = field_addr %v0, 0
+            %v2: u32 = const 1:u32
+            store %v1, %v2
+            %v3: ptr<blob<8, align=8>> = field_addr %v0, 1
+            %v4: u64 = const 42:u64
+            %v5: ptr<u64> = addr_of %l1
+            store %v5, %v4
+            %v6: u64 = const 0:u64
+            %v7: ptr<u8> = index_addr %v3, %v6
+            %v8: u64 = const 8:u64
+            memcpy %v7, %v5, %v8
+            %v9: Option = load %v0
+            ret %v9
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_array_lit_elems() {
     let ctx = analyze(indoc! {"
         fn main() -> u64[3] {
             [1, 2, 3]
@@ -347,7 +417,7 @@ fn test_lower_array_lit_elems_return() {
 }
 
 #[test]
-fn test_lower_array_lit_repeat_return() {
+fn test_lower_array_lit_repeat() {
     let ctx = analyze(indoc! {"
         fn main() -> u64[3] {
             [0; 3]

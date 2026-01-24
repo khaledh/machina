@@ -17,6 +17,7 @@ pub(super) struct TypeLowerer<'a> {
     by_type_id: HashMap<TypeId, IrTypeId>,
     by_type: HashMap<Type, IrTypeId>,
     ptr_cache: HashMap<IrTypeId, IrTypeId>,
+    enum_layouts: HashMap<TypeId, EnumLayout>,
 }
 
 impl<'a> TypeLowerer<'a> {
@@ -27,6 +28,7 @@ impl<'a> TypeLowerer<'a> {
             by_type_id: HashMap::new(),
             by_type: HashMap::new(),
             ptr_cache: HashMap::new(),
+            enum_layouts: HashMap::new(),
         }
     }
 
@@ -118,6 +120,24 @@ impl<'a> TypeLowerer<'a> {
                 self.ir_type_cache
                     .add_named(IrTypeKind::Struct { fields }, name.clone())
             }
+            Type::Enum { name, .. } => {
+                let ty_id = self.type_map.type_table().lookup_id(ty).unwrap_or_else(|| {
+                    panic!("ssa type lowering: missing enum type id for {name}")
+                });
+                let layout = self.enum_layout(ty_id);
+                let fields = vec![
+                    IrStructField {
+                        name: "tag".to_string(),
+                        ty: layout.tag_ty,
+                    },
+                    IrStructField {
+                        name: "payload".to_string(),
+                        ty: layout.blob_ty,
+                    },
+                ];
+                self.ir_type_cache
+                    .add_named(IrTypeKind::Struct { fields }, name.clone())
+            }
 
             // Pointer-like types (heap allocations, references) become SSA pointers.
             Type::Heap { elem_ty }
@@ -154,4 +174,129 @@ impl<'a> TypeLowerer<'a> {
             other => panic!("ssa type lowering: expected int type, found {:?}", other),
         }
     }
+
+    pub(super) fn enum_layout(&mut self, ty_id: TypeId) -> &EnumLayout {
+        if self.enum_layouts.contains_key(&ty_id) {
+            return self.enum_layouts.get(&ty_id).unwrap();
+        }
+
+        let enum_ty = self.type_map.type_table().get(ty_id);
+        let Type::Enum { name: _, variants } = enum_ty else {
+            panic!("ssa type lowering: expected enum type, found {:?}", enum_ty);
+        };
+
+        // Clone variants to avoid holding a borrow while we mutate self
+        let variants = variants.clone();
+
+        let tag_ty = self.lower_type(&Type::Int {
+            signed: false,
+            bits: 32,
+        });
+
+        let mut max_payload_size = 0u64;
+        let mut max_payload_align = 1u64;
+        let mut variant_layouts = Vec::new();
+
+        for (i, variant) in variants.iter().enumerate() {
+            let tag_value = i as u32;
+            if variant.payload.is_empty() {
+                // No payload, just a scalar tag.
+                variant_layouts.push(EnumVariantLayout {
+                    name: variant.name.clone(),
+                    tag: tag_value,
+                    field_tys: vec![],
+                    field_offsets: vec![],
+                    payload_size: 0,
+                    payload_align: 1,
+                });
+                continue;
+            }
+            if variant.payload.len() == 1 {
+                // Single payload element, use the element's layout directly.
+                let payload_ty = self.lower_type(&variant.payload[0]);
+                let payload_layout = self.ir_type_cache.layout(payload_ty);
+                let payload_size = payload_layout.size();
+                let payload_align = payload_layout.align();
+                variant_layouts.push(EnumVariantLayout {
+                    name: variant.name.clone(),
+                    tag: tag_value,
+                    field_tys: vec![payload_ty],
+                    field_offsets: vec![0],
+                    payload_size,
+                    payload_align,
+                });
+                max_payload_size = max_payload_size.max(payload_size);
+                max_payload_align = max_payload_align.max(payload_align);
+                continue;
+            }
+
+            // Payload size > 1: create a tuple type and use its layout offsets.
+            let payload_field_tys: Vec<_> = variant
+                .payload
+                .iter()
+                .map(|field| self.lower_type(field))
+                .collect();
+
+            let tuple_ty = self.ir_type_cache.add(IrTypeKind::Tuple {
+                fields: payload_field_tys.clone(),
+            });
+            let payload_layout = self.ir_type_cache.layout(tuple_ty);
+            let payload_size = payload_layout.size();
+            let payload_align = payload_layout.align();
+            let field_offsets = payload_layout.field_offsets().to_vec();
+
+            variant_layouts.push(EnumVariantLayout {
+                name: variant.name.clone(),
+                tag: tag_value,
+                field_tys: payload_field_tys,
+                field_offsets,
+                payload_size,
+                payload_align,
+            });
+            max_payload_size = max_payload_size.max(payload_size);
+            max_payload_align = max_payload_align.max(payload_align);
+        }
+
+        let blob_ty = self.ir_type_cache.add(IrTypeKind::Blob {
+            size: max_payload_size,
+            align: max_payload_align,
+        });
+        let layout = EnumLayout {
+            tag_ty,
+            blob_ty,
+            variants: variant_layouts,
+        };
+        self.enum_layouts.insert(ty_id, layout);
+        self.enum_layouts.get(&ty_id).unwrap()
+    }
 }
+
+pub struct EnumLayout {
+    pub tag_ty: IrTypeId,  // u32 tag type
+    pub blob_ty: IrTypeId, // blob of bytes for the payload
+    pub variants: Vec<EnumVariantLayout>,
+}
+
+pub struct EnumVariantLayout {
+    pub name: String,
+    pub tag: u32,                 // index of the variant
+    pub field_tys: Vec<IrTypeId>, // lowered field types
+    pub field_offsets: Vec<u64>,  // offsets of the fields in the blob
+    #[allow(dead_code)]
+    pub payload_size: u64,
+    #[allow(dead_code)]
+    pub payload_align: u64,
+}
+
+impl EnumLayout {
+    pub(super) fn variant_by_name(&self, name: &str) -> &EnumVariantLayout {
+        self.variants
+            .iter()
+            .find(|variant| variant.name == name)
+            .unwrap_or_else(|| panic!("ssa enum layout missing variant {name}"))
+    }
+}
+
+#[cfg(test)]
+#[path = "../../tests/ssa/lower/types.rs"]
+mod tests;

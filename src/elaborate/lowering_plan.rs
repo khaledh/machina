@@ -277,6 +277,10 @@ impl<'a> LoweringPlanBuilder<'a> {
                         .all(|field| self.is_linear_value_expr(&field.value))
             }
 
+            sem::ValueExprKind::EnumVariant { payload, .. } => {
+                payload.iter().all(|value| self.is_linear_value_expr(value))
+            }
+
             sem::ValueExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
 
             sem::ValueExprKind::BinOp { left, right, .. } => {

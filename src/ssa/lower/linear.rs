@@ -159,6 +159,63 @@ impl<'a> FuncLowerer<'a> {
                 Ok(self.builder.load(addr, struct_ty))
             }
 
+            sem::ValueExprKind::EnumVariant {
+                enum_name: _,
+                variant,
+                payload,
+            } => {
+                let (tag_ty, blob_ty, variant_tag, field_offsets, field_tys) = {
+                    let layout = self.type_lowerer.enum_layout(expr.ty);
+                    let variant_layout = layout.variant_by_name(variant);
+                    (
+                        layout.tag_ty,
+                        layout.blob_ty,
+                        variant_layout.tag,
+                        variant_layout.field_offsets.clone(),
+                        variant_layout.field_tys.clone(),
+                    )
+                };
+
+                // Allocate a local for the enum and get its address.
+                let enum_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let local = self.builder.add_local(enum_ty, None);
+                let ptr_ty = self.type_lowerer.ptr_to(enum_ty);
+                let addr = self.builder.addr_of_local(local, ptr_ty);
+
+                // Store the tag in field 0.
+                let tag_ptr_ty = self.type_lowerer.ptr_to(tag_ty);
+                let tag_ptr = self.builder.field_addr(addr, 0, tag_ptr_ty);
+                let tag_val = self
+                    .builder
+                    .const_int(variant_tag as i128, false, 32, tag_ty);
+                self.builder.store(tag_ptr, tag_val);
+
+                // Store each payload field into the blob (field 1) at its offset.
+                let payload_ptr_ty = self.type_lowerer.ptr_to(blob_ty);
+                let payload_ptr = self.builder.field_addr(addr, 1, payload_ptr_ty);
+
+                if field_offsets.len() != payload.len() || field_tys.len() != payload.len() {
+                    panic!(
+                        "ssa enum variant payload mismatch for {}: {} offsets, {} tys, {} values",
+                        variant,
+                        field_offsets.len(),
+                        field_tys.len(),
+                        payload.len()
+                    );
+                }
+
+                for ((value_expr, offset), value_ty) in payload
+                    .iter()
+                    .zip(field_offsets.iter())
+                    .zip(field_tys.iter().copied())
+                {
+                    let value = self.lower_value_expr_linear(value_expr)?;
+                    self.store_into_blob(payload_ptr, *offset, value, value_ty);
+                }
+
+                Ok(self.builder.load(addr, enum_ty))
+            }
+
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
                 let value = self.lower_value_expr_linear(inner)?;
                 let ty = self.type_lowerer.lower_type_id(expr.ty);

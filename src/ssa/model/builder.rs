@@ -228,6 +228,14 @@ impl FunctionBuilder {
         });
     }
 
+    /// Emits a memory copy instruction at the cursor.
+    pub fn memcopy(&mut self, dst: ValueId, src: ValueId, len: ValueId) {
+        self.current_block_mut().insts.push(Instruction {
+            result: None,
+            kind: InstKind::MemCopy { dst, src, len },
+        });
+    }
+
     /// Sets the terminator for the current block.
     pub fn terminate(&mut self, term: Terminator) {
         self.current_block_mut().term = term;

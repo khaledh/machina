@@ -224,6 +224,43 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    pub(super) fn byte_offset_addr(&mut self, base: ValueId, offset: u64) -> ValueId {
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+
+        // base is a ptr<blob>; we treat it as ptr<u8> for indexing
+        // TODO: add proper pointer cast instruction in IR
+        let base_u8 = base; // no bitcast in IR yet; assume ptr is opaque
+        let offset_val = self.builder.const_int(offset as i128, false, 64, u64_ty);
+        self.builder.index_addr(base_u8, offset_val, u8_ptr_ty)
+    }
+
+    pub(super) fn store_into_blob(
+        &mut self,
+        blob_ptr: ValueId,
+        offset: u64,
+        value: ValueId,
+        value_ty: IrTypeId,
+    ) {
+        // Store the value into a temporary local
+        let temp = self.builder.add_local(value_ty, None);
+        let temp_ptr_ty = self.type_lowerer.ptr_to(value_ty);
+        let temp_ptr = self.builder.addr_of_local(temp, temp_ptr_ty);
+        self.builder.store(temp_ptr, value);
+
+        // Copy the value into the blob at the given offset and length
+        let dst = self.byte_offset_addr(blob_ptr, offset);
+
+        let layout = self.type_lowerer.ir_type_cache.layout(value_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self
+            .builder
+            .const_int(layout.size() as i128, false, 64, u64_ty);
+
+        self.builder.memcopy(dst, temp_ptr, len);
+    }
+
     pub(super) fn err_span(&self, span: Span, kind: LoweringErrorKind) -> LoweringError {
         LoweringError { kind, span }
     }
