@@ -275,6 +275,16 @@ impl<'a> FuncLowerer<'a> {
                     None => base_len,
                 };
 
+                if start.is_some() || end.is_some() {
+                    let zero = self.builder.const_int(0, false, 64, u64_ty);
+                    let one = self.builder.const_int(1, false, 64, u64_ty);
+                    let max_excl = self.builder.binop(BinOp::Add, base_len, one, u64_ty);
+
+                    // Enforce start <= base_len and start <= end <= base_len.
+                    self.emit_range_check(start_val, zero, max_excl);
+                    self.emit_range_check(end_val, start_val, max_excl);
+                }
+
                 let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.emit_slice_value(
                     slice_ty,

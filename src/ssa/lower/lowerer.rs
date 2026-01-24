@@ -9,7 +9,9 @@ use crate::ssa::lower::locals::{LocalMap, LocalStorage, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{BlockId, Callee, CmpOp, CastKind, FunctionSig, RuntimeFn, Terminator, ValueId};
+use crate::ssa::model::ir::{
+    BinOp, BlockId, Callee, CastKind, CmpOp, FunctionSig, RuntimeFn, Terminator, ValueId,
+};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -343,6 +345,41 @@ impl<'a> FuncLowerer<'a> {
         self.builder.terminate(Terminator::Unreachable);
 
         // Continue lowering in the in-bounds block.
+        self.builder.select_block(ok_bb);
+    }
+
+    /// Emits a range check guard that traps if `value` is outside [min, max_excl).
+    pub(super) fn emit_range_check(&mut self, value: ValueId, min: ValueId, max_excl: ValueId) {
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let ge_min = self.builder.cmp(CmpOp::Ge, value, min, bool_ty);
+        let lt_max = self.builder.cmp(CmpOp::Lt, value, max_excl, bool_ty);
+        let in_range = self.builder.binop(BinOp::And, ge_min, lt_max, bool_ty);
+
+        let ok_bb = self.builder.add_block();
+        let trap_bb = self.builder.add_block();
+
+        // Split control flow on the range predicate.
+        self.builder.terminate(Terminator::CondBr {
+            cond: in_range,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: trap_bb,
+            else_args: Vec::new(),
+        });
+
+        // Trap on out-of-range values.
+        self.builder.select_block(trap_bb);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let kind = self.builder.const_int(2, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::Trap),
+            vec![kind, value, min, max_excl],
+            unit_ty,
+        );
+        self.builder.terminate(Terminator::Unreachable);
+
+        // Continue lowering in the in-range block.
         self.builder.select_block(ok_bb);
     }
 
