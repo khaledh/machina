@@ -4,7 +4,7 @@ use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{BinOp, CastKind, Terminator, UnOp, ValueId};
+use crate::ssa::model::ir::{BinOp, Terminator, UnOp, ValueId};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -102,8 +102,7 @@ impl<'a> FuncLowerer<'a> {
                 for (i, elem_expr) in items.iter().enumerate() {
                     let value = self.lower_value_expr_linear(elem_expr)?;
                     let field_ty = self.lower_tuple_field_ty(expr.ty, i);
-                    let field_addr = self.field_addr_typed(addr, i, field_ty);
-                    self.builder.store(field_addr, value);
+                    self.store_field(addr, i, field_ty, value);
                 }
 
                 // Load the tuple value
@@ -119,8 +118,7 @@ impl<'a> FuncLowerer<'a> {
                 for field in fields.iter() {
                     let value = self.lower_value_expr_linear(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    let field_addr = self.field_addr_typed(addr, field_index, field_ty);
-                    self.builder.store(field_addr, value);
+                    self.store_field(addr, field_index, field_ty, value);
                 }
 
                 // Load the struct value
@@ -140,8 +138,7 @@ impl<'a> FuncLowerer<'a> {
                 for field in fields.iter() {
                     let value = self.lower_value_expr_linear(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    let field_addr = self.field_addr_typed(addr, field_index, field_ty);
-                    self.builder.store(field_addr, value);
+                    self.store_field(addr, field_index, field_ty, value);
                 }
 
                 // Load the updated struct value
@@ -170,11 +167,10 @@ impl<'a> FuncLowerer<'a> {
                 let addr = self.alloc_local_addr(enum_ty);
 
                 // Store the tag in field 0.
-                let tag_ptr = self.field_addr_typed(addr, 0, tag_ty);
                 let tag_val = self
                     .builder
                     .const_int(variant_tag as i128, false, 32, tag_ty);
-                self.builder.store(tag_ptr, tag_val);
+                self.store_field(addr, 0, tag_ty, tag_val);
 
                 // Store each payload field into the blob (field 1) at its offset.
                 let payload_ptr = self.field_addr_typed(addr, 1, blob_ty);
@@ -525,11 +521,8 @@ impl<'a> FuncLowerer<'a> {
         // Materialize the slice struct and load it as a value.
         let addr = self.alloc_local_addr(slice_ty);
 
-        let ptr_field = self.field_addr_typed(addr, 0, elem_ptr_ty);
-        self.builder.store(ptr_field, ptr_at);
-
-        let len_field = self.field_addr_typed(addr, 1, u64_ty);
-        self.builder.store(len_field, len_at);
+        self.store_field(addr, 0, elem_ptr_ty, ptr_at);
+        self.store_field(addr, 1, u64_ty, len_at);
 
         self.builder.load(addr, slice_ty)
     }

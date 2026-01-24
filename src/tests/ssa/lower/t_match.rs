@@ -24,9 +24,9 @@ fn test_lower_match_enum_no_payload() {
             %l1: Flag
           bb0():
             %v0: ptr<Flag> = addr_of %l0
-            %v1: ptr<u32> = field_addr %v0, 0
-            %v2: u32 = const 1:u32
-            store %v1, %v2
+            %v1: u32 = const 1:u32
+            %v2: ptr<u32> = field_addr %v0, 0
+            store %v2, %v1
             %v3: ptr<blob<0, align=1>> = field_addr %v0, 1
             %v4: Flag = load %v0
             %v5: ptr<Flag> = addr_of %l1
@@ -82,9 +82,9 @@ fn test_lower_match_enum_payload_binding() {
             %l2: Option
           bb0():
             %v0: ptr<Option> = addr_of %l0
-            %v1: ptr<u32> = field_addr %v0, 0
-            %v2: u32 = const 1:u32
-            store %v1, %v2
+            %v1: u32 = const 1:u32
+            %v2: ptr<u32> = field_addr %v0, 0
+            store %v2, %v1
             %v3: ptr<blob<8, align=8>> = field_addr %v0, 1
             %v4: u64 = const 42:u64
             %v5: ptr<u64> = addr_of %l1

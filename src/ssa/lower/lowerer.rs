@@ -9,7 +9,7 @@ use crate::ssa::lower::locals::{LocalMap, LocalStorage, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{BlockId, Callee, CmpOp, FunctionSig, RuntimeFn, Terminator, ValueId};
+use crate::ssa::model::ir::{BlockId, Callee, CmpOp, CastKind, FunctionSig, RuntimeFn, Terminator, ValueId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -211,6 +211,29 @@ impl<'a> FuncLowerer<'a> {
         self.builder.field_addr(base, index, ptr_ty)
     }
 
+    /// Loads a field value from a base aggregate.
+    pub(super) fn load_field(
+        &mut self,
+        base: ValueId,
+        index: usize,
+        field_ty: IrTypeId,
+    ) -> ValueId {
+        let addr = self.field_addr_typed(base, index, field_ty);
+        self.builder.load(addr, field_ty)
+    }
+
+    /// Stores a field value into a base aggregate.
+    pub(super) fn store_field(
+        &mut self,
+        base: ValueId,
+        index: usize,
+        field_ty: IrTypeId,
+        value: ValueId,
+    ) {
+        let addr = self.field_addr_typed(base, index, field_ty);
+        self.builder.store(addr, value);
+    }
+
     /// Loads ptr/len from a slice base stored at `base_addr`.
     pub(super) fn load_slice_view(
         &mut self,
@@ -218,10 +241,8 @@ impl<'a> FuncLowerer<'a> {
         elem_ptr_ty: IrTypeId,
     ) -> BaseView {
         let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
-        let len_addr = self.field_addr_typed(base_addr, 1, len_ty);
-        let ptr = self.builder.load(ptr_addr, elem_ptr_ty);
-        let len = self.builder.load(len_addr, len_ty);
+        let ptr = self.load_field(base_addr, 0, elem_ptr_ty);
+        let len = self.load_field(base_addr, 1, len_ty);
         BaseView { ptr, len }
     }
 
@@ -229,13 +250,11 @@ impl<'a> FuncLowerer<'a> {
     pub(super) fn load_string_view(&mut self, base_addr: ValueId) -> BaseView {
         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
         let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
-        let ptr_addr = self.field_addr_typed(base_addr, 0, u8_ptr_ty);
-        let ptr = self.builder.load(ptr_addr, u8_ptr_ty);
+        let ptr = self.load_field(base_addr, 0, u8_ptr_ty);
 
         // String lengths are u32; widen to u64 for bounds checks and indexing.
         let len_u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
-        let len_addr = self.field_addr_typed(base_addr, 1, len_u32_ty);
-        let len_u32 = self.builder.load(len_addr, len_u32_ty);
+        let len_u32 = self.load_field(base_addr, 1, len_u32_ty);
         let len_u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let len = self
             .builder
@@ -442,11 +461,8 @@ impl<'a> FuncLowerer<'a> {
         let value_addr = self.alloc_local_addr(value_ty);
         self.builder.store(value_addr, value);
 
-        let ptr_addr = self.field_addr_typed(value_addr, 0, ptr_ty);
-        let len_addr = self.field_addr_typed(value_addr, 1, len_ty);
-
-        let ptr_val = self.builder.load(ptr_addr, ptr_ty);
-        let mut len_val = self.builder.load(len_addr, len_ty);
+        let ptr_val = self.load_field(value_addr, 0, ptr_ty);
+        let mut len_val = self.load_field(value_addr, 1, len_ty);
         if len_bits == 32 {
             let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
             len_val = self.builder.cast(
