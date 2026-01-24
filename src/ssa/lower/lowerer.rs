@@ -9,7 +9,7 @@ use crate::ssa::lower::locals::{LocalMap, LocalStorage, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{BlockId, FunctionSig, ValueId};
+use crate::ssa::model::ir::{BlockId, Callee, CmpOp, FunctionSig, RuntimeFn, Terminator, ValueId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -203,6 +203,40 @@ impl<'a> FuncLowerer<'a> {
     ) -> ValueId {
         let ptr_ty = self.type_lowerer.ptr_to(field_ty);
         self.builder.field_addr(base, index, ptr_ty)
+    }
+
+    /// Emits a bounds check guard that traps if `index >= len`.
+    pub(super) fn emit_bounds_check(&mut self, index: ValueId, len: ValueId) {
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let cond = self.builder.cmp(CmpOp::Lt, index, len, bool_ty);
+
+        let ok_bb = self.builder.add_block();
+        let trap_bb = self.builder.add_block();
+
+        // Split control flow on the bounds predicate.
+        self.builder.terminate(Terminator::CondBr {
+            cond,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: trap_bb,
+            else_args: Vec::new(),
+        });
+
+        // Trap on out-of-bounds.
+        self.builder.select_block(trap_bb);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let kind = self.builder.const_int(1, false, 64, u64_ty);
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::Trap),
+            vec![kind, index, len, zero],
+            unit_ty,
+        );
+        self.builder.terminate(Terminator::Unreachable);
+
+        // Continue lowering in the in-bounds block.
+        self.builder.select_block(ok_bb);
     }
 
     /// Resolves a place to its base address after peeling heap/ref indirections.

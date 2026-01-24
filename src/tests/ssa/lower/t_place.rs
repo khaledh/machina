@@ -211,10 +211,22 @@ fn test_lower_slice_index_load() {
             store %v1, %v0
             %v2: ptr<ptr<u64>> = field_addr %v1, 0
             %v3: ptr<u64> = load %v2
-            %v4: u64 = const 1:u64
-            %v5: ptr<u64> = index_addr %v3, %v4
-            %v6: u64 = load %v5
-            ret %v6
+            %v4: ptr<u64> = field_addr %v1, 1
+            %v5: u64 = load %v4
+            %v6: u64 = const 1:u64
+            %v7: bool = cmp.lt %v6, %v5
+            cbr %v7, bb1, bb2
+
+          bb1():
+            %v11: ptr<u64> = index_addr %v3, %v6
+            %v12: u64 = load %v11
+            ret %v12
+
+          bb2():
+            %v8: u64 = const 1:u64
+            %v9: u64 = const 0:u64
+            %v10: () = call @__rt_trap(%v8, %v6, %v5, %v9)
+            unreachable
         }
     "};
     assert_eq!(text, expected);
@@ -245,15 +257,39 @@ fn test_lower_slice_index_assign() {
             store %v2, %v0
             %v3: ptr<ptr<u64>> = field_addr %v2, 0
             %v4: ptr<u64> = load %v3
-            %v5: u64 = const 1:u64
-            %v6: ptr<u64> = index_addr %v4, %v5
-            store %v6, %v1
-            %v7: ptr<ptr<u64>> = field_addr %v2, 0
-            %v8: ptr<u64> = load %v7
+            %v5: ptr<u64> = field_addr %v2, 1
+            %v6: u64 = load %v5
+            %v7: u64 = const 1:u64
+            %v8: bool = cmp.lt %v7, %v6
+            cbr %v8, bb1, bb2
+
+          bb1():
+            %v12: ptr<u64> = index_addr %v4, %v7
+            store %v12, %v1
+            %v13: ptr<ptr<u64>> = field_addr %v2, 0
+            %v14: ptr<u64> = load %v13
+            %v15: ptr<u64> = field_addr %v2, 1
+            %v16: u64 = load %v15
+            %v17: u64 = const 1:u64
+            %v18: bool = cmp.lt %v17, %v16
+            cbr %v18, bb3, bb4
+
+          bb2():
             %v9: u64 = const 1:u64
-            %v10: ptr<u64> = index_addr %v8, %v9
-            %v11: u64 = load %v10
-            ret %v11
+            %v10: u64 = const 0:u64
+            %v11: () = call @__rt_trap(%v9, %v7, %v6, %v10)
+            unreachable
+
+          bb3():
+            %v22: ptr<u64> = index_addr %v14, %v17
+            %v23: u64 = load %v22
+            ret %v23
+
+          bb4():
+            %v19: u64 = const 1:u64
+            %v20: u64 = const 0:u64
+            %v21: () = call @__rt_trap(%v19, %v17, %v16, %v20)
+            unreachable
         }
     "};
     assert_eq!(text, expected);
@@ -281,10 +317,23 @@ fn test_lower_string_index_load() {
             store %v1, %v0
             %v2: ptr<ptr<u8>> = field_addr %v1, 0
             %v3: ptr<u8> = load %v2
-            %v4: u64 = const 1:u64
-            %v5: ptr<u8> = index_addr %v3, %v4
-            %v6: u8 = load %v5
-            ret %v6
+            %v4: ptr<u32> = field_addr %v1, 1
+            %v5: u32 = load %v4
+            %v6: u64 = cast.IntExtend { signed: false } %v5 to u64
+            %v7: u64 = const 1:u64
+            %v8: bool = cmp.lt %v7, %v6
+            cbr %v8, bb1, bb2
+
+          bb1():
+            %v12: ptr<u8> = index_addr %v3, %v7
+            %v13: u8 = load %v12
+            ret %v13
+
+          bb2():
+            %v9: u64 = const 1:u64
+            %v10: u64 = const 0:u64
+            %v11: () = call @__rt_trap(%v9, %v7, %v6, %v10)
+            unreachable
         }
     "};
     assert_eq!(text, expected);
