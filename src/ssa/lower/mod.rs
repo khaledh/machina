@@ -15,6 +15,7 @@ mod lowerer;
 mod mapping;
 mod r#match;
 mod place;
+mod slots;
 mod types;
 
 use crate::resolve::DefTable;
