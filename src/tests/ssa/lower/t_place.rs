@@ -188,3 +188,34 @@ fn test_lower_array_index_partial() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_slice_index_load() {
+    let ctx = analyze(indoc! {"
+        fn main(s: u64[]) -> u64 {
+            s[1]
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(struct { ptr: ptr<u64>, len: u64 }) -> u64 {
+          locals:
+            %l0: struct { ptr: ptr<u64>, len: u64 }
+          bb0(%v0: struct { ptr: ptr<u64>, len: u64 }):
+            %v1: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l0
+            store %v1, %v0
+            %v2: ptr<ptr<u64>> = field_addr %v1, 0
+            %v3: ptr<u64> = load %v2
+            %v4: u64 = const 1:u64
+            %v5: ptr<u64> = index_addr %v3, %v4
+            %v6: u64 = load %v5
+            ret %v6
+        }
+    "};
+    assert_eq!(text, expected);
+}

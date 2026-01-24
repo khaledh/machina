@@ -52,34 +52,57 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
                     .lookup_index_plan(place.id)
                     .unwrap_or_else(|| panic!("ssa array index missing index plan {:?}", place.id));
 
-                let deref_count = match plan.base {
-                    sem::IndexBaseKind::Array { deref_count, .. } => deref_count,
-                    sem::IndexBaseKind::Slice { .. } | sem::IndexBaseKind::String { .. } => {
-                        return Err(self.err_span(target.span, LoweringErrorKind::UnsupportedExpr));
+                match plan.base {
+                    sem::IndexBaseKind::Array { deref_count, .. } => {
+                        let (mut base_addr, mut curr_ty) =
+                            self.resolve_deref_base(target, deref_count)?;
+
+                        // Walk indices and compute element/sub-array type in each step.
+                        for index_expr in indices {
+                            let index_val = self.lower_value_expr_linear(index_expr)?;
+                            let next_ty = curr_ty.array_item_type().unwrap_or_else(|| {
+                                panic!("ssa array index too many indices for {:?}", curr_ty);
+                            });
+
+                            let elem_ir_ty = self.type_lowerer.lower_type(&next_ty);
+                            let ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                            base_addr = self.builder.index_addr(base_addr, index_val, ptr_ty);
+
+                            curr_ty = next_ty;
+                        }
+
+                        Ok(PlaceAddr {
+                            addr: base_addr,
+                            value_ty: self.type_lowerer.lower_type_id(place.ty),
+                        })
                     }
-                };
+                    sem::IndexBaseKind::Slice { deref_count } => {
+                        if indices.len() != 1 {
+                            panic!("ssa slice index expects exactly one index");
+                        }
 
-                let (mut base_addr, mut curr_ty) =
-                    self.resolve_deref_base(target, deref_count)?;
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::Slice { elem_ty } = base_ty else {
+                            panic!("ssa slice index on non-slice base {:?}", base_ty);
+                        };
 
-                // Walk indices and compute element/sub-array type in each step.
-                for index_expr in indices {
-                    let index_val = self.lower_value_expr_linear(index_expr)?;
-                    let next_ty = curr_ty.array_item_type().unwrap_or_else(|| {
-                        panic!("ssa array index too many indices for {:?}", curr_ty);
-                    });
+                        // Load the slice data pointer, then index into it.
+                        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
+                        let base_ptr = self.builder.load(ptr_addr, elem_ptr_ty);
 
-                    let elem_ir_ty = self.type_lowerer.lower_type(&next_ty);
-                    let ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                    base_addr = self.builder.index_addr(base_addr, index_val, ptr_ty);
-
-                    curr_ty = next_ty;
+                        let index_val = self.lower_value_expr_linear(&indices[0])?;
+                        let addr = self.builder.index_addr(base_ptr, index_val, elem_ptr_ty);
+                        Ok(PlaceAddr {
+                            addr,
+                            value_ty: elem_ir_ty,
+                        })
+                    }
+                    sem::IndexBaseKind::String { .. } => {
+                        Err(self.err_span(target.span, LoweringErrorKind::UnsupportedExpr))
+                    }
                 }
-
-                Ok(PlaceAddr {
-                    addr: base_addr,
-                    value_ty: self.type_lowerer.lower_type_id(place.ty),
-                })
             }
         }
     }
