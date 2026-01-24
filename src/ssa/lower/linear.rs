@@ -96,53 +96,53 @@ impl<'a> FuncLowerer<'a> {
             sem::ValueExprKind::TupleLit(items) => {
                 // Allocate a local for the tuple and get its address
                 let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let addr = self.alloc_local_addr(tuple_ty);
+                let slot = self.alloc_value_slot(tuple_ty);
 
                 // Store each field
                 for (i, elem_expr) in items.iter().enumerate() {
                     let value = self.lower_value_expr_linear(elem_expr)?;
                     let field_ty = self.lower_tuple_field_ty(expr.ty, i);
-                    self.store_field(addr, i, field_ty, value);
+                    self.store_field(slot.addr, i, field_ty, value);
                 }
 
                 // Load the tuple value
-                Ok(self.builder.load(addr, tuple_ty))
+                Ok(self.load_slot(&slot))
             }
 
             sem::ValueExprKind::StructLit { fields, .. } => {
                 // Allocate a local for the struct and get its address
                 let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let addr = self.alloc_local_addr(struct_ty);
+                let slot = self.alloc_value_slot(struct_ty);
 
                 // Store each field
                 for field in fields.iter() {
                     let value = self.lower_value_expr_linear(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    self.store_field(addr, field_index, field_ty, value);
+                    self.store_field(slot.addr, field_index, field_ty, value);
                 }
 
                 // Load the struct value
-                Ok(self.builder.load(addr, struct_ty))
+                Ok(self.load_slot(&slot))
             }
 
             sem::ValueExprKind::StructUpdate { target, fields } => {
                 // Allocate a local for the updated struct and get its address
                 let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let addr = self.alloc_local_addr(struct_ty);
+                let slot = self.alloc_value_slot(struct_ty);
 
                 // Copy the base struct
                 let base_value = self.lower_value_expr_linear(target)?;
-                self.builder.store(addr, base_value);
+                self.builder.store(slot.addr, base_value);
 
                 // Overwrite the updated fields
                 for field in fields.iter() {
                     let value = self.lower_value_expr_linear(&field.value)?;
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    self.store_field(addr, field_index, field_ty, value);
+                    self.store_field(slot.addr, field_index, field_ty, value);
                 }
 
                 // Load the updated struct value
-                Ok(self.builder.load(addr, struct_ty))
+                Ok(self.load_slot(&slot))
             }
 
             sem::ValueExprKind::EnumVariant {
@@ -164,16 +164,16 @@ impl<'a> FuncLowerer<'a> {
 
                 // Allocate a local for the enum and get its address.
                 let enum_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let addr = self.alloc_local_addr(enum_ty);
+                let slot = self.alloc_value_slot(enum_ty);
 
                 // Store the tag in field 0.
                 let tag_val = self
                     .builder
                     .const_int(variant_tag as i128, false, 32, tag_ty);
-                self.store_field(addr, 0, tag_ty, tag_val);
+                self.store_field(slot.addr, 0, tag_ty, tag_val);
 
                 // Store each payload field into the blob (field 1) at its offset.
-                let payload_ptr = self.field_addr_typed(addr, 1, blob_ty);
+                let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
 
                 if field_offsets.len() != payload.len() || field_tys.len() != payload.len() {
                     panic!(
@@ -194,7 +194,7 @@ impl<'a> FuncLowerer<'a> {
                     self.store_into_blob(payload_ptr, *offset, value, value_ty);
                 }
 
-                Ok(self.builder.load(addr, enum_ty))
+                Ok(self.load_slot(&slot))
             }
 
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
@@ -519,11 +519,11 @@ impl<'a> FuncLowerer<'a> {
         let len_at = self.builder.binop(BinOp::Sub, end_val, start_val, u64_ty);
 
         // Materialize the slice struct and load it as a value.
-        let addr = self.alloc_local_addr(slice_ty);
+        let slot = self.alloc_value_slot(slice_ty);
 
-        self.store_field(addr, 0, elem_ptr_ty, ptr_at);
-        self.store_field(addr, 1, u64_ty, len_at);
+        self.store_field(slot.addr, 0, elem_ptr_ty, ptr_at);
+        self.store_field(slot.addr, 1, u64_ty, len_at);
 
-        self.builder.load(addr, slice_ty)
+        self.load_slot(&slot)
     }
 }

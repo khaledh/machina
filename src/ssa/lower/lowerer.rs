@@ -70,6 +70,12 @@ pub(super) struct BaseView {
     pub(super) len: ValueId,
 }
 
+/// An addressable slot for materializing aggregate values.
+pub(super) struct ValueSlot {
+    pub(super) addr: ValueId,
+    pub(super) ty: IrTypeId,
+}
+
 impl<'a> FuncLowerer<'a> {
     /// Creates a new function lowerer for the given semantic function definition.
     ///
@@ -209,6 +215,24 @@ impl<'a> FuncLowerer<'a> {
     ) -> ValueId {
         let ptr_ty = self.type_lowerer.ptr_to(field_ty);
         self.builder.field_addr(base, index, ptr_ty)
+    }
+
+    /// Allocates a local slot for an aggregate value.
+    pub(super) fn alloc_value_slot(&mut self, ty: IrTypeId) -> ValueSlot {
+        let addr = self.alloc_local_addr(ty);
+        ValueSlot { addr, ty }
+    }
+
+    /// Materializes a value into a local slot for address-based access.
+    pub(super) fn materialize_value_slot(&mut self, value: ValueId, ty: IrTypeId) -> ValueSlot {
+        let slot = self.alloc_value_slot(ty);
+        self.builder.store(slot.addr, value);
+        slot
+    }
+
+    /// Loads a value from a slot.
+    pub(super) fn load_slot(&mut self, slot: &ValueSlot) -> ValueId {
+        self.builder.load(slot.addr, slot.ty)
     }
 
     /// Loads a field value from a base aggregate.
@@ -458,11 +482,10 @@ impl<'a> FuncLowerer<'a> {
         let value_ty = self.type_lowerer.lower_type(ty);
 
         // Materialize the aggregate into a local to address its fields.
-        let value_addr = self.alloc_local_addr(value_ty);
-        self.builder.store(value_addr, value);
+        let slot = self.materialize_value_slot(value, value_ty);
 
-        let ptr_val = self.load_field(value_addr, 0, ptr_ty);
-        let mut len_val = self.load_field(value_addr, 1, len_ty);
+        let ptr_val = self.load_field(slot.addr, 0, ptr_ty);
+        let mut len_val = self.load_field(slot.addr, 1, len_ty);
         if len_bits == 32 {
             let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
             len_val = self.builder.cast(
