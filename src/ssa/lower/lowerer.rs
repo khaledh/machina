@@ -171,6 +171,13 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Allocates a new local of the given value type and returns its address.
+    pub(super) fn alloc_local_addr(&mut self, value_ty: IrTypeId) -> ValueId {
+        let local_id = self.builder.add_local(value_ty, None);
+        let ptr_ty = self.type_lowerer.ptr_to(value_ty);
+        self.builder.addr_of_local(local_id, ptr_ty)
+    }
+
     /// Ensures a local has an addressable slot and returns its address.
     pub(super) fn ensure_local_addr(&mut self, def_id: DefId, value_ty: IrTypeId) -> ValueId {
         let local = self.lookup_local(def_id);
@@ -184,9 +191,7 @@ impl<'a> FuncLowerer<'a> {
         match local.storage {
             LocalStorage::Addr(addr) => addr,
             LocalStorage::Value(value) => {
-                let local_id = self.builder.add_local(value_ty, None);
-                let ptr_ty = self.type_lowerer.ptr_to(value_ty);
-                let addr = self.builder.addr_of_local(local_id, ptr_ty);
+                let addr = self.alloc_local_addr(value_ty);
                 self.builder.store(addr, value);
                 self.locals.insert(def_id, LocalValue::addr(addr, value_ty));
                 addr
@@ -244,9 +249,7 @@ impl<'a> FuncLowerer<'a> {
         value_ty: IrTypeId,
     ) {
         // Store the value into a temporary local
-        let temp = self.builder.add_local(value_ty, None);
-        let temp_ptr_ty = self.type_lowerer.ptr_to(value_ty);
-        let temp_ptr = self.builder.addr_of_local(temp, temp_ptr_ty);
+        let temp_ptr = self.alloc_local_addr(value_ty);
         self.builder.store(temp_ptr, value);
 
         // Copy the value into the blob at the given offset and length

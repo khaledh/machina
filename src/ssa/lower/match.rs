@@ -35,11 +35,7 @@ impl<'a, 'b> MatchLowerer<'a, 'b> {
         let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;
         let scrutinee_ty_id = scrutinee.ty;
         let scrutinee_ir_ty = lowerer.type_lowerer.lower_type_id(scrutinee_ty_id);
-        let scrutinee_local = lowerer.builder.add_local(scrutinee_ir_ty, None);
-        let scrutinee_ptr_ty = lowerer.type_lowerer.ptr_to(scrutinee_ir_ty);
-        let scrutinee_addr = lowerer
-            .builder
-            .addr_of_local(scrutinee_local, scrutinee_ptr_ty);
+        let scrutinee_addr = lowerer.alloc_local_addr(scrutinee_ir_ty);
         lowerer.builder.store(scrutinee_addr, scrutinee_value);
 
         let mut helper = MatchLowerer {

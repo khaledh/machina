@@ -61,9 +61,7 @@ impl<'a> FuncLowerer<'a> {
             sem::ValueExprKind::ArrayLit { init, .. } => {
                 // Allocate a local for the array and get its address
                 let array_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let local = self.builder.add_local(array_ty, None);
-                let ptr_ty = self.type_lowerer.ptr_to(array_ty);
-                let addr = self.builder.addr_of_local(local, ptr_ty);
+                let addr = self.alloc_local_addr(array_ty);
 
                 let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
 
@@ -98,9 +96,7 @@ impl<'a> FuncLowerer<'a> {
             sem::ValueExprKind::TupleLit(items) => {
                 // Allocate a local for the tuple and get its address
                 let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let local = self.builder.add_local(tuple_ty, None);
-                let ptr_ty = self.type_lowerer.ptr_to(tuple_ty);
-                let addr = self.builder.addr_of_local(local, ptr_ty);
+                let addr = self.alloc_local_addr(tuple_ty);
 
                 // Store each field
                 for (i, elem_expr) in items.iter().enumerate() {
@@ -118,9 +114,7 @@ impl<'a> FuncLowerer<'a> {
             sem::ValueExprKind::StructLit { fields, .. } => {
                 // Allocate a local for the struct and get its address
                 let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let local = self.builder.add_local(struct_ty, None);
-                let ptr_ty = self.type_lowerer.ptr_to(struct_ty);
-                let addr = self.builder.addr_of_local(local, ptr_ty);
+                let addr = self.alloc_local_addr(struct_ty);
 
                 // Store each field
                 for field in fields.iter() {
@@ -138,9 +132,7 @@ impl<'a> FuncLowerer<'a> {
             sem::ValueExprKind::StructUpdate { target, fields } => {
                 // Allocate a local for the updated struct and get its address
                 let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let local = self.builder.add_local(struct_ty, None);
-                let ptr_ty = self.type_lowerer.ptr_to(struct_ty);
-                let addr = self.builder.addr_of_local(local, ptr_ty);
+                let addr = self.alloc_local_addr(struct_ty);
 
                 // Copy the base struct
                 let base_value = self.lower_value_expr_linear(target)?;
@@ -178,9 +170,7 @@ impl<'a> FuncLowerer<'a> {
 
                 // Allocate a local for the enum and get its address.
                 let enum_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let local = self.builder.add_local(enum_ty, None);
-                let ptr_ty = self.type_lowerer.ptr_to(enum_ty);
-                let addr = self.builder.addr_of_local(local, ptr_ty);
+                let addr = self.alloc_local_addr(enum_ty);
 
                 // Store the tag in field 0.
                 let tag_ptr_ty = self.type_lowerer.ptr_to(tag_ty);
