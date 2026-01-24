@@ -3,6 +3,7 @@
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, StmtOutcome};
+use crate::ssa::lower::r#match::MatchLowerer;
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, ValueId};
 use crate::tree::semantic as sem;
@@ -122,6 +123,11 @@ impl<'a> FuncLowerer<'a> {
                 let join_value = join.join_value();
                 join.finalize(self);
                 Ok(BranchResult::Value(join_value))
+            }
+
+            // Match expression: switch on enum tags (decision tree not yet supported).
+            sem::ValueExprKind::Match { scrutinee, arms } => {
+                MatchLowerer::lower(self, expr, scrutinee, arms)
             }
 
             // Other expressions: lower using their plan.

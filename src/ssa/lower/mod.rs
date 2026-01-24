@@ -11,6 +11,7 @@ mod linear;
 mod locals;
 mod lowerer;
 mod mapping;
+mod r#match;
 mod place;
 mod types;
 

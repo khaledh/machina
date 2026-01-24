@@ -30,7 +30,15 @@ pub(super) use crate::ssa::lower::lower_func;
 pub(super) use crate::ssa::model::format::formact_func;
 pub(super) use indoc::indoc;
 
+#[path = "t_branching.rs"]
 mod branching;
+#[path = "t_calls.rs"]
 mod calls;
+#[path = "t_linear.rs"]
 mod linear;
+#[path = "t_match.rs"]
+mod r#match;
+#[path = "t_place.rs"]
 mod place;
+#[path = "t_types.rs"]
+mod types;

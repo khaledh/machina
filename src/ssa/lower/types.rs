@@ -296,7 +296,3 @@ impl EnumLayout {
             .unwrap_or_else(|| panic!("ssa enum layout missing variant {name}"))
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/ssa/lower/types.rs"]
-mod tests;
