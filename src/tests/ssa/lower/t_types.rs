@@ -68,6 +68,47 @@ fn enum_type_id(ctx: &crate::context::SemanticContext, name: &str) -> crate::typ
 }
 
 #[test]
+fn test_lower_slice_type() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            0
+        }
+    "});
+
+    let mut type_lowerer = TypeLowerer::new(&ctx.type_map);
+    let slice_ty = Type::Slice {
+        elem_ty: Box::new(Type::uint(8)),
+    };
+    let slice_ir = type_lowerer.lower_type(&slice_ty);
+
+    let IrTypeKind::Struct { fields } = type_lowerer.ir_type_cache.kind(slice_ir) else {
+        panic!("expected slice to lower to a struct");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name, "ptr");
+    assert_eq!(fields[1].name, "len");
+
+    let IrTypeKind::Ptr { elem } = type_lowerer.ir_type_cache.kind(fields[0].ty) else {
+        panic!("expected slice ptr field to be a pointer");
+    };
+    match type_lowerer.ir_type_cache.kind(*elem) {
+        IrTypeKind::Int { signed, bits } => {
+            assert!(!signed);
+            assert_eq!(*bits, 8);
+        }
+        other => panic!("expected u8 slice element, got {:?}", other),
+    }
+
+    match type_lowerer.ir_type_cache.kind(fields[1].ty) {
+        IrTypeKind::Int { signed, bits } => {
+            assert!(!signed);
+            assert_eq!(*bits, 64);
+        }
+        other => panic!("expected u64 slice len, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_enum_layout_single_payload() {
     let ctx = analyze(indoc! {"
         type Option = None | Some(u64)

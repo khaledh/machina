@@ -231,6 +231,29 @@ impl<'a> FuncLowerer<'a> {
                 Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
             }
 
+            sem::ValueExprKind::Len { place } => {
+                // Length is an internal node for array/slice iteration.
+                let place_ty = self.type_map.type_table().get(place.ty).clone();
+                match place_ty {
+                    Type::Array { dims, .. } => {
+                        let len = dims
+                            .first()
+                            .copied()
+                            .unwrap_or_else(|| panic!("ssa len on array with empty dims"));
+                        let ty = self.type_lowerer.lower_type_id(expr.ty);
+                        Ok(self.builder.const_int(len as i128, false, 64, ty))
+                    }
+                    Type::Slice { .. } => {
+                        let place_addr = self.lower_place_addr(place)?;
+                        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                        let len_ptr_ty = self.type_lowerer.ptr_to(len_ty);
+                        let len_addr = self.builder.field_addr(place_addr.addr, 1, len_ptr_ty);
+                        Ok(self.builder.load(len_addr, len_ty))
+                    }
+                    other => panic!("ssa len on unsupported type {:?}", other),
+                }
+            }
+
             sem::ValueExprKind::Load { place } => match &place.kind {
                 sem::PlaceExprKind::Var { def_id, .. } => Ok(self.load_local_value(*def_id)),
                 _ => {

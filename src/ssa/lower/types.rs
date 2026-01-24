@@ -96,6 +96,24 @@ impl<'a> TypeLowerer<'a> {
                     .add_named(IrTypeKind::Struct { fields }, "string".to_string())
             }
 
+            // Slice is lowered as a struct { ptr, len } with a typed pointer.
+            Type::Slice { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u64 = self.lower_type(&Type::uint(64));
+                let fields = vec![
+                    IrStructField {
+                        name: "ptr".to_string(),
+                        ty: ptr,
+                    },
+                    IrStructField {
+                        name: "len".to_string(),
+                        ty: u64,
+                    },
+                ];
+                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+            }
+
             // Compound types: recursively convert element/field types.
             Type::Tuple { field_tys } => {
                 let fields = field_tys
