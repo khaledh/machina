@@ -114,3 +114,28 @@ uint64_t __mc_u64_to_hex(const mc_slice_t *s, uint64_t value) {
     static const char digits[] = "0123456789abcdef";
     return __mc_u64_to_base(s, value, 16, digits);
 }
+
+uint64_t __rt_u64_to_dec(uint64_t ptr, uint64_t len, uint64_t value) {
+    mc_slice_t s = { .ptr = ptr, .len = len };
+    return __mc_u64_to_dec(&s, value);
+}
+
+uint64_t __rt_i64_to_dec(uint64_t ptr, uint64_t len, int64_t value) {
+    mc_slice_t s = { .ptr = ptr, .len = len };
+    return __mc_i64_to_dec(&s, value);
+}
+
+uint64_t __rt_u64_to_bin(uint64_t ptr, uint64_t len, uint64_t value) {
+    mc_slice_t s = { .ptr = ptr, .len = len };
+    return __mc_u64_to_bin(&s, value);
+}
+
+uint64_t __rt_u64_to_oct(uint64_t ptr, uint64_t len, uint64_t value) {
+    mc_slice_t s = { .ptr = ptr, .len = len };
+    return __mc_u64_to_oct(&s, value);
+}
+
+uint64_t __rt_u64_to_hex(uint64_t ptr, uint64_t len, uint64_t value) {
+    mc_slice_t s = { .ptr = ptr, .len = len };
+    return __mc_u64_to_hex(&s, value);
+}

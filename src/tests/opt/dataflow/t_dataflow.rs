@@ -688,8 +688,8 @@ fn test_memcpy_lower_calls_runtime_for_large_copy() {
                 callee: Callee::Runtime(RuntimeFn::MemCopy),
                 args,
                 ..
-            } if matches!(args.as_slice(), [PlaceAny::Aggregate(_), PlaceAny::Aggregate(_)])
+            } if matches!(args.as_slice(), [PlaceAny::Scalar(_), PlaceAny::Scalar(_), PlaceAny::Scalar(_)])
         )),
-        "expected runtime __mc_memcpy call for large copy"
+        "expected runtime __rt_memcpy call for large copy"
     );
 }

@@ -3,8 +3,14 @@
 use crate::diag::Span;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{Callee, ValueId};
+use crate::ssa::model::ir::{Callee, RuntimeFn, ValueId};
 use crate::tree::{NodeId, semantic as sem};
+use crate::types::Type;
+
+struct CallInputValue {
+    value: ValueId,
+    ty: Type,
+}
 
 impl<'a> FuncLowerer<'a> {
     pub(super) fn lower_call_expr(
@@ -25,8 +31,11 @@ impl<'a> FuncLowerer<'a> {
         // Resolve the callee (only direct calls supported).
         let callee = match &call_plan.target {
             sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
-            sem::CallTarget::Indirect | sem::CallTarget::Intrinsic(_) => {
+            sem::CallTarget::Indirect => {
                 return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+            }
+            sem::CallTarget::Intrinsic(intrinsic) => {
+                Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)
             }
         };
 
@@ -35,10 +44,17 @@ impl<'a> FuncLowerer<'a> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    arg_values.push(self.lower_value_expr_linear(expr)?);
+                    let value = self.lower_value_expr_linear(expr)?;
+                    let ty = self.type_map.type_table().get(expr.ty).clone();
+                    arg_values.push(CallInputValue { value, ty });
                 }
-                sem::CallArg::InOut { span, .. } | sem::CallArg::Out { span, .. } => {
-                    return Err(self.err_span(*span, LoweringErrorKind::UnsupportedExpr));
+                sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                    let addr = self.lower_place_addr(place)?;
+                    let ty = self.type_map.type_table().get(place.ty).clone();
+                    arg_values.push(CallInputValue {
+                        value: addr.addr,
+                        ty,
+                    });
                 }
             }
         }
@@ -71,16 +87,28 @@ impl<'a> FuncLowerer<'a> {
         // Resolve the callee (only direct calls supported).
         let callee = match &call_plan.target {
             sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
-            sem::CallTarget::Indirect | sem::CallTarget::Intrinsic(_) => {
+            sem::CallTarget::Indirect => {
                 return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+            }
+            sem::CallTarget::Intrinsic(intrinsic) => {
+                Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)
             }
         };
 
         // Lower the receiver (value receivers only).
         let receiver_value = match receiver {
-            sem::MethodReceiver::ValueExpr(expr) => self.lower_value_expr_linear(expr)?,
+            sem::MethodReceiver::ValueExpr(expr) => {
+                let value = self.lower_value_expr_linear(expr)?;
+                let ty = self.type_map.type_table().get(expr.ty).clone();
+                CallInputValue { value, ty }
+            }
             sem::MethodReceiver::PlaceExpr(place) => {
-                return Err(self.err_span(place.span, LoweringErrorKind::UnsupportedExpr));
+                let addr = self.lower_place_addr(place)?;
+                let ty = self.type_map.type_table().get(place.ty).clone();
+                CallInputValue {
+                    value: addr.addr,
+                    ty,
+                }
             }
         };
 
@@ -89,10 +117,17 @@ impl<'a> FuncLowerer<'a> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    arg_values.push(self.lower_value_expr_linear(expr)?);
+                    let value = self.lower_value_expr_linear(expr)?;
+                    let ty = self.type_map.type_table().get(expr.ty).clone();
+                    arg_values.push(CallInputValue { value, ty });
                 }
-                sem::CallArg::InOut { span, .. } | sem::CallArg::Out { span, .. } => {
-                    return Err(self.err_span(*span, LoweringErrorKind::UnsupportedExpr));
+                sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                    let addr = self.lower_place_addr(place)?;
+                    let ty = self.type_map.type_table().get(place.ty).clone();
+                    arg_values.push(CallInputValue {
+                        value: addr.addr,
+                        ty,
+                    });
                 }
             }
         }
@@ -110,12 +145,12 @@ impl<'a> FuncLowerer<'a> {
     }
 
     fn lower_call_args_from_plan(
-        &self,
+        &mut self,
         expr_id: NodeId,
         span: Span,
         call_plan: &sem::CallPlan,
-        receiver_value: Option<ValueId>,
-        arg_values: &[ValueId],
+        receiver_value: Option<CallInputValue>,
+        arg_values: &[CallInputValue],
     ) -> Result<Vec<ValueId>, LoweringError> {
         if call_plan.has_receiver != receiver_value.is_some() {
             panic!(
@@ -129,20 +164,58 @@ impl<'a> FuncLowerer<'a> {
             match lowering {
                 sem::ArgLowering::Direct(input) => {
                     let value = match input {
-                        sem::CallInput::Receiver => receiver_value.unwrap_or_else(|| {
-                            panic!("ssa call plan missing receiver value for {:?}", expr_id)
-                        }),
-                        sem::CallInput::Arg(index) => *arg_values
-                            .get(*index)
-                            .unwrap_or_else(|| panic!("ssa call arg index out of range: {index}")),
+                        sem::CallInput::Receiver => {
+                            receiver_value
+                                .as_ref()
+                                .unwrap_or_else(|| {
+                                    panic!("ssa call plan missing receiver value for {:?}", expr_id)
+                                })
+                                .value
+                        }
+                        sem::CallInput::Arg(index) => {
+                            arg_values
+                                .get(*index)
+                                .unwrap_or_else(|| {
+                                    panic!("ssa call arg index out of range: {index}")
+                                })
+                                .value
+                        }
                     };
                     call_args.push(value);
                 }
-                sem::ArgLowering::PtrLen { .. } => {
-                    return Err(self.err_span(span, LoweringErrorKind::UnsupportedExpr));
+                sem::ArgLowering::PtrLen { input, len_bits } => {
+                    let input_value = match input {
+                        sem::CallInput::Receiver => receiver_value.as_ref().unwrap_or_else(|| {
+                            panic!("ssa call plan missing receiver value for {:?}", expr_id)
+                        }),
+                        sem::CallInput::Arg(index) => arg_values
+                            .get(*index)
+                            .unwrap_or_else(|| panic!("ssa call arg index out of range: {index}")),
+                    };
+                    let (ptr, len) = self.lower_ptr_len_from_value(
+                        span,
+                        input_value.value,
+                        &input_value.ty,
+                        *len_bits,
+                    )?;
+                    call_args.push(ptr);
+                    call_args.push(len);
                 }
             }
         }
         Ok(call_args)
+    }
+
+    fn runtime_for_intrinsic(
+        &self,
+        intrinsic: &sem::IntrinsicCall,
+    ) -> Result<RuntimeFn, LoweringError> {
+        match intrinsic {
+            sem::IntrinsicCall::Print => Ok(RuntimeFn::Print),
+            sem::IntrinsicCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
+            sem::IntrinsicCall::MemSet => Ok(RuntimeFn::MemSet),
+            sem::IntrinsicCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
+            sem::IntrinsicCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
+        }
     }
 }

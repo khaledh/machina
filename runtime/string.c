@@ -215,3 +215,51 @@ void __mc_fmt_finish(mc_string_t *out, const mc_fmt_t *fmt) {
     };
     __mc_string_from_bytes(out, &s);
 }
+
+void __rt_fmt_init(uint64_t fmt_ptr, uint64_t buf_ptr, uint64_t buf_len) {
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    mc_slice_t buf = { .ptr = buf_ptr, .len = buf_len };
+    __mc_fmt_init(fmt, &buf);
+}
+
+void __rt_fmt_append_bytes(uint64_t fmt_ptr, uint64_t ptr, uint64_t len) {
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    __mc_fmt_append_bytes(fmt, ptr, len);
+}
+
+void __rt_fmt_append_u64(uint64_t fmt_ptr, uint64_t value) {
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    __mc_fmt_append_u64(fmt, value);
+}
+
+void __rt_fmt_append_i64(uint64_t fmt_ptr, int64_t value) {
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    __mc_fmt_append_i64(fmt, value);
+}
+
+void __rt_fmt_finish(uint64_t out_ptr, uint64_t fmt_ptr) {
+    mc_string_t *out = (mc_string_t *)out_ptr;
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    __mc_fmt_finish(out, fmt);
+}
+
+void __rt_string_from_bytes(uint64_t out_ptr, uint64_t ptr, uint64_t len) {
+    mc_string_t *out = (mc_string_t *)out_ptr;
+    mc_slice_t s = { .ptr = ptr, .len = len };
+    __mc_string_from_bytes(out, &s);
+}
+
+void __rt_string_append_bytes(uint64_t s_ptr, uint64_t ptr, uint64_t len) {
+    mc_string_t *s = (mc_string_t *)s_ptr;
+    __mc_string_append_bytes(s, ptr, len);
+}
+
+void __rt_string_ensure(uint64_t s_ptr, uint32_t min_cap) {
+    mc_string_t *s = (mc_string_t *)s_ptr;
+    __mc_string_ensure(s, min_cap);
+}
+
+void __rt_string_drop(uint64_t s_ptr) {
+    mc_string_t *s = (mc_string_t *)s_ptr;
+    __mc_string_drop(s);
+}

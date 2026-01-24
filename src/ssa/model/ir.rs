@@ -131,9 +131,69 @@ pub enum CastKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeFn {
+    Trap,
+    Print,
+    StringFromBytes,
+    FmtInit,
+    FmtAppendBytes,
+    FmtAppendU64,
+    FmtAppendI64,
+    FmtFinish,
+    U64ToDec,
+    I64ToDec,
+    U64ToBin,
+    U64ToOct,
+    U64ToHex,
+    MemSet,
+    MemCopy,
+    StringEnsure,
+    StringDrop,
+    StringAppendBytes,
+    DynArrayEnsure,
+    DynArrayAppendElem,
+    Alloc,
+    Realloc,
+    Free,
+    SetAllocTrace,
+}
+
+impl RuntimeFn {
+    pub fn name(&self) -> &'static str {
+        match self {
+            RuntimeFn::Trap => "__rt_trap",
+            RuntimeFn::Print => "__rt_print",
+            RuntimeFn::StringFromBytes => "__rt_string_from_bytes",
+            RuntimeFn::FmtInit => "__rt_fmt_init",
+            RuntimeFn::FmtAppendBytes => "__rt_fmt_append_bytes",
+            RuntimeFn::FmtAppendU64 => "__rt_fmt_append_u64",
+            RuntimeFn::FmtAppendI64 => "__rt_fmt_append_i64",
+            RuntimeFn::FmtFinish => "__rt_fmt_finish",
+            RuntimeFn::U64ToDec => "__rt_u64_to_dec",
+            RuntimeFn::I64ToDec => "__rt_i64_to_dec",
+            RuntimeFn::U64ToBin => "__rt_u64_to_bin",
+            RuntimeFn::U64ToOct => "__rt_u64_to_oct",
+            RuntimeFn::U64ToHex => "__rt_u64_to_hex",
+            RuntimeFn::MemSet => "__rt_memset",
+            RuntimeFn::MemCopy => "__rt_memcpy",
+            RuntimeFn::StringEnsure => "__rt_string_ensure",
+            RuntimeFn::StringDrop => "__rt_string_drop",
+            RuntimeFn::StringAppendBytes => "__rt_string_append_bytes",
+            RuntimeFn::DynArrayEnsure => "__rt_dyn_array_ensure",
+            RuntimeFn::DynArrayAppendElem => "__rt_dyn_array_append_elem",
+            RuntimeFn::Alloc => "__rt_alloc",
+            RuntimeFn::Realloc => "__rt_realloc",
+            RuntimeFn::Free => "__rt_free",
+            RuntimeFn::SetAllocTrace => "__rt_set_alloc_trace",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callee {
     Direct(DefId),
     Value(ValueId),
+    Runtime(RuntimeFn),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

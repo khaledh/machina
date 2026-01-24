@@ -813,7 +813,7 @@ fn test_lower_string_index_emits_memcpy() {
 fn test_lower_string_append_uses_runtime() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__mc_string_append_bytes")]
+            @[intrinsic, link_name("__rt_string_append_bytes")]
             fn append(inout self, other: string);
         }
 
@@ -839,14 +839,14 @@ fn test_lower_string_append_uses_runtime() {
             )
         })
     });
-    assert!(saw_append, "expected __mc_string_append_bytes call");
+    assert!(saw_append, "expected __rt_string_append_bytes call");
 }
 
 #[test]
 fn test_lower_string_append_bytes_uses_runtime() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__mc_string_append_bytes")]
+            @[intrinsic, link_name("__rt_string_append_bytes")]
             fn append_bytes(inout self, bytes: u8[]);
         }
 
@@ -873,14 +873,14 @@ fn test_lower_string_append_bytes_uses_runtime() {
             )
         })
     });
-    assert!(saw_append, "expected __mc_string_append_bytes call");
+    assert!(saw_append, "expected __rt_string_append_bytes call");
 }
 
 #[test]
 fn test_call_plan_string_append_len_bits_32() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__mc_string_append_bytes")]
+            @[intrinsic, link_name("__rt_string_append_bytes")]
             fn append(inout self, other: string);
         }
 
@@ -922,7 +922,7 @@ fn test_call_plan_string_append_len_bits_32() {
 fn test_call_plan_string_append_bytes_len_bits_64() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__mc_string_append_bytes")]
+            @[intrinsic, link_name("__rt_string_append_bytes")]
             fn append_bytes(inout self, bytes: u8[]);
         }
 
@@ -1871,10 +1871,10 @@ fn test_lower_fstring_calls_runtime() {
         }
     }
 
-    assert!(saw_fmt_init, "expected __mc_fmt_init call");
-    assert!(saw_append_bytes, "expected __mc_fmt_append_bytes call");
-    assert!(saw_append_u64, "expected __mc_fmt_append_u64 call");
-    assert!(saw_fmt_finish, "expected __mc_fmt_finish call");
+    assert!(saw_fmt_init, "expected __rt_fmt_init call");
+    assert!(saw_append_bytes, "expected __rt_fmt_append_bytes call");
+    assert!(saw_append_u64, "expected __rt_fmt_append_u64 call");
+    assert!(saw_fmt_finish, "expected __rt_fmt_finish call");
 
     let mut strings = Vec::new();
     for global in &globals {
@@ -1910,7 +1910,7 @@ fn test_lower_fstring_signed_uses_i64_runtime() {
             )
         })
     });
-    assert!(saw_append_i64, "expected __mc_fmt_append_i64 call");
+    assert!(saw_append_i64, "expected __rt_fmt_append_i64 call");
 
     let saw_minus = globals
         .iter()
@@ -1945,7 +1945,7 @@ fn test_lower_fstring_with_string_expr_uses_append() {
             )
         })
     });
-    assert!(saw_append, "expected __mc_string_append_bytes call");
+    assert!(saw_append, "expected __rt_string_append_bytes call");
 }
 
 #[test]

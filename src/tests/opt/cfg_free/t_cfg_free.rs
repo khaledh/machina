@@ -417,8 +417,8 @@ fn test_memset_lower_calls_runtime_for_large_memset() {
                 callee: Callee::Runtime(RuntimeFn::MemSet),
                 args,
                 ..
-            } if matches!(args.as_slice(), [PlaceAny::Aggregate(_), PlaceAny::Scalar(_)])
+            } if matches!(args.as_slice(), [PlaceAny::Scalar(_), PlaceAny::Scalar(_), PlaceAny::Scalar(_)])
         )),
-        "expected runtime __mc_memset call for large MemSet"
+        "expected runtime __rt_memset call for large MemSet"
     );
 }

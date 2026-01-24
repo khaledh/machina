@@ -139,3 +139,26 @@ void __mc_dyn_array_append_elem(
     __mc_memcpy(&dst, &src);
     v->len = (uint32_t)new_len;
 }
+
+void __rt_dyn_array_ensure(
+    uint64_t v_ptr,
+    uint32_t min_cap,
+    uint64_t elem_size,
+    uint64_t elem_align
+) {
+    __mc_dyn_array_ensure((mc_dyn_array_t *)v_ptr, min_cap, elem_size, elem_align);
+}
+
+void __rt_dyn_array_append_elem(
+    uint64_t v_ptr,
+    uint64_t elem_ptr,
+    uint64_t elem_size,
+    uint64_t elem_align
+) {
+    __mc_dyn_array_append_elem(
+        (mc_dyn_array_t *)v_ptr,
+        (const void *)elem_ptr,
+        elem_size,
+        elem_align
+    );
+}

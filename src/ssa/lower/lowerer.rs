@@ -308,6 +308,59 @@ impl<'a> FuncLowerer<'a> {
         }
     }
 
+    /// Extracts ptr+len from a string/slice value for runtime argument lowering.
+    pub(super) fn lower_ptr_len_from_value(
+        &mut self,
+        span: Span,
+        value: ValueId,
+        ty: &Type,
+        len_bits: u8,
+    ) -> Result<(ValueId, ValueId), LoweringError> {
+        let (ptr_ty, len_ty) = match ty {
+            Type::String => {
+                if len_bits != 32 {
+                    panic!("ssa ptr/len lowering invalid len_bits {len_bits} for string");
+                }
+                let byte_ty = self.type_lowerer.lower_type(&Type::uint(8));
+                let ptr_ty = self.type_lowerer.ptr_to(byte_ty);
+                let len_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                (ptr_ty, len_ty)
+            }
+            Type::Slice { elem_ty } => {
+                if len_bits != 64 {
+                    panic!("ssa ptr/len lowering invalid len_bits {len_bits} for slice");
+                }
+                let elem_ir = self.type_lowerer.lower_type(elem_ty);
+                let ptr_ty = self.type_lowerer.ptr_to(elem_ir);
+                let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                (ptr_ty, len_ty)
+            }
+            _ => return Err(self.err_span(span, LoweringErrorKind::UnsupportedExpr)),
+        };
+
+        let value_ty = self.type_lowerer.lower_type(ty);
+
+        // Materialize the aggregate into a local to address its fields.
+        let value_addr = self.alloc_local_addr(value_ty);
+        self.builder.store(value_addr, value);
+
+        let ptr_addr = self.field_addr_typed(value_addr, 0, ptr_ty);
+        let len_addr = self.field_addr_typed(value_addr, 1, len_ty);
+
+        let ptr_val = self.builder.load(ptr_addr, ptr_ty);
+        let mut len_val = self.builder.load(len_addr, len_ty);
+        if len_bits == 32 {
+            let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+            len_val = self.builder.cast(
+                crate::ssa::model::ir::CastKind::IntExtend { signed: false },
+                len_val,
+                u64_ty,
+            );
+        }
+
+        Ok((ptr_val, len_val))
+    }
+
     pub(super) fn byte_offset_addr(&mut self, base: ValueId, offset: u64) -> ValueId {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));

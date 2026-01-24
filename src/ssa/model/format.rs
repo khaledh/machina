@@ -235,6 +235,9 @@ impl<'a> Formatter<'a> {
             Callee::Value(value) => {
                 let _ = write!(&mut self.out, "%v{}", value.0);
             }
+            Callee::Runtime(func) => {
+                let _ = write!(&mut self.out, "@{}", func.name());
+            }
         }
     }
 

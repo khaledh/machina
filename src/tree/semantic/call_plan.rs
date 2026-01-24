@@ -4,6 +4,10 @@ use crate::resolve::DefId;
 
 #[derive(Clone, Debug)]
 pub enum IntrinsicCall {
+    Print,
+    U64ToDec,
+    MemSet,
+    StringFromBytes,
     StringAppendBytes,
 }
 

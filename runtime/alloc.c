@@ -159,3 +159,19 @@ void __mc_free(void *ptr) {
     mc_trace_log("free", ptr, header->size, 0, heap);
     heap->vtable->free(header->raw);
 }
+
+void *__rt_alloc(uint64_t size, uint64_t align) {
+    return __mc_alloc((size_t)size, (size_t)align);
+}
+
+void *__rt_realloc(void *ptr, uint64_t size, uint64_t align) {
+    return __mc_realloc(ptr, (size_t)size, (size_t)align);
+}
+
+void __rt_free(void *ptr) {
+    __mc_free(ptr);
+}
+
+void __rt_set_alloc_trace(uint8_t enabled) {
+    __mc_set_alloc_trace(enabled);
+}

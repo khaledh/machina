@@ -56,11 +56,11 @@ Statements encode side effects and writes:
 
 `MemSet` is a lowering helper and is removed by the cfg-free memset pass
 (`opt/cfg_free/memset_lower.rs`) before codegen; it becomes either inline
-stores or a runtime `__mc_memset` call.
+stores or a runtime `__rt_memset` call.
 
 `CopyAggregate` is lowered by the dataflow memcpy pass
 (`opt/dataflow/memcpy_lower.rs`) into inline byte copies or a runtime
-`__mc_memcpy` call.
+`__rt_memcpy` call.
 
 ### Terminators
 
@@ -91,5 +91,5 @@ structure explicit.
 Calls use a `Callee::Def(DefId)` so codegen can resolve symbol names via the
 symbol table (DefId -> name mapping). Runtime entry points use
 `Callee::Runtime(RuntimeFn)`; see `src/mcir/abi.rs` for the runtime ABI table.
-Runtime checks are emitted as a runtime call (e.g. `__mc_trap`) followed by
+Runtime checks are emitted as a runtime call (e.g. `__rt_trap`) followed by
 `Unreachable`.

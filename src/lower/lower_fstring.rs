@@ -45,19 +45,25 @@ impl<'a> FuncLowerer<'a> {
         );
         let base_ptr = Operand::Copy(base_ptr_place);
 
-        // Initialize the formatter with the backing buffer slice.
-        let init_slice = self.build_u8_slice(base_ptr.clone(), u64_const(total_len as u64))?;
+        // Initialize the formatter with the backing buffer pointer and length.
         let fmt_ty_id = self.fmt_ty_id();
         let fmt = self.new_temp_aggregate(fmt_ty_id);
+
+        let fmt_ptr_place = self.new_temp_scalar(u64_ty_id);
+        self.emit_copy_scalar(
+            fmt_ptr_place.clone(),
+            Rvalue::AddrOf(PlaceAny::Aggregate(fmt.clone())),
+        );
+        let fmt_ptr_arg = self.runtime_arg_place(Operand::Copy(fmt_ptr_place));
+
+        let base_ptr_arg = self.runtime_arg_place(base_ptr.clone());
+        let len_arg = self.runtime_arg_place(u64_const(total_len as u64));
         self.fb.push_stmt(
             self.curr_block,
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::FmtInit),
-                args: vec![
-                    PlaceAny::Aggregate(fmt.clone()),
-                    PlaceAny::Aggregate(init_slice),
-                ],
+                args: vec![fmt_ptr_arg.clone(), base_ptr_arg, len_arg],
             },
         );
 
@@ -65,9 +71,11 @@ impl<'a> FuncLowerer<'a> {
         // integer appends (string variables are not supported yet).
         for segment in &plan.segments {
             match segment {
-                SegmentKind::LiteralBytes(value) => self.append_literal_segment(&fmt, value)?,
+                SegmentKind::LiteralBytes(value) => {
+                    self.append_literal_segment(&fmt_ptr_arg, value)?
+                }
                 SegmentKind::Int { expr, signed, bits } => {
-                    self.append_int_segment(&fmt, expr, *signed, *bits)?
+                    self.append_int_segment(&fmt_ptr_arg, expr, *signed, *bits)?
                 }
                 SegmentKind::StringValue { .. } => {
                     panic!("compiler bug: view f-string received string segment");
@@ -76,12 +84,18 @@ impl<'a> FuncLowerer<'a> {
         }
 
         // Finalize into a string view.
+        let dst_ptr_place = self.new_temp_scalar(u64_ty_id);
+        self.emit_copy_scalar(
+            dst_ptr_place.clone(),
+            Rvalue::AddrOf(PlaceAny::Aggregate(dst)),
+        );
+        let dst_ptr_arg = self.runtime_arg_place(Operand::Copy(dst_ptr_place));
         self.fb.push_stmt(
             self.curr_block,
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::FmtFinish),
-                args: vec![PlaceAny::Aggregate(dst), PlaceAny::Aggregate(fmt)],
+                args: vec![dst_ptr_arg, fmt_ptr_arg],
             },
         );
 
@@ -129,7 +143,7 @@ impl<'a> FuncLowerer<'a> {
 
     fn append_literal_segment(
         &mut self,
-        fmt: &Place<Aggregate>,
+        fmt_ptr: &PlaceAny,
         value: &str,
     ) -> Result<(), LowerError> {
         if value.is_empty() {
@@ -151,7 +165,7 @@ impl<'a> FuncLowerer<'a> {
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::FmtAppendBytes),
-                args: vec![PlaceAny::Aggregate(fmt.clone()), src_ptr_arg, len_arg],
+                args: vec![fmt_ptr.clone(), src_ptr_arg, len_arg],
             },
         );
 
@@ -160,7 +174,7 @@ impl<'a> FuncLowerer<'a> {
 
     fn append_int_segment(
         &mut self,
-        fmt: &Place<Aggregate>,
+        fmt_ptr: &PlaceAny,
         expr: &ValueExpr,
         signed: bool,
         bits: u8,
@@ -169,16 +183,16 @@ impl<'a> FuncLowerer<'a> {
         let value_op = self.lower_scalar_expr(expr)?;
         if !signed {
             let value_op = self.coerce_int_to_u64(expr, value_op)?;
-            return self.append_u64_segment(fmt, value_op);
+            return self.append_u64_segment(fmt_ptr, value_op);
         }
 
         let value_op = self.coerce_int_to_i64(value_op, bits)?;
-        self.append_i64_segment(fmt, value_op)
+        self.append_i64_segment(fmt_ptr, value_op)
     }
 
     fn append_u64_segment(
         &mut self,
-        fmt: &Place<Aggregate>,
+        fmt_ptr: &PlaceAny,
         value_op: Operand,
     ) -> Result<(), LowerError> {
         // Delegate integer formatting to the runtime builder.
@@ -188,7 +202,7 @@ impl<'a> FuncLowerer<'a> {
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::FmtAppendU64),
-                args: vec![PlaceAny::Aggregate(fmt.clone()), value_arg],
+                args: vec![fmt_ptr.clone(), value_arg],
             },
         );
         Ok(())
@@ -196,7 +210,7 @@ impl<'a> FuncLowerer<'a> {
 
     fn append_i64_segment(
         &mut self,
-        fmt: &Place<Aggregate>,
+        fmt_ptr: &PlaceAny,
         value_op: Operand,
     ) -> Result<(), LowerError> {
         // Delegate signed integer formatting to the runtime builder.
@@ -206,7 +220,7 @@ impl<'a> FuncLowerer<'a> {
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::FmtAppendI64),
-                args: vec![PlaceAny::Aggregate(fmt.clone()), value_arg],
+                args: vec![fmt_ptr.clone(), value_arg],
             },
         );
         Ok(())
@@ -414,7 +428,6 @@ impl<'a> FuncLowerer<'a> {
         );
         let buf_ptr_op = Operand::Copy(buf_ptr_place);
 
-        let slice = self.build_u8_slice(buf_ptr_op.clone(), u64_const(MAX_U64_DEC_LEN as u64))?;
         let len_place = self.new_temp_scalar(u64_ty_id);
         let len_dst = PlaceAny::Scalar(len_place.clone());
 
@@ -431,12 +444,14 @@ impl<'a> FuncLowerer<'a> {
             RuntimeFn::U64ToDec
         };
 
+        let buf_ptr_arg = self.runtime_arg_place(buf_ptr_op.clone());
+        let buf_len_arg = self.runtime_arg_place(u64_const(MAX_U64_DEC_LEN as u64));
         self.fb.push_stmt(
             self.curr_block,
             Statement::Call {
                 dst: Some(len_dst),
                 callee: Callee::Runtime(callee),
-                args: vec![PlaceAny::Aggregate(slice), value_arg],
+                args: vec![buf_ptr_arg, buf_len_arg, value_arg],
             },
         );
 
@@ -450,6 +465,14 @@ impl<'a> FuncLowerer<'a> {
         ptr: Operand,
         len: Operand,
     ) -> Result<(), LowerError> {
+        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
+        let dst_ptr_place = self.new_temp_scalar(u64_ty_id);
+        self.emit_copy_scalar(
+            dst_ptr_place.clone(),
+            Rvalue::AddrOf(PlaceAny::Aggregate(dst.clone())),
+        );
+        let dst_ptr_arg = self.runtime_arg_place(Operand::Copy(dst_ptr_place));
+
         let ptr_arg = self.runtime_arg_place(ptr);
         let len_arg = self.runtime_arg_place(len);
 
@@ -458,7 +481,7 @@ impl<'a> FuncLowerer<'a> {
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::StringAppendBytes),
-                args: vec![PlaceAny::Aggregate(dst.clone()), ptr_arg, len_arg],
+                args: vec![dst_ptr_arg, ptr_arg, len_arg],
             },
         );
 

@@ -24,3 +24,14 @@ void __mc_memcpy(mc_slice_t *dst, const mc_slice_t *src) {
         dst_buf[i] = src_buf[i];
     }
 }
+
+void __rt_memset(uint64_t ptr, uint64_t len, uint8_t value) {
+    mc_slice_t dst = { .ptr = ptr, .len = len };
+    __mc_memset(&dst, value);
+}
+
+void __rt_memcpy(uint64_t dst_ptr, uint64_t src_ptr, uint64_t len) {
+    mc_slice_t dst = { .ptr = dst_ptr, .len = len };
+    mc_slice_t src = { .ptr = src_ptr, .len = len };
+    __mc_memcpy(&dst, &src);
+}

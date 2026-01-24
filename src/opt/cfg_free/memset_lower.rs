@@ -124,17 +124,15 @@ fn call_runtime_memset(
     });
 
     let slice_local = push_temp(locals, slice_ty);
-    let slice_place = Place::new(slice_local, slice_ty, vec![]);
-
     let ptr_field = Place::new(slice_local, u64_ty, vec![Projection::Field { index: 0 }]);
     let len_field = Place::new(slice_local, u64_ty, vec![Projection::Field { index: 1 }]);
 
     out.push(Statement::CopyScalar {
-        dst: ptr_field,
+        dst: ptr_field.clone(),
         src: Rvalue::AddrOf(PlaceAny::Aggregate(dst.clone())),
     });
     out.push(Statement::CopyScalar {
-        dst: len_field,
+        dst: len_field.clone(),
         src: Rvalue::Use(Operand::Const(Const::Int {
             signed: false,
             bits: 64,
@@ -148,7 +146,8 @@ fn call_runtime_memset(
         dst: None,
         callee: Callee::Runtime(RuntimeFn::MemSet),
         args: vec![
-            PlaceAny::Aggregate(slice_place),
+            PlaceAny::Scalar(ptr_field),
+            PlaceAny::Scalar(len_field),
             PlaceAny::Scalar(value_place),
         ],
     });

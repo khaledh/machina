@@ -184,6 +184,10 @@ impl<'a> FuncLowerer<'a> {
         intrinsic: &IntrinsicCall,
     ) -> Result<RuntimeFn, LowerError> {
         match intrinsic {
+            IntrinsicCall::Print => Ok(RuntimeFn::Print),
+            IntrinsicCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
+            IntrinsicCall::MemSet => Ok(RuntimeFn::MemSet),
+            IntrinsicCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
             IntrinsicCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
         }
     }

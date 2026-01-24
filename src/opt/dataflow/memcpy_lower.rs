@@ -8,7 +8,7 @@ use crate::mcir::{
 
 const INLINE_THRESHOLD: u64 = 16;
 
-// Lower aggregate copies into inline byte copies or runtime __mc_memcpy calls.
+// Lower aggregate copies into inline byte copies or runtime __rt_memcpy calls.
 pub fn run(funcs: &mut [LoweredFunc]) {
     for func in funcs {
         lower_body(&mut func.body);
@@ -90,50 +90,15 @@ fn call_runtime_memcpy(
     src: Place<crate::mcir::Aggregate>,
     len: u64,
 ) {
-    // Materialize dst/src as mc_slice_t for the runtime memcpy.
+    // Materialize ptr+len args for the runtime memcpy.
     let u64_ty = types.add(TyKind::Int {
         signed: false,
         bits: 64,
     });
-    let slice_ty = types.add(TyKind::Struct {
-        fields: vec![
-            crate::mcir::StructField {
-                name: "ptr".to_string(),
-                ty: u64_ty,
-            },
-            crate::mcir::StructField {
-                name: "len".to_string(),
-                ty: u64_ty,
-            },
-        ],
-    });
-
-    let dst_slice_local = push_temp(locals, slice_ty);
-    let src_slice_local = push_temp(locals, slice_ty);
-
-    let dst_slice = Place::new(dst_slice_local, slice_ty, vec![]);
-    let src_slice = Place::new(src_slice_local, slice_ty, vec![]);
-
-    let dst_ptr = Place::new(
-        dst_slice_local,
-        u64_ty,
-        vec![Projection::Field { index: 0 }],
-    );
-    let dst_len = Place::new(
-        dst_slice_local,
-        u64_ty,
-        vec![Projection::Field { index: 1 }],
-    );
-    let src_ptr = Place::new(
-        src_slice_local,
-        u64_ty,
-        vec![Projection::Field { index: 0 }],
-    );
-    let src_len = Place::new(
-        src_slice_local,
-        u64_ty,
-        vec![Projection::Field { index: 1 }],
-    );
+    let dst_ptr_local = push_temp(locals, u64_ty);
+    let src_ptr_local = push_temp(locals, u64_ty);
+    let dst_ptr = Place::new(dst_ptr_local, u64_ty, vec![]);
+    let src_ptr = Place::new(src_ptr_local, u64_ty, vec![]);
 
     let len_const = Operand::Const(Const::Int {
         signed: false,
@@ -142,30 +107,45 @@ fn call_runtime_memcpy(
     });
 
     out.push(Statement::CopyScalar {
-        dst: dst_ptr,
+        dst: dst_ptr.clone(),
         src: Rvalue::AddrOf(PlaceAny::Aggregate(dst.clone())),
     });
     out.push(Statement::CopyScalar {
-        dst: dst_len,
-        src: Rvalue::Use(len_const.clone()),
-    });
-    out.push(Statement::CopyScalar {
-        dst: src_ptr,
+        dst: src_ptr.clone(),
         src: Rvalue::AddrOf(PlaceAny::Aggregate(src.clone())),
     });
-    out.push(Statement::CopyScalar {
-        dst: src_len,
-        src: Rvalue::Use(len_const),
-    });
+
+    let len_place = ensure_value_place(locals, out, len_const, u64_ty);
 
     out.push(Statement::Call {
         dst: None,
         callee: Callee::Runtime(RuntimeFn::MemCopy),
         args: vec![
-            PlaceAny::Aggregate(dst_slice),
-            PlaceAny::Aggregate(src_slice),
+            PlaceAny::Scalar(dst_ptr),
+            PlaceAny::Scalar(src_ptr),
+            PlaceAny::Scalar(len_place),
         ],
     });
+}
+
+fn ensure_value_place(
+    locals: &mut Vec<Local>,
+    out: &mut Vec<Statement>,
+    value: Operand,
+    elem_ty: TyId,
+) -> Place<crate::mcir::Scalar> {
+    match value {
+        Operand::Copy(place) | Operand::Move(place) => place,
+        Operand::Const(c) => {
+            let tmp = push_temp(locals, elem_ty);
+            let dst = Place::new(tmp, elem_ty, vec![]);
+            out.push(Statement::CopyScalar {
+                dst: dst.clone(),
+                src: Rvalue::Use(Operand::Const(c)),
+            });
+            dst
+        }
+    }
 }
 
 fn push_temp(locals: &mut Vec<Local>, ty: TyId) -> LocalId {

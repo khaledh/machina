@@ -86,3 +86,7 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
 
     _exit((int)(100 + kind));
 }
+
+void __rt_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
+    __mc_trap(kind, arg0, arg1, arg2);
+}

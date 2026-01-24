@@ -7,34 +7,6 @@ use crate::tree::semantic::{PlaceExpr, ValueExpr};
 use crate::types::Type;
 
 impl<'a> FuncLowerer<'a> {
-    pub(super) fn build_u8_slice(
-        &mut self,
-        ptr: Operand,
-        len: Operand,
-    ) -> Result<Place<Aggregate>, LowerError> {
-        let slice_ty = Type::Slice {
-            elem_ty: Box::new(Type::uint(8)),
-        };
-        let slice_ty_id = self.ty_lowerer.lower_ty(&slice_ty);
-        let slice = self.new_temp_aggregate(slice_ty_id);
-
-        let u64_ty_id = self.ty_lowerer.lower_ty(&Type::uint(64));
-        let ptr_field = Place::new(
-            slice.base(),
-            u64_ty_id,
-            vec![Projection::Field { index: 0 }],
-        );
-        let len_field = Place::new(
-            slice.base(),
-            u64_ty_id,
-            vec![Projection::Field { index: 1 }],
-        );
-
-        self.emit_copy_scalar(ptr_field, Rvalue::Use(ptr));
-        self.emit_copy_scalar(len_field, Rvalue::Use(len));
-        Ok(slice)
-    }
-
     pub(super) fn lower_string_index(
         &mut self,
         place: &PlaceExpr,
@@ -114,18 +86,16 @@ impl<'a> FuncLowerer<'a> {
         );
         let buf_ptr_op = Operand::Copy(buf_ptr_place);
 
-        let dst_slice = self.build_u8_slice(buf_ptr_op, u64_const(1))?;
-        let src_slice = self.build_u8_slice(ptr_at, u64_const(1))?;
+        let dst_ptr_arg = self.runtime_arg_place(buf_ptr_op);
+        let src_ptr_arg = self.runtime_arg_place(ptr_at);
+        let len_arg = self.runtime_arg_place(u64_const(1));
 
         self.fb.push_stmt(
             self.curr_block,
             Statement::Call {
                 dst: None,
                 callee: Callee::Runtime(RuntimeFn::MemCopy),
-                args: vec![
-                    PlaceAny::Aggregate(dst_slice),
-                    PlaceAny::Aggregate(src_slice),
-                ],
+                args: vec![dst_ptr_arg, src_ptr_arg, len_arg],
             },
         );
 

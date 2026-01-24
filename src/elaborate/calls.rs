@@ -37,8 +37,25 @@ impl<'a> Elaborator<'a> {
                 .lookup_def(def_id)
                 .unwrap_or_else(|| panic!("compiler bug: missing def for call {call_id:?}"));
             // Intrinsics override the normal direct-call target with a lowering intent.
-            if def.is_intrinsic() && matches!(def.link_name(), Some("__mc_string_append_bytes")) {
-                target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes);
+            if def.is_intrinsic() {
+                match def.link_name() {
+                    Some("__rt_print") => {
+                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::Print);
+                    }
+                    Some("__rt_u64_to_dec") => {
+                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::U64ToDec);
+                    }
+                    Some("__rt_memset") => {
+                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::MemSet);
+                    }
+                    Some("__rt_string_from_bytes") => {
+                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringFromBytes);
+                    }
+                    Some("__rt_string_append_bytes") => {
+                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes);
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -54,6 +71,78 @@ impl<'a> Elaborator<'a> {
         }
 
         let args = match target {
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::Print) => {
+                if has_receiver {
+                    panic!("compiler bug: intrinsic print has receiver");
+                }
+                if call_sig.params.len() != 2 {
+                    panic!(
+                        "compiler bug: intrinsic print expects 2 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::PtrLen {
+                        input: sem::CallInput::Arg(0),
+                        len_bits: 32,
+                    },
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::U64ToDec) => {
+                if has_receiver {
+                    panic!("compiler bug: intrinsic u64_to_dec has receiver");
+                }
+                if call_sig.params.len() != 2 {
+                    panic!(
+                        "compiler bug: intrinsic u64_to_dec expects 2 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::PtrLen {
+                        input: sem::CallInput::Arg(0),
+                        len_bits: 64,
+                    },
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MemSet) => {
+                if has_receiver {
+                    panic!("compiler bug: intrinsic memset has receiver");
+                }
+                if call_sig.params.len() != 2 {
+                    panic!(
+                        "compiler bug: intrinsic memset expects 2 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::PtrLen {
+                        input: sem::CallInput::Arg(0),
+                        len_bits: 64,
+                    },
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringFromBytes) => {
+                if has_receiver {
+                    panic!("compiler bug: intrinsic string_from_bytes has receiver");
+                }
+                if call_sig.params.len() != 2 {
+                    panic!(
+                        "compiler bug: intrinsic string_from_bytes expects 2 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                    sem::ArgLowering::PtrLen {
+                        input: sem::CallInput::Arg(1),
+                        len_bits: 64,
+                    },
+                ]
+            }
             sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic string append missing receiver");
