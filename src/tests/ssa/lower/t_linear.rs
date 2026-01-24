@@ -501,31 +501,20 @@ fn test_lower_slice_expr_array() {
             cbr %v21, bb1, bb2
 
           bb1():
-            %v24: bool = cmp.ge %v14, %v15
-            %v25: bool = cmp.lt %v14, %v18
-            %v26: bool = and %v24, %v25
-            cbr %v26, bb3, bb4
+            %v24: ptr<u64> = index_addr %v13, %v15
+            %v25: u64 = sub %v14, %v15
+            %v26: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l2
+            %v27: ptr<ptr<u64>> = field_addr %v26, 0
+            store %v27, %v24
+            %v28: ptr<u64> = field_addr %v26, 1
+            store %v28, %v25
+            %v29: struct { ptr: ptr<u64>, len: u64 } = load %v26
+            %v30: u64 = const 0:u64
+            ret %v30
 
           bb2():
             %v22: u64 = const 2:u64
             %v23: () = call @__rt_trap(%v22, %v15, %v16, %v18)
-            unreachable
-
-          bb3():
-            %v29: ptr<u64> = index_addr %v13, %v15
-            %v30: u64 = sub %v14, %v15
-            %v31: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l2
-            %v32: ptr<ptr<u64>> = field_addr %v31, 0
-            store %v32, %v29
-            %v33: ptr<u64> = field_addr %v31, 1
-            store %v33, %v30
-            %v34: struct { ptr: ptr<u64>, len: u64 } = load %v31
-            %v35: u64 = const 0:u64
-            ret %v35
-
-          bb4():
-            %v27: u64 = const 2:u64
-            %v28: () = call @__rt_trap(%v27, %v14, %v15, %v18)
             unreachable
         }
     "};
@@ -568,31 +557,20 @@ fn test_lower_slice_expr_string() {
             cbr %v13, bb1, bb2
 
           bb1():
-            %v16: bool = cmp.ge %v6, %v7
-            %v17: bool = cmp.lt %v6, %v10
-            %v18: bool = and %v16, %v17
-            cbr %v18, bb3, bb4
+            %v16: ptr<u8> = index_addr %v3, %v7
+            %v17: u64 = sub %v6, %v7
+            %v18: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l1
+            %v19: ptr<ptr<u8>> = field_addr %v18, 0
+            store %v19, %v16
+            %v20: ptr<u64> = field_addr %v18, 1
+            store %v20, %v17
+            %v21: struct { ptr: ptr<u8>, len: u64 } = load %v18
+            %v22: u64 = const 0:u64
+            ret %v22
 
           bb2():
             %v14: u64 = const 2:u64
             %v15: () = call @__rt_trap(%v14, %v7, %v8, %v10)
-            unreachable
-
-          bb3():
-            %v21: ptr<u8> = index_addr %v3, %v7
-            %v22: u64 = sub %v6, %v7
-            %v23: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l1
-            %v24: ptr<ptr<u8>> = field_addr %v23, 0
-            store %v24, %v21
-            %v25: ptr<u64> = field_addr %v23, 1
-            store %v25, %v22
-            %v26: struct { ptr: ptr<u8>, len: u64 } = load %v23
-            %v27: u64 = const 0:u64
-            ret %v27
-
-          bb4():
-            %v19: u64 = const 2:u64
-            %v20: () = call @__rt_trap(%v19, %v6, %v7, %v10)
             unreachable
         }
     "};

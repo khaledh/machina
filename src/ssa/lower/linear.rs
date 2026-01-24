@@ -275,14 +275,24 @@ impl<'a> FuncLowerer<'a> {
                     None => base_len,
                 };
 
-                if start.is_some() || end.is_some() {
+                let start_check = start
+                    .as_deref()
+                    .is_some_and(|expr| !matches!(expr.kind, sem::ValueExprKind::IntLit(0)));
+                let end_check = end.is_some();
+
+                if start_check || end_check {
                     let zero = self.builder.const_int(0, false, 64, u64_ty);
                     let one = self.builder.const_int(1, false, 64, u64_ty);
                     let max_excl = self.builder.binop(BinOp::Add, base_len, one, u64_ty);
 
-                    // Enforce start <= base_len and start <= end <= base_len.
-                    self.emit_range_check(start_val, zero, max_excl);
-                    self.emit_range_check(end_val, start_val, max_excl);
+                    // Enforce start <= base_len when it is not trivially zero.
+                    if start_check {
+                        self.emit_range_check(start_val, zero, max_excl);
+                    }
+                    // Enforce start <= end <= base_len when an explicit end is provided.
+                    if end_check {
+                        self.emit_range_check(end_val, start_val, max_excl);
+                    }
                 }
 
                 let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
