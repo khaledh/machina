@@ -154,6 +154,72 @@ fn test_lower_if_cmp_return() {
 }
 
 #[test]
+fn test_lower_logical_and() {
+    let ctx = analyze(indoc! {"
+        fn main() -> bool {
+            false && true
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> bool {
+          bb0():
+            %v0: bool = const false
+            cbr %v0, bb1, bb2
+
+          bb1():
+            %v2: bool = const true
+            br bb3(%v2)
+
+          bb2():
+            %v3: bool = const false
+            br bb3(%v3)
+
+          bb3(%v1: bool):
+            ret %v1
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_logical_or() {
+    let ctx = analyze(indoc! {"
+        fn main() -> bool {
+            true || false
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> bool {
+          bb0():
+            %v0: bool = const true
+            cbr %v0, bb2, bb1
+
+          bb1():
+            %v2: bool = const false
+            br bb3(%v2)
+
+          bb2():
+            %v3: bool = const true
+            br bb3(%v3)
+
+          bb3(%v1: bool):
+            ret %v1
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_while_stmt() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {

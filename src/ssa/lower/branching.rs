@@ -6,7 +6,7 @@ use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOut
 use crate::ssa::lower::r#match::MatchLowerer;
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, ValueId};
-use crate::tree::semantic as sem;
+use crate::tree::{BinaryOp, semantic as sem};
 
 impl<'a> FuncLowerer<'a> {
     /// Lowers a branching expression, potentially creating multiple basic blocks.
@@ -107,6 +107,60 @@ impl<'a> FuncLowerer<'a> {
                 }
 
                 // Select join block and install its parameters as the new local values.
+                let join_value = join.join_value();
+                join.finalize(self);
+                Ok(BranchResult::Value(join_value))
+            }
+
+            sem::ValueExprKind::BinOp { left, op, right }
+                if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) =>
+            {
+                // Short-circuit lowering: emit a conditional branch based on the LHS.
+                let lhs = match self.lower_value_expr(left)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+
+                // Create control-flow structure for RHS evaluation vs. short-circuit.
+                let rhs_bb = self.builder.add_block();
+                let short_bb = self.builder.add_block();
+                let join = self.begin_join(expr);
+
+                // AND: true evaluates RHS, false short-circuits.
+                // OR: false evaluates RHS, true short-circuits.
+                let (then_bb, else_bb, short_val) = match op {
+                    BinaryOp::LogicalAnd => (rhs_bb, short_bb, false),
+                    BinaryOp::LogicalOr => (short_bb, rhs_bb, true),
+                    _ => unreachable!("ssa logical op dispatch missed: {op:?}"),
+                };
+
+                // Branch on the LHS value.
+                self.builder.terminate(Terminator::CondBr {
+                    cond: lhs,
+                    then_bb,
+                    then_args: Vec::new(),
+                    else_bb,
+                    else_args: Vec::new(),
+                });
+
+                // Evaluate the RHS on the branch that continues execution.
+                self.builder.select_block(rhs_bb);
+                match self.lower_value_expr(right)? {
+                    BranchResult::Value(value) => {
+                        join.emit_branch(self, value, expr.span)?;
+                    }
+                    BranchResult::Return => {
+                        return Ok(BranchResult::Return);
+                    }
+                }
+
+                // Emit the short-circuit value on the opposite branch.
+                join.restore_locals(self);
+                self.builder.select_block(short_bb);
+                let bool_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let short_value = self.builder.const_bool(short_val, bool_ty);
+                join.emit_branch(self, short_value, expr.span)?;
+
                 let join_value = join.join_value();
                 join.finalize(self);
                 Ok(BranchResult::Value(join_value))
