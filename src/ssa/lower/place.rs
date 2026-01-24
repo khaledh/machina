@@ -1,6 +1,6 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
-use crate::ssa::lower::{LoweringError, LoweringErrorKind};
+use crate::ssa::lower::LoweringError;
 use crate::ssa::model::ir::ValueId;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -99,8 +99,28 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
                             value_ty: elem_ir_ty,
                         })
                     }
-                    sem::IndexBaseKind::String { .. } => {
-                        Err(self.err_span(target.span, LoweringErrorKind::UnsupportedExpr))
+                    sem::IndexBaseKind::String { deref_count } => {
+                        if indices.len() != 1 {
+                            panic!("ssa string index expects exactly one index");
+                        }
+
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::String = base_ty else {
+                            panic!("ssa string index on non-string base {:?}", base_ty);
+                        };
+
+                        // Load the string data pointer, then index into it.
+                        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+                        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+                        let ptr_addr = self.field_addr_typed(base_addr, 0, u8_ptr_ty);
+                        let base_ptr = self.builder.load(ptr_addr, u8_ptr_ty);
+
+                        let index_val = self.lower_value_expr_linear(&indices[0])?;
+                        let addr = self.builder.index_addr(base_ptr, index_val, u8_ptr_ty);
+                        Ok(PlaceAddr {
+                            addr,
+                            value_ty: u8_ty,
+                        })
                     }
                 }
             }

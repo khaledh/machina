@@ -219,3 +219,34 @@ fn test_lower_slice_index_load() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_string_index_load() {
+    let ctx = analyze(indoc! {"
+        fn main(s: string) -> u8 {
+            s[1]
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(string) -> u8 {
+          locals:
+            %l0: string
+          bb0(%v0: string):
+            %v1: ptr<string> = addr_of %l0
+            store %v1, %v0
+            %v2: ptr<ptr<u8>> = field_addr %v1, 0
+            %v3: ptr<u8> = load %v2
+            %v4: u64 = const 1:u64
+            %v5: ptr<u8> = index_addr %v3, %v4
+            %v6: u8 = load %v5
+            ret %v6
+        }
+    "};
+    assert_eq!(text, expected);
+}
