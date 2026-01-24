@@ -22,30 +22,10 @@ impl<'a> FuncLowerer<'a> {
             // Block expression: process items sequentially.
             sem::ValueExprKind::Block { items, tail } => {
                 for item in items {
-                    // While loops are handled specially at the statement level.
-                    if let sem::BlockItem::Stmt(stmt) = item {
-                        if let sem::StmtExprKind::While { cond, body } = &stmt.kind {
-                            self.lower_while_stmt(cond, body)?;
-                            continue;
-                        }
-                    }
-
-                    // Dispatch based on precomputed plan (linear vs branching).
                     match item {
                         sem::BlockItem::Stmt(stmt) => {
-                            if let sem::StmtExprKind::Break = &stmt.kind {
-                                return self.lower_break_stmt();
-                            }
-                            if let sem::StmtExprKind::Continue = &stmt.kind {
-                                return self.lower_continue_stmt();
-                            }
-
-                            // Statements are lowered directly in linear form.
-                            match self.lower_stmt_expr_linear(stmt)? {
-                                StmtOutcome::Continue => {}
-                                StmtOutcome::Return => {
-                                    return Ok(BranchResult::Return);
-                                }
+                            if let Some(result) = self.lower_stmt_expr_branching(stmt)? {
+                                return Ok(result);
                             }
                         }
                         sem::BlockItem::Expr(expr) => {
@@ -152,6 +132,25 @@ impl<'a> FuncLowerer<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// Lowers a statement inside a branching block.
+    fn lower_stmt_expr_branching(
+        &mut self,
+        stmt: &sem::StmtExpr,
+    ) -> Result<Option<BranchResult>, LoweringError> {
+        match &stmt.kind {
+            sem::StmtExprKind::While { cond, body } => {
+                self.lower_while_stmt(cond, body)?;
+                Ok(None)
+            }
+            sem::StmtExprKind::Break => Ok(Some(self.lower_break_stmt()?)),
+            sem::StmtExprKind::Continue => Ok(Some(self.lower_continue_stmt()?)),
+            _ => match self.lower_stmt_expr_linear(stmt)? {
+                StmtOutcome::Continue => Ok(None),
+                StmtOutcome::Return => Ok(Some(BranchResult::Return)),
+            },
         }
     }
 
