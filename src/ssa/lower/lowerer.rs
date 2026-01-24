@@ -64,6 +64,12 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) loop_stack: Vec<LoopContext>,
 }
 
+/// Base pointer + length pair for slice-like lowering.
+pub(super) struct BaseView {
+    pub(super) ptr: ValueId,
+    pub(super) len: ValueId,
+}
+
 impl<'a> FuncLowerer<'a> {
     /// Creates a new function lowerer for the given semantic function definition.
     ///
@@ -203,6 +209,64 @@ impl<'a> FuncLowerer<'a> {
     ) -> ValueId {
         let ptr_ty = self.type_lowerer.ptr_to(field_ty);
         self.builder.field_addr(base, index, ptr_ty)
+    }
+
+    /// Loads ptr/len from a slice base stored at `base_addr`.
+    pub(super) fn load_slice_view(
+        &mut self,
+        base_addr: ValueId,
+        elem_ptr_ty: IrTypeId,
+    ) -> BaseView {
+        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
+        let len_addr = self.field_addr_typed(base_addr, 1, len_ty);
+        let ptr = self.builder.load(ptr_addr, elem_ptr_ty);
+        let len = self.builder.load(len_addr, len_ty);
+        BaseView { ptr, len }
+    }
+
+    /// Loads ptr/len from a string base stored at `base_addr`.
+    pub(super) fn load_string_view(&mut self, base_addr: ValueId) -> BaseView {
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let ptr_addr = self.field_addr_typed(base_addr, 0, u8_ptr_ty);
+        let ptr = self.builder.load(ptr_addr, u8_ptr_ty);
+
+        // String lengths are u32; widen to u64 for bounds checks and indexing.
+        let len_u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let len_addr = self.field_addr_typed(base_addr, 1, len_u32_ty);
+        let len_u32 = self.builder.load(len_addr, len_u32_ty);
+        let len_u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self
+            .builder
+            .cast(CastKind::IntExtend { signed: false }, len_u32, len_u64_ty);
+
+        BaseView { ptr, len }
+    }
+
+    /// Builds ptr/len for array bases using a constant length.
+    pub(super) fn load_array_view(
+        &mut self,
+        base_addr: ValueId,
+        elem_ptr_ty: IrTypeId,
+        len: u64,
+    ) -> BaseView {
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
+        let ptr = self.builder.index_addr(base_addr, zero, elem_ptr_ty);
+        let len_val = self.builder.const_int(len as i128, false, 64, u64_ty);
+        BaseView { ptr, len: len_val }
+    }
+
+    /// Emits an index address with bounds checking.
+    pub(super) fn index_with_bounds(
+        &mut self,
+        view: BaseView,
+        index: ValueId,
+        elem_ptr_ty: IrTypeId,
+    ) -> ValueId {
+        self.emit_bounds_check(index, view.len);
+        self.builder.index_addr(view.ptr, index, elem_ptr_ty)
     }
 
     /// Emits a bounds check guard that traps if `index >= len`.

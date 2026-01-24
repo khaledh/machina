@@ -1,7 +1,7 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
 use crate::ssa::lower::LoweringError;
-use crate::ssa::model::ir::{CastKind, ValueId};
+use crate::ssa::model::ir::ValueId;
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
@@ -89,18 +89,9 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
                         // Load the slice data pointer, then index into it.
                         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
                         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
-                        let base_ptr = self.builder.load(ptr_addr, elem_ptr_ty);
-
-                        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                        let len_addr = self.field_addr_typed(base_addr, 1, len_ty);
-                        let len_val = self.builder.load(len_addr, len_ty);
-
+                        let view = self.load_slice_view(base_addr, elem_ptr_ty);
                         let index_val = self.lower_value_expr_linear(&indices[0])?;
-                        // Guard the element address computation.
-                        self.emit_bounds_check(index_val, len_val);
-
-                        let addr = self.builder.index_addr(base_ptr, index_val, elem_ptr_ty);
+                        let addr = self.index_with_bounds(view, index_val, elem_ptr_ty);
                         Ok(PlaceAddr {
                             addr,
                             value_ty: elem_ir_ty,
@@ -119,24 +110,9 @@ impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
                         // Load the string data pointer, then index into it.
                         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
                         let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
-                        let ptr_addr = self.field_addr_typed(base_addr, 0, u8_ptr_ty);
-                        let base_ptr = self.builder.load(ptr_addr, u8_ptr_ty);
-
-                        let len_field_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                        let len_addr = self.field_addr_typed(base_addr, 1, len_field_ty);
-                        let len_val_u32 = self.builder.load(len_addr, len_field_ty);
-                        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                        let len_val = self.builder.cast(
-                            CastKind::IntExtend { signed: false },
-                            len_val_u32,
-                            len_ty,
-                        );
-
+                        let view = self.load_string_view(base_addr);
                         let index_val = self.lower_value_expr_linear(&indices[0])?;
-                        // Guard the byte address computation.
-                        self.emit_bounds_check(index_val, len_val);
-
-                        let addr = self.builder.index_addr(base_ptr, index_val, u8_ptr_ty);
+                        let addr = self.index_with_bounds(view, index_val, u8_ptr_ty);
                         Ok(PlaceAddr {
                             addr,
                             value_ty: u8_ty,

@@ -248,44 +248,24 @@ impl<'a> FuncLowerer<'a> {
                         let Type::Array { .. } = base_ty else {
                             panic!("ssa slice on non-array base {:?}", base_ty);
                         };
-
-                        let zero = self.builder.const_int(0, false, 64, u64_ty);
-                        let ptr = self.builder.index_addr(base_addr, zero, elem_ptr_ty);
-                        let len_val = self.builder.const_int(len as i128, false, 64, u64_ty);
-                        (ptr, len_val)
+                        let view = self.load_array_view(base_addr, elem_ptr_ty, len);
+                        (view.ptr, view.len)
                     }
                     sem::SliceBaseKind::Slice { deref_count } => {
                         let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
                         let Type::Slice { .. } = base_ty else {
                             panic!("ssa slice on non-slice base {:?}", base_ty);
                         };
-
-                        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
-                        let ptr = self.builder.load(ptr_addr, elem_ptr_ty);
-
-                        let len_addr = self.field_addr_typed(base_addr, 1, u64_ty);
-                        let len_val = self.builder.load(len_addr, u64_ty);
-                        (ptr, len_val)
+                        let view = self.load_slice_view(base_addr, elem_ptr_ty);
+                        (view.ptr, view.len)
                     }
                     sem::SliceBaseKind::String { deref_count } => {
                         let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
                         let Type::String = base_ty else {
                             panic!("ssa slice on non-string base {:?}", base_ty);
                         };
-
-                        let ptr_addr = self.field_addr_typed(base_addr, 0, elem_ptr_ty);
-                        let ptr = self.builder.load(ptr_addr, elem_ptr_ty);
-
-                        let len_field_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                        let len_addr = self.field_addr_typed(base_addr, 1, len_field_ty);
-                        let len_val_u32 = self.builder.load(len_addr, len_field_ty);
-                        let len_val = self.builder.cast(
-                            CastKind::IntExtend { signed: false },
-                            len_val_u32,
-                            u64_ty,
-                        );
-
-                        (ptr, len_val)
+                        let view = self.load_string_view(base_addr);
+                        (view.ptr, view.len)
                     }
                 };
 
