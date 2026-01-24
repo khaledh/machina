@@ -6,6 +6,7 @@
 mod branching;
 mod calls;
 mod error;
+mod fstring;
 mod join;
 mod linear;
 mod locals;

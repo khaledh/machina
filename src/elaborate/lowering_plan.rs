@@ -312,6 +312,15 @@ impl<'a> LoweringPlanBuilder<'a> {
                         .unwrap_or(true)
             }
 
+            sem::ValueExprKind::StringFmt { plan } => {
+                plan.segments.iter().all(|segment| match segment {
+                    sem::SegmentKind::LiteralBytes(_) => true,
+                    sem::SegmentKind::Int { expr, .. } | sem::SegmentKind::StringValue { expr } => {
+                        self.is_linear_value_expr(expr)
+                    }
+                })
+            }
+
             sem::ValueExprKind::Call { callee, args } => {
                 self.is_linear_value_expr(callee)
                     && args.iter().all(|arg| self.is_linear_call_arg(arg))

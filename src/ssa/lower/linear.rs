@@ -90,6 +90,14 @@ impl<'a> FuncLowerer<'a> {
                 Ok(self.load_slot(&slot))
             }
 
+            sem::ValueExprKind::StringFmt { plan } => {
+                let string_ty = self.type_lowerer.lower_type_id(expr.ty);
+                match plan.kind {
+                    sem::FmtKind::View => self.lower_string_fmt_view(plan, string_ty),
+                    sem::FmtKind::Owned => self.lower_string_fmt_owned(plan, string_ty),
+                }
+            }
+
             sem::ValueExprKind::ArrayLit { init, .. } => {
                 // Allocate a local for the array and get its address
                 let array_ty = self.type_lowerer.lower_type_id(expr.ty);

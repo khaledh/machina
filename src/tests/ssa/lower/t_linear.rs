@@ -193,6 +193,39 @@ fn test_lower_string_lit() {
 }
 
 #[test]
+fn test_lower_string_fmt_view() {
+    let ctx = analyze(indoc! {r#"
+        fn main(a: u64) -> string {
+            f"{a}"
+        }
+    "#});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("call @__rt_fmt_init"));
+    assert!(text.contains("call @__rt_fmt_append_u64"));
+    assert!(text.contains("call @__rt_fmt_finish"));
+}
+
+#[test]
+fn test_lower_string_fmt_owned() {
+    let ctx = analyze(indoc! {r#"
+        fn main(s: string) -> string {
+            f"hi {s}"
+        }
+    "#});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("call @__rt_string_ensure"));
+    assert!(text.contains("call @__rt_string_append_bytes"));
+}
+
+#[test]
 fn test_lower_cmp() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {

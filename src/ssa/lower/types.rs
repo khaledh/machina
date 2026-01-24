@@ -18,6 +18,7 @@ pub(super) struct TypeLowerer<'a> {
     by_type: HashMap<Type, IrTypeId>,
     ptr_cache: HashMap<IrTypeId, IrTypeId>,
     enum_layouts: HashMap<TypeId, EnumLayout>,
+    fmt_ty: Option<IrTypeId>,
 }
 
 impl<'a> TypeLowerer<'a> {
@@ -29,6 +30,7 @@ impl<'a> TypeLowerer<'a> {
             by_type: HashMap::new(),
             ptr_cache: HashMap::new(),
             enum_layouts: HashMap::new(),
+            fmt_ty: None,
         }
     }
 
@@ -186,6 +188,34 @@ impl<'a> TypeLowerer<'a> {
 
         let id = self.ir_type_cache.add(IrTypeKind::Ptr { elem });
         self.ptr_cache.insert(elem, id);
+        id
+    }
+
+    /// Returns the internal formatter struct type (fmt { ptr, len, cap }).
+    pub(super) fn fmt_type(&mut self) -> IrTypeId {
+        if let Some(id) = self.fmt_ty {
+            return id;
+        }
+
+        let u64_ty = self.lower_type(&Type::uint(64));
+        let fields = vec![
+            IrStructField {
+                name: "ptr".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "len".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "cap".to_string(),
+                ty: u64_ty,
+            },
+        ];
+        let id = self
+            .ir_type_cache
+            .add_named(IrTypeKind::Struct { fields }, "fmt".to_string());
+        self.fmt_ty = Some(id);
         id
     }
 
