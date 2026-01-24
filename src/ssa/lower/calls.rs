@@ -12,7 +12,7 @@ struct CallInputValue {
     ty: Type,
 }
 
-impl<'a> FuncLowerer<'a> {
+impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_call_expr(
         &mut self,
         expr: &sem::ValueExpr,

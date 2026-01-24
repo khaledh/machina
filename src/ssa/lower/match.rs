@@ -11,16 +11,16 @@ use crate::ssa::model::ir::{ConstValue, SwitchCase, Terminator, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::{Type, TypeId};
 
-pub(super) struct MatchLowerer<'a, 'b> {
-    lowerer: &'a mut FuncLowerer<'b>,
+pub(super) struct MatchLowerer<'a, 'b, 'g> {
+    lowerer: &'a mut FuncLowerer<'b, 'g>,
     expr: &'a sem::ValueExpr,
     scrutinee_addr: ValueId,
     scrutinee_ty_id: TypeId,
 }
 
-impl<'a, 'b> MatchLowerer<'a, 'b> {
+impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     pub(super) fn lower(
-        lowerer: &'a mut FuncLowerer<'b>,
+        lowerer: &'a mut FuncLowerer<'b, 'g>,
         expr: &'a sem::ValueExpr,
         scrutinee: &sem::ValueExpr,
         arms: &'a [sem::MatchArm],

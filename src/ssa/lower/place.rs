@@ -11,7 +11,7 @@ pub(super) struct PlaceAddr {
     pub(super) value_ty: crate::ssa::IrTypeId,
 }
 
-impl<'a> crate::ssa::lower::lowerer::FuncLowerer<'a> {
+impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
     /// Lowers a place expression into an address and its value type.
     pub(super) fn lower_place_addr(
         &mut self,

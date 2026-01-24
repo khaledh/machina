@@ -8,7 +8,7 @@ use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, ValueId};
 use crate::tree::{BinaryOp, semantic as sem};
 
-impl<'a> FuncLowerer<'a> {
+impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a branching expression, potentially creating multiple basic blocks.
     ///
     /// Emits instructions starting at the current block cursor. May create new blocks

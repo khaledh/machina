@@ -27,6 +27,7 @@ pub(super) fn analyze(source: &str) -> crate::context::SemanticContext {
 }
 
 pub(super) use crate::ssa::lower::lower_func;
+pub(super) use crate::ssa::lower::lower_module;
 pub(super) use crate::ssa::model::format::formact_func;
 pub(super) use indoc::indoc;
 
@@ -38,6 +39,8 @@ mod calls;
 mod linear;
 #[path = "t_match.rs"]
 mod r#match;
+#[path = "t_module.rs"]
+mod module;
 #[path = "t_place.rs"]
 mod place;
 #[path = "t_types.rs"]

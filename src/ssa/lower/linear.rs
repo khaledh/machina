@@ -9,7 +9,7 @@ use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
-impl<'a> FuncLowerer<'a> {
+impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a linear value expression directly from the semantic tree.
     ///
     /// This avoids constructing a parallel linear AST for the common cases.

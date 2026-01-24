@@ -4,15 +4,16 @@ use std::collections::HashMap;
 
 use crate::diag::Span;
 use crate::resolve::{DefId, DefTable};
-use crate::ssa::IrTypeId;
+use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::locals::{LocalMap, LocalStorage, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
-use crate::ssa::lower::{LoweredFunction, LoweringError, LoweringErrorKind};
+use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{
-    BinOp, BlockId, Callee, CastKind, CmpOp, FunctionSig, GlobalData, GlobalId, RuntimeFn,
+    BinOp, BlockId, Callee, CastKind, CmpOp, Function, FunctionSig, GlobalId, RuntimeFn,
     Terminator, ValueId,
 };
+use crate::ssa::{IrTypeCache, IrTypeId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
@@ -55,7 +56,7 @@ pub(super) struct LoopContext {
 /// - SSA function builder for emitting instructions
 /// - Current SSA values for local variables (updated on assignment/join)
 /// - Expression plans from semantic analysis (linear vs branching)
-pub(super) struct FuncLowerer<'a> {
+pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
     pub(super) builder: FunctionBuilder,
@@ -65,8 +66,7 @@ pub(super) struct FuncLowerer<'a> {
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
     pub(super) loop_stack: Vec<LoopContext>,
-    pub(super) globals: Vec<GlobalData>,
-    next_global: u32,
+    pub(super) globals: &'g mut GlobalArena,
 }
 
 /// Base pointer + length pair for slice-like lowering.
@@ -81,7 +81,7 @@ pub(super) struct ValueSlot {
     pub(super) ty: IrTypeId,
 }
 
-impl<'a> FuncLowerer<'a> {
+impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Creates a new function lowerer for the given semantic function definition.
     ///
     /// Initializes the type context, extracts the function signature, and prepares
@@ -91,6 +91,7 @@ impl<'a> FuncLowerer<'a> {
         def_table: &DefTable,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        globals: &'g mut GlobalArena,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
 
@@ -143,29 +144,17 @@ impl<'a> FuncLowerer<'a> {
             param_defs,
             param_tys,
             loop_stack: Vec::new(),
-            globals: Vec::new(),
-            next_global: 0,
+            globals,
         }
     }
 
-    pub(super) fn finish(self) -> LoweredFunction {
-        LoweredFunction {
-            func: self.builder.finish(),
-            types: self.type_lowerer.ir_type_cache,
-            globals: self.globals,
-        }
+    pub(super) fn finish(self) -> (Function, IrTypeCache) {
+        (self.builder.finish(), self.type_lowerer.ir_type_cache)
     }
 
     /// Registers a byte blob as a global and returns its ID.
     pub(super) fn add_global_bytes(&mut self, bytes: Vec<u8>) -> GlobalId {
-        let id = GlobalId(self.next_global);
-        self.next_global += 1;
-        self.globals.push(GlobalData {
-            id,
-            bytes,
-            align: 1,
-        });
-        id
+        self.globals.add_bytes(bytes)
     }
 
     /// Lowers a value expression by consulting its precomputed lowering plan.

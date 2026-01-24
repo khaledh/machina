@@ -7,6 +7,7 @@ mod branching;
 mod calls;
 mod error;
 mod fstring;
+mod globals;
 mod join;
 mod linear;
 mod locals;
@@ -18,6 +19,7 @@ mod types;
 
 use crate::resolve::DefTable;
 use crate::ssa::IrTypeCache;
+use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::lowerer::BranchResult;
 use crate::ssa::model::ir::{Function, GlobalData, Terminator};
 use crate::tree::semantic as sem;
@@ -27,6 +29,11 @@ use lowerer::FuncLowerer;
 pub struct LoweredFunction {
     pub func: Function,
     pub types: IrTypeCache,
+    pub globals: Vec<GlobalData>,
+}
+
+pub struct LoweredModule {
+    pub funcs: Vec<LoweredFunction>,
     pub globals: Vec<GlobalData>,
 }
 
@@ -46,9 +53,43 @@ pub fn lower_func(
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
 ) -> Result<LoweredFunction, LoweringError> {
+    let mut globals = GlobalArena::new();
+    lower_func_with_globals(func, def_table, type_map, lowering_plans, &mut globals)
+}
+
+pub fn lower_module(
+    module: &sem::Module,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+) -> Result<LoweredModule, LoweringError> {
+    let mut globals = GlobalArena::new();
+    let mut funcs = Vec::new();
+
+    for func_def in module.func_defs() {
+        let lowered =
+            lower_func_with_globals(func_def, def_table, type_map, lowering_plans, &mut globals)?;
+        funcs.push(lowered);
+    }
+
+    Ok(LoweredModule {
+        funcs,
+        globals: globals.into_globals(),
+    })
+}
+
+fn lower_func_with_globals(
+    func: &sem::FuncDef,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    globals: &mut GlobalArena,
+) -> Result<LoweredFunction, LoweringError> {
+    let globals_start = globals.len();
+
     // Initialize the lowerer with function metadata and type information.
     // The builder starts with the cursor at the entry block (block 0).
-    let mut lowerer = FuncLowerer::new(func, def_table, type_map, lowering_plans);
+    let mut lowerer = FuncLowerer::new(func, def_table, type_map, lowering_plans, globals);
 
     // Add function parameters as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
@@ -75,7 +116,14 @@ pub fn lower_func(
             .terminate(Terminator::Return { value: Some(value) });
     }
 
-    Ok(lowerer.finish())
+    let (func, types) = lowerer.finish();
+    let globals = globals.slice_from(globals_start);
+
+    Ok(LoweredFunction {
+        func,
+        types,
+        globals,
+    })
 }
 
 #[cfg(test)]

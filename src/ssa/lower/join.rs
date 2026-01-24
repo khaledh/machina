@@ -25,7 +25,7 @@ pub(super) struct JoinSession {
     saved_locals: LocalSnapshot,
 }
 
-impl crate::ssa::lower::lowerer::FuncLowerer<'_> {
+impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
     /// Builds a join plan for merging control flow from multiple branches.
     ///
     /// Creates the join block with:
@@ -101,14 +101,17 @@ impl JoinSession {
 
     pub(super) fn emit_branch(
         &self,
-        lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_>,
+        lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>,
         value: ValueId,
         span: Span,
     ) -> Result<(), LoweringError> {
         lowerer.emit_join_branch(&self.plan, value, span)
     }
 
-    pub(super) fn restore_locals(&self, lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_>) {
+    pub(super) fn restore_locals(
+        &self,
+        lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>,
+    ) {
         lowerer.locals.restore(&self.saved_locals);
     }
 
@@ -116,7 +119,7 @@ impl JoinSession {
         self.plan.join_value
     }
 
-    pub(super) fn finalize(self, lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_>) {
+    pub(super) fn finalize(self, lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>) {
         lowerer.builder.select_block(self.plan.join_bb);
         lowerer.locals.set_from_params_like(
             &self.plan.defs,

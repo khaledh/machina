@@ -14,7 +14,7 @@ enum LoweredFmtSegment {
     Int { value: ValueId, signed: bool },
 }
 
-impl<'a> FuncLowerer<'a> {
+impl<'a, 'g> FuncLowerer<'a, 'g> {
     // --- Fixed-length f-string formatting (view string) ---
 
     pub(super) fn lower_string_fmt_view(
