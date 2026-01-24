@@ -289,6 +289,12 @@ impl<'a> LoweringPlanBuilder<'a> {
 
             sem::ValueExprKind::Load { place } => self.is_linear_place_expr(place),
 
+            sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
+                self.is_linear_place_expr(place)
+            }
+
+            sem::ValueExprKind::Coerce { expr, .. } => self.is_linear_value_expr(expr),
+
             sem::ValueExprKind::AddrOf { place } => self.is_linear_place_expr(place),
 
             sem::ValueExprKind::Len { place } => self.is_linear_place_expr(place),

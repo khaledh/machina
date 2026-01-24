@@ -229,6 +229,34 @@ impl<'a> FuncLowerer<'a> {
         Ok((base.addr, curr_ty))
     }
 
+    /// Resolves a value holding heap/ref pointers to its base address.
+    pub(super) fn resolve_deref_base_value(
+        &mut self,
+        value: ValueId,
+        ty: Type,
+        deref_count: usize,
+    ) -> (ValueId, Type) {
+        let mut base_addr = value;
+        let mut curr_ty = ty;
+
+        for i in 0..deref_count {
+            let elem_ty = match curr_ty {
+                Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                other => panic!("ssa resolve_deref_base_value on non-heap/ref {:?}", other),
+            };
+
+            if i > 0 {
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                base_addr = self.builder.load(base_addr, ptr_ir_ty);
+            }
+
+            curr_ty = (*elem_ty).clone();
+        }
+
+        (base_addr, curr_ty)
+    }
+
     /// Ensures a local has an addressable slot and returns its address.
     pub(super) fn ensure_local_addr(&mut self, def_id: DefId, value_ty: IrTypeId) -> ValueId {
         let local = self.lookup_local(def_id);

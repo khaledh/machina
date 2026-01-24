@@ -4,7 +4,7 @@ use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{BinOp, CastKind, Terminator, UnOp};
+use crate::ssa::model::ir::{BinOp, CastKind, Terminator, UnOp, ValueId};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -299,21 +299,16 @@ impl<'a> FuncLowerer<'a> {
                     None => base_len,
                 };
 
-                // Compute the resulting slice pointer and length.
-                let ptr_at = self.builder.index_addr(base_ptr, start_val, elem_ptr_ty);
-                let len_at = self.builder.binop(BinOp::Sub, end_val, start_val, u64_ty);
-
-                // Materialize the slice struct and load it as a value.
                 let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let addr = self.alloc_local_addr(slice_ty);
-
-                let ptr_field = self.field_addr_typed(addr, 0, elem_ptr_ty);
-                self.builder.store(ptr_field, ptr_at);
-
-                let len_field = self.field_addr_typed(addr, 1, u64_ty);
-                self.builder.store(len_field, len_at);
-
-                Ok(self.builder.load(addr, slice_ty))
+                Ok(self.emit_slice_value(
+                    slice_ty,
+                    elem_ptr_ty,
+                    u64_ty,
+                    base_ptr,
+                    base_len,
+                    start_val,
+                    end_val,
+                ))
             }
 
             sem::ValueExprKind::Len { place } => {
@@ -337,6 +332,85 @@ impl<'a> FuncLowerer<'a> {
                     other => panic!("ssa len on unsupported type {:?}", other),
                 }
             }
+
+            sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
+                match &place.kind {
+                    sem::PlaceExprKind::Var { def_id, .. } => Ok(self.load_local_value(*def_id)),
+                    _ => {
+                        let place_addr = self.lower_place_addr(place)?;
+                        Ok(self.builder.load(place_addr.addr, place_addr.value_ty))
+                    }
+                }
+            }
+
+            sem::ValueExprKind::Coerce { kind, expr: inner } => match kind {
+                crate::tree::CoerceKind::ArrayToSlice => {
+                    let plan = self.type_map.lookup_slice_plan(expr.id).unwrap_or_else(|| {
+                        panic!("ssa coerce missing slice plan for expr {:?}", expr.id);
+                    });
+
+                    let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
+                    else {
+                        panic!("ssa coerce array-to-slice has non-slice type");
+                    };
+
+                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+
+                    let (base_addr, base_len) = match plan.base {
+                        sem::SliceBaseKind::Array { len, deref_count } => {
+                            let base_ty = self.type_map.type_table().get(inner.ty).clone();
+
+                            // Prefer a place-based lowering to reuse the base address; otherwise
+                            // materialize the value into a temporary slot.
+                            let (base_addr, base_ty) = match &inner.kind {
+                                sem::ValueExprKind::Load { place }
+                                | sem::ValueExprKind::Move { place }
+                                | sem::ValueExprKind::ImplicitMove { place } => {
+                                    self.resolve_deref_base(place, deref_count)?
+                                }
+                                _ => {
+                                    let value = self.lower_value_expr_linear(inner)?;
+                                    if deref_count == 0 {
+                                        let array_ty = self.type_lowerer.lower_type_id(inner.ty);
+                                        let addr = self.alloc_local_addr(array_ty);
+                                        self.builder.store(addr, value);
+                                        (addr, base_ty)
+                                    } else {
+                                        self.resolve_deref_base_value(value, base_ty, deref_count)
+                                    }
+                                }
+                            };
+
+                            let Type::Array { .. } = base_ty else {
+                                panic!("ssa coerce array-to-slice on {:?}", base_ty);
+                            };
+
+                            let zero = self.builder.const_int(0, false, 64, u64_ty);
+                            let ptr = self.builder.index_addr(base_addr, zero, elem_ptr_ty);
+                            let len_val = self.builder.const_int(len as i128, false, 64, u64_ty);
+                            (ptr, len_val)
+                        }
+                        other => {
+                            panic!("ssa coerce array-to-slice with base {:?}", other);
+                        }
+                    };
+
+                    let start_val = self.builder.const_int(0, false, 64, u64_ty);
+                    let end_val = base_len;
+                    let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+                    Ok(self.emit_slice_value(
+                        slice_ty,
+                        elem_ptr_ty,
+                        u64_ty,
+                        base_addr,
+                        base_len,
+                        start_val,
+                        end_val,
+                    ))
+                }
+            },
 
             sem::ValueExprKind::Load { place } => match &place.kind {
                 sem::PlaceExprKind::Var { def_id, .. } => Ok(self.load_local_value(*def_id)),
@@ -451,5 +525,32 @@ impl<'a> FuncLowerer<'a> {
                 span: pattern.span,
             }),
         }
+    }
+
+    /// Builds a slice value from a base pointer and length.
+    fn emit_slice_value(
+        &mut self,
+        slice_ty: crate::ssa::IrTypeId,
+        elem_ptr_ty: crate::ssa::IrTypeId,
+        u64_ty: crate::ssa::IrTypeId,
+        base_ptr: ValueId,
+        _base_len: ValueId,
+        start_val: ValueId,
+        end_val: ValueId,
+    ) -> LinearValue {
+        // Compute the resulting slice pointer and length.
+        let ptr_at = self.builder.index_addr(base_ptr, start_val, elem_ptr_ty);
+        let len_at = self.builder.binop(BinOp::Sub, end_val, start_val, u64_ty);
+
+        // Materialize the slice struct and load it as a value.
+        let addr = self.alloc_local_addr(slice_ty);
+
+        let ptr_field = self.field_addr_typed(addr, 0, elem_ptr_ty);
+        self.builder.store(ptr_field, ptr_at);
+
+        let len_field = self.field_addr_typed(addr, 1, u64_ty);
+        self.builder.store(len_field, len_at);
+
+        self.builder.load(addr, slice_ty)
     }
 }
