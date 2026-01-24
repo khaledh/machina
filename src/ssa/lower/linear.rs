@@ -90,6 +90,12 @@ impl<'a> FuncLowerer<'a> {
                 Ok(self.load_slot(&slot))
             }
 
+            sem::ValueExprKind::Range { start, .. } => {
+                // Range values are represented as u64 in SSA (bounds live in the type).
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_int(*start as i128, false, 64, ty))
+            }
+
             sem::ValueExprKind::StringFmt { plan } => {
                 let string_ty = self.type_lowerer.lower_type_id(expr.ty);
                 match plan.kind {

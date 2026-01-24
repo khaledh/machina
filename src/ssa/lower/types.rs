@@ -72,6 +72,7 @@ impl<'a> TypeLowerer<'a> {
                 signed: false,
                 bits: 32,
             }),
+            Type::Range { .. } => self.lower_type(&Type::uint(64)),
 
             // String is lowered as a struct with pointer, length, and capacity.
             Type::String => {

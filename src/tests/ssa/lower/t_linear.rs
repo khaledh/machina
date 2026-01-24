@@ -23,6 +23,28 @@ fn test_lower_const() {
 }
 
 #[test]
+fn test_lower_range_type_value() {
+    let ctx = analyze(indoc! {"
+        fn main() -> range(0, 10) {
+            3
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v0: u64 = const 3:u64
+            ret %v0
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_stmt() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
