@@ -57,6 +57,14 @@ impl<'a> FuncLowerer<'a> {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.const_bool(*value, ty))
             }
+            sem::ValueExprKind::CharLit(value) => {
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                let signed = false;
+                let bits = 32;
+                Ok(self
+                    .builder
+                    .const_int(*value as u32 as i128, signed, bits, ty))
+            }
 
             sem::ValueExprKind::ArrayLit { init, .. } => {
                 // Allocate a local for the array and get its address

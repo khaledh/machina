@@ -137,6 +137,28 @@ fn test_lower_unop_not() {
 }
 
 #[test]
+fn test_lower_char_lit() {
+    let ctx = analyze(indoc! {"
+        fn main() -> char {
+            'a'
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u32 {
+          bb0():
+            %v0: u32 = const 97:u32
+            ret %v0
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_cmp() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {

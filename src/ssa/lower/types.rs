@@ -66,6 +66,10 @@ impl<'a> TypeLowerer<'a> {
                 signed: *signed,
                 bits: *bits,
             }),
+            Type::Char => self.ir_type_cache.add(IrTypeKind::Int {
+                signed: false,
+                bits: 32,
+            }),
 
             // String is lowered as a struct with pointer, length, and capacity.
             Type::String => {
