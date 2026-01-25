@@ -497,6 +497,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(StmtOutcome::Continue)
             }
 
+            sem::StmtExprKind::VarDecl { def_id, .. } => {
+                let def = self
+                    .def_table
+                    .lookup_def(*def_id)
+                    .unwrap_or_else(|| panic!("ssa var decl missing def {:?}", def_id));
+                let ty_id = self
+                    .type_map
+                    .lookup_def_type_id(def)
+                    .unwrap_or_else(|| panic!("ssa var decl missing type for {:?}", def_id));
+                let ir_ty = self.type_lowerer.lower_type_id(ty_id);
+                let addr = self.alloc_local_addr(ir_ty);
+                self.locals.insert(*def_id, LocalValue::addr(addr, ir_ty));
+                Ok(StmtOutcome::Continue)
+            }
+
             sem::StmtExprKind::Assign {
                 assignee, value, ..
             } => {
@@ -525,8 +540,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(StmtOutcome::Return)
             }
 
-            sem::StmtExprKind::VarDecl { .. }
-            | sem::StmtExprKind::While { .. }
+            sem::StmtExprKind::While { .. }
             | sem::StmtExprKind::For { .. }
             | sem::StmtExprKind::Break
             | sem::StmtExprKind::Continue => {

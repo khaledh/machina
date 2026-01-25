@@ -53,6 +53,7 @@ pub(super) struct LoopContext {
 /// - Current SSA values for local variables (updated on assignment/join)
 /// - Expression plans from semantic analysis (linear vs branching)
 pub(super) struct FuncLowerer<'a, 'g> {
+    pub(crate) def_table: &'a DefTable,
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
     pub(super) builder: FunctionBuilder,
@@ -84,7 +85,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// parameter information for later mapping to SSA block parameters.
     pub(super) fn new(
         func: &sem::FuncDef,
-        def_table: &DefTable,
+        def_table: &'a DefTable,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         globals: &'g mut GlobalArena,
@@ -132,6 +133,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
         let builder = FunctionBuilder::new(func.def_id, func.sig.name.clone(), sig);
         Self {
+            def_table,
             type_map,
             type_lowerer,
             builder,
@@ -151,7 +153,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn new_method(
         type_name: &str,
         method_def: &sem::MethodDef,
-        def_table: &DefTable,
+        def_table: &'a DefTable,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         globals: &'g mut GlobalArena,
@@ -221,6 +223,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let name = format!("{type_name}${}", method_def.sig.name);
         let builder = FunctionBuilder::new(method_def.def_id, name, sig);
         Self {
+            def_table,
             type_map,
             type_lowerer,
             builder,
