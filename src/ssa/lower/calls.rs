@@ -1,8 +1,8 @@
 //! Call lowering.
 
 use crate::diag::Span;
+use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue};
-use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Callee, RuntimeFn, ValueId};
 use crate::tree::{NodeId, semantic as sem};
 use crate::types::Type;
@@ -86,18 +86,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         }
 
-        // Resolve the callee (only direct calls supported).
-        let callee = match &call_plan.target {
-            sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
-            sem::CallTarget::Indirect => {
-                return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
-            }
-            sem::CallTarget::Intrinsic(intrinsic) => {
-                Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)
-            }
-        };
-
-        // Lower the receiver (value receivers only).
+        // Lower the receiver.
         let receiver_value = match receiver {
             sem::MethodReceiver::ValueExpr(expr) => {
                 let value = self.lower_linear_value_expr(expr)?;
@@ -111,6 +100,26 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     value: addr.addr,
                     ty,
                 }
+            }
+        };
+
+        // Resolve the callee.
+        let callee = match &call_plan.target {
+            sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
+            sem::CallTarget::Indirect => {
+                // For indirect method calls, treat the receiver as the callee value.
+                // The call plan still governs how the receiver/args are passed.
+                let callee_value = match receiver {
+                    sem::MethodReceiver::ValueExpr(_) => receiver_value.value,
+                    sem::MethodReceiver::PlaceExpr(_) => {
+                        let ty = self.type_lowerer.lower_type(&receiver_value.ty);
+                        self.builder.load(receiver_value.value, ty)
+                    }
+                };
+                Callee::Value(callee_value)
+            }
+            sem::CallTarget::Intrinsic(intrinsic) => {
+                Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)
             }
         };
 
