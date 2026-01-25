@@ -25,6 +25,7 @@ impl NrvoAnalyzer {
             def_table,
             type_map,
             lowering_plans,
+            drop_plans,
             symbols,
             node_id_gen,
         } = self.ctx;
@@ -40,6 +41,7 @@ impl NrvoAnalyzer {
             def_table,
             type_map,
             lowering_plans,
+            drop_plans,
             symbols,
             node_id_gen,
         }

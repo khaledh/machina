@@ -32,6 +32,7 @@ use crate::tree::semantic as sem;
 mod bind_pattern;
 mod calls;
 mod closure;
+mod drop_plan;
 mod elaborator;
 mod index_plan;
 mod lowering_plan;
@@ -40,6 +41,7 @@ mod place;
 mod types;
 mod value;
 
+use crate::elaborate::drop_plan::build_drop_plans;
 use crate::elaborate::elaborator::Elaborator;
 use crate::elaborate::lowering_plan::build_lowering_plans;
 
@@ -74,6 +76,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
 
     let module = elaborator.elaborate_module(&module);
     let lowering_plans = build_lowering_plans(&module, &type_map);
+    let drop_plans = build_drop_plans(&module, &def_table, &type_map);
 
     // Generate method names for lifted closures and add them to the symbol table
     let mut symbols = symbols;
@@ -105,6 +108,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         def_table,
         type_map,
         lowering_plans,
+        drop_plans,
         symbols,
         node_id_gen,
     }
