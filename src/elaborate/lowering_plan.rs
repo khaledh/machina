@@ -283,7 +283,9 @@ impl<'a> LoweringPlanBuilder<'a> {
                 payload.iter().all(|value| self.is_linear_value_expr(value))
             }
 
-            sem::ValueExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
+            sem::ValueExprKind::UnaryOp { expr, .. } | sem::ValueExprKind::HeapAlloc { expr } => {
+                self.is_linear_value_expr(expr)
+            }
 
             sem::ValueExprKind::BinOp { left, op, right } => match op {
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr => false,

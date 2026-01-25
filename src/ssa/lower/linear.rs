@@ -4,7 +4,7 @@ use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{BinOp, Terminator, UnOp, ValueId};
+use crate::ssa::model::ir::{BinOp, Callee, RuntimeFn, Terminator, UnOp, ValueId};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -256,6 +256,39 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     UnaryOp::BitNot => self.builder.unop(UnOp::BitNot, value, ty),
                 };
                 Ok(result)
+            }
+
+            sem::ValueExprKind::HeapAlloc { expr: inner } => {
+                let heap_ty = self.type_map.type_table().get(expr.ty).clone();
+                let Type::Heap { elem_ty } = heap_ty else {
+                    panic!("ssa heap alloc expects heap type, got {:?}", heap_ty);
+                };
+
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let size_val =
+                    self.builder
+                        .const_int(layout.size() as i128, false, 64, u64_ty);
+                let align_val =
+                    self.builder
+                        .const_int(layout.align() as i128, false, 64, u64_ty);
+
+                // Allocate heap storage and initialize it with the value.
+                let ptr_val = self.builder.call(
+                    Callee::Runtime(RuntimeFn::Alloc),
+                    vec![size_val, align_val],
+                    ptr_ir_ty,
+                );
+
+                if layout.size() != 0 {
+                    let value = self.lower_linear_value_expr(inner)?;
+                    self.builder.store(ptr_val, value);
+                }
+
+                Ok(ptr_val)
             }
 
             sem::ValueExprKind::BinOp { left, op, right } => {

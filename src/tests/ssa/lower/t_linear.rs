@@ -377,6 +377,28 @@ fn test_lower_string_fmt_owned() {
 }
 
 #[test]
+fn test_lower_heap_alloc() {
+    let ctx = analyze(indoc! {"
+        fn main() -> ^u64 {
+            ^42
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("call @__rt_alloc"));
+    assert!(text.contains("store"));
+}
+
+#[test]
 fn test_lower_drop_string_local() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
