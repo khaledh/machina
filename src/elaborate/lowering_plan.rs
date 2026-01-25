@@ -335,9 +335,7 @@ impl<'a> LoweringPlanBuilder<'a> {
                     && self.is_linear_call_plan(expr.id, true)
             }
 
-            // SSA lowering doesn't emit closure refs yet; keep this branching
-            // so we surface an explicit unimplemented error.
-            sem::ValueExprKind::ClosureRef { .. } => false,
+            sem::ValueExprKind::ClosureRef { .. } => true,
 
             _ => false,
         }

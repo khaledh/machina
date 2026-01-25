@@ -490,8 +490,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.lower_method_call_expr(expr, receiver, args)
             }
 
-            sem::ValueExprKind::ClosureRef { .. } => {
-                Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
+            sem::ValueExprKind::ClosureRef { def_id } => {
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_func_addr(*def_id, ty))
             }
 
             _ => Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr)),
