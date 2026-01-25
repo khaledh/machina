@@ -3,6 +3,7 @@
 //! This module currently supports a subset of the language while the SSA
 //! pipeline is built out incrementally.
 
+mod bind;
 mod branching;
 mod calls;
 mod error;

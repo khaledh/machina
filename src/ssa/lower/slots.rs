@@ -1,6 +1,7 @@
 //! Helpers for materializing values into addressable slots.
 
 use crate::ssa::IrTypeId;
+use crate::ssa::lower::locals::{LocalStorage, LocalValue};
 use crate::ssa::lower::lowerer::{FuncLowerer, ValueSlot};
 use crate::ssa::model::ir::ValueId;
 
@@ -39,6 +40,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Loads a value from a slot.
     pub(super) fn load_slot(&mut self, slot: &ValueSlot) -> ValueId {
         self.builder.load(slot.addr, slot.ty)
+    }
+
+    /// Returns a slot for a local value, materializing value storage if needed.
+    pub(super) fn slot_for_value(&mut self, value: LocalValue) -> ValueSlot {
+        match value.storage {
+            LocalStorage::Value(value_id) => self.materialize_value_slot(value_id, value.value_ty),
+            LocalStorage::Addr(addr) => ValueSlot {
+                addr,
+                ty: value.value_ty,
+            },
+        }
     }
 
     /// Loads a field value from a base aggregate.

@@ -492,7 +492,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let value_expr = value;
                 let value = self.lower_linear_value_expr(value_expr)?;
                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                self.bind_pattern(pattern, LocalValue::value(value, ty))?;
+                let value_ty = self.type_map.type_table().get(value_expr.ty).clone();
+                self.bind_pattern(pattern, LocalValue::value(value, ty), &value_ty)?;
                 Ok(StmtOutcome::Continue)
             }
 
@@ -547,25 +548,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     expr.span
                 );
             }
-        }
-    }
-
-    /// Binds a pattern to a value, updating the locals map.
-    /// Only simple name patterns are supported.
-    pub(super) fn bind_pattern(
-        &mut self,
-        pattern: &sem::BindPattern,
-        value: LocalValue,
-    ) -> Result<(), LoweringError> {
-        match &pattern.kind {
-            sem::BindPatternKind::Name { def_id, .. } => {
-                self.locals.insert(*def_id, value);
-                Ok(())
-            }
-            _ => Err(LoweringError {
-                kind: LoweringErrorKind::UnsupportedStmt,
-                span: pattern.span,
-            }),
         }
     }
 

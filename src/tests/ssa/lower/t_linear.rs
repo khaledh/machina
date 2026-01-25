@@ -303,6 +303,46 @@ fn test_lower_tuple_lit() {
 }
 
 #[test]
+fn test_lower_tuple_bind() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            let (a, b) = (1, 2);
+            a + b
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          locals:
+            %l0: (u64, u64)
+            %l1: (u64, u64)
+          bb0():
+            %v0: ptr<(u64, u64)> = addr_of %l0
+            %v1: u64 = const 1:u64
+            %v2: ptr<u64> = field_addr %v0, 0
+            store %v2, %v1
+            %v3: u64 = const 2:u64
+            %v4: ptr<u64> = field_addr %v0, 1
+            store %v4, %v3
+            %v5: (u64, u64) = load %v0
+            %v6: ptr<(u64, u64)> = addr_of %l1
+            store %v6, %v5
+            %v7: ptr<u64> = field_addr %v6, 0
+            %v8: u64 = load %v7
+            %v9: ptr<u64> = field_addr %v6, 1
+            %v10: u64 = load %v9
+            %v11: u64 = add %v8, %v10
+            ret %v11
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_struct_lit() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64, b: u64 }
@@ -330,6 +370,92 @@ fn test_lower_struct_lit() {
             store %v4, %v3
             %v5: Pair = load %v0
             ret %v5
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_struct_bind() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+
+        fn main() -> u64 {
+            let Pair { a, b } = Pair { a: 1, b: 2 };
+            a + b
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          locals:
+            %l0: Pair
+            %l1: Pair
+          bb0():
+            %v0: ptr<Pair> = addr_of %l0
+            %v1: u64 = const 1:u64
+            %v2: ptr<u64> = field_addr %v0, 0
+            store %v2, %v1
+            %v3: u64 = const 2:u64
+            %v4: ptr<u64> = field_addr %v0, 1
+            store %v4, %v3
+            %v5: Pair = load %v0
+            %v6: ptr<Pair> = addr_of %l1
+            store %v6, %v5
+            %v7: ptr<u64> = field_addr %v6, 0
+            %v8: u64 = load %v7
+            %v9: ptr<u64> = field_addr %v6, 1
+            %v10: u64 = load %v9
+            %v11: u64 = add %v8, %v10
+            ret %v11
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_array_bind() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            let [a, b] = u64[1, 2];
+            a + b
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          locals:
+            %l0: u64[2]
+            %l1: u64[2]
+          bb0():
+            %v0: ptr<u64[2]> = addr_of %l0
+            %v1: u64 = const 1:u64
+            %v2: u64 = const 0:u64
+            %v3: ptr<u64> = index_addr %v0, %v2
+            store %v3, %v1
+            %v4: u64 = const 2:u64
+            %v5: u64 = const 1:u64
+            %v6: ptr<u64> = index_addr %v0, %v5
+            store %v6, %v4
+            %v7: u64[2] = load %v0
+            %v8: ptr<u64[2]> = addr_of %l1
+            store %v8, %v7
+            %v9: u64 = const 0:u64
+            %v10: ptr<u64> = index_addr %v8, %v9
+            %v11: u64 = load %v10
+            %v12: u64 = const 1:u64
+            %v13: ptr<u64> = index_addr %v8, %v12
+            %v14: u64 = load %v13
+            %v15: u64 = add %v11, %v14
+            ret %v15
         }
     "};
     assert_eq!(text, expected);
