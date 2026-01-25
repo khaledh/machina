@@ -136,3 +136,96 @@ fn test_lower_match_enum_payload_binding() {
     "};
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_match_tuple_decision_tree() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            match (true, 2) {
+                (true, 1) => 10,
+                (true, 2) => 20,
+                _ => 0,
+            }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          locals:
+            %l0: (bool, u64)
+            %l1: (bool, u64)
+          bb0():
+            %v0: ptr<(bool, u64)> = addr_of %l0
+            %v1: bool = const true
+            %v2: ptr<bool> = field_addr %v0, 0
+            store %v2, %v1
+            %v3: u64 = const 2:u64
+            %v4: ptr<u64> = field_addr %v0, 1
+            store %v4, %v3
+            %v5: (bool, u64) = load %v0
+            %v6: ptr<(bool, u64)> = addr_of %l1
+            store %v6, %v5
+            %v15: ptr<bool> = field_addr %v6, 0
+            %v16: bool = load %v15
+            %v17: bool = const true
+            %v18: bool = cmp.eq %v16, %v17
+            cbr %v18, bb9, bb5
+
+          bb1():
+            %v24: u64 = const 10:u64
+            br bb10(%v24)
+
+          bb2():
+            %v25: u64 = const 20:u64
+            br bb10(%v25)
+
+          bb3():
+            %v26: u64 = const 0:u64
+            br bb10(%v26)
+
+          bb4():
+            br bb1
+
+          bb5():
+            %v7: ptr<bool> = field_addr %v6, 0
+            %v8: bool = load %v7
+            %v9: bool = const true
+            %v10: bool = cmp.eq %v8, %v9
+            cbr %v10, bb8, bb7
+
+          bb6():
+            br bb2
+
+          bb7():
+            br bb3
+
+          bb8():
+            %v11: ptr<u64> = field_addr %v6, 1
+            %v12: u64 = load %v11
+            %v13: u64 = const 2:u64
+            %v14: bool = cmp.eq %v12, %v13
+            cbr %v14, bb6, bb7
+
+          bb9():
+            %v19: ptr<u64> = field_addr %v6, 1
+            %v20: u64 = load %v19
+            %v21: u64 = const 1:u64
+            %v22: bool = cmp.eq %v20, %v21
+            cbr %v22, bb4, bb5
+
+          bb10(%v23: u64):
+            ret %v23
+        }
+    "};
+    assert_eq!(text, expected);
+}

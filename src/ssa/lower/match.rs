@@ -4,10 +4,10 @@
 //! precomputed match plans to avoid pattern re-derivation.
 
 use crate::ssa::IrTypeId;
+use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer};
-use crate::ssa::lower::{LoweringError, LoweringErrorKind};
-use crate::ssa::model::ir::{ConstValue, SwitchCase, Terminator, ValueId};
+use crate::ssa::model::ir::{CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::{Type, TypeId};
 
@@ -50,10 +50,73 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
         match decision {
             sem::MatchDecision::Switch(switch) => helper.lower_switch(arms, &arm_plans, &switch),
-            sem::MatchDecision::DecisionTree(_) => Err(helper
-                .lowerer
-                .err_span(expr.span, LoweringErrorKind::UnimplementedBranching)),
+            sem::MatchDecision::DecisionTree(tree) => {
+                helper.lower_decision_tree(arms, &arm_plans, &tree)
+            }
         }
+    }
+
+    fn lower_decision_tree(
+        &mut self,
+        arms: &[sem::MatchArm],
+        arm_plans: &[sem::MatchArmPlan],
+        tree: &sem::MatchDecisionNode,
+    ) -> Result<BranchResult, LoweringError> {
+        if arms.len() != arm_plans.len() {
+            panic!(
+                "ssa match plan arm mismatch: {} arms vs {} plans",
+                arms.len(),
+                arm_plans.len()
+            );
+        }
+
+        // Pre-allocate arm blocks and mark which arms are reachable in the tree.
+        let mut arm_blocks = Vec::with_capacity(arms.len());
+        for _ in 0..arms.len() {
+            arm_blocks.push(self.lowerer.builder.add_block());
+        }
+        let mut reachable = vec![false; arms.len()];
+        self.collect_reachable_arms(tree, &mut reachable);
+
+        // Emit the decision tree starting from the current block.
+        let entry_bb = self.lowerer.builder.current_block();
+        self.emit_decision_node(tree, entry_bb, &arm_blocks)?;
+
+        let join = self.lowerer.begin_join(self.expr);
+
+        // Lower each reachable arm and branch into the join.
+        let mut returned = vec![false; arms.len()];
+        for (arm_index, (arm, arm_plan)) in arms.iter().zip(arm_plans).enumerate() {
+            if !reachable[arm_index] {
+                continue;
+            }
+
+            join.restore_locals(self.lowerer);
+            self.lowerer.builder.select_block(arm_blocks[arm_index]);
+
+            self.lower_bindings(&arm_plan.bindings)?;
+
+            match self.lowerer.lower_branching_value_expr(&arm.body)? {
+                BranchResult::Value(value) => {
+                    join.emit_branch(self.lowerer, value, arm.body.span)?;
+                }
+                BranchResult::Return => {
+                    returned[arm_index] = true;
+                }
+            }
+        }
+
+        let all_returned = reachable
+            .iter()
+            .zip(returned.iter())
+            .all(|(is_reachable, did_return)| !is_reachable || *did_return);
+        if all_returned {
+            return Ok(BranchResult::Return);
+        }
+
+        let join_value = join.join_value();
+        join.finalize(self.lowerer);
+        Ok(BranchResult::Value(join_value))
     }
 
     fn lower_switch(
@@ -151,6 +214,134 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         let join_value = join.join_value();
         join.finalize(self.lowerer);
         Ok(BranchResult::Value(join_value))
+    }
+
+    fn emit_decision_node(
+        &mut self,
+        node: &sem::MatchDecisionNode,
+        entry_bb: crate::ssa::model::ir::BlockId,
+        arm_blocks: &[crate::ssa::model::ir::BlockId],
+    ) -> Result<(), LoweringError> {
+        match node {
+            sem::MatchDecisionNode::Leaf { arm_index } => {
+                self.lowerer.builder.select_block(entry_bb);
+                self.lowerer.builder.terminate(Terminator::Br {
+                    target: arm_blocks[*arm_index],
+                    args: Vec::new(),
+                });
+                Ok(())
+            }
+            sem::MatchDecisionNode::Unreachable => {
+                self.lowerer.builder.select_block(entry_bb);
+                self.lowerer.builder.terminate(Terminator::Unreachable);
+                Ok(())
+            }
+            sem::MatchDecisionNode::Tests {
+                tests,
+                on_match,
+                on_fail,
+            } => {
+                let on_match_bb = self.lowerer.builder.add_block();
+                let on_fail_bb = self.lowerer.builder.add_block();
+
+                // Emit child subtrees before wiring the test chain.
+                self.emit_decision_node(on_match, on_match_bb, arm_blocks)?;
+                self.emit_decision_node(on_fail, on_fail_bb, arm_blocks)?;
+
+                self.emit_tests_chain(entry_bb, tests, on_match_bb, on_fail_bb)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn emit_tests_chain(
+        &mut self,
+        entry_bb: crate::ssa::model::ir::BlockId,
+        tests: &[sem::MatchTest],
+        on_match_bb: crate::ssa::model::ir::BlockId,
+        on_fail_bb: crate::ssa::model::ir::BlockId,
+    ) -> Result<(), LoweringError> {
+        if tests.is_empty() {
+            self.lowerer.builder.select_block(entry_bb);
+            self.lowerer.builder.terminate(Terminator::Br {
+                target: on_match_bb,
+                args: Vec::new(),
+            });
+            return Ok(());
+        }
+
+        let mut current_bb = entry_bb;
+        for (index, test) in tests.iter().enumerate() {
+            self.lowerer.builder.select_block(current_bb);
+            let cond = self.lower_test_cond(test)?;
+
+            let then_bb = if index + 1 == tests.len() {
+                on_match_bb
+            } else {
+                self.lowerer.builder.add_block()
+            };
+
+            // Each test either advances to the next test or jumps to the fail subtree.
+            self.lowerer.builder.terminate(Terminator::CondBr {
+                cond,
+                then_bb,
+                then_args: Vec::new(),
+                else_bb: on_fail_bb,
+                else_args: Vec::new(),
+            });
+
+            current_bb = then_bb;
+        }
+
+        Ok(())
+    }
+
+    fn lower_test_cond(&mut self, test: &sem::MatchTest) -> Result<ValueId, LoweringError> {
+        let bool_ty = self.lowerer.type_lowerer.lower_type(&Type::Bool);
+
+        match &test.kind {
+            sem::MatchTestKind::Bool { value } => {
+                let (lhs, lhs_ty) = self.lower_place_value(&test.place)?;
+                let rhs = self.lowerer.builder.const_bool(*value, lhs_ty);
+                Ok(self.lowerer.builder.cmp(CmpOp::Eq, lhs, rhs, bool_ty))
+            }
+            sem::MatchTestKind::Int {
+                value,
+                signed,
+                bits,
+            } => {
+                let (lhs, lhs_ty) = self.lower_place_value(&test.place)?;
+                let rhs = self
+                    .lowerer
+                    .builder
+                    .const_int(*value as i128, *signed, *bits, lhs_ty);
+                Ok(self.lowerer.builder.cmp(CmpOp::Eq, lhs, rhs, bool_ty))
+            }
+            sem::MatchTestKind::EnumTag { tag, .. } => {
+                let (lhs, tag_ty) = self.lower_discriminant(&test.place)?;
+                let tag_ir_ty = self.lowerer.type_lowerer.lower_type(&tag_ty);
+                let rhs = self
+                    .lowerer
+                    .builder
+                    .const_int(*tag as i128, false, 32, tag_ir_ty);
+                Ok(self.lowerer.builder.cmp(CmpOp::Eq, lhs, rhs, bool_ty))
+            }
+        }
+    }
+
+    fn collect_reachable_arms(&self, node: &sem::MatchDecisionNode, reachable: &mut [bool]) {
+        match node {
+            sem::MatchDecisionNode::Leaf { arm_index } => {
+                reachable[*arm_index] = true;
+            }
+            sem::MatchDecisionNode::Tests {
+                on_match, on_fail, ..
+            } => {
+                self.collect_reachable_arms(on_match, reachable);
+                self.collect_reachable_arms(on_fail, reachable);
+            }
+            sem::MatchDecisionNode::Unreachable => {}
+        }
     }
 
     fn lower_discriminant(
