@@ -105,14 +105,6 @@ impl LocalMap {
         Some(args)
     }
 
-    /// Resets locals from block parameters.
-    pub(super) fn set_from_params(&mut self, defs: &[DefId], tys: &[IrTypeId], params: &[ValueId]) {
-        self.values.clear();
-        for ((def, ty), value) in defs.iter().zip(tys.iter()).zip(params.iter()) {
-            self.values.insert(*def, LocalValue::value(*value, *ty));
-        }
-    }
-
     /// Resets locals from block parameters, preserving storage kinds and value types.
     pub(super) fn set_from_params_like(
         &mut self,

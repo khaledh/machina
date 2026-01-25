@@ -218,3 +218,35 @@ fn test_lower_indirect_call() {
     );
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_out_param_def() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64 }
+
+        fn set(out p: Pair) {
+            p.a = 3;
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "});
+    let set_def = ctx.module.func_defs()[0];
+
+    let lowered = lower_func(set_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn set(ptr<Pair>) -> () {
+          bb0(%v0: ptr<Pair>):
+            %v1: u64 = const 3:u64
+            %v2: ptr<u64> = field_addr %v0, 0
+            store %v2, %v1
+            %v3: () = const ()
+            ret %v3
+        }
+    "};
+    assert_eq!(text, expected);
+}

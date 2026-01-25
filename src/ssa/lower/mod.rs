@@ -114,15 +114,12 @@ fn lower_func_with_globals(
     // Add function parameters as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
     let entry = lowerer.builder.current_block();
-    let param_defs = lowerer.param_defs.clone();
     let param_tys = lowerer.param_tys.clone();
     let mut param_values = Vec::with_capacity(param_tys.len());
     for ty in &param_tys {
         param_values.push(lowerer.builder.add_block_param(entry, *ty));
     }
-    lowerer
-        .locals
-        .set_from_params(&param_defs, &param_tys, &param_values);
+    lowerer.init_param_locals(&param_values);
 
     // Lower the function body. This may produce multiple basic blocks
     // for control flow (if/else, loops, etc.). The cursor ends at the
@@ -170,15 +167,12 @@ fn lower_method_def_with_globals(
     // Add method parameters (including `self`) as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
     let entry = lowerer.builder.current_block();
-    let param_defs = lowerer.param_defs.clone();
     let param_tys = lowerer.param_tys.clone();
     let mut param_values = Vec::with_capacity(param_tys.len());
     for ty in &param_tys {
         param_values.push(lowerer.builder.add_block_param(entry, *ty));
     }
-    lowerer
-        .locals
-        .set_from_params(&param_defs, &param_tys, &param_values);
+    lowerer.init_param_locals(&param_values);
 
     // Lower the method body and emit the final return if it yields a value.
     let result = lowerer.lower_branching_value_expr(&method_def.body)?;

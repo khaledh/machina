@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::resolve::{DefId, DefTable};
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::globals::GlobalArena;
-use crate::ssa::lower::locals::LocalMap;
+use crate::ssa::lower::locals::{LocalMap, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{BlockId, Function, FunctionSig, GlobalId, ValueId};
@@ -62,6 +62,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
+    pub(super) param_modes: Vec<ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
     pub(super) globals: &'g mut GlobalArena,
 }
@@ -107,22 +108,24 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Convert each parameter to SSA types. Only `in` mode is supported for now.
         let mut param_defs = Vec::with_capacity(func.sig.params.len());
         let mut param_tys = Vec::with_capacity(func.sig.params.len());
+        let mut param_modes = Vec::with_capacity(func.sig.params.len());
         for param in &func.sig.params {
-            if param.mode != ParamMode::In {
-                panic!(
-                    "ssa lower_func only supports in params, found {:?} for {:?}",
-                    param.mode, param.ident
-                );
-            }
             let def = def_table
                 .lookup_def(param.def_id)
                 .unwrap_or_else(|| panic!("ssa lower_func missing param def {:?}", param.def_id));
             let param_ty = type_map
                 .lookup_def_type(def)
                 .unwrap_or_else(|| panic!("ssa lower_func missing param type {:?}", param.def_id));
-            let param_ty_id = type_lowerer.lower_type(&param_ty);
+            let param_ty_id = match param.mode {
+                ParamMode::In | ParamMode::Sink => type_lowerer.lower_type(&param_ty),
+                ParamMode::Out | ParamMode::InOut => {
+                    let value_ty = type_lowerer.lower_type(&param_ty);
+                    type_lowerer.ptr_to(value_ty)
+                }
+            };
             param_defs.push(param.def_id);
             param_tys.push(param_ty_id);
+            param_modes.push(param.mode.clone());
         }
 
         // Build the SSA function signature and initialize the builder.
@@ -141,6 +144,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             lowering_plans,
             param_defs,
             param_tys,
+            param_modes,
             loop_stack: Vec::new(),
             globals,
         }
@@ -168,12 +172,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         });
 
         // Lower the explicit `self` parameter first.
-        if method_def.sig.self_param.mode != ParamMode::In {
-            panic!(
-                "ssa lower_method only supports in self param, found {:?}",
-                method_def.sig.self_param.mode
-            );
-        }
         let self_def = def_table
             .lookup_def(method_def.sig.self_param.def_id)
             .unwrap_or_else(|| {
@@ -188,30 +186,39 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 method_def.sig.self_param.def_id
             )
         });
-        let self_ty_id = type_lowerer.lower_type(&self_ty);
+        let self_ty_id = match method_def.sig.self_param.mode {
+            ParamMode::In | ParamMode::Sink => type_lowerer.lower_type(&self_ty),
+            ParamMode::Out | ParamMode::InOut => {
+                let value_ty = type_lowerer.lower_type(&self_ty);
+                type_lowerer.ptr_to(value_ty)
+            }
+        };
 
         let mut param_defs = Vec::with_capacity(method_def.sig.params.len() + 1);
         let mut param_tys = Vec::with_capacity(method_def.sig.params.len() + 1);
+        let mut param_modes = Vec::with_capacity(method_def.sig.params.len() + 1);
         param_defs.push(method_def.sig.self_param.def_id);
         param_tys.push(self_ty_id);
+        param_modes.push(method_def.sig.self_param.mode.clone());
 
-        // Convert each method parameter to SSA types. Only `in` mode is supported for now.
+        // Convert each method parameter to SSA types.
         for param in &method_def.sig.params {
-            if param.mode != ParamMode::In {
-                panic!(
-                    "ssa lower_method only supports in params, found {:?} for {:?}",
-                    param.mode, param.ident
-                );
-            }
             let def = def_table
                 .lookup_def(param.def_id)
                 .unwrap_or_else(|| panic!("ssa lower_method missing param def {:?}", param.def_id));
             let param_ty = type_map.lookup_def_type(def).unwrap_or_else(|| {
                 panic!("ssa lower_method missing param type {:?}", param.def_id)
             });
-            let param_ty_id = type_lowerer.lower_type(&param_ty);
+            let param_ty_id = match param.mode {
+                ParamMode::In | ParamMode::Sink => type_lowerer.lower_type(&param_ty),
+                ParamMode::Out | ParamMode::InOut => {
+                    let value_ty = type_lowerer.lower_type(&param_ty);
+                    type_lowerer.ptr_to(value_ty)
+                }
+            };
             param_defs.push(param.def_id);
             param_tys.push(param_ty_id);
+            param_modes.push(param.mode.clone());
         }
 
         // Build the SSA function signature and initialize the builder.
@@ -231,8 +238,43 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             lowering_plans,
             param_defs,
             param_tys,
+            param_modes,
             loop_stack: Vec::new(),
             globals,
+        }
+    }
+
+    /// Initializes locals for parameters using their declared modes.
+    pub(super) fn init_param_locals(&mut self, params: &[ValueId]) {
+        if params.len() != self.param_defs.len() {
+            panic!(
+                "ssa param locals mismatch: {} defs, {} params",
+                self.param_defs.len(),
+                params.len()
+            );
+        }
+
+        self.locals = LocalMap::new();
+        for ((def_id, mode), value) in self
+            .param_defs
+            .iter()
+            .zip(self.param_modes.iter())
+            .zip(params.iter())
+        {
+            let def = self
+                .def_table
+                .lookup_def(*def_id)
+                .unwrap_or_else(|| panic!("ssa param locals missing def {:?}", def_id));
+            let param_ty = self
+                .type_map
+                .lookup_def_type(def)
+                .unwrap_or_else(|| panic!("ssa param locals missing type {:?}", def_id));
+            let value_ty = self.type_lowerer.lower_type(&param_ty);
+            let local = match mode {
+                ParamMode::In | ParamMode::Sink => LocalValue::value(*value, value_ty),
+                ParamMode::Out | ParamMode::InOut => LocalValue::addr(*value, value_ty),
+            };
+            self.locals.insert(*def_id, local);
         }
     }
 
