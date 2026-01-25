@@ -19,29 +19,33 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<LinearValue, LoweringError> {
         match &expr.kind {
             sem::ValueExprKind::Block { items, tail } => {
-                for item in items {
-                    match item {
-                        sem::BlockItem::Stmt(stmt) => match self.lower_stmt_expr_linear(stmt)? {
-                            StmtOutcome::Continue => {}
-                            StmtOutcome::Return => {
-                                panic!(
-                                    "ssa lower_linear_value_expr hit return in linear block at {:?}",
-                                    stmt.span
-                                );
+                self.with_drop_scope(expr.id, |lowerer| {
+                    for item in items {
+                        match item {
+                            sem::BlockItem::Stmt(stmt) => {
+                                match lowerer.lower_stmt_expr_linear(stmt)? {
+                                    StmtOutcome::Continue => {}
+                                    StmtOutcome::Return => {
+                                        panic!(
+                                            "ssa lower_linear_value_expr hit return in linear block at {:?}",
+                                            stmt.span
+                                        );
+                                    }
+                                }
                             }
-                        },
-                        sem::BlockItem::Expr(expr) => {
-                            let _ = self.lower_linear_value_expr(expr)?;
+                            sem::BlockItem::Expr(expr) => {
+                                let _ = lowerer.lower_linear_value_expr(expr)?;
+                            }
                         }
                     }
-                }
 
-                if let Some(tail) = tail {
-                    return self.lower_linear_value_expr(tail);
-                }
+                    if let Some(tail) = tail {
+                        return lowerer.lower_linear_value_expr(tail);
+                    }
 
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_unit(ty))
+                    let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
+                    Ok(lowerer.builder.const_unit(ty))
+                })
             }
 
             sem::ValueExprKind::UnitLit => {
@@ -377,7 +381,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
                 match &place.kind {
-                    sem::PlaceExprKind::Var { def_id, .. } => Ok(self.load_local_value(*def_id)),
+                    sem::PlaceExprKind::Var { def_id, .. } => {
+                        self.set_drop_flag_for_def(*def_id, false);
+                        Ok(self.load_local_value(*def_id))
+                    }
                     _ => {
                         let place_addr = self.lower_place_addr(place)?;
                         Ok(self.builder.load(place_addr.addr, place_addr.value_ty))
@@ -527,11 +534,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let ir_ty = self.type_lowerer.lower_type_id(ty_id);
                 let addr = self.alloc_local_addr(ir_ty);
                 self.locals.insert(*def_id, LocalValue::addr(addr, ir_ty));
+                // Start drop tracking as uninitialized until the first init assignment.
+                self.set_drop_flag_for_def(*def_id, false);
                 Ok(StmtOutcome::Continue)
             }
 
             sem::StmtExprKind::Assign {
-                assignee, value, ..
+                assignee,
+                value,
+                init,
+                ..
             } => {
                 let value_expr = value;
                 let value = self.lower_linear_value_expr(value_expr)?;
@@ -539,6 +551,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         self.assign_local_value(*def_id, value, ty);
+                        if init.is_init || init.promotes_full {
+                            self.set_drop_flag_for_def(*def_id, true);
+                        }
                         Ok(StmtOutcome::Continue)
                     }
                     _ => {
@@ -554,6 +569,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     Some(expr) => Some(self.lower_linear_value_expr(expr)?),
                     None => None,
                 };
+                self.emit_drops_for_stmt(stmt.id)?;
                 self.builder.terminate(Terminator::Return { value });
                 Ok(StmtOutcome::Return)
             }

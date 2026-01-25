@@ -6,6 +6,7 @@
 mod bind;
 mod branching;
 mod calls;
+mod drops;
 mod error;
 mod fstring;
 mod globals;
@@ -55,9 +56,17 @@ pub fn lower_func(
     def_table: &DefTable,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
 ) -> Result<LoweredFunction, LoweringError> {
     let mut globals = GlobalArena::new();
-    lower_func_with_globals(func, def_table, type_map, lowering_plans, &mut globals)
+    lower_func_with_globals(
+        func,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_plans,
+        &mut globals,
+    )
 }
 
 pub fn lower_module(
@@ -65,13 +74,20 @@ pub fn lower_module(
     def_table: &DefTable,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
 ) -> Result<LoweredModule, LoweringError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
 
     for func_def in module.func_defs() {
-        let lowered =
-            lower_func_with_globals(func_def, def_table, type_map, lowering_plans, &mut globals)?;
+        let lowered = lower_func_with_globals(
+            func_def,
+            def_table,
+            type_map,
+            lowering_plans,
+            drop_plans,
+            &mut globals,
+        )?;
         funcs.push(lowered);
     }
 
@@ -86,6 +102,7 @@ pub fn lower_module(
                 def_table,
                 type_map,
                 lowering_plans,
+                drop_plans,
                 &mut globals,
             )?;
             funcs.push(lowered);
@@ -103,6 +120,7 @@ fn lower_func_with_globals(
     def_table: &DefTable,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
     let globals_start = globals.len();
@@ -110,6 +128,8 @@ fn lower_func_with_globals(
     // Initialize the lowerer with function metadata and type information.
     // The builder starts with the cursor at the entry block (block 0).
     let mut lowerer = FuncLowerer::new(func, def_table, type_map, lowering_plans, globals);
+    lowerer.set_drop_plans(drop_plans);
+    lowerer.enter_drop_scope(func.id);
 
     // Add function parameters as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
@@ -128,6 +148,7 @@ fn lower_func_with_globals(
 
     // If the body produces a value (not an early return), emit the final return.
     if let BranchResult::Value(value) = result {
+        lowerer.emit_drops_to_depth(0)?;
         lowerer
             .builder
             .terminate(Terminator::Return { value: Some(value) });
@@ -149,6 +170,7 @@ fn lower_method_def_with_globals(
     def_table: &DefTable,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
     let globals_start = globals.len();
@@ -163,6 +185,8 @@ fn lower_method_def_with_globals(
         lowering_plans,
         globals,
     );
+    lowerer.set_drop_plans(drop_plans);
+    lowerer.enter_drop_scope(method_def.id);
 
     // Add method parameters (including `self`) as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
@@ -177,6 +201,7 @@ fn lower_method_def_with_globals(
     // Lower the method body and emit the final return if it yields a value.
     let result = lowerer.lower_branching_value_expr(&method_def.body)?;
     if let BranchResult::Value(value) = result {
+        lowerer.emit_drops_to_depth(0)?;
         lowerer
             .builder
             .terminate(Terminator::Return { value: Some(value) });

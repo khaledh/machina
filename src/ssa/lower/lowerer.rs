@@ -64,6 +64,9 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) param_tys: Vec<IrTypeId>,
     pub(super) param_modes: Vec<ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
+    pub(super) drop_plans: Option<&'a sem::DropPlanMap>,
+    pub(super) drop_scopes: Vec<NodeId>,
+    pub(super) drop_flags: HashMap<DefId, ValueId>,
     pub(super) globals: &'g mut GlobalArena,
 }
 
@@ -146,6 +149,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys,
             param_modes,
             loop_stack: Vec::new(),
+            drop_plans: None,
+            drop_scopes: Vec::new(),
+            drop_flags: HashMap::new(),
             globals,
         }
     }
@@ -240,6 +246,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys,
             param_modes,
             loop_stack: Vec::new(),
+            drop_plans: None,
+            drop_scopes: Vec::new(),
+            drop_flags: HashMap::new(),
             globals,
         }
     }
@@ -255,15 +264,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         self.locals = LocalMap::new();
-        for ((def_id, mode), value) in self
-            .param_defs
-            .iter()
-            .zip(self.param_modes.iter())
-            .zip(params.iter())
-        {
+        for (index, value) in params.iter().enumerate() {
+            let def_id = self.param_defs[index];
+            let mode = self.param_modes[index].clone();
             let def = self
                 .def_table
-                .lookup_def(*def_id)
+                .lookup_def(def_id)
                 .unwrap_or_else(|| panic!("ssa param locals missing def {:?}", def_id));
             let param_ty = self
                 .type_map
@@ -274,7 +280,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 ParamMode::In | ParamMode::Sink => LocalValue::value(*value, value_ty),
                 ParamMode::Out | ParamMode::InOut => LocalValue::addr(*value, value_ty),
             };
-            self.locals.insert(*def_id, local);
+            self.locals.insert(def_id, local);
+            if matches!(mode, ParamMode::Sink) {
+                self.set_drop_flag_for_def(def_id, true);
+            }
         }
     }
 

@@ -58,7 +58,7 @@ impl<'a> DropPlanBuilder<'a> {
 
     // --- Scope management ---
 
-    fn enter_scope(&mut self, id: crate::tree::NodeId) {
+    fn enter_scope(&mut self) {
         self.scope_stack.push(DropScopePlan::default());
     }
 
@@ -127,7 +127,7 @@ impl<'a> DropPlanBuilder<'a> {
 
     fn visit_func_def(&mut self, func_def: &sem::FuncDef) {
         // Function-level scope for params and locals.
-        self.enter_scope(func_def.id);
+        self.enter_scope();
 
         for param in &func_def.sig.params {
             if param.mode != crate::tree::ParamMode::Sink {
@@ -143,7 +143,7 @@ impl<'a> DropPlanBuilder<'a> {
 
     fn visit_method_def(&mut self, method_def: &sem::MethodDef) {
         // Method bodies get the same drop planning as functions.
-        self.enter_scope(method_def.id);
+        self.enter_scope();
 
         let self_param = &method_def.sig.self_param;
         if self_param.mode == crate::tree::ParamMode::Sink {
@@ -169,7 +169,7 @@ impl<'a> DropPlanBuilder<'a> {
         tail: Option<&sem::ValueExpr>,
     ) {
         // Each block introduces a new drop scope.
-        self.enter_scope(expr.id);
+        self.enter_scope();
 
         for item in items {
             match item {
@@ -253,15 +253,6 @@ impl<'a> DropPlanBuilder<'a> {
             sem::PlaceExprKind::StructField { target, .. }
             | sem::PlaceExprKind::TupleField { target, .. } => {
                 self.visit_place_expr(target);
-            }
-            sem::PlaceExprKind::Slice { target, start, end } => {
-                self.visit_place_expr(target);
-                if let Some(start) = start {
-                    self.visit_value_expr(start);
-                }
-                if let Some(end) = end {
-                    self.visit_value_expr(end);
-                }
             }
         }
     }
@@ -361,7 +352,14 @@ impl<'a> DropPlanBuilder<'a> {
             sem::ValueExprKind::Call { callee, args } => {
                 self.visit_value_expr(callee);
                 for arg in args {
-                    self.visit_value_expr(&arg.expr);
+                    match arg {
+                        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                            self.visit_value_expr(expr);
+                        }
+                        sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                            self.visit_place_expr(place);
+                        }
+                    }
                 }
             }
             sem::ValueExprKind::MethodCall { receiver, args, .. } => {
@@ -370,7 +368,14 @@ impl<'a> DropPlanBuilder<'a> {
                     sem::MethodReceiver::PlaceExpr(place) => self.visit_place_expr(place),
                 }
                 for arg in args {
-                    self.visit_value_expr(&arg.expr);
+                    match arg {
+                        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                            self.visit_value_expr(expr);
+                        }
+                        sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                            self.visit_place_expr(place);
+                        }
+                    }
                 }
             }
         }

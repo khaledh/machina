@@ -21,34 +21,35 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match &expr.kind {
             // Block expression: process items sequentially.
             sem::ValueExprKind::Block { items, tail } => {
-                for item in items {
-                    match item {
-                        sem::BlockItem::Stmt(stmt) => {
-                            if let Some(result) = self.lower_stmt_expr_branching(stmt)? {
-                                return Ok(result);
+                self.with_drop_scope(expr.id, |lowerer| {
+                    for item in items {
+                        match item {
+                            sem::BlockItem::Stmt(stmt) => {
+                                if let Some(result) = lowerer.lower_stmt_expr_branching(stmt)? {
+                                    return Ok(result);
+                                }
                             }
-                        }
-                        sem::BlockItem::Expr(expr) => {
-                            // Statement-position expression: lower using the plan.
-                            match self.lower_value_expr(expr)? {
-                                BranchResult::Value(_) => {}
-                                BranchResult::Return => {
+                            sem::BlockItem::Expr(expr) => {
+                                // Statement-position expression: lower using the plan.
+                                if let BranchResult::Return = lowerer.lower_value_expr(expr)? {
                                     return Ok(BranchResult::Return);
                                 }
                             }
                         }
                     }
-                }
 
-                // Lower the tail expression if present.
-                if let Some(tail) = tail {
-                    return self.lower_value_expr(tail);
-                }
+                    if let Some(tail) = tail {
+                        return match lowerer.lower_value_expr(tail)? {
+                            BranchResult::Value(value) => Ok(BranchResult::Value(value)),
+                            BranchResult::Return => Ok(BranchResult::Return),
+                        };
+                    }
 
-                // Blocks without a tail produce unit.
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
-                let value = self.builder.const_unit(ty);
-                Ok(BranchResult::Value(value))
+                    // Blocks without a tail produce unit.
+                    let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
+                    let value = lowerer.builder.const_unit(ty);
+                    Ok(BranchResult::Value(value))
+                })
             }
 
             // If expression: creates then/else blocks and a join block.
@@ -199,8 +200,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.lower_while_stmt(cond, body)?;
                 Ok(None)
             }
-            sem::StmtExprKind::Break => Ok(Some(self.lower_break_stmt()?)),
-            sem::StmtExprKind::Continue => Ok(Some(self.lower_continue_stmt()?)),
+            sem::StmtExprKind::Break => Ok(Some(self.lower_break_stmt(stmt)?)),
+            sem::StmtExprKind::Continue => Ok(Some(self.lower_continue_stmt(stmt)?)),
             _ => match self.lower_stmt_expr_linear(stmt)? {
                 StmtOutcome::Continue => Ok(None),
                 StmtOutcome::Return => Ok(Some(BranchResult::Return)),
@@ -222,6 +223,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         cond: &sem::ValueExpr,
         body: &sem::ValueExpr,
     ) -> Result<(), LoweringError> {
+        // Snapshot active drop scopes so we can restore them after lowering
+        // control-flow edges that may exit the loop body early.
+        let drop_snapshot = self.drop_scopes_snapshot();
+
         // Snapshot current locals for threading through the loop.
         let locals_snapshot = self.locals.ordered();
         let defs: Vec<DefId> = locals_snapshot.iter().map(|(def_id, _)| *def_id).collect();
@@ -281,6 +286,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let body_result = self.lower_branching_value_expr(body);
         self.loop_stack.pop();
         let body_result = body_result?;
+
+        // The body may have pushed/popped scopes; restore the outer loop depth
+        // before emitting back-edges or continuing at the loop exit.
+        self.restore_drop_scopes(&drop_snapshot);
+
         if let BranchResult::Value(_) = body_result {
             // Collect updated locals and branch back to header.
             let Some(loop_args) = self.locals.args_for(&defs) else {
@@ -296,11 +306,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.select_block(exit_bb);
         self.locals
             .set_from_params_like(&defs, &locals, &exit_params);
+
+        // The exit block should see the same drop scope depth as before the loop.
+        self.restore_drop_scopes(&drop_snapshot);
+
         Ok(())
     }
 
     /// Lowers a `break` statement by branching to the loop exit block.
-    fn lower_break_stmt(&mut self) -> Result<BranchResult, LoweringError> {
+    fn lower_break_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LoweringError> {
+        self.emit_drops_for_stmt(stmt.id)?;
         let ctx = self.current_loop();
         let Some(exit_args) = self.locals.args_for(&ctx.defs) else {
             panic!("ssa break missing locals args for loop exit");
@@ -313,7 +328,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Lowers a `continue` statement by branching to the loop header block.
-    fn lower_continue_stmt(&mut self) -> Result<BranchResult, LoweringError> {
+    fn lower_continue_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LoweringError> {
+        self.emit_drops_for_stmt(stmt.id)?;
         let ctx = self.current_loop();
         let Some(loop_args) = self.locals.args_for(&ctx.defs) else {
             panic!("ssa continue missing locals args for loop header");

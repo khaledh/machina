@@ -11,8 +11,14 @@ fn test_lower_struct_field_load() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -43,8 +49,14 @@ fn test_lower_struct_field_assign() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -74,8 +86,14 @@ fn test_lower_array_index_load() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -105,8 +123,14 @@ fn test_lower_array_index_assign() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -138,8 +162,14 @@ fn test_lower_array_index_multi_dim() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -169,8 +199,14 @@ fn test_lower_array_index_partial() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -198,8 +234,14 @@ fn test_lower_slice_index_load() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -243,8 +285,14 @@ fn test_lower_slice_index_assign() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -304,8 +352,14 @@ fn test_lower_string_index_load() {
     "});
 
     let main_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"

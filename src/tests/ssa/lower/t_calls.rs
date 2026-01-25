@@ -16,8 +16,14 @@ fn test_lower_call_with_params() {
     let main_def = ctx.module.func_defs()[1];
     let add_id = add_def.def_id;
 
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -51,8 +57,14 @@ fn test_lower_call_stmt() {
     let main_def = ctx.module.func_defs()[1];
     let add_id = add_def.def_id;
 
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -101,8 +113,14 @@ fn test_lower_method_call_param() {
 
     let main_def = ctx.module.func_defs()[0];
 
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -134,8 +152,14 @@ fn test_lower_call_array_to_slice_arg() {
     let main_def = ctx.module.func_defs()[1];
     let take_id = take_def.def_id;
 
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -199,8 +223,14 @@ fn test_lower_indirect_call() {
     let main_def = ctx.module.func_defs()[1];
     let add_id = add_def.def_id;
 
-    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = format!(
@@ -234,8 +264,14 @@ fn test_lower_out_param_def() {
     "});
     let set_def = ctx.module.func_defs()[0];
 
-    let lowered = lower_func(set_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        set_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"

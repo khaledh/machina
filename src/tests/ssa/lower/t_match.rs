@@ -13,8 +13,14 @@ fn test_lower_match_enum_no_payload() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
@@ -70,8 +76,14 @@ fn test_lower_match_enum_payload_binding() {
         }
     "});
     let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(func_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
-        .expect("failed to lower");
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"

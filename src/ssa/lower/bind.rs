@@ -17,6 +17,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match &pattern.kind {
             sem::BindPatternKind::Name { def_id, .. } => {
                 self.locals.insert(*def_id, value);
+                // Track drop liveness for bindings that own drop-tracked values.
+                self.set_drop_flag_for_def(*def_id, true);
                 Ok(())
             }
             sem::BindPatternKind::Tuple { fields } => {

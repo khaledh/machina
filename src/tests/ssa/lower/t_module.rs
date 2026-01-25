@@ -18,6 +18,7 @@ fn test_lower_module_globals() {
         &ctx.def_table,
         &ctx.type_map,
         &ctx.lowering_plans,
+        &ctx.drop_plans,
     )
     .unwrap();
 
@@ -63,6 +64,7 @@ fn test_lower_module_method_defs() {
         &ctx.def_table,
         &ctx.type_map,
         &ctx.lowering_plans,
+        &ctx.drop_plans,
     )
     .unwrap();
 

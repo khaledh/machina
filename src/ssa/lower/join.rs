@@ -6,6 +6,7 @@ use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::{LocalSnapshot, LocalValue};
 use crate::ssa::model::ir::{BlockId, Terminator, ValueId};
+use crate::tree::NodeId;
 use crate::tree::semantic as sem;
 
 /// Plan for joining control flow from multiple branches (e.g., if/else arms).
@@ -23,6 +24,7 @@ pub(super) struct JoinPlan {
 pub(super) struct JoinSession {
     plan: JoinPlan,
     saved_locals: LocalSnapshot,
+    saved_drop_scopes: Vec<NodeId>,
 }
 
 impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
@@ -65,7 +67,11 @@ impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
     }
 
     pub(super) fn begin_join(&mut self, expr: &sem::ValueExpr) -> JoinSession {
-        JoinSession::new(self.build_join_plan(expr), self.locals.snapshot())
+        JoinSession::new(
+            self.build_join_plan(expr),
+            self.locals.snapshot(),
+            self.drop_scopes_snapshot(),
+        )
     }
 
     /// Emits a branch from the current block to the join block.
@@ -95,8 +101,16 @@ impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
 }
 
 impl JoinSession {
-    pub(super) fn new(plan: JoinPlan, saved_locals: LocalSnapshot) -> Self {
-        Self { plan, saved_locals }
+    pub(super) fn new(
+        plan: JoinPlan,
+        saved_locals: LocalSnapshot,
+        saved_drop_scopes: Vec<NodeId>,
+    ) -> Self {
+        Self {
+            plan,
+            saved_locals,
+            saved_drop_scopes,
+        }
     }
 
     pub(super) fn emit_branch(
@@ -113,6 +127,7 @@ impl JoinSession {
         lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>,
     ) {
         lowerer.locals.restore(&self.saved_locals);
+        lowerer.restore_drop_scopes(&self.saved_drop_scopes);
     }
 
     pub(super) fn join_value(&self) -> ValueId {
@@ -120,6 +135,7 @@ impl JoinSession {
     }
 
     pub(super) fn finalize(self, lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>) {
+        lowerer.restore_drop_scopes(&self.saved_drop_scopes);
         lowerer.builder.select_block(self.plan.join_bb);
         lowerer.locals.set_from_params_like(
             &self.plan.defs,

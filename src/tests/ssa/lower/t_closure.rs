@@ -32,6 +32,7 @@ fn test_lower_closure_ref_captureless() {
         &ctx.def_table,
         &ctx.type_map,
         &ctx.lowering_plans,
+        &ctx.drop_plans,
     )
     .unwrap();
 
@@ -109,6 +110,7 @@ fn test_lower_closure_invoke() {
         &ctx.def_table,
         &ctx.type_map,
         &ctx.lowering_plans,
+        &ctx.drop_plans,
     )
     .unwrap();
 
@@ -201,6 +203,7 @@ fn test_lower_closure_borrow_capture() {
         &ctx.def_table,
         &ctx.type_map,
         &ctx.lowering_plans,
+        &ctx.drop_plans,
     )
     .unwrap();
 
