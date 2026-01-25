@@ -75,6 +75,21 @@ impl<'a> Parser<'a> {
             self.parse_postfix()?
         };
 
+        if self.allow_range_expr && matches!(self.curr_token.kind, TK::DotDot) {
+            let start = match lhs.kind {
+                ExprKind::IntLit(value) => value,
+                _ => return Err(ParseError::ExpectedIntLit(self.curr_token.clone())),
+            };
+            self.advance();
+            let end = self.parse_int_lit()?;
+            lhs = Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Range { start, end },
+                ty: (),
+                span: self.close(marker),
+            };
+        }
+
         while let Some((op, bp)) = Self::token_to_binary_op(&self.curr_token.kind) {
             // Binary operators
             if bp < min_bp {
@@ -324,13 +339,21 @@ impl<'a> Parser<'a> {
             let mut end = None;
 
             if self.curr_token.kind != TK::DotDot {
-                start = Some(Box::new(self.parse_expr(0)?));
+                let allow_range_expr = self.allow_range_expr;
+                self.allow_range_expr = false;
+                let result = self.parse_expr(0);
+                self.allow_range_expr = allow_range_expr;
+                start = Some(Box::new(result?));
             }
 
             self.consume(&TK::DotDot)?;
 
             if self.curr_token.kind != TK::RBracket {
-                end = Some(Box::new(self.parse_expr(0)?));
+                let allow_range_expr = self.allow_range_expr;
+                self.allow_range_expr = false;
+                let result = self.parse_expr(0);
+                self.allow_range_expr = allow_range_expr;
+                end = Some(Box::new(result?));
             }
 
             self.consume(&TK::RBracket)?;

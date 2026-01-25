@@ -27,6 +27,8 @@ pub struct Parser<'a> {
     curr_token: &'a Token,
     id_gen: NodeIdGen,
     allow_struct_lit: bool,
+    // Avoid treating `..` as a range when parsing slice bounds.
+    allow_range_expr: bool,
     closure_base: Option<String>,
     closure_index: u32,
 }
@@ -39,6 +41,7 @@ impl<'a> Parser<'a> {
             curr_token: &tokens[0],
             id_gen: NodeIdGen::new(),
             allow_struct_lit: true,
+            allow_range_expr: true,
             closure_base: None,
             closure_index: 0,
         }
@@ -51,6 +54,7 @@ impl<'a> Parser<'a> {
             curr_token: &tokens[0],
             id_gen,
             allow_struct_lit: true,
+            allow_range_expr: true,
             closure_base: None,
             closure_index: 0,
         }
