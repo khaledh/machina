@@ -97,6 +97,10 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
+                let arg_ty = &call_sig.params[0].ty;
+                if !matches!(arg_ty, Type::String) {
+                    panic!("compiler bug: intrinsic print expects string arg, got {arg_ty:?}");
+                }
                 vec![
                     sem::ArgLowering::PtrLen {
                         input: sem::CallInput::Arg(0),
@@ -114,6 +118,14 @@ impl<'a> Elaborator<'a> {
                         "compiler bug: intrinsic u64_to_dec expects 2 args, got {}",
                         call_sig.params.len()
                     );
+                }
+                let arg_ty = &call_sig.params[0].ty;
+                if !matches!(
+                    arg_ty,
+                    Type::Slice { elem_ty }
+                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8 })
+                ) {
+                    panic!("compiler bug: intrinsic u64_to_dec expects u8[] arg, got {arg_ty:?}");
                 }
                 vec![
                     sem::ArgLowering::PtrLen {
@@ -133,6 +145,14 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
+                let arg_ty = &call_sig.params[0].ty;
+                if !matches!(
+                    arg_ty,
+                    Type::Slice { elem_ty }
+                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8 })
+                ) {
+                    panic!("compiler bug: intrinsic memset expects u8[] arg, got {arg_ty:?}");
+                }
                 vec![
                     sem::ArgLowering::PtrLen {
                         input: sem::CallInput::Arg(0),
@@ -149,6 +169,22 @@ impl<'a> Elaborator<'a> {
                     panic!(
                         "compiler bug: intrinsic string_from_bytes expects 2 args, got {}",
                         call_sig.params.len()
+                    );
+                }
+                let dst_ty = &call_sig.params[0].ty;
+                if !matches!(dst_ty, Type::String) {
+                    panic!(
+                        "compiler bug: intrinsic string_from_bytes expects string dst, got {dst_ty:?}"
+                    );
+                }
+                let arg_ty = &call_sig.params[1].ty;
+                if !matches!(
+                    arg_ty,
+                    Type::Slice { elem_ty }
+                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8 })
+                ) {
+                    panic!(
+                        "compiler bug: intrinsic string_from_bytes expects u8[] arg, got {arg_ty:?}"
                     );
                 }
                 vec![

@@ -263,7 +263,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Extracts ptr+len from a string/slice value for runtime argument lowering.
     pub(super) fn lower_ptr_len_from_value(
         &mut self,
-        span: Span,
+        _span: Span,
         value: ValueId,
         ty: &Type,
         len_bits: u8,
@@ -287,7 +287,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
                 (ptr_ty, len_ty)
             }
-            _ => return Err(self.err_span(span, LoweringErrorKind::UnsupportedExpr)),
+            _ => panic!("compiler bug: ssa ptr/len lowering expects string or slice, got {ty:?}"),
         };
 
         let value_ty = self.type_lowerer.lower_type(ty);
