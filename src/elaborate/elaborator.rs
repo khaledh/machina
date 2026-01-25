@@ -104,9 +104,13 @@ pub struct Elaborator<'a> {
     // Accumulated closure lifting results
     pub(super) closure_types: Vec<sem::TypeDef>,
     pub(super) closure_methods: Vec<sem::MethodBlock>,
+    /// Captureless closures lowered as top-level functions.
+    pub(super) closure_funcs: Vec<sem::FuncDef>,
     pub(super) closure_info: HashMap<DefId, ClosureInfo>,
     pub(super) closure_bindings: HashMap<DefId, DefId>,
     pub(super) closure_stack: Vec<ClosureContext>,
+    /// Track captureless closures already emitted as functions.
+    pub(super) closure_func_ids: HashSet<DefId>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -131,9 +135,11 @@ impl<'a> Elaborator<'a> {
             closure_captures,
             closure_types: Vec::new(),
             closure_methods: Vec::new(),
+            closure_funcs: Vec::new(),
             closure_info: HashMap::new(),
             closure_bindings: HashMap::new(),
             closure_stack: Vec::new(),
+            closure_func_ids: HashSet::new(),
         }
     }
 
@@ -144,9 +150,11 @@ impl<'a> Elaborator<'a> {
     pub fn elaborate_module(&mut self, module: &norm::Module) -> sem::Module {
         self.closure_types.clear();
         self.closure_methods.clear();
+        self.closure_funcs.clear();
         self.closure_info.clear();
         self.closure_bindings.clear();
         self.closure_stack.clear();
+        self.closure_func_ids.clear();
 
         let mut top_level_items: Vec<_> = module
             .top_level_items
@@ -154,13 +162,14 @@ impl<'a> Elaborator<'a> {
             .map(|item| self.elab_top_level_item(item))
             .collect();
 
-        // Append lifted closure types and their invoke methods
+        // Append lifted closure types, invoke methods, and captureless functions.
         top_level_items.extend(self.closure_types.drain(..).map(sem::TopLevelItem::TypeDef));
         top_level_items.extend(
             self.closure_methods
                 .drain(..)
                 .map(sem::TopLevelItem::MethodBlock),
         );
+        top_level_items.extend(self.closure_funcs.drain(..).map(sem::TopLevelItem::FuncDef));
         sem::Module { top_level_items }
     }
 

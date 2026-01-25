@@ -1,6 +1,82 @@
 use super::{analyze, formact_func, indoc, lower_module};
 
 #[test]
+fn test_lower_closure_ref_captureless() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            let add = |x: u64| -> u64 {
+                x + 1
+            };
+            add(3)
+        }
+    "});
+
+    let closure_def = ctx
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|def| def.sig.name.contains("$closure$"))
+        .expect("missing closure function definition");
+    let closure_name = closure_def.sig.name.clone();
+    let closure_def_id = closure_def.def_id;
+
+    assert!(
+        ctx.module
+            .method_blocks()
+            .iter()
+            .all(|block| !block.type_name.contains("$closure$"))
+    );
+
+    let lowered = lower_module(
+        &ctx.module,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+    )
+    .unwrap();
+
+    let mut func_texts = std::collections::HashMap::new();
+    for lowered_func in &lowered.funcs {
+        let text = formact_func(&lowered_func.func, &lowered_func.types);
+        func_texts.insert(lowered_func.func.name.clone(), text);
+    }
+
+    let main_text = func_texts
+        .get("main")
+        .unwrap_or_else(|| panic!("missing lowered function for main"));
+    let closure_text = func_texts
+        .get(&closure_name)
+        .unwrap_or_else(|| panic!("missing lowered function for {closure_name}"));
+
+    let expected_main = format!(
+        indoc! {"
+            fn main() -> u64 {{
+              bb0():
+                %v0: fn(u64) -> u64 = const @{}
+                %v1: u64 = const 3:u64
+                %v2: u64 = call %v0(%v1)
+                ret %v2
+            }}
+        "},
+        closure_def_id
+    );
+    assert_eq!(main_text, &expected_main);
+
+    let expected_closure = format!(
+        indoc! {"
+            fn {}(u64) -> u64 {{
+              bb0(%v0: u64):
+                %v1: u64 = const 1:u64
+                %v2: u64 = add %v0, %v1
+                ret %v2
+            }}
+        "},
+        closure_name
+    );
+    assert_eq!(closure_text, &expected_closure);
+}
+
+#[test]
 fn test_lower_closure_invoke() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {

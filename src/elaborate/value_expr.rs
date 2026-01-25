@@ -6,8 +6,8 @@
 //! 1. **Lvalue expressions** (vars, field access, indexing, deref): Convert
 //!    to place expressions and wrap in Load or Move based on semck results
 //!
-//! 2. **Closure expressions**: Lift to struct types and replace with struct
-//!    literals that capture the environment
+//! 2. **Closure expressions**: Captureless closures become `ClosureRef`s,
+//!    while captured closures are lifted to struct types and struct literals
 //!
 //! 3. **Call expressions**: Build call plans and elaborate arguments
 //!
@@ -123,6 +123,17 @@ impl<'a> Elaborator<'a> {
         else {
             return None;
         };
+
+        if self.is_captureless_closure(*def_id) {
+            // Captureless closures become top-level functions referenced by def id.
+            self.ensure_closure_func(ident, *def_id, params, return_ty, body, expr.span, expr.id);
+            return Some(sem::ValueExpr {
+                id: expr.id,
+                kind: sem::ValueExprKind::ClosureRef { def_id: *def_id },
+                ty: expr.ty,
+                span: expr.span,
+            });
+        }
 
         let info =
             self.ensure_closure_info(ident, *def_id, params, return_ty, body, expr.span, expr.id);

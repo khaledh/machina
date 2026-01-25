@@ -7,7 +7,9 @@
 //! 2. An `invoke` method that takes the struct as `self` and the original params
 //!
 //! The closure literal becomes a struct literal that initializes the capture
-//! fields, and closure calls become method calls on that struct.
+//! fields, and closure calls become method calls on that struct. Captureless
+//! closures are lifted directly to top-level functions and referenced via
+//! `ClosureRef`.
 //!
 //! ## Capture modes
 //!
@@ -51,6 +53,13 @@ use crate::types::{StructField, Type, TypeId};
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
 
 impl<'a> Elaborator<'a> {
+    /// Returns true when a closure has no captures (or no capture metadata).
+    pub(super) fn is_captureless_closure(&self, def_id: DefId) -> bool {
+        self.closure_captures
+            .get(&def_id)
+            .map_or(true, |captures| captures.is_empty())
+    }
+
     /// Build capture field metadata for all variables captured by a closure.
     fn capture_fields_for(&mut self, closure_def_id: DefId, span: Span) -> Vec<CaptureField> {
         let Some(captures) = self.closure_captures.get(&closure_def_id) else {
@@ -104,6 +113,72 @@ impl<'a> Elaborator<'a> {
             });
         }
         fields
+    }
+
+    /// Ensure that a captureless closure is lifted to a top-level function.
+    pub(super) fn ensure_closure_func(
+        &mut self,
+        ident: &str,
+        def_id: DefId,
+        params: &[norm::Param],
+        return_ty: &norm::TypeExpr,
+        body: &norm::Expr,
+        span: Span,
+        expr_id: NodeId,
+    ) {
+        if !self.is_captureless_closure(def_id) {
+            return;
+        }
+
+        // Avoid re-emitting the same lifted function for a closure def.
+        if !self.closure_func_ids.insert(def_id) {
+            return;
+        }
+
+        // The closure expression already typechecks as a function type.
+        let fn_ty = self
+            .type_map
+            .lookup_node_type(expr_id)
+            .unwrap_or_else(|| panic!("compiler bug: missing closure type for {:?}", expr_id));
+        let return_ty_val = match &fn_ty {
+            Type::Fn { ret_ty, .. } => *ret_ty.clone(),
+            other => panic!(
+                "compiler bug: closure expr {:?} has non-fn type {:?}",
+                expr_id, other
+            ),
+        };
+
+        let def = self
+            .def_table
+            .lookup_def(def_id)
+            .unwrap_or_else(|| panic!("compiler bug: missing def for closure {:?}", def_id))
+            .clone();
+
+        // The resolver registers a def_id for closures but doesn't assign a def type.
+        if self.type_map.lookup_def_type_id(&def).is_none() {
+            self.type_map.insert_def_type(def, fn_ty.clone());
+        }
+
+        // The generated function gets a fresh node id but reuses the closure def id.
+        let func_id = self.node_id_gen.new_id();
+        self.type_map
+            .insert_node_type(func_id, return_ty_val.clone());
+
+        let func_def = sem::FuncDef {
+            id: func_id,
+            def_id,
+            attrs: Vec::new(),
+            sig: sem::FunctionSig {
+                name: ident.to_string(),
+                params: params.to_vec(),
+                ret_ty_expr: return_ty.clone(),
+                span,
+            },
+            body: self.elab_value(body),
+            span,
+        };
+
+        self.closure_funcs.push(func_def);
     }
 
     /// Generate the struct type definition for a lifted closure.
@@ -316,18 +391,23 @@ impl<'a> Elaborator<'a> {
                 return_ty,
                 body,
                 captures: _,
-            } => Some((
-                *def_id,
-                self.ensure_closure_info(
-                    ident,
+            } => {
+                if self.is_captureless_closure(*def_id) {
+                    return None;
+                }
+                Some((
                     *def_id,
-                    params,
-                    return_ty,
-                    body,
-                    callee.span,
-                    callee.id,
-                ),
-            )),
+                    self.ensure_closure_info(
+                        ident,
+                        *def_id,
+                        params,
+                        return_ty,
+                        body,
+                        callee.span,
+                        callee.id,
+                    ),
+                ))
+            }
             norm::ExprKind::Var { def_id, .. } => {
                 self.closure_bindings
                     .get(def_id)

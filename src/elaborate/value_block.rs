@@ -125,10 +125,17 @@ impl<'a> Elaborator<'a> {
             captures: _,
         } = &value.kind
         {
-            let info = self.ensure_closure_info(
-                ident, *def_id, params, return_ty, body, value.span, value.id,
-            );
-            self.record_closure_binding(pattern, *def_id, &info);
+            if self.is_captureless_closure(*def_id) {
+                // Emit a top-level function for captureless closures.
+                self.ensure_closure_func(
+                    ident, *def_id, params, return_ty, body, value.span, value.id,
+                );
+            } else {
+                let info = self.ensure_closure_info(
+                    ident, *def_id, params, return_ty, body, value.span, value.id,
+                );
+                self.record_closure_binding(pattern, *def_id, &info);
+            }
         }
         Box::new(self.elab_value(value))
     }
