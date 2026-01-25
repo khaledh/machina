@@ -377,6 +377,28 @@ fn test_lower_string_fmt_owned() {
 }
 
 #[test]
+fn test_lower_drop_string_local() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            var s = \"hi\";
+            0
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("call @__rt_string_drop"));
+}
+
+#[test]
 fn test_lower_cmp() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {
@@ -803,6 +825,31 @@ fn test_lower_enum_variant_payload() {
         }
     "};
     assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_drop_enum_payload() {
+    let ctx = analyze(indoc! {"
+        type Option = None | Some(string)
+
+        fn main() -> u64 {
+            var opt = Option::Some(\"hi\");
+            0
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("switch"));
+    assert!(text.contains("call @__rt_string_drop"));
 }
 
 #[test]

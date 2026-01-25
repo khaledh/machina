@@ -3,10 +3,11 @@
 use crate::resolve::DefId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::lowerer::FuncLowerer;
-use crate::ssa::model::ir::{Callee, RuntimeFn, Terminator, ValueId};
+use crate::ssa::model::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
 use crate::tree::NodeId;
 use crate::tree::semantic as sem;
 use crate::types::Type;
+use crate::types::TypeId;
 use std::ptr::NonNull;
 
 /// RAII guard that exits a drop scope when it falls out of scope.
@@ -218,18 +219,187 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         ty_id: crate::types::TypeId,
     ) -> Result<(), LoweringError> {
         let ty = self.type_map.type_table().get(ty_id).clone();
+        let value_ty = self.type_lowerer.lower_type_id(ty_id);
+        let addr = self.ensure_local_addr(def_id, value_ty);
+        self.drop_value_at_addr(addr, &ty)
+    }
+
+    fn drop_value_at_addr(&mut self, addr: ValueId, ty: &Type) -> Result<(), LoweringError> {
+        if !ty.needs_drop() {
+            return Ok(());
+        }
+
         match ty {
             Type::String => {
-                let value_ty = self.type_lowerer.lower_type_id(ty_id);
-                let addr = self.ensure_local_addr(def_id, value_ty);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ =
                     self.builder
                         .call(Callee::Runtime(RuntimeFn::StringDrop), vec![addr], unit_ty);
                 Ok(())
             }
+            Type::Heap { elem_ty } => {
+                let ptr_ty = self.type_lowerer.lower_type(ty);
+                let ptr_val = self.builder.load(addr, ptr_ty);
+
+                if elem_ty.needs_drop() {
+                    self.drop_value_at_addr(ptr_val, elem_ty)?;
+                }
+
+                let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+                let _ = self
+                    .builder
+                    .call(Callee::Runtime(RuntimeFn::Free), vec![ptr_val], unit_ty);
+                Ok(())
+            }
+            Type::Struct { fields, .. } => {
+                for (index, field) in fields.iter().enumerate().rev() {
+                    if !field.ty.needs_drop() {
+                        continue;
+                    }
+                    let field_ty = self.type_lowerer.lower_type(&field.ty);
+                    let field_addr = self.field_addr_typed(addr, index, field_ty);
+                    self.drop_value_at_addr(field_addr, &field.ty)?;
+                }
+                Ok(())
+            }
+            Type::Tuple { field_tys } => {
+                for (index, field_ty) in field_tys.iter().enumerate().rev() {
+                    if !field_ty.needs_drop() {
+                        continue;
+                    }
+                    let field_ir_ty = self.type_lowerer.lower_type(field_ty);
+                    let field_addr = self.field_addr_typed(addr, index, field_ir_ty);
+                    self.drop_value_at_addr(field_addr, field_ty)?;
+                }
+                Ok(())
+            }
+            Type::Array { dims, .. } => {
+                let Some(elem_ty) = ty.array_item_type() else {
+                    panic!("ssa drop array missing element type");
+                };
+                if !elem_ty.needs_drop() {
+                    return Ok(());
+                }
+
+                let len = *dims
+                    .first()
+                    .unwrap_or_else(|| panic!("ssa drop array missing dims"));
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                let idx_ty = self.type_lowerer.lower_type(&Type::uint(64));
+
+                for i in (0..len).rev() {
+                    let idx_val = self.builder.const_int(i as i128, false, 64, idx_ty);
+                    let elem_addr = self.builder.index_addr(addr, idx_val, elem_ptr_ty);
+                    self.drop_value_at_addr(elem_addr, &elem_ty)?;
+                }
+                Ok(())
+            }
+            Type::Enum { variants, .. } => {
+                let ty_id = self.type_id_for_enum(ty);
+                // Copy layout data out of the type lowerer to avoid holding a mutable borrow
+                // while emitting IR instructions that need &mut self.
+                let (tag_ty, blob_ty, layout_variants) = {
+                    let layout = self.type_lowerer.enum_layout(ty_id);
+                    let variants = layout
+                        .variants
+                        .iter()
+                        .map(|variant| {
+                            (
+                                variant.tag,
+                                variant.field_offsets.clone(),
+                                variant.name.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    (layout.tag_ty, layout.blob_ty, variants)
+                };
+
+                let mut needs_drop = false;
+                for variant in variants {
+                    if variant.payload.iter().any(Type::needs_drop) {
+                        needs_drop = true;
+                        break;
+                    }
+                }
+                if !needs_drop {
+                    return Ok(());
+                }
+
+                let switch_bb = self.builder.current_block();
+                let tag_addr = self.field_addr_typed(addr, 0, tag_ty);
+                let tag_val = self.builder.load(tag_addr, tag_ty);
+                let ret_bb = self.builder.add_block();
+                let mut cases = Vec::new();
+
+                // Emit a tag-based switch that drops the active variant's payload.
+                for (variant, (tag, field_offsets, name)) in
+                    variants.iter().zip(layout_variants.iter())
+                {
+                    if !variant.payload.iter().any(Type::needs_drop) {
+                        continue;
+                    }
+
+                    if variant.payload.len() != field_offsets.len() {
+                        panic!(
+                            "ssa enum drop payload mismatch for {}: {} offsets, {} tys",
+                            name,
+                            field_offsets.len(),
+                            variant.payload.len()
+                        );
+                    }
+
+                    let case_bb = self.builder.add_block();
+                    cases.push(SwitchCase {
+                        value: ConstValue::Int {
+                            value: *tag as i128,
+                            signed: false,
+                            bits: 32,
+                        },
+                        target: case_bb,
+                        args: Vec::new(),
+                    });
+
+                    self.builder.select_block(case_bb);
+
+                    let payload_ptr = self.field_addr_typed(addr, 1, blob_ty);
+                    // Drop payload fields in reverse order, using blob offsets.
+                    for (payload_ty, offset) in
+                        variant.payload.iter().zip(field_offsets.iter()).rev()
+                    {
+                        if !payload_ty.needs_drop() {
+                            continue;
+                        }
+                        let field_addr = self.byte_offset_addr(payload_ptr, *offset);
+                        self.drop_value_at_addr(field_addr, payload_ty)?;
+                    }
+
+                    self.builder.terminate(Terminator::Br {
+                        target: ret_bb,
+                        args: Vec::new(),
+                    });
+                }
+
+                self.builder.select_block(switch_bb);
+                self.builder.terminate(Terminator::Switch {
+                    value: tag_val,
+                    cases,
+                    default: ret_bb,
+                    default_args: Vec::new(),
+                });
+
+                self.builder.select_block(ret_bb);
+                Ok(())
+            }
             other => panic!("ssa drop not implemented for {:?}", other),
         }
+    }
+
+    fn type_id_for_enum(&self, ty: &Type) -> TypeId {
+        self.type_map
+            .type_table()
+            .lookup_id(ty)
+            .unwrap_or_else(|| panic!("ssa drop missing enum type id for {:?}", ty))
     }
 
     fn create_drop_flag(&mut self, def_id: DefId) -> ValueId {
