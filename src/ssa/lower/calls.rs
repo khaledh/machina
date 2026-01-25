@@ -16,6 +16,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_call_expr(
         &mut self,
         expr: &sem::ValueExpr,
+        callee_expr: &sem::ValueExpr,
         args: &[sem::CallArg],
     ) -> Result<LinearValue, LoweringError> {
         let call_plan = self
@@ -28,11 +29,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             panic!("ssa lower_call_expr expected no receiver for {:?}", expr.id);
         }
 
-        // Resolve the callee (only direct calls supported).
+        // Resolve the callee.
         let callee = match &call_plan.target {
             sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
             sem::CallTarget::Indirect => {
-                return Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr));
+                let callee_value = self.lower_linear_value_expr(callee_expr)?;
+                Callee::Value(callee_value)
             }
             sem::CallTarget::Intrinsic(intrinsic) => {
                 Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)

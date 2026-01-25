@@ -182,3 +182,39 @@ fn test_lower_call_array_to_slice_arg() {
     );
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_lower_indirect_call() {
+    let ctx = analyze(indoc! {"
+        fn add(a: u64, b: u64) -> u64 {
+            a + b
+        }
+
+        fn main() -> u64 {
+            let f: fn(u64, u64) -> u64 = add;
+            f(1, 2)
+        }
+    "});
+    let add_def = ctx.module.func_defs()[0];
+    let main_def = ctx.module.func_defs()[1];
+    let add_id = add_def.def_id;
+
+    let lowered = lower_func(main_def, &ctx.def_table, &ctx.type_map, &ctx.lowering_plans)
+        .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = format!(
+        indoc! {"
+            fn main() -> u64 {{
+              bb0():
+                %v0: fn(u64, u64) -> u64 = const @{}
+                %v1: u64 = const 1:u64
+                %v2: u64 = const 2:u64
+                %v3: u64 = call %v0(%v1, %v2)
+                ret %v3
+            }}
+        "},
+        add_id
+    );
+    assert_eq!(text, expected);
+}

@@ -402,12 +402,11 @@ impl<'a> LoweringPlanBuilder<'a> {
             return false;
         }
 
-        if !matches!(plan.target, sem::CallTarget::Direct(_)) {
-            return false;
-        }
-
-        plan.args
-            .iter()
-            .all(|arg| matches!(arg, sem::ArgLowering::Direct(_)))
+        plan.args.iter().all(|arg| {
+            matches!(
+                arg,
+                sem::ArgLowering::Direct(_) | sem::ArgLowering::PtrLen { .. }
+            )
+        })
     }
 }

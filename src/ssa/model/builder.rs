@@ -152,6 +152,18 @@ impl FunctionBuilder {
         result
     }
 
+    /// Emits a function address constant instruction at the cursor.
+    pub fn const_func_addr(&mut self, def: DefId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::Const {
+                value: ConstValue::FuncAddr { def },
+            },
+        });
+        result
+    }
+
     /// Emits a binary operation instruction at the cursor.
     pub fn binop(&mut self, op: BinOp, lhs: ValueId, rhs: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);

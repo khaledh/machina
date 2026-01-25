@@ -9,7 +9,7 @@ use crate::ssa::IrTypeKind;
 use crate::ssa::lower::types::TypeLowerer;
 use crate::typeck::type_check;
 use crate::typeck::type_map::resolve_type_expr;
-use crate::types::{EnumVariant, Type};
+use crate::types::{EnumVariant, FnParam, FnParamMode, Type};
 use indoc::indoc;
 
 fn analyze(source: &str) -> crate::context::SemanticContext {
@@ -105,6 +105,90 @@ fn test_lower_slice_type() {
             assert_eq!(*bits, 64);
         }
         other => panic!("expected u64 slice len, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_lower_fn_type() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            0
+        }
+    "});
+
+    let mut type_lowerer = TypeLowerer::new(&ctx.type_map);
+    let fn_ty = Type::Fn {
+        params: vec![
+            FnParam {
+                mode: FnParamMode::In,
+                ty: Type::uint(64),
+            },
+            FnParam {
+                mode: FnParamMode::Out,
+                ty: Type::uint(8),
+            },
+            FnParam {
+                mode: FnParamMode::InOut,
+                ty: Type::uint(16),
+            },
+            FnParam {
+                mode: FnParamMode::Sink,
+                ty: Type::uint(32),
+            },
+        ],
+        ret_ty: Box::new(Type::uint(64)),
+    };
+    let ir_fn = type_lowerer.lower_type(&fn_ty);
+
+    let IrTypeKind::Fn { params, ret } = type_lowerer.ir_type_cache.kind(ir_fn) else {
+        panic!("expected fn type to lower to IrTypeKind::Fn");
+    };
+    assert_eq!(params.len(), 4);
+
+    match type_lowerer.ir_type_cache.kind(params[0]) {
+        IrTypeKind::Int { signed, bits } => {
+            assert!(!signed);
+            assert_eq!(*bits, 64);
+        }
+        other => panic!("expected in param to be u64, got {:?}", other),
+    }
+
+    match type_lowerer.ir_type_cache.kind(params[1]) {
+        IrTypeKind::Ptr { elem } => match type_lowerer.ir_type_cache.kind(*elem) {
+            IrTypeKind::Int { signed, bits } => {
+                assert!(!signed);
+                assert_eq!(*bits, 8);
+            }
+            other => panic!("expected out param elem to be u8, got {:?}", other),
+        },
+        other => panic!("expected out param to be ptr, got {:?}", other),
+    }
+
+    match type_lowerer.ir_type_cache.kind(params[2]) {
+        IrTypeKind::Ptr { elem } => match type_lowerer.ir_type_cache.kind(*elem) {
+            IrTypeKind::Int { signed, bits } => {
+                assert!(!signed);
+                assert_eq!(*bits, 16);
+            }
+            other => panic!("expected inout param elem to be u16, got {:?}", other),
+        },
+        other => panic!("expected inout param to be ptr, got {:?}", other),
+    }
+
+    match type_lowerer.ir_type_cache.kind(params[3]) {
+        IrTypeKind::Int { signed, bits } => {
+            assert!(!signed);
+            assert_eq!(*bits, 32);
+        }
+        other => panic!("expected sink param to be u32, got {:?}", other),
+    }
+
+    match type_lowerer.ir_type_cache.kind(*ret) {
+        IrTypeKind::Int { signed, bits } => {
+            assert!(!signed);
+            assert_eq!(*bits, 64);
+        }
+        other => panic!("expected fn ret to be u64, got {:?}", other),
     }
 }
 

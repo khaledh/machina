@@ -455,7 +455,24 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             },
 
             sem::ValueExprKind::Load { place } => match &place.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => Ok(self.load_local_value(*def_id)),
+                sem::PlaceExprKind::Var { def_id, .. } => {
+                    if self.locals.get(*def_id).is_some() {
+                        Ok(self.load_local_value(*def_id))
+                    } else {
+                        let def = self
+                            .def_table
+                            .lookup_def(*def_id)
+                            .unwrap_or_else(|| panic!("ssa load missing def {:?}", def_id));
+                        match def.kind {
+                            crate::resolve::DefKind::FuncDef { .. }
+                            | crate::resolve::DefKind::FuncDecl { .. } => {
+                                let value_ty = self.type_lowerer.lower_type_id(place.ty);
+                                Ok(self.builder.const_func_addr(*def_id, value_ty))
+                            }
+                            _ => panic!("ssa load missing local for non-function def {:?}", def_id),
+                        }
+                    }
+                }
                 _ => {
                     let place_addr = self.lower_place_addr(place)?;
                     Ok(self.builder.load(place_addr.addr, place_addr.value_ty))
@@ -467,7 +484,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(place_addr.addr)
             }
 
-            sem::ValueExprKind::Call { callee: _, args } => self.lower_call_expr(expr, args),
+            sem::ValueExprKind::Call { callee, args } => self.lower_call_expr(expr, callee, args),
 
             sem::ValueExprKind::MethodCall { receiver, args, .. } => {
                 self.lower_method_call_expr(expr, receiver, args)

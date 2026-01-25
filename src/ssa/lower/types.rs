@@ -2,7 +2,7 @@
 
 use crate::ssa::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
 use crate::typeck::type_map::TypeMap;
-use crate::types::{Type, TypeId};
+use crate::types::{FnParamMode, Type, TypeId};
 use std::collections::HashMap;
 
 /// Lowers type-checker types to SSA IR types with caching.
@@ -73,6 +73,20 @@ impl<'a> TypeLowerer<'a> {
                 bits: 32,
             }),
             Type::Range { .. } => self.lower_type(&Type::uint(64)),
+            Type::Fn { params, ret_ty } => {
+                let params = params
+                    .iter()
+                    .map(|param| {
+                        let param_ty = self.lower_type(&param.ty);
+                        match param.mode {
+                            FnParamMode::In | FnParamMode::Sink => param_ty,
+                            FnParamMode::Out | FnParamMode::InOut => self.ptr_to(param_ty),
+                        }
+                    })
+                    .collect();
+                let ret = self.lower_type(ret_ty);
+                self.ir_type_cache.add(IrTypeKind::Fn { params, ret })
+            }
 
             // String is lowered as a struct with pointer, length, and capacity.
             Type::String => {
