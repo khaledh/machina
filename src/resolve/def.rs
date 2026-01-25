@@ -70,6 +70,7 @@ impl Default for TypeAttrs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncAttrs {
     pub intrinsic: bool,
+    pub runtime: bool,
     pub link_name: Option<String>,
 }
 
@@ -77,6 +78,7 @@ impl Default for FuncAttrs {
     fn default() -> Self {
         Self {
             intrinsic: false,
+            runtime: false,
             link_name: None,
         }
     }
@@ -149,6 +151,13 @@ impl Def {
         match &self.kind {
             DefKind::TypeDef { attrs } => attrs.intrinsic,
             DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.intrinsic,
+            _ => false,
+        }
+    }
+
+    pub fn is_runtime(&self) -> bool {
+        match &self.kind {
+            DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.runtime,
             _ => false,
         }
     }

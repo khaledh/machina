@@ -408,6 +408,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let len_addr = self.field_addr_typed(place_addr.addr, 1, len_ty);
                         Ok(self.builder.load(len_addr, len_ty))
                     }
+                    Type::String => {
+                        let place_addr = self.lower_place_addr(place)?;
+                        let view = self.load_string_view(place_addr.addr);
+                        Ok(view.len)
+                    }
                     other => panic!("ssa len on unsupported type {:?}", other),
                 }
             }

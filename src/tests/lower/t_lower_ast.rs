@@ -813,7 +813,7 @@ fn test_lower_string_index_emits_memcpy() {
 fn test_lower_string_append_uses_runtime() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__rt_string_append_bytes")]
+            @[runtime]
             fn append(inout self, other: string);
         }
 
@@ -846,7 +846,7 @@ fn test_lower_string_append_uses_runtime() {
 fn test_lower_string_append_bytes_uses_runtime() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__rt_string_append_bytes")]
+            @[runtime]
             fn append_bytes(inout self, bytes: u8[]);
         }
 
@@ -880,7 +880,7 @@ fn test_lower_string_append_bytes_uses_runtime() {
 fn test_call_plan_string_append_len_bits_32() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__rt_string_append_bytes")]
+            @[runtime]
             fn append(inout self, other: string);
         }
 
@@ -901,7 +901,7 @@ fn test_call_plan_string_append_len_bits_32() {
 
     assert!(matches!(
         plan.target,
-        sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes)
+        sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes)
     ));
     assert!(plan.has_receiver);
     assert_eq!(plan.args.len(), 2);
@@ -922,7 +922,7 @@ fn test_call_plan_string_append_len_bits_32() {
 fn test_call_plan_string_append_bytes_len_bits_64() {
     let source = r#"
         string :: {
-            @[intrinsic, link_name("__rt_string_append_bytes")]
+            @[runtime]
             fn append_bytes(inout self, bytes: u8[]);
         }
 
@@ -944,7 +944,7 @@ fn test_call_plan_string_append_bytes_len_bits_64() {
 
     assert!(matches!(
         plan.target,
-        sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes)
+        sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes)
     ));
     assert!(plan.has_receiver);
     assert_eq!(plan.args.len(), 2);

@@ -6,7 +6,7 @@ use crate::resolve::DefKind;
 use crate::tree::InitInfo;
 use crate::tree::semantic::{
     ArgLowering, CallArg, CallInput, CallPlan, CallTarget, IntrinsicCall, MethodReceiver,
-    PlaceExpr, PlaceExprKind as PEK, ValueExpr, ValueExprKind as VEK,
+    PlaceExpr, PlaceExprKind as PEK, RuntimeCall, ValueExpr, ValueExprKind as VEK,
 };
 use crate::types::Type;
 
@@ -173,22 +173,22 @@ impl<'a> FuncLowerer<'a> {
                 };
                 Ok(Callee::Value(self.lower_scalar_expr(callee)?))
             }
-            CallTarget::Intrinsic(intrinsic) => {
-                Ok(Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?))
-            }
+            CallTarget::Intrinsic(intrinsic) => match intrinsic {
+                IntrinsicCall::StringLen => {
+                    panic!("mcir lowering does not support string len intrinsic")
+                }
+            },
+            CallTarget::Runtime(runtime) => Ok(Callee::Runtime(self.runtime_for_call(runtime)?)),
         }
     }
 
-    fn runtime_for_intrinsic(
-        &mut self,
-        intrinsic: &IntrinsicCall,
-    ) -> Result<RuntimeFn, LowerError> {
-        match intrinsic {
-            IntrinsicCall::Print => Ok(RuntimeFn::Print),
-            IntrinsicCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
-            IntrinsicCall::MemSet => Ok(RuntimeFn::MemSet),
-            IntrinsicCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
-            IntrinsicCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
+    fn runtime_for_call(&mut self, runtime: &RuntimeCall) -> Result<RuntimeFn, LowerError> {
+        match runtime {
+            RuntimeCall::Print => Ok(RuntimeFn::Print),
+            RuntimeCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
+            RuntimeCall::MemSet => Ok(RuntimeFn::MemSet),
+            RuntimeCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
+            RuntimeCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
         }
     }
 

@@ -4,6 +4,11 @@ use crate::resolve::DefId;
 
 #[derive(Clone, Debug)]
 pub enum IntrinsicCall {
+    StringLen,
+}
+
+#[derive(Clone, Debug)]
+pub enum RuntimeCall {
     Print,
     U64ToDec,
     MemSet,
@@ -16,6 +21,7 @@ pub enum CallTarget {
     Direct(DefId),
     Indirect,
     Intrinsic(IntrinsicCall),
+    Runtime(RuntimeCall),
 }
 
 #[derive(Clone, Debug)]

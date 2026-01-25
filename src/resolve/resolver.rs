@@ -195,6 +195,18 @@ impl SymbolResolver {
                         resolved.intrinsic = true;
                     }
                 }
+                "runtime" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.runtime = true;
+                    }
+                }
                 "link_name" => {
                     if attr.args.len() != 1 {
                         self.errors.push(ResolveError::AttrWrongArgCount(
@@ -667,7 +679,7 @@ impl SymbolResolver {
             .get(&method_decl.id)
             .cloned()
             .unwrap_or_default();
-        if !func_attrs.intrinsic {
+        if !func_attrs.intrinsic && !func_attrs.runtime {
             self.errors.push(ResolveError::MethodDeclMissingIntrinsic(
                 method_decl.sig.name.clone(),
                 method_decl.span,

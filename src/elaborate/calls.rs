@@ -38,24 +38,40 @@ impl<'a> Elaborator<'a> {
                 .unwrap_or_else(|| panic!("compiler bug: missing def for call {call_id:?}"));
             // Intrinsics override the normal direct-call target with a lowering intent.
             if def.is_intrinsic() {
-                match def.link_name() {
-                    Some("__rt_print") => {
-                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::Print);
-                    }
-                    Some("__rt_u64_to_dec") => {
-                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::U64ToDec);
-                    }
-                    Some("__rt_memset") => {
-                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::MemSet);
-                    }
-                    Some("__rt_string_from_bytes") => {
-                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringFromBytes);
-                    }
-                    Some("__rt_string_append_bytes") => {
-                        target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes);
+                let intrinsic_name = def.link_name().unwrap_or(def.name.as_str());
+                match intrinsic_name {
+                    "len" => {
+                        if matches!(
+                            call_sig.receiver.as_ref().map(|recv| &recv.ty),
+                            Some(Type::String)
+                        ) {
+                            target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen);
+                        }
                     }
                     _ => {}
                 }
+            } else if def.is_runtime() {
+                let runtime_name = def.link_name().unwrap_or(def.name.as_str());
+                target = match runtime_name {
+                    "__rt_print" => sem::CallTarget::Runtime(sem::RuntimeCall::Print),
+                    "__rt_u64_to_dec" => sem::CallTarget::Runtime(sem::RuntimeCall::U64ToDec),
+                    "__rt_memset" => sem::CallTarget::Runtime(sem::RuntimeCall::MemSet),
+                    "__rt_string_from_bytes" => {
+                        sem::CallTarget::Runtime(sem::RuntimeCall::StringFromBytes)
+                    }
+                    "__rt_string_append_bytes" => {
+                        sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes)
+                    }
+                    "append" | "append_bytes"
+                        if matches!(
+                            call_sig.receiver.as_ref().map(|recv| &recv.ty),
+                            Some(Type::String)
+                        ) =>
+                    {
+                        sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes)
+                    }
+                    _ => target,
+                };
             }
         }
 
@@ -71,7 +87,7 @@ impl<'a> Elaborator<'a> {
         }
 
         let args = match target {
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::Print) => {
+            sem::CallTarget::Runtime(sem::RuntimeCall::Print) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic print has receiver");
                 }
@@ -89,7 +105,7 @@ impl<'a> Elaborator<'a> {
                     sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::U64ToDec) => {
+            sem::CallTarget::Runtime(sem::RuntimeCall::U64ToDec) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic u64_to_dec has receiver");
                 }
@@ -107,7 +123,7 @@ impl<'a> Elaborator<'a> {
                     sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MemSet) => {
+            sem::CallTarget::Runtime(sem::RuntimeCall::MemSet) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic memset has receiver");
                 }
@@ -125,7 +141,7 @@ impl<'a> Elaborator<'a> {
                     sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringFromBytes) => {
+            sem::CallTarget::Runtime(sem::RuntimeCall::StringFromBytes) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic string_from_bytes has receiver");
                 }
@@ -143,7 +159,7 @@ impl<'a> Elaborator<'a> {
                     },
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringAppendBytes) => {
+            sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic string append missing receiver");
                 }
@@ -176,6 +192,18 @@ impl<'a> Elaborator<'a> {
                         len_bits,
                     },
                 ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic string len missing receiver");
+                }
+                if !call_sig.params.is_empty() {
+                    panic!(
+                        "compiler bug: intrinsic string len expects 0 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
             }
             _ => {
                 // Default lowering passes inputs straight through in ABI order.

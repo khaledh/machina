@@ -1,14 +1,14 @@
 // Runtime externs: implemented in runtime/*
-@[intrinsic, link_name("__rt_print")]
+@[runtime]
 fn __rt_print(s: string, newline: u64);
 
-@[intrinsic, link_name("__rt_u64_to_dec")]
+@[runtime]
 fn __rt_u64_to_dec(inout buf: u8[], value: u64) -> u64;
 
-@[intrinsic, link_name("__rt_memset")]
+@[runtime]
 fn __rt_memset(inout buf: u8[], value: u8);
 
-@[intrinsic, link_name("__rt_string_from_bytes")]
+@[runtime]
 fn __rt_string_from_bytes(inout dst: string, bytes: u8[]);
 
 fn __rt_alloc(size: u64, align: u64) -> u64;
@@ -23,10 +23,13 @@ fn string_from_bytes(bytes: u8[]) -> string {
 }
 
 string :: {
-  @[intrinsic, link_name("__rt_string_append_bytes")]
+  @[intrinsic]
+  fn len(self) -> u64;
+
+  @[runtime]
   fn append(inout self, other: string);
 
-  @[intrinsic, link_name("__rt_string_append_bytes")]
+  @[runtime]
   fn append_bytes(inout self, bytes: u8[]);
 }
 

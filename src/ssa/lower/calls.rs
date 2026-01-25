@@ -36,9 +36,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let callee_value = self.lower_linear_value_expr(callee_expr)?;
                 Callee::Value(callee_value)
             }
-            sem::CallTarget::Intrinsic(intrinsic) => {
-                Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)
-            }
+            sem::CallTarget::Intrinsic(intrinsic) => match intrinsic {
+                sem::IntrinsicCall::StringLen => {
+                    panic!("ssa call expr cannot lower string len without a receiver");
+                }
+            },
+            sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
         };
 
         // Lower argument expressions.
@@ -119,8 +122,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Callee::Value(callee_value)
             }
             sem::CallTarget::Intrinsic(intrinsic) => {
-                Callee::Runtime(self.runtime_for_intrinsic(intrinsic)?)
+                if matches!(intrinsic, sem::IntrinsicCall::StringLen) {
+                    // String length is a field load; avoid emitting a runtime call.
+                    return self.lower_string_len_method(expr.span, receiver, &receiver_value);
+                }
+                panic!("ssa method call intrinsic {:?} not supported", intrinsic);
             }
+            sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
         };
 
         // Lower argument expressions.
@@ -217,16 +225,45 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(call_args)
     }
 
-    fn runtime_for_intrinsic(
-        &self,
-        intrinsic: &sem::IntrinsicCall,
-    ) -> Result<RuntimeFn, LoweringError> {
-        match intrinsic {
-            sem::IntrinsicCall::Print => Ok(RuntimeFn::Print),
-            sem::IntrinsicCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
-            sem::IntrinsicCall::MemSet => Ok(RuntimeFn::MemSet),
-            sem::IntrinsicCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
-            sem::IntrinsicCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
+    fn runtime_for_call(&self, runtime: &sem::RuntimeCall) -> Result<RuntimeFn, LoweringError> {
+        match runtime {
+            sem::RuntimeCall::Print => Ok(RuntimeFn::Print),
+            sem::RuntimeCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
+            sem::RuntimeCall::MemSet => Ok(RuntimeFn::MemSet),
+            sem::RuntimeCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
+            sem::RuntimeCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
         }
+    }
+
+    fn lower_string_len_method(
+        &mut self,
+        span: Span,
+        receiver: &sem::MethodReceiver,
+        receiver_value: &CallInputValue,
+    ) -> Result<ValueId, LoweringError> {
+        if !matches!(receiver_value.ty, Type::String) {
+            panic!(
+                "ssa string len intrinsic expects string receiver, got {:?}",
+                receiver_value.ty
+            );
+        }
+
+        let len = match receiver {
+            sem::MethodReceiver::ValueExpr(_) => {
+                let (_ptr, len) = self.lower_ptr_len_from_value(
+                    span,
+                    receiver_value.value,
+                    &receiver_value.ty,
+                    32,
+                )?;
+                len
+            }
+            sem::MethodReceiver::PlaceExpr(_) => {
+                let view = self.load_string_view(receiver_value.value);
+                view.len
+            }
+        };
+
+        Ok(len)
     }
 }
