@@ -35,9 +35,7 @@ impl Cfg {
                     push_unique(&mut block_succs, *target);
                 }
                 Terminator::CondBr {
-                    then_bb,
-                    else_bb,
-                    ..
+                    then_bb, else_bb, ..
                 } => {
                     push_unique(&mut block_succs, *then_bb);
                     push_unique(&mut block_succs, *else_bb);

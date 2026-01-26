@@ -1,3 +1,4 @@
+use crate::analysis::dataflow::DataflowGraph;
 use crate::context::ParsedContext;
 use crate::elaborate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
@@ -6,7 +7,9 @@ use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::ssa::analysis::cfg::Cfg;
+use crate::ssa::analysis::liveness::analyze as liveness_analyze;
 use crate::ssa::lower::lower_func;
+use crate::ssa::model::ir::Terminator;
 use crate::typeck::type_check;
 use indoc::indoc;
 
@@ -30,7 +33,51 @@ fn analyze(source: &str) -> crate::context::SemanticContext {
 }
 
 #[test]
-fn test_cfg_if_diamond() {
+fn test_liveness_matches_block_count() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            if true { 1 } else { 2 }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+
+    let live_map = liveness_analyze(&lowered.func);
+    assert_eq!(live_map.len(), lowered.func.blocks.len());
+}
+
+#[test]
+fn test_liveness_single_block_empty_sets() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            1
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+
+    let live_map = liveness_analyze(&lowered.func);
+    assert_eq!(live_map.len(), 1);
+    assert!(live_map[0].live_in.is_empty());
+    assert!(live_map[0].live_out.is_empty());
+}
+
+#[test]
+fn test_liveness_branch_args_live_out() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
             if true { 1 } else { 2 }
@@ -47,69 +94,22 @@ fn test_cfg_if_diamond() {
     .expect("failed to lower");
 
     let cfg = Cfg::new(&lowered.func);
-    let blocks = cfg.blocks();
-    assert_eq!(blocks.len(), 4);
+    let live_map = liveness_analyze(&lowered.func);
 
-    let entry = blocks[0];
-    let then_bb = blocks[1];
-    let else_bb = blocks[2];
-    let join_bb = blocks[3];
+    let then_block = &lowered.func.blocks[1];
+    let else_block = &lowered.func.blocks[2];
 
-    assert_eq!(cfg.entry(), entry);
-    assert_eq!(cfg.succs(entry), &[then_bb, else_bb]);
-    assert_eq!(cfg.succs(then_bb), &[join_bb]);
-    assert_eq!(cfg.succs(else_bb), &[join_bb]);
-    assert!(cfg.succs(join_bb).is_empty());
+    let then_arg = match &then_block.term {
+        Terminator::Br { args, .. } => args[0],
+        other => panic!("expected then branch to end with br, got {:?}", other),
+    };
+    let else_arg = match &else_block.term {
+        Terminator::Br { args, .. } => args[0],
+        other => panic!("expected else branch to end with br, got {:?}", other),
+    };
 
-    assert_eq!(cfg.preds(then_bb), &[entry]);
-    assert_eq!(cfg.preds(else_bb), &[entry]);
-    assert_eq!(cfg.preds(join_bb), &[then_bb, else_bb]);
-
-    let rpo = cfg.rpo();
-    assert_eq!(rpo, vec![entry, else_bb, then_bb, join_bb]);
-}
-
-#[test]
-fn test_cfg_while_loop_back_edge() {
-    let ctx = analyze(indoc! {"
-        fn main() -> u64 {
-            var i = 0;
-            while i < 2 {
-                i = i + 1;
-            }
-            i
-        }
-    "});
-    let func_def = ctx.module.func_defs()[0];
-    let lowered = lower_func(
-        func_def,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.lowering_plans,
-        &ctx.drop_plans,
-    )
-    .expect("failed to lower");
-
-    let cfg = Cfg::new(&lowered.func);
-    let blocks = cfg.blocks();
-    assert_eq!(blocks.len(), 4);
-
-    let entry = blocks[0];
-    let header = blocks[1];
-    let body = blocks[2];
-    let exit = blocks[3];
-
-    assert_eq!(cfg.entry(), entry);
-    assert_eq!(cfg.succs(entry), &[header]);
-    assert_eq!(cfg.succs(header), &[body, exit]);
-    assert_eq!(cfg.succs(body), &[header]);
-    assert!(cfg.succs(exit).is_empty());
-
-    assert_eq!(cfg.preds(header), &[entry, body]);
-    assert_eq!(cfg.preds(body), &[header]);
-    assert_eq!(cfg.preds(exit), &[header]);
-
-    let rpo = cfg.rpo();
-    assert_eq!(rpo.first().copied(), Some(entry));
-    assert_eq!(rpo.len(), blocks.len());
+    let then_idx = cfg.index(then_block.id);
+    let else_idx = cfg.index(else_block.id);
+    assert!(live_map[then_idx].live_out.contains(&then_arg));
+    assert!(live_map[else_idx].live_out.contains(&else_arg));
 }

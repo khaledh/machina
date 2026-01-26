@@ -1,5 +1,5 @@
-pub mod codegen;
 pub mod analysis;
+pub mod codegen;
 pub mod lower;
 pub mod model;
 
