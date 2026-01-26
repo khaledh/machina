@@ -1,0 +1,44 @@
+//! CFG-free SSA optimizations.
+
+use crate::ssa::model::ir::Function;
+
+pub mod const_fold;
+
+/// SSA optimization pass trait.
+pub trait Pass {
+    fn name(&self) -> &'static str;
+    fn run(&mut self, func: &mut Function) -> bool;
+}
+
+pub struct PassManager {
+    passes: Vec<Box<dyn Pass>>,
+}
+
+impl PassManager {
+    pub fn new() -> Self {
+        Self {
+            passes: vec![Box::new(const_fold::ConstFold)],
+        }
+    }
+
+    pub fn run(&mut self, funcs: &mut [Function]) {
+        const MAX_ITERS: usize = 4;
+
+        // Iterate to a local fixpoint; CFG-free passes should be idempotent.
+        for _ in 0..MAX_ITERS {
+            let mut changed = false;
+            for pass in &mut self.passes {
+                for func in funcs.iter_mut() {
+                    changed |= pass.run(func);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../tests/ssa/opt/t_cfg_free.rs"]
+mod tests;
