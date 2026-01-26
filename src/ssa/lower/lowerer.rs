@@ -30,6 +30,12 @@ pub(super) enum BranchResult {
     Return,
 }
 
+impl From<ValueId> for BranchResult {
+    fn from(value: ValueId) -> Self {
+        BranchResult::Value(value)
+    }
+}
+
 /// Outcome of lowering a statement.
 pub(super) enum StmtOutcome {
     /// Continue execution in the current block.
@@ -321,6 +327,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(BranchResult::Value(value))
             }
             sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
+        }
+    }
+
+    /// Lowers a value expression and returns `None` if it forces an early return.
+    ///
+    /// This is used by linear lowering to evaluate subexpressions that may contain
+    /// branching control-flow (e.g. `if`), without duplicating the linear logic.
+    pub(super) fn lower_value_expr_opt(
+        &mut self,
+        expr: &sem::ValueExpr,
+    ) -> Result<Option<ValueId>, LoweringError> {
+        match self.lower_value_expr(expr)? {
+            BranchResult::Value(value) => Ok(Some(value)),
+            BranchResult::Return => Ok(None),
         }
     }
 }

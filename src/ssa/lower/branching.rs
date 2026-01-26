@@ -2,9 +2,9 @@
 
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
+use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::ssa::lower::r#match::MatchLowerer;
-use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{Terminator, ValueId};
 use crate::tree::{BinaryOp, semantic as sem};
 
@@ -172,18 +172,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 MatchLowerer::lower(self, expr, scrutinee, arms)
             }
 
-            // Other expressions: lower using their plan.
+            // Other expressions: delegate to unified value lowering to avoid duplication.
             _ => {
                 let plan = self.lowering_plans.get(&expr.id).unwrap_or_else(|| {
                     panic!("ssa lower_func missing lowering plan {:?}", expr.id)
                 });
                 match plan {
-                    sem::LoweringPlan::Linear => {
-                        let value = self.lower_linear_value_expr(expr)?;
-                        Ok(BranchResult::Value(value))
-                    }
-                    sem::LoweringPlan::Branching => {
-                        Err(self.err_span(expr.span, LoweringErrorKind::UnimplementedBranching))
+                    sem::LoweringPlan::Linear | sem::LoweringPlan::Branching => {
+                        self.lower_value_expr_value(expr)
                     }
                 }
             }

@@ -133,6 +133,54 @@ fn test_lower_if_stmt_side_effect() {
 }
 
 #[test]
+fn test_lower_tuple_with_branching_elem() {
+    let ctx = analyze(indoc! {"
+        fn main() -> (u64, u64) {
+            (if true { 1 } else { 2 }, 3)
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main() -> (u64, u64) {
+          locals:
+            %l0: (u64, u64)
+          bb0():
+            %v0: ptr<(u64, u64)> = addr_of %l0
+            %v1: bool = const true
+            cbr %v1, bb1, bb2
+
+          bb1():
+            %v3: u64 = const 1:u64
+            br bb3(%v3)
+
+          bb2():
+            %v4: u64 = const 2:u64
+            br bb3(%v4)
+
+          bb3(%v2: u64):
+            %v5: ptr<u64> = field_addr %v0, 0
+            store %v5, %v2
+            %v6: u64 = const 3:u64
+            %v7: ptr<u64> = field_addr %v0, 1
+            store %v7, %v6
+            %v8: (u64, u64) = load %v0
+            ret %v8
+        }
+    "};
+    assert_eq!(text, expected);
+}
+
+#[test]
 fn test_lower_if_cmp_return() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {

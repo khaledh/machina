@@ -17,6 +17,32 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         expr: &sem::ValueExpr,
     ) -> Result<LinearValue, LoweringError> {
+        match self.lower_value_expr_value(expr)? {
+            BranchResult::Value(value) => Ok(value),
+            BranchResult::Return => {
+                panic!(
+                    "ssa lower_linear_value_expr hit return in linear context at {:?}",
+                    expr.span
+                );
+            }
+        }
+    }
+
+    /// Lowers a value expression, allowing branching subexpressions to return early.
+    pub(super) fn lower_value_expr_value(
+        &mut self,
+        expr: &sem::ValueExpr,
+    ) -> Result<BranchResult, LoweringError> {
+        macro_rules! eval_value {
+            ($expr:expr) => {
+                match self.lower_value_expr_opt($expr)? {
+                    // Propagate early return from a branching subexpression.
+                    Some(value) => value,
+                    None => return Ok(BranchResult::Return),
+                }
+            };
+        }
+
         match &expr.kind {
             sem::ValueExprKind::Block { items, tail } => {
                 self.with_drop_scope(expr.id, |lowerer| {
@@ -40,26 +66,31 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
 
                     if let Some(tail) = tail {
-                        return lowerer.lower_linear_value_expr(tail);
+                        return lowerer
+                            .lower_linear_value_expr(tail)
+                            .map(Into::into);
                     }
 
                     let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
-                    Ok(lowerer.builder.const_unit(ty))
+                    Ok(lowerer.builder.const_unit(ty).into())
                 })
             }
 
             sem::ValueExprKind::UnitLit => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_unit(ty))
+                Ok(self.builder.const_unit(ty).into())
             }
             sem::ValueExprKind::IntLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let (signed, bits) = self.type_lowerer.int_info(expr.ty);
-                Ok(self.builder.const_int(*value as i128, signed, bits, ty))
+                Ok(self
+                    .builder
+                    .const_int(*value as i128, signed, bits, ty)
+                    .into())
             }
             sem::ValueExprKind::BoolLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_bool(*value, ty))
+                Ok(self.builder.const_bool(*value, ty).into())
             }
             sem::ValueExprKind::CharLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
@@ -67,7 +98,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let bits = 32;
                 Ok(self
                     .builder
-                    .const_int(*value as u32 as i128, signed, bits, ty))
+                    .const_int(*value as u32 as i128, signed, bits, ty)
+                    .into())
             }
             sem::ValueExprKind::StringLit { value } => {
                 let string_ty = self.type_lowerer.lower_type_id(expr.ty);
@@ -91,21 +123,28 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.store_field(slot.addr, 1, len_ty, len_val);
                 self.store_field(slot.addr, 2, len_ty, cap_val);
 
-                Ok(self.load_slot(&slot))
+                Ok(self.load_slot(&slot).into())
             }
 
             sem::ValueExprKind::Range { start, .. } => {
                 // Range values are represented as u64 in SSA (bounds live in the type).
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_int(*start as i128, false, 64, ty))
+                Ok(self
+                    .builder
+                    .const_int(*start as i128, false, 64, ty)
+                    .into())
             }
 
             sem::ValueExprKind::StringFmt { plan } => {
                 let string_ty = self.type_lowerer.lower_type_id(expr.ty);
-                match plan.kind {
-                    sem::FmtKind::View => self.lower_string_fmt_view(plan, string_ty),
-                    sem::FmtKind::Owned => self.lower_string_fmt_owned(plan, string_ty),
-                }
+                let value = match plan.kind {
+                    sem::FmtKind::View => self.lower_string_fmt_view(plan, string_ty)?,
+                    sem::FmtKind::Owned => self.lower_string_fmt_owned(plan, string_ty)?,
+                };
+                let Some(value) = value else {
+                    return Ok(BranchResult::Return);
+                };
+                Ok(value.into())
             }
 
             sem::ValueExprKind::ArrayLit { init, .. } => {
@@ -119,7 +158,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 match init {
                     sem::ArrayLitInit::Elems(elems) => {
                         for (i, elem_expr) in elems.iter().enumerate() {
-                            let value = self.lower_linear_value_expr(elem_expr)?;
+                            let value = eval_value!(elem_expr);
                             let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
                             let elem_ty = self.type_lowerer.lower_type_id(elem_expr.ty);
                             let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
@@ -128,7 +167,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         }
                     }
                     sem::ArrayLitInit::Repeat(expr, count) => {
-                        let value = self.lower_linear_value_expr(expr)?;
+                        let value = eval_value!(expr);
                         let elem_ty = self.type_lowerer.lower_type_id(expr.ty);
                         for i in 0..*count {
                             let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
@@ -140,7 +179,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
 
                 // Load the array value
-                Ok(self.builder.load(addr, array_ty))
+                Ok(self.builder.load(addr, array_ty).into())
             }
 
             sem::ValueExprKind::TupleLit(items) => {
@@ -150,13 +189,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Store each field
                 for (i, elem_expr) in items.iter().enumerate() {
-                    let value = self.lower_linear_value_expr(elem_expr)?;
+                    let value = eval_value!(elem_expr);
                     let field_ty = self.lower_tuple_field_ty(expr.ty, i);
                     self.store_field(slot.addr, i, field_ty, value);
                 }
 
                 // Load the tuple value
-                Ok(self.load_slot(&slot))
+                Ok(self.load_slot(&slot).into())
             }
 
             sem::ValueExprKind::StructLit { fields, .. } => {
@@ -166,13 +205,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Store each field
                 for field in fields.iter() {
-                    let value = self.lower_linear_value_expr(&field.value)?;
+                    let value = eval_value!(&field.value);
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
                     self.store_field(slot.addr, field_index, field_ty, value);
                 }
 
                 // Load the struct value
-                Ok(self.load_slot(&slot))
+                Ok(self.load_slot(&slot).into())
             }
 
             sem::ValueExprKind::StructUpdate { target, fields } => {
@@ -181,18 +220,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let slot = self.alloc_value_slot(struct_ty);
 
                 // Copy the base struct
-                let base_value = self.lower_linear_value_expr(target)?;
+                let base_value = eval_value!(target);
                 self.builder.store(slot.addr, base_value);
 
                 // Overwrite the updated fields
                 for field in fields.iter() {
-                    let value = self.lower_linear_value_expr(&field.value)?;
+                    let value = eval_value!(&field.value);
                     let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
                     self.store_field(slot.addr, field_index, field_ty, value);
                 }
 
                 // Load the updated struct value
-                Ok(self.load_slot(&slot))
+                Ok(self.load_slot(&slot).into())
             }
 
             sem::ValueExprKind::EnumVariant {
@@ -240,22 +279,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .zip(field_offsets.iter())
                     .zip(field_tys.iter().copied())
                 {
-                    let value = self.lower_linear_value_expr(value_expr)?;
+                    let value = eval_value!(value_expr);
                     self.store_into_blob(payload_ptr, *offset, value, value_ty);
                 }
 
-                Ok(self.load_slot(&slot))
+                Ok(self.load_slot(&slot).into())
             }
 
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
-                let value = self.lower_linear_value_expr(inner)?;
+                let value = eval_value!(inner);
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = match op {
                     UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
                     UnaryOp::LogicalNot => self.builder.unop(UnOp::Not, value, ty),
                     UnaryOp::BitNot => self.builder.unop(UnOp::BitNot, value, ty),
                 };
-                Ok(result)
+                Ok(result.into())
             }
 
             sem::ValueExprKind::HeapAlloc { expr: inner } => {
@@ -284,23 +323,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 );
 
                 if layout.size() != 0 {
-                    let value = self.lower_linear_value_expr(inner)?;
+                    let value = eval_value!(inner);
                     self.builder.store(ptr_val, value);
                 }
 
-                Ok(ptr_val)
+                Ok(ptr_val.into())
             }
 
             sem::ValueExprKind::BinOp { left, op, right } => {
-                let lhs = self.lower_linear_value_expr(left)?;
-                let rhs = self.lower_linear_value_expr(right)?;
+                let lhs = eval_value!(left);
+                let rhs = eval_value!(right);
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
 
                 if let Some(binop) = map_binop(*op) {
-                    return Ok(self.builder.binop(binop, lhs, rhs, ty));
+                    return Ok(self.builder.binop(binop, lhs, rhs, ty).into());
                 }
                 if let Some(cmp) = map_cmp(*op) {
-                    return Ok(self.builder.cmp(cmp, lhs, rhs, ty));
+                    return Ok(self.builder.cmp(cmp, lhs, rhs, ty).into());
                 }
                 Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
             }
@@ -350,11 +389,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Evaluate bounds (default start=0, end=base_len).
                 let start_val = match start {
-                    Some(expr) => self.lower_linear_value_expr(expr)?,
+                    Some(expr) => eval_value!(expr),
                     None => self.builder.const_int(0, false, 64, u64_ty),
                 };
                 let end_val = match end {
-                    Some(expr) => self.lower_linear_value_expr(expr)?,
+                    Some(expr) => eval_value!(expr),
                     None => base_len,
                 };
 
@@ -379,15 +418,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
 
                 let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.emit_slice_value(
-                    slice_ty,
-                    elem_ptr_ty,
-                    u64_ty,
-                    base_ptr,
-                    base_len,
-                    start_val,
-                    end_val,
-                ))
+                Ok(self
+                    .emit_slice_value(
+                        slice_ty,
+                        elem_ptr_ty,
+                        u64_ty,
+                        base_ptr,
+                        base_len,
+                        start_val,
+                        end_val,
+                    )
+                    .into())
             }
 
             sem::ValueExprKind::Len { place } => {
@@ -400,18 +441,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             .copied()
                             .unwrap_or_else(|| panic!("ssa len on array with empty dims"));
                         let ty = self.type_lowerer.lower_type_id(expr.ty);
-                        Ok(self.builder.const_int(len as i128, false, 64, ty))
+                        Ok(self
+                            .builder
+                            .const_int(len as i128, false, 64, ty)
+                            .into())
                     }
                     Type::Slice { .. } => {
                         let place_addr = self.lower_place_addr(place)?;
                         let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
                         let len_addr = self.field_addr_typed(place_addr.addr, 1, len_ty);
-                        Ok(self.builder.load(len_addr, len_ty))
+                        Ok(self.builder.load(len_addr, len_ty).into())
                     }
                     Type::String => {
                         let place_addr = self.lower_place_addr(place)?;
                         let view = self.load_string_view(place_addr.addr);
-                        Ok(view.len)
+                        Ok(view.len.into())
                     }
                     other => panic!("ssa len on unsupported type {:?}", other),
                 }
@@ -421,11 +465,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 match &place.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         self.set_drop_flag_for_def(*def_id, false);
-                        Ok(self.load_local_value(*def_id))
+                        Ok(self.load_local_value(*def_id).into())
                     }
                     _ => {
                         let place_addr = self.lower_place_addr(place)?;
-                        Ok(self.builder.load(place_addr.addr, place_addr.value_ty))
+                        Ok(self
+                            .builder
+                            .load(place_addr.addr, place_addr.value_ty)
+                            .into())
                     }
                 }
             }
@@ -458,7 +505,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                                     self.resolve_deref_base(place, deref_count)?
                                 }
                                 _ => {
-                                    let value = self.lower_linear_value_expr(inner)?;
+                                    let value = eval_value!(inner);
                                     if deref_count == 0 {
                                         let array_ty = self.type_lowerer.lower_type_id(inner.ty);
                                         let addr = self.alloc_local_addr(array_ty);
@@ -487,22 +534,24 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let start_val = self.builder.const_int(0, false, 64, u64_ty);
                     let end_val = base_len;
                     let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
-                    Ok(self.emit_slice_value(
-                        slice_ty,
-                        elem_ptr_ty,
-                        u64_ty,
-                        base_addr,
-                        base_len,
-                        start_val,
-                        end_val,
-                    ))
+                    Ok(self
+                        .emit_slice_value(
+                            slice_ty,
+                            elem_ptr_ty,
+                            u64_ty,
+                            base_addr,
+                            base_len,
+                            start_val,
+                            end_val,
+                        )
+                        .into())
                 }
             },
 
             sem::ValueExprKind::Load { place } => match &place.kind {
                 sem::PlaceExprKind::Var { def_id, .. } => {
                     if self.locals.get(*def_id).is_some() {
-                        Ok(self.load_local_value(*def_id))
+                        Ok(self.load_local_value(*def_id).into())
                     } else {
                         let def = self
                             .def_table
@@ -512,7 +561,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             crate::resolve::DefKind::FuncDef { .. }
                             | crate::resolve::DefKind::FuncDecl { .. } => {
                                 let value_ty = self.type_lowerer.lower_type_id(place.ty);
-                                Ok(self.builder.const_func_addr(*def_id, value_ty))
+                                Ok(self.builder.const_func_addr(*def_id, value_ty).into())
                             }
                             _ => panic!("ssa load missing local for non-function def {:?}", def_id),
                         }
@@ -520,24 +569,35 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 _ => {
                     let place_addr = self.lower_place_addr(place)?;
-                    Ok(self.builder.load(place_addr.addr, place_addr.value_ty))
+                    Ok(self
+                        .builder
+                        .load(place_addr.addr, place_addr.value_ty)
+                        .into())
                 }
             },
 
             sem::ValueExprKind::AddrOf { place } => {
                 let place_addr = self.lower_place_addr(place)?;
-                Ok(place_addr.addr)
+                Ok(place_addr.addr.into())
             }
 
-            sem::ValueExprKind::Call { callee, args } => self.lower_call_expr(expr, callee, args),
+            sem::ValueExprKind::Call { callee, args } => {
+                let Some(value) = self.lower_call_expr(expr, callee, args)? else {
+                    return Ok(BranchResult::Return);
+                };
+                Ok(value.into())
+            }
 
             sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-                self.lower_method_call_expr(expr, receiver, args)
+                let Some(value) = self.lower_method_call_expr(expr, receiver, args)? else {
+                    return Ok(BranchResult::Return);
+                };
+                Ok(value.into())
             }
 
             sem::ValueExprKind::ClosureRef { def_id } => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_func_addr(*def_id, ty))
+                Ok(self.builder.const_func_addr(*def_id, ty).into())
             }
 
             _ => Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr)),
@@ -553,7 +613,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             sem::StmtExprKind::LetBind { pattern, value, .. }
             | sem::StmtExprKind::VarBind { pattern, value, .. } => {
                 let value_expr = value;
-                let value = self.lower_linear_value_expr(value_expr)?;
+                let value = match self.lower_value_expr_value(value_expr)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(StmtOutcome::Return),
+                };
                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                 let value_ty = self.type_map.type_table().get(value_expr.ty).clone();
                 self.bind_pattern(pattern, LocalValue::value(value, ty), &value_ty)?;
@@ -584,7 +647,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 ..
             } => {
                 let value_expr = value;
-                let value = self.lower_linear_value_expr(value_expr)?;
+                let value = match self.lower_value_expr_value(value_expr)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(StmtOutcome::Return),
+                };
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
@@ -604,7 +670,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             sem::StmtExprKind::Return { value } => {
                 let value = match value {
-                    Some(expr) => Some(self.lower_linear_value_expr(expr)?),
+                    Some(expr) => match self.lower_value_expr_value(expr)? {
+                        BranchResult::Value(value) => Some(value),
+                        BranchResult::Return => return Ok(StmtOutcome::Return),
+                    },
                     None => None,
                 };
                 self.emit_drops_for_stmt(stmt.id)?;

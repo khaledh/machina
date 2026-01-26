@@ -17,11 +17,12 @@ enum LoweredFmtSegment {
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     // --- Fixed-length f-string formatting (view string) ---
 
+    /// Lowers a view f-string, returning `None` if a segment returns early.
     pub(super) fn lower_string_fmt_view(
         &mut self,
         plan: &sem::StringFmtPlan,
         string_ty: crate::ssa::IrTypeId,
-    ) -> Result<LinearValue, LoweringError> {
+    ) -> Result<Option<LinearValue>, LoweringError> {
         let total_len = self.string_fmt_plan_len(plan);
         let buf_len = total_len.max(1);
 
@@ -50,7 +51,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             unit_ty,
         );
 
-        let (segments, _) = self.lower_fmt_segments(plan, u8_ptr_ty, u64_ty)?;
+        let (segments, _) = match self.lower_fmt_segments(plan, u8_ptr_ty, u64_ty)? {
+            Some(value) => value,
+            None => return Ok(None),
+        };
 
         // Append each segment using the runtime formatter.
         for segment in segments {
@@ -85,7 +89,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             vec![slot.addr, fmt_addr],
             unit_ty,
         );
-        Ok(self.load_slot(&slot))
+        Ok(Some(self.load_slot(&slot)))
     }
 
     fn string_fmt_plan_len(&self, plan: &sem::StringFmtPlan) -> usize {
@@ -105,15 +109,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     // --- Variable length f-string formatting (owned string) ---
 
+    /// Lowers an owned f-string, returning `None` if a segment returns early.
     pub(super) fn lower_string_fmt_owned(
         &mut self,
         plan: &sem::StringFmtPlan,
         string_ty: crate::ssa::IrTypeId,
-    ) -> Result<LinearValue, LoweringError> {
+    ) -> Result<Option<LinearValue>, LoweringError> {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
         let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
-        let (segments, string_lens) = self.lower_fmt_segments(plan, u8_ptr_ty, u64_ty)?;
+        let (segments, string_lens) = match self.lower_fmt_segments(plan, u8_ptr_ty, u64_ty)? {
+            Some(value) => value,
+            None => return Ok(None),
+        };
 
         let slot = self.alloc_value_slot(string_ty);
         self.init_empty_string_slot(&slot);
@@ -172,7 +180,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
         }
 
-        Ok(self.load_slot(&slot))
+        Ok(Some(self.load_slot(&slot)))
     }
 
     fn init_empty_string_slot(&mut self, slot: &ValueSlot) {
@@ -233,12 +241,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     // --- Shared between view and owned f-string lowering ---
 
+    /// Lowers format segments, propagating early returns from segment expressions.
     fn lower_fmt_segments(
         &mut self,
         plan: &sem::StringFmtPlan,
         u8_ptr_ty: crate::ssa::IrTypeId,
         u64_ty: crate::ssa::IrTypeId,
-    ) -> Result<(Vec<LoweredFmtSegment>, Vec<Option<ValueId>>), LoweringError> {
+    ) -> Result<Option<(Vec<LoweredFmtSegment>, Vec<Option<ValueId>>)>, LoweringError> {
         let mut segments = Vec::with_capacity(plan.segments.len());
         let mut string_lens = vec![None; plan.segments.len()];
 
@@ -260,14 +269,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     });
                 }
                 sem::SegmentKind::StringValue { expr } => {
-                    let value = self.lower_linear_value_expr(expr)?;
+                    let Some(value) = self.lower_value_expr_opt(expr)? else {
+                        return Ok(None);
+                    };
                     let (ptr, len) =
                         self.lower_ptr_len_from_value(expr.span, value, &Type::String, 32)?;
                     string_lens[index] = Some(len);
                     segments.push(LoweredFmtSegment::StringValue { ptr, len });
                 }
                 sem::SegmentKind::Int { expr, signed, bits } => {
-                    let value = self.lower_linear_value_expr(expr)?;
+                    let Some(value) = self.lower_value_expr_opt(expr)? else {
+                        return Ok(None);
+                    };
                     let target_ty = self.type_lowerer.lower_type(&Type::Int {
                         signed: *signed,
                         bits: 64,
@@ -281,7 +294,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
         }
 
-        Ok((segments, string_lens))
+        Ok(Some((segments, string_lens)))
     }
 
     fn cast_int_value(

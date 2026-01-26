@@ -13,12 +13,13 @@ struct CallInputValue {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    /// Lowers a call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_call_expr(
         &mut self,
         expr: &sem::ValueExpr,
         callee_expr: &sem::ValueExpr,
         args: &[sem::CallArg],
-    ) -> Result<LinearValue, LoweringError> {
+    ) -> Result<Option<LinearValue>, LoweringError> {
         let call_plan = self
             .type_map
             .lookup_call_plan(expr.id)
@@ -33,7 +34,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let callee = match &call_plan.target {
             sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
             sem::CallTarget::Indirect => {
-                let callee_value = self.lower_linear_value_expr(callee_expr)?;
+                let Some(callee_value) = self.lower_value_expr_opt(callee_expr)? else {
+                    return Ok(None);
+                };
                 Callee::Value(callee_value)
             }
             sem::CallTarget::Intrinsic(intrinsic) => match intrinsic {
@@ -49,7 +52,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let value = self.lower_linear_value_expr(expr)?;
+                    let Some(value) = self.lower_value_expr_opt(expr)? else {
+                        return Ok(None);
+                    };
                     let ty = self.type_map.type_table().get(expr.ty).clone();
                     arg_values.push(CallInputValue { value, ty });
                 }
@@ -68,15 +73,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let call_args =
             self.lower_call_args_from_plan(expr.id, expr.span, &call_plan, None, &arg_values)?;
         let ty = self.type_lowerer.lower_type_id(expr.ty);
-        Ok(self.builder.call(callee, call_args, ty))
+        Ok(Some(self.builder.call(callee, call_args, ty)))
     }
 
+    /// Lowers a method call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_method_call_expr(
         &mut self,
         expr: &sem::ValueExpr,
         receiver: &sem::MethodReceiver,
         args: &[sem::CallArg],
-    ) -> Result<LinearValue, LoweringError> {
+    ) -> Result<Option<LinearValue>, LoweringError> {
         let call_plan = self.type_map.lookup_call_plan(expr.id).unwrap_or_else(|| {
             panic!("ssa lower_method_call_expr missing call plan {:?}", expr.id)
         });
@@ -92,7 +98,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Lower the receiver.
         let receiver_value = match receiver {
             sem::MethodReceiver::ValueExpr(expr) => {
-                let value = self.lower_linear_value_expr(expr)?;
+                let Some(value) = self.lower_value_expr_opt(expr)? else {
+                    return Ok(None);
+                };
                 let ty = self.type_map.type_table().get(expr.ty).clone();
                 CallInputValue { value, ty }
             }
@@ -124,7 +132,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             sem::CallTarget::Intrinsic(intrinsic) => {
                 if matches!(intrinsic, sem::IntrinsicCall::StringLen) {
                     // String length is a field load; avoid emitting a runtime call.
-                    return self.lower_string_len_method(expr.span, receiver, &receiver_value);
+                    return self
+                        .lower_string_len_method(expr.span, receiver, &receiver_value)
+                        .map(Some);
                 }
                 panic!("ssa method call intrinsic {:?} not supported", intrinsic);
             }
@@ -136,7 +146,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let value = self.lower_linear_value_expr(expr)?;
+                    let Some(value) = self.lower_value_expr_opt(expr)? else {
+                        return Ok(None);
+                    };
                     let ty = self.type_map.type_table().get(expr.ty).clone();
                     arg_values.push(CallInputValue { value, ty });
                 }
@@ -160,7 +172,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             &arg_values,
         )?;
         let ty = self.type_lowerer.lower_type_id(expr.ty);
-        Ok(self.builder.call(callee, call_args, ty))
+        Ok(Some(self.builder.call(callee, call_args, ty)))
     }
 
     fn lower_call_args_from_plan(
