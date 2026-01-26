@@ -7,7 +7,7 @@ use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::ssa::lower::lower_func;
 use crate::ssa::model::format::formact_func;
-use crate::ssa::opt::cfg_free::PassManager;
+use crate::ssa::opt::dataflow::PassManager;
 use crate::typeck::type_check;
 use indoc::indoc;
 
@@ -48,51 +48,64 @@ fn lower_and_optimize(source: &str) -> String {
 }
 
 #[test]
-fn test_const_fold_binop() {
+fn test_dce_removes_unused_binop() {
     let text = lower_and_optimize(indoc! {"
         fn main() -> u64 {
             let x = 1 + 2;
-            x
+            4
         }
     "});
 
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
-            %v0: u64 = const 1:u64
-            %v1: u64 = const 2:u64
-            %v2: u64 = const 3:u64
-            ret %v2
+            %v3: u64 = const 4:u64
+            ret %v3
         }
     "};
     assert_eq!(text, expected);
 }
 
 #[test]
-fn test_const_fold_cond_br() {
-    let text = lower_and_optimize(indoc! {"
+fn test_dce_keeps_call() {
+    let ctx = analyze(indoc! {"
         fn main() -> u64 {
-            if true { 1 } else { 2 }
+            side();
+            4
+        }
+
+        fn side() -> u64 {
+            1
         }
     "});
 
-    let expected = indoc! {"
-        fn main() -> u64 {
-          bb0():
-            %v0: bool = const true
-            br bb1
+    let main_def = ctx.module.func_defs()[0];
+    let side_def = ctx.module.func_defs()[1];
+    let side_id = side_def.def_id;
 
-          bb1():
-            %v2: u64 = const 1:u64
-            br bb3(%v2)
+    let mut lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
 
-          bb2():
-            %v3: u64 = const 2:u64
-            br bb3(%v3)
+    let mut manager = PassManager::new();
+    manager.run(std::slice::from_mut(&mut lowered.func));
+    let text = formact_func(&lowered.func, &lowered.types);
 
-          bb3(%v1: u64):
-            ret %v1
-        }
-    "};
+    let expected = format!(
+        indoc! {"
+            fn main() -> u64 {{
+              bb0():
+                %v0: u64 = call @{}()
+                %v1: u64 = const 4:u64
+                ret %v1
+            }}
+        "},
+        side_id
+    );
     assert_eq!(text, expected);
 }

@@ -2,13 +2,9 @@
 
 use crate::ssa::model::ir::Function;
 
-pub mod const_fold;
+pub use crate::ssa::opt::Pass;
 
-/// SSA optimization pass trait.
-pub trait Pass {
-    fn name(&self) -> &'static str;
-    fn run(&mut self, func: &mut Function) -> bool;
-}
+pub mod const_fold;
 
 pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
