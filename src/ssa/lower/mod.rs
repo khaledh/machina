@@ -41,7 +41,7 @@ pub struct LoweredModule {
     pub globals: Vec<GlobalData>,
 }
 
-pub use error::{LoweringError, LoweringErrorKind};
+pub use error::LoweringError;
 
 /// Lowers a semantic function definition into SSA IR.
 ///

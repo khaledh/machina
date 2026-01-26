@@ -3,9 +3,9 @@
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
+use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::{LocalStorage, LocalValue};
 use crate::ssa::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
-use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{BinOp, Callee, CastKind, CmpOp, RuntimeFn, Terminator, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -340,16 +340,5 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .const_int(layout.size() as i128, false, 64, u64_ty);
 
         self.builder.memcopy(dst, temp_ptr, len);
-    }
-
-    pub(super) fn err_span(&self, span: Span, kind: LoweringErrorKind) -> LoweringError {
-        LoweringError { kind, span }
-    }
-
-    pub(super) fn err_stmt(&self, stmt: &sem::StmtExpr, kind: LoweringErrorKind) -> LoweringError {
-        LoweringError {
-            kind,
-            span: stmt.span,
-        }
     }
 }

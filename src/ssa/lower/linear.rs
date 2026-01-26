@@ -1,9 +1,9 @@
 //! Straight-line (single-block) lowering routines.
 
+use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
-use crate::ssa::lower::{LoweringError, LoweringErrorKind};
 use crate::ssa::model::ir::{BinOp, Callee, RuntimeFn, Terminator, UnOp, ValueId};
 use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
@@ -341,7 +341,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 if let Some(cmp) = map_cmp(*op) {
                     return Ok(self.builder.cmp(cmp, lhs, rhs, ty).into());
                 }
-                Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr))
+                panic!(
+                    "ssa lower_value_expr_value unsupported binop {:?} at {:?}",
+                    op, expr.span
+                );
             }
 
             sem::ValueExprKind::Slice { target, start, end } => {
@@ -600,7 +603,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(self.builder.const_func_addr(*def_id, ty).into())
             }
 
-            _ => Err(self.err_span(expr.span, LoweringErrorKind::UnsupportedExpr)),
+            _ => {
+                panic!(
+                    "ssa lower_value_expr_value unsupported expr {:?} at {:?}",
+                    expr.kind, expr.span
+                );
+            }
         }
     }
 
@@ -685,7 +693,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             | sem::StmtExprKind::For { .. }
             | sem::StmtExprKind::Break
             | sem::StmtExprKind::Continue => {
-                Err(self.err_stmt(stmt, LoweringErrorKind::UnsupportedStmt))
+                panic!(
+                    "ssa lower_stmt_expr_linear unsupported stmt {:?} at {:?}",
+                    stmt.kind, stmt.span
+                );
             }
         }
     }
