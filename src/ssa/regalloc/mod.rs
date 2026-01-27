@@ -45,6 +45,8 @@ pub fn regalloc(
     let analysis = intervals::analyze(func, live_map);
     let mut result = alloc::LinearScan::new(&analysis, types, target).alloc();
     let moves = moves::build_move_plan(func, &result.alloc_map, target);
+    let mut moves = moves;
+    moves.resolve_parallel_moves(target.scratch_regs());
     result.edge_moves = moves.edge_moves;
     result.call_moves = moves.call_moves;
     result

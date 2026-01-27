@@ -38,6 +38,25 @@ pub struct MovePlan {
     pub call_moves: Vec<CallMove>,
 }
 
+impl MovePlan {
+    /// Orders parallel move lists and breaks register cycles using a scratch register.
+    pub fn resolve_parallel_moves(&mut self, scratch_regs: &[crate::regalloc::target::PhysReg]) {
+        if scratch_regs.is_empty() {
+            return;
+        }
+        let scratch = scratch_regs[0];
+
+        for edge in &mut self.edge_moves {
+            resolve_move_list(&mut edge.moves, scratch);
+        }
+
+        for call in &mut self.call_moves {
+            resolve_move_list(&mut call.pre_moves, scratch);
+            resolve_move_list(&mut call.post_moves, scratch);
+        }
+    }
+}
+
 /// Build move plans for block arguments and call ABI requirements.
 pub fn build_move_plan(
     func: &Function,
@@ -205,4 +224,68 @@ fn edge_moves_for(
     }
 
     moves
+}
+
+fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::PhysReg) {
+    if moves.len() <= 1 {
+        return;
+    }
+
+    let mut pending = std::mem::take(moves);
+    let mut ordered = Vec::with_capacity(pending.len());
+
+    while !pending.is_empty() {
+        let mut ready_idx = None;
+        for (idx, mov) in pending.iter().enumerate() {
+            match mov.dst {
+                Location::Reg(dst_reg) => {
+                    let mut used_elsewhere = false;
+                    for (other_idx, other) in pending.iter().enumerate() {
+                        if other_idx == idx {
+                            continue;
+                        }
+                        if let Location::Reg(src_reg) = other.src {
+                            if src_reg == dst_reg {
+                                used_elsewhere = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !used_elsewhere {
+                        ready_idx = Some(idx);
+                        break;
+                    }
+                }
+                _ => {
+                    ready_idx = Some(idx);
+                    break;
+                }
+            }
+        }
+
+        if let Some(idx) = ready_idx {
+            ordered.push(pending.remove(idx));
+            continue;
+        }
+
+        let cycle_idx = pending
+            .iter()
+            .position(|mov| matches!((&mov.src, &mov.dst), (Location::Reg(_), Location::Reg(_))))
+            .expect("cycle resolution requires reg-to-reg move");
+        let mut mov = pending.remove(cycle_idx);
+        let Location::Reg(src_reg) = mov.src else {
+            unreachable!("cycle candidate must be reg -> reg");
+        };
+
+        ordered.push(MoveOp {
+            src: Location::Reg(src_reg),
+            dst: Location::Reg(scratch),
+        });
+
+        mov.src = Location::Reg(scratch);
+        pending.push(mov);
+    }
+
+    *moves = ordered;
 }
