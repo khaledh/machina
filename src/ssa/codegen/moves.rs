@@ -62,6 +62,13 @@ pub enum EdgeMovePlacement {
     Split { block: MoveBlockId },
 }
 
+/// Resulting edge target after accounting for split move blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeTarget {
+    Direct(BlockId),
+    Via(MoveBlockId),
+}
+
 /// Plan for emitting edge moves during codegen without mutating SSA IR.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeMovePlan {
@@ -102,13 +109,63 @@ impl EdgeMovePlan {
         self.placements.get(&(from, to)).copied()
     }
 
+    /// Returns the edge target to branch to during codegen.
+    pub fn edge_target(&self, from: BlockId, to: BlockId) -> EdgeTarget {
+        match self
+            .placements
+            .get(&(from, to))
+            .copied()
+            .unwrap_or(EdgeMovePlacement::InPredecessor)
+        {
+            EdgeMovePlacement::InPredecessor => EdgeTarget::Direct(to),
+            EdgeMovePlacement::Split { block } => EdgeTarget::Via(block),
+        }
+    }
+
+    /// Returns the final target block for a synthesized move block.
+    pub fn move_block_target(&self, block: MoveBlockId) -> Option<BlockId> {
+        self.placements
+            .iter()
+            .find_map(|((_, to), placement)| match placement {
+                EdgeMovePlacement::Split { block: id } if *id == block => Some(*to),
+                _ => None,
+            })
+    }
+
     /// Returns the move list for a synthesized move block.
     pub fn move_block(&self, block: MoveBlockId) -> Option<&[MoveOp]> {
         self.move_blocks.get(&block).map(|moves| moves.as_slice())
+    }
+
+    /// Returns the synthesized move blocks with their original edge metadata.
+    pub fn move_blocks(&self) -> Vec<MoveBlock> {
+        let mut blocks = Vec::new();
+        for ((from, to), placement) in &self.placements {
+            if let EdgeMovePlacement::Split { block } = *placement {
+                if let Some(moves) = self.move_blocks.get(&block) {
+                    blocks.push(MoveBlock {
+                        id: block,
+                        from: *from,
+                        to: *to,
+                        moves: moves.clone(),
+                    });
+                }
+            }
+        }
+        blocks
     }
 
     /// Returns the underlying move schedule for edge/call queries.
     pub fn schedule(&self) -> &MoveSchedule {
         &self.schedule
     }
+}
+
+/// Describes a synthetic block used to emit edge moves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveBlock {
+    pub id: MoveBlockId,
+    pub from: BlockId,
+    pub to: BlockId,
+    pub moves: Vec<MoveOp>,
 }

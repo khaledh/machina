@@ -2,7 +2,8 @@ use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{Callee, FunctionSig, Terminator};
+use crate::ssa::model::ir::{BlockId, Callee, FunctionSig, Terminator};
+use crate::ssa::regalloc::moves::{EdgeMove, MoveOp, MovePlan};
 use crate::ssa::regalloc::{Location, TargetSpec, regalloc};
 use crate::ssa::{IrTypeCache, IrTypeKind};
 
@@ -163,4 +164,50 @@ fn test_regalloc_call_moves() {
     let post = call_move.post_moves[0];
     assert!(matches!(post.src, Location::Reg(reg) if reg == PhysReg(0)));
     assert!(matches!(post.dst, Location::Stack(_)));
+}
+
+#[test]
+fn test_move_plan_resolves_cycle_with_scratch() {
+    let mut plan = MovePlan {
+        edge_moves: vec![EdgeMove {
+            from: BlockId(0),
+            to: BlockId(1),
+            moves: vec![
+                MoveOp {
+                    src: Location::Reg(PhysReg(0)),
+                    dst: Location::Reg(PhysReg(1)),
+                },
+                MoveOp {
+                    src: Location::Reg(PhysReg(1)),
+                    dst: Location::Reg(PhysReg(0)),
+                },
+            ],
+        }],
+        call_moves: Vec::new(),
+    };
+
+    plan.resolve_parallel_moves(&[PhysReg(3)]);
+    let moves = &plan.edge_moves[0].moves;
+    assert_eq!(moves.len(), 3);
+    assert!(matches!(
+        moves[0],
+        MoveOp {
+            src: Location::Reg(reg),
+            dst: Location::Reg(dst)
+        } if reg == PhysReg(0) && dst == PhysReg(3)
+    ));
+    assert!(matches!(
+        moves[1],
+        MoveOp {
+            src: Location::Reg(reg),
+            dst: Location::Reg(dst)
+        } if reg == PhysReg(1) && dst == PhysReg(0)
+    ));
+    assert!(matches!(
+        moves[2],
+        MoveOp {
+            src: Location::Reg(reg),
+            dst: Location::Reg(dst)
+        } if reg == PhysReg(3) && dst == PhysReg(1)
+    ));
 }

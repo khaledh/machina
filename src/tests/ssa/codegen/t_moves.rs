@@ -2,7 +2,7 @@ use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
-use crate::ssa::codegen::moves::{EdgeMovePlacement, EdgeMovePlan, MoveSchedule};
+use crate::ssa::codegen::moves::{EdgeMovePlacement, EdgeMovePlan, EdgeTarget, MoveSchedule};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{Callee, FunctionSig, Terminator};
 use crate::ssa::regalloc::moves::{EdgeMove, MoveOp};
@@ -165,6 +165,22 @@ fn test_codegen_edge_move_plan_splits_on_multi_succ() {
         .edge_placement(entry, then_bb)
         .expect("missing placement");
     assert!(matches!(placement, EdgeMovePlacement::Split { .. }));
+
+    assert!(matches!(
+        plan.edge_target(entry, then_bb),
+        EdgeTarget::Via(_)
+    ));
+
+    let blocks = plan.move_blocks();
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].from, entry);
+    assert_eq!(blocks[0].to, then_bb);
+    assert_eq!(blocks[0].moves.len(), 1);
+
+    let target = plan
+        .move_block_target(blocks[0].id)
+        .expect("missing move block target");
+    assert_eq!(target, then_bb);
 }
 
 #[test]
@@ -210,4 +226,9 @@ fn test_codegen_edge_move_plan_inserts_in_pred() {
         .edge_placement(entry, target)
         .expect("missing placement");
     assert!(matches!(placement, EdgeMovePlacement::InPredecessor));
+
+    assert!(matches!(
+        plan.edge_target(entry, target),
+        EdgeTarget::Direct(block) if block == target
+    ));
 }
