@@ -3,9 +3,11 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::ssa::model::ir::Function;
+use crate::ssa::regalloc::ValueAllocMap;
 use crate::ssa::regalloc::moves::MoveOp;
 
-use super::graph::{CodegenBlockId, CodegenBlockStream, CodegenEmit, CodegenGraph};
+use super::emitter::{CodegenEmitter, LocationResolver};
+use super::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
 
 /// Callback interface used by the traversal to emit codegen steps.
 pub trait CodegenSink {
@@ -13,6 +15,47 @@ pub trait CodegenSink {
     fn emit_moves(&mut self, moves: &[MoveOp]);
     fn emit_inst(&mut self, inst: &crate::ssa::model::ir::Instruction);
     fn emit_terminator(&mut self, term: &crate::ssa::model::ir::Terminator);
+}
+
+/// Emits code using a target emitter and allocation map.
+pub fn emit_graph_with_emitter(
+    graph: &CodegenGraph,
+    func: &Function,
+    alloc_map: &ValueAllocMap,
+    emitter: &mut dyn CodegenEmitter,
+) {
+    struct EmitSink<'a> {
+        emitter: &'a mut dyn CodegenEmitter,
+        locs: LocationResolver<'a>,
+    }
+
+    impl<'a> CodegenSink for EmitSink<'a> {
+        fn enter_block(&mut self, block: CodegenBlockId) {
+            let label = match block {
+                CodegenBlockId::Ssa(id) => format!("bb{}", id.0),
+                CodegenBlockId::Move(id) => format!("mb{}", id.0),
+            };
+            self.emitter.begin_block(&label);
+        }
+
+        fn emit_moves(&mut self, moves: &[MoveOp]) {
+            self.emitter.emit_moves(moves);
+        }
+
+        fn emit_inst(&mut self, inst: &crate::ssa::model::ir::Instruction) {
+            self.emitter.emit_inst(inst, &self.locs);
+        }
+
+        fn emit_terminator(&mut self, term: &crate::ssa::model::ir::Terminator) {
+            self.emitter.emit_terminator(term, &self.locs);
+        }
+    }
+
+    let mut sink = EmitSink {
+        emitter,
+        locs: LocationResolver { map: alloc_map },
+    };
+    emit_graph(graph, func, &mut sink);
 }
 
 /// Walks the codegen graph in RPO order and emits instructions.
