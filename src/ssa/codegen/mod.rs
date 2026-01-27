@@ -1,5 +1,6 @@
 // SSA-based code generation lives here.
 
+pub mod emitter;
 pub mod graph;
 pub mod moves;
 pub mod traverse;
