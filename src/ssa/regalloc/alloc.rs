@@ -42,11 +42,25 @@ impl<'a> LinearScan<'a> {
             slot_sizes.insert(*value, slots);
         }
 
+        let param_set: HashSet<ValueId> = analysis.param_values.iter().copied().collect();
+
         // Precolor return values into the ABI result register.
         let mut fixed_regs = HashMap::new();
         let result_reg = target.result_reg();
         for value in &analysis.return_values {
-            fixed_regs.insert(*value, result_reg);
+            if !param_set.contains(value) {
+                fixed_regs.insert(*value, result_reg);
+            }
+        }
+
+        // Precolor entry parameters into their ABI registers if available.
+        for (index, value) in analysis.param_values.iter().enumerate() {
+            if fixed_regs.contains_key(value) {
+                continue;
+            }
+            if let Some(reg) = target.param_reg(index as u32) {
+                fixed_regs.insert(*value, reg);
+            }
         }
 
         Self {

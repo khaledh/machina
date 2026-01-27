@@ -23,6 +23,8 @@ pub struct IntervalAnalysis {
     pub intervals: LiveIntervalMap,
     pub call_positions: Vec<u32>,
     pub value_types: HashMap<ValueId, IrTypeId>,
+    /// Entry block parameter values in source order.
+    pub param_values: Vec<ValueId>,
     /// Values returned from the function, used for result-register precoloring.
     pub return_values: Vec<ValueId>,
 }
@@ -39,11 +41,18 @@ pub fn analyze(func: &Function, live_map: &LiveMap) -> IntervalAnalysis {
     let mut block_end_idx = vec![0u32; func.blocks.len()];
     let mut call_positions = Vec::new();
     let mut value_types = HashMap::new();
+    let mut param_values = Vec::new();
     let mut return_values = Vec::new();
 
     let mut block_index = HashMap::with_capacity(func.blocks.len());
     for (idx, block) in func.blocks.iter().enumerate() {
         block_index.insert(block.id, idx);
+    }
+
+    if let Some(entry) = func.blocks.first() {
+        for param in &entry.params {
+            param_values.push(param.value.id);
+        }
     }
 
     let cfg = Cfg::new(func);
@@ -106,6 +115,7 @@ pub fn analyze(func: &Function, live_map: &LiveMap) -> IntervalAnalysis {
         intervals: map,
         call_positions,
         value_types,
+        param_values,
         return_values,
     }
 }

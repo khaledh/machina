@@ -66,6 +66,7 @@ struct SplitTarget {
     allocatable: Vec<PhysReg>,
     caller_saved: Vec<PhysReg>,
     callee_saved: Vec<PhysReg>,
+    param_regs: Vec<PhysReg>,
     result: PhysReg,
 }
 
@@ -74,12 +75,14 @@ impl SplitTarget {
         allocatable: Vec<PhysReg>,
         caller_saved: Vec<PhysReg>,
         callee_saved: Vec<PhysReg>,
+        param_regs: Vec<PhysReg>,
         result: PhysReg,
     ) -> Self {
         Self {
             allocatable,
             caller_saved,
             callee_saved,
+            param_regs,
             result,
         }
     }
@@ -99,7 +102,7 @@ impl TargetSpec for SplitTarget {
     }
 
     fn param_reg(&self, _index: u32) -> Option<PhysReg> {
-        None
+        self.param_regs.get(_index as usize).copied()
     }
 
     fn result_reg(&self) -> PhysReg {
@@ -222,6 +225,7 @@ fn test_regalloc_prefers_call_safe_regs() {
         vec![PhysReg(0), PhysReg(1), PhysReg(2)],
         vec![PhysReg(0)],
         vec![PhysReg(1), PhysReg(2)],
+        vec![],
         PhysReg(0),
     );
     let alloc = regalloc(&func, &mut types, &live_map, &target);
@@ -256,6 +260,7 @@ fn test_regalloc_precolors_return_value() {
         vec![PhysReg(0), PhysReg(1)],
         vec![],
         vec![PhysReg(1)],
+        vec![],
         PhysReg(0),
     );
     let alloc = regalloc(&func, &mut types, &live_map, &target);
@@ -297,4 +302,41 @@ fn test_regalloc_sizes_spill_slots() {
 
     assert_eq!(alloc.stack_slot_count, 2);
     assert_eq!(alloc.frame_size, 16);
+}
+
+#[test]
+fn test_regalloc_precolors_param_reg() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "param_reg",
+        FunctionSig {
+            params: vec![u64_ty],
+            ret: unit_ty,
+        },
+    );
+
+    let entry = builder.current_block();
+    let param = builder.add_block_param(entry, u64_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = SplitTarget::new(
+        vec![PhysReg(0), PhysReg(1)],
+        vec![],
+        vec![PhysReg(1)],
+        vec![PhysReg(1)],
+        PhysReg(0),
+    );
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let location = alloc.alloc_map.get(&param).expect("missing alloc");
+    assert!(matches!(location, Location::Reg(reg) if *reg == PhysReg(1)));
 }
