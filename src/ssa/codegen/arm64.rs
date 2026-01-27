@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use crate::regalloc::target::PhysReg;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemonic};
-use crate::ssa::model::ir::{InstKind, Instruction, Terminator};
+use crate::ssa::model::ir::{Callee, CmpOp, InstKind, Instruction, Terminator};
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
 
@@ -32,19 +32,39 @@ impl Arm64Emitter {
             3 => "x3",
             4 => "x4",
             5 => "x5",
+            6 => "x6",
+            7 => "x7",
+            8 => "x8",
+            9 => "x9",
+            10 => "x10",
+            11 => "x11",
             _ => "x9",
-        }
-    }
-
-    fn fmt_loc(loc: Location) -> String {
-        match loc {
-            Location::Reg(reg) => Self::reg_name(reg).to_string(),
-            Location::Stack(slot) => format!("[sp, #{}]", slot.offset_bytes()),
         }
     }
 
     fn emit_line(&mut self, line: &str) {
         let _ = writeln!(self.output, "  {}", line);
+    }
+
+    fn cmp_condition(op: CmpOp) -> &'static str {
+        match op {
+            CmpOp::Eq => "eq",
+            CmpOp::Ne => "ne",
+            CmpOp::Lt => "lt",
+            CmpOp::Le => "le",
+            CmpOp::Gt => "gt",
+            CmpOp::Ge => "ge",
+        }
+    }
+
+    fn load_value(&mut self, loc: Location, scratch: &str) -> String {
+        match loc {
+            Location::Reg(reg) => Self::reg_name(reg).to_string(),
+            Location::Stack(slot) => {
+                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, slot.offset_bytes()));
+                scratch.to_string()
+            }
+        }
     }
 }
 
@@ -127,30 +147,74 @@ impl CodegenEmitter for Arm64Emitter {
                     }
                 }
             }
+            InstKind::Cmp { op, lhs, rhs } => {
+                if let Some(result) = &inst.result {
+                    let lhs = locs.value(*lhs);
+                    let rhs = locs.value(*rhs);
+                    let lhs_reg = self.load_value(lhs, "x9");
+                    let rhs_reg = match rhs {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(slot) => {
+                            let scratch = if lhs_reg == "x9" { "x10" } else { "x9" };
+                            self.emit_line(&format!(
+                                "ldr {}, [sp, #{}]",
+                                scratch,
+                                slot.offset_bytes()
+                            ));
+                            scratch.to_string()
+                        }
+                    };
+
+                    self.emit_line(&format!("cmp {}, {}", lhs_reg, rhs_reg));
+                    let cond = Self::cmp_condition(*op);
+                    let dst = locs.value(result.id);
+                    match dst {
+                        Location::Reg(reg) => {
+                            self.emit_line(&format!("cset {}, {}", Self::reg_name(reg), cond));
+                        }
+                        Location::Stack(slot) => {
+                            self.emit_line(&format!("cset x9, {}", cond));
+                            self.emit_line(&format!("str x9, [sp, #{}]", slot.offset_bytes()));
+                        }
+                    }
+                }
+            }
             InstKind::Load { ptr } => {
                 let src = locs.value(*ptr);
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
-                    if let (Location::Reg(src), Location::Reg(dst)) = (src, dst) {
-                        self.emit_line(&format!(
-                            "ldr {}, [{}]",
-                            Self::reg_name(dst),
-                            Self::reg_name(src)
-                        ));
+                    let src = self.load_value(src, "x9");
+                    match dst {
+                        Location::Reg(dst) => {
+                            self.emit_line(&format!("ldr {}, [{}]", Self::reg_name(dst), src));
+                        }
+                        Location::Stack(slot) => {
+                            self.emit_line(&format!("ldr x9, [{}]", src));
+                            self.emit_line(&format!("str x9, [sp, #{}]", slot.offset_bytes()));
+                        }
                     }
                 }
             }
             InstKind::Store { ptr, value } => {
                 let ptr = locs.value(*ptr);
                 let value = locs.value(*value);
-                if let (Location::Reg(ptr), Location::Reg(val)) = (ptr, value) {
-                    self.emit_line(&format!(
-                        "str {}, [{}]",
-                        Self::reg_name(val),
-                        Self::reg_name(ptr)
-                    ));
-                }
+                let ptr = self.load_value(ptr, "x9");
+                let val = self.load_value(value, "x10");
+                self.emit_line(&format!("str {}, [{}]", val, ptr));
             }
+            InstKind::Call { callee, .. } => match callee {
+                Callee::Direct(def_id) => {
+                    self.emit_line(&format!("bl fn{}", def_id.0));
+                }
+                Callee::Runtime(rt) => {
+                    self.emit_line(&format!("bl {}", rt.name()));
+                }
+                Callee::Value(value) => {
+                    let callee = locs.value(*value);
+                    let reg = self.load_value(callee, "x9");
+                    self.emit_line(&format!("blr {}", reg));
+                }
+            },
             _ => {
                 self.emit_line("// unsupported inst");
             }
@@ -169,17 +233,15 @@ impl CodegenEmitter for Arm64Emitter {
                 ..
             } => {
                 let cond = locs.value(*cond);
-                if let Location::Reg(reg) = cond {
-                    self.emit_line(&format!("cbnz {}, bb{}", Self::reg_name(reg), then_bb.0));
-                    self.emit_line(&format!("b bb{}", else_bb.0));
-                }
+                let cond = self.load_value(cond, "x9");
+                self.emit_line(&format!("cbnz {}, bb{}", cond, then_bb.0));
+                self.emit_line(&format!("b bb{}", else_bb.0));
             }
             Terminator::Return { value } => {
                 if let Some(value) = value {
                     let src = locs.value(*value);
-                    if let Location::Reg(reg) = src {
-                        self.emit_line(&format!("mov x0, {}", Self::reg_name(reg)));
-                    }
+                    let src = self.load_value(src, "x9");
+                    self.emit_line(&format!("mov x0, {}", src));
                 }
                 self.emit_line("ret");
             }
