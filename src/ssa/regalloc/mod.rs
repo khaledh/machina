@@ -11,6 +11,7 @@ use crate::ssa::model::ir::ValueId;
 pub use crate::regalloc::stack::StackSlotId;
 pub use crate::regalloc::target::{PhysReg, TargetSpec};
 
+pub mod alloc;
 pub mod intervals;
 
 /// Location assigned to an SSA value.
@@ -30,3 +31,17 @@ pub struct AllocationResult {
     pub frame_size: u32,
     pub stack_slot_count: u32,
 }
+
+/// Run SSA register allocation for a single function.
+pub fn regalloc(
+    func: &crate::ssa::model::ir::Function,
+    live_map: &crate::ssa::analysis::liveness::LiveMap,
+    target: &dyn TargetSpec,
+) -> AllocationResult {
+    let intervals = intervals::build_live_intervals(func, live_map);
+    alloc::LinearScan::new(&intervals, target).alloc()
+}
+
+#[cfg(test)]
+#[path = "../../tests/ssa/regalloc/t_alloc.rs"]
+mod tests;
