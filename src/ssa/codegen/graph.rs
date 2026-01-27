@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use crate::ssa::model::ir::{BlockId, Function, Terminator};
 
-use super::moves::{EdgeMovePlan, EdgeTarget, MoveBlockId, MoveOp, MoveSchedule};
+use super::moves::{EdgeMovePlan, EdgeTarget, MoveBlockId, MoveSchedule};
+use crate::ssa::regalloc::moves::MoveOp;
 
 /// Identifier for a codegen block (SSA block or synthetic move block).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,6 +89,20 @@ impl CodegenGraph {
         self.schedule.call_moves(block, inst_index)
     }
 
+    /// Produces a linearized emission stream for a block.
+    pub fn block_stream<'a>(
+        &'a self,
+        func: &'a Function,
+        block: BlockId,
+    ) -> CodegenBlockStream<'a> {
+        let block = func
+            .blocks
+            .iter()
+            .find(|b| b.id == block)
+            .unwrap_or_else(|| panic!("ssa codegen: missing block {:?}", block));
+        CodegenBlockStream::new(block, &self.schedule)
+    }
+
     fn populate_succs(&mut self, func: &Function, plan: &EdgeMovePlan) {
         for block in &func.blocks {
             let from = block.id;
@@ -132,5 +147,83 @@ fn edge_target(plan: &EdgeMovePlan, from: BlockId, to: BlockId) -> CodegenBlockI
     match plan.edge_target(from, to) {
         EdgeTarget::Direct(block) => CodegenBlockId::Ssa(block),
         EdgeTarget::Via(block) => CodegenBlockId::Move(block),
+    }
+}
+
+/// Emission item for a codegen block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodegenEmit<'a> {
+    PreMoves(&'a [MoveOp]),
+    Inst(&'a crate::ssa::model::ir::Instruction),
+    PostMoves(&'a [MoveOp]),
+}
+
+/// Iterator-like helper that yields instructions with pre/post call moves.
+#[derive(Debug)]
+pub struct CodegenBlockStream<'a> {
+    block: &'a crate::ssa::model::ir::Block,
+    schedule: &'a MoveSchedule,
+    cursor: usize,
+    stage: StreamStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamStage {
+    Pre,
+    Inst,
+    Post,
+}
+
+impl<'a> CodegenBlockStream<'a> {
+    fn new(block: &'a crate::ssa::model::ir::Block, schedule: &'a MoveSchedule) -> Self {
+        Self {
+            block,
+            schedule,
+            cursor: 0,
+            stage: StreamStage::Pre,
+        }
+    }
+
+    pub fn next(&mut self) -> Option<CodegenEmit<'a>> {
+        while self.cursor < self.block.insts.len() {
+            let inst_index = self.cursor;
+            let has_call = matches!(
+                self.block.insts[inst_index].kind,
+                crate::ssa::model::ir::InstKind::Call { .. }
+            );
+
+            if has_call {
+                match self.stage {
+                    StreamStage::Pre => {
+                        self.stage = StreamStage::Inst;
+                        if let Some((pre, _)) = self.schedule.call_moves(self.block.id, inst_index)
+                        {
+                            if !pre.is_empty() {
+                                return Some(CodegenEmit::PreMoves(pre));
+                            }
+                        }
+                    }
+                    StreamStage::Inst => {
+                        self.stage = StreamStage::Post;
+                        return Some(CodegenEmit::Inst(&self.block.insts[inst_index]));
+                    }
+                    StreamStage::Post => {
+                        self.stage = StreamStage::Pre;
+                        self.cursor += 1;
+                        if let Some((_, post)) = self.schedule.call_moves(self.block.id, inst_index)
+                        {
+                            if !post.is_empty() {
+                                return Some(CodegenEmit::PostMoves(post));
+                            }
+                        }
+                    }
+                }
+            } else {
+                self.cursor += 1;
+                return Some(CodegenEmit::Inst(&self.block.insts[inst_index]));
+            }
+        }
+
+        None
     }
 }

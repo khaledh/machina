@@ -1,6 +1,6 @@
 use crate::regalloc::stack::StackSlotId;
 use crate::resolve::DefId;
-use crate::ssa::codegen::graph::{CodegenBlockId, CodegenGraph};
+use crate::ssa::codegen::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
 use crate::ssa::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{Callee, FunctionSig, InstKind, Terminator};
@@ -132,4 +132,56 @@ fn test_codegen_graph_exposes_call_moves() {
 
     assert_eq!(pre.len(), 1);
     assert_eq!(post.len(), 1);
+}
+
+#[test]
+fn test_codegen_block_stream_orders_call_moves() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "stream_moves",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let arg = builder.const_int(1, false, 64, u64_ty);
+    let _call = builder.call(Callee::Direct(DefId(1)), vec![arg], u64_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let edge_moves = Vec::new();
+    let call_moves = vec![crate::ssa::regalloc::moves::CallMove {
+        block: func.blocks[0].id,
+        inst_index: 1,
+        pre_moves: vec![MoveOp {
+            src: Location::Stack(StackSlotId(0)),
+            dst: Location::Stack(StackSlotId(1)),
+        }],
+        post_moves: vec![MoveOp {
+            src: Location::Stack(StackSlotId(1)),
+            dst: Location::Stack(StackSlotId(2)),
+        }],
+    }];
+    let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+
+    let mut stream = graph.block_stream(&func, func.blocks[0].id);
+    let mut emits = Vec::new();
+    while let Some(item) = stream.next() {
+        emits.push(item);
+    }
+
+    assert!(matches!(emits[0], CodegenEmit::Inst(_)));
+    assert!(matches!(emits[1], CodegenEmit::PreMoves(_)));
+    assert!(matches!(emits[2], CodegenEmit::Inst(_)));
+    assert!(matches!(emits[3], CodegenEmit::PostMoves(_)));
 }
