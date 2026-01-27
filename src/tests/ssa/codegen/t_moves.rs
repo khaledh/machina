@@ -1,9 +1,11 @@
+use crate::regalloc::stack::StackSlotId;
 use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
-use crate::ssa::codegen::moves::MoveSchedule;
+use crate::ssa::codegen::moves::{EdgeMovePlacement, EdgeMovePlan, MoveSchedule};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{Callee, FunctionSig, Terminator};
+use crate::ssa::regalloc::moves::{EdgeMove, MoveOp};
 use crate::ssa::regalloc::{Location, TargetSpec, regalloc};
 use crate::ssa::{IrTypeCache, IrTypeKind};
 
@@ -109,4 +111,103 @@ fn test_codegen_move_schedule_for_call() {
 
     assert!(matches!(pre[0].dst, Location::Reg(reg) if reg == PhysReg(1)));
     assert!(matches!(post[0].src, Location::Reg(reg) if reg == PhysReg(0)));
+}
+
+#[test]
+fn test_codegen_edge_move_plan_splits_on_multi_succ() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let bool_ty = types.add(IrTypeKind::Bool);
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "edge_split",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let entry = builder.current_block();
+    let then_bb = builder.add_block();
+    let else_bb = builder.add_block();
+    let cond = builder.const_bool(true, bool_ty);
+
+    builder.set_terminator(
+        entry,
+        Terminator::CondBr {
+            cond,
+            then_bb,
+            then_args: vec![],
+            else_bb,
+            else_args: vec![],
+        },
+    );
+
+    builder.select_block(then_bb);
+    builder.terminate(Terminator::Return { value: None });
+    builder.select_block(else_bb);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let edge_moves = vec![EdgeMove {
+        from: entry,
+        to: then_bb,
+        moves: vec![MoveOp {
+            src: Location::Stack(StackSlotId(0)),
+            dst: Location::Stack(StackSlotId(1)),
+        }],
+    }];
+    let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
+    let plan = EdgeMovePlan::new(&func, schedule);
+
+    let placement = plan
+        .edge_placement(entry, then_bb)
+        .expect("missing placement");
+    assert!(matches!(placement, EdgeMovePlacement::Split { .. }));
+}
+
+#[test]
+fn test_codegen_edge_move_plan_inserts_in_pred() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "edge_pred",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let entry = builder.current_block();
+    let target = builder.add_block();
+    builder.set_terminator(
+        entry,
+        Terminator::Br {
+            target,
+            args: vec![],
+        },
+    );
+
+    builder.select_block(target);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let edge_moves = vec![EdgeMove {
+        from: entry,
+        to: target,
+        moves: vec![MoveOp {
+            src: Location::Stack(StackSlotId(0)),
+            dst: Location::Stack(StackSlotId(1)),
+        }],
+    }];
+    let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
+    let plan = EdgeMovePlan::new(&func, schedule);
+
+    let placement = plan
+        .edge_placement(entry, target)
+        .expect("missing placement");
+    assert!(matches!(placement, EdgeMovePlacement::InPredecessor));
 }
