@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::ssa::IrTypeId;
 use crate::ssa::analysis::cfg::Cfg;
 use crate::ssa::analysis::liveness::LiveMap;
 use crate::ssa::model::ir::{Callee, Function, InstKind, Terminator, ValueId};
@@ -16,10 +17,29 @@ pub struct LiveInterval {
 /// Live intervals keyed by SSA `ValueId`.
 pub type LiveIntervalMap = HashMap<ValueId, LiveInterval>;
 
+/// Combined interval analysis results for SSA regalloc.
+#[derive(Debug, Clone)]
+pub struct IntervalAnalysis {
+    pub intervals: LiveIntervalMap,
+    pub call_positions: Vec<u32>,
+    pub value_types: HashMap<ValueId, IrTypeId>,
+    /// Values returned from the function, used for result-register precoloring.
+    pub return_values: Vec<ValueId>,
+}
+
 /// Build SSA live intervals using a linearized instruction index and block live-outs.
 pub fn build_live_intervals(func: &Function, live_map: &LiveMap) -> LiveIntervalMap {
+    analyze(func, live_map).intervals
+}
+
+/// Analyze a function to build intervals, call positions, value type info,
+/// and return values for precoloring.
+pub fn analyze(func: &Function, live_map: &LiveMap) -> IntervalAnalysis {
     let mut map = LiveIntervalMap::new();
     let mut block_end_idx = vec![0u32; func.blocks.len()];
+    let mut call_positions = Vec::new();
+    let mut value_types = HashMap::new();
+    let mut return_values = Vec::new();
 
     let mut block_index = HashMap::with_capacity(func.blocks.len());
     for (idx, block) in func.blocks.iter().enumerate() {
@@ -35,6 +55,7 @@ pub fn build_live_intervals(func: &Function, live_map: &LiveMap) -> LiveInterval
 
         for param in &block.params {
             mark_def(param.value.id, inst_idx, &mut map);
+            value_types.insert(param.value.id, param.value.ty);
         }
 
         for inst in &block.insts {
@@ -44,6 +65,11 @@ pub fn build_live_intervals(func: &Function, live_map: &LiveMap) -> LiveInterval
 
             if let Some(result) = &inst.result {
                 mark_def(result.id, inst_idx, &mut map);
+                value_types.insert(result.id, result.ty);
+            }
+
+            if matches!(inst.kind, InstKind::Call { .. }) {
+                call_positions.push(inst_idx);
             }
 
             inst_idx += 1;
@@ -51,6 +77,13 @@ pub fn build_live_intervals(func: &Function, live_map: &LiveMap) -> LiveInterval
 
         for value in term_uses(&block.term) {
             mark_use(value, inst_idx + 1, &mut map);
+        }
+
+        // Track SSA values that flow into the function return.
+        if let Terminator::Return { value: Some(value) } = block.term {
+            if !return_values.contains(&value) {
+                return_values.push(value);
+            }
         }
 
         inst_idx += 1; // Terminator slot.
@@ -69,7 +102,12 @@ pub fn build_live_intervals(func: &Function, live_map: &LiveMap) -> LiveInterval
         }
     }
 
-    map
+    IntervalAnalysis {
+        intervals: map,
+        call_positions,
+        value_types,
+        return_values,
+    }
 }
 
 fn mark_use(value: ValueId, end: u32, map: &mut LiveIntervalMap) {

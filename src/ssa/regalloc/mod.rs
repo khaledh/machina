@@ -35,11 +35,12 @@ pub struct AllocationResult {
 /// Run SSA register allocation for a single function.
 pub fn regalloc(
     func: &crate::ssa::model::ir::Function,
+    types: &mut crate::ssa::IrTypeCache,
     live_map: &crate::ssa::analysis::liveness::LiveMap,
     target: &dyn TargetSpec,
 ) -> AllocationResult {
-    let intervals = intervals::build_live_intervals(func, live_map);
-    alloc::LinearScan::new(&intervals, target).alloc()
+    let analysis = intervals::analyze(func, live_map);
+    alloc::LinearScan::new(&analysis, types, target).alloc()
 }
 
 #[cfg(test)]
