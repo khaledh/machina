@@ -23,6 +23,7 @@ pub fn emit_graph_with_emitter(
     func: &Function,
     alloc_map: &ValueAllocMap,
     frame_size: u32,
+    callee_saved: &[crate::regalloc::target::PhysReg],
     emitter: &mut dyn CodegenEmitter,
 ) {
     struct EmitSink<'a> {
@@ -57,7 +58,7 @@ pub fn emit_graph_with_emitter(
         locs: LocationResolver { map: alloc_map },
     };
     sink.emitter
-        .begin_function(&format!("fn{}", func.def_id.0), frame_size);
+        .begin_function(&format!("fn{}", func.def_id.0), frame_size, callee_saved);
     emit_graph(graph, func, &mut sink);
     sink.emitter.end_function();
 }

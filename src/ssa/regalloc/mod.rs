@@ -31,6 +31,8 @@ pub struct AllocationResult {
     pub alloc_map: ValueAllocMap,
     pub frame_size: u32,
     pub stack_slot_count: u32,
+    /// Callee-saved registers that must be preserved by the prologue/epilogue.
+    pub used_callee_saved: Vec<PhysReg>,
     pub edge_moves: Vec<moves::EdgeMove>,
     pub call_moves: Vec<moves::CallMove>,
 }
@@ -42,13 +44,30 @@ pub fn regalloc(
     live_map: &crate::ssa::analysis::liveness::LiveMap,
     target: &dyn TargetSpec,
 ) -> AllocationResult {
+    // Build live intervals and allocate registers/stack slots.
     let analysis = intervals::analyze(func, live_map);
     let mut result = alloc::LinearScan::new(&analysis, types, target).alloc();
+
+    // Compute move plans for edges and calls.
     let moves = moves::build_move_plan(func, &result.alloc_map, target);
     let mut moves = moves;
     moves.resolve_parallel_moves(target.scratch_regs());
     result.edge_moves = moves.edge_moves;
     result.call_moves = moves.call_moves;
+
+    // Record callee-saved registers that need prologue/epilogue saves.
+    let mut used = Vec::new();
+    for loc in result.alloc_map.values() {
+        if let Location::Reg(reg) = loc {
+            if target.callee_saved().iter().any(|saved| *saved == *reg) {
+                if !used.iter().any(|r| r == reg) {
+                    used.push(*reg);
+                }
+            }
+        }
+    }
+    used.sort_by_key(|reg| reg.0);
+    result.used_callee_saved = used;
     result
 }
 

@@ -11,7 +11,12 @@ use crate::ssa::regalloc::moves::MoveOp;
 /// Simple string-based ARM64 emitter for early SSA codegen.
 pub struct Arm64Emitter {
     output: String,
+    /// Stack frame size rounded up to the ABI alignment.
     aligned_frame_size: u32,
+    /// Byte size of the callee-saved register save area.
+    saved_size: u32,
+    /// Callee-saved registers to save/restore in the prologue/epilogue.
+    callee_saved: Vec<PhysReg>,
 }
 
 impl Arm64Emitter {
@@ -19,6 +24,8 @@ impl Arm64Emitter {
         Self {
             output: String::new(),
             aligned_frame_size: 0,
+            saved_size: 0,
+            callee_saved: Vec::new(),
         }
     }
 
@@ -74,7 +81,9 @@ impl Arm64Emitter {
         if self.aligned_frame_size == 0 {
             return slot.offset_bytes();
         }
-        self.aligned_frame_size.saturating_sub(slot.offset_bytes())
+        // Stack slots live below the callee-saved area at the top of the frame.
+        let slot_base = self.aligned_frame_size.saturating_sub(self.saved_size);
+        slot_base.saturating_sub(slot.offset_bytes())
     }
 
     fn align_frame(size: u32) -> u32 {
@@ -83,11 +92,30 @@ impl Arm64Emitter {
 }
 
 impl CodegenEmitter for Arm64Emitter {
-    fn begin_function(&mut self, name: &str, frame_size: u32) {
-        self.aligned_frame_size = Self::align_frame(frame_size);
+    fn begin_function(&mut self, name: &str, frame_size: u32, callee_saved: &[PhysReg]) {
+        // Capture the callee-saved set so we can restore it in the epilogue.
+        self.callee_saved = callee_saved.to_vec();
+        self.saved_size = (callee_saved.len() as u32) * 8;
+
+        // Lay out the frame as: [callee-saved area][local/slot area], aligned to 16 bytes.
+        let total = frame_size.saturating_add(self.saved_size);
+        self.aligned_frame_size = Self::align_frame(total);
+
         let _ = writeln!(self.output, "{}:", name);
+
+        // Reserve the full frame size up front.
         if self.aligned_frame_size > 0 {
             self.emit_line(&format!("sub sp, sp, #{}", self.aligned_frame_size));
+        }
+
+        if !self.callee_saved.is_empty() {
+            // Save callee-saved registers at the top of the frame.
+            let base = self.aligned_frame_size.saturating_sub(self.saved_size);
+            let callee_saved = self.callee_saved.clone();
+            for (index, reg) in callee_saved.iter().enumerate() {
+                let offset = base + (index as u32) * 8;
+                self.emit_line(&format!("str {}, [sp, #{}]", Self::reg_name(*reg), offset));
+            }
         }
     }
 
@@ -265,9 +293,27 @@ impl CodegenEmitter for Arm64Emitter {
                     let src = self.load_value(src, "x9");
                     self.emit_line(&format!("mov x0, {}", src));
                 }
+
+                // Restore callee-saved registers before tearing down the frame.
                 if self.aligned_frame_size > 0 {
+                    if !self.callee_saved.is_empty() {
+                        let base = self.aligned_frame_size.saturating_sub(self.saved_size);
+                        let callee_saved = self.callee_saved.clone();
+
+                        // Restore callee-saved registers in reverse order.
+                        for (rev_index, reg) in callee_saved.iter().rev().enumerate() {
+                            let index = callee_saved.len() - 1 - rev_index;
+                            let offset = base + (index as u32) * 8;
+                            self.emit_line(&format!(
+                                "ldr {}, [sp, #{}]",
+                                Self::reg_name(*reg),
+                                offset
+                            ));
+                        }
+                    }
                     self.emit_line(&format!("add sp, sp, #{}", self.aligned_frame_size));
                 }
+
                 self.emit_line("ret");
             }
             _ => self.emit_line("// unsupported terminator"),

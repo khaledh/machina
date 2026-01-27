@@ -1,5 +1,6 @@
 //! Target-agnostic SSA codegen emitter traits.
 
+use crate::regalloc::target::PhysReg;
 use crate::ssa::model::ir::{BinOp, Instruction, Terminator};
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
@@ -7,7 +8,7 @@ use crate::ssa::regalloc::moves::MoveOp;
 /// Minimal instruction selection interface for SSA codegen.
 pub trait CodegenEmitter {
     /// Begin emitting a function symbol and prologue.
-    fn begin_function(&mut self, _name: &str, _frame_size: u32) {}
+    fn begin_function(&mut self, _name: &str, _frame_size: u32, _callee_saved: &[PhysReg]) {}
 
     /// Begin emitting a new block label.
     fn begin_block(&mut self, label: &str);
