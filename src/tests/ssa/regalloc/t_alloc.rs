@@ -225,7 +225,7 @@ fn test_regalloc_prefers_call_safe_regs() {
         vec![PhysReg(0), PhysReg(1), PhysReg(2)],
         vec![PhysReg(0)],
         vec![PhysReg(1), PhysReg(2)],
-        vec![],
+        vec![PhysReg(1)],
         PhysReg(0),
     );
     let alloc = regalloc(&func, &mut types, &live_map, &target);

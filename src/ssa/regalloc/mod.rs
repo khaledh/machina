@@ -13,6 +13,7 @@ pub use crate::regalloc::target::{PhysReg, TargetSpec};
 
 pub mod alloc;
 pub mod intervals;
+pub mod moves;
 
 /// Location assigned to an SSA value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub struct AllocationResult {
     pub alloc_map: ValueAllocMap,
     pub frame_size: u32,
     pub stack_slot_count: u32,
+    pub edge_moves: Vec<moves::EdgeMove>,
+    pub call_moves: Vec<moves::CallMove>,
 }
 
 /// Run SSA register allocation for a single function.
@@ -40,9 +43,17 @@ pub fn regalloc(
     target: &dyn TargetSpec,
 ) -> AllocationResult {
     let analysis = intervals::analyze(func, live_map);
-    alloc::LinearScan::new(&analysis, types, target).alloc()
+    let mut result = alloc::LinearScan::new(&analysis, types, target).alloc();
+    let moves = moves::build_move_plan(func, &result.alloc_map, target);
+    result.edge_moves = moves.edge_moves;
+    result.call_moves = moves.call_moves;
+    result
 }
 
 #[cfg(test)]
 #[path = "../../tests/ssa/regalloc/t_alloc.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/ssa/regalloc/t_moves.rs"]
+mod tests_moves;
