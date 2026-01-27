@@ -6,6 +6,9 @@ use crate::ssa::regalloc::moves::MoveOp;
 
 /// Minimal instruction selection interface for SSA codegen.
 pub trait CodegenEmitter {
+    /// Begin emitting a function symbol and prologue.
+    fn begin_function(&mut self, _name: &str, _frame_size: u32) {}
+
     /// Begin emitting a new block label.
     fn begin_block(&mut self, label: &str);
 
@@ -17,6 +20,9 @@ pub trait CodegenEmitter {
 
     /// Emit a terminator.
     fn emit_terminator(&mut self, term: &Terminator, locs: &LocationResolver);
+
+    /// Finish emitting a function.
+    fn end_function(&mut self) {}
 }
 
 /// Resolves SSA values to allocated locations.

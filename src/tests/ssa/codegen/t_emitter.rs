@@ -136,7 +136,13 @@ fn test_arm64_emitter_basic() {
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
     let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(&graph, &func, &alloc.alloc_map, &mut emitter);
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &mut emitter,
+    );
 
     let asm = emitter.finish();
     assert!(asm.contains("bb0:"));
@@ -177,7 +183,13 @@ fn test_arm64_emitter_cmp_cset() {
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
     let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(&graph, &func, &alloc.alloc_map, &mut emitter);
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &mut emitter,
+    );
 
     let asm = emitter.finish();
     assert!(asm.contains("cmp"));
@@ -229,7 +241,13 @@ fn test_arm64_emitter_condbr_stack_cond() {
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
     let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(&graph, &func, &alloc.alloc_map, &mut emitter);
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &mut emitter,
+    );
 
     let asm = emitter.finish();
     assert!(asm.contains("ldr x9"));
@@ -262,7 +280,13 @@ fn test_arm64_emitter_runtime_call() {
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
     let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(&graph, &func, &alloc.alloc_map, &mut emitter);
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &mut emitter,
+    );
 
     let asm = emitter.finish();
     assert!(asm.contains("__rt_trap"));
@@ -299,8 +323,57 @@ fn test_arm64_emitter_indirect_call() {
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
     let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(&graph, &func, &alloc.alloc_map, &mut emitter);
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &mut emitter,
+    );
 
     let asm = emitter.finish();
     assert!(asm.contains("blr"));
+}
+
+#[test]
+fn test_arm64_emitter_stack_frame_prologue() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_stack_frame",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let _value = builder.const_int(123, false, 64, u64_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = NoRegTarget;
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("sub sp, sp"));
+    assert!(asm.contains("add sp, sp"));
 }

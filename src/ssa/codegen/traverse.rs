@@ -22,6 +22,7 @@ pub fn emit_graph_with_emitter(
     graph: &CodegenGraph,
     func: &Function,
     alloc_map: &ValueAllocMap,
+    frame_size: u32,
     emitter: &mut dyn CodegenEmitter,
 ) {
     struct EmitSink<'a> {
@@ -55,7 +56,10 @@ pub fn emit_graph_with_emitter(
         emitter,
         locs: LocationResolver { map: alloc_map },
     };
+    sink.emitter
+        .begin_function(&format!("fn{}", func.def_id.0), frame_size);
     emit_graph(graph, func, &mut sink);
+    sink.emitter.end_function();
 }
 
 /// Walks the codegen graph in RPO order and emits instructions.

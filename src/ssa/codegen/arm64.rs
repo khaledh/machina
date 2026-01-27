@@ -11,12 +11,14 @@ use crate::ssa::regalloc::moves::MoveOp;
 /// Simple string-based ARM64 emitter for early SSA codegen.
 pub struct Arm64Emitter {
     output: String,
+    aligned_frame_size: u32,
 }
 
 impl Arm64Emitter {
     pub fn new() -> Self {
         Self {
             output: String::new(),
+            aligned_frame_size: 0,
         }
     }
 
@@ -61,14 +63,34 @@ impl Arm64Emitter {
         match loc {
             Location::Reg(reg) => Self::reg_name(reg).to_string(),
             Location::Stack(slot) => {
-                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, slot.offset_bytes()));
+                let offset = self.stack_offset(slot);
+                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
                 scratch.to_string()
             }
         }
     }
+
+    fn stack_offset(&self, slot: crate::ssa::regalloc::StackSlotId) -> u32 {
+        if self.aligned_frame_size == 0 {
+            return slot.offset_bytes();
+        }
+        self.aligned_frame_size.saturating_sub(slot.offset_bytes())
+    }
+
+    fn align_frame(size: u32) -> u32 {
+        (size + 15) & !15
+    }
 }
 
 impl CodegenEmitter for Arm64Emitter {
+    fn begin_function(&mut self, name: &str, frame_size: u32) {
+        self.aligned_frame_size = Self::align_frame(frame_size);
+        let _ = writeln!(self.output, "{}:", name);
+        if self.aligned_frame_size > 0 {
+            self.emit_line(&format!("sub sp, sp, #{}", self.aligned_frame_size));
+        }
+    }
+
     fn begin_block(&mut self, label: &str) {
         let _ = writeln!(self.output, "{}:", label);
     }
@@ -87,19 +109,19 @@ impl CodegenEmitter for Arm64Emitter {
                     self.emit_line(&format!(
                         "str {}, [sp, #{}]",
                         Self::reg_name(src),
-                        dst.offset_bytes()
+                        self.stack_offset(dst)
                     ));
                 }
                 (Location::Stack(src), Location::Reg(dst)) => {
                     self.emit_line(&format!(
                         "ldr {}, [sp, #{}]",
                         Self::reg_name(dst),
-                        src.offset_bytes()
+                        self.stack_offset(src)
                     ));
                 }
                 (Location::Stack(src), Location::Stack(dst)) => {
-                    self.emit_line(&format!("ldr x9, [sp, #{}]", src.offset_bytes()));
-                    self.emit_line(&format!("str x9, [sp, #{}]", dst.offset_bytes()));
+                    self.emit_line(&format!("ldr x9, [sp, #{}]", self.stack_offset(src)));
+                    self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
                 }
             }
         }
@@ -120,7 +142,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                         Location::Stack(slot) => {
                             self.emit_line(&format!("mov x9, #{}", value.as_int()));
-                            self.emit_line(&format!("str x9, [sp, #{}]", slot.offset_bytes()));
+                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
                         }
                     }
                 }
@@ -159,7 +181,7 @@ impl CodegenEmitter for Arm64Emitter {
                             self.emit_line(&format!(
                                 "ldr {}, [sp, #{}]",
                                 scratch,
-                                slot.offset_bytes()
+                                self.stack_offset(slot)
                             ));
                             scratch.to_string()
                         }
@@ -174,7 +196,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                         Location::Stack(slot) => {
                             self.emit_line(&format!("cset x9, {}", cond));
-                            self.emit_line(&format!("str x9, [sp, #{}]", slot.offset_bytes()));
+                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
                         }
                     }
                 }
@@ -190,7 +212,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                         Location::Stack(slot) => {
                             self.emit_line(&format!("ldr x9, [{}]", src));
-                            self.emit_line(&format!("str x9, [sp, #{}]", slot.offset_bytes()));
+                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
                         }
                     }
                 }
@@ -242,6 +264,9 @@ impl CodegenEmitter for Arm64Emitter {
                     let src = locs.value(*value);
                     let src = self.load_value(src, "x9");
                     self.emit_line(&format!("mov x0, {}", src));
+                }
+                if self.aligned_frame_size > 0 {
+                    self.emit_line(&format!("add sp, sp, #{}", self.aligned_frame_size));
                 }
                 self.emit_line("ret");
             }
