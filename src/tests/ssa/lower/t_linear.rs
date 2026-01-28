@@ -696,6 +696,7 @@ fn test_lower_struct_update() {
           locals:
             %l0: Pair
             %l1: Pair
+            %l2: Pair
           bb0():
             %v0: ptr<Pair> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -706,12 +707,15 @@ fn test_lower_struct_update() {
             store %v4, %v3
             %v5: Pair = load %v0
             %v6: ptr<Pair> = addr_of %l1
-            store %v6, %v5
-            %v7: u64 = const 5:u64
-            %v8: ptr<u64> = field_addr %v6, 1
-            store %v8, %v7
-            %v9: Pair = load %v6
-            ret %v9
+            %v7: ptr<Pair> = addr_of %l2
+            store %v7, %v5
+            %v8: u64 = const 16:u64
+            memcpy %v6, %v7, %v8
+            %v9: u64 = const 5:u64
+            %v10: ptr<u64> = field_addr %v6, 1
+            store %v10, %v9
+            %v11: Pair = load %v6
+            ret %v11
         }
     "};
     assert_eq!(text, expected);
@@ -743,6 +747,7 @@ fn test_lower_struct_update_multi_field() {
           locals:
             %l0: Pair
             %l1: Pair
+            %l2: Pair
           bb0():
             %v0: ptr<Pair> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -753,18 +758,73 @@ fn test_lower_struct_update_multi_field() {
             store %v4, %v3
             %v5: Pair = load %v0
             %v6: ptr<Pair> = addr_of %l1
-            store %v6, %v5
-            %v7: u64 = const 5:u64
-            %v8: ptr<u64> = field_addr %v6, 1
-            store %v8, %v7
-            %v9: u64 = const 3:u64
-            %v10: ptr<u64> = field_addr %v6, 0
+            %v7: ptr<Pair> = addr_of %l2
+            store %v7, %v5
+            %v8: u64 = const 16:u64
+            memcpy %v6, %v7, %v8
+            %v9: u64 = const 5:u64
+            %v10: ptr<u64> = field_addr %v6, 1
             store %v10, %v9
-            %v11: Pair = load %v6
-            ret %v11
+            %v11: u64 = const 3:u64
+            %v12: ptr<u64> = field_addr %v6, 0
+            store %v12, %v11
+            %v13: Pair = load %v6
+            ret %v13
         }
     "};
     assert_eq!(text, expected);
+}
+
+#[test]
+fn test_lower_aggregate_assign_memcpy() {
+    let ctx = analyze(indoc! {"
+        type Pair = { a: u64, b: u64 }
+        type Outer = { inner: Pair }
+
+        fn main() -> Pair {
+            var o = Outer { inner: Pair { a: 1, b: 2 } };
+            o.inner = Pair { a: 3, b: 4 };
+            o.inner
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("memcpy"));
+}
+
+#[test]
+fn test_lower_aggregate_assign_needs_drop_no_memcpy() {
+    let ctx = analyze(indoc! {"
+        type Wrap = { s: string }
+        type Outer = { w: Wrap }
+
+        fn main() -> Outer {
+            var o = Outer { w: Wrap { s: \"hi\" } };
+            o.w = Wrap { s: \"bye\" };
+            o
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(!text.contains("memcpy"));
 }
 
 #[test]

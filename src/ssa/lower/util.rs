@@ -2,11 +2,11 @@
 
 use crate::diag::Span;
 use crate::resolve::DefId;
-use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::{LocalStorage, LocalValue};
 use crate::ssa::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
 use crate::ssa::model::ir::{BinOp, Callee, CmpOp, RuntimeFn, Terminator, ValueId};
+use crate::ssa::{IrTypeId, IrTypeKind};
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
@@ -253,9 +253,49 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .insert(def_id, LocalValue::value(value, value_ty));
             }
             LocalStorage::Addr(addr) => {
-                self.builder.store(addr, value);
+                let def = self
+                    .def_table
+                    .lookup_def(def_id)
+                    .unwrap_or_else(|| panic!("ssa assign missing def {:?}", def_id));
+                let ty_id = self
+                    .type_map
+                    .lookup_def_type_id(def)
+                    .unwrap_or_else(|| panic!("ssa assign missing type for {:?}", def_id));
+                let ty = self.type_map.type_table().get(ty_id);
+                self.store_value_into_addr(addr, value, ty, value_ty);
             }
         }
+    }
+
+    fn is_aggregate(&self, ir_ty: IrTypeId) -> bool {
+        matches!(
+            self.type_lowerer.ir_type_cache.kind(ir_ty),
+            IrTypeKind::Array { .. }
+                | IrTypeKind::Tuple { .. }
+                | IrTypeKind::Struct { .. }
+                | IrTypeKind::Blob { .. }
+        )
+    }
+
+    pub(super) fn store_value_into_addr(
+        &mut self,
+        dst: ValueId,
+        value: ValueId,
+        ty: &Type,
+        ir_ty: IrTypeId,
+    ) {
+        if ty.needs_drop() || !self.is_aggregate(ir_ty) {
+            self.builder.store(dst, value);
+            return;
+        }
+
+        let src_slot = self.materialize_value_slot(value, ir_ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self
+            .builder
+            .const_int(layout.size() as i128, false, 64, u64_ty);
+        self.builder.memcopy(dst, src_slot.addr, len);
     }
 
     /// Extracts ptr+len from a string/slice value for runtime argument lowering.

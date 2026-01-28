@@ -221,7 +221,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Copy the base struct
                 let base_value = eval_value!(target);
-                self.builder.store(slot.addr, base_value);
+                let base_ty = self.type_map.type_table().get(expr.ty);
+                self.store_value_into_addr(slot.addr, base_value, base_ty, struct_ty);
 
                 // Overwrite the updated fields
                 for field in fields.iter() {
@@ -670,7 +671,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
                     _ => {
                         let place_addr = self.lower_place_addr(assignee)?;
-                        self.builder.store(place_addr.addr, value);
+                        let ir_ty = self.type_lowerer.lower_type_id(value_expr.ty);
+                        let sem_ty = self.type_map.type_table().get(value_expr.ty);
+                        self.store_value_into_addr(place_addr.addr, value, sem_ty, ir_ty);
                         Ok(StmtOutcome::Continue)
                     }
                 }
