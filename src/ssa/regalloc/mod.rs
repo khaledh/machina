@@ -20,6 +20,12 @@ pub mod moves;
 pub enum Location {
     Reg(PhysReg),
     Stack(StackSlotId),
+    /// Address of a stack slot (used for sret setup moves).
+    StackAddr(StackSlotId),
+    /// Incoming stack argument at the given byte offset from SP (post-prologue).
+    IncomingArg(u32),
+    /// Outgoing stack argument at the given byte offset from SP (post-prologue).
+    OutgoingArg(u32),
 }
 
 /// Allocation map for a single SSA function.
@@ -48,8 +54,51 @@ pub fn regalloc(
     let analysis = intervals::analyze(func, live_map);
     let mut result = alloc::LinearScan::new(&analysis, types, target).alloc();
 
+    let param_reg_count = {
+        const MAX_PARAM_REGS: u32 = 32;
+        let mut count = 0usize;
+        let mut seen = std::collections::HashSet::new();
+        for idx in 0..MAX_PARAM_REGS {
+            match target.param_reg(idx) {
+                Some(reg) => {
+                    if !seen.insert(reg) {
+                        break;
+                    }
+                    count += 1;
+                }
+                None => break,
+            }
+        }
+        count
+    };
+
+    // Reserve space for stack-passed call arguments.
+    let mut max_stack_args = 0usize;
+    for block in &func.blocks {
+        for inst in &block.insts {
+            if let crate::ssa::model::ir::InstKind::Call { args, .. } = &inst.kind {
+                let stack_args = args.len().saturating_sub(param_reg_count);
+                max_stack_args = max_stack_args.max(stack_args);
+            }
+        }
+    }
+    let outgoing_arg_size = (max_stack_args as u32) * 8;
+    result.frame_size = result.frame_size.saturating_add(outgoing_arg_size);
+
+    // Map stack-passed incoming params to their SP-relative slots.
+    if let Some(entry) = func.blocks.first() {
+        for (index, param) in entry.params.iter().enumerate() {
+            if index >= param_reg_count {
+                let offset = ((index - param_reg_count) as u32) * 8;
+                result
+                    .alloc_map
+                    .insert(param.value.id, Location::IncomingArg(offset));
+            }
+        }
+    }
+
     // Compute move plans for edges and calls.
-    let moves = moves::build_move_plan(func, &result.alloc_map, target);
+    let moves = moves::build_move_plan(func, &result.alloc_map, types, target);
     let mut moves = moves;
     moves.resolve_parallel_moves(target.scratch_regs());
     result.edge_moves = moves.edge_moves;

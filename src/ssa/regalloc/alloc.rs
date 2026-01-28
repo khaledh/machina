@@ -17,6 +17,7 @@ pub struct LinearScan<'a> {
     call_safe: HashSet<PhysReg>,
     slot_sizes: HashMap<ValueId, u32>,
     fixed_regs: HashMap<ValueId, PhysReg>,
+    needs_stack: HashSet<ValueId>,
 }
 
 impl<'a> LinearScan<'a> {
@@ -37,9 +38,13 @@ impl<'a> LinearScan<'a> {
 
         // Precompute spill slot sizes per SSA value (in 8-byte slots).
         let mut slot_sizes = HashMap::new();
+        let mut needs_stack = HashSet::new();
         for (value, ty) in &analysis.value_types {
             let slots = stack_slots_for(types, *ty);
             slot_sizes.insert(*value, slots);
+            if !is_reg_type(types, *ty) {
+                needs_stack.insert(*value);
+            }
         }
 
         let param_set: HashSet<ValueId> = analysis.param_values.iter().copied().collect();
@@ -48,7 +53,12 @@ impl<'a> LinearScan<'a> {
         let mut fixed_regs = HashMap::new();
         let result_reg = target.result_reg();
         for value in &analysis.return_values {
-            if !param_set.contains(value) {
+            let ty = analysis
+                .value_types
+                .get(value)
+                .copied()
+                .unwrap_or_else(|| panic!("ssa regalloc: missing return type for {:?}", value));
+            if !param_set.contains(value) && is_reg_type(types, ty) {
                 fixed_regs.insert(*value, result_reg);
             }
         }
@@ -58,8 +68,15 @@ impl<'a> LinearScan<'a> {
             if fixed_regs.contains_key(value) {
                 continue;
             }
-            if let Some(reg) = target.param_reg(index as u32) {
-                fixed_regs.insert(*value, reg);
+            let ty = analysis
+                .value_types
+                .get(value)
+                .copied()
+                .unwrap_or_else(|| panic!("ssa regalloc: missing param type for {:?}", value));
+            if is_reg_type(types, ty) {
+                if let Some(reg) = target.param_reg(index as u32) {
+                    fixed_regs.insert(*value, reg);
+                }
             }
         }
 
@@ -69,6 +86,7 @@ impl<'a> LinearScan<'a> {
             call_safe,
             slot_sizes,
             fixed_regs,
+            needs_stack,
         }
     }
 
@@ -94,6 +112,12 @@ impl<'a> LinearScan<'a> {
 
         for (value, interval) in ordered {
             expire_old(&mut active, interval.start, &mut self.allocatable);
+
+            if self.needs_stack.contains(&value) {
+                let slot = alloc_stack_for(value, &self.slot_sizes, &mut allocator);
+                alloc_map.insert(value, Location::Stack(slot));
+                continue;
+            }
 
             // Fixed registers must be assigned even if they displace other intervals.
             if let Some(reg) = self.fixed_regs.get(&value).copied() {
@@ -321,4 +345,15 @@ fn alloc_stack_for(
 ) -> crate::regalloc::stack::StackSlotId {
     let slots = slot_sizes.get(&value).copied().unwrap_or(1);
     allocator.alloc_slots(slots)
+}
+
+/// Returns true if the type can live in a single machine register.
+fn is_reg_type(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
+    matches!(
+        types.kind(ty),
+        crate::ssa::IrTypeKind::Unit
+            | crate::ssa::IrTypeKind::Bool
+            | crate::ssa::IrTypeKind::Int { .. }
+            | crate::ssa::IrTypeKind::Ptr { .. }
+    )
 }

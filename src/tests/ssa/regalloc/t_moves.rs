@@ -5,20 +5,27 @@ use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{BlockId, Callee, FunctionSig, Terminator};
 use crate::ssa::regalloc::moves::{EdgeMove, MoveOp, MovePlan};
 use crate::ssa::regalloc::{Location, TargetSpec, regalloc};
-use crate::ssa::{IrTypeCache, IrTypeKind};
+use crate::ssa::{IrStructField, IrTypeCache, IrTypeKind};
 
 struct CallTarget {
     allocatable: Vec<PhysReg>,
     param_regs: Vec<PhysReg>,
     result: PhysReg,
+    indirect_result: Option<PhysReg>,
 }
 
 impl CallTarget {
-    fn new(allocatable: Vec<PhysReg>, param_regs: Vec<PhysReg>, result: PhysReg) -> Self {
+    fn new(
+        allocatable: Vec<PhysReg>,
+        param_regs: Vec<PhysReg>,
+        result: PhysReg,
+        indirect_result: Option<PhysReg>,
+    ) -> Self {
         Self {
             allocatable,
             param_regs,
             result,
+            indirect_result,
         }
     }
 }
@@ -45,7 +52,7 @@ impl TargetSpec for CallTarget {
     }
 
     fn indirect_result_reg(&self) -> Option<PhysReg> {
-        None
+        self.indirect_result
     }
 
     fn indirect_call_reg(&self) -> PhysReg {
@@ -103,7 +110,7 @@ fn test_regalloc_edge_moves_for_block_args() {
 
     let func = builder.finish();
     let live_map = liveness::analyze(&func);
-    let target = CallTarget::new(vec![], vec![], PhysReg(0));
+    let target = CallTarget::new(vec![], vec![], PhysReg(0), None);
     let alloc = regalloc(&func, &mut types, &live_map, &target);
 
     let edge = alloc
@@ -150,7 +157,7 @@ fn test_regalloc_call_moves() {
 
     let func = builder.finish();
     let live_map = liveness::analyze(&func);
-    let target = CallTarget::new(vec![], vec![PhysReg(1)], PhysReg(0));
+    let target = CallTarget::new(vec![], vec![PhysReg(1)], PhysReg(0), None);
     let alloc = regalloc(&func, &mut types, &live_map, &target);
 
     let call_move = alloc.call_moves.first().expect("missing call moves");
@@ -164,6 +171,106 @@ fn test_regalloc_call_moves() {
     let post = call_move.post_moves[0];
     assert!(matches!(post.src, Location::Reg(reg) if reg == PhysReg(0)));
     assert!(matches!(post.dst, Location::Stack(_)));
+}
+
+#[test]
+fn test_regalloc_call_moves_stack_args() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_stack_args",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let args = vec![
+        builder.const_int(1, false, 64, u64_ty),
+        builder.const_int(2, false, 64, u64_ty),
+        builder.const_int(3, false, 64, u64_ty),
+        builder.const_int(4, false, 64, u64_ty),
+    ];
+    let _call = builder.call(Callee::Direct(DefId(1)), args, u64_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = CallTarget::new(vec![], vec![PhysReg(1), PhysReg(2)], PhysReg(0), None);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    let stack_moves: Vec<_> = call_move
+        .pre_moves
+        .iter()
+        .filter(|mov| matches!(mov.dst, Location::OutgoingArg(_)))
+        .collect();
+    assert_eq!(stack_moves.len(), 2);
+    assert!(
+        stack_moves
+            .iter()
+            .any(|mov| matches!(mov.dst, Location::OutgoingArg(0)))
+    );
+    assert!(
+        stack_moves
+            .iter()
+            .any(|mov| matches!(mov.dst, Location::OutgoingArg(8)))
+    );
+}
+
+#[test]
+fn test_regalloc_call_moves_sret() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_sret",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let call = builder.call(Callee::Direct(DefId(1)), vec![], pair_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = CallTarget::new(vec![], vec![PhysReg(0)], PhysReg(0), Some(PhysReg(8)));
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let result_loc = alloc.alloc_map.get(&call).expect("missing call alloc");
+    assert!(matches!(result_loc, Location::Stack(_)));
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    assert!(call_move.post_moves.is_empty());
+    assert!(call_move.pre_moves.iter().any(|mov| matches!(
+        (mov.src, mov.dst),
+        (Location::StackAddr(_), Location::Reg(reg)) if reg == PhysReg(8)
+    )));
 }
 
 #[test]

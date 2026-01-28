@@ -1,8 +1,10 @@
 //! Move planning for SSA register allocation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::regalloc::target::TargetSpec;
+use crate::ssa::IrTypeCache;
+use crate::ssa::IrTypeKind;
 use crate::ssa::model::ir::{BlockId, Function, InstKind, Terminator, ValueId};
 
 use super::{Location, ValueAllocMap};
@@ -61,9 +63,11 @@ impl MovePlan {
 pub fn build_move_plan(
     func: &Function,
     alloc_map: &ValueAllocMap,
+    types: &mut IrTypeCache,
     target: &dyn TargetSpec,
 ) -> MovePlan {
     let mut plan = MovePlan::default();
+    let param_reg_count = param_reg_count(target);
 
     let mut block_params: HashMap<BlockId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
@@ -77,28 +81,61 @@ pub fn build_move_plan(
                 let mut pre_moves = Vec::new();
                 let mut post_moves = Vec::new();
 
+                if let Some(result) = &inst.result {
+                    if needs_sret(types, result.ty) {
+                        let reg = target.indirect_result_reg().unwrap_or_else(|| {
+                            panic!("ssa regalloc: call sret requires indirect result reg")
+                        });
+                        let loc = alloc_map.get(&result.id).copied().unwrap_or_else(|| {
+                            panic!("ssa regalloc: missing alloc for {:?}", result.id)
+                        });
+                        let src = match loc {
+                            Location::Stack(slot) => Location::StackAddr(slot),
+                            _ => {
+                                panic!(
+                                    "ssa regalloc: sret result must be stack-backed, got {:?}",
+                                    loc
+                                );
+                            }
+                        };
+                        pre_moves.push(MoveOp {
+                            src,
+                            dst: Location::Reg(reg),
+                        });
+                    }
+                }
+
                 for (idx, arg) in args.iter().enumerate() {
-                    // TODO: support stack-passed call arguments (beyond the ABI register set).
-                    let dst = target
-                        .param_reg(idx as u32)
-                        .unwrap_or_else(|| panic!("ssa regalloc: call arg {} has no ABI reg", idx));
                     let src = alloc_map
                         .get(arg)
                         .copied()
                         .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", arg));
-                    let dst = Location::Reg(dst);
-                    if src != dst {
-                        pre_moves.push(MoveOp { src, dst });
+                    if idx < param_reg_count {
+                        let dst = target.param_reg(idx as u32).unwrap_or_else(|| {
+                            panic!("ssa regalloc: call arg {} has no ABI reg", idx)
+                        });
+                        let dst = Location::Reg(dst);
+                        if src != dst {
+                            pre_moves.push(MoveOp { src, dst });
+                        }
+                    } else {
+                        let offset = ((idx - param_reg_count) as u32) * 8;
+                        pre_moves.push(MoveOp {
+                            src,
+                            dst: Location::OutgoingArg(offset),
+                        });
                     }
                 }
 
                 if let Some(result) = &inst.result {
-                    let src = Location::Reg(target.result_reg());
-                    let dst = alloc_map.get(&result.id).copied().unwrap_or_else(|| {
-                        panic!("ssa regalloc: missing alloc for {:?}", result.id)
-                    });
-                    if src != dst {
-                        post_moves.push(MoveOp { src, dst });
+                    if !needs_sret(types, result.ty) {
+                        let src = Location::Reg(target.result_reg());
+                        let dst = alloc_map.get(&result.id).copied().unwrap_or_else(|| {
+                            panic!("ssa regalloc: missing alloc for {:?}", result.id)
+                        });
+                        if src != dst {
+                            post_moves.push(MoveOp { src, dst });
+                        }
                     }
                 }
 
@@ -184,6 +221,33 @@ pub fn build_move_plan(
     }
 
     plan
+}
+
+fn param_reg_count(target: &dyn TargetSpec) -> usize {
+    const MAX_PARAM_REGS: u32 = 32;
+    let mut count = 0usize;
+    let mut seen = HashSet::new();
+    for idx in 0..MAX_PARAM_REGS {
+        match target.param_reg(idx) {
+            Some(reg) => {
+                if !seen.insert(reg) {
+                    break;
+                }
+                count += 1;
+            }
+            None => break,
+        }
+    }
+    count
+}
+
+fn needs_sret(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
+    match types.kind(ty) {
+        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
+            false
+        }
+        _ => true,
+    }
 }
 
 fn edge_moves_for(

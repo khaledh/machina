@@ -8,13 +8,14 @@ use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemo
 use crate::ssa::model::ir::{
     Callee, CastKind, CmpOp, ConstValue, InstKind, Instruction, Terminator, UnOp,
 };
-use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
+use crate::ssa::regalloc::{Location, StackSlotId};
 
 #[derive(Debug, Clone, Copy)]
 struct FrameLayout {
     aligned_size: u32,
     saved_size: u32,
+    frame_size: u32,
 }
 
 impl FrameLayout {
@@ -24,6 +25,7 @@ impl FrameLayout {
         Self {
             aligned_size,
             saved_size,
+            frame_size,
         }
     }
 
@@ -42,6 +44,19 @@ impl FrameLayout {
     fn saved_base(self) -> u32 {
         self.aligned_size.saturating_sub(self.saved_size)
     }
+
+    fn outgoing_base(self) -> u32 {
+        self.aligned_size
+            .saturating_sub(self.frame_size.saturating_add(self.saved_size))
+    }
+
+    fn outgoing_offset(self, offset: u32) -> u32 {
+        self.outgoing_base().saturating_add(offset)
+    }
+
+    fn incoming_offset(self, offset: u32) -> u32 {
+        self.aligned_size.saturating_add(offset)
+    }
 }
 
 /// Simple string-based ARM64 emitter for early SSA codegen.
@@ -59,6 +74,7 @@ impl Arm64Emitter {
             layout: FrameLayout {
                 aligned_size: 0,
                 saved_size: 0,
+                frame_size: 0,
             },
             callee_saved: Vec::new(),
         }
@@ -109,6 +125,42 @@ impl Arm64Emitter {
                 self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
                 scratch.to_string()
             }
+            Location::IncomingArg(offset) => {
+                let offset = self.layout.incoming_offset(offset);
+                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
+                scratch.to_string()
+            }
+            Location::OutgoingArg(offset) => {
+                let offset = self.layout.outgoing_offset(offset);
+                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
+                scratch.to_string()
+            }
+            Location::StackAddr(slot) => {
+                let offset = self.stack_offset(slot);
+                self.emit_line(&format!("add {}, sp, #{}", scratch, offset));
+                scratch.to_string()
+            }
+        }
+    }
+
+    fn value_dst(
+        &mut self,
+        dst: Location,
+        scratch: &str,
+        context: &str,
+    ) -> (String, Option<StackSlotId>) {
+        match dst {
+            Location::Reg(reg) => (Self::reg_name(reg).to_string(), None),
+            Location::Stack(slot) => (scratch.to_string(), Some(slot)),
+            other => {
+                panic!("ssa codegen: invalid {} dst {:?}", context, other);
+            }
+        }
+    }
+
+    fn store_if_needed(&mut self, slot: Option<StackSlotId>, reg: &str) {
+        if let Some(slot) = slot {
+            self.emit_line(&format!("str {}, [sp, #{}]", reg, self.stack_offset(slot)));
         }
     }
 
@@ -194,6 +246,39 @@ impl CodegenEmitter for Arm64Emitter {
                     self.emit_line(&format!("ldr x9, [sp, #{}]", self.stack_offset(src)));
                     self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
                 }
+                (Location::Reg(src), Location::OutgoingArg(offset)) => {
+                    let offset = self.layout.outgoing_offset(offset);
+                    self.emit_line(&format!("str {}, [sp, #{}]", Self::reg_name(src), offset));
+                }
+                (Location::Stack(src), Location::OutgoingArg(offset)) => {
+                    let offset = self.layout.outgoing_offset(offset);
+                    self.emit_line(&format!("ldr x9, [sp, #{}]", self.stack_offset(src)));
+                    self.emit_line(&format!("str x9, [sp, #{}]", offset));
+                }
+                (Location::IncomingArg(offset), Location::Reg(dst)) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    self.emit_line(&format!("ldr {}, [sp, #{}]", Self::reg_name(dst), offset));
+                }
+                (Location::IncomingArg(offset), Location::Stack(dst)) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    self.emit_line(&format!("ldr x9, [sp, #{}]", offset));
+                    self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
+                }
+                (Location::StackAddr(src), Location::Reg(dst)) => {
+                    let offset = self.stack_offset(src);
+                    self.emit_line(&format!("add {}, sp, #{}", Self::reg_name(dst), offset));
+                }
+                (Location::StackAddr(src), Location::Stack(dst)) => {
+                    let offset = self.stack_offset(src);
+                    self.emit_line(&format!("add x9, sp, #{}", offset));
+                    self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
+                }
+                _ => {
+                    panic!(
+                        "ssa codegen: unsupported move {:?} -> {:?}",
+                        mov.src, mov.dst
+                    );
+                }
             }
         }
     }
@@ -206,61 +291,30 @@ impl CodegenEmitter for Arm64Emitter {
                     let dst = locs.value(result.id);
                     match value {
                         ConstValue::Int { .. } | ConstValue::Bool(_) | ConstValue::Unit => {
-                            match dst {
-                                Location::Reg(reg) => {
-                                    self.emit_line(&format!(
-                                        "mov {}, #{}",
-                                        Self::reg_name(reg),
-                                        value.as_int()
-                                    ));
-                                }
-                                Location::Stack(slot) => {
-                                    self.emit_line(&format!("mov x9, #{}", value.as_int()));
-                                    self.emit_line(&format!(
-                                        "str x9, [sp, #{}]",
-                                        self.stack_offset(slot)
-                                    ));
-                                }
-                            }
+                            let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "const");
+                            self.emit_line(&format!("mov {}, #{}", dst_reg, value.as_int()));
+                            self.store_if_needed(dst_slot, &dst_reg);
                         }
                         ConstValue::FuncAddr { def } => {
                             let label = format!("fn{}", def.0);
-                            let dst_reg = match dst {
-                                Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                                Location::Stack(_) => "x9".to_string(),
-                            };
+                            let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "const func");
                             self.emit_line(&format!("adrp {}, {}", dst_reg, label));
                             self.emit_line(&format!(
                                 "add {}, {}, :lo12:{}",
                                 dst_reg, dst_reg, label
                             ));
-                            if let Location::Stack(slot) = dst {
-                                self.emit_line(&format!(
-                                    "str {}, [sp, #{}]",
-                                    dst_reg,
-                                    self.stack_offset(slot)
-                                ));
-                            }
+                            self.store_if_needed(dst_slot, &dst_reg);
                         }
                         ConstValue::GlobalAddr { id } => {
                             // TODO: ensure SSA codegen emits global data labels.
                             let label = format!("g{}", id.0);
-                            let dst_reg = match dst {
-                                Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                                Location::Stack(_) => "x9".to_string(),
-                            };
+                            let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "const global");
                             self.emit_line(&format!("adrp {}, {}", dst_reg, label));
                             self.emit_line(&format!(
                                 "add {}, {}, :lo12:{}",
                                 dst_reg, dst_reg, label
                             ));
-                            if let Location::Stack(slot) = dst {
-                                self.emit_line(&format!(
-                                    "str {}, [sp, #{}]",
-                                    dst_reg,
-                                    self.stack_offset(slot)
-                                ));
-                            }
+                            self.store_if_needed(dst_slot, &dst_reg);
                         }
                     }
                 }
@@ -273,19 +327,10 @@ impl CodegenEmitter for Arm64Emitter {
                     let lhs_reg = self.load_value(lhs, "x9");
                     let rhs_reg = self.load_value(rhs, "x10");
                     let dst = locs.value(result.id);
-                    let dst_reg = match dst {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(_) => "x11".to_string(),
-                    };
+                    let (dst_reg, dst_slot) = self.value_dst(dst, "x11", "binop");
                     let op = binop_mnemonic(*op);
                     self.emit_line(&format!("{} {}, {}, {}", op, dst_reg, lhs_reg, rhs_reg));
-                    if let Location::Stack(slot) = dst {
-                        self.emit_line(&format!(
-                            "str {}, [sp, #{}]",
-                            dst_reg,
-                            self.stack_offset(slot)
-                        ));
-                    }
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::UnOp { op, value } => {
@@ -294,16 +339,8 @@ impl CodegenEmitter for Arm64Emitter {
                     let src_loc = locs.value(*value);
                     let src_reg = self.load_value(src_loc, "x9");
                     let dst = locs.value(result.id);
-                    let dst_reg = match dst {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(_) => {
-                            if src_reg == "x10" {
-                                "x11".to_string()
-                            } else {
-                                "x10".to_string()
-                            }
-                        }
-                    };
+                    let scratch = if src_reg == "x10" { "x11" } else { "x10" };
+                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "unop");
 
                     match op {
                         UnOp::Neg => {
@@ -319,13 +356,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
 
-                    if let Location::Stack(slot) = dst {
-                        self.emit_line(&format!(
-                            "str {}, [sp, #{}]",
-                            dst_reg,
-                            self.stack_offset(slot)
-                        ));
-                    }
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::Cmp { op, lhs, rhs } => {
@@ -334,31 +365,14 @@ impl CodegenEmitter for Arm64Emitter {
                     let lhs = locs.value(*lhs);
                     let rhs = locs.value(*rhs);
                     let lhs_reg = self.load_value(lhs, "x9");
-                    let rhs_reg = match rhs {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(slot) => {
-                            let scratch = if lhs_reg == "x9" { "x10" } else { "x9" };
-                            self.emit_line(&format!(
-                                "ldr {}, [sp, #{}]",
-                                scratch,
-                                self.stack_offset(slot)
-                            ));
-                            scratch.to_string()
-                        }
-                    };
+                    let rhs_reg = self.load_value(rhs, if lhs_reg == "x9" { "x10" } else { "x9" });
 
                     self.emit_line(&format!("cmp {}, {}", lhs_reg, rhs_reg));
                     let cond = Self::cmp_condition(*op);
                     let dst = locs.value(result.id);
-                    match dst {
-                        Location::Reg(reg) => {
-                            self.emit_line(&format!("cset {}, {}", Self::reg_name(reg), cond));
-                        }
-                        Location::Stack(slot) => {
-                            self.emit_line(&format!("cset x9, {}", cond));
-                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
-                        }
-                    }
+                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "cmp");
+                    self.emit_line(&format!("cset {}, {}", dst_reg, cond));
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::IntTrunc { value, ty } => {
@@ -367,16 +381,8 @@ impl CodegenEmitter for Arm64Emitter {
                     let src_loc = locs.value(*value);
                     let src_reg = self.load_value(src_loc, "x9");
                     let dst = locs.value(result.id);
-                    let dst_reg = match dst {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(_) => {
-                            if src_reg == "x10" {
-                                "x11".to_string()
-                            } else {
-                                "x10".to_string()
-                            }
-                        }
-                    };
+                    let scratch = if src_reg == "x10" { "x11" } else { "x10" };
+                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "trunc");
 
                     let dst_bits = match locs.types.kind(*ty) {
                         IrTypeKind::Int { bits, .. } => *bits as u32,
@@ -401,13 +407,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
 
-                    if let Location::Stack(slot) = dst {
-                        self.emit_line(&format!(
-                            "str {}, [sp, #{}]",
-                            dst_reg,
-                            self.stack_offset(slot)
-                        ));
-                    }
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::IntExtend { value, ty, signed } => {
@@ -416,16 +416,8 @@ impl CodegenEmitter for Arm64Emitter {
                     let src_loc = locs.value(*value);
                     let src_reg = self.load_value(src_loc, "x9");
                     let dst = locs.value(result.id);
-                    let dst_reg = match dst {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(_) => {
-                            if src_reg == "x10" {
-                                "x11".to_string()
-                            } else {
-                                "x10".to_string()
-                            }
-                        }
-                    };
+                    let scratch = if src_reg == "x10" { "x11" } else { "x10" };
+                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "extend");
 
                     let src_bits = match locs.types.kind(locs.value_ty(*value)) {
                         IrTypeKind::Int { bits, .. } => *bits as u32,
@@ -459,13 +451,7 @@ impl CodegenEmitter for Arm64Emitter {
                         self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
                     }
 
-                    if let Location::Stack(slot) = dst {
-                        self.emit_line(&format!(
-                            "str {}, [sp, #{}]",
-                            dst_reg,
-                            self.stack_offset(slot)
-                        ));
-                    }
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::Cast { kind, value, ty: _ } => {
@@ -474,16 +460,8 @@ impl CodegenEmitter for Arm64Emitter {
                     let src_loc = locs.value(*value);
                     let src_reg = self.load_value(src_loc, "x9");
                     let dst = locs.value(result.id);
-                    let dst_reg = match dst {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(_) => {
-                            if src_reg == "x10" {
-                                "x11".to_string()
-                            } else {
-                                "x10".to_string()
-                            }
-                        }
-                    };
+                    let scratch = if src_reg == "x10" { "x11" } else { "x10" };
+                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "cast");
 
                     match kind {
                         CastKind::PtrToInt | CastKind::IntToPtr => {
@@ -491,13 +469,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
 
-                    if let Location::Stack(slot) = dst {
-                        self.emit_line(&format!(
-                            "str {}, [sp, #{}]",
-                            dst_reg,
-                            self.stack_offset(slot)
-                        ));
-                    }
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::Load { ptr } => {
@@ -506,15 +478,9 @@ impl CodegenEmitter for Arm64Emitter {
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
                     let src = self.load_value(src, "x9");
-                    match dst {
-                        Location::Reg(dst) => {
-                            self.emit_line(&format!("ldr {}, [{}]", Self::reg_name(dst), src));
-                        }
-                        Location::Stack(slot) => {
-                            self.emit_line(&format!("ldr x9, [{}]", src));
-                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
-                        }
-                    }
+                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "load");
+                    self.emit_line(&format!("ldr {}, [{}]", dst_reg, src));
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::AddrOfLocal { local } => {
@@ -525,19 +491,9 @@ impl CodegenEmitter for Arm64Emitter {
                     let offset_from_top = locs.local_offset(*local);
                     // Convert the local's offset-from-top into an SP-relative address.
                     let sp_offset = self.layout.saved_base().saturating_sub(offset_from_top);
-                    match dst {
-                        Location::Reg(reg) => {
-                            self.emit_line(&format!(
-                                "add {}, sp, #{}",
-                                Self::reg_name(reg),
-                                sp_offset
-                            ));
-                        }
-                        Location::Stack(slot) => {
-                            self.emit_line(&format!("add x9, sp, #{}", sp_offset));
-                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
-                        }
-                    }
+                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "addr-of-local");
+                    self.emit_line(&format!("add {}, sp, #{}", dst_reg, sp_offset));
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::FieldAddr { base, index } => {
@@ -559,20 +515,9 @@ impl CodegenEmitter for Arm64Emitter {
                     // Field offsets are precomputed in the pointee layout.
                     let offset = layout.field_offsets().get(*index).copied().unwrap_or(0) as u32;
                     // Add the field byte offset to the base address.
-                    match dst {
-                        Location::Reg(reg) => {
-                            self.emit_line(&format!(
-                                "add {}, {}, #{}",
-                                Self::reg_name(reg),
-                                base_reg,
-                                offset
-                            ));
-                        }
-                        Location::Stack(slot) => {
-                            self.emit_line(&format!("add x9, {}, #{}", base_reg, offset));
-                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
-                        }
-                    }
+                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "field-addr");
+                    self.emit_line(&format!("add {}, {}, #{}", dst_reg, base_reg, offset));
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::IndexAddr { base, index } => {
@@ -594,10 +539,7 @@ impl CodegenEmitter for Arm64Emitter {
                     };
                     let stride = locs.layout(elem_ty).stride() as u32;
 
-                    let dst_reg = match dst {
-                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
-                        Location::Stack(_) => "x11".to_string(),
-                    };
+                    let (dst_reg, dst_slot) = self.value_dst(dst, "x11", "index-addr");
 
                     // Prefer scaled addressing when stride is a power of two.
                     if stride == 0 {
@@ -625,14 +567,8 @@ impl CodegenEmitter for Arm64Emitter {
                         self.emit_line(&format!("add {}, {}, x11", dst_reg, base_reg));
                     }
 
-                    if let Location::Stack(slot) = dst {
-                        // Spill the computed address if it doesn't live in a register.
-                        self.emit_line(&format!(
-                            "str {}, [sp, #{}]",
-                            dst_reg,
-                            self.stack_offset(slot)
-                        ));
-                    }
+                    // Spill the computed address if it doesn't live in a register.
+                    self.store_if_needed(dst_slot, &dst_reg);
                 }
             }
             InstKind::Store { ptr, value } => {
@@ -753,9 +689,31 @@ impl CodegenEmitter for Arm64Emitter {
             Terminator::Return { value } => {
                 // Materialize return value and tear down the stack frame.
                 if let Some(value) = value {
-                    let src = locs.value(*value);
-                    let src = self.load_value(src, "x9");
-                    self.emit_line(&format!("mov x0, {}", src));
+                    let ty = locs.value_ty(*value);
+                    if needs_sret(locs, ty) {
+                        // Indirect return: store the value into the sret pointer (x8).
+                        let src_loc = locs.value(*value);
+                        match src_loc {
+                            Location::Reg(reg) => {
+                                self.emit_line(&format!("str {}, [x8]", Self::reg_name(reg)));
+                            }
+                            Location::Stack(slot) => {
+                                let offset = self.stack_offset(slot);
+                                let size = locs.layout(ty).size() as u32;
+                                self.emit_line("mov x0, x8");
+                                self.emit_line(&format!("add x1, sp, #{}", offset));
+                                self.emit_line(&format!("mov x2, #{}", size));
+                                self.emit_line("bl __rt_memcpy");
+                            }
+                            _ => {
+                                panic!("ssa codegen: unsupported sret source {:?}", src_loc);
+                            }
+                        }
+                    } else {
+                        let src = locs.value(*value);
+                        let src = self.load_value(src, "x9");
+                        self.emit_line(&format!("mov x0, {}", src));
+                    }
                 }
 
                 // Restore callee-saved registers before tearing down the frame.
@@ -824,5 +782,14 @@ impl ConstValueExt for crate::ssa::model::ir::ConstValue {
             crate::ssa::model::ir::ConstValue::FuncAddr { .. } => 0,
             crate::ssa::model::ir::ConstValue::GlobalAddr { .. } => 0,
         }
+    }
+}
+
+fn needs_sret(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> bool {
+    match locs.types.kind(ty) {
+        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
+            false
+        }
+        _ => true,
     }
 }

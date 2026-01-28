@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::ssa::analysis::cfg::Cfg;
 use crate::ssa::model::ir::{BlockId, Function};
+use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::{CallMove, EdgeMove, MoveOp};
 
 /// Move schedule keyed by edges and call sites.
@@ -19,12 +20,24 @@ impl MoveSchedule {
         let mut schedule = MoveSchedule::default();
 
         for edge in edge_moves {
+            validate_moves(
+                &format!("edge {:?} -> {:?}", edge.from, edge.to),
+                &edge.moves,
+            );
             schedule
                 .edge_moves
                 .insert((edge.from, edge.to), edge.moves.clone());
         }
 
         for call in call_moves {
+            validate_moves(
+                &format!("call pre {:?} @{}", call.block, call.inst_index),
+                &call.pre_moves,
+            );
+            validate_moves(
+                &format!("call post {:?} @{}", call.block, call.inst_index),
+                &call.post_moves,
+            );
             schedule.call_moves.insert(
                 (call.block, call.inst_index),
                 (call.pre_moves.clone(), call.post_moves.clone()),
@@ -169,4 +182,33 @@ pub struct MoveBlock {
     pub from: BlockId,
     pub to: BlockId,
     pub moves: Vec<MoveOp>,
+}
+
+fn validate_moves(context: &str, moves: &[MoveOp]) {
+    if let Some((index, mov)) = moves
+        .iter()
+        .enumerate()
+        .find(|(_, mov)| !is_legal_move(mov.src, mov.dst))
+    {
+        panic!(
+            "ssa codegen: illegal move in {} at {}: {:?} -> {:?}",
+            context, index, mov.src, mov.dst
+        );
+    }
+}
+
+fn is_legal_move(src: Location, dst: Location) -> bool {
+    matches!(
+        (src, dst),
+        (Location::Reg(_), Location::Reg(_))
+            | (Location::Reg(_), Location::Stack(_))
+            | (Location::Stack(_), Location::Reg(_))
+            | (Location::Stack(_), Location::Stack(_))
+            | (Location::Reg(_), Location::OutgoingArg(_))
+            | (Location::Stack(_), Location::OutgoingArg(_))
+            | (Location::IncomingArg(_), Location::Reg(_))
+            | (Location::IncomingArg(_), Location::Stack(_))
+            | (Location::StackAddr(_), Location::Reg(_))
+            | (Location::StackAddr(_), Location::Stack(_))
+    )
 }

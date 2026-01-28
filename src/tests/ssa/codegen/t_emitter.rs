@@ -10,7 +10,7 @@ use crate::ssa::model::ir::{
     BinOp, Callee, CmpOp, ConstValue, FunctionSig, RuntimeFn, SwitchCase, Terminator,
 };
 use crate::ssa::regalloc::{TargetSpec, regalloc};
-use crate::ssa::{IrTypeCache, IrTypeKind};
+use crate::ssa::{IrStructField, IrTypeCache, IrTypeKind};
 
 struct TinyTarget {
     regs: Vec<PhysReg>,
@@ -62,6 +62,79 @@ impl TargetSpec for TinyTarget {
             0 => "r0",
             1 => "r1",
             _ => "rx",
+        }
+    }
+}
+
+struct AapcsTarget {
+    regs: Vec<PhysReg>,
+}
+
+impl AapcsTarget {
+    fn new() -> Self {
+        Self {
+            regs: (0..=10).filter(|reg| *reg != 8).map(PhysReg).collect(),
+        }
+    }
+}
+
+impl TargetSpec for AapcsTarget {
+    fn allocatable_regs(&self) -> &[PhysReg] {
+        &self.regs
+    }
+
+    fn caller_saved(&self) -> &[PhysReg] {
+        &self.regs
+    }
+
+    fn callee_saved(&self) -> &[PhysReg] {
+        &[]
+    }
+
+    fn param_reg(&self, index: u32) -> Option<PhysReg> {
+        match index {
+            0 => Some(PhysReg(0)),
+            1 => Some(PhysReg(1)),
+            2 => Some(PhysReg(2)),
+            3 => Some(PhysReg(3)),
+            4 => Some(PhysReg(4)),
+            5 => Some(PhysReg(5)),
+            6 => Some(PhysReg(6)),
+            7 => Some(PhysReg(7)),
+            _ => None,
+        }
+    }
+
+    fn result_reg(&self) -> PhysReg {
+        PhysReg(0)
+    }
+
+    fn indirect_result_reg(&self) -> Option<PhysReg> {
+        Some(PhysReg(8))
+    }
+
+    fn indirect_call_reg(&self) -> PhysReg {
+        PhysReg(9)
+    }
+
+    fn scratch_regs(&self) -> &[PhysReg] {
+        &[]
+    }
+
+    fn reg_name(&self, reg: PhysReg) -> &'static str {
+        match reg.0 {
+            0 => "x0",
+            1 => "x1",
+            2 => "x2",
+            3 => "x3",
+            4 => "x4",
+            5 => "x5",
+            6 => "x6",
+            7 => "x7",
+            8 => "x8",
+            9 => "x9",
+            10 => "x10",
+            _ => "x?",
         }
     }
 }
@@ -654,6 +727,174 @@ fn test_arm64_emitter_runtime_call() {
 
     let asm = emitter.finish();
     assert!(asm.contains("__rt_trap"));
+}
+
+#[test]
+fn test_arm64_emitter_stack_args() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_stack_args",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let mut args = Vec::new();
+    for i in 0..10 {
+        args.push(builder.const_int(i, false, 64, u64_ty));
+    }
+    let _call = builder.call(Callee::Direct(DefId(1)), args, u64_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = AapcsTarget::new();
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    let aligned = (alloc.frame_size + 15) & !15;
+    let outgoing_base = aligned.saturating_sub(alloc.frame_size);
+    let first = outgoing_base;
+    let second = outgoing_base.saturating_add(8);
+    assert!(asm.contains(&format!("[sp, #{}]", first)));
+    assert!(asm.contains(&format!("[sp, #{}]", second)));
+}
+
+#[test]
+fn test_arm64_emitter_sret_call_setup() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_sret_call",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let _call = builder.call(Callee::Direct(DefId(1)), vec![], pair_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = AapcsTarget::new();
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("add x8, sp"));
+}
+
+#[test]
+fn test_arm64_emitter_sret_return() {
+    let mut types = IrTypeCache::new();
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+    let pair_ptr = types.add(IrTypeKind::Ptr { elem: pair_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_sret_return",
+        FunctionSig {
+            params: vec![],
+            ret: pair_ty,
+        },
+    );
+
+    let local = builder.add_local(pair_ty, None);
+    let addr = builder.addr_of_local(local, pair_ptr);
+    let value = builder.load(addr, pair_ty);
+    builder.terminate(Terminator::Return { value: Some(value) });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = AapcsTarget::new();
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("mov x0, x8"));
+    assert!(asm.contains("bl __rt_memcpy"));
 }
 
 #[test]
