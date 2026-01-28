@@ -6,7 +6,7 @@ use crate::regalloc::target::PhysReg;
 use crate::ssa::IrTypeKind;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemonic};
 use crate::ssa::model::ir::{
-    Callee, CastKind, CmpOp, ConstValue, InstKind, Instruction, Terminator, UnOp,
+    Callee, CastKind, CmpOp, ConstValue, GlobalData, InstKind, Instruction, Terminator, UnOp,
 };
 use crate::ssa::regalloc::moves::MoveOp;
 use crate::ssa::regalloc::{Location, StackSlotId};
@@ -59,12 +59,20 @@ impl FrameLayout {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AsmSection {
+    None,
+    Text,
+    Data,
+}
+
 /// Simple string-based ARM64 emitter for early SSA codegen.
 pub struct Arm64Emitter {
     output: String,
     layout: FrameLayout,
     /// Callee-saved registers to save/restore in the prologue/epilogue.
     callee_saved: Vec<PhysReg>,
+    section: AsmSection,
 }
 
 impl Arm64Emitter {
@@ -77,6 +85,7 @@ impl Arm64Emitter {
                 frame_size: 0,
             },
             callee_saved: Vec::new(),
+            section: AsmSection::None,
         }
     }
 
@@ -104,6 +113,20 @@ impl Arm64Emitter {
 
     fn emit_line(&mut self, line: &str) {
         let _ = writeln!(self.output, "  {}", line);
+    }
+
+    fn ensure_text(&mut self) {
+        if self.section != AsmSection::Text {
+            let _ = writeln!(self.output, ".text");
+            self.section = AsmSection::Text;
+        }
+    }
+
+    fn ensure_data(&mut self) {
+        if self.section != AsmSection::Data {
+            let _ = writeln!(self.output, ".data");
+            self.section = AsmSection::Data;
+        }
     }
 
     fn cmp_condition(op: CmpOp) -> &'static str {
@@ -171,7 +194,39 @@ impl Arm64Emitter {
 }
 
 impl CodegenEmitter for Arm64Emitter {
+    fn emit_global(&mut self, global: &GlobalData) {
+        self.ensure_data();
+
+        // Emit a stable label for the global payload.
+        let label = format!("g{}", global.id.0);
+
+        // Align the data so references can use natural alignment.
+        let align = global.align.max(1);
+        if align.is_power_of_two() {
+            let align_log2 = align.trailing_zeros();
+            self.emit_line(&format!(".p2align {}", align_log2));
+        } else {
+            self.emit_line(&format!(".balign {}", align));
+        }
+
+        let _ = writeln!(self.output, "{}:", label);
+
+        // Emit bytes verbatim; empty globals still reserve a byte.
+        if global.bytes.is_empty() {
+            self.emit_line(".byte 0");
+        } else {
+            let data = global
+                .bytes
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.emit_line(&format!(".byte {}", data));
+        }
+    }
+
     fn begin_function(&mut self, name: &str, frame_size: u32, callee_saved: &[PhysReg]) {
+        self.ensure_text();
         // Capture the callee-saved set so we can restore it in the epilogue.
         self.callee_saved = callee_saved.to_vec();
         let saved_size = (callee_saved.len() as u32) * 8;
@@ -507,8 +562,7 @@ impl CodegenEmitter for Arm64Emitter {
                     let elem_ty = match locs.types.kind(base_ty) {
                         IrTypeKind::Ptr { elem } => *elem,
                         other => {
-                            self.emit_line(&format!("// unsupported field base {:?}", other));
-                            return;
+                            panic!("ssa codegen: field addr base must be ptr, got {:?}", other);
                         }
                     };
                     let layout = locs.layout(elem_ty);
@@ -533,8 +587,7 @@ impl CodegenEmitter for Arm64Emitter {
                     let elem_ty = match locs.types.kind(result.ty) {
                         IrTypeKind::Ptr { elem } => *elem,
                         other => {
-                            self.emit_line(&format!("// unsupported index result {:?}", other));
-                            return;
+                            panic!("ssa codegen: index result must be ptr, got {:?}", other);
                         }
                     };
                     let stride = locs.layout(elem_ty).stride() as u32;

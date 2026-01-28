@@ -2,12 +2,16 @@ use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::codegen::arm64::Arm64Emitter;
+use crate::ssa::codegen::emit_module_arm64;
+use crate::ssa::codegen::emitter::CodegenEmitter;
 use crate::ssa::codegen::graph::CodegenGraph;
 use crate::ssa::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::ssa::codegen::traverse::emit_graph_with_emitter;
+use crate::ssa::lower::{LoweredFunction, LoweredModule};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{
-    BinOp, Callee, CmpOp, ConstValue, FunctionSig, RuntimeFn, SwitchCase, Terminator,
+    BinOp, Callee, CmpOp, ConstValue, FunctionSig, GlobalData, GlobalId, RuntimeFn, SwitchCase,
+    Terminator,
 };
 use crate::ssa::regalloc::{TargetSpec, regalloc};
 use crate::ssa::{IrStructField, IrTypeCache, IrTypeKind};
@@ -273,6 +277,75 @@ fn test_arm64_emitter_basic() {
     assert!(asm.contains("bb0:"));
     assert!(asm.contains("mov"));
     assert!(asm.contains("ret"));
+}
+
+#[test]
+fn test_arm64_emitter_global_bytes() {
+    let mut emitter = Arm64Emitter::new();
+    let data = GlobalData {
+        id: GlobalId(0),
+        bytes: vec![1, 2, 3],
+        align: 4,
+    };
+    emitter.emit_global(&data);
+    let asm = emitter.finish();
+    assert!(asm.contains(".data"));
+    assert!(asm.contains("g0:"));
+    assert!(asm.contains(".byte 1, 2, 3"));
+}
+
+#[test]
+fn test_arm64_emit_module() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+
+    let mut builder0 = FunctionBuilder::new(
+        DefId(0),
+        "module_fn0",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+    builder0.terminate(Terminator::Return { value: None });
+    let func0 = builder0.finish();
+
+    let mut builder1 = FunctionBuilder::new(
+        DefId(1),
+        "module_fn1",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+    builder1.terminate(Terminator::Return { value: None });
+    let func1 = builder1.finish();
+
+    let module = LoweredModule {
+        funcs: vec![
+            LoweredFunction {
+                func: func0,
+                types: types.clone(),
+                globals: Vec::new(),
+            },
+            LoweredFunction {
+                func: func1,
+                types: types.clone(),
+                globals: Vec::new(),
+            },
+        ],
+        globals: vec![GlobalData {
+            id: GlobalId(0),
+            bytes: vec![9],
+            align: 1,
+        }],
+    };
+
+    let target = TinyTarget::new(2);
+    let asm = emit_module_arm64(&module, &target);
+    assert!(asm.contains("g0:"));
+    assert!(asm.contains("fn0:"));
+    assert!(asm.contains("fn1:"));
 }
 
 #[test]

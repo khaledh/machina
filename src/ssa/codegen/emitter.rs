@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::regalloc::target::PhysReg;
 use crate::ssa::IrTypeCache;
 use crate::ssa::IrTypeId;
-use crate::ssa::model::ir::{BinOp, Instruction, LocalId, Terminator, ValueId};
+use crate::ssa::model::ir::{BinOp, GlobalData, Instruction, LocalId, Terminator, ValueId};
 use crate::ssa::model::layout::IrLayout;
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
@@ -17,6 +17,9 @@ pub trait CodegenEmitter {
 
     /// Begin emitting a new block label.
     fn begin_block(&mut self, label: &str);
+
+    /// Emit a global data item.
+    fn emit_global(&mut self, _global: &GlobalData) {}
 
     /// Emit a move sequence.
     fn emit_moves(&mut self, moves: &[MoveOp]);
