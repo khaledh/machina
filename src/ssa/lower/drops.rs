@@ -224,6 +224,41 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.drop_value_at_addr(addr, &ty)
     }
 
+    pub(super) fn emit_drop_for_value(
+        &mut self,
+        value: ValueId,
+        ty: &Type,
+        is_addr: bool,
+    ) -> Result<(), LoweringError> {
+        if !ty.needs_drop() {
+            return Ok(());
+        }
+
+        if let Type::Heap { elem_ty } = ty {
+            if is_addr {
+                return self.drop_value_at_addr(value, ty);
+            }
+
+            if elem_ty.needs_drop() {
+                self.drop_value_at_addr(value, elem_ty)?;
+            }
+            let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+            let _ = self
+                .builder
+                .call(Callee::Runtime(RuntimeFn::Free), vec![value], unit_ty);
+            return Ok(());
+        }
+
+        if is_addr {
+            return self.drop_value_at_addr(value, ty);
+        }
+
+        let ir_ty = self.type_lowerer.lower_type(ty);
+        let slot = self.alloc_value_slot(ir_ty);
+        self.store_value_into_addr(slot.addr, value, ty, ir_ty);
+        self.drop_value_at_addr(slot.addr, ty)
+    }
+
     fn drop_value_at_addr(&mut self, addr: ValueId, ty: &Type) -> Result<(), LoweringError> {
         if !ty.needs_drop() {
             return Ok(());

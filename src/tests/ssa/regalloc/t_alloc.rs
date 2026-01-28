@@ -235,6 +235,47 @@ fn test_regalloc_prefers_call_safe_regs() {
 }
 
 #[test]
+fn test_regalloc_prefers_call_safe_regs_for_drop() {
+    let mut types = IrTypeCache::new();
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let ptr_u64_ty = types.add(IrTypeKind::Ptr { elem: u64_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "drop_safe",
+        FunctionSig {
+            params: vec![u64_ty],
+            ret: u64_ty,
+        },
+    );
+
+    let entry = builder.current_block();
+    let param = builder.add_block_param(entry, u64_ty);
+    let local = builder.add_local(u64_ty, None);
+    let addr = builder.addr_of_local(local, ptr_u64_ty);
+    builder.drop_ptr(addr);
+    let sum = builder.binop(crate::ssa::model::ir::BinOp::Add, param, param, u64_ty);
+    builder.terminate(Terminator::Return { value: Some(sum) });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = SplitTarget::new(
+        vec![PhysReg(0), PhysReg(1), PhysReg(2)],
+        vec![PhysReg(0)],
+        vec![PhysReg(1), PhysReg(2)],
+        vec![PhysReg(1)],
+        PhysReg(0),
+    );
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let location = alloc.alloc_map.get(&param).expect("missing alloc");
+    assert!(matches!(location, Location::Reg(reg) if reg.0 != 0));
+}
+
+#[test]
 fn test_regalloc_precolors_return_value() {
     let mut types = IrTypeCache::new();
     let u64_ty = types.add(IrTypeKind::Int {

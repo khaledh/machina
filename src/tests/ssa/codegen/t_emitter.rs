@@ -441,6 +441,122 @@ fn test_arm64_emitter_memset() {
 }
 
 #[test]
+fn test_arm64_emitter_drop_string() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u8_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let u32_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 32,
+    });
+    let u8_ptr = types.add(IrTypeKind::Ptr { elem: u8_ty });
+    let string_ty = types.add_named(
+        IrTypeKind::Struct {
+            fields: vec![
+                crate::ssa::IrStructField {
+                    name: "ptr".to_string(),
+                    ty: u8_ptr,
+                },
+                crate::ssa::IrStructField {
+                    name: "len".to_string(),
+                    ty: u32_ty,
+                },
+                crate::ssa::IrStructField {
+                    name: "cap".to_string(),
+                    ty: u32_ty,
+                },
+            ],
+        },
+        "string".to_string(),
+    );
+    let string_ptr = types.add(IrTypeKind::Ptr { elem: string_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_drop_string",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(string_ty, None);
+    let addr = builder.addr_of_local(local, string_ptr);
+    builder.drop_ptr(addr);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TinyTarget::new(2);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("__rt_string_drop"));
+}
+
+#[test]
+fn test_arm64_emitter_const_func_addr() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let fn_ty = types.add(IrTypeKind::Fn {
+        params: vec![],
+        ret: unit_ty,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_const_func_addr",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let _addr = builder.const_func_addr(DefId(2), fn_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TinyTarget::new(1);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("adrp"));
+    assert!(asm.contains("fn2"));
+}
+
+#[test]
 fn test_arm64_emitter_condbr_stack_cond() {
     let mut types = IrTypeCache::new();
     let unit_ty = types.add(IrTypeKind::Unit);

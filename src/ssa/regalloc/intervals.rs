@@ -77,7 +77,7 @@ pub fn analyze(func: &Function, live_map: &LiveMap) -> IntervalAnalysis {
                 value_types.insert(result.id, result.ty);
             }
 
-            if matches!(inst.kind, InstKind::Call { .. }) {
+            if matches!(inst.kind, InstKind::Call { .. } | InstKind::Drop { .. }) {
                 call_positions.push(inst_idx);
             }
 

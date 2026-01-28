@@ -5,7 +5,9 @@ use std::fmt::Write;
 use crate::regalloc::target::PhysReg;
 use crate::ssa::IrTypeKind;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemonic};
-use crate::ssa::model::ir::{Callee, CastKind, CmpOp, InstKind, Instruction, Terminator, UnOp};
+use crate::ssa::model::ir::{
+    Callee, CastKind, CmpOp, ConstValue, InstKind, Instruction, Terminator, UnOp,
+};
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
 
@@ -202,41 +204,87 @@ impl CodegenEmitter for Arm64Emitter {
                 // Materialize immediates into a register or stack slot.
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
-                    match dst {
-                        Location::Reg(reg) => {
-                            self.emit_line(&format!(
-                                "mov {}, #{}",
-                                Self::reg_name(reg),
-                                value.as_int()
-                            ));
+                    match value {
+                        ConstValue::Int { .. } | ConstValue::Bool(_) | ConstValue::Unit => {
+                            match dst {
+                                Location::Reg(reg) => {
+                                    self.emit_line(&format!(
+                                        "mov {}, #{}",
+                                        Self::reg_name(reg),
+                                        value.as_int()
+                                    ));
+                                }
+                                Location::Stack(slot) => {
+                                    self.emit_line(&format!("mov x9, #{}", value.as_int()));
+                                    self.emit_line(&format!(
+                                        "str x9, [sp, #{}]",
+                                        self.stack_offset(slot)
+                                    ));
+                                }
+                            }
                         }
-                        Location::Stack(slot) => {
-                            self.emit_line(&format!("mov x9, #{}", value.as_int()));
-                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
+                        ConstValue::FuncAddr { def } => {
+                            let label = format!("fn{}", def.0);
+                            let dst_reg = match dst {
+                                Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                                Location::Stack(_) => "x9".to_string(),
+                            };
+                            self.emit_line(&format!("adrp {}, {}", dst_reg, label));
+                            self.emit_line(&format!(
+                                "add {}, {}, :lo12:{}",
+                                dst_reg, dst_reg, label
+                            ));
+                            if let Location::Stack(slot) = dst {
+                                self.emit_line(&format!(
+                                    "str {}, [sp, #{}]",
+                                    dst_reg,
+                                    self.stack_offset(slot)
+                                ));
+                            }
+                        }
+                        ConstValue::GlobalAddr { id } => {
+                            // TODO: ensure SSA codegen emits global data labels.
+                            let label = format!("g{}", id.0);
+                            let dst_reg = match dst {
+                                Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                                Location::Stack(_) => "x9".to_string(),
+                            };
+                            self.emit_line(&format!("adrp {}, {}", dst_reg, label));
+                            self.emit_line(&format!(
+                                "add {}, {}, :lo12:{}",
+                                dst_reg, dst_reg, label
+                            ));
+                            if let Location::Stack(slot) = dst {
+                                self.emit_line(&format!(
+                                    "str {}, [sp, #{}]",
+                                    dst_reg,
+                                    self.stack_offset(slot)
+                                ));
+                            }
                         }
                     }
                 }
             }
             InstKind::BinOp { op, lhs, rhs } => {
                 // Binary arithmetic/logical ops on integer registers.
-                let lhs = locs.value(*lhs);
-                let rhs = locs.value(*rhs);
                 if let Some(result) = &inst.result {
+                    let lhs = locs.value(*lhs);
+                    let rhs = locs.value(*rhs);
+                    let lhs_reg = self.load_value(lhs, "x9");
+                    let rhs_reg = self.load_value(rhs, "x10");
                     let dst = locs.value(result.id);
+                    let dst_reg = match dst {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(_) => "x11".to_string(),
+                    };
                     let op = binop_mnemonic(*op);
-                    match (lhs, rhs, dst) {
-                        (Location::Reg(a), Location::Reg(b), Location::Reg(out)) => {
-                            self.emit_line(&format!(
-                                "{} {}, {}, {}",
-                                op,
-                                Self::reg_name(out),
-                                Self::reg_name(a),
-                                Self::reg_name(b)
-                            ));
-                        }
-                        _ => {
-                            self.emit_line("// binop fallback");
-                        }
+                    self.emit_line(&format!("{} {}, {}, {}", op, dst_reg, lhs_reg, rhs_reg));
+                    if let Location::Stack(slot) = dst {
+                        self.emit_line(&format!(
+                            "str {}, [sp, #{}]",
+                            dst_reg,
+                            self.stack_offset(slot)
+                        ));
                     }
                 }
             }
@@ -641,9 +689,26 @@ impl CodegenEmitter for Arm64Emitter {
                     self.emit_line(&format!("blr {}", reg));
                 }
             },
-            _ => {
-                // TODO: add remaining SSA instructions.
-                self.emit_line("// unsupported inst");
+            InstKind::Drop { ptr } => {
+                // Drop a pointer value; only string drops are supported in the emitter.
+                let ptr_loc = locs.value(*ptr);
+                let ptr_reg = self.load_value(ptr_loc, "x0");
+                let ptr_ty = locs.value_ty(*ptr);
+                let elem_ty = match locs.types.kind(ptr_ty) {
+                    IrTypeKind::Ptr { elem } => *elem,
+                    other => {
+                        panic!("ssa codegen: unsupported drop ptr {:?}", other);
+                    }
+                };
+                let elem_name = locs.types.get(elem_ty).name.as_deref();
+                if elem_name == Some("string") {
+                    if ptr_reg != "x0" {
+                        self.emit_line(&format!("mov x0, {}", ptr_reg));
+                    }
+                    self.emit_line("bl __rt_string_drop");
+                } else {
+                    panic!("ssa codegen: unsupported drop for {:?}", elem_name);
+                }
             }
         }
     }

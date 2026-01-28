@@ -10,6 +10,7 @@ use crate::types::Type;
 struct CallInputValue {
     value: ValueId,
     ty: Type,
+    is_addr: bool,
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -56,7 +57,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         return Ok(None);
                     };
                     let ty = self.type_map.type_table().get(expr.ty).clone();
-                    arg_values.push(CallInputValue { value, ty });
+                    arg_values.push(CallInputValue {
+                        value,
+                        ty,
+                        is_addr: false,
+                    });
                 }
                 sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
                     let addr = self.lower_place_addr(place)?;
@@ -64,6 +69,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     arg_values.push(CallInputValue {
                         value: addr.addr,
                         ty,
+                        is_addr: true,
                     });
                 }
             }
@@ -73,7 +79,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let call_args =
             self.lower_call_args_from_plan(expr.id, expr.span, &call_plan, None, &arg_values)?;
         let ty = self.type_lowerer.lower_type_id(expr.ty);
-        Ok(Some(self.builder.call(callee, call_args, ty)))
+        let result = self.builder.call(callee, call_args, ty);
+        self.emit_call_drops(&call_plan, None, &arg_values)?;
+        Ok(Some(result))
     }
 
     /// Lowers a method call expression, returning `None` if a subexpression returns.
@@ -102,7 +110,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     return Ok(None);
                 };
                 let ty = self.type_map.type_table().get(expr.ty).clone();
-                CallInputValue { value, ty }
+                CallInputValue {
+                    value,
+                    ty,
+                    is_addr: false,
+                }
             }
             sem::MethodReceiver::PlaceExpr(place) => {
                 let addr = self.lower_place_addr(place)?;
@@ -110,6 +122,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 CallInputValue {
                     value: addr.addr,
                     ty,
+                    is_addr: true,
                 }
             }
         };
@@ -150,7 +163,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         return Ok(None);
                     };
                     let ty = self.type_map.type_table().get(expr.ty).clone();
-                    arg_values.push(CallInputValue { value, ty });
+                    arg_values.push(CallInputValue {
+                        value,
+                        ty,
+                        is_addr: false,
+                    });
                 }
                 sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
                     let addr = self.lower_place_addr(place)?;
@@ -158,6 +175,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     arg_values.push(CallInputValue {
                         value: addr.addr,
                         ty,
+                        is_addr: true,
                     });
                 }
             }
@@ -168,11 +186,49 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             expr.id,
             expr.span,
             &call_plan,
-            Some(receiver_value),
+            Some(&receiver_value),
             &arg_values,
         )?;
         let ty = self.type_lowerer.lower_type_id(expr.ty);
-        Ok(Some(self.builder.call(callee, call_args, ty)))
+        let result = self.builder.call(callee, call_args, ty);
+        self.emit_call_drops(&call_plan, Some(&receiver_value), &arg_values)?;
+        Ok(Some(result))
+    }
+
+    fn emit_call_drops(
+        &mut self,
+        call_plan: &sem::CallPlan,
+        receiver_value: Option<&CallInputValue>,
+        arg_values: &[CallInputValue],
+    ) -> Result<(), LoweringError> {
+        let expected = (call_plan.has_receiver as usize) + arg_values.len();
+        if call_plan.drop_mask.len() != expected {
+            panic!(
+                "ssa call drop mask length mismatch: expected {}, got {}",
+                expected,
+                call_plan.drop_mask.len()
+            );
+        }
+
+        let mut input_index = 0;
+        if call_plan.has_receiver {
+            let receiver = receiver_value.unwrap_or_else(|| {
+                panic!("ssa call drop mask missing receiver value for call plan");
+            });
+            if call_plan.drop_mask[input_index] {
+                self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
+            }
+            input_index += 1;
+        }
+
+        for arg in arg_values {
+            if call_plan.drop_mask[input_index] {
+                self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
+            }
+            input_index += 1;
+        }
+
+        Ok(())
     }
 
     fn lower_call_args_from_plan(
@@ -180,7 +236,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         expr_id: NodeId,
         span: Span,
         call_plan: &sem::CallPlan,
-        receiver_value: Option<CallInputValue>,
+        receiver_value: Option<&CallInputValue>,
         arg_values: &[CallInputValue],
     ) -> Result<Vec<ValueId>, LoweringError> {
         if call_plan.has_receiver != receiver_value.is_some() {
@@ -197,7 +253,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let value = match input {
                         sem::CallInput::Receiver => {
                             receiver_value
-                                .as_ref()
                                 .unwrap_or_else(|| {
                                     panic!("ssa call plan missing receiver value for {:?}", expr_id)
                                 })
@@ -216,7 +271,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 sem::ArgLowering::PtrLen { input, len_bits } => {
                     let input_value = match input {
-                        sem::CallInput::Receiver => receiver_value.as_ref().unwrap_or_else(|| {
+                        sem::CallInput::Receiver => receiver_value.unwrap_or_else(|| {
                             panic!("ssa call plan missing receiver value for {:?}", expr_id)
                         }),
                         sem::CallInput::Arg(index) => arg_values

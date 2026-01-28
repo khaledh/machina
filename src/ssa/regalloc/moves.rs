@@ -78,6 +78,7 @@ pub fn build_move_plan(
                 let mut post_moves = Vec::new();
 
                 for (idx, arg) in args.iter().enumerate() {
+                    // TODO: support stack-passed call arguments (beyond the ABI register set).
                     let dst = target
                         .param_reg(idx as u32)
                         .unwrap_or_else(|| panic!("ssa regalloc: call arg {} has no ABI reg", idx));

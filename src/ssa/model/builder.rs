@@ -264,6 +264,14 @@ impl FunctionBuilder {
         result
     }
 
+    /// Emits a drop instruction at the cursor.
+    pub fn drop_ptr(&mut self, ptr: ValueId) {
+        self.current_block_mut().insts.push(Instruction {
+            result: None,
+            kind: InstKind::Drop { ptr },
+        });
+    }
+
     /// Emits a load instruction at the cursor.
     pub fn load(&mut self, ptr: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);

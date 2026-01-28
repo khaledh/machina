@@ -137,6 +137,33 @@ fn test_lower_method_call_param() {
 }
 
 #[test]
+fn test_lower_call_drops_in_arg() {
+    let ctx = analyze(indoc! {"
+        fn take(s: string) -> u64 {
+            1
+        }
+
+        fn main() -> u64 {
+            take(\"hi\");
+            0
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[1];
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("call @__rt_string_drop"));
+}
+
+#[test]
 fn test_lower_call_array_to_slice_arg() {
     let ctx = analyze(indoc! {"
         fn take(xs: u64[]) -> u64 {
