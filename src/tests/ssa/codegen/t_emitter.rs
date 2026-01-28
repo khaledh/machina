@@ -476,3 +476,93 @@ fn test_arm64_emitter_saves_callee_saved() {
     assert!(asm.contains("str x4"));
     assert!(asm.contains("ldr x4"));
 }
+
+#[test]
+fn test_arm64_emitter_saves_multiple_callee_saved() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_multi_callee_saved",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let value = builder.const_int(11, false, 64, u64_ty);
+    let _call = builder.call(Callee::Runtime(RuntimeFn::Print), vec![value], unit_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+
+    struct MultiCalleeSavedTarget {
+        regs: Vec<PhysReg>,
+    }
+
+    impl TargetSpec for MultiCalleeSavedTarget {
+        fn allocatable_regs(&self) -> &[PhysReg] {
+            &self.regs
+        }
+
+        fn caller_saved(&self) -> &[PhysReg] {
+            &[]
+        }
+
+        fn callee_saved(&self) -> &[PhysReg] {
+            &self.regs
+        }
+
+        fn param_reg(&self, index: u32) -> Option<PhysReg> {
+            self.regs.get(index as usize).copied()
+        }
+
+        fn result_reg(&self) -> PhysReg {
+            self.regs[0]
+        }
+
+        fn indirect_result_reg(&self) -> Option<PhysReg> {
+            None
+        }
+
+        fn indirect_call_reg(&self) -> PhysReg {
+            self.regs[0]
+        }
+
+        fn scratch_regs(&self) -> &[PhysReg] {
+            &[]
+        }
+
+        fn reg_name(&self, _reg: PhysReg) -> &'static str {
+            "r0"
+        }
+    }
+
+    let target = MultiCalleeSavedTarget {
+        regs: vec![PhysReg(4), PhysReg(5)],
+    };
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("stp x4, x5"));
+    assert!(asm.contains("ldp x4, x5"));
+}
