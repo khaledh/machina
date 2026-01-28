@@ -184,7 +184,27 @@ impl FunctionBuilder {
         result
     }
 
-    /// Emits a cast instruction at the cursor.
+    /// Emits an integer truncation instruction at the cursor.
+    pub fn int_trunc(&mut self, value: ValueId, ty: IrTypeId) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::IntTrunc { value, ty },
+        });
+        result
+    }
+
+    /// Emits an integer extension instruction at the cursor.
+    pub fn int_extend(&mut self, value: ValueId, ty: IrTypeId, signed: bool) -> ValueId {
+        let result = self.alloc_value(ty);
+        self.current_block_mut().insts.push(Instruction {
+            result: Some(ValueDef { id: result, ty }),
+            kind: InstKind::IntExtend { value, ty, signed },
+        });
+        result
+    }
+
+    /// Emits a pointer/integer cast instruction at the cursor.
     pub fn cast(&mut self, kind: CastKind, value: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
         self.current_block_mut().insts.push(Instruction {

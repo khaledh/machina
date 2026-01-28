@@ -157,7 +157,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let zero = self.builder.const_int(0, false, 64, u64_ty);
         self.emit_range_check(total, zero, max_excl);
 
-        let total_u32 = self.builder.cast(CastKind::IntTrunc, total, u32_ty);
+        let total_u32 = self.builder.int_trunc(total, u32_ty);
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
         let _ = self.builder.call(
             Callee::Runtime(RuntimeFn::StringEnsure),
@@ -308,10 +308,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return value;
         }
         if bits < 64 {
-            return self
-                .builder
-                .cast(CastKind::IntExtend { signed }, value, target_ty);
+            return self.builder.int_extend(value, target_ty, signed);
         }
-        self.builder.cast(CastKind::IntTrunc, value, target_ty)
+        self.builder.int_trunc(value, target_ty)
     }
 }

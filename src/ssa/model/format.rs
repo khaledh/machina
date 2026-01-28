@@ -101,6 +101,15 @@ impl<'a> Formatter<'a> {
             InstKind::UnOp { op, value } => {
                 let _ = write!(&mut self.out, "{} %v{}", unop_name(op), value.0);
             }
+            InstKind::IntTrunc { value, ty } => {
+                let _ = write!(&mut self.out, "trunc %v{} to ", value.0);
+                self.write_type(*ty);
+            }
+            InstKind::IntExtend { value, ty, signed } => {
+                let kind = if *signed { "sext" } else { "zext" };
+                let _ = write!(&mut self.out, "{} %v{} to ", kind, value.0);
+                self.write_type(*ty);
+            }
             InstKind::Cmp { op, lhs, rhs } => {
                 let _ = write!(
                     &mut self.out,

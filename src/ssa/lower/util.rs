@@ -6,7 +6,7 @@ use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::{LocalStorage, LocalValue};
 use crate::ssa::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
-use crate::ssa::model::ir::{BinOp, Callee, CastKind, CmpOp, RuntimeFn, Terminator, ValueId};
+use crate::ssa::model::ir::{BinOp, Callee, CmpOp, RuntimeFn, Terminator, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
@@ -56,9 +56,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let len_u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
         let len_u32 = self.load_field(base_addr, 1, len_u32_ty);
         let len_u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let len = self
-            .builder
-            .cast(CastKind::IntExtend { signed: false }, len_u32, len_u64_ty);
+        let len = self.builder.int_extend(len_u32, len_u64_ty, false);
 
         BaseView { ptr, len }
     }
@@ -299,9 +297,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut len_val = self.load_field(slot.addr, 1, len_ty);
         if len_bits == 32 {
             let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-            len_val = self
-                .builder
-                .cast(CastKind::IntExtend { signed: false }, len_val, u64_ty);
+            len_val = self.builder.int_extend(len_val, u64_ty, false);
         }
 
         Ok((ptr_val, len_val))

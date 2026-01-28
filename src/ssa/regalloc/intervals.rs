@@ -150,6 +150,8 @@ fn inst_uses(kind: &InstKind) -> Vec<ValueId> {
             vec![*lhs, *rhs]
         }
         InstKind::UnOp { value, .. }
+        | InstKind::IntTrunc { value, .. }
+        | InstKind::IntExtend { value, .. }
         | InstKind::Cast { value, .. }
         | InstKind::FieldAddr { base: value, .. }
         | InstKind::Load { ptr: value } => vec![*value],

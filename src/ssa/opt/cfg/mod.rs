@@ -347,6 +347,8 @@ fn collect_inst_uses(kind: &InstKind, used: &mut HashSet<ValueId>) {
             used.insert(*rhs);
         }
         InstKind::UnOp { value, .. }
+        | InstKind::IntTrunc { value, .. }
+        | InstKind::IntExtend { value, .. }
         | InstKind::Cast { value, .. }
         | InstKind::FieldAddr { base: value, .. }
         | InstKind::Load { ptr: value } => {

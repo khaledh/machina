@@ -1065,7 +1065,7 @@ fn test_lower_slice_expr_string() {
             %v3: ptr<u8> = load %v2
             %v4: ptr<u32> = field_addr %v1, 1
             %v5: u32 = load %v4
-            %v6: u64 = cast.IntExtend { signed: false } %v5 to u64
+            %v6: u64 = zext %v5 to u64
             %v7: u64 = const 1:u64
             %v8: u64 = const 0:u64
             %v9: u64 = const 1:u64

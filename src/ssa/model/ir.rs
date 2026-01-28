@@ -131,8 +131,6 @@ pub enum CmpOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CastKind {
-    IntTrunc,
-    IntExtend { signed: bool },
     PtrToInt,
     IntToPtr,
 }
@@ -222,6 +220,15 @@ pub enum InstKind {
     UnOp {
         op: UnOp,
         value: ValueId,
+    },
+    IntTrunc {
+        value: ValueId,
+        ty: IrTypeId,
+    },
+    IntExtend {
+        value: ValueId,
+        ty: IrTypeId,
+        signed: bool,
     },
     Cmp {
         op: CmpOp,

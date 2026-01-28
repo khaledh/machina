@@ -144,6 +144,8 @@ fn inst_uses(kind: &InstKind, use_def: &mut UseDef) {
             use_def.add_use(*rhs);
         }
         InstKind::UnOp { value, .. }
+        | InstKind::IntTrunc { value, .. }
+        | InstKind::IntExtend { value, .. }
         | InstKind::Cast { value, .. }
         | InstKind::FieldAddr { base: value, .. }
         | InstKind::Load { ptr: value } => {

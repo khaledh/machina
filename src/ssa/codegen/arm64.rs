@@ -5,7 +5,7 @@ use std::fmt::Write;
 use crate::regalloc::target::PhysReg;
 use crate::ssa::IrTypeKind;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemonic};
-use crate::ssa::model::ir::{Callee, CmpOp, InstKind, Instruction, Terminator};
+use crate::ssa::model::ir::{Callee, CastKind, CmpOp, InstKind, Instruction, Terminator, UnOp};
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
 
@@ -240,6 +240,46 @@ impl CodegenEmitter for Arm64Emitter {
                     }
                 }
             }
+            InstKind::UnOp { op, value } => {
+                // Unary ops over integer values.
+                if let Some(result) = &inst.result {
+                    let src_loc = locs.value(*value);
+                    let src_reg = self.load_value(src_loc, "x9");
+                    let dst = locs.value(result.id);
+                    let dst_reg = match dst {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(_) => {
+                            if src_reg == "x10" {
+                                "x11".to_string()
+                            } else {
+                                "x10".to_string()
+                            }
+                        }
+                    };
+
+                    match op {
+                        UnOp::Neg => {
+                            self.emit_line(&format!("neg {}, {}", dst_reg, src_reg));
+                        }
+                        UnOp::BitNot => {
+                            self.emit_line(&format!("mvn {}, {}", dst_reg, src_reg));
+                        }
+                        UnOp::Not => {
+                            // Logical not: compare against zero and materialize a boolean.
+                            self.emit_line(&format!("cmp {}, #0", src_reg));
+                            self.emit_line(&format!("cset {}, eq", dst_reg));
+                        }
+                    }
+
+                    if let Location::Stack(slot) = dst {
+                        self.emit_line(&format!(
+                            "str {}, [sp, #{}]",
+                            dst_reg,
+                            self.stack_offset(slot)
+                        ));
+                    }
+                }
+            }
             InstKind::Cmp { op, lhs, rhs } => {
                 // Compare and produce a boolean via cset.
                 if let Some(result) = &inst.result {
@@ -270,6 +310,145 @@ impl CodegenEmitter for Arm64Emitter {
                             self.emit_line(&format!("cset x9, {}", cond));
                             self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
                         }
+                    }
+                }
+            }
+            InstKind::IntTrunc { value, ty } => {
+                // Integer truncation via masking to the destination bit-width.
+                if let Some(result) = &inst.result {
+                    let src_loc = locs.value(*value);
+                    let src_reg = self.load_value(src_loc, "x9");
+                    let dst = locs.value(result.id);
+                    let dst_reg = match dst {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(_) => {
+                            if src_reg == "x10" {
+                                "x11".to_string()
+                            } else {
+                                "x10".to_string()
+                            }
+                        }
+                    };
+
+                    let dst_bits = match locs.types.kind(*ty) {
+                        IrTypeKind::Int { bits, .. } => *bits as u32,
+                        _ => 64,
+                    };
+
+                    match dst_bits {
+                        64 => self.emit_line(&format!("mov {}, {}", dst_reg, src_reg)),
+                        32 => self.emit_line(&format!(
+                            "and {}, {}, #0x{:x}",
+                            dst_reg, src_reg, 0xffff_ffffu64
+                        )),
+                        16 => self.emit_line(&format!(
+                            "and {}, {}, #0x{:x}",
+                            dst_reg, src_reg, 0xffffu64
+                        )),
+                        8 => self
+                            .emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, 0xffu64)),
+                        other => {
+                            let mask = (1u64 << other).saturating_sub(1);
+                            self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                        }
+                    }
+
+                    if let Location::Stack(slot) = dst {
+                        self.emit_line(&format!(
+                            "str {}, [sp, #{}]",
+                            dst_reg,
+                            self.stack_offset(slot)
+                        ));
+                    }
+                }
+            }
+            InstKind::IntExtend { value, ty, signed } => {
+                // Integer extension to a wider destination type.
+                if let Some(result) = &inst.result {
+                    let src_loc = locs.value(*value);
+                    let src_reg = self.load_value(src_loc, "x9");
+                    let dst = locs.value(result.id);
+                    let dst_reg = match dst {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(_) => {
+                            if src_reg == "x10" {
+                                "x11".to_string()
+                            } else {
+                                "x10".to_string()
+                            }
+                        }
+                    };
+
+                    let src_bits = match locs.types.kind(locs.value_ty(*value)) {
+                        IrTypeKind::Int { bits, .. } => *bits as u32,
+                        _ => 64,
+                    };
+                    let dst_bits = match locs.types.kind(*ty) {
+                        IrTypeKind::Int { bits, .. } => *bits as u32,
+                        _ => 64,
+                    };
+
+                    if dst_bits <= src_bits {
+                        // Treat size-narrowing as a truncation mask.
+                        let mask = if dst_bits >= 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << dst_bits).saturating_sub(1)
+                        };
+                        self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                    } else if *signed {
+                        // Sign-extend by shifting up then arithmetic shifting down.
+                        let shift = 64u32.saturating_sub(src_bits);
+                        self.emit_line(&format!("lsl {}, {}, #{}", dst_reg, src_reg, shift));
+                        self.emit_line(&format!("asr {}, {}, #{}", dst_reg, dst_reg, shift));
+                    } else {
+                        // Zero-extend by masking to the source bit-width.
+                        let mask = if src_bits >= 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << src_bits).saturating_sub(1)
+                        };
+                        self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                    }
+
+                    if let Location::Stack(slot) = dst {
+                        self.emit_line(&format!(
+                            "str {}, [sp, #{}]",
+                            dst_reg,
+                            self.stack_offset(slot)
+                        ));
+                    }
+                }
+            }
+            InstKind::Cast { kind, value, ty: _ } => {
+                // Pointer/integer bitcasts are modeled as moves.
+                if let Some(result) = &inst.result {
+                    let src_loc = locs.value(*value);
+                    let src_reg = self.load_value(src_loc, "x9");
+                    let dst = locs.value(result.id);
+                    let dst_reg = match dst {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(_) => {
+                            if src_reg == "x10" {
+                                "x11".to_string()
+                            } else {
+                                "x10".to_string()
+                            }
+                        }
+                    };
+
+                    match kind {
+                        CastKind::PtrToInt | CastKind::IntToPtr => {
+                            self.emit_line(&format!("mov {}, {}", dst_reg, src_reg));
+                        }
+                    }
+
+                    if let Location::Stack(slot) = dst {
+                        self.emit_line(&format!(
+                            "str {}, [sp, #{}]",
+                            dst_reg,
+                            self.stack_offset(slot)
+                        ));
                     }
                 }
             }
