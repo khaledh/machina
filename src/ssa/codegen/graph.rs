@@ -104,6 +104,7 @@ impl CodegenGraph {
     }
 
     fn populate_succs(&mut self, func: &Function, plan: &EdgeMovePlan) {
+        // First wire successors for SSA blocks, accounting for any split edge moves.
         for block in &func.blocks {
             let from = block.id;
             let id = CodegenBlockId::Ssa(from);
@@ -132,6 +133,7 @@ impl CodegenGraph {
             self.blocks[idx].succs = succs;
         }
 
+        // Then wire successors for synthetic move blocks to their final SSA targets.
         for move_block in plan.move_blocks() {
             let id = CodegenBlockId::Move(move_block.id);
             let idx = self.index[&id];

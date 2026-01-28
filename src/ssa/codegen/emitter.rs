@@ -1,7 +1,12 @@
 //! Target-agnostic SSA codegen emitter traits.
 
+use std::collections::HashMap;
+
 use crate::regalloc::target::PhysReg;
-use crate::ssa::model::ir::{BinOp, Instruction, Terminator};
+use crate::ssa::IrTypeCache;
+use crate::ssa::IrTypeId;
+use crate::ssa::model::ir::{BinOp, Instruction, LocalId, Terminator, ValueId};
+use crate::ssa::model::layout::IrLayout;
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
 
@@ -29,6 +34,10 @@ pub trait CodegenEmitter {
 /// Resolves SSA values to allocated locations.
 pub struct LocationResolver<'a> {
     pub map: &'a crate::ssa::regalloc::ValueAllocMap,
+    pub value_types: &'a HashMap<ValueId, IrTypeId>,
+    pub local_offsets: &'a HashMap<LocalId, u32>,
+    pub types: &'a IrTypeCache,
+    pub layouts: &'a HashMap<IrTypeId, IrLayout>,
 }
 
 impl<'a> LocationResolver<'a> {
@@ -37,6 +46,26 @@ impl<'a> LocationResolver<'a> {
             .map
             .get(&id)
             .unwrap_or_else(|| panic!("ssa codegen: missing alloc for {:?}", id))
+    }
+
+    pub fn value_ty(&self, id: ValueId) -> IrTypeId {
+        *self
+            .value_types
+            .get(&id)
+            .unwrap_or_else(|| panic!("ssa codegen: missing type for {:?}", id))
+    }
+
+    pub fn local_offset(&self, id: LocalId) -> u32 {
+        *self
+            .local_offsets
+            .get(&id)
+            .unwrap_or_else(|| panic!("ssa codegen: missing local offset for {:?}", id))
+    }
+
+    pub fn layout(&self, id: IrTypeId) -> &IrLayout {
+        self.layouts
+            .get(&id)
+            .unwrap_or_else(|| panic!("ssa codegen: missing layout for {:?}", id))
     }
 }
 

@@ -3,6 +3,7 @@
 use std::fmt::Write;
 
 use crate::regalloc::target::PhysReg;
+use crate::ssa::IrTypeKind;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemonic};
 use crate::ssa::model::ir::{Callee, CmpOp, InstKind, Instruction, Terminator};
 use crate::ssa::regalloc::Location;
@@ -198,6 +199,7 @@ impl CodegenEmitter for Arm64Emitter {
     fn emit_inst(&mut self, inst: &Instruction, locs: &LocationResolver) {
         match &inst.kind {
             InstKind::Const { value } => {
+                // Materialize immediates into a register or stack slot.
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
                     match dst {
@@ -216,6 +218,7 @@ impl CodegenEmitter for Arm64Emitter {
                 }
             }
             InstKind::BinOp { op, lhs, rhs } => {
+                // Binary arithmetic/logical ops on integer registers.
                 let lhs = locs.value(*lhs);
                 let rhs = locs.value(*rhs);
                 if let Some(result) = &inst.result {
@@ -238,6 +241,7 @@ impl CodegenEmitter for Arm64Emitter {
                 }
             }
             InstKind::Cmp { op, lhs, rhs } => {
+                // Compare and produce a boolean via cset.
                 if let Some(result) = &inst.result {
                     let lhs = locs.value(*lhs);
                     let rhs = locs.value(*rhs);
@@ -270,6 +274,7 @@ impl CodegenEmitter for Arm64Emitter {
                 }
             }
             InstKind::Load { ptr } => {
+                // Load through a pointer value into the destination.
                 let src = locs.value(*ptr);
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
@@ -285,7 +290,126 @@ impl CodegenEmitter for Arm64Emitter {
                     }
                 }
             }
+            InstKind::AddrOfLocal { local } => {
+                // Compute the address of a stack local as a pointer value.
+                if let Some(result) = &inst.result {
+                    let dst = locs.value(result.id);
+                    // Locals are laid out above spills; offsets are measured from the top.
+                    let offset_from_top = locs.local_offset(*local);
+                    // Convert the local's offset-from-top into an SP-relative address.
+                    let sp_offset = self.layout.saved_base().saturating_sub(offset_from_top);
+                    match dst {
+                        Location::Reg(reg) => {
+                            self.emit_line(&format!(
+                                "add {}, sp, #{}",
+                                Self::reg_name(reg),
+                                sp_offset
+                            ));
+                        }
+                        Location::Stack(slot) => {
+                            self.emit_line(&format!("add x9, sp, #{}", sp_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
+                        }
+                    }
+                }
+            }
+            InstKind::FieldAddr { base, index } => {
+                // Compute base + field offset for a struct field address.
+                if let Some(result) = &inst.result {
+                    let dst = locs.value(result.id);
+                    let base_loc = locs.value(*base);
+                    // Base is a pointer value; ensure we have it in a register.
+                    let base_reg = self.load_value(base_loc, "x9");
+                    let base_ty = locs.value_ty(*base);
+                    let elem_ty = match locs.types.kind(base_ty) {
+                        IrTypeKind::Ptr { elem } => *elem,
+                        other => {
+                            self.emit_line(&format!("// unsupported field base {:?}", other));
+                            return;
+                        }
+                    };
+                    let layout = locs.layout(elem_ty);
+                    // Field offsets are precomputed in the pointee layout.
+                    let offset = layout.field_offsets().get(*index).copied().unwrap_or(0) as u32;
+                    // Add the field byte offset to the base address.
+                    match dst {
+                        Location::Reg(reg) => {
+                            self.emit_line(&format!(
+                                "add {}, {}, #{}",
+                                Self::reg_name(reg),
+                                base_reg,
+                                offset
+                            ));
+                        }
+                        Location::Stack(slot) => {
+                            self.emit_line(&format!("add x9, {}, #{}", base_reg, offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(slot)));
+                        }
+                    }
+                }
+            }
+            InstKind::IndexAddr { base, index } => {
+                // Compute base + index * stride for array/slice indexing.
+                if let Some(result) = &inst.result {
+                    let dst = locs.value(result.id);
+                    let base_loc = locs.value(*base);
+                    let index_loc = locs.value(*index);
+                    // Load base/index into registers for address arithmetic.
+                    let base_reg = self.load_value(base_loc, "x9");
+                    let index_reg = self.load_value(index_loc, "x10");
+
+                    let elem_ty = match locs.types.kind(result.ty) {
+                        IrTypeKind::Ptr { elem } => *elem,
+                        other => {
+                            self.emit_line(&format!("// unsupported index result {:?}", other));
+                            return;
+                        }
+                    };
+                    let stride = locs.layout(elem_ty).stride() as u32;
+
+                    let dst_reg = match dst {
+                        Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                        Location::Stack(_) => "x11".to_string(),
+                    };
+
+                    // Prefer scaled addressing when stride is a power of two.
+                    if stride == 0 {
+                        // Zero-sized elements collapse to the base address.
+                        self.emit_line(&format!("mov {}, {}", dst_reg, base_reg));
+                    } else if stride.is_power_of_two() {
+                        let shift = stride.trailing_zeros();
+                        if shift == 0 {
+                            // Stride 1: plain add.
+                            self.emit_line(&format!(
+                                "add {}, {}, {}",
+                                dst_reg, base_reg, index_reg
+                            ));
+                        } else {
+                            // Stride 2^k: use scaled register offset.
+                            self.emit_line(&format!(
+                                "add {}, {}, {}, lsl #{}",
+                                dst_reg, base_reg, index_reg, shift
+                            ));
+                        }
+                    } else {
+                        // Non power-of-two stride: multiply then add.
+                        self.emit_line(&format!("mov x11, #{}", stride));
+                        self.emit_line(&format!("mul x11, {}, x11", index_reg));
+                        self.emit_line(&format!("add {}, {}, x11", dst_reg, base_reg));
+                    }
+
+                    if let Location::Stack(slot) = dst {
+                        // Spill the computed address if it doesn't live in a register.
+                        self.emit_line(&format!(
+                            "str {}, [sp, #{}]",
+                            dst_reg,
+                            self.stack_offset(slot)
+                        ));
+                    }
+                }
+            }
             InstKind::Store { ptr, value } => {
+                // Store a value into a pointer destination.
                 let ptr = locs.value(*ptr);
                 let value = locs.value(*value);
                 let ptr = self.load_value(ptr, "x9");
@@ -293,6 +417,7 @@ impl CodegenEmitter for Arm64Emitter {
                 self.emit_line(&format!("str {}, [{}]", val, ptr));
             }
             InstKind::Call { callee, .. } => match callee {
+                // Direct/runtime calls use named symbols; indirect calls use a register.
                 Callee::Direct(def_id) => {
                     self.emit_line(&format!("bl fn{}", def_id.0));
                 }
@@ -306,6 +431,7 @@ impl CodegenEmitter for Arm64Emitter {
                 }
             },
             _ => {
+                // TODO: add remaining SSA instructions.
                 self.emit_line("// unsupported inst");
             }
         }
@@ -314,6 +440,7 @@ impl CodegenEmitter for Arm64Emitter {
     fn emit_terminator(&mut self, term: &Terminator, locs: &LocationResolver) {
         match term {
             Terminator::Br { target, .. } => {
+                // Unconditional branch to the target block.
                 self.emit_line(&format!("b bb{}", target.0));
             }
             Terminator::CondBr {
@@ -322,12 +449,33 @@ impl CodegenEmitter for Arm64Emitter {
                 else_bb,
                 ..
             } => {
+                // Conditional branch: jump to then_bb if cond != 0.
                 let cond = locs.value(*cond);
                 let cond = self.load_value(cond, "x9");
                 self.emit_line(&format!("cbnz {}, bb{}", cond, then_bb.0));
                 self.emit_line(&format!("b bb{}", else_bb.0));
             }
+            Terminator::Switch {
+                value,
+                cases,
+                default,
+                ..
+            } => {
+                // Switch lowered as a compare-and-branch chain.
+                let value_loc = locs.value(*value);
+                let value_reg = self.load_value(value_loc, "x9");
+                let const_reg = if value_reg == "x9" { "x10" } else { "x9" };
+
+                for case in cases {
+                    self.emit_line(&format!("mov {}, #{}", const_reg, case.value.as_int()));
+                    self.emit_line(&format!("cmp {}, {}", value_reg, const_reg));
+                    self.emit_line(&format!("b.eq bb{}", case.target.0));
+                }
+
+                self.emit_line(&format!("b bb{}", default.0));
+            }
             Terminator::Return { value } => {
+                // Materialize return value and tear down the stack frame.
                 if let Some(value) = value {
                     let src = locs.value(*value);
                     let src = self.load_value(src, "x9");
@@ -373,7 +521,10 @@ impl CodegenEmitter for Arm64Emitter {
 
                 self.emit_line("ret");
             }
-            _ => self.emit_line("// unsupported terminator"),
+            Terminator::Unreachable => {
+                // Emit a trap for unreachable control flow.
+                self.emit_line("brk #0");
+            }
         }
     }
 }

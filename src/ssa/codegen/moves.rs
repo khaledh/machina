@@ -89,6 +89,7 @@ impl EdgeMovePlan {
 
         let mut next_id = 0u32;
         for ((from, to), moves) in plan.schedule.edge_moves.iter() {
+            // Split edges that have multiple successors to keep moves isolated.
             let placement = if cfg.succs(*from).len() > 1 {
                 let id = MoveBlockId(next_id);
                 next_id += 1;

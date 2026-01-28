@@ -1,8 +1,9 @@
 //! Codegen traversal utilities for SSA functions.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::ssa::model::ir::Function;
+use crate::ssa::IrTypeId;
+use crate::ssa::model::ir::{Function, LocalId, ValueId};
 use crate::ssa::regalloc::ValueAllocMap;
 use crate::ssa::regalloc::moves::MoveOp;
 
@@ -24,6 +25,7 @@ pub fn emit_graph_with_emitter(
     alloc_map: &ValueAllocMap,
     frame_size: u32,
     callee_saved: &[crate::regalloc::target::PhysReg],
+    types: &mut crate::ssa::IrTypeCache,
     emitter: &mut dyn CodegenEmitter,
 ) {
     struct EmitSink<'a> {
@@ -53,14 +55,89 @@ pub fn emit_graph_with_emitter(
         }
     }
 
+    let value_types = build_value_types(func);
+    let layouts = build_layouts(types, func, &value_types);
+    let (local_offsets, locals_size) = build_local_offsets(func, &layouts, frame_size);
+    let total_frame_size = frame_size.saturating_add(locals_size);
+
     let mut sink = EmitSink {
         emitter,
-        locs: LocationResolver { map: alloc_map },
+        locs: LocationResolver {
+            map: alloc_map,
+            value_types: &value_types,
+            local_offsets: &local_offsets,
+            types,
+            layouts: &layouts,
+        },
     };
-    sink.emitter
-        .begin_function(&format!("fn{}", func.def_id.0), frame_size, callee_saved);
+    sink.emitter.begin_function(
+        &format!("fn{}", func.def_id.0),
+        total_frame_size,
+        callee_saved,
+    );
     emit_graph(graph, func, &mut sink);
     sink.emitter.end_function();
+}
+
+fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
+    let mut map = HashMap::new();
+    for block in &func.blocks {
+        for param in &block.params {
+            map.insert(param.value.id, param.value.ty);
+        }
+        for inst in &block.insts {
+            if let Some(result) = &inst.result {
+                map.insert(result.id, result.ty);
+            }
+        }
+    }
+    map
+}
+
+fn build_layouts(
+    types: &mut crate::ssa::IrTypeCache,
+    func: &Function,
+    value_types: &HashMap<ValueId, IrTypeId>,
+) -> HashMap<IrTypeId, crate::ssa::model::layout::IrLayout> {
+    let mut layouts = HashMap::new();
+    for ty in value_types
+        .values()
+        .copied()
+        .chain(func.locals.iter().map(|l| l.ty))
+    {
+        if !layouts.contains_key(&ty) {
+            let layout = types.layout(ty);
+            layouts.insert(ty, layout);
+        }
+    }
+    layouts
+}
+
+fn build_local_offsets(
+    func: &Function,
+    layouts: &HashMap<IrTypeId, crate::ssa::model::layout::IrLayout>,
+    spill_size: u32,
+) -> (HashMap<LocalId, u32>, u32) {
+    let mut offsets = HashMap::new();
+    let mut cursor: u32 = 0;
+
+    for local in &func.locals {
+        let layout = layouts
+            .get(&local.ty)
+            .unwrap_or_else(|| panic!("ssa codegen: missing layout for {:?}", local.ty));
+        let align = layout.align().max(1) as u32;
+        cursor = align_to(cursor, align);
+        offsets.insert(local.id, spill_size + cursor);
+        cursor = cursor.saturating_add(layout.size() as u32);
+    }
+
+    let locals_size = align_to(cursor, 8);
+    (offsets, locals_size)
+}
+
+fn align_to(value: u32, align: u32) -> u32 {
+    debug_assert!(align != 0);
+    (value + align - 1) & !(align - 1)
 }
 
 /// Walks the codegen graph in RPO order and emits instructions.

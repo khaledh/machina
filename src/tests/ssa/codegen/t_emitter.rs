@@ -6,7 +6,9 @@ use crate::ssa::codegen::graph::CodegenGraph;
 use crate::ssa::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::ssa::codegen::traverse::emit_graph_with_emitter;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{BinOp, Callee, CmpOp, FunctionSig, RuntimeFn, Terminator};
+use crate::ssa::model::ir::{
+    BinOp, Callee, CmpOp, ConstValue, FunctionSig, RuntimeFn, SwitchCase, Terminator,
+};
 use crate::ssa::regalloc::{TargetSpec, regalloc};
 use crate::ssa::{IrTypeCache, IrTypeKind};
 
@@ -190,6 +192,7 @@ fn test_arm64_emitter_basic() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
@@ -238,12 +241,98 @@ fn test_arm64_emitter_cmp_cset() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
     let asm = emitter.finish();
     assert!(asm.contains("cmp"));
     assert!(asm.contains("cset"));
+}
+
+#[test]
+fn test_arm64_emitter_switch() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_switch",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let entry = builder.current_block();
+    let case0 = builder.add_block();
+    let case1 = builder.add_block();
+    let default = builder.add_block();
+    let value = builder.const_int(1, false, 64, u64_ty);
+
+    builder.set_terminator(
+        entry,
+        Terminator::Switch {
+            value,
+            cases: vec![
+                SwitchCase {
+                    value: ConstValue::Int {
+                        value: 0,
+                        signed: false,
+                        bits: 64,
+                    },
+                    target: case0,
+                    args: vec![],
+                },
+                SwitchCase {
+                    value: ConstValue::Int {
+                        value: 1,
+                        signed: false,
+                        bits: 64,
+                    },
+                    target: case1,
+                    args: vec![],
+                },
+            ],
+            default,
+            default_args: vec![],
+        },
+    );
+
+    builder.select_block(case0);
+    builder.terminate(Terminator::Return { value: None });
+    builder.select_block(case1);
+    builder.terminate(Terminator::Return { value: None });
+    builder.select_block(default);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TinyTarget::new(1);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("cmp"));
+    assert!(asm.contains(&format!("b.eq bb{}", case0.0)));
+    assert!(asm.contains(&format!("b.eq bb{}", case1.0)));
+    assert!(asm.contains(&format!("b bb{}", default.0)));
 }
 
 #[test]
@@ -297,6 +386,7 @@ fn test_arm64_emitter_condbr_stack_cond() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
@@ -337,6 +427,7 @@ fn test_arm64_emitter_runtime_call() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
@@ -381,6 +472,7 @@ fn test_arm64_emitter_indirect_call() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
@@ -424,6 +516,7 @@ fn test_arm64_emitter_stack_frame_prologue() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
@@ -469,6 +562,7 @@ fn test_arm64_emitter_saves_callee_saved() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
@@ -559,10 +653,166 @@ fn test_arm64_emitter_saves_multiple_callee_saved() {
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        &mut types,
         &mut emitter,
     );
 
     let asm = emitter.finish();
     assert!(asm.contains("stp x4, x5"));
     assert!(asm.contains("ldp x4, x5"));
+}
+
+#[test]
+fn test_arm64_emitter_addr_of_local() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let u64_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_addr_of_local",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(u64_ty, None);
+    let _addr = builder.addr_of_local(local, u64_ptr);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TinyTarget::new(2);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("add"));
+    assert!(asm.contains("sp"));
+}
+
+#[test]
+fn test_arm64_emitter_field_addr() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let struct_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            crate::ssa::IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            crate::ssa::IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+    let struct_ptr = types.add(IrTypeKind::Ptr { elem: struct_ty });
+    let field_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_field_addr",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(struct_ty, None);
+    let base = builder.addr_of_local(local, struct_ptr);
+    let _field = builder.field_addr(base, 1, field_ptr);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TinyTarget::new(2);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("#8"));
+}
+
+#[test]
+fn test_arm64_emitter_index_addr() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let u64_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_index_addr",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(u64_ty, None);
+    let base = builder.addr_of_local(local, u64_ptr);
+    let index = builder.const_int(2, false, 64, u64_ty);
+    let _elem = builder.index_addr(base, index, u64_ptr);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TinyTarget::new(2);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let plan = EdgeMovePlan::new(&func, schedule);
+    let graph = CodegenGraph::new(&func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        &func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        &mut types,
+        &mut emitter,
+    );
+
+    let asm = emitter.finish();
+    assert!(asm.contains("lsl #3"));
 }
