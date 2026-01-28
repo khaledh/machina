@@ -4,6 +4,7 @@ use crate::ssa::model::ir::Function;
 use crate::ssa::opt::Pass;
 
 pub mod dce;
+pub mod memops;
 
 pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
@@ -12,7 +13,7 @@ pub struct PassManager {
 impl PassManager {
     pub fn new() -> Self {
         Self {
-            passes: vec![Box::new(dce::DeadCodeElim)],
+            passes: vec![Box::new(dce::DeadCodeElim), Box::new(memops::MemOps)],
         }
     }
 

@@ -595,6 +595,38 @@ impl CodegenEmitter for Arm64Emitter {
                 let val = self.load_value(value, "x10");
                 self.emit_line(&format!("str {}, [{}]", val, ptr));
             }
+            InstKind::MemCopy { dst, src, len } => {
+                // Lower memcpy as a runtime call: __rt_memcpy(dst, src, len).
+                let dst = self.load_value(locs.value(*dst), "x0");
+                let src = self.load_value(locs.value(*src), "x1");
+                let len = self.load_value(locs.value(*len), "x2");
+                if dst != "x0" {
+                    self.emit_line(&format!("mov x0, {}", dst));
+                }
+                if src != "x1" {
+                    self.emit_line(&format!("mov x1, {}", src));
+                }
+                if len != "x2" {
+                    self.emit_line(&format!("mov x2, {}", len));
+                }
+                self.emit_line("bl __rt_memcpy");
+            }
+            InstKind::MemSet { dst, byte, len } => {
+                // Lower memset as a runtime call: __rt_memset(dst, byte, len).
+                let dst = self.load_value(locs.value(*dst), "x0");
+                let byte = self.load_value(locs.value(*byte), "x1");
+                let len = self.load_value(locs.value(*len), "x2");
+                if dst != "x0" {
+                    self.emit_line(&format!("mov x0, {}", dst));
+                }
+                if byte != "x1" {
+                    self.emit_line(&format!("mov x1, {}", byte));
+                }
+                if len != "x2" {
+                    self.emit_line(&format!("mov x2, {}", len));
+                }
+                self.emit_line("bl __rt_memset");
+            }
             InstKind::Call { callee, .. } => match callee {
                 // Direct/runtime calls use named symbols; indirect calls use a register.
                 Callee::Direct(def_id) => {

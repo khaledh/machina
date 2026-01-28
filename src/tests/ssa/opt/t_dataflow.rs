@@ -109,3 +109,30 @@ fn test_dce_keeps_call() {
     );
     assert_eq!(text, expected);
 }
+
+#[test]
+fn test_memops_to_runtime_calls() {
+    let ctx = analyze(indoc! {"
+        type Option = None | Some(u64)
+
+        fn main() -> Option {
+            Option::Some(42)
+        }
+    "});
+
+    let func_def = ctx.module.func_defs()[0];
+    let mut lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+
+    let mut manager = PassManager::new();
+    manager.run(std::slice::from_mut(&mut lowered.func));
+    let text = formact_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("__rt_memcpy"));
+}
