@@ -25,7 +25,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let Type::Tuple { field_tys } = value_ty else {
                     panic!("ssa bind tuple on {:?}", value_ty);
                 };
-                let slot = self.slot_for_value(value);
+                let slot = self.slot_for_value_typed(value, value_ty);
 
                 // Destructure each tuple field into a local binding.
                 for field in fields {
@@ -53,7 +53,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 else {
                     panic!("ssa bind struct on {:?}", value_ty);
                 };
-                let slot = self.slot_for_value(value);
+                let slot = self.slot_for_value_typed(value, value_ty);
 
                 // Destructure each struct field into a local binding.
                 for field in fields {
@@ -81,7 +81,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
                 let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                 let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let slot = self.slot_for_value(value);
+                let slot = self.slot_for_value_typed(value, value_ty);
 
                 // Load each array element and bind it recursively.
                 for (index, pattern) in patterns.iter().enumerate() {

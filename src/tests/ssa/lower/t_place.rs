@@ -25,12 +25,16 @@ fn test_lower_struct_field_load() {
         fn main(Pair) -> u64 {
           locals:
             %l0: Pair
+            %l1: Pair
           bb0(%v0: Pair):
             %v1: ptr<Pair> = addr_of %l0
-            store %v1, %v0
-            %v2: ptr<u64> = field_addr %v1, 0
-            %v3: u64 = load %v2
-            ret %v3
+            %v2: ptr<Pair> = addr_of %l1
+            store %v2, %v0
+            %v3: u64 = const 16:u64
+            memcpy %v1, %v2, %v3
+            %v4: ptr<u64> = field_addr %v1, 0
+            %v5: u64 = load %v4
+            ret %v5
         }
     "};
     assert_eq!(text, expected);
@@ -63,15 +67,19 @@ fn test_lower_struct_field_assign() {
         fn main(Pair) -> u64 {
           locals:
             %l0: Pair
+            %l1: Pair
           bb0(%v0: Pair):
             %v1: u64 = const 5:u64
             %v2: ptr<Pair> = addr_of %l0
-            store %v2, %v0
-            %v3: ptr<u64> = field_addr %v2, 0
-            store %v3, %v1
-            %v4: ptr<u64> = field_addr %v2, 0
-            %v5: u64 = load %v4
-            ret %v5
+            %v3: ptr<Pair> = addr_of %l1
+            store %v3, %v0
+            %v4: u64 = const 16:u64
+            memcpy %v2, %v3, %v4
+            %v5: ptr<u64> = field_addr %v2, 0
+            store %v5, %v1
+            %v6: ptr<u64> = field_addr %v2, 0
+            %v7: u64 = load %v6
+            ret %v7
         }
     "};
     assert_eq!(text, expected);
@@ -100,13 +108,17 @@ fn test_lower_array_index_load() {
         fn main(u64[3]) -> u64 {
           locals:
             %l0: u64[3]
+            %l1: u64[3]
           bb0(%v0: u64[3]):
             %v1: ptr<u64[3]> = addr_of %l0
-            store %v1, %v0
-            %v2: u64 = const 1:u64
-            %v3: ptr<u64> = index_addr %v1, %v2
-            %v4: u64 = load %v3
-            ret %v4
+            %v2: ptr<u64[3]> = addr_of %l1
+            store %v2, %v0
+            %v3: u64 = const 24:u64
+            memcpy %v1, %v2, %v3
+            %v4: u64 = const 1:u64
+            %v5: ptr<u64> = index_addr %v1, %v4
+            %v6: u64 = load %v5
+            ret %v6
         }
     "};
     assert_eq!(text, expected);
@@ -137,17 +149,21 @@ fn test_lower_array_index_assign() {
         fn main(u64[3]) -> u64 {
           locals:
             %l0: u64[3]
+            %l1: u64[3]
           bb0(%v0: u64[3]):
             %v1: u64 = const 9:u64
             %v2: ptr<u64[3]> = addr_of %l0
-            store %v2, %v0
-            %v3: u64 = const 1:u64
-            %v4: ptr<u64> = index_addr %v2, %v3
-            store %v4, %v1
+            %v3: ptr<u64[3]> = addr_of %l1
+            store %v3, %v0
+            %v4: u64 = const 24:u64
+            memcpy %v2, %v3, %v4
             %v5: u64 = const 1:u64
             %v6: ptr<u64> = index_addr %v2, %v5
-            %v7: u64 = load %v6
-            ret %v7
+            store %v6, %v1
+            %v7: u64 = const 1:u64
+            %v8: ptr<u64> = index_addr %v2, %v7
+            %v9: u64 = load %v8
+            ret %v9
         }
     "};
     assert_eq!(text, expected);
@@ -176,15 +192,19 @@ fn test_lower_array_index_multi_dim() {
         fn main(u64[2, 2]) -> u64 {
           locals:
             %l0: u64[2, 2]
+            %l1: u64[2, 2]
           bb0(%v0: u64[2, 2]):
             %v1: ptr<u64[2, 2]> = addr_of %l0
-            store %v1, %v0
-            %v2: u64 = const 1:u64
-            %v3: ptr<u64[2]> = index_addr %v1, %v2
-            %v4: u64 = const 0:u64
-            %v5: ptr<u64> = index_addr %v3, %v4
-            %v6: u64 = load %v5
-            ret %v6
+            %v2: ptr<u64[2, 2]> = addr_of %l1
+            store %v2, %v0
+            %v3: u64 = const 32:u64
+            memcpy %v1, %v2, %v3
+            %v4: u64 = const 1:u64
+            %v5: ptr<u64[2]> = index_addr %v1, %v4
+            %v6: u64 = const 0:u64
+            %v7: ptr<u64> = index_addr %v5, %v6
+            %v8: u64 = load %v7
+            ret %v8
         }
     "};
     assert_eq!(text, expected);
@@ -213,13 +233,17 @@ fn test_lower_array_index_partial() {
         fn main(u64[2, 2]) -> u64[2] {
           locals:
             %l0: u64[2, 2]
+            %l1: u64[2, 2]
           bb0(%v0: u64[2, 2]):
             %v1: ptr<u64[2, 2]> = addr_of %l0
-            store %v1, %v0
-            %v2: u64 = const 1:u64
-            %v3: ptr<u64[2]> = index_addr %v1, %v2
-            %v4: u64[2] = load %v3
-            ret %v4
+            %v2: ptr<u64[2, 2]> = addr_of %l1
+            store %v2, %v0
+            %v3: u64 = const 32:u64
+            memcpy %v1, %v2, %v3
+            %v4: u64 = const 1:u64
+            %v5: ptr<u64[2]> = index_addr %v1, %v4
+            %v6: u64[2] = load %v5
+            ret %v6
         }
     "};
     assert_eq!(text, expected);
@@ -248,26 +272,30 @@ fn test_lower_slice_index_load() {
         fn main(struct { ptr: ptr<u64>, len: u64 }) -> u64 {
           locals:
             %l0: struct { ptr: ptr<u64>, len: u64 }
+            %l1: struct { ptr: ptr<u64>, len: u64 }
           bb0(%v0: struct { ptr: ptr<u64>, len: u64 }):
             %v1: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l0
-            store %v1, %v0
-            %v2: ptr<ptr<u64>> = field_addr %v1, 0
-            %v3: ptr<u64> = load %v2
-            %v4: ptr<u64> = field_addr %v1, 1
-            %v5: u64 = load %v4
-            %v6: u64 = const 1:u64
-            %v7: bool = cmp.lt %v6, %v5
-            cbr %v7, bb1, bb2
+            %v2: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l1
+            store %v2, %v0
+            %v3: u64 = const 16:u64
+            memcpy %v1, %v2, %v3
+            %v4: ptr<ptr<u64>> = field_addr %v1, 0
+            %v5: ptr<u64> = load %v4
+            %v6: ptr<u64> = field_addr %v1, 1
+            %v7: u64 = load %v6
+            %v8: u64 = const 1:u64
+            %v9: bool = cmp.lt %v8, %v7
+            cbr %v9, bb1, bb2
 
           bb1():
-            %v11: ptr<u64> = index_addr %v3, %v6
-            %v12: u64 = load %v11
-            ret %v12
+            %v13: ptr<u64> = index_addr %v5, %v8
+            %v14: u64 = load %v13
+            ret %v14
 
           bb2():
-            %v8: u64 = const 1:u64
-            %v9: u64 = const 0:u64
-            %v10: () = call @__rt_trap(%v8, %v6, %v5, %v9)
+            %v10: u64 = const 1:u64
+            %v11: u64 = const 0:u64
+            %v12: () = call @__rt_trap(%v10, %v8, %v7, %v11)
             unreachable
         }
     "};
@@ -299,44 +327,48 @@ fn test_lower_slice_index_assign() {
         fn main(struct { ptr: ptr<u64>, len: u64 }) -> u64 {
           locals:
             %l0: struct { ptr: ptr<u64>, len: u64 }
+            %l1: struct { ptr: ptr<u64>, len: u64 }
           bb0(%v0: struct { ptr: ptr<u64>, len: u64 }):
             %v1: u64 = const 9:u64
             %v2: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l0
-            store %v2, %v0
-            %v3: ptr<ptr<u64>> = field_addr %v2, 0
-            %v4: ptr<u64> = load %v3
-            %v5: ptr<u64> = field_addr %v2, 1
-            %v6: u64 = load %v5
-            %v7: u64 = const 1:u64
-            %v8: bool = cmp.lt %v7, %v6
-            cbr %v8, bb1, bb2
+            %v3: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l1
+            store %v3, %v0
+            %v4: u64 = const 16:u64
+            memcpy %v2, %v3, %v4
+            %v5: ptr<ptr<u64>> = field_addr %v2, 0
+            %v6: ptr<u64> = load %v5
+            %v7: ptr<u64> = field_addr %v2, 1
+            %v8: u64 = load %v7
+            %v9: u64 = const 1:u64
+            %v10: bool = cmp.lt %v9, %v8
+            cbr %v10, bb1, bb2
 
           bb1():
-            %v12: ptr<u64> = index_addr %v4, %v7
-            store %v12, %v1
-            %v13: ptr<ptr<u64>> = field_addr %v2, 0
-            %v14: ptr<u64> = load %v13
-            %v15: ptr<u64> = field_addr %v2, 1
-            %v16: u64 = load %v15
-            %v17: u64 = const 1:u64
-            %v18: bool = cmp.lt %v17, %v16
-            cbr %v18, bb3, bb4
+            %v14: ptr<u64> = index_addr %v6, %v9
+            store %v14, %v1
+            %v15: ptr<ptr<u64>> = field_addr %v2, 0
+            %v16: ptr<u64> = load %v15
+            %v17: ptr<u64> = field_addr %v2, 1
+            %v18: u64 = load %v17
+            %v19: u64 = const 1:u64
+            %v20: bool = cmp.lt %v19, %v18
+            cbr %v20, bb3, bb4
 
           bb2():
-            %v9: u64 = const 1:u64
-            %v10: u64 = const 0:u64
-            %v11: () = call @__rt_trap(%v9, %v7, %v6, %v10)
+            %v11: u64 = const 1:u64
+            %v12: u64 = const 0:u64
+            %v13: () = call @__rt_trap(%v11, %v9, %v8, %v12)
             unreachable
 
           bb3():
-            %v22: ptr<u64> = index_addr %v14, %v17
-            %v23: u64 = load %v22
-            ret %v23
+            %v24: ptr<u64> = index_addr %v16, %v19
+            %v25: u64 = load %v24
+            ret %v25
 
           bb4():
-            %v19: u64 = const 1:u64
-            %v20: u64 = const 0:u64
-            %v21: () = call @__rt_trap(%v19, %v17, %v16, %v20)
+            %v21: u64 = const 1:u64
+            %v22: u64 = const 0:u64
+            %v23: () = call @__rt_trap(%v21, %v19, %v18, %v22)
             unreachable
         }
     "};

@@ -136,3 +136,16 @@ fn test_memops_to_runtime_calls() {
 
     assert!(text.contains("__rt_memcpy"));
 }
+
+#[test]
+fn test_memops_to_runtime_calls_array() {
+    let text = lower_and_optimize(indoc! {"
+        fn main() -> () {
+            var a: u8[8];
+            var b = u8[0; 8];
+            a = b;
+        }
+    "});
+
+    assert!(text.contains("__rt_memcpy"));
+}

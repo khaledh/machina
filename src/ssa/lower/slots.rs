@@ -4,6 +4,7 @@ use crate::ssa::IrTypeId;
 use crate::ssa::lower::locals::{LocalStorage, LocalValue};
 use crate::ssa::lower::lowerer::{FuncLowerer, ValueSlot};
 use crate::ssa::model::ir::ValueId;
+use crate::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Allocates a new local of the given value type and returns its address.
@@ -43,9 +44,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Returns a slot for a local value, materializing value storage if needed.
-    pub(super) fn slot_for_value(&mut self, value: LocalValue) -> ValueSlot {
+    pub(super) fn slot_for_value_typed(&mut self, value: LocalValue, value_ty: &Type) -> ValueSlot {
         match value.storage {
-            LocalStorage::Value(value_id) => self.materialize_value_slot(value_id, value.value_ty),
+            LocalStorage::Value(value_id) => {
+                let slot = self.alloc_value_slot(value.value_ty);
+                self.store_value_into_addr(slot.addr, value_id, value_ty, value.value_ty);
+                slot
+            }
             LocalStorage::Addr(addr) => ValueSlot {
                 addr,
                 ty: value.value_ty,

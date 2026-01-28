@@ -325,7 +325,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 if layout.size() != 0 {
                     let value = eval_value!(inner);
-                    self.builder.store(ptr_val, value);
+                    self.store_value_into_addr(ptr_val, value, &elem_ty, elem_ir_ty);
                 }
 
                 Ok(ptr_val.into())
@@ -513,7 +513,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                                     if deref_count == 0 {
                                         let array_ty = self.type_lowerer.lower_type_id(inner.ty);
                                         let addr = self.alloc_local_addr(array_ty);
-                                        self.builder.store(addr, value);
+                                        let array_sem_ty =
+                                            self.type_map.type_table().get(inner.ty);
+                                        self.store_value_into_addr(
+                                            addr,
+                                            value,
+                                            array_sem_ty,
+                                            array_ty,
+                                        );
                                         (addr, base_ty)
                                     } else {
                                         self.resolve_deref_base_value(value, base_ty, deref_count)

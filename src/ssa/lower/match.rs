@@ -36,7 +36,13 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         let scrutinee_ty_id = scrutinee.ty;
         let scrutinee_ir_ty = lowerer.type_lowerer.lower_type_id(scrutinee_ty_id);
         let scrutinee_addr = lowerer.alloc_local_addr(scrutinee_ir_ty);
-        lowerer.builder.store(scrutinee_addr, scrutinee_value);
+        let scrutinee_ty = lowerer.type_map.type_table().get(scrutinee.ty);
+        lowerer.store_value_into_addr(
+            scrutinee_addr,
+            scrutinee_value,
+            scrutinee_ty,
+            scrutinee_ir_ty,
+        );
 
         let mut helper = MatchLowerer {
             lowerer,

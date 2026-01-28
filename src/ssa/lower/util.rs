@@ -221,7 +221,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             LocalStorage::Addr(addr) => addr,
             LocalStorage::Value(value) => {
                 let addr = self.alloc_local_addr(value_ty);
-                self.builder.store(addr, value);
+                let def = self
+                    .def_table
+                    .lookup_def(def_id)
+                    .unwrap_or_else(|| panic!("ssa ensure addr missing def {:?}", def_id));
+                let ty_id = self
+                    .type_map
+                    .lookup_def_type_id(def)
+                    .unwrap_or_else(|| panic!("ssa ensure addr missing type for {:?}", def_id));
+                let ty = self.type_map.type_table().get(ty_id);
+                self.store_value_into_addr(addr, value, ty, value_ty);
                 self.locals.insert(def_id, LocalValue::addr(addr, value_ty));
                 addr
             }

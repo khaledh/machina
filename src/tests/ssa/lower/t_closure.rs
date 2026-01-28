@@ -151,13 +151,17 @@ fn test_lower_closure_invoke() {
         fn main$closure$1$invoke(main$closure$1, u64) -> u64 {
           locals:
             %l0: main$closure$1
+            %l1: main$closure$1
           bb0(%v0: main$closure$1, %v1: u64):
             %v2: ptr<main$closure$1> = addr_of %l0
-            store %v2, %v0
-            %v3: ptr<u64> = field_addr %v2, 0
-            %v4: u64 = load %v3
-            %v5: u64 = add %v4, %v1
-            ret %v5
+            %v3: ptr<main$closure$1> = addr_of %l1
+            store %v3, %v0
+            %v4: u64 = const 8:u64
+            memcpy %v2, %v3, %v4
+            %v5: ptr<u64> = field_addr %v2, 0
+            %v6: u64 = load %v5
+            %v7: u64 = add %v6, %v1
+            ret %v7
         }
     "};
     assert_eq!(invoke_text, expected_invoke);
@@ -262,14 +266,18 @@ fn test_lower_closure_borrow_capture() {
         fn main$closure$1$invoke(main$closure$1, u64) -> u64 {
           locals:
             %l0: main$closure$1
+            %l1: main$closure$1
           bb0(%v0: main$closure$1, %v1: u64):
             %v2: ptr<main$closure$1> = addr_of %l0
-            store %v2, %v0
-            %v3: ptr<ptr<u64>> = field_addr %v2, 0
-            %v4: ptr<u64> = load %v3
-            %v5: u64 = load %v4
-            %v6: u64 = add %v5, %v1
-            ret %v6
+            %v3: ptr<main$closure$1> = addr_of %l1
+            store %v3, %v0
+            %v4: u64 = const 8:u64
+            memcpy %v2, %v3, %v4
+            %v5: ptr<ptr<u64>> = field_addr %v2, 0
+            %v6: ptr<u64> = load %v5
+            %v7: u64 = load %v6
+            %v8: u64 = add %v7, %v1
+            ret %v8
         }
     "};
     assert_eq!(add_invoke_text, expected_add_invoke);
@@ -278,20 +286,24 @@ fn test_lower_closure_borrow_capture() {
         fn main$closure$2$invoke(main$closure$2, u64) -> u64 {
           locals:
             %l0: main$closure$2
+            %l1: main$closure$2
           bb0(%v0: main$closure$2, %v1: u64):
             %v2: ptr<main$closure$2> = addr_of %l0
-            store %v2, %v0
-            %v3: ptr<ptr<u64>> = field_addr %v2, 0
-            %v4: ptr<u64> = load %v3
-            %v5: u64 = load %v4
-            %v6: u64 = add %v5, %v1
-            %v7: ptr<ptr<u64>> = field_addr %v2, 0
-            %v8: ptr<u64> = load %v7
-            store %v8, %v6
+            %v3: ptr<main$closure$2> = addr_of %l1
+            store %v3, %v0
+            %v4: u64 = const 8:u64
+            memcpy %v2, %v3, %v4
+            %v5: ptr<ptr<u64>> = field_addr %v2, 0
+            %v6: ptr<u64> = load %v5
+            %v7: u64 = load %v6
+            %v8: u64 = add %v7, %v1
             %v9: ptr<ptr<u64>> = field_addr %v2, 0
             %v10: ptr<u64> = load %v9
-            %v11: u64 = load %v10
-            ret %v11
+            store %v10, %v8
+            %v11: ptr<ptr<u64>> = field_addr %v2, 0
+            %v12: ptr<u64> = load %v11
+            %v13: u64 = load %v12
+            ret %v13
         }
     "};
     assert_eq!(bump_invoke_text, expected_bump_invoke);

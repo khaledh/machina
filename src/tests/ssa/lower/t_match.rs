@@ -28,6 +28,7 @@ fn test_lower_match_enum_no_payload() {
           locals:
             %l0: Flag
             %l1: Flag
+            %l2: Flag
           bb0():
             %v0: ptr<Flag> = addr_of %l0
             %v1: u32 = const 1:u32
@@ -36,28 +37,31 @@ fn test_lower_match_enum_no_payload() {
             %v3: ptr<blob<0, align=1>> = field_addr %v0, 1
             %v4: Flag = load %v0
             %v5: ptr<Flag> = addr_of %l1
-            store %v5, %v4
-            %v6: ptr<u32> = field_addr %v5, 0
-            %v7: u32 = load %v6
-            switch %v7 {
+            %v6: ptr<Flag> = addr_of %l2
+            store %v6, %v4
+            %v7: u64 = const 4:u64
+            memcpy %v5, %v6, %v7
+            %v8: ptr<u32> = field_addr %v5, 0
+            %v9: u32 = load %v8
+            switch %v9 {
               case 0:u32 -> bb1
               case 1:u32 -> bb2
               default -> bb3
             }
 
           bb1():
-            %v9: u64 = const 0:u64
-            br bb4(%v9)
+            %v11: u64 = const 0:u64
+            br bb4(%v11)
 
           bb2():
-            %v10: u64 = const 1:u64
-            br bb4(%v10)
+            %v12: u64 = const 1:u64
+            br bb4(%v12)
 
           bb3():
             unreachable
 
-          bb4(%v8: u64):
-            ret %v8
+          bb4(%v10: u64):
+            ret %v10
         }
     "};
     assert_eq!(text, expected);
@@ -92,6 +96,7 @@ fn test_lower_match_enum_payload_binding() {
             %l0: Option
             %l1: u64
             %l2: Option
+            %l3: Option
           bb0():
             %v0: ptr<Option> = addr_of %l0
             %v1: u32 = const 1:u32
@@ -107,31 +112,34 @@ fn test_lower_match_enum_payload_binding() {
             memcpy %v7, %v5, %v8
             %v9: Option = load %v0
             %v10: ptr<Option> = addr_of %l2
-            store %v10, %v9
-            %v11: ptr<u32> = field_addr %v10, 0
-            %v12: u32 = load %v11
-            switch %v12 {
+            %v11: ptr<Option> = addr_of %l3
+            store %v11, %v9
+            %v12: u64 = const 16:u64
+            memcpy %v10, %v11, %v12
+            %v13: ptr<u32> = field_addr %v10, 0
+            %v14: u32 = load %v13
+            switch %v14 {
               case 0:u32 -> bb1
               case 1:u32 -> bb2
               default -> bb3
             }
 
           bb1():
-            %v14: u64 = const 0:u64
-            br bb4(%v14)
+            %v16: u64 = const 0:u64
+            br bb4(%v16)
 
           bb2():
-            %v15: ptr<blob<8, align=8>> = field_addr %v10, 1
-            %v16: u64 = const 0:u64
-            %v17: ptr<u8> = index_addr %v15, %v16
-            %v18: u64 = load %v17
-            br bb4(%v18)
+            %v17: ptr<blob<8, align=8>> = field_addr %v10, 1
+            %v18: u64 = const 0:u64
+            %v19: ptr<u8> = index_addr %v17, %v18
+            %v20: u64 = load %v19
+            br bb4(%v20)
 
           bb3():
             unreachable
 
-          bb4(%v13: u64):
-            ret %v13
+          bb4(%v15: u64):
+            ret %v15
         }
     "};
     assert_eq!(text, expected);
@@ -164,6 +172,7 @@ fn test_lower_match_tuple_decision_tree() {
           locals:
             %l0: (bool, u64)
             %l1: (bool, u64)
+            %l2: (bool, u64)
           bb0():
             %v0: ptr<(bool, u64)> = addr_of %l0
             %v1: bool = const true
@@ -174,34 +183,37 @@ fn test_lower_match_tuple_decision_tree() {
             store %v4, %v3
             %v5: (bool, u64) = load %v0
             %v6: ptr<(bool, u64)> = addr_of %l1
-            store %v6, %v5
-            %v15: ptr<bool> = field_addr %v6, 0
-            %v16: bool = load %v15
-            %v17: bool = const true
-            %v18: bool = cmp.eq %v16, %v17
-            cbr %v18, bb9, bb5
+            %v7: ptr<(bool, u64)> = addr_of %l2
+            store %v7, %v5
+            %v8: u64 = const 16:u64
+            memcpy %v6, %v7, %v8
+            %v17: ptr<bool> = field_addr %v6, 0
+            %v18: bool = load %v17
+            %v19: bool = const true
+            %v20: bool = cmp.eq %v18, %v19
+            cbr %v20, bb9, bb5
 
           bb1():
-            %v24: u64 = const 10:u64
-            br bb10(%v24)
+            %v26: u64 = const 10:u64
+            br bb10(%v26)
 
           bb2():
-            %v25: u64 = const 20:u64
-            br bb10(%v25)
+            %v27: u64 = const 20:u64
+            br bb10(%v27)
 
           bb3():
-            %v26: u64 = const 0:u64
-            br bb10(%v26)
+            %v28: u64 = const 0:u64
+            br bb10(%v28)
 
           bb4():
             br bb1
 
           bb5():
-            %v7: ptr<bool> = field_addr %v6, 0
-            %v8: bool = load %v7
-            %v9: bool = const true
-            %v10: bool = cmp.eq %v8, %v9
-            cbr %v10, bb8, bb7
+            %v9: ptr<bool> = field_addr %v6, 0
+            %v10: bool = load %v9
+            %v11: bool = const true
+            %v12: bool = cmp.eq %v10, %v11
+            cbr %v12, bb8, bb7
 
           bb6():
             br bb2
@@ -210,21 +222,21 @@ fn test_lower_match_tuple_decision_tree() {
             br bb3
 
           bb8():
-            %v11: ptr<u64> = field_addr %v6, 1
-            %v12: u64 = load %v11
-            %v13: u64 = const 2:u64
-            %v14: bool = cmp.eq %v12, %v13
-            cbr %v14, bb6, bb7
+            %v13: ptr<u64> = field_addr %v6, 1
+            %v14: u64 = load %v13
+            %v15: u64 = const 2:u64
+            %v16: bool = cmp.eq %v14, %v15
+            cbr %v16, bb6, bb7
 
           bb9():
-            %v19: ptr<u64> = field_addr %v6, 1
-            %v20: u64 = load %v19
-            %v21: u64 = const 1:u64
-            %v22: bool = cmp.eq %v20, %v21
-            cbr %v22, bb4, bb5
+            %v21: ptr<u64> = field_addr %v6, 1
+            %v22: u64 = load %v21
+            %v23: u64 = const 1:u64
+            %v24: bool = cmp.eq %v22, %v23
+            cbr %v24, bb4, bb5
 
-          bb10(%v23: u64):
-            ret %v23
+          bb10(%v25: u64):
+            ret %v25
         }
     "};
     assert_eq!(text, expected);

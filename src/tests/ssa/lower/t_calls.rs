@@ -168,7 +168,8 @@ fn test_lower_call_array_to_slice_arg() {
               locals:
                 %l0: u64[3]
                 %l1: u64[3]
-                %l2: struct {{ ptr: ptr<u64>, len: u64 }}
+                %l2: u64[3]
+                %l3: struct {{ ptr: ptr<u64>, len: u64 }}
               bb0():
                 %v0: ptr<u64[3]> = addr_of %l0
                 %v1: u64 = const 1:u64
@@ -185,21 +186,24 @@ fn test_lower_call_array_to_slice_arg() {
                 store %v9, %v7
                 %v10: u64[3] = load %v0
                 %v11: ptr<u64[3]> = addr_of %l1
-                store %v11, %v10
-                %v12: u64 = const 0:u64
-                %v13: ptr<u64> = index_addr %v11, %v12
-                %v14: u64 = const 3:u64
-                %v15: u64 = const 0:u64
-                %v16: ptr<u64> = index_addr %v13, %v15
-                %v17: u64 = sub %v14, %v15
-                %v18: ptr<struct {{ ptr: ptr<u64>, len: u64 }}> = addr_of %l2
-                %v19: ptr<ptr<u64>> = field_addr %v18, 0
-                store %v19, %v16
-                %v20: ptr<u64> = field_addr %v18, 1
-                store %v20, %v17
-                %v21: struct {{ ptr: ptr<u64>, len: u64 }} = load %v18
-                %v22: u64 = call @{}(%v21)
-                ret %v22
+                %v12: ptr<u64[3]> = addr_of %l2
+                store %v12, %v10
+                %v13: u64 = const 24:u64
+                memcpy %v11, %v12, %v13
+                %v14: u64 = const 0:u64
+                %v15: ptr<u64> = index_addr %v11, %v14
+                %v16: u64 = const 3:u64
+                %v17: u64 = const 0:u64
+                %v18: ptr<u64> = index_addr %v15, %v17
+                %v19: u64 = sub %v16, %v17
+                %v20: ptr<struct {{ ptr: ptr<u64>, len: u64 }}> = addr_of %l3
+                %v21: ptr<ptr<u64>> = field_addr %v20, 0
+                store %v21, %v18
+                %v22: ptr<u64> = field_addr %v20, 1
+                store %v22, %v19
+                %v23: struct {{ ptr: ptr<u64>, len: u64 }} = load %v20
+                %v24: u64 = call @{}(%v23)
+                ret %v24
             }}
         "},
         take_id
