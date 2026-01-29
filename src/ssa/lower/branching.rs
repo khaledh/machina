@@ -173,16 +173,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             // Other expressions: delegate to unified value lowering to avoid duplication.
-            _ => {
-                let plan = self.lowering_plans.get(&expr.id).unwrap_or_else(|| {
-                    panic!("ssa lower_func missing lowering plan {:?}", expr.id)
-                });
-                match plan {
-                    sem::LoweringPlan::Linear | sem::LoweringPlan::Branching => {
-                        self.lower_value_expr_value(expr)
-                    }
+            _ => match self.lowering_plan(expr.id) {
+                sem::LoweringPlan::Linear | sem::LoweringPlan::Branching => {
+                    self.lower_value_expr_value(expr)
                 }
-            }
+            },
         }
     }
 

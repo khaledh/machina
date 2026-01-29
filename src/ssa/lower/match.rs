@@ -25,11 +25,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         scrutinee: &sem::ValueExpr,
         arms: &'a [sem::MatchArm],
     ) -> Result<BranchResult, LoweringError> {
-        let plan = lowerer
-            .type_map
-            .lookup_match_plan(expr.id)
-            .unwrap_or_else(|| panic!("ssa lower_func missing match plan {:?}", expr.id))
-            .clone();
+        let plan = lowerer.match_plan(expr.id);
 
         // Evaluate the scrutinee once and store it for address-based projections.
         let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;

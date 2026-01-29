@@ -368,9 +368,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             sem::ValueExprKind::Slice { target, start, end } => {
                 // Build a slice value { ptr, len } from a place and optional bounds.
-                let plan = self.type_map.lookup_slice_plan(expr.id).unwrap_or_else(|| {
-                    panic!("ssa slice missing plan for expr {:?}", expr.id);
-                });
+                let plan = self.slice_plan(expr.id);
 
                 let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
                 else {
@@ -501,9 +499,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             sem::ValueExprKind::Coerce { kind, expr: inner } => match kind {
                 crate::tree::CoerceKind::ArrayToSlice => {
-                    let plan = self.type_map.lookup_slice_plan(expr.id).unwrap_or_else(|| {
-                        panic!("ssa coerce missing slice plan for expr {:?}", expr.id);
-                    });
+                    let plan = self.slice_plan(expr.id);
 
                     let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
                     else {
@@ -582,10 +578,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     if self.locals.get(*def_id).is_some() {
                         Ok(self.load_local_value(*def_id).into())
                     } else {
-                        let def = self
-                            .def_table
-                            .lookup_def(*def_id)
-                            .unwrap_or_else(|| panic!("ssa load missing def {:?}", def_id));
+                        let def = self.def(*def_id);
                         match def.kind {
                             crate::resolve::DefKind::FuncDef { .. }
                             | crate::resolve::DefKind::FuncDecl { .. } => {
@@ -630,13 +623,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             _ => {
-                let plan = self
-                    .lowering_plans
-                    .get(&expr.id)
-                    .unwrap_or_else(|| {
-                        panic!("ssa lower_func missing lowering plan {:?}", expr.id)
-                    });
-                match plan {
+                match self.lowering_plan(expr.id) {
                     sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
                     sem::LoweringPlan::Linear => {
                         panic!(
@@ -669,15 +656,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             sem::StmtExprKind::VarDecl { def_id, .. } => {
-                let def = self
-                    .def_table
-                    .lookup_def(*def_id)
-                    .unwrap_or_else(|| panic!("ssa var decl missing def {:?}", def_id));
-                let ty_id = self
-                    .type_map
-                    .lookup_def_type_id(def)
-                    .unwrap_or_else(|| panic!("ssa var decl missing type for {:?}", def_id));
-                let ir_ty = self.type_lowerer.lower_type_id(ty_id);
+                let ty = self.def_type(*def_id);
+                let ir_ty = self.type_lowerer.lower_type(&ty);
                 let addr = self.alloc_local_addr(ir_ty);
                 self.locals.insert(*def_id, LocalValue::addr(addr, ir_ty));
                 // Start drop tracking as uninitialized until the first init assignment.
@@ -699,14 +679,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let value_ty = self.type_map.type_table().get(value_expr.ty).clone();
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
-                        let def = self
-                            .def_table
-                            .lookup_def(*def_id)
-                            .unwrap_or_else(|| panic!("ssa assign missing def {:?}", def_id));
-                        let dest_ty = self
-                            .type_map
-                            .lookup_def_type(def)
-                            .unwrap_or_else(|| panic!("ssa assign missing def type {:?}", def_id));
+                        let dest_ty = self.def_type(*def_id);
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
                         if let Some(mode) = self.param_mode_for(*def_id) {
                             if matches!(mode, ParamMode::Out | ParamMode::InOut) {

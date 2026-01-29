@@ -281,16 +281,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             LocalStorage::Addr(addr) => addr,
             LocalStorage::Value(value) => {
                 let addr = self.alloc_local_addr(value_ty);
-                let def = self
-                    .def_table
-                    .lookup_def(def_id)
-                    .unwrap_or_else(|| panic!("ssa ensure addr missing def {:?}", def_id));
-                let ty_id = self
-                    .type_map
-                    .lookup_def_type_id(def)
-                    .unwrap_or_else(|| panic!("ssa ensure addr missing type for {:?}", def_id));
-                let ty = self.type_map.type_table().get(ty_id);
-                self.store_value_into_addr(addr, value, ty, value_ty);
+                let ty = self.def_type(def_id);
+                self.store_value_into_addr(addr, value, &ty, value_ty);
                 self.locals.insert(def_id, LocalValue::addr(addr, value_ty));
                 addr
             }
@@ -322,16 +314,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .insert(def_id, LocalValue::value(value, value_ty));
             }
             LocalStorage::Addr(addr) => {
-                let def = self
-                    .def_table
-                    .lookup_def(def_id)
-                    .unwrap_or_else(|| panic!("ssa assign missing def {:?}", def_id));
-                let ty_id = self
-                    .type_map
-                    .lookup_def_type_id(def)
-                    .unwrap_or_else(|| panic!("ssa assign missing type for {:?}", def_id));
-                let ty = self.type_map.type_table().get(ty_id);
-                self.store_value_into_addr(addr, value, ty, value_ty);
+                let ty = self.def_type(def_id);
+                self.store_value_into_addr(addr, value, &ty, value_ty);
             }
         }
     }

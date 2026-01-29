@@ -48,10 +48,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
                 })
             }
             sem::PlaceExprKind::ArrayIndex { target, indices } => {
-                let plan = self
-                    .type_map
-                    .lookup_index_plan(place.id)
-                    .unwrap_or_else(|| panic!("ssa array index missing index plan {:?}", place.id));
+                let plan = self.index_plan(place.id);
 
                 match plan.base {
                     sem::IndexBaseKind::Array { deref_count, .. } => {

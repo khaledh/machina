@@ -42,10 +42,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         callee_expr: &sem::ValueExpr,
         args: &[sem::CallArg],
     ) -> Result<Option<LinearValue>, LoweringError> {
-        let call_plan = self
-            .type_map
-            .lookup_call_plan(expr.id)
-            .unwrap_or_else(|| panic!("ssa lower_call_expr missing call plan {:?}", expr.id));
+        let call_plan = self.call_plan(expr.id);
 
         // Direct calls (no receiver) only for now.
         if call_plan.has_receiver {
@@ -116,9 +113,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         receiver: &sem::MethodReceiver,
         args: &[sem::CallArg],
     ) -> Result<Option<LinearValue>, LoweringError> {
-        let call_plan = self.type_map.lookup_call_plan(expr.id).unwrap_or_else(|| {
-            panic!("ssa lower_method_call_expr missing call plan {:?}", expr.id)
-        });
+        let call_plan = self.call_plan(expr.id);
 
         // Method calls must have a receiver.
         if !call_plan.has_receiver {

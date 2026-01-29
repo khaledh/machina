@@ -16,14 +16,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<(), LoweringError> {
         match &pattern.kind {
             sem::BindPatternKind::Name { def_id, .. } => {
-                let def = self
-                    .def_table
-                    .lookup_def(*def_id)
-                    .unwrap_or_else(|| panic!("ssa bind missing def {:?}", def_id));
-                let dest_ty = self
-                    .type_map
-                    .lookup_def_type(def)
-                    .unwrap_or_else(|| panic!("ssa bind missing def type {:?}", def_id));
+                let dest_ty = self.def_type(*def_id);
                 if let crate::ssa::lower::locals::LocalStorage::Value(value) = value.storage {
                     self.emit_conversion_check(value_ty, &dest_ty, value);
                 }

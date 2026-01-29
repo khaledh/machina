@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::resolve::{DefId, DefTable};
+use crate::resolve::{Def, DefId, DefTable};
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::locals::{LocalMap, LocalValue};
@@ -90,6 +90,63 @@ pub(super) struct ValueSlot {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    /// Looks up a definition by id, panicking with SSA-specific context on failure.
+    pub(super) fn def(&self, def_id: DefId) -> &Def {
+        self.def_table
+            .lookup_def(def_id)
+            .unwrap_or_else(|| panic!("ssa missing def {:?}", def_id))
+    }
+
+    /// Looks up a definition's semantic type, panicking on missing entries.
+    pub(super) fn def_type(&self, def_id: DefId) -> Type {
+        self.type_map
+            .lookup_def_type(self.def(def_id))
+            .unwrap_or_else(|| panic!("ssa missing def type {:?}", def_id))
+    }
+
+    /// Looks up a node's semantic type, panicking on missing entries.
+    pub(super) fn node_type(&self, node_id: NodeId) -> Type {
+        self.type_map
+            .lookup_node_type(node_id)
+            .unwrap_or_else(|| panic!("ssa missing node type {:?}", node_id))
+    }
+
+    /// Fetches the lowering plan for a node.
+    pub(super) fn lowering_plan(&self, node_id: NodeId) -> sem::LoweringPlan {
+        self.lowering_plans
+            .get(&node_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("ssa missing lowering plan {:?}", node_id))
+    }
+
+    /// Fetches a call plan for a node.
+    pub(super) fn call_plan(&self, node_id: NodeId) -> sem::CallPlan {
+        self.type_map
+            .lookup_call_plan(node_id)
+            .unwrap_or_else(|| panic!("ssa missing call plan {:?}", node_id))
+    }
+
+    /// Fetches an index plan for a node.
+    pub(super) fn index_plan(&self, node_id: NodeId) -> sem::IndexPlan {
+        self.type_map
+            .lookup_index_plan(node_id)
+            .unwrap_or_else(|| panic!("ssa missing index plan {:?}", node_id))
+    }
+
+    /// Fetches a match plan for a node.
+    pub(super) fn match_plan(&self, node_id: NodeId) -> sem::MatchPlan {
+        self.type_map
+            .lookup_match_plan(node_id)
+            .unwrap_or_else(|| panic!("ssa missing match plan {:?}", node_id))
+    }
+
+    /// Fetches a slice plan for a node.
+    pub(super) fn slice_plan(&self, node_id: NodeId) -> sem::SlicePlan {
+        self.type_map
+            .lookup_slice_plan(node_id)
+            .unwrap_or_else(|| panic!("ssa missing slice plan {:?}", node_id))
+    }
+
     /// Creates a new function lowerer for the given semantic function definition.
     ///
     /// Initializes the type context, extracts the function signature, and prepares
@@ -295,14 +352,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for (index, value) in params.iter().enumerate() {
             let def_id = self.param_defs[index];
             let mode = self.param_modes[index].clone();
-            let def = self
-                .def_table
-                .lookup_def(def_id)
-                .unwrap_or_else(|| panic!("ssa param locals missing def {:?}", def_id));
-            let param_ty = self
-                .type_map
-                .lookup_def_type(def)
-                .unwrap_or_else(|| panic!("ssa param locals missing type {:?}", def_id));
+            let param_ty = self.def_type(def_id);
             let value_ty = self.type_lowerer.lower_type(&param_ty);
             let local = match mode {
                 ParamMode::In | ParamMode::Sink => {
@@ -352,12 +402,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         expr: &sem::ValueExpr,
     ) -> Result<BranchResult, LoweringError> {
-        let plan = self
-            .lowering_plans
-            .get(&expr.id)
-            .unwrap_or_else(|| panic!("ssa lower_func missing lowering plan {:?}", expr.id));
-
-        match plan {
+        match self.lowering_plan(expr.id) {
             sem::LoweringPlan::Linear => {
                 // The plan guarantees linearity; any failure here is a compiler bug.
                 let value = self.lower_linear_value_expr(expr).unwrap_or_else(|err| {

@@ -188,15 +188,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return;
         }
 
-        let def = self
-            .def_table
-            .lookup_def(def_id)
-            .unwrap_or_else(|| panic!("ssa drop flag missing def {:?}", def_id));
-        let ty_id = self
-            .type_map
-            .lookup_def_type_id(def)
-            .unwrap_or_else(|| panic!("ssa drop flag missing type for {:?}", def_id));
-        let ty = self.type_map.type_table().get(ty_id).clone();
+        let ty = self.def_type(def_id);
         if !ty.needs_drop() {
             return;
         }
@@ -497,10 +489,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn create_drop_flag(&mut self, def_id: DefId) -> ValueId {
         let flag_ty = self.type_lowerer.lower_type(&Type::Bool);
-        let name = self
-            .def_table
-            .lookup_def(def_id)
-            .map(|def| format!("{}$drop_live", def.name));
+        let name = Some(format!("{}$drop_live", self.def(def_id).name));
         let local = self.builder.add_local(flag_ty, name);
         let ptr_ty = self.type_lowerer.ptr_to(flag_ty);
         self.builder.addr_of_local(local, ptr_ty)
