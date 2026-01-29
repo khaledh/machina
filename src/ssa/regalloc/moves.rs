@@ -14,6 +14,7 @@ use super::{Location, ValueAllocMap};
 pub struct MoveOp {
     pub src: Location,
     pub dst: Location,
+    pub size: u32,
 }
 
 /// Moves needed on a control-flow edge from `from` to `to`.
@@ -68,6 +69,7 @@ pub fn build_move_plan(
 ) -> MovePlan {
     let mut plan = MovePlan::default();
     let param_reg_count = param_reg_count(target);
+    let value_types = build_value_types(func);
 
     let mut block_params: HashMap<BlockId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
@@ -98,32 +100,59 @@ pub fn build_move_plan(
                                 );
                             }
                         };
+                        let size = move_size_for(types, result.ty, src, Location::Reg(reg));
                         pre_moves.push(MoveOp {
                             src,
                             dst: Location::Reg(reg),
+                            size,
                         });
                     }
                 }
 
                 for (idx, arg) in args.iter().enumerate() {
+                    let arg_ty = value_types
+                        .get(arg)
+                        .copied()
+                        .unwrap_or_else(|| panic!("ssa regalloc: missing type for arg {:?}", arg));
                     let src = alloc_map
                         .get(arg)
                         .copied()
                         .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", arg));
+                    let is_reg = matches!(
+                        types.kind(arg_ty),
+                        crate::ssa::IrTypeKind::Unit
+                            | crate::ssa::IrTypeKind::Bool
+                            | crate::ssa::IrTypeKind::Int { .. }
+                            | crate::ssa::IrTypeKind::Ptr { .. }
+                    );
+                    let src = if is_reg {
+                        src
+                    } else {
+                        match src {
+                            Location::Stack(slot) => Location::StackAddr(slot),
+                            Location::StackAddr(slot) => Location::StackAddr(slot),
+                            other => {
+                                panic!(
+                                    "ssa regalloc: aggregate arg must be stack-backed, got {:?}",
+                                    other
+                                );
+                            }
+                        }
+                    };
                     if idx < param_reg_count {
                         let dst = target.param_reg(idx as u32).unwrap_or_else(|| {
                             panic!("ssa regalloc: call arg {} has no ABI reg", idx)
                         });
                         let dst = Location::Reg(dst);
                         if src != dst {
-                            pre_moves.push(MoveOp { src, dst });
+                            let size = move_size_for(types, arg_ty, src, dst);
+                            pre_moves.push(MoveOp { src, dst, size });
                         }
                     } else {
                         let offset = ((idx - param_reg_count) as u32) * 8;
-                        pre_moves.push(MoveOp {
-                            src,
-                            dst: Location::OutgoingArg(offset),
-                        });
+                        let dst = Location::OutgoingArg(offset);
+                        let size = move_size_for(types, arg_ty, src, dst);
+                        pre_moves.push(MoveOp { src, dst, size });
                     }
                 }
 
@@ -134,7 +163,8 @@ pub fn build_move_plan(
                             panic!("ssa regalloc: missing alloc for {:?}", result.id)
                         });
                         if src != dst {
-                            post_moves.push(MoveOp { src, dst });
+                            let size = move_size_for(types, result.ty, src, dst);
+                            post_moves.push(MoveOp { src, dst, size });
                         }
                     }
                 }
@@ -152,7 +182,15 @@ pub fn build_move_plan(
 
         match &block.term {
             Terminator::Br { target, args } => {
-                let moves = edge_moves_for(block.id, *target, args, &block_params, alloc_map);
+                let moves = edge_moves_for(
+                    block.id,
+                    *target,
+                    args,
+                    &block_params,
+                    alloc_map,
+                    &value_types,
+                    types,
+                );
                 if !moves.is_empty() {
                     plan.edge_moves.push(EdgeMove {
                         from: block.id,
@@ -168,8 +206,15 @@ pub fn build_move_plan(
                 else_args,
                 ..
             } => {
-                let then_moves =
-                    edge_moves_for(block.id, *then_bb, then_args, &block_params, alloc_map);
+                let then_moves = edge_moves_for(
+                    block.id,
+                    *then_bb,
+                    then_args,
+                    &block_params,
+                    alloc_map,
+                    &value_types,
+                    types,
+                );
                 if !then_moves.is_empty() {
                     plan.edge_moves.push(EdgeMove {
                         from: block.id,
@@ -178,8 +223,15 @@ pub fn build_move_plan(
                     });
                 }
 
-                let else_moves =
-                    edge_moves_for(block.id, *else_bb, else_args, &block_params, alloc_map);
+                let else_moves = edge_moves_for(
+                    block.id,
+                    *else_bb,
+                    else_args,
+                    &block_params,
+                    alloc_map,
+                    &value_types,
+                    types,
+                );
                 if !else_moves.is_empty() {
                     plan.edge_moves.push(EdgeMove {
                         from: block.id,
@@ -195,8 +247,15 @@ pub fn build_move_plan(
                 ..
             } => {
                 for case in cases {
-                    let moves =
-                        edge_moves_for(block.id, case.target, &case.args, &block_params, alloc_map);
+                    let moves = edge_moves_for(
+                        block.id,
+                        case.target,
+                        &case.args,
+                        &block_params,
+                        alloc_map,
+                        &value_types,
+                        types,
+                    );
                     if !moves.is_empty() {
                         plan.edge_moves.push(EdgeMove {
                             from: block.id,
@@ -206,8 +265,15 @@ pub fn build_move_plan(
                     }
                 }
 
-                let default_moves =
-                    edge_moves_for(block.id, *default, default_args, &block_params, alloc_map);
+                let default_moves = edge_moves_for(
+                    block.id,
+                    *default,
+                    default_args,
+                    &block_params,
+                    alloc_map,
+                    &value_types,
+                    types,
+                );
                 if !default_moves.is_empty() {
                     plan.edge_moves.push(EdgeMove {
                         from: block.id,
@@ -221,6 +287,21 @@ pub fn build_move_plan(
     }
 
     plan
+}
+
+fn build_value_types(func: &Function) -> HashMap<ValueId, crate::ssa::IrTypeId> {
+    let mut map = HashMap::new();
+    for block in &func.blocks {
+        for param in &block.params {
+            map.insert(param.value.id, param.value.ty);
+        }
+        for inst in &block.insts {
+            if let Some(result) = &inst.result {
+                map.insert(result.id, result.ty);
+            }
+        }
+    }
+    map
 }
 
 fn param_reg_count(target: &dyn TargetSpec) -> usize {
@@ -256,6 +337,8 @@ fn edge_moves_for(
     args: &[ValueId],
     block_params: &HashMap<BlockId, Vec<ValueId>>,
     alloc_map: &ValueAllocMap,
+    value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
+    types: &mut IrTypeCache,
 ) -> Vec<MoveOp> {
     let params = block_params.get(&to).unwrap_or_else(|| {
         panic!(
@@ -284,7 +367,18 @@ fn edge_moves_for(
             .copied()
             .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", param));
         if src != dst {
-            moves.push(MoveOp { src, dst });
+            let arg_ty = value_types
+                .get(arg)
+                .copied()
+                .or_else(|| value_types.get(param).copied())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "ssa regalloc: missing type for block arg {:?} (param {:?})",
+                        arg, param
+                    )
+                });
+            let size = move_size_for(types, arg_ty, src, dst);
+            moves.push(MoveOp { src, dst, size });
         }
     }
 
@@ -346,6 +440,7 @@ fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::
         ordered.push(MoveOp {
             src: Location::Reg(src_reg),
             dst: Location::Reg(scratch),
+            size: mov.size,
         });
 
         mov.src = Location::Reg(scratch);
@@ -353,4 +448,17 @@ fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::
     }
 
     *moves = ordered;
+}
+
+fn move_size_for(
+    types: &mut IrTypeCache,
+    ty: crate::ssa::IrTypeId,
+    src: Location,
+    dst: Location,
+) -> u32 {
+    if matches!(src, Location::StackAddr(_)) || matches!(dst, Location::StackAddr(_)) {
+        return 8;
+    }
+
+    types.layout(ty).size() as u32
 }

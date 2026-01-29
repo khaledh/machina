@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ssa::IrTypeId;
-use crate::ssa::model::ir::{Function, LocalId, ValueId};
+use crate::ssa::model::ir::{BlockId, Function, LocalId, ValueId};
 use crate::ssa::regalloc::ValueAllocMap;
 use crate::ssa::regalloc::moves::MoveOp;
 
@@ -16,6 +16,19 @@ pub trait CodegenSink {
     fn emit_moves(&mut self, moves: &[MoveOp]);
     fn emit_inst(&mut self, inst: &crate::ssa::model::ir::Instruction);
     fn emit_terminator(&mut self, term: &crate::ssa::model::ir::Terminator);
+    fn emit_branch(&mut self, target: CodegenBlockId);
+    fn emit_cond_branch(
+        &mut self,
+        cond: ValueId,
+        then_target: CodegenBlockId,
+        else_target: CodegenBlockId,
+    );
+    fn emit_switch(
+        &mut self,
+        value: ValueId,
+        cases: &[(crate::ssa::model::ir::ConstValue, CodegenBlockId)],
+        default_target: CodegenBlockId,
+    );
 }
 
 /// Emits code using a target emitter and allocation map.
@@ -26,19 +39,23 @@ pub fn emit_graph_with_emitter(
     frame_size: u32,
     callee_saved: &[crate::regalloc::target::PhysReg],
     types: &mut crate::ssa::IrTypeCache,
+    def_names: &HashMap<crate::resolve::DefId, String>,
+    func_label: &str,
     emitter: &mut dyn CodegenEmitter,
 ) {
     struct EmitSink<'a> {
         emitter: &'a mut dyn CodegenEmitter,
         locs: LocationResolver<'a>,
+        label_prefix: String,
     }
 
     impl<'a> CodegenSink for EmitSink<'a> {
         fn enter_block(&mut self, block: CodegenBlockId) {
-            let label = match block {
+            let base = match block {
                 CodegenBlockId::Ssa(id) => format!("bb{}", id.0),
                 CodegenBlockId::Move(id) => format!("mb{}", id.0),
             };
+            let label = format!("{}_{}", self.label_prefix, base);
             self.emitter.begin_block(&label);
         }
 
@@ -53,12 +70,49 @@ pub fn emit_graph_with_emitter(
         fn emit_terminator(&mut self, term: &crate::ssa::model::ir::Terminator) {
             self.emitter.emit_terminator(term, &self.locs);
         }
+
+        fn emit_branch(&mut self, target: CodegenBlockId) {
+            self.emitter.emit_branch(target);
+        }
+
+        fn emit_cond_branch(
+            &mut self,
+            cond: ValueId,
+            then_target: CodegenBlockId,
+            else_target: CodegenBlockId,
+        ) {
+            self.emitter
+                .emit_cond_branch(cond, then_target, else_target, &self.locs);
+        }
+
+        fn emit_switch(
+            &mut self,
+            value: ValueId,
+            cases: &[(crate::ssa::model::ir::ConstValue, CodegenBlockId)],
+            default_target: CodegenBlockId,
+        ) {
+            self.emitter
+                .emit_switch(value, cases, default_target, &self.locs);
+        }
     }
 
     let value_types = build_value_types(func);
+    if cfg!(debug_assertions) {
+        if let Err(msg) = validate_value_types(func, &value_types) {
+            panic!("ssa codegen: {msg}");
+        }
+    }
     let layouts = build_layouts(types, func, &value_types);
     let (local_offsets, locals_size) = build_local_offsets(func, &layouts, frame_size);
     let total_frame_size = frame_size.saturating_add(locals_size);
+    let mut callee_saved = callee_saved.to_vec();
+    if needs_sret(types, func.sig.ret) {
+        let sret_reg = crate::regalloc::target::PhysReg(8);
+        if !callee_saved.iter().any(|reg| *reg == sret_reg) {
+            callee_saved.push(sret_reg);
+            callee_saved.sort_by_key(|reg| reg.0);
+        }
+    }
 
     let mut sink = EmitSink {
         emitter,
@@ -68,13 +122,13 @@ pub fn emit_graph_with_emitter(
             local_offsets: &local_offsets,
             types,
             layouts: &layouts,
+            def_names,
         },
+        label_prefix: format!(".L{}", func_label),
     };
-    sink.emitter.begin_function(
-        &format!("fn{}", func.def_id.0),
-        total_frame_size,
-        callee_saved,
-    );
+    sink.emitter
+        .begin_function(func_label, total_frame_size, &callee_saved);
+    sink.emitter.emit_param_moves(func, &sink.locs);
     emit_graph(graph, func, &mut sink);
     sink.emitter.end_function();
 }
@@ -91,6 +145,65 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
             }
         }
     }
+
+    // Some branch arguments may refer to values not defined in a block yet; in
+    // that case, infer their type from the target block parameter they feed.
+    let mut blocks_by_id = HashMap::new();
+    for block in &func.blocks {
+        blocks_by_id.insert(block.id, block);
+    }
+
+    let mut fill_args = |target: BlockId, args: &[ValueId]| {
+        let target_block = blocks_by_id
+            .get(&target)
+            .unwrap_or_else(|| panic!("ssa codegen: missing block {:?} for branch args", target));
+        if target_block.params.len() != args.len() {
+            panic!(
+                "ssa codegen: block {:?} expects {} args, got {}",
+                target,
+                target_block.params.len(),
+                args.len()
+            );
+        }
+        for (idx, arg) in args.iter().enumerate() {
+            if !map.contains_key(arg) {
+                let param_ty = target_block.params[idx].value.ty;
+                map.insert(*arg, param_ty);
+            }
+        }
+    };
+
+    for block in &func.blocks {
+        match &block.term {
+            crate::ssa::model::ir::Terminator::Br { target, args } => {
+                fill_args(*target, args);
+            }
+            crate::ssa::model::ir::Terminator::CondBr {
+                then_bb,
+                then_args,
+                else_bb,
+                else_args,
+                ..
+            } => {
+                fill_args(*then_bb, then_args);
+                fill_args(*else_bb, else_args);
+            }
+            crate::ssa::model::ir::Terminator::Switch {
+                cases,
+                default,
+                default_args,
+                ..
+            } => {
+                for case in cases {
+                    fill_args(case.target, &case.args);
+                }
+                fill_args(*default, default_args);
+            }
+            crate::ssa::model::ir::Terminator::Return { .. }
+            | crate::ssa::model::ir::Terminator::Unreachable => {}
+        }
+    }
+
     map
 }
 
@@ -105,12 +218,52 @@ fn build_layouts(
         .copied()
         .chain(func.locals.iter().map(|l| l.ty))
     {
-        if !layouts.contains_key(&ty) {
-            let layout = types.layout(ty);
-            layouts.insert(ty, layout);
-        }
+        collect_layouts(types, ty, &mut layouts);
     }
     layouts
+}
+
+fn collect_layouts(
+    types: &mut crate::ssa::IrTypeCache,
+    ty: IrTypeId,
+    layouts: &mut HashMap<IrTypeId, crate::ssa::model::layout::IrLayout>,
+) {
+    if layouts.contains_key(&ty) {
+        return;
+    }
+
+    let layout = types.layout(ty);
+    layouts.insert(ty, layout);
+
+    let kind = types.kind(ty).clone();
+    match kind {
+        crate::ssa::IrTypeKind::Ptr { elem } => {
+            collect_layouts(types, elem, layouts);
+        }
+        crate::ssa::IrTypeKind::Array { elem, .. } => {
+            collect_layouts(types, elem, layouts);
+        }
+        crate::ssa::IrTypeKind::Tuple { fields } => {
+            for field in fields {
+                collect_layouts(types, field, layouts);
+            }
+        }
+        crate::ssa::IrTypeKind::Struct { fields } => {
+            for field in fields {
+                collect_layouts(types, field.ty, layouts);
+            }
+        }
+        crate::ssa::IrTypeKind::Fn { params, ret } => {
+            for param in params {
+                collect_layouts(types, param, layouts);
+            }
+            collect_layouts(types, ret, layouts);
+        }
+        crate::ssa::IrTypeKind::Unit
+        | crate::ssa::IrTypeKind::Bool
+        | crate::ssa::IrTypeKind::Int { .. }
+        | crate::ssa::IrTypeKind::Blob { .. } => {}
+    }
 }
 
 fn build_local_offsets(
@@ -119,7 +272,7 @@ fn build_local_offsets(
     spill_size: u32,
 ) -> (HashMap<LocalId, u32>, u32) {
     let mut offsets = HashMap::new();
-    let mut cursor: u32 = 0;
+    let mut cursor: u32 = spill_size;
 
     for local in &func.locals {
         let layout = layouts
@@ -127,17 +280,137 @@ fn build_local_offsets(
             .unwrap_or_else(|| panic!("ssa codegen: missing layout for {:?}", local.ty));
         let align = layout.align().max(1) as u32;
         cursor = align_to(cursor, align);
-        offsets.insert(local.id, spill_size + cursor);
         cursor = cursor.saturating_add(layout.size() as u32);
+        offsets.insert(local.id, cursor);
     }
 
-    let locals_size = align_to(cursor, 8);
+    let locals_size = align_to(cursor.saturating_sub(spill_size), 8);
     (offsets, locals_size)
 }
 
 fn align_to(value: u32, align: u32) -> u32 {
     debug_assert!(align != 0);
     (value + align - 1) & !(align - 1)
+}
+
+fn needs_sret(types: &crate::ssa::IrTypeCache, ty: IrTypeId) -> bool {
+    match types.kind(ty) {
+        crate::ssa::IrTypeKind::Unit
+        | crate::ssa::IrTypeKind::Bool
+        | crate::ssa::IrTypeKind::Int { .. }
+        | crate::ssa::IrTypeKind::Ptr { .. } => false,
+        _ => true,
+    }
+}
+
+fn validate_value_types(
+    func: &Function,
+    value_types: &HashMap<ValueId, IrTypeId>,
+) -> Result<(), String> {
+    for block in &func.blocks {
+        for inst in &block.insts {
+            let mut uses = Vec::new();
+            match &inst.kind {
+                crate::ssa::model::ir::InstKind::Const { .. }
+                | crate::ssa::model::ir::InstKind::AddrOfLocal { .. } => {}
+                crate::ssa::model::ir::InstKind::BinOp { lhs, rhs, .. }
+                | crate::ssa::model::ir::InstKind::Cmp { lhs, rhs, .. } => {
+                    uses.push(*lhs);
+                    uses.push(*rhs);
+                }
+                crate::ssa::model::ir::InstKind::UnOp { value, .. }
+                | crate::ssa::model::ir::InstKind::IntTrunc { value, .. }
+                | crate::ssa::model::ir::InstKind::IntExtend { value, .. }
+                | crate::ssa::model::ir::InstKind::Cast { value, .. }
+                | crate::ssa::model::ir::InstKind::FieldAddr { base: value, .. }
+                | crate::ssa::model::ir::InstKind::Load { ptr: value } => {
+                    uses.push(*value);
+                }
+                crate::ssa::model::ir::InstKind::IndexAddr { base, index } => {
+                    uses.push(*base);
+                    uses.push(*index);
+                }
+                crate::ssa::model::ir::InstKind::Store { ptr, value } => {
+                    uses.push(*ptr);
+                    uses.push(*value);
+                }
+                crate::ssa::model::ir::InstKind::MemCopy { dst, src, len } => {
+                    uses.push(*dst);
+                    uses.push(*src);
+                    uses.push(*len);
+                }
+                crate::ssa::model::ir::InstKind::MemSet { dst, byte, len } => {
+                    uses.push(*dst);
+                    uses.push(*byte);
+                    uses.push(*len);
+                }
+                crate::ssa::model::ir::InstKind::Call { callee, args } => {
+                    if let crate::ssa::model::ir::Callee::Value(value) = callee {
+                        uses.push(*value);
+                    }
+                    uses.extend(args.iter().copied());
+                }
+                crate::ssa::model::ir::InstKind::Drop { ptr } => {
+                    uses.push(*ptr);
+                }
+            }
+
+            for value in uses {
+                if !value_types.contains_key(&value) {
+                    return Err(format!(
+                        "missing type for {:?} in block {:?} inst {:?}",
+                        value, block.id, inst.kind
+                    ));
+                }
+            }
+        }
+
+        let mut term_uses = Vec::new();
+        match &block.term {
+            crate::ssa::model::ir::Terminator::Br { args, .. } => {
+                term_uses.extend(args.iter().copied());
+            }
+            crate::ssa::model::ir::Terminator::CondBr {
+                cond,
+                then_args,
+                else_args,
+                ..
+            } => {
+                term_uses.push(*cond);
+                term_uses.extend(then_args.iter().copied());
+                term_uses.extend(else_args.iter().copied());
+            }
+            crate::ssa::model::ir::Terminator::Switch {
+                value,
+                cases,
+                default_args,
+                ..
+            } => {
+                term_uses.push(*value);
+                for case in cases {
+                    term_uses.extend(case.args.iter().copied());
+                }
+                term_uses.extend(default_args.iter().copied());
+            }
+            crate::ssa::model::ir::Terminator::Return { value } => {
+                if let Some(value) = value {
+                    term_uses.push(*value);
+                }
+            }
+            crate::ssa::model::ir::Terminator::Unreachable => {}
+        }
+
+        for value in term_uses {
+            if !value_types.contains_key(&value) {
+                return Err(format!(
+                    "missing type for {:?} in block {:?} terminator {:?}",
+                    value, block.id, block.term
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Walks the codegen graph in RPO order and emits instructions.
@@ -182,7 +455,42 @@ fn emit_ssa_block(
         .unwrap_or_else(|| panic!("ssa codegen: missing block {:?}", block))
         .term
         .clone();
-    sink.emit_terminator(&term);
+    match &term {
+        crate::ssa::model::ir::Terminator::Br { target, .. } => {
+            if let Some(moves) = graph.edge_moves(block, *target) {
+                if !moves.is_empty() {
+                    sink.emit_moves(moves);
+                }
+            }
+            let target = graph.edge_target(block, *target);
+            sink.emit_branch(target);
+        }
+        crate::ssa::model::ir::Terminator::CondBr {
+            cond,
+            then_bb,
+            else_bb,
+            ..
+        } => {
+            let then_target = graph.edge_target(block, *then_bb);
+            let else_target = graph.edge_target(block, *else_bb);
+            sink.emit_cond_branch(*cond, then_target, else_target);
+        }
+        crate::ssa::model::ir::Terminator::Switch {
+            value,
+            cases,
+            default,
+            ..
+        } => {
+            let mut case_labels = Vec::with_capacity(cases.len());
+            for case in cases {
+                let target = graph.edge_target(block, case.target);
+                case_labels.push((case.value.clone(), target));
+            }
+            let default_target = graph.edge_target(block, *default);
+            sink.emit_switch(*value, &case_labels, default_target);
+        }
+        _ => sink.emit_terminator(&term),
+    }
 }
 
 fn emit_move_block(
@@ -204,16 +512,7 @@ fn emit_move_block(
         .first()
         .copied()
         .unwrap_or_else(|| panic!("ssa codegen: move block {:?} has no successor", block));
-    let term = match target {
-        CodegenBlockId::Ssa(block) => crate::ssa::model::ir::Terminator::Br {
-            target: block,
-            args: Vec::new(),
-        },
-        CodegenBlockId::Move(_) => {
-            panic!("ssa codegen: move block successor must be SSA block")
-        }
-    };
-    sink.emit_terminator(&term);
+    sink.emit_branch(target);
 }
 
 fn rpo(graph: &CodegenGraph) -> Vec<CodegenBlockId> {

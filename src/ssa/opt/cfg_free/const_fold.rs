@@ -152,6 +152,11 @@ fn fold_binop(op: BinOp, lhs: ValueId, rhs: ValueId, env: &ConstEnv) -> Option<C
     }
 
     // Preserve the IR's integer semantics by using wrapping arithmetic.
+    // Avoid folding operations that would trap at runtime (e.g., div/mod by zero).
+    if matches!(op, BinOp::Div | BinOp::Mod) && rhs_val == 0 {
+        return None;
+    }
+
     let value = match op {
         BinOp::Add => lhs_val.wrapping_add(rhs_val),
         BinOp::Sub => lhs_val.wrapping_sub(rhs_val),

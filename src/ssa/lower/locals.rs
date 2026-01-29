@@ -96,15 +96,6 @@ impl LocalMap {
         locals
     }
 
-    pub(super) fn args_for(&self, defs: &[DefId]) -> Option<Vec<ValueId>> {
-        let mut args = Vec::with_capacity(defs.len());
-        for def in defs {
-            let local = self.values.get(def)?;
-            args.push(local.storage_value());
-        }
-        Some(args)
-    }
-
     /// Resets locals from block parameters, preserving storage kinds and value types.
     pub(super) fn set_from_params_like(
         &mut self,

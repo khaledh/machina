@@ -84,10 +84,9 @@ impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
         value: ValueId,
         _span: Span,
     ) -> Result<(), LoweringError> {
-        // Build arguments: result value + locals in stable order.
-        let Some(local_args) = self.locals.args_for(&plan.defs) else {
-            panic!("ssa emit_join_branch missing locals args for join");
-        };
+        // Build arguments: result value + locals in stable order, coercing storage
+        // to match the join plan's expected locals.
+        let local_args = self.local_args_for_like(&plan.defs, &plan.locals);
         let mut args = Vec::with_capacity(1 + local_args.len());
         args.push(value);
         args.extend(local_args);

@@ -8,7 +8,7 @@ use crate::ssa::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
 use crate::ssa::model::ir::{BinOp, Callee, CmpOp, RuntimeFn, Terminator, ValueId};
 use crate::ssa::{IrTypeId, IrTypeKind};
 use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::types::{Type, TypeAssignability, type_assignable};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lookup_local(&self, def_id: DefId) -> LocalValue {
@@ -120,6 +120,57 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.select_block(ok_bb);
     }
 
+    /// Emits a divide/modulo-by-zero check that traps if `rhs == 0`.
+    pub(super) fn emit_div_by_zero_check(&mut self, rhs: ValueId, rhs_ty: &Type) {
+        let Type::Int { signed, bits } = rhs_ty else {
+            panic!("ssa div-by-zero check on non-int type {:?}", rhs_ty);
+        };
+
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let rhs_ir_ty = self.type_lowerer.lower_type(rhs_ty);
+        let zero = self.builder.const_int(0, *signed, *bits, rhs_ir_ty);
+        let cond = self.builder.cmp(CmpOp::Ne, rhs, zero, bool_ty);
+
+        let ok_bb = self.builder.add_block();
+        let trap_bb = self.builder.add_block();
+
+        // Split control flow on the non-zero predicate.
+        self.builder.terminate(Terminator::CondBr {
+            cond,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: trap_bb,
+            else_args: Vec::new(),
+        });
+
+        // Trap on division/modulo by zero.
+        self.builder.select_block(trap_bb);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let kind = self.builder.const_int(0, false, 64, u64_ty);
+        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::Trap),
+            vec![kind, zero_u64, zero_u64, zero_u64],
+            unit_ty,
+        );
+        self.builder.terminate(Terminator::Unreachable);
+
+        // Continue lowering in the non-zero block.
+        self.builder.select_block(ok_bb);
+    }
+
+    pub(super) fn emit_runtime_set_alloc_trace(&mut self, enabled: bool) {
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let flag = self.builder.const_int(enabled as i128, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::SetAllocTrace),
+            vec![flag],
+            unit_ty,
+        );
+    }
+
     /// Emits a range check guard that traps if `value` is outside [min, max_excl).
     pub(super) fn emit_range_check(&mut self, value: ValueId, min: ValueId, max_excl: ValueId) {
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
@@ -153,6 +204,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         // Continue lowering in the in-range block.
         self.builder.select_block(ok_bb);
+    }
+
+    pub(super) fn emit_conversion_check(&mut self, from_ty: &Type, to_ty: &Type, value: ValueId) {
+        if let TypeAssignability::UInt64ToRange { min, max } = type_assignable(from_ty, to_ty) {
+            let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+            let min_val = self.builder.const_int(min as i128, false, 64, u64_ty);
+            let max_val = self.builder.const_int(max as i128, false, 64, u64_ty);
+            self.emit_range_check(value, min_val, max_val);
+        }
     }
 
     /// Resolves a place to its base address after peeling heap/ref indirections.
@@ -274,6 +334,38 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.store_value_into_addr(addr, value, ty, value_ty);
             }
         }
+    }
+
+    /// Builds block arguments for locals, coercing storage to match `expected`.
+    ///
+    /// This keeps join/loop arguments type-consistent even if a branch
+    /// temporarily takes an address for a scalar local.
+    pub(super) fn local_args_for_like(
+        &mut self,
+        defs: &[DefId],
+        expected: &[LocalValue],
+    ) -> Vec<ValueId> {
+        let mut args = Vec::with_capacity(defs.len());
+        for (def, expected_local) in defs.iter().zip(expected.iter()) {
+            let current = self.lookup_local(*def);
+            let value_ty = expected_local.value_ty;
+            let arg = match expected_local.storage {
+                LocalStorage::Value(_) => match current.storage {
+                    LocalStorage::Value(value) => value,
+                    LocalStorage::Addr(addr) => self.builder.load(addr, value_ty),
+                },
+                LocalStorage::Addr(_) => match current.storage {
+                    LocalStorage::Addr(addr) => addr,
+                    LocalStorage::Value(value) => {
+                        let addr = self.alloc_local_addr(value_ty);
+                        self.builder.store(addr, value);
+                        addr
+                    }
+                },
+            };
+            args.push(arg);
+        }
+        args
     }
 
     fn is_aggregate(&self, ir_ty: IrTypeId) -> bool {

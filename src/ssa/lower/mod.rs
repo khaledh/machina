@@ -28,6 +28,7 @@ use crate::ssa::lower::lowerer::BranchResult;
 use crate::ssa::model::ir::{Function, GlobalData, Terminator};
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
+use crate::types::Type;
 use lowerer::FuncLowerer;
 
 pub struct LoweredFunction {
@@ -58,6 +59,18 @@ pub fn lower_func(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
 ) -> Result<LoweredFunction, LoweringError> {
+    lower_func_with_opts(func, def_table, type_map, lowering_plans, drop_plans, false)
+}
+
+/// Lowers a semantic function with optional SSA lowering flags.
+pub fn lower_func_with_opts(
+    func: &sem::FuncDef,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
+    trace_alloc: bool,
+) -> Result<LoweredFunction, LoweringError> {
     let mut globals = GlobalArena::new();
     lower_func_with_globals(
         func,
@@ -65,6 +78,7 @@ pub fn lower_func(
         type_map,
         lowering_plans,
         drop_plans,
+        trace_alloc,
         &mut globals,
     )
 }
@@ -76,6 +90,25 @@ pub fn lower_module(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
 ) -> Result<LoweredModule, LoweringError> {
+    lower_module_with_opts(
+        module,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_plans,
+        false,
+    )
+}
+
+/// Lowers a semantic module with optional SSA lowering flags.
+pub fn lower_module_with_opts(
+    module: &sem::Module,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
+    trace_alloc: bool,
+) -> Result<LoweredModule, LoweringError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
 
@@ -86,6 +119,7 @@ pub fn lower_module(
             type_map,
             lowering_plans,
             drop_plans,
+            trace_alloc,
             &mut globals,
         )?;
         funcs.push(lowered);
@@ -103,6 +137,7 @@ pub fn lower_module(
                 type_map,
                 lowering_plans,
                 drop_plans,
+                trace_alloc,
                 &mut globals,
             )?;
             funcs.push(lowered);
@@ -121,9 +156,23 @@ fn lower_func_with_globals(
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
+    trace_alloc: bool,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
     let globals_start = globals.len();
+    let ret_ty = {
+        let def = def_table
+            .lookup_def(func.def_id)
+            .unwrap_or_else(|| panic!("ssa lower_func missing def {:?}", func.def_id));
+        let func_ty = type_map
+            .lookup_def_type(def)
+            .unwrap_or_else(|| panic!("ssa lower_func missing def type {:?}", func.def_id));
+        match func_ty {
+            Type::Fn { ret_ty, .. } => ret_ty,
+            other => panic!("ssa lower_func expected fn type, found {:?}", other),
+        }
+    };
+    let ret_is_unit = matches!(ret_ty.as_ref(), Type::Unit);
 
     // Initialize the lowerer with function metadata and type information.
     // The builder starts with the cursor at the entry block (block 0).
@@ -141,6 +190,10 @@ fn lower_func_with_globals(
     }
     lowerer.init_param_locals(&param_values);
 
+    if trace_alloc && func.sig.name == "main" {
+        lowerer.emit_runtime_set_alloc_trace(true);
+    }
+
     // Lower the function body. This may produce multiple basic blocks
     // for control flow (if/else, loops, etc.). The cursor ends at the
     // final block where execution continues.
@@ -149,9 +202,9 @@ fn lower_func_with_globals(
     // If the body produces a value (not an early return), emit the final return.
     if let BranchResult::Value(value) = result {
         lowerer.emit_drops_to_depth(0)?;
-        lowerer
-            .builder
-            .terminate(Terminator::Return { value: Some(value) });
+        lowerer.builder.terminate(Terminator::Return {
+            value: if ret_is_unit { None } else { Some(value) },
+        });
     }
 
     let (func, types) = lowerer.finish();
@@ -171,9 +224,17 @@ fn lower_method_def_with_globals(
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
+    trace_alloc: bool,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
     let globals_start = globals.len();
+    let ret_ty = type_map.lookup_node_type(method_def.id).unwrap_or_else(|| {
+        panic!(
+            "ssa lower_method missing return type for {:?}",
+            method_def.id
+        )
+    });
+    let ret_is_unit = matches!(ret_ty, Type::Unit);
 
     // Initialize the lowerer with method metadata and type information.
     // The builder starts with the cursor at the entry block (block 0).
@@ -198,13 +259,17 @@ fn lower_method_def_with_globals(
     }
     lowerer.init_param_locals(&param_values);
 
+    if trace_alloc && method_def.sig.name == "main" {
+        lowerer.emit_runtime_set_alloc_trace(true);
+    }
+
     // Lower the method body and emit the final return if it yields a value.
     let result = lowerer.lower_branching_value_expr(&method_def.body)?;
     if let BranchResult::Value(value) = result {
         lowerer.emit_drops_to_depth(0)?;
-        lowerer
-            .builder
-            .terminate(Terminator::Return { value: Some(value) });
+        lowerer.builder.terminate(Terminator::Return {
+            value: if ret_is_unit { None } else { Some(value) },
+        });
     }
 
     let (func, types) = lowerer.finish();

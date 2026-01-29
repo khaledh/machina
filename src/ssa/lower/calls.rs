@@ -1,6 +1,7 @@
 //! Call lowering.
 
 use crate::diag::Span;
+use crate::resolve::DefId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue};
 use crate::ssa::model::ir::{Callee, RuntimeFn, ValueId};
@@ -11,6 +12,26 @@ struct CallInputValue {
     value: ValueId,
     ty: Type,
     is_addr: bool,
+    drop_def: Option<DefId>,
+}
+
+fn drop_def_for_value_expr(expr: &sem::ValueExpr) -> Option<DefId> {
+    match &expr.kind {
+        sem::ValueExprKind::Move { place }
+        | sem::ValueExprKind::ImplicitMove { place }
+        | sem::ValueExprKind::Load { place } => drop_def_for_place_expr(place),
+        _ => None,
+    }
+}
+
+fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
+    match &place.kind {
+        sem::PlaceExprKind::Var { def_id, .. } => Some(*def_id),
+        sem::PlaceExprKind::ArrayIndex { target, .. }
+        | sem::PlaceExprKind::TupleField { target, .. }
+        | sem::PlaceExprKind::StructField { target, .. } => drop_def_for_place_expr(target),
+        sem::PlaceExprKind::Deref { value } => drop_def_for_value_expr(value),
+    }
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -53,6 +74,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                    let drop_def = drop_def_for_value_expr(expr);
                     let Some(value) = self.lower_value_expr_opt(expr)? else {
                         return Ok(None);
                     };
@@ -61,15 +83,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         value,
                         ty,
                         is_addr: false,
+                        drop_def,
                     });
                 }
                 sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                    let drop_def = drop_def_for_place_expr(place);
                     let addr = self.lower_place_addr(place)?;
                     let ty = self.type_map.type_table().get(place.ty).clone();
                     arg_values.push(CallInputValue {
                         value: addr.addr,
                         ty,
                         is_addr: true,
+                        drop_def,
                     });
                 }
             }
@@ -106,6 +131,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Lower the receiver.
         let receiver_value = match receiver {
             sem::MethodReceiver::ValueExpr(expr) => {
+                let drop_def = drop_def_for_value_expr(expr);
                 let Some(value) = self.lower_value_expr_opt(expr)? else {
                     return Ok(None);
                 };
@@ -114,15 +140,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     value,
                     ty,
                     is_addr: false,
+                    drop_def,
                 }
             }
             sem::MethodReceiver::PlaceExpr(place) => {
+                let drop_def = drop_def_for_place_expr(place);
                 let addr = self.lower_place_addr(place)?;
                 let ty = self.type_map.type_table().get(place.ty).clone();
                 CallInputValue {
                     value: addr.addr,
                     ty,
                     is_addr: true,
+                    drop_def,
                 }
             }
         };
@@ -159,6 +188,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for arg in args {
             match arg {
                 sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                    let drop_def = drop_def_for_value_expr(expr);
                     let Some(value) = self.lower_value_expr_opt(expr)? else {
                         return Ok(None);
                     };
@@ -167,15 +197,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         value,
                         ty,
                         is_addr: false,
+                        drop_def,
                     });
                 }
                 sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                    let drop_def = drop_def_for_place_expr(place);
                     let addr = self.lower_place_addr(place)?;
                     let ty = self.type_map.type_table().get(place.ty).clone();
                     arg_values.push(CallInputValue {
                         value: addr.addr,
                         ty,
                         is_addr: true,
+                        drop_def,
                     });
                 }
             }
@@ -216,14 +249,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 panic!("ssa call drop mask missing receiver value for call plan");
             });
             if call_plan.drop_mask[input_index] {
-                self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
+                if receiver.drop_def.is_none() {
+                    self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
+                }
             }
             input_index += 1;
         }
 
         for arg in arg_values {
             if call_plan.drop_mask[input_index] {
-                self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
+                if arg.drop_def.is_none() {
+                    self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
+                }
             }
             input_index += 1;
         }
@@ -250,24 +287,28 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         for lowering in &call_plan.args {
             match lowering {
                 sem::ArgLowering::Direct(input) => {
-                    let value = match input {
-                        sem::CallInput::Receiver => {
-                            receiver_value
-                                .unwrap_or_else(|| {
-                                    panic!("ssa call plan missing receiver value for {:?}", expr_id)
-                                })
-                                .value
-                        }
-                        sem::CallInput::Arg(index) => {
-                            arg_values
-                                .get(*index)
-                                .unwrap_or_else(|| {
-                                    panic!("ssa call arg index out of range: {index}")
-                                })
-                                .value
-                        }
+                    let input_value = match input {
+                        sem::CallInput::Receiver => receiver_value.unwrap_or_else(|| {
+                            panic!("ssa call plan missing receiver value for {:?}", expr_id)
+                        }),
+                        sem::CallInput::Arg(index) => arg_values
+                            .get(*index)
+                            .unwrap_or_else(|| panic!("ssa call arg index out of range: {index}")),
                     };
-                    call_args.push(value);
+
+                    if input_value.is_addr || input_value.ty.is_scalar() {
+                        call_args.push(input_value.value);
+                    } else {
+                        let ir_ty = self.type_lowerer.lower_type(&input_value.ty);
+                        let slot = self.alloc_value_slot(ir_ty);
+                        self.store_value_into_addr(
+                            slot.addr,
+                            input_value.value,
+                            &input_value.ty,
+                            ir_ty,
+                        );
+                        call_args.push(slot.addr);
+                    }
                 }
                 sem::ArgLowering::PtrLen { input, len_bits } => {
                     let input_value = match input {

@@ -84,6 +84,30 @@ impl CodegenGraph {
         &self.blocks[idx].succs
     }
 
+    /// Returns edge moves scheduled for an SSA edge, if any.
+    pub fn edge_moves(&self, from: BlockId, to: BlockId) -> Option<&[MoveOp]> {
+        self.schedule.edge_moves(from, to)
+    }
+
+    /// Returns the codegen edge target (SSA or move block) for a given SSA edge.
+    pub fn edge_target(&self, from: BlockId, to: BlockId) -> CodegenBlockId {
+        let from_id = CodegenBlockId::Ssa(from);
+        let succs = self.succs(from_id);
+        for succ in succs {
+            match *succ {
+                CodegenBlockId::Ssa(id) if id == to => return *succ,
+                CodegenBlockId::Move(_) => {
+                    let target = self.succs(*succ).first().copied();
+                    if target == Some(CodegenBlockId::Ssa(to)) {
+                        return *succ;
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("ssa codegen: missing edge target {:?} -> {:?}", from, to);
+    }
+
     /// Returns the pre-/post-moves for a call site.
     pub fn call_moves(&self, block: BlockId, inst_index: usize) -> Option<(&[MoveOp], &[MoveOp])> {
         self.schedule.call_moves(block, inst_index)

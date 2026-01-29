@@ -5,8 +5,8 @@ use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
 use crate::ssa::model::ir::{BinOp, Callee, RuntimeFn, Terminator, UnOp, ValueId};
-use crate::tree::UnaryOp;
 use crate::tree::semantic as sem;
+use crate::tree::{BinaryOp, ParamMode, UnaryOp};
 use crate::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -169,11 +169,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     sem::ArrayLitInit::Repeat(expr, count) => {
                         let value = eval_value!(expr);
                         let elem_ty = self.type_lowerer.lower_type_id(expr.ty);
-                        for i in 0..*count {
-                            let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
+                        let sem_ty = self.type_map.type_table().get(expr.ty);
+                        if matches!(sem_ty, Type::Int { signed: false, bits: 8 }) {
                             let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
-                            let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
-                            self.builder.store(elem_addr, value);
+                            let zero = self.builder.const_int(0, false, 64, u64_ty);
+                            let len = self.builder.const_int(*count as i128, false, 64, u64_ty);
+                            let base_ptr = self.builder.index_addr(addr, zero, elem_ptr_ty);
+                            self.builder.memset(base_ptr, value, len);
+                        } else {
+                            for i in 0..*count {
+                                let index_val =
+                                    self.builder.const_int(i as i128, false, 64, u64_ty);
+                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
+                                let elem_addr =
+                                    self.builder.index_addr(addr, index_val, elem_ptr_ty);
+                                self.builder.store(elem_addr, value);
+                            }
                         }
                     }
                 }
@@ -332,11 +343,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             sem::ValueExprKind::BinOp { left, op, right } => {
+                if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
+                    return self.lower_branching_value_expr(expr);
+                }
                 let lhs = eval_value!(left);
                 let rhs = eval_value!(right);
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
+                let sem_ty = self.type_map.type_table().get(expr.ty);
 
                 if let Some(binop) = map_binop(*op) {
+                    if matches!(*op, BinaryOp::Div | BinaryOp::Mod) {
+                        self.emit_div_by_zero_check(rhs, sem_ty);
+                    }
                     return Ok(self.builder.binop(binop, lhs, rhs, ty).into());
                 }
                 if let Some(cmp) = map_cmp(*op) {
@@ -612,10 +630,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             _ => {
-                panic!(
-                    "ssa lower_value_expr_value unsupported expr {:?} at {:?}",
-                    expr.kind, expr.span
-                );
+                let plan = self
+                    .lowering_plans
+                    .get(&expr.id)
+                    .unwrap_or_else(|| {
+                        panic!("ssa lower_func missing lowering plan {:?}", expr.id)
+                    });
+                match plan {
+                    sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
+                    sem::LoweringPlan::Linear => {
+                        panic!(
+                            "ssa lower_value_expr_value unsupported expr {:?} at {:?}",
+                            expr.kind, expr.span
+                        );
+                    }
+                }
             }
         }
     }
@@ -667,16 +696,36 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     BranchResult::Value(value) => value,
                     BranchResult::Return => return Ok(StmtOutcome::Return),
                 };
+                let value_ty = self.type_map.type_table().get(value_expr.ty).clone();
                 match &assignee.kind {
                     sem::PlaceExprKind::Var { def_id, .. } => {
+                        let def = self
+                            .def_table
+                            .lookup_def(*def_id)
+                            .unwrap_or_else(|| panic!("ssa assign missing def {:?}", def_id));
+                        let dest_ty = self
+                            .type_map
+                            .lookup_def_type(def)
+                            .unwrap_or_else(|| panic!("ssa assign missing def type {:?}", def_id));
+                        self.emit_conversion_check(&value_ty, &dest_ty, value);
+                        if let Some(mode) = self.param_mode_for(*def_id) {
+                            if matches!(mode, ParamMode::Out | ParamMode::InOut) {
+                                let ty = self.type_lowerer.lower_type_id(value_expr.ty);
+                                self.assign_local_value(*def_id, value, ty);
+                                return Ok(StmtOutcome::Continue);
+                            }
+                        }
+                        if !init.is_init && !init.promotes_full {
+                            self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;
+                        }
                         let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         self.assign_local_value(*def_id, value, ty);
-                        if init.is_init || init.promotes_full {
-                            self.set_drop_flag_for_def(*def_id, true);
-                        }
+                        self.set_drop_flag_for_def(*def_id, true);
                         Ok(StmtOutcome::Continue)
                     }
                     _ => {
+                        let dest_ty = self.type_map.type_table().get(assignee.ty).clone();
+                        self.emit_conversion_check(&value_ty, &dest_ty, value);
                         let place_addr = self.lower_place_addr(assignee)?;
                         let ir_ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         let sem_ty = self.type_map.type_table().get(value_expr.ty);
@@ -689,7 +738,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             sem::StmtExprKind::Return { value } => {
                 let value = match value {
                     Some(expr) => match self.lower_value_expr_value(expr)? {
-                        BranchResult::Value(value) => Some(value),
+                        BranchResult::Value(value) => {
+                            let ty = self.type_map.type_table().get(expr.ty);
+                            if matches!(ty, Type::Unit) {
+                                None
+                            } else {
+                                Some(value)
+                            }
+                        }
                         BranchResult::Return => return Ok(StmtOutcome::Return),
                     },
                     None => None,

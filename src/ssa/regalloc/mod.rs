@@ -88,7 +88,24 @@ pub fn regalloc(
     // Map stack-passed incoming params to their SP-relative slots.
     if let Some(entry) = func.blocks.first() {
         for (index, param) in entry.params.iter().enumerate() {
-            if index >= param_reg_count {
+            if index < param_reg_count {
+                continue;
+            }
+            let ty = analysis
+                .value_types
+                .get(&param.value.id)
+                .copied()
+                .unwrap_or_else(|| {
+                    panic!("ssa regalloc: missing param type for {:?}", param.value.id)
+                });
+            let is_reg = matches!(
+                types.kind(ty),
+                crate::ssa::IrTypeKind::Unit
+                    | crate::ssa::IrTypeKind::Bool
+                    | crate::ssa::IrTypeKind::Int { .. }
+                    | crate::ssa::IrTypeKind::Ptr { .. }
+            );
+            if is_reg {
                 let offset = ((index - param_reg_count) as u32) * 8;
                 result
                     .alloc_map

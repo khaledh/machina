@@ -49,7 +49,8 @@ impl<'a> LinearScan<'a> {
 
         let param_set: HashSet<ValueId> = analysis.param_values.iter().copied().collect();
 
-        // Precolor return values into the ABI result register.
+        // Precolor return values into the ABI result register only when they
+        // do not cross a call (caller-saved regs are not safe across calls).
         let mut fixed_regs = HashMap::new();
         let result_reg = target.result_reg();
         for value in &analysis.return_values {
@@ -59,7 +60,15 @@ impl<'a> LinearScan<'a> {
                 .copied()
                 .unwrap_or_else(|| panic!("ssa regalloc: missing return type for {:?}", value));
             if !param_set.contains(value) && is_reg_type(types, ty) {
-                fixed_regs.insert(*value, result_reg);
+                let interval = analysis
+                    .intervals
+                    .get(value)
+                    .copied()
+                    .unwrap_or(LiveInterval { start: 0, end: 0 });
+                let crosses_call = interval_crosses_call(interval, &analysis.call_positions);
+                if !crosses_call {
+                    fixed_regs.insert(*value, result_reg);
+                }
             }
         }
 
@@ -75,7 +84,15 @@ impl<'a> LinearScan<'a> {
                 .unwrap_or_else(|| panic!("ssa regalloc: missing param type for {:?}", value));
             if is_reg_type(types, ty) {
                 if let Some(reg) = target.param_reg(index as u32) {
-                    fixed_regs.insert(*value, reg);
+                    let interval = analysis
+                        .intervals
+                        .get(value)
+                        .copied()
+                        .unwrap_or(LiveInterval { start: 0, end: 0 });
+                    let crosses_call = interval_crosses_call(interval, &analysis.call_positions);
+                    if !(crosses_call && caller_saved.contains(&reg)) {
+                        fixed_regs.insert(*value, reg);
+                    }
                 }
             }
         }

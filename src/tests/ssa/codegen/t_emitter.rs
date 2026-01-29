@@ -6,18 +6,42 @@ use crate::ssa::codegen::emit_module_arm64;
 use crate::ssa::codegen::emitter::CodegenEmitter;
 use crate::ssa::codegen::graph::CodegenGraph;
 use crate::ssa::codegen::moves::{EdgeMovePlan, MoveSchedule};
-use crate::ssa::codegen::traverse::emit_graph_with_emitter;
+use crate::ssa::codegen::traverse::emit_graph_with_emitter as emit_graph_with_emitter_impl;
 use crate::ssa::lower::{LoweredFunction, LoweredModule};
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{
     BinOp, Callee, CmpOp, ConstValue, FunctionSig, GlobalData, GlobalId, RuntimeFn, SwitchCase,
     Terminator,
 };
-use crate::ssa::regalloc::{TargetSpec, regalloc};
+use crate::ssa::regalloc::{TargetSpec, ValueAllocMap, regalloc};
 use crate::ssa::{IrStructField, IrTypeCache, IrTypeKind};
 
 struct TinyTarget {
     regs: Vec<PhysReg>,
+}
+
+fn emit_graph_with_emitter(
+    graph: &CodegenGraph,
+    func: &crate::ssa::model::ir::Function,
+    alloc_map: &ValueAllocMap,
+    frame_size: u32,
+    callee_saved: &[PhysReg],
+    types: &mut IrTypeCache,
+    emitter: &mut Arm64Emitter,
+) {
+    let def_names = std::collections::HashMap::new();
+    let func_label = format!("_fn{}", func.def_id.0);
+    emit_graph_with_emitter_impl(
+        graph,
+        func,
+        alloc_map,
+        frame_size,
+        callee_saved,
+        types,
+        &def_names,
+        &func_label,
+        emitter,
+    );
 }
 
 impl TinyTarget {
@@ -274,7 +298,7 @@ fn test_arm64_emitter_basic() {
     );
 
     let asm = emitter.finish();
-    assert!(asm.contains("bb0:"));
+    assert!(asm.contains(".L_fn0_bb0:"));
     assert!(asm.contains("mov"));
     assert!(asm.contains("ret"));
 }
@@ -290,7 +314,7 @@ fn test_arm64_emitter_global_bytes() {
     emitter.emit_global(&data);
     let asm = emitter.finish();
     assert!(asm.contains(".data"));
-    assert!(asm.contains("g0:"));
+    assert!(asm.contains("_g0:"));
     assert!(asm.contains(".byte 1, 2, 3"));
 }
 
@@ -342,7 +366,8 @@ fn test_arm64_emit_module() {
     };
 
     let target = TinyTarget::new(2);
-    let asm = emit_module_arm64(&module, &target);
+    let def_names = std::collections::HashMap::new();
+    let asm = emit_module_arm64(&module, &def_names, &target);
     assert!(asm.contains("g0:"));
     assert!(asm.contains("fn0:"));
     assert!(asm.contains("fn1:"));
@@ -531,7 +556,7 @@ fn test_arm64_emitter_memcopy() {
     );
 
     let asm = emitter.finish();
-    assert!(asm.contains("bl __rt_memcpy"));
+    assert!(asm.contains("bl ___rt_memcpy"));
 }
 
 #[test]
@@ -583,7 +608,7 @@ fn test_arm64_emitter_memset() {
     );
 
     let asm = emitter.finish();
-    assert!(asm.contains("bl __rt_memset"));
+    assert!(asm.contains("bl ___rt_memset"));
 }
 
 #[test]
@@ -654,7 +679,7 @@ fn test_arm64_emitter_drop_string() {
     );
 
     let asm = emitter.finish();
-    assert!(asm.contains("__rt_string_drop"));
+    assert!(asm.contains("bl ___rt_string_drop"));
 }
 
 #[test]
@@ -967,7 +992,7 @@ fn test_arm64_emitter_sret_return() {
 
     let asm = emitter.finish();
     assert!(asm.contains("mov x0, x8"));
-    assert!(asm.contains("bl __rt_memcpy"));
+    assert!(asm.contains("bl ___rt_memcpy"));
 }
 
 #[test]

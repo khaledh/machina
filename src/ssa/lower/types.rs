@@ -79,7 +79,13 @@ impl<'a> TypeLowerer<'a> {
                     .map(|param| {
                         let param_ty = self.lower_type(&param.ty);
                         match param.mode {
-                            FnParamMode::In | FnParamMode::Sink => param_ty,
+                            FnParamMode::In | FnParamMode::Sink => {
+                                if param.ty.is_scalar() {
+                                    param_ty
+                                } else {
+                                    self.ptr_to(param_ty)
+                                }
+                            }
                             FnParamMode::Out | FnParamMode::InOut => self.ptr_to(param_ty),
                         }
                     })
@@ -149,6 +155,9 @@ impl<'a> TypeLowerer<'a> {
                 self.ir_type_cache.add(IrTypeKind::Array { elem, dims })
             }
             Type::Struct { name, fields } => {
+                let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
+                self.by_type.insert(ty.clone(), placeholder);
+
                 let fields = fields
                     .iter()
                     .map(|field| IrStructField {
@@ -156,13 +165,17 @@ impl<'a> TypeLowerer<'a> {
                         ty: self.lower_type(&field.ty),
                     })
                     .collect();
+
                 self.ir_type_cache
-                    .add_named(IrTypeKind::Struct { fields }, name.clone())
+                    .update_kind(placeholder, IrTypeKind::Struct { fields });
+                placeholder
             }
             Type::Enum { name, .. } => {
                 let ty_id = self.type_map.type_table().lookup_id(ty).unwrap_or_else(|| {
                     panic!("ssa type lowering: missing enum type id for {name}")
                 });
+                let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
+                self.by_type.insert(ty.clone(), placeholder);
                 let layout = self.enum_layout(ty_id);
                 let fields = vec![
                     IrStructField {
@@ -175,7 +188,8 @@ impl<'a> TypeLowerer<'a> {
                     },
                 ];
                 self.ir_type_cache
-                    .add_named(IrTypeKind::Struct { fields }, name.clone())
+                    .update_kind(placeholder, IrTypeKind::Struct { fields });
+                placeholder
             }
 
             // Pointer-like types (heap allocations, references) become SSA pointers.

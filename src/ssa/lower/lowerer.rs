@@ -49,6 +49,7 @@ pub(super) struct LoopContext {
     pub(super) header_bb: BlockId,
     pub(super) exit_bb: BlockId,
     pub(super) defs: Vec<DefId>,
+    pub(super) locals: Vec<crate::ssa::lower::locals::LocalValue>,
 }
 
 /// Main state for lowering a single function to SSA IR.
@@ -126,7 +127,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 .lookup_def_type(def)
                 .unwrap_or_else(|| panic!("ssa lower_func missing param type {:?}", param.def_id));
             let param_ty_id = match param.mode {
-                ParamMode::In | ParamMode::Sink => type_lowerer.lower_type(&param_ty),
+                ParamMode::In | ParamMode::Sink => {
+                    let value_ty = type_lowerer.lower_type(&param_ty);
+                    if param_ty.is_scalar() {
+                        value_ty
+                    } else {
+                        type_lowerer.ptr_to(value_ty)
+                    }
+                }
                 ParamMode::Out | ParamMode::InOut => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     type_lowerer.ptr_to(value_ty)
@@ -199,7 +207,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             )
         });
         let self_ty_id = match method_def.sig.self_param.mode {
-            ParamMode::In | ParamMode::Sink => type_lowerer.lower_type(&self_ty),
+            ParamMode::In | ParamMode::Sink => {
+                let value_ty = type_lowerer.lower_type(&self_ty);
+                if self_ty.is_scalar() {
+                    value_ty
+                } else {
+                    type_lowerer.ptr_to(value_ty)
+                }
+            }
             ParamMode::Out | ParamMode::InOut => {
                 let value_ty = type_lowerer.lower_type(&self_ty);
                 type_lowerer.ptr_to(value_ty)
@@ -222,7 +237,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 panic!("ssa lower_method missing param type {:?}", param.def_id)
             });
             let param_ty_id = match param.mode {
-                ParamMode::In | ParamMode::Sink => type_lowerer.lower_type(&param_ty),
+                ParamMode::In | ParamMode::Sink => {
+                    let value_ty = type_lowerer.lower_type(&param_ty);
+                    if param_ty.is_scalar() {
+                        value_ty
+                    } else {
+                        type_lowerer.ptr_to(value_ty)
+                    }
+                }
                 ParamMode::Out | ParamMode::InOut => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     type_lowerer.ptr_to(value_ty)
@@ -283,7 +305,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 .unwrap_or_else(|| panic!("ssa param locals missing type {:?}", def_id));
             let value_ty = self.type_lowerer.lower_type(&param_ty);
             let local = match mode {
-                ParamMode::In | ParamMode::Sink => LocalValue::value(*value, value_ty),
+                ParamMode::In | ParamMode::Sink => {
+                    if param_ty.is_scalar() {
+                        LocalValue::value(*value, value_ty)
+                    } else {
+                        let slot = self.alloc_value_slot(value_ty);
+                        let layout = self.type_lowerer.ir_type_cache.layout(value_ty);
+                        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                        let len = self
+                            .builder
+                            .const_int(layout.size() as i128, false, 64, len_ty);
+                        self.builder.memcopy(slot.addr, *value, len);
+                        LocalValue::addr(slot.addr, value_ty)
+                    }
+                }
                 ParamMode::Out | ParamMode::InOut => LocalValue::addr(*value, value_ty),
             };
             self.locals.insert(def_id, local);
@@ -295,6 +330,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     pub(super) fn finish(self) -> (Function, IrTypeCache) {
         (self.builder.finish(), self.type_lowerer.ir_type_cache)
+    }
+
+    pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ParamMode> {
+        self.param_defs
+            .iter()
+            .position(|id| *id == def_id)
+            .map(|idx| self.param_modes[idx].clone())
     }
 
     /// Registers a byte blob as a global and returns its ID.

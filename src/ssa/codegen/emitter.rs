@@ -3,9 +3,13 @@
 use std::collections::HashMap;
 
 use crate::regalloc::target::PhysReg;
+use crate::resolve::DefId;
 use crate::ssa::IrTypeCache;
 use crate::ssa::IrTypeId;
-use crate::ssa::model::ir::{BinOp, GlobalData, Instruction, LocalId, Terminator, ValueId};
+use crate::ssa::codegen::graph::CodegenBlockId;
+use crate::ssa::model::ir::{
+    BinOp, ConstValue, Function, GlobalData, Instruction, LocalId, Terminator, ValueId,
+};
 use crate::ssa::model::layout::IrLayout;
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
@@ -14,6 +18,9 @@ use crate::ssa::regalloc::moves::MoveOp;
 pub trait CodegenEmitter {
     /// Begin emitting a function symbol and prologue.
     fn begin_function(&mut self, _name: &str, _frame_size: u32, _callee_saved: &[PhysReg]) {}
+
+    /// Emit moves that materialize incoming ABI params into allocated locations.
+    fn emit_param_moves(&mut self, _func: &Function, _locs: &LocationResolver) {}
 
     /// Begin emitting a new block label.
     fn begin_block(&mut self, label: &str);
@@ -26,6 +33,27 @@ pub trait CodegenEmitter {
 
     /// Emit a lowered instruction.
     fn emit_inst(&mut self, inst: &Instruction, locs: &LocationResolver);
+
+    /// Emit an unconditional branch to a resolved label.
+    fn emit_branch(&mut self, target: CodegenBlockId);
+
+    /// Emit a conditional branch to resolved labels.
+    fn emit_cond_branch(
+        &mut self,
+        cond: ValueId,
+        then_target: CodegenBlockId,
+        else_target: CodegenBlockId,
+        locs: &LocationResolver,
+    );
+
+    /// Emit a switch terminator with resolved labels.
+    fn emit_switch(
+        &mut self,
+        value: ValueId,
+        cases: &[(ConstValue, CodegenBlockId)],
+        default_target: CodegenBlockId,
+        locs: &LocationResolver,
+    );
 
     /// Emit a terminator.
     fn emit_terminator(&mut self, term: &Terminator, locs: &LocationResolver);
@@ -41,6 +69,7 @@ pub struct LocationResolver<'a> {
     pub local_offsets: &'a HashMap<LocalId, u32>,
     pub types: &'a IrTypeCache,
     pub layouts: &'a HashMap<IrTypeId, IrLayout>,
+    pub def_names: &'a HashMap<DefId, String>,
 }
 
 impl<'a> LocationResolver<'a> {
@@ -69,6 +98,10 @@ impl<'a> LocationResolver<'a> {
         self.layouts
             .get(&id)
             .unwrap_or_else(|| panic!("ssa codegen: missing layout for {:?}", id))
+    }
+
+    pub fn def_name(&self, id: DefId) -> Option<&str> {
+        self.def_names.get(&id).map(|name| name.as_str())
     }
 }
 

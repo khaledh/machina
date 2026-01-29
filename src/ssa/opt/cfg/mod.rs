@@ -250,6 +250,14 @@ fn merge_single_pred_blocks(func: &mut Function) -> bool {
 fn prune_unused_block_params(func: &mut Function) -> bool {
     let mut changed = false;
     let mut updates: Vec<(BlockId, Vec<usize>)> = Vec::new();
+    let mut used_values: HashSet<ValueId> = HashSet::new();
+
+    for block in &func.blocks {
+        for inst in &block.insts {
+            collect_inst_uses(&inst.kind, &mut used_values);
+        }
+        collect_term_uses(&block.term, &mut used_values);
+    }
 
     for block in &mut func.blocks {
         if block.params.is_empty() {
@@ -264,7 +272,7 @@ fn prune_unused_block_params(func: &mut Function) -> bool {
 
         let mut removed = Vec::new();
         for (idx, param) in block.params.iter().enumerate() {
-            if !used.contains(&param.value.id) {
+            if !used.contains(&param.value.id) && !used_values.contains(&param.value.id) {
                 removed.push(idx);
             }
         }

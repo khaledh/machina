@@ -16,6 +16,7 @@ use crate::parse::Parser;
 use crate::regalloc;
 use crate::resolve::{DefId, resolve};
 use crate::semck::sem_check;
+use crate::ssa;
 use crate::targets;
 use crate::targets::TargetKind;
 use crate::tree::NodeIdGen;
@@ -25,13 +26,20 @@ use crate::typeck::type_check;
 pub struct CompileOptions {
     pub dump: Option<String>,
     pub target: TargetKind,
-    pub emit_mcir: bool,
+    pub emit_ir: bool,
     pub trace_alloc: bool,
+    pub backend: BackendKind,
+}
+
+#[derive(Copy, Clone, Debug, clap::ValueEnum)]
+pub enum BackendKind {
+    Legacy,
+    Ssa,
 }
 
 pub struct CompileOutput {
     pub asm: String,
-    pub mcir: Option<String>,
+    pub ir: Option<String>,
 }
 
 pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec<CompileError>> {
@@ -173,124 +181,192 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         println!("--------------------------------");
     }
 
-    // --- Lower to MCIR ---
-
-    let lowered_context = lower::lower_ast::lower_ast(analyzed_context, opts.trace_alloc)
-        .map_err(|e| vec![e.into()])?;
-    if dump_ir {
-        println!("MCIR:");
-        println!("--------------------------------");
-        for func in &lowered_context.funcs {
-            let func_name = lowered_context
-                .symbols
-                .def_names
-                .get(&func.def_id)
-                .map(|name| name.as_str())
-                .unwrap_or("<unknown>");
-            println!(
-                "{}",
-                format_mcir_body(&func.body, func_name, &lowered_context.symbols.def_names)
-            );
-            println!("--------------------------------");
-        }
-    }
-
-    // --- Optimize MCIR ---
-
-    let optimized_context = opt::cfg_free::run(lowered_context);
-    let liveness_context = liveness::analyze(optimized_context);
-    let optimized_context = opt::dataflow::run(liveness_context);
-    let liveness_context = liveness::analyze(optimized_context);
-
-    let mcir = if opts.emit_mcir {
-        let mut mcir_out = String::new();
-        mcir_out.push_str(&format_globals(&liveness_context.globals));
-        for func in &liveness_context.funcs {
-            let func_name = liveness_context
-                .symbols
-                .def_names
-                .get(&func.def_id)
-                .map(|name| name.as_str())
-                .unwrap_or("<unknown>");
-            mcir_out.push_str(&format!(
-                "{}\n",
-                format_mcir_body(&func.body, func_name, &liveness_context.symbols.def_names)
-            ));
-            mcir_out.push('\n');
-        }
-        Some(mcir_out)
-    } else {
-        None
-    };
-
-    if dump_liveness || dump_intervals {
-        // --- Dump Liveness Analysis ---
-        use crate::liveness::format_liveness_map;
-        use regalloc::intervals::{build_live_intervals, format_live_intervals};
-        for (func, live_map) in liveness_context
-            .funcs
-            .iter()
-            .zip(liveness_context.live_maps.iter())
-        {
-            let func_name = liveness_context
-                .symbols
-                .def_names
-                .get(&func.def_id)
-                .map(|name| name.as_str())
-                .unwrap_or("<unknown>");
-            if dump_liveness {
-                print!("{}", format_liveness_map(live_map, func_name));
-            }
-            if dump_intervals {
-                let intervals = build_live_intervals(&func.body, live_map);
-                print!("{}", format_live_intervals(&intervals, func_name));
-            }
-        }
-    }
-
-    // --- Register Allocation ---
-
     let target = match opts.target {
         TargetKind::Arm64 => targets::arm64::regs::Arm64Target::new(),
     };
-    let regalloc_context = regalloc::regalloc(liveness_context, &target);
 
-    if dump_regalloc {
-        for (func, alloc_result) in regalloc_context
-            .funcs
-            .iter()
-            .zip(regalloc_context.alloc_results.iter())
-        {
-            let func_name = regalloc_context
-                .symbols
-                .def_names
-                .get(&func.def_id)
-                .map(|name| name.as_str())
-                .unwrap_or("<unknown>");
-            print!("{}", alloc_result.format_alloc_map(func_name, &target));
+    match opts.backend {
+        BackendKind::Legacy => {
+            // --- Lower to MCIR ---
+            let lowered_context = lower::lower_ast::lower_ast(analyzed_context, opts.trace_alloc)
+                .map_err(|e| vec![e.into()])?;
+            if dump_ir {
+                println!("MCIR:");
+                println!("--------------------------------");
+                for func in &lowered_context.funcs {
+                    let func_name = lowered_context
+                        .symbols
+                        .def_names
+                        .get(&func.def_id)
+                        .map(|name| name.as_str())
+                        .unwrap_or("<unknown>");
+                    println!(
+                        "{}",
+                        format_mcir_body(&func.body, func_name, &lowered_context.symbols.def_names)
+                    );
+                    println!("--------------------------------");
+                }
+            }
+
+            // --- Optimize MCIR ---
+            let optimized_context = opt::cfg_free::run(lowered_context);
+            let liveness_context = liveness::analyze(optimized_context);
+            let optimized_context = opt::dataflow::run(liveness_context);
+            let liveness_context = liveness::analyze(optimized_context);
+
+            let ir = if opts.emit_ir {
+                let mut mcir_out = String::new();
+                mcir_out.push_str(&format_globals(&liveness_context.globals));
+                for func in &liveness_context.funcs {
+                    let func_name = liveness_context
+                        .symbols
+                        .def_names
+                        .get(&func.def_id)
+                        .map(|name| name.as_str())
+                        .unwrap_or("<unknown>");
+                    mcir_out.push_str(&format!(
+                        "{}\n",
+                        format_mcir_body(
+                            &func.body,
+                            func_name,
+                            &liveness_context.symbols.def_names
+                        )
+                    ));
+                    mcir_out.push('\n');
+                }
+                Some(mcir_out)
+            } else {
+                None
+            };
+
+            if dump_liveness || dump_intervals {
+                // --- Dump Liveness Analysis ---
+                use crate::liveness::format_liveness_map;
+                use regalloc::intervals::{build_live_intervals, format_live_intervals};
+                for (func, live_map) in liveness_context
+                    .funcs
+                    .iter()
+                    .zip(liveness_context.live_maps.iter())
+                {
+                    let func_name = liveness_context
+                        .symbols
+                        .def_names
+                        .get(&func.def_id)
+                        .map(|name| name.as_str())
+                        .unwrap_or("<unknown>");
+                    if dump_liveness {
+                        print!("{}", format_liveness_map(live_map, func_name));
+                    }
+                    if dump_intervals {
+                        let intervals = build_live_intervals(&func.body, live_map);
+                        print!("{}", format_live_intervals(&intervals, func_name));
+                    }
+                }
+            }
+
+            // --- Register Allocation ---
+            let regalloc_context = regalloc::regalloc(liveness_context, &target);
+
+            if dump_regalloc {
+                for (func, alloc_result) in regalloc_context
+                    .funcs
+                    .iter()
+                    .zip(regalloc_context.alloc_results.iter())
+                {
+                    let func_name = regalloc_context
+                        .symbols
+                        .def_names
+                        .get(&func.def_id)
+                        .map(|name| name.as_str())
+                        .unwrap_or("<unknown>");
+                    print!("{}", alloc_result.format_alloc_map(func_name, &target));
+                }
+            }
+
+            // --- Codegen (Assembly) ---
+            let asm = match opts.target {
+                TargetKind::Arm64 => {
+                    let mut codegen =
+                        targets::arm64::Arm64Codegen::from_regalloc_context(&regalloc_context);
+                    codegen
+                        .generate()
+                        .map_err(|e| vec![targets::CodegenError::from(e).into()])?
+                }
+            };
+
+            if dump_asm {
+                println!("ASM:");
+                println!("--------------------------------");
+                println!("{}", asm);
+                println!("--------------------------------");
+            }
+
+            Ok(CompileOutput { asm, ir })
+        }
+        BackendKind::Ssa => {
+            // --- Lower to SSA IR ---
+            let lowered = ssa::lower::lower_module_with_opts(
+                &analyzed_context.module,
+                &analyzed_context.def_table,
+                &analyzed_context.type_map,
+                &analyzed_context.lowering_plans,
+                &analyzed_context.drop_plans,
+                opts.trace_alloc,
+            )
+            .map_err(|e| vec![e.into()])?;
+
+            // --- Optimize SSA ---
+            let mut funcs: Vec<_> = lowered.funcs.iter().map(|f| f.func.clone()).collect();
+            let mut pipeline = ssa::opt::Pipeline::new();
+            pipeline.run(&mut funcs);
+
+            let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
+            for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
+                let types = lowered_func.types.clone();
+                let globals = lowered_func.globals.clone();
+                optimized_funcs.push(ssa::lower::LoweredFunction {
+                    func,
+                    types,
+                    globals,
+                });
+            }
+
+            let lowered = ssa::lower::LoweredModule {
+                funcs: optimized_funcs,
+                globals: lowered.globals.clone(),
+            };
+
+            let ir = if opts.emit_ir {
+                let mut out = String::new();
+                out.push_str(&format_ssa_globals(&lowered.globals));
+                for (idx, func) in lowered.funcs.iter().enumerate() {
+                    if idx > 0 {
+                        out.push('\n');
+                    }
+                    out.push_str(&ssa::model::format::formact_func(&func.func, &func.types));
+                    out.push('\n');
+                }
+                Some(out)
+            } else {
+                None
+            };
+
+            let asm = ssa::codegen::emit_module_arm64(
+                &lowered,
+                &analyzed_context.symbols.def_names,
+                &target,
+            );
+
+            if dump_asm {
+                println!("ASM:");
+                println!("--------------------------------");
+                println!("{}", asm);
+                println!("--------------------------------");
+            }
+
+            Ok(CompileOutput { asm, ir })
         }
     }
-
-    // --- Codegen (Assembly) ---
-
-    let asm = match opts.target {
-        TargetKind::Arm64 => {
-            let mut codegen =
-                targets::arm64::Arm64Codegen::from_regalloc_context(&regalloc_context);
-            codegen
-                .generate()
-                .map_err(|e| vec![targets::CodegenError::from(e).into()])?
-        }
-    };
-
-    if dump_asm {
-        println!("ASM:");
-        println!("--------------------------------");
-        println!("{}", asm);
-        println!("--------------------------------");
-    }
-
-    Ok(CompileOutput { asm, mcir })
 }
 
 // --- stdlib parsed-tree injection ---
@@ -375,6 +451,24 @@ fn format_globals(globals: &[mcir::types::GlobalItem]) -> String {
         out.push_str(&format!("  g#{} ({}): {}\n", g.id.index(), kind, payload));
     }
     out.push('\n');
+    out
+}
+
+fn format_ssa_globals(globals: &[ssa::model::ir::GlobalData]) -> String {
+    let mut out = String::new();
+    for global in globals {
+        out.push_str(&format!("global _g{} = bytes [", global.id.0));
+        for (idx, byte) in global.bytes.iter().enumerate() {
+            if idx > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&byte.to_string());
+        }
+        out.push_str("]\n");
+    }
+    if !globals.is_empty() {
+        out.push('\n');
+    }
     out
 }
 

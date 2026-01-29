@@ -135,6 +135,54 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.emit_drops_to_depth(depth)
     }
 
+    pub(super) fn emit_drop_for_def_if_live(
+        &mut self,
+        def_id: DefId,
+        ty_id: TypeId,
+    ) -> Result<(), LoweringError> {
+        if self.drop_plans.is_none() {
+            return Ok(());
+        }
+
+        let ty = self.type_map.type_table().get(ty_id).clone();
+        if !ty.needs_drop() {
+            return Ok(());
+        }
+
+        let flag_addr = self
+            .drop_flags
+            .get(&def_id)
+            .copied()
+            .unwrap_or_else(|| panic!("ssa drop missing flag for {:?}", def_id));
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let cond = self.builder.load(flag_addr, bool_ty);
+        let drop_bb = self.builder.add_block();
+        let cont_bb = self.builder.add_block();
+
+        self.builder.terminate(Terminator::CondBr {
+            cond,
+            then_bb: drop_bb,
+            then_args: Vec::new(),
+            else_bb: cont_bb,
+            else_args: Vec::new(),
+        });
+
+        self.builder.select_block(drop_bb);
+        let local = self.lookup_local(def_id);
+        let (value, is_addr) = match local.storage {
+            crate::ssa::lower::locals::LocalStorage::Value(value) => (value, false),
+            crate::ssa::lower::locals::LocalStorage::Addr(addr) => (addr, true),
+        };
+        self.emit_drop_for_value(value, &ty, is_addr)?;
+        self.builder.terminate(Terminator::Br {
+            target: cont_bb,
+            args: Vec::new(),
+        });
+
+        self.builder.select_block(cont_bb);
+        Ok(())
+    }
+
     pub(super) fn set_drop_flag_for_def(&mut self, def_id: DefId, value: bool) {
         if self.drop_plans.is_none() {
             return;
@@ -181,36 +229,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     fn emit_drop_item(&mut self, item: &sem::DropItem) -> Result<(), LoweringError> {
-        let flag_addr = self
-            .drop_flags
-            .get(&item.def_id)
-            .copied()
-            .unwrap_or_else(|| {
-                panic!("ssa drop missing flag for {:?}", item.def_id);
-            });
+        match item.guard {
+            sem::DropGuard::Always => {
+                self.emit_drop_for_def(item.def_id, item.ty)?;
+                Ok(())
+            }
+            sem::DropGuard::IfInitialized => {
+                let flag_addr = match self.drop_flags.get(&item.def_id).copied() {
+                    Some(addr) => addr,
+                    None => {
+                        let addr = self.create_drop_flag(item.def_id);
+                        self.drop_flags.insert(item.def_id, addr);
+                        self.store_drop_flag(addr, false);
+                        addr
+                    }
+                };
 
-        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-        let cond = self.builder.load(flag_addr, bool_ty);
-        let drop_bb = self.builder.add_block();
-        let cont_bb = self.builder.add_block();
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+                let cond = self.builder.load(flag_addr, bool_ty);
+                let drop_bb = self.builder.add_block();
+                let cont_bb = self.builder.add_block();
 
-        self.builder.terminate(Terminator::CondBr {
-            cond,
-            then_bb: drop_bb,
-            then_args: Vec::new(),
-            else_bb: cont_bb,
-            else_args: Vec::new(),
-        });
+                self.builder.terminate(Terminator::CondBr {
+                    cond,
+                    then_bb: drop_bb,
+                    then_args: Vec::new(),
+                    else_bb: cont_bb,
+                    else_args: Vec::new(),
+                });
 
-        self.builder.select_block(drop_bb);
-        self.emit_drop_for_def(item.def_id, item.ty)?;
-        self.builder.terminate(Terminator::Br {
-            target: cont_bb,
-            args: Vec::new(),
-        });
+                self.builder.select_block(drop_bb);
+                self.emit_drop_for_def(item.def_id, item.ty)?;
+                self.builder.terminate(Terminator::Br {
+                    target: cont_bb,
+                    args: Vec::new(),
+                });
 
-        self.builder.select_block(cont_bb);
-        Ok(())
+                self.builder.select_block(cont_bb);
+                Ok(())
+            }
+        }
     }
 
     fn emit_drop_for_def(

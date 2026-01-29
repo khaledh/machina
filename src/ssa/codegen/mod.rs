@@ -6,6 +6,9 @@ pub mod graph;
 pub mod moves;
 pub mod traverse;
 
+use std::collections::HashMap;
+
+use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::codegen::emitter::CodegenEmitter;
 use crate::ssa::lower::{LoweredFunction, LoweredModule};
@@ -14,6 +17,7 @@ use crate::ssa::regalloc::{TargetSpec, regalloc};
 /// Emit a full SSA module (globals + functions) using the provided emitter.
 pub fn emit_module_with_emitter(
     module: &LoweredModule,
+    def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
     emitter: &mut dyn CodegenEmitter,
 ) {
@@ -22,19 +26,24 @@ pub fn emit_module_with_emitter(
     }
 
     for func in &module.funcs {
-        emit_function_with_emitter(func, target, emitter);
+        emit_function_with_emitter(func, def_names, target, emitter);
     }
 }
 
 /// Convenience entrypoint for emitting ARM64 assembly for a full module.
-pub fn emit_module_arm64(module: &LoweredModule, target: &dyn TargetSpec) -> String {
+pub fn emit_module_arm64(
+    module: &LoweredModule,
+    def_names: &HashMap<DefId, String>,
+    target: &dyn TargetSpec,
+) -> String {
     let mut emitter = arm64::Arm64Emitter::new();
-    emit_module_with_emitter(module, target, &mut emitter);
+    emit_module_with_emitter(module, def_names, target, &mut emitter);
     emitter.finish()
 }
 
 fn emit_function_with_emitter(
     func: &LoweredFunction,
+    def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
     emitter: &mut dyn CodegenEmitter,
 ) {
@@ -46,6 +55,11 @@ fn emit_function_with_emitter(
     let plan = moves::EdgeMovePlan::new(&func.func, schedule);
     let graph = graph::CodegenGraph::new(&func.func, &plan);
 
+    let func_label = def_names
+        .get(&func.func.def_id)
+        .map(|name| format!("_{}", name))
+        .unwrap_or_else(|| format!("_fn{}", func.func.def_id.0));
+
     traverse::emit_graph_with_emitter(
         &graph,
         &func.func,
@@ -53,6 +67,8 @@ fn emit_function_with_emitter(
         alloc.frame_size,
         &alloc.used_callee_saved,
         &mut types,
+        def_names,
+        &func_label,
         emitter,
     );
 }

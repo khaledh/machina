@@ -259,9 +259,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.locals
             .set_from_params_like(&defs, &locals, &header_params);
         let cond_value = self.lower_linear_expr_value(cond)?;
-        let Some(exit_args) = self.locals.args_for(&defs) else {
-            panic!("ssa lower_while_stmt missing locals args for loop exit");
-        };
+        let exit_args = self.local_args_for_like(&defs, &locals);
 
         // Conditional branch: true goes to body, false exits the loop.
         self.builder.terminate(Terminator::CondBr {
@@ -278,6 +276,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             header_bb,
             exit_bb,
             defs: defs.clone(),
+            locals: locals.clone(),
         });
         let body_result = self.lower_branching_value_expr(body);
         self.loop_stack.pop();
@@ -289,9 +288,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         if let BranchResult::Value(_) = body_result {
             // Collect updated locals and branch back to header.
-            let Some(loop_args) = self.locals.args_for(&defs) else {
-                panic!("ssa lower_while_stmt missing locals args for loop back-edge");
-            };
+            let loop_args = self.local_args_for_like(&defs, &locals);
             self.builder.terminate(Terminator::Br {
                 target: header_bb,
                 args: loop_args,
@@ -313,11 +310,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_break_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LoweringError> {
         self.emit_drops_for_stmt(stmt.id)?;
         let ctx = self.current_loop();
-        let Some(exit_args) = self.locals.args_for(&ctx.defs) else {
-            panic!("ssa break missing locals args for loop exit");
-        };
+        let exit_bb = ctx.exit_bb;
+        let defs = ctx.defs.clone();
+        let locals = ctx.locals.clone();
+        let exit_args = self.local_args_for_like(&defs, &locals);
         self.builder.terminate(Terminator::Br {
-            target: ctx.exit_bb,
+            target: exit_bb,
             args: exit_args,
         });
         Ok(BranchResult::Return)
@@ -327,11 +325,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_continue_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LoweringError> {
         self.emit_drops_for_stmt(stmt.id)?;
         let ctx = self.current_loop();
-        let Some(loop_args) = self.locals.args_for(&ctx.defs) else {
-            panic!("ssa continue missing locals args for loop header");
-        };
+        let header_bb = ctx.header_bb;
+        let defs = ctx.defs.clone();
+        let locals = ctx.locals.clone();
+        let loop_args = self.local_args_for_like(&defs, &locals);
         self.builder.terminate(Terminator::Br {
-            target: ctx.header_bb,
+            target: header_bb,
             args: loop_args,
         });
         Ok(BranchResult::Return)

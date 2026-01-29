@@ -51,6 +51,7 @@ fn test_codegen_graph_inserts_move_block() {
         moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(0)),
             dst: Location::Stack(StackSlotId(1)),
+            size: 8,
         }],
     }];
     let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
@@ -111,10 +112,12 @@ fn test_codegen_graph_exposes_call_moves() {
         pre_moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(0)),
             dst: Location::Stack(StackSlotId(1)),
+            size: 8,
         }],
         post_moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(1)),
             dst: Location::Stack(StackSlotId(2)),
+            size: 8,
         }],
     }];
     let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves);
@@ -164,10 +167,12 @@ fn test_codegen_block_stream_orders_call_moves() {
         pre_moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(0)),
             dst: Location::Stack(StackSlotId(1)),
+            size: 8,
         }],
         post_moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(1)),
             dst: Location::Stack(StackSlotId(2)),
+            size: 8,
         }],
     }];
     let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves);

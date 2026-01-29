@@ -298,11 +298,14 @@ impl<'a> TupleRule<'a> {
                     check_enum_pattern(&name, &variants, pattern, errors);
                 }
                 MatchPattern::Tuple { patterns, span } => {
-                    let Type::Tuple { .. } = peeled_ty else {
+                    let Type::Tuple {
+                        field_tys: nested_fields,
+                    } = peeled_ty
+                    else {
                         errors.push(SemCheckError::InvalidMatchPattern(peeled_ty, *span));
                         continue;
                     };
-                    self.check_tuple_pattern(&field_tys, patterns, *span, errors);
+                    self.check_tuple_pattern(&nested_fields, patterns, *span, errors);
                 }
             }
         }

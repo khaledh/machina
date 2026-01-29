@@ -28,7 +28,8 @@ impl Pass for MemOps {
                     InstKind::MemSet { dst, byte, len } => {
                         inst.kind = InstKind::Call {
                             callee: Callee::Runtime(RuntimeFn::MemSet),
-                            args: vec![*dst, *byte, *len],
+                            // Runtime ABI is (ptr, len, value).
+                            args: vec![*dst, *len, *byte],
                         };
                         inst.result = None;
                         changed = true;

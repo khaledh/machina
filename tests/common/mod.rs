@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use machina::compile::{CompileOptions, compile};
+use machina::compile::{BackendKind, CompileOptions, compile};
 use machina::targets::TargetKind;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -76,7 +76,8 @@ fn compile_source(source_path: &Path) -> machina::compile::CompileOutput {
     let opts = CompileOptions {
         dump: None,
         target: TargetKind::Arm64,
-        emit_mcir: false,
+        backend: BackendKind::Ssa,
+        emit_ir: false,
         trace_alloc: false,
     };
     compile(&source, &opts).expect("compile failed")

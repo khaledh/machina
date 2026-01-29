@@ -38,6 +38,31 @@ impl CodegenSink for DummySink {
     fn emit_terminator(&mut self, _term: &crate::ssa::model::ir::Terminator) {
         self.emitted_terms += 1;
     }
+
+    fn emit_branch(&mut self, _target: crate::ssa::codegen::graph::CodegenBlockId) {
+        self.emitted_terms += 1;
+    }
+
+    fn emit_cond_branch(
+        &mut self,
+        _cond: crate::ssa::model::ir::ValueId,
+        _then_target: crate::ssa::codegen::graph::CodegenBlockId,
+        _else_target: crate::ssa::codegen::graph::CodegenBlockId,
+    ) {
+        self.emitted_terms += 1;
+    }
+
+    fn emit_switch(
+        &mut self,
+        _value: crate::ssa::model::ir::ValueId,
+        _cases: &[(
+            crate::ssa::model::ir::ConstValue,
+            crate::ssa::codegen::graph::CodegenBlockId,
+        )],
+        _default_target: crate::ssa::codegen::graph::CodegenBlockId,
+    ) {
+        self.emitted_terms += 1;
+    }
 }
 
 #[test]
@@ -70,10 +95,12 @@ fn test_codegen_traverse_emits_moves_and_insts() {
         pre_moves: vec![crate::ssa::regalloc::moves::MoveOp {
             src: Location::Stack(crate::regalloc::stack::StackSlotId(0)),
             dst: Location::Stack(crate::regalloc::stack::StackSlotId(1)),
+            size: 8,
         }],
         post_moves: vec![crate::ssa::regalloc::moves::MoveOp {
             src: Location::Stack(crate::regalloc::stack::StackSlotId(1)),
             dst: Location::Stack(crate::regalloc::stack::StackSlotId(2)),
+            size: 8,
         }],
     }];
     let schedule = MoveSchedule::from_moves(&[], &call_moves);

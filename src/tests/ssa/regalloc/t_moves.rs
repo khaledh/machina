@@ -283,10 +283,12 @@ fn test_move_plan_resolves_cycle_with_scratch() {
                 MoveOp {
                     src: Location::Reg(PhysReg(0)),
                     dst: Location::Reg(PhysReg(1)),
+                    size: 8,
                 },
                 MoveOp {
                     src: Location::Reg(PhysReg(1)),
                     dst: Location::Reg(PhysReg(0)),
+                    size: 8,
                 },
             ],
         }],
@@ -300,21 +302,24 @@ fn test_move_plan_resolves_cycle_with_scratch() {
         moves[0],
         MoveOp {
             src: Location::Reg(reg),
-            dst: Location::Reg(dst)
+            dst: Location::Reg(dst),
+            ..
         } if reg == PhysReg(0) && dst == PhysReg(3)
     ));
     assert!(matches!(
         moves[1],
         MoveOp {
             src: Location::Reg(reg),
-            dst: Location::Reg(dst)
+            dst: Location::Reg(dst),
+            ..
         } if reg == PhysReg(1) && dst == PhysReg(0)
     ));
     assert!(matches!(
         moves[2],
         MoveOp {
             src: Location::Reg(reg),
-            dst: Location::Reg(dst)
+            dst: Location::Reg(dst),
+            ..
         } if reg == PhysReg(3) && dst == PhysReg(1)
     ));
 }

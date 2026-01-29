@@ -264,7 +264,7 @@ cargo mcc build -o output input.mc
 
 Use `--emit` to keep intermediate artifacts (otherwise `.s` is a temp file):
 ```
-cargo mcc build --emit asm,mcir input.mc
+cargo mcc build --emit asm,ir input.mc
 ```
 
 ## Testing

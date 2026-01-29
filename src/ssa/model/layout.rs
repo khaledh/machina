@@ -58,6 +58,10 @@ impl IrLayoutCache {
         layout
     }
 
+    pub fn invalidate(&mut self, ty: IrTypeId) {
+        self.layouts.remove(&ty);
+    }
+
     fn compute_layout(&mut self, types: &[IrTypeInfo], ty: IrTypeId) -> IrLayout {
         match &types[ty.index()].kind {
             IrTypeKind::Unit => IrLayout {

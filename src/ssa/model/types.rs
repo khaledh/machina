@@ -84,6 +84,15 @@ impl IrTypeCache {
         id
     }
 
+    pub fn add_placeholder_named(&mut self, name: String) -> IrTypeId {
+        self.add_named(IrTypeKind::Struct { fields: Vec::new() }, name)
+    }
+
+    pub fn update_kind(&mut self, id: IrTypeId, kind: IrTypeKind) {
+        self.types[id.index()].kind = kind;
+        self.layout_cache.invalidate(id);
+    }
+
     pub fn get(&self, id: IrTypeId) -> &IrTypeInfo {
         &self.types[id.index()]
     }

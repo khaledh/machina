@@ -29,18 +29,18 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
                 Ok(PlaceAddr { addr, value_ty })
             }
             sem::PlaceExprKind::TupleField { target, index } => {
-                let base = self.lower_place_addr(target)?;
-                let field_ty = self.lower_tuple_field_ty(target.ty, *index);
-                let addr = self.field_addr_typed(base.addr, *index, field_ty);
+                let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
+                let field_ty = self.lower_tuple_field_from_type(&base_ty, *index);
+                let addr = self.field_addr_typed(base_addr, *index, field_ty);
                 Ok(PlaceAddr {
                     addr,
                     value_ty: field_ty,
                 })
             }
             sem::PlaceExprKind::StructField { target, field } => {
-                let base = self.lower_place_addr(target)?;
-                let (field_index, field_ty) = self.lower_struct_field_ty(target.ty, field);
-                let addr = self.field_addr_typed(base.addr, field_index, field_ty);
+                let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
+                let (field_index, field_ty) = self.lower_struct_field_from_type(&base_ty, field);
+                let addr = self.field_addr_typed(base_addr, field_index, field_ty);
                 Ok(PlaceAddr {
                     addr,
                     value_ty: field_ty,
@@ -60,13 +60,20 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
                         // Walk indices and compute element/sub-array type in each step.
                         for index_expr in indices {
                             let index_val = self.lower_linear_value_expr(index_expr)?;
+                            let Type::Array { dims, .. } = &curr_ty else {
+                                panic!("ssa array index too many indices for {:?}", curr_ty);
+                            };
+                            let len = dims.first().copied().unwrap_or_else(|| {
+                                panic!("ssa array index missing dims {:?}", curr_ty)
+                            });
                             let next_ty = curr_ty.array_item_type().unwrap_or_else(|| {
                                 panic!("ssa array index too many indices for {:?}", curr_ty);
                             });
 
                             let elem_ir_ty = self.type_lowerer.lower_type(&next_ty);
                             let ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                            base_addr = self.builder.index_addr(base_addr, index_val, ptr_ty);
+                            let view = self.load_array_view(base_addr, ptr_ty, len as u64);
+                            base_addr = self.index_with_bounds(view, index_val, ptr_ty);
 
                             curr_ty = next_ty;
                         }
@@ -147,6 +154,56 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
         field: &str,
     ) -> (usize, crate::ssa::IrTypeId) {
         match self.type_map.type_table().get(ty_id) {
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .enumerate()
+                .find(|(_, f)| f.name == field)
+                .map(|(idx, f)| (idx, self.type_lowerer.lower_type(&f.ty)))
+                .unwrap_or_else(|| panic!("ssa struct field not found: {}", field)),
+            other => panic!("ssa struct field on non-struct type {:?}", other),
+        }
+    }
+
+    fn lower_place_deref_base(
+        &mut self,
+        target: &sem::PlaceExpr,
+    ) -> Result<(ValueId, Type), LoweringError> {
+        let mut base = self.lower_place_addr(target)?;
+        let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
+
+        loop {
+            let elem_ty = match curr_ty {
+                Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                _ => break,
+            };
+
+            let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+            let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+            base.addr = self.builder.load(base.addr, ptr_ir_ty);
+            curr_ty = (*elem_ty).clone();
+        }
+
+        Ok((base.addr, curr_ty))
+    }
+
+    fn lower_tuple_field_from_type(&mut self, ty: &Type, index: usize) -> crate::ssa::IrTypeId {
+        match ty {
+            Type::Tuple { field_tys } => {
+                let field_ty = field_tys
+                    .get(index)
+                    .unwrap_or_else(|| panic!("ssa tuple field out of range {index}"));
+                self.type_lowerer.lower_type(field_ty)
+            }
+            other => panic!("ssa tuple field on non-tuple type {:?}", other),
+        }
+    }
+
+    fn lower_struct_field_from_type(
+        &mut self,
+        ty: &Type,
+        field: &str,
+    ) -> (usize, crate::ssa::IrTypeId) {
+        match ty {
             Type::Struct { fields, .. } => fields
                 .iter()
                 .enumerate()

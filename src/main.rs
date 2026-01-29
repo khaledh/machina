@@ -1,5 +1,5 @@
 use clap::Parser as ClapParser;
-use machina::compile::{CompileOptions, compile};
+use machina::compile::{BackendKind, CompileOptions, compile};
 use machina::diag::{CompileError, Span, format_error};
 use machina::targets::TargetKind;
 use std::ffi::OsStr;
@@ -30,13 +30,17 @@ struct Args {
     #[clap(long, value_enum, default_value_t = TargetKind::Arm64, global = true)]
     target: TargetKind,
 
-    /// Comma-separated list of artifacts to emit: [asm, mcir]
+    /// Comma-separated list of artifacts to emit: [asm, ir]
     #[clap(long, value_delimiter = ',', global = true)]
     emit: Vec<EmitKind>,
 
     /// Emit allocation trace messages from the runtime.
     #[clap(long = "trace-alloc", global = true)]
     trace_alloc: bool,
+
+    /// Backend pipeline to use: legacy MCIR or new SSA.
+    #[clap(long, value_enum, default_value_t = BackendKind::Ssa, global = true)]
+    backend: BackendKind,
 }
 
 #[derive(clap::Subcommand)]
@@ -66,7 +70,7 @@ enum Command {
 #[derive(clap::ValueEnum, Clone)]
 enum EmitKind {
     Asm,
-    Mcir,
+    Ir,
 }
 
 #[derive(Copy, Clone)]
@@ -94,6 +98,7 @@ fn main() {
         target,
         emit,
         trace_alloc,
+        backend,
     } = Args::parse();
     let invocation = match cmd {
         Command::Compile { input, output } => DriverInvocation {
@@ -121,21 +126,22 @@ fn main() {
         }
     };
     let emit_asm = emit.iter().any(|kind| matches!(kind, EmitKind::Asm));
-    let emit_mcir = emit.iter().any(|kind| matches!(kind, EmitKind::Mcir));
+    let emit_ir = emit.iter().any(|kind| matches!(kind, EmitKind::Ir));
     let opts = CompileOptions {
         dump,
         target,
-        emit_mcir,
+        emit_ir,
         trace_alloc,
+        backend,
     };
     let output = compile(&source, &opts);
 
     match output {
         Ok(output) => {
-            if let Some(mcir) = output.mcir {
-                let mcir_path = input_path.with_extension("mcir");
-                if let Err(e) = std::fs::write(&mcir_path, mcir) {
-                    eprintln!("[WARN] failed to write {}: {e}", mcir_path.display());
+            if let Some(ir) = output.ir {
+                let ir_path = input_path.with_extension("ir");
+                if let Err(e) = std::fs::write(&ir_path, ir) {
+                    eprintln!("[WARN] failed to write {}: {e}", ir_path.display());
                 }
             }
 
@@ -228,6 +234,9 @@ fn main() {
                         println!("{}", format_error(&source, e.span(), e));
                     }
                     CompileError::Lower(e) => {
+                        println!("{}", format_error(&source, Span::default(), e));
+                    }
+                    CompileError::SsaLowering(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
                     CompileError::Codegen(e) => {

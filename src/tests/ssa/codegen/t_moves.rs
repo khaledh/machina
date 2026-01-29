@@ -156,6 +156,7 @@ fn test_codegen_edge_move_plan_splits_on_multi_succ() {
         moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(0)),
             dst: Location::Stack(StackSlotId(1)),
+            size: 8,
         }],
     }];
     let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
@@ -217,6 +218,7 @@ fn test_codegen_edge_move_plan_inserts_in_pred() {
         moves: vec![MoveOp {
             src: Location::Stack(StackSlotId(0)),
             dst: Location::Stack(StackSlotId(1)),
+            size: 8,
         }],
     }];
     let schedule = MoveSchedule::from_moves(&edge_moves, &[]);

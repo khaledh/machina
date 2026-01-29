@@ -4,9 +4,12 @@ use std::fmt::Write;
 
 use crate::regalloc::target::PhysReg;
 use crate::ssa::IrTypeKind;
+use crate::ssa::RuntimeFn;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver, binop_mnemonic};
+use crate::ssa::codegen::graph::CodegenBlockId;
 use crate::ssa::model::ir::{
-    Callee, CastKind, CmpOp, ConstValue, GlobalData, InstKind, Instruction, Terminator, UnOp,
+    BinOp, Callee, CastKind, CmpOp, ConstValue, GlobalData, InstKind, Instruction, Terminator,
+    UnOp, ValueId,
 };
 use crate::ssa::regalloc::moves::MoveOp;
 use crate::ssa::regalloc::{Location, StackSlotId};
@@ -73,6 +76,7 @@ pub struct Arm64Emitter {
     /// Callee-saved registers to save/restore in the prologue/epilogue.
     callee_saved: Vec<PhysReg>,
     section: AsmSection,
+    block_prefix: String,
 }
 
 impl Arm64Emitter {
@@ -86,6 +90,7 @@ impl Arm64Emitter {
             },
             callee_saved: Vec::new(),
             section: AsmSection::None,
+            block_prefix: String::new(),
         }
     }
 
@@ -94,29 +99,156 @@ impl Arm64Emitter {
     }
 
     fn reg_name(reg: PhysReg) -> &'static str {
-        match reg.0 {
-            0 => "x0",
-            1 => "x1",
-            2 => "x2",
-            3 => "x3",
-            4 => "x4",
-            5 => "x5",
-            6 => "x6",
-            7 => "x7",
-            8 => "x8",
-            9 => "x9",
-            10 => "x10",
-            11 => "x11",
-            _ => "x9",
-        }
+        const REG_NAMES: [&str; 31] = [
+            "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+            "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23", "x24", "x25",
+            "x26", "x27", "x28", "x29", "x30",
+        ];
+        REG_NAMES
+            .get(reg.0 as usize)
+            .copied()
+            .unwrap_or_else(|| panic!("ssa codegen: unsupported phys reg x{}", reg.0))
     }
 
     fn emit_line(&mut self, line: &str) {
         let _ = writeln!(self.output, "  {}", line);
     }
 
+    fn emit_mov_imm(&mut self, dst: &str, value: i128, bits: u8) {
+        if bits == 0 {
+            self.emit_line(&format!("mov {}, #0", dst));
+            return;
+        }
+
+        let reg = if bits <= 32 {
+            Self::w_reg(dst)
+        } else {
+            dst.to_string()
+        };
+
+        let mask = if bits >= 64 {
+            u128::MAX
+        } else {
+            (1u128 << bits) - 1
+        };
+        let imm = (value as i128 as u128) & mask;
+
+        if imm == 0 {
+            self.emit_line(&format!("mov {}, #0", reg));
+            return;
+        }
+
+        let max_shift = match bits {
+            0..=16 => 0,
+            17..=32 => 16,
+            33..=48 => 32,
+            _ => 48,
+        };
+        let mut emitted = false;
+        for shift in (0..=max_shift).step_by(16) {
+            let chunk = (imm >> shift) & 0xffff;
+            if chunk == 0 {
+                continue;
+            }
+            if !emitted {
+                if shift == 0 {
+                    self.emit_line(&format!("movz {}, #{}", reg, chunk));
+                } else {
+                    self.emit_line(&format!("movz {}, #{}, lsl #{}", reg, chunk, shift));
+                }
+                emitted = true;
+            } else if shift == 0 {
+                self.emit_line(&format!("movk {}, #{}", reg, chunk));
+            } else {
+                self.emit_line(&format!("movk {}, #{}, lsl #{}", reg, chunk, shift));
+            }
+        }
+    }
+
+    fn emit_sp_offset_addr(&mut self, dst: &str, offset: u32) {
+        if offset <= 4095 {
+            self.emit_line(&format!("add {}, sp, #{}", dst, offset));
+            return;
+        }
+
+        // Materialize large offsets into a register, then add to SP.
+        let mut remaining = offset;
+        let mut shift = 0;
+        self.emit_line(&format!("mov {}, #0", dst));
+        while remaining > 0 {
+            let chunk = (remaining & 0xffff) as u16;
+            if chunk != 0 {
+                self.emit_line(&format!("movk {}, #{}, lsl #{}", dst, chunk, shift));
+            }
+            remaining >>= 16;
+            shift += 16;
+        }
+        self.emit_line(&format!("add {}, sp, {}", dst, dst));
+    }
+
+    fn emit_stp_sp(&mut self, reg0: PhysReg, reg1: PhysReg, offset: u32) {
+        if offset <= 504 && offset % 8 == 0 {
+            self.emit_line(&format!(
+                "stp {}, {}, [sp, #{}]",
+                Self::reg_name(reg0),
+                Self::reg_name(reg1),
+                offset
+            ));
+            return;
+        }
+
+        self.emit_sp_offset_addr("x9", offset);
+        self.emit_line(&format!(
+            "stp {}, {}, [x9]",
+            Self::reg_name(reg0),
+            Self::reg_name(reg1)
+        ));
+    }
+
+    fn emit_ldp_sp(&mut self, reg0: PhysReg, reg1: PhysReg, offset: u32) {
+        if offset <= 504 && offset % 8 == 0 {
+            self.emit_line(&format!(
+                "ldp {}, {}, [sp, #{}]",
+                Self::reg_name(reg0),
+                Self::reg_name(reg1),
+                offset
+            ));
+            return;
+        }
+
+        self.emit_sp_offset_addr("x9", offset);
+        self.emit_line(&format!(
+            "ldp {}, {}, [x9]",
+            Self::reg_name(reg0),
+            Self::reg_name(reg1)
+        ));
+    }
+
+    fn emit_str_sp(&mut self, reg: PhysReg, offset: u32) {
+        if offset <= 4095 {
+            self.emit_line(&format!("str {}, [sp, #{}]", Self::reg_name(reg), offset));
+            return;
+        }
+
+        self.emit_sp_offset_addr("x9", offset);
+        self.emit_line(&format!("str {}, [x9]", Self::reg_name(reg)));
+    }
+
+    fn emit_ldr_sp(&mut self, reg: PhysReg, offset: u32) {
+        if offset <= 4095 {
+            self.emit_line(&format!("ldr {}, [sp, #{}]", Self::reg_name(reg), offset));
+            return;
+        }
+
+        self.emit_sp_offset_addr("x9", offset);
+        self.emit_line(&format!("ldr {}, [x9]", Self::reg_name(reg)));
+    }
+
     fn ensure_text(&mut self) {
         if self.section != AsmSection::Text {
+            if !self.output.is_empty() {
+                let _ = writeln!(self.output);
+            }
             let _ = writeln!(self.output, ".text");
             self.section = AsmSection::Text;
         }
@@ -124,9 +256,23 @@ impl Arm64Emitter {
 
     fn ensure_data(&mut self) {
         if self.section != AsmSection::Data {
+            if !self.output.is_empty() {
+                let _ = writeln!(self.output);
+            }
             let _ = writeln!(self.output, ".data");
             self.section = AsmSection::Data;
         }
+    }
+
+    fn codegen_label(&self, id: CodegenBlockId) -> String {
+        match id {
+            CodegenBlockId::Ssa(id) => format!("{}_bb{}", self.block_prefix, id.0),
+            CodegenBlockId::Move(id) => format!("{}_mb{}", self.block_prefix, id.0),
+        }
+    }
+
+    fn global_label(id: crate::ssa::model::ir::GlobalId) -> String {
+        format!("_g{}", id.0)
     }
 
     fn cmp_condition(op: CmpOp) -> &'static str {
@@ -140,23 +286,62 @@ impl Arm64Emitter {
         }
     }
 
-    fn load_value(&mut self, loc: Location, scratch: &str) -> String {
+    fn scalar_size(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> u32 {
+        match locs.types.kind(ty) {
+            IrTypeKind::Unit => 0,
+            IrTypeKind::Bool => 1,
+            IrTypeKind::Int { bits, .. } => (*bits as u32) / 8,
+            IrTypeKind::Ptr { .. } | IrTypeKind::Fn { .. } => 8,
+            _ => locs.layout(ty).size() as u32,
+        }
+    }
+
+    fn reg_for_type(locs: &LocationResolver, ty: crate::ssa::IrTypeId, reg: PhysReg) -> String {
+        let name = Self::reg_name(reg).to_string();
+        let size = Self::scalar_size(locs, ty);
+        if size > 0 && size <= 4 {
+            Self::w_reg(&name)
+        } else {
+            name
+        }
+    }
+
+    fn load_value_typed(
+        &mut self,
+        locs: &LocationResolver,
+        loc: Location,
+        ty: crate::ssa::IrTypeId,
+        scratch: &str,
+    ) -> String {
+        let size = Self::scalar_size(locs, ty);
         match loc {
-            Location::Reg(reg) => Self::reg_name(reg).to_string(),
+            Location::Reg(reg) => Self::reg_for_type(locs, ty, reg),
             Location::Stack(slot) => {
                 let offset = self.stack_offset(slot);
-                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
-                scratch.to_string()
+                self.emit_load_sized(scratch, offset, size);
+                if size > 0 && size <= 4 {
+                    Self::w_reg(scratch)
+                } else {
+                    scratch.to_string()
+                }
             }
             Location::IncomingArg(offset) => {
                 let offset = self.layout.incoming_offset(offset);
-                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
-                scratch.to_string()
+                self.emit_load_sized(scratch, offset, size);
+                if size > 0 && size <= 4 {
+                    Self::w_reg(scratch)
+                } else {
+                    scratch.to_string()
+                }
             }
             Location::OutgoingArg(offset) => {
                 let offset = self.layout.outgoing_offset(offset);
-                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
-                scratch.to_string()
+                self.emit_load_sized(scratch, offset, size);
+                if size > 0 && size <= 4 {
+                    Self::w_reg(scratch)
+                } else {
+                    scratch.to_string()
+                }
             }
             Location::StackAddr(slot) => {
                 let offset = self.stack_offset(slot);
@@ -166,24 +351,146 @@ impl Arm64Emitter {
         }
     }
 
-    fn value_dst(
+    fn emit_load_sized(&mut self, scratch: &str, offset: u32, size: u32) {
+        match size {
+            0 => {}
+            1 => {
+                let w = Self::w_reg(scratch);
+                self.emit_line(&format!("ldrb {}, [sp, #{}]", w, offset));
+            }
+            2 => {
+                let w = Self::w_reg(scratch);
+                self.emit_line(&format!("ldrh {}, [sp, #{}]", w, offset));
+            }
+            4 => {
+                let w = Self::w_reg(scratch);
+                self.emit_line(&format!("ldr {}, [sp, #{}]", w, offset));
+            }
+            8 => {
+                self.emit_line(&format!("ldr {}, [sp, #{}]", scratch, offset));
+            }
+            other => {
+                panic!("ssa codegen: unsupported scalar load size {other}");
+            }
+        }
+    }
+
+    fn value_dst_typed(
         &mut self,
+        locs: &LocationResolver,
         dst: Location,
         scratch: &str,
         context: &str,
+        ty: crate::ssa::IrTypeId,
     ) -> (String, Option<StackSlotId>) {
         match dst {
-            Location::Reg(reg) => (Self::reg_name(reg).to_string(), None),
-            Location::Stack(slot) => (scratch.to_string(), Some(slot)),
+            Location::Reg(reg) => (Self::reg_for_type(locs, ty, reg), None),
+            Location::Stack(slot) => {
+                let size = Self::scalar_size(locs, ty);
+                if size > 0 && size <= 4 {
+                    (Self::w_reg(scratch), Some(slot))
+                } else {
+                    (scratch.to_string(), Some(slot))
+                }
+            }
             other => {
                 panic!("ssa codegen: invalid {} dst {:?}", context, other);
             }
         }
     }
 
-    fn store_if_needed(&mut self, slot: Option<StackSlotId>, reg: &str) {
+    fn store_if_needed_typed(
+        &mut self,
+        locs: &LocationResolver,
+        slot: Option<StackSlotId>,
+        reg: &str,
+        ty: crate::ssa::IrTypeId,
+    ) {
         if let Some(slot) = slot {
-            self.emit_line(&format!("str {}, [sp, #{}]", reg, self.stack_offset(slot)));
+            let size = Self::scalar_size(locs, ty);
+            let offset = self.stack_offset(slot);
+            match size {
+                0 => {}
+                1 => {
+                    let w = Self::w_reg(reg);
+                    self.emit_line(&format!("strb {}, [sp, #{}]", w, offset));
+                }
+                2 => {
+                    let w = Self::w_reg(reg);
+                    self.emit_line(&format!("strh {}, [sp, #{}]", w, offset));
+                }
+                4 => {
+                    let w = Self::w_reg(reg);
+                    self.emit_line(&format!("str {}, [sp, #{}]", w, offset));
+                }
+                8 => {
+                    self.emit_line(&format!("str {}, [sp, #{}]", reg, offset));
+                }
+                other => {
+                    panic!("ssa codegen: unsupported scalar store size {other}");
+                }
+            }
+        }
+    }
+
+    fn is_reg_type(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> bool {
+        matches!(
+            locs.types.kind(ty),
+            IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. }
+        )
+    }
+
+    fn copy_ptr_to_stack(&mut self, src_reg: &str, dst_offset: u32, size: u32) {
+        let mut offset = 0u32;
+
+        while offset + 8 <= size {
+            self.emit_line(&format!("ldr x14, [{}, #{}]", src_reg, offset));
+            self.emit_line(&format!("str x14, [sp, #{}]", dst_offset + offset));
+            offset += 8;
+        }
+
+        if offset + 4 <= size {
+            self.emit_line(&format!("ldr w14, [{}, #{}]", src_reg, offset));
+            self.emit_line(&format!("str w14, [sp, #{}]", dst_offset + offset));
+            offset += 4;
+        }
+
+        if offset + 2 <= size {
+            self.emit_line(&format!("ldrh w14, [{}, #{}]", src_reg, offset));
+            self.emit_line(&format!("strh w14, [sp, #{}]", dst_offset + offset));
+            offset += 2;
+        }
+
+        if offset < size {
+            self.emit_line(&format!("ldrb w14, [{}, #{}]", src_reg, offset));
+            self.emit_line(&format!("strb w14, [sp, #{}]", dst_offset + offset));
+        }
+    }
+
+    fn copy_stack_to_ptr(&mut self, src_offset: u32, dst_reg: &str, size: u32) {
+        let mut offset = 0u32;
+
+        while offset + 8 <= size {
+            self.emit_line(&format!("ldr x14, [sp, #{}]", src_offset + offset));
+            self.emit_line(&format!("str x14, [{}, #{}]", dst_reg, offset));
+            offset += 8;
+        }
+
+        if offset + 4 <= size {
+            self.emit_line(&format!("ldr w14, [sp, #{}]", src_offset + offset));
+            self.emit_line(&format!("str w14, [{}, #{}]", dst_reg, offset));
+            offset += 4;
+        }
+
+        if offset + 2 <= size {
+            self.emit_line(&format!("ldrh w14, [sp, #{}]", src_offset + offset));
+            self.emit_line(&format!("strh w14, [{}, #{}]", dst_reg, offset));
+            offset += 2;
+        }
+
+        if offset < size {
+            self.emit_line(&format!("ldrb w14, [sp, #{}]", src_offset + offset));
+            self.emit_line(&format!("strb w14, [{}, #{}]", dst_reg, offset));
         }
     }
 
@@ -191,14 +498,37 @@ impl Arm64Emitter {
         // Stack slots live below the callee-saved area at the top of the frame.
         self.layout.slot_offset(slot)
     }
+
+    fn saved_reg_offset(&self, reg: PhysReg) -> Option<u32> {
+        let idx = self.callee_saved.iter().position(|saved| *saved == reg)?;
+        let base = self.layout.saved_base();
+        let pair = (idx / 2) as u32;
+        let lane = (idx % 2) as u32;
+        Some(base + pair * 16 + lane * 8)
+    }
+
+    fn w_reg(reg: &str) -> String {
+        reg.strip_prefix('x')
+            .map(|suffix| format!("w{}", suffix))
+            .unwrap_or_else(|| reg.to_string())
+    }
+
+    fn x_reg(reg: &str) -> String {
+        reg.strip_prefix('w')
+            .map(|suffix| format!("x{}", suffix))
+            .unwrap_or_else(|| reg.to_string())
+    }
 }
 
 impl CodegenEmitter for Arm64Emitter {
     fn emit_global(&mut self, global: &GlobalData) {
         self.ensure_data();
+        if !self.output.is_empty() {
+            let _ = writeln!(self.output);
+        }
 
         // Emit a stable label for the global payload.
-        let label = format!("g{}", global.id.0);
+        let label = Self::global_label(global.id);
 
         // Align the data so references can use natural alignment.
         let align = global.align.max(1);
@@ -227,9 +557,18 @@ impl CodegenEmitter for Arm64Emitter {
 
     fn begin_function(&mut self, name: &str, frame_size: u32, callee_saved: &[PhysReg]) {
         self.ensure_text();
+        if !self.output.is_empty() {
+            let _ = writeln!(self.output);
+        }
+        self.block_prefix = format!(".L{}", name);
+        let _ = writeln!(self.output, ".globl {}", name);
         // Capture the callee-saved set so we can restore it in the epilogue.
         self.callee_saved = callee_saved.to_vec();
-        let saved_size = (callee_saved.len() as u32) * 8;
+        if !self.callee_saved.iter().any(|reg| reg.0 == 30) {
+            self.callee_saved.push(PhysReg(30));
+        }
+        self.callee_saved.sort_by_key(|reg| reg.0);
+        let saved_size = (self.callee_saved.len() as u32) * 8;
         // Lay out the frame as: [callee-saved area][local/slot area], aligned to 16 bytes.
         self.layout = FrameLayout::new(frame_size, saved_size);
 
@@ -252,20 +591,80 @@ impl CodegenEmitter for Arm64Emitter {
                 let reg0 = callee_saved[idx];
                 let reg1 = callee_saved[idx + 1];
                 let offset = base + (pair as u32) * 16;
-                self.emit_line(&format!(
-                    "stp {}, {}, [sp, #{}]",
-                    Self::reg_name(reg0),
-                    Self::reg_name(reg1),
-                    offset
-                ));
+                self.emit_stp_sp(reg0, reg1, offset);
             }
 
             // Handle a trailing register if the count is odd.
             if callee_saved.len() % 2 == 1 {
                 let reg = callee_saved[pair_count * 2];
                 let offset = base + (pair_count as u32) * 16;
-                self.emit_line(&format!("str {}, [sp, #{}]", Self::reg_name(reg), offset));
+                self.emit_str_sp(reg, offset);
             }
+        }
+    }
+
+    fn emit_param_moves(
+        &mut self,
+        func: &crate::ssa::model::ir::Function,
+        locs: &crate::ssa::codegen::emitter::LocationResolver,
+    ) {
+        const PARAM_REG_COUNT: usize = 8;
+        let Some(entry) = func.blocks.first() else {
+            return;
+        };
+
+        let mut moves = Vec::new();
+        for (idx, param) in entry.params.iter().enumerate() {
+            if idx >= PARAM_REG_COUNT {
+                continue;
+            }
+
+            let ty = locs.value_ty(param.value.id);
+            let dst = locs.value(param.value.id);
+            let src = Location::Reg(PhysReg(idx as u8));
+
+            if Self::is_reg_type(locs, ty) {
+                if src != dst {
+                    let size = locs.layout(ty).size() as u32;
+                    moves.push(MoveOp { src, dst, size });
+                }
+            }
+        }
+
+        if !moves.is_empty() {
+            self.emit_moves(&moves);
+        }
+
+        for (idx, param) in entry.params.iter().enumerate() {
+            let ty = locs.value_ty(param.value.id);
+            if Self::is_reg_type(locs, ty) {
+                continue;
+            }
+
+            let Location::Stack(slot) = locs.value(param.value.id) else {
+                panic!(
+                    "ssa codegen: aggregate param must be stack-backed, got {:?}",
+                    locs.value(param.value.id)
+                );
+            };
+
+            let size = locs.layout(ty).size() as u32;
+            if size == 0 {
+                continue;
+            }
+
+            let src_reg = if idx < PARAM_REG_COUNT {
+                Self::reg_name(PhysReg(idx as u8))
+            } else {
+                let offset = self
+                    .layout
+                    .incoming_offset((idx - PARAM_REG_COUNT) as u32 * 8);
+                self.emit_ldr_sp(PhysReg(15), offset);
+                "x15"
+            };
+
+            let dst_offset = self.stack_offset(slot);
+            self.copy_ptr_to_stack(src_reg, dst_offset, size);
         }
     }
 
@@ -275,49 +674,206 @@ impl CodegenEmitter for Arm64Emitter {
 
     fn emit_moves(&mut self, moves: &[MoveOp]) {
         for mov in moves {
+            if mov.size == 0 {
+                continue;
+            }
             match (mov.src, mov.dst) {
                 (Location::Reg(src), Location::Reg(dst)) => {
-                    self.emit_line(&format!(
-                        "mov {}, {}",
-                        Self::reg_name(dst),
-                        Self::reg_name(src)
-                    ));
+                    if mov.size <= 4 {
+                        let dst = Self::w_reg(Self::reg_name(dst));
+                        let src = Self::w_reg(Self::reg_name(src));
+                        self.emit_line(&format!("mov {}, {}", dst, src));
+                    } else {
+                        self.emit_line(&format!(
+                            "mov {}, {}",
+                            Self::reg_name(dst),
+                            Self::reg_name(src)
+                        ));
+                    }
                 }
                 (Location::Reg(src), Location::Stack(dst)) => {
-                    self.emit_line(&format!(
-                        "str {}, [sp, #{}]",
-                        Self::reg_name(src),
-                        self.stack_offset(dst)
-                    ));
+                    let offset = self.stack_offset(dst);
+                    match mov.size {
+                        1 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strb {}, [sp, #{}]", src, offset));
+                        }
+                        2 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strh {}, [sp, #{}]", src, offset));
+                        }
+                        4 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("str {}, [sp, #{}]", src, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "str {}, [sp, #{}]",
+                                Self::reg_name(src),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported reg->stack move size {other}");
+                        }
+                    }
                 }
                 (Location::Stack(src), Location::Reg(dst)) => {
-                    self.emit_line(&format!(
-                        "ldr {}, [sp, #{}]",
-                        Self::reg_name(dst),
-                        self.stack_offset(src)
-                    ));
+                    let offset = self.stack_offset(src);
+                    match mov.size {
+                        1 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldrb {}, [sp, #{}]", dst, offset));
+                        }
+                        2 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldrh {}, [sp, #{}]", dst, offset));
+                        }
+                        4 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldr {}, [sp, #{}]", dst, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "ldr {}, [sp, #{}]",
+                                Self::reg_name(dst),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported stack->reg move size {other}");
+                        }
+                    }
                 }
                 (Location::Stack(src), Location::Stack(dst)) => {
-                    self.emit_line(&format!("ldr x9, [sp, #{}]", self.stack_offset(src)));
-                    self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
+                    let src_offset = self.stack_offset(src);
+                    let dst_offset = self.stack_offset(dst);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", dst_offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", dst_offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", dst_offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
+                        }
+                        other => {
+                            self.emit_line(&format!("add x9, sp, #{}", src_offset));
+                            self.copy_ptr_to_stack("x9", dst_offset, other);
+                        }
+                    }
                 }
                 (Location::Reg(src), Location::OutgoingArg(offset)) => {
                     let offset = self.layout.outgoing_offset(offset);
-                    self.emit_line(&format!("str {}, [sp, #{}]", Self::reg_name(src), offset));
+                    match mov.size {
+                        1 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strb {}, [sp, #{}]", src, offset));
+                        }
+                        2 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strh {}, [sp, #{}]", src, offset));
+                        }
+                        4 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("str {}, [sp, #{}]", src, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "str {}, [sp, #{}]",
+                                Self::reg_name(src),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported reg->outgoing move size {other}");
+                        }
+                    }
                 }
                 (Location::Stack(src), Location::OutgoingArg(offset)) => {
                     let offset = self.layout.outgoing_offset(offset);
-                    self.emit_line(&format!("ldr x9, [sp, #{}]", self.stack_offset(src)));
-                    self.emit_line(&format!("str x9, [sp, #{}]", offset));
+                    let src_offset = self.stack_offset(src);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", offset));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported stack->outgoing move size {other}");
+                        }
+                    }
                 }
                 (Location::IncomingArg(offset), Location::Reg(dst)) => {
                     let offset = self.layout.incoming_offset(offset);
-                    self.emit_line(&format!("ldr {}, [sp, #{}]", Self::reg_name(dst), offset));
+                    match mov.size {
+                        1 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldrb {}, [sp, #{}]", dst, offset));
+                        }
+                        2 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldrh {}, [sp, #{}]", dst, offset));
+                        }
+                        4 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldr {}, [sp, #{}]", dst, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "ldr {}, [sp, #{}]",
+                                Self::reg_name(dst),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported incoming->reg move size {other}");
+                        }
+                    }
                 }
                 (Location::IncomingArg(offset), Location::Stack(dst)) => {
                     let offset = self.layout.incoming_offset(offset);
-                    self.emit_line(&format!("ldr x9, [sp, #{}]", offset));
-                    self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
+                    let dst_offset = self.stack_offset(dst);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", dst_offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", dst_offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", dst_offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported incoming->stack move size {other}");
+                        }
+                    }
                 }
                 (Location::StackAddr(src), Location::Reg(dst)) => {
                     let offset = self.stack_offset(src);
@@ -327,6 +883,12 @@ impl CodegenEmitter for Arm64Emitter {
                     let offset = self.stack_offset(src);
                     self.emit_line(&format!("add x9, sp, #{}", offset));
                     self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
+                }
+                (Location::StackAddr(src), Location::OutgoingArg(offset)) => {
+                    let src_offset = self.stack_offset(src);
+                    let out_offset = self.layout.outgoing_offset(offset);
+                    self.emit_line(&format!("add x9, sp, #{}", src_offset));
+                    self.emit_line(&format!("str x9, [sp, #{}]", out_offset));
                 }
                 _ => {
                     panic!(
@@ -344,32 +906,41 @@ impl CodegenEmitter for Arm64Emitter {
                 // Materialize immediates into a register or stack slot.
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
+                    let dst_ty = locs.value_ty(result.id);
                     match value {
                         ConstValue::Int { .. } | ConstValue::Bool(_) | ConstValue::Unit => {
-                            let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "const");
-                            self.emit_line(&format!("mov {}, #{}", dst_reg, value.as_int()));
-                            self.store_if_needed(dst_slot, &dst_reg);
+                            let (dst_reg, dst_slot) =
+                                self.value_dst_typed(locs, dst, "x9", "const", dst_ty);
+                            let size = Self::scalar_size(locs, dst_ty);
+                            let bits = (size.saturating_mul(8)) as u8;
+                            self.emit_mov_imm(&dst_reg, value.as_int(), bits);
+                            self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                         }
                         ConstValue::FuncAddr { def } => {
-                            let label = format!("fn{}", def.0);
-                            let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "const func");
-                            self.emit_line(&format!("adrp {}, {}", dst_reg, label));
+                            let label = locs
+                                .def_name(*def)
+                                .map(|name| format!("_{}", name))
+                                .unwrap_or_else(|| format!("_fn{}", def.0));
+                            let (dst_reg, dst_slot) =
+                                self.value_dst_typed(locs, dst, "x9", "const func", dst_ty);
+                            self.emit_line(&format!("adrp {}, {}@PAGE", dst_reg, label));
                             self.emit_line(&format!(
-                                "add {}, {}, :lo12:{}",
+                                "add {}, {}, {}@PAGEOFF",
                                 dst_reg, dst_reg, label
                             ));
-                            self.store_if_needed(dst_slot, &dst_reg);
+                            self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                         }
                         ConstValue::GlobalAddr { id } => {
                             // TODO: ensure SSA codegen emits global data labels.
-                            let label = format!("g{}", id.0);
-                            let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "const global");
-                            self.emit_line(&format!("adrp {}, {}", dst_reg, label));
+                            let label = Self::global_label(*id);
+                            let (dst_reg, dst_slot) =
+                                self.value_dst_typed(locs, dst, "x9", "const global", dst_ty);
+                            self.emit_line(&format!("adrp {}, {}@PAGE", dst_reg, label));
                             self.emit_line(&format!(
-                                "add {}, {}, :lo12:{}",
+                                "add {}, {}, {}@PAGEOFF",
                                 dst_reg, dst_reg, label
                             ));
-                            self.store_if_needed(dst_slot, &dst_reg);
+                            self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                         }
                     }
                 }
@@ -377,25 +948,67 @@ impl CodegenEmitter for Arm64Emitter {
             InstKind::BinOp { op, lhs, rhs } => {
                 // Binary arithmetic/logical ops on integer registers.
                 if let Some(result) = &inst.result {
-                    let lhs = locs.value(*lhs);
-                    let rhs = locs.value(*rhs);
-                    let lhs_reg = self.load_value(lhs, "x9");
-                    let rhs_reg = self.load_value(rhs, "x10");
+                    let lhs_id = *lhs;
+                    let rhs_id = *rhs;
+                    let lhs = locs.value(lhs_id);
+                    let rhs = locs.value(rhs_id);
+                    let lhs_ty = locs.value_ty(lhs_id);
+                    let rhs_ty = locs.value_ty(rhs_id);
+                    let lhs_reg = self.load_value_typed(locs, lhs, lhs_ty, "x9");
+                    let rhs_reg = self.load_value_typed(locs, rhs, rhs_ty, "x10");
                     let dst = locs.value(result.id);
-                    let (dst_reg, dst_slot) = self.value_dst(dst, "x11", "binop");
-                    let op = binop_mnemonic(*op);
-                    self.emit_line(&format!("{} {}, {}, {}", op, dst_reg, lhs_reg, rhs_reg));
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, "x11", "binop", dst_ty);
+                    match op {
+                        BinOp::Mod => {
+                            // ARM64 has no smod/umod: use div + msub.
+                            let signed = match locs.types.kind(locs.value_ty(result.id)) {
+                                IrTypeKind::Int { signed, .. } => *signed,
+                                _ => true,
+                            };
+                            let narrow = dst_reg.starts_with('w');
+                            let q_reg = if narrow { "w12" } else { "x12" };
+                            let q_alt = if narrow { "w13" } else { "x13" };
+                            let q_reg = if dst_reg != q_reg && lhs_reg != q_reg && rhs_reg != q_reg
+                            {
+                                q_reg
+                            } else {
+                                q_alt
+                            };
+                            let div_op = if signed { "sdiv" } else { "udiv" };
+                            self.emit_line(&format!(
+                                "{} {}, {}, {}",
+                                div_op, q_reg, lhs_reg, rhs_reg
+                            ));
+                            // dst = lhs - q * rhs
+                            self.emit_line(&format!(
+                                "msub {}, {}, {}, {}",
+                                dst_reg, q_reg, rhs_reg, lhs_reg
+                            ));
+                        }
+                        _ => {
+                            let op = binop_mnemonic(*op);
+                            self.emit_line(&format!(
+                                "{} {}, {}, {}",
+                                op, dst_reg, lhs_reg, rhs_reg
+                            ));
+                        }
+                    }
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::UnOp { op, value } => {
                 // Unary ops over integer values.
                 if let Some(result) = &inst.result {
                     let src_loc = locs.value(*value);
-                    let src_reg = self.load_value(src_loc, "x9");
+                    let src_ty = locs.value_ty(*value);
+                    let src_reg = self.load_value_typed(locs, src_loc, src_ty, "x9");
                     let dst = locs.value(result.id);
                     let scratch = if src_reg == "x10" { "x11" } else { "x10" };
-                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "unop");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, scratch, "unop", dst_ty);
 
                     match op {
                         UnOp::Neg => {
@@ -411,33 +1024,52 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
 
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::Cmp { op, lhs, rhs } => {
                 // Compare and produce a boolean via cset.
                 if let Some(result) = &inst.result {
-                    let lhs = locs.value(*lhs);
-                    let rhs = locs.value(*rhs);
-                    let lhs_reg = self.load_value(lhs, "x9");
-                    let rhs_reg = self.load_value(rhs, if lhs_reg == "x9" { "x10" } else { "x9" });
+                    let lhs_id = *lhs;
+                    let rhs_id = *rhs;
+                    let lhs = locs.value(lhs_id);
+                    let rhs = locs.value(rhs_id);
+                    let lhs_ty = locs.value_ty(lhs_id);
+                    let rhs_ty = locs.value_ty(rhs_id);
+                    let lhs_reg = self.load_value_typed(locs, lhs, lhs_ty, "x9");
+                    let rhs_reg = self.load_value_typed(
+                        locs,
+                        rhs,
+                        rhs_ty,
+                        if lhs_reg == "x9" || lhs_reg == "w9" {
+                            "x10"
+                        } else {
+                            "x9"
+                        },
+                    );
 
                     self.emit_line(&format!("cmp {}, {}", lhs_reg, rhs_reg));
                     let cond = Self::cmp_condition(*op);
                     let dst = locs.value(result.id);
-                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "cmp");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) = self.value_dst_typed(locs, dst, "x9", "cmp", dst_ty);
                     self.emit_line(&format!("cset {}, {}", dst_reg, cond));
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::IntTrunc { value, ty } => {
                 // Integer truncation via masking to the destination bit-width.
                 if let Some(result) = &inst.result {
                     let src_loc = locs.value(*value);
-                    let src_reg = self.load_value(src_loc, "x9");
+                    let src_ty = locs.value_ty(*value);
+                    let src_reg = self.load_value_typed(locs, src_loc, src_ty, "x9");
                     let dst = locs.value(result.id);
                     let scratch = if src_reg == "x10" { "x11" } else { "x10" };
-                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "trunc");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, scratch, "trunc", dst_ty);
+                    let src_reg = Self::x_reg(&src_reg);
+                    let dst_reg = Self::x_reg(&dst_reg);
 
                     let dst_bits = match locs.types.kind(*ty) {
                         IrTypeKind::Int { bits, .. } => *bits as u32,
@@ -462,17 +1094,22 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
 
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::IntExtend { value, ty, signed } => {
                 // Integer extension to a wider destination type.
                 if let Some(result) = &inst.result {
                     let src_loc = locs.value(*value);
-                    let src_reg = self.load_value(src_loc, "x9");
+                    let src_ty = locs.value_ty(*value);
+                    let src_reg = self.load_value_typed(locs, src_loc, src_ty, "x9");
                     let dst = locs.value(result.id);
                     let scratch = if src_reg == "x10" { "x11" } else { "x10" };
-                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "extend");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, scratch, "extend", dst_ty);
+                    let src_reg = Self::x_reg(&src_reg);
+                    let dst_reg = Self::x_reg(&dst_reg);
 
                     let src_bits = match locs.types.kind(locs.value_ty(*value)) {
                         IrTypeKind::Int { bits, .. } => *bits as u32,
@@ -506,17 +1143,20 @@ impl CodegenEmitter for Arm64Emitter {
                         self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
                     }
 
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::Cast { kind, value, ty: _ } => {
                 // Pointer/integer bitcasts are modeled as moves.
                 if let Some(result) = &inst.result {
                     let src_loc = locs.value(*value);
-                    let src_reg = self.load_value(src_loc, "x9");
+                    let src_ty = locs.value_ty(*value);
+                    let src_reg = self.load_value_typed(locs, src_loc, src_ty, "x9");
                     let dst = locs.value(result.id);
                     let scratch = if src_reg == "x10" { "x11" } else { "x10" };
-                    let (dst_reg, dst_slot) = self.value_dst(dst, scratch, "cast");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, scratch, "cast", dst_ty);
 
                     match kind {
                         CastKind::PtrToInt | CastKind::IntToPtr => {
@@ -524,7 +1164,7 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
 
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::Load { ptr } => {
@@ -532,23 +1172,58 @@ impl CodegenEmitter for Arm64Emitter {
                 let src = locs.value(*ptr);
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
-                    let src = self.load_value(src, "x9");
-                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "load");
-                    self.emit_line(&format!("ldr {}, [{}]", dst_reg, src));
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    let ty = result.ty;
+                    let src_ty = locs.value_ty(*ptr);
+                    let src = self.load_value_typed(locs, src, src_ty, "x15");
+                    if Self::is_reg_type(locs, ty) {
+                        let (dst_reg, dst_slot) = self.value_dst_typed(locs, dst, "x9", "load", ty);
+                        let size = locs.layout(ty).size() as u32;
+                        match size {
+                            1 => {
+                                let w = Self::w_reg(&dst_reg);
+                                self.emit_line(&format!("ldrb {}, [{}]", w, src));
+                            }
+                            2 => {
+                                let w = Self::w_reg(&dst_reg);
+                                self.emit_line(&format!("ldrh {}, [{}]", w, src));
+                            }
+                            4 => {
+                                let w = Self::w_reg(&dst_reg);
+                                self.emit_line(&format!("ldr {}, [{}]", w, src));
+                            }
+                            8 => {
+                                self.emit_line(&format!("ldr {}, [{}]", dst_reg, src));
+                            }
+                            other => {
+                                panic!("ssa codegen: unsupported scalar load size {other}");
+                            }
+                        }
+                        self.store_if_needed_typed(locs, dst_slot, &dst_reg, ty);
+                    } else {
+                        let Location::Stack(slot) = dst else {
+                            panic!("ssa codegen: aggregate load needs stack dst, got {:?}", dst);
+                        };
+                        let size = locs.layout(ty).size() as u32;
+                        if size > 0 {
+                            let dst_offset = self.stack_offset(slot);
+                            self.copy_ptr_to_stack(&src, dst_offset, size);
+                        }
+                    }
                 }
             }
             InstKind::AddrOfLocal { local } => {
                 // Compute the address of a stack local as a pointer value.
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
+                    let dst_ty = locs.value_ty(result.id);
                     // Locals are laid out above spills; offsets are measured from the top.
                     let offset_from_top = locs.local_offset(*local);
                     // Convert the local's offset-from-top into an SP-relative address.
                     let sp_offset = self.layout.saved_base().saturating_sub(offset_from_top);
-                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "addr-of-local");
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, "x9", "addr-of-local", dst_ty);
                     self.emit_line(&format!("add {}, sp, #{}", dst_reg, sp_offset));
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::FieldAddr { base, index } => {
@@ -557,7 +1232,8 @@ impl CodegenEmitter for Arm64Emitter {
                     let dst = locs.value(result.id);
                     let base_loc = locs.value(*base);
                     // Base is a pointer value; ensure we have it in a register.
-                    let base_reg = self.load_value(base_loc, "x9");
+                    let base_ty = locs.value_ty(*base);
+                    let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x9");
                     let base_ty = locs.value_ty(*base);
                     let elem_ty = match locs.types.kind(base_ty) {
                         IrTypeKind::Ptr { elem } => *elem,
@@ -569,9 +1245,11 @@ impl CodegenEmitter for Arm64Emitter {
                     // Field offsets are precomputed in the pointee layout.
                     let offset = layout.field_offsets().get(*index).copied().unwrap_or(0) as u32;
                     // Add the field byte offset to the base address.
-                    let (dst_reg, dst_slot) = self.value_dst(dst, "x9", "field-addr");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, "x9", "field-addr", dst_ty);
                     self.emit_line(&format!("add {}, {}, #{}", dst_reg, base_reg, offset));
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::IndexAddr { base, index } => {
@@ -581,8 +1259,10 @@ impl CodegenEmitter for Arm64Emitter {
                     let base_loc = locs.value(*base);
                     let index_loc = locs.value(*index);
                     // Load base/index into registers for address arithmetic.
-                    let base_reg = self.load_value(base_loc, "x9");
-                    let index_reg = self.load_value(index_loc, "x10");
+                    let base_ty = locs.value_ty(*base);
+                    let index_ty = locs.value_ty(*index);
+                    let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x9");
+                    let index_reg = self.load_value_typed(locs, index_loc, index_ty, "x10");
 
                     let elem_ty = match locs.types.kind(result.ty) {
                         IrTypeKind::Ptr { elem } => *elem,
@@ -592,7 +1272,9 @@ impl CodegenEmitter for Arm64Emitter {
                     };
                     let stride = locs.layout(elem_ty).stride() as u32;
 
-                    let (dst_reg, dst_slot) = self.value_dst(dst, "x11", "index-addr");
+                    let dst_ty = locs.value_ty(result.id);
+                    let (dst_reg, dst_slot) =
+                        self.value_dst_typed(locs, dst, "x11", "index-addr", dst_ty);
 
                     // Prefer scaled addressing when stride is a power of two.
                     if stride == 0 {
@@ -615,28 +1297,66 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     } else {
                         // Non power-of-two stride: multiply then add.
-                        self.emit_line(&format!("mov x11, #{}", stride));
+                        self.emit_mov_imm("x11", stride as i128, 64);
                         self.emit_line(&format!("mul x11, {}, x11", index_reg));
                         self.emit_line(&format!("add {}, {}, x11", dst_reg, base_reg));
                     }
 
                     // Spill the computed address if it doesn't live in a register.
-                    self.store_if_needed(dst_slot, &dst_reg);
+                    self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
             InstKind::Store { ptr, value } => {
                 // Store a value into a pointer destination.
-                let ptr = locs.value(*ptr);
-                let value = locs.value(*value);
-                let ptr = self.load_value(ptr, "x9");
-                let val = self.load_value(value, "x10");
-                self.emit_line(&format!("str {}, [{}]", val, ptr));
+                let ptr_id = *ptr;
+                let value_id = *value;
+                let ptr = locs.value(ptr_id);
+                let value_loc = locs.value(value_id);
+                let value_ty = locs.value_ty(value_id);
+                let ptr_ty = locs.value_ty(ptr_id);
+                let ptr = self.load_value_typed(locs, ptr, ptr_ty, "x15");
+                if Self::is_reg_type(locs, value_ty) {
+                    let val = self.load_value_typed(locs, value_loc, value_ty, "x10");
+                    let size = locs.layout(value_ty).size() as u32;
+                    match size {
+                        1 => {
+                            let w = Self::w_reg(&val);
+                            self.emit_line(&format!("strb {}, [{}]", w, ptr));
+                        }
+                        2 => {
+                            let w = Self::w_reg(&val);
+                            self.emit_line(&format!("strh {}, [{}]", w, ptr));
+                        }
+                        4 => {
+                            let w = Self::w_reg(&val);
+                            self.emit_line(&format!("str {}, [{}]", w, ptr));
+                        }
+                        8 => {
+                            self.emit_line(&format!("str {}, [{}]", val, ptr));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported scalar store size {other}");
+                        }
+                    }
+                } else {
+                    let Location::Stack(slot) = value_loc else {
+                        panic!(
+                            "ssa codegen: aggregate store needs stack src, got {:?}",
+                            value_loc
+                        );
+                    };
+                    let size = locs.layout(value_ty).size() as u32;
+                    if size > 0 {
+                        let src_offset = self.stack_offset(slot);
+                        self.copy_stack_to_ptr(src_offset, &ptr, size);
+                    }
+                }
             }
             InstKind::MemCopy { dst, src, len } => {
                 // Lower memcpy as a runtime call: __rt_memcpy(dst, src, len).
-                let dst = self.load_value(locs.value(*dst), "x0");
-                let src = self.load_value(locs.value(*src), "x1");
-                let len = self.load_value(locs.value(*len), "x2");
+                let dst = self.load_value_typed(locs, locs.value(*dst), locs.value_ty(*dst), "x0");
+                let src = self.load_value_typed(locs, locs.value(*src), locs.value_ty(*src), "x1");
+                let len = self.load_value_typed(locs, locs.value(*len), locs.value_ty(*len), "x2");
                 if dst != "x0" {
                     self.emit_line(&format!("mov x0, {}", dst));
                 }
@@ -646,43 +1366,49 @@ impl CodegenEmitter for Arm64Emitter {
                 if len != "x2" {
                     self.emit_line(&format!("mov x2, {}", len));
                 }
-                self.emit_line("bl __rt_memcpy");
+                self.emit_line(&format!("bl _{}", RuntimeFn::MemCopy.name()));
             }
             InstKind::MemSet { dst, byte, len } => {
-                // Lower memset as a runtime call: __rt_memset(dst, byte, len).
-                let dst = self.load_value(locs.value(*dst), "x0");
-                let byte = self.load_value(locs.value(*byte), "x1");
-                let len = self.load_value(locs.value(*len), "x2");
+                // Lower memset as a runtime call: __rt_memset(dst, len, value).
+                let dst = self.load_value_typed(locs, locs.value(*dst), locs.value_ty(*dst), "x0");
+                let len = self.load_value_typed(locs, locs.value(*len), locs.value_ty(*len), "x1");
+                let byte =
+                    self.load_value_typed(locs, locs.value(*byte), locs.value_ty(*byte), "x2");
                 if dst != "x0" {
                     self.emit_line(&format!("mov x0, {}", dst));
                 }
-                if byte != "x1" {
-                    self.emit_line(&format!("mov x1, {}", byte));
+                if len != "x1" {
+                    self.emit_line(&format!("mov x1, {}", len));
                 }
-                if len != "x2" {
-                    self.emit_line(&format!("mov x2, {}", len));
+                if byte != "x2" {
+                    self.emit_line(&format!("mov x2, {}", byte));
                 }
-                self.emit_line("bl __rt_memset");
+                self.emit_line(&format!("bl _{}", RuntimeFn::MemSet.name()));
             }
             InstKind::Call { callee, .. } => match callee {
                 // Direct/runtime calls use named symbols; indirect calls use a register.
                 Callee::Direct(def_id) => {
-                    self.emit_line(&format!("bl fn{}", def_id.0));
+                    let name = locs
+                        .def_name(*def_id)
+                        .map(|name| format!("_{}", name))
+                        .unwrap_or_else(|| format!("_fn{}", def_id.0));
+                    self.emit_line(&format!("bl {}", name));
                 }
                 Callee::Runtime(rt) => {
-                    self.emit_line(&format!("bl {}", rt.name()));
+                    self.emit_line(&format!("bl _{}", rt.name()));
                 }
                 Callee::Value(value) => {
                     let callee = locs.value(*value);
-                    let reg = self.load_value(callee, "x9");
+                    let callee_ty = locs.value_ty(*value);
+                    let reg = self.load_value_typed(locs, callee, callee_ty, "x9");
                     self.emit_line(&format!("blr {}", reg));
                 }
             },
             InstKind::Drop { ptr } => {
                 // Drop a pointer value; only string drops are supported in the emitter.
                 let ptr_loc = locs.value(*ptr);
-                let ptr_reg = self.load_value(ptr_loc, "x0");
                 let ptr_ty = locs.value_ty(*ptr);
+                let ptr_reg = self.load_value_typed(locs, ptr_loc, ptr_ty, "x0");
                 let elem_ty = match locs.types.kind(ptr_ty) {
                     IrTypeKind::Ptr { elem } => *elem,
                     other => {
@@ -694,7 +1420,7 @@ impl CodegenEmitter for Arm64Emitter {
                     if ptr_reg != "x0" {
                         self.emit_line(&format!("mov x0, {}", ptr_reg));
                     }
-                    self.emit_line("bl __rt_string_drop");
+                    self.emit_line(&format!("bl _{}", RuntimeFn::StringDrop.name()));
                 } else {
                     panic!("ssa codegen: unsupported drop for {:?}", elem_name);
                 }
@@ -702,11 +1428,68 @@ impl CodegenEmitter for Arm64Emitter {
         }
     }
 
+    fn emit_branch(&mut self, target: CodegenBlockId) {
+        self.emit_line(&format!("b {}", self.codegen_label(target)));
+    }
+
+    fn emit_cond_branch(
+        &mut self,
+        cond: ValueId,
+        then_target: CodegenBlockId,
+        else_target: CodegenBlockId,
+        locs: &LocationResolver,
+    ) {
+        // Conditional branch: jump to then_label if cond != 0.
+        let cond_id = cond;
+        let cond_loc = locs.value(cond_id);
+        let cond_ty = locs.value_ty(cond_id);
+        let cond = self.load_value_typed(locs, cond_loc, cond_ty, "x9");
+        self.emit_line(&format!(
+            "cbnz {}, {}",
+            cond,
+            self.codegen_label(then_target)
+        ));
+        self.emit_line(&format!("b {}", self.codegen_label(else_target)));
+    }
+
+    fn emit_switch(
+        &mut self,
+        value: ValueId,
+        cases: &[(ConstValue, CodegenBlockId)],
+        default_target: CodegenBlockId,
+        locs: &LocationResolver,
+    ) {
+        // Switch lowered as a compare-and-branch chain.
+        let value_loc = locs.value(value);
+        let value_ty = locs.value_ty(value);
+        let value_reg = self.load_value_typed(locs, value_loc, value_ty, "x9");
+        let const_reg = if value_reg == "x9" || value_reg == "w9" {
+            "x10"
+        } else {
+            "x9"
+        };
+        let const_reg = if value_reg.starts_with('w') {
+            Self::w_reg(const_reg)
+        } else {
+            const_reg.to_string()
+        };
+
+        for (value, target) in cases {
+            let size = Self::scalar_size(locs, value_ty);
+            let bits = (size.saturating_mul(8)) as u8;
+            self.emit_mov_imm(&const_reg, value.as_int(), bits);
+            self.emit_line(&format!("cmp {}, {}", value_reg, const_reg));
+            self.emit_line(&format!("b.eq {}", self.codegen_label(*target)));
+        }
+
+        self.emit_line(&format!("b {}", self.codegen_label(default_target)));
+    }
+
     fn emit_terminator(&mut self, term: &Terminator, locs: &LocationResolver) {
         match term {
             Terminator::Br { target, .. } => {
                 // Unconditional branch to the target block.
-                self.emit_line(&format!("b bb{}", target.0));
+                self.emit_branch(CodegenBlockId::Ssa(*target));
             }
             Terminator::CondBr {
                 cond,
@@ -714,11 +1497,12 @@ impl CodegenEmitter for Arm64Emitter {
                 else_bb,
                 ..
             } => {
-                // Conditional branch: jump to then_bb if cond != 0.
-                let cond = locs.value(*cond);
-                let cond = self.load_value(cond, "x9");
-                self.emit_line(&format!("cbnz {}, bb{}", cond, then_bb.0));
-                self.emit_line(&format!("b bb{}", else_bb.0));
+                self.emit_cond_branch(
+                    *cond,
+                    CodegenBlockId::Ssa(*then_bb),
+                    CodegenBlockId::Ssa(*else_bb),
+                    locs,
+                );
             }
             Terminator::Switch {
                 value,
@@ -726,18 +1510,11 @@ impl CodegenEmitter for Arm64Emitter {
                 default,
                 ..
             } => {
-                // Switch lowered as a compare-and-branch chain.
-                let value_loc = locs.value(*value);
-                let value_reg = self.load_value(value_loc, "x9");
-                let const_reg = if value_reg == "x9" { "x10" } else { "x9" };
-
-                for case in cases {
-                    self.emit_line(&format!("mov {}, #{}", const_reg, case.value.as_int()));
-                    self.emit_line(&format!("cmp {}, {}", value_reg, const_reg));
-                    self.emit_line(&format!("b.eq bb{}", case.target.0));
-                }
-
-                self.emit_line(&format!("b bb{}", default.0));
+                let case_labels: Vec<(ConstValue, CodegenBlockId)> = cases
+                    .iter()
+                    .map(|case| (case.value.clone(), CodegenBlockId::Ssa(case.target)))
+                    .collect();
+                self.emit_switch(*value, &case_labels, CodegenBlockId::Ssa(*default), locs);
             }
             Terminator::Return { value } => {
                 // Materialize return value and tear down the stack frame.
@@ -745,6 +1522,9 @@ impl CodegenEmitter for Arm64Emitter {
                     let ty = locs.value_ty(*value);
                     if needs_sret(locs, ty) {
                         // Indirect return: store the value into the sret pointer (x8).
+                        if let Some(offset) = self.saved_reg_offset(PhysReg(8)) {
+                            self.emit_ldr_sp(PhysReg(8), offset);
+                        }
                         let src_loc = locs.value(*value);
                         match src_loc {
                             Location::Reg(reg) => {
@@ -755,8 +1535,8 @@ impl CodegenEmitter for Arm64Emitter {
                                 let size = locs.layout(ty).size() as u32;
                                 self.emit_line("mov x0, x8");
                                 self.emit_line(&format!("add x1, sp, #{}", offset));
-                                self.emit_line(&format!("mov x2, #{}", size));
-                                self.emit_line("bl __rt_memcpy");
+                                self.emit_mov_imm("x2", size as i128, 64);
+                                self.emit_line(&format!("bl _{}", RuntimeFn::MemCopy.name()));
                             }
                             _ => {
                                 panic!("ssa codegen: unsupported sret source {:?}", src_loc);
@@ -764,9 +1544,18 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     } else {
                         let src = locs.value(*value);
-                        let src = self.load_value(src, "x9");
-                        self.emit_line(&format!("mov x0, {}", src));
+                        let src = self.load_value_typed(locs, src, ty, "x9");
+                        let size = Self::scalar_size(locs, ty);
+                        if size > 0 && size <= 4 {
+                            let dst = Self::w_reg("x0");
+                            self.emit_line(&format!("mov {}, {}", dst, src));
+                        } else {
+                            self.emit_line(&format!("mov x0, {}", src));
+                        }
                     }
+                } else {
+                    // Unit returns use x0=0 for a stable process exit code.
+                    self.emit_line("mov x0, #0");
                 }
 
                 // Restore callee-saved registers before tearing down the frame.
@@ -782,11 +1571,7 @@ impl CodegenEmitter for Arm64Emitter {
                         if callee_saved.len() % 2 == 1 {
                             let reg = callee_saved[pair_count * 2];
                             let offset = base + (pair_count as u32) * 16;
-                            self.emit_line(&format!(
-                                "ldr {}, [sp, #{}]",
-                                Self::reg_name(reg),
-                                offset
-                            ));
+                            self.emit_ldr_sp(reg, offset);
                         }
 
                         // Restore paired registers in reverse pair order.
@@ -795,12 +1580,7 @@ impl CodegenEmitter for Arm64Emitter {
                             let reg0 = callee_saved[idx];
                             let reg1 = callee_saved[idx + 1];
                             let offset = base + (pair as u32) * 16;
-                            self.emit_line(&format!(
-                                "ldp {}, {}, [sp, #{}]",
-                                Self::reg_name(reg0),
-                                Self::reg_name(reg1),
-                                offset
-                            ));
+                            self.emit_ldp_sp(reg0, reg1, offset);
                         }
                     }
                     self.emit_line(&format!("add sp, sp, #{}", self.layout.aligned_size));
