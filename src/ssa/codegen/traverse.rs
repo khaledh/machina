@@ -9,6 +9,7 @@ use crate::ssa::regalloc::moves::MoveOp;
 
 use super::emitter::{CodegenEmitter, LocationResolver};
 use super::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
+use super::moves::MoveBlockId;
 
 /// Callback interface used by the traversal to emit codegen steps.
 pub trait CodegenSink {
@@ -131,6 +132,58 @@ pub fn emit_graph_with_emitter(
     sink.emitter.emit_param_moves(func, &sink.locs);
     emit_graph(graph, func, &mut sink);
     sink.emitter.end_function();
+}
+
+struct EmitContext<'a> {
+    graph: &'a CodegenGraph,
+    func: &'a Function,
+    blocks_by_id: HashMap<BlockId, &'a crate::ssa::model::ir::Block>,
+    move_blocks: HashMap<MoveBlockId, &'a [MoveOp]>,
+}
+
+impl<'a> EmitContext<'a> {
+    fn new(graph: &'a CodegenGraph, func: &'a Function) -> Self {
+        let mut blocks_by_id = HashMap::new();
+        for block in &func.blocks {
+            blocks_by_id.insert(block.id, block);
+        }
+
+        let mut move_blocks = HashMap::new();
+        for block in graph.blocks() {
+            if let CodegenBlockId::Move(id) = block.id {
+                move_blocks.insert(id, block.moves.as_slice());
+            }
+        }
+
+        Self {
+            graph,
+            func,
+            blocks_by_id,
+            move_blocks,
+        }
+    }
+
+    fn ssa_block(&self, id: BlockId) -> &crate::ssa::model::ir::Block {
+        self.blocks_by_id
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| panic!("ssa codegen: missing block {:?}", id))
+    }
+
+    fn move_block_moves(&self, id: MoveBlockId) -> &[MoveOp] {
+        self.move_blocks
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| panic!("ssa codegen: missing move block {:?}", id))
+    }
+
+    fn edge_moves(&self, from: BlockId, to: BlockId) -> &[MoveOp] {
+        self.graph.edge_moves(from, to).unwrap_or(&[])
+    }
+
+    fn edge_target(&self, from: BlockId, to: BlockId) -> CodegenBlockId {
+        self.graph.edge_target(from, to)
+    }
 }
 
 fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
@@ -415,6 +468,7 @@ fn validate_value_types(
 
 /// Walks the codegen graph in RPO order and emits instructions.
 pub fn emit_graph(graph: &CodegenGraph, func: &Function, sink: &mut dyn CodegenSink) {
+    let ctx = EmitContext::new(graph, func);
     let order = rpo(graph);
     let mut visited = HashSet::new();
 
@@ -426,19 +480,34 @@ pub fn emit_graph(graph: &CodegenGraph, func: &Function, sink: &mut dyn CodegenS
         sink.enter_block(block_id);
 
         match block_id {
-            CodegenBlockId::Ssa(id) => emit_ssa_block(graph, func, id, sink),
-            CodegenBlockId::Move(id) => emit_move_block(graph, id, sink),
+            CodegenBlockId::Ssa(id) => emit_ssa_block(&ctx, id, sink),
+            CodegenBlockId::Move(id) => emit_move_block(&ctx, id, sink),
         }
     }
 }
 
-fn emit_ssa_block(
-    graph: &CodegenGraph,
-    func: &Function,
-    block: crate::ssa::model::ir::BlockId,
-    sink: &mut dyn CodegenSink,
-) {
-    let mut stream = graph.block_stream(func, block);
+fn emit_edge_branch(ctx: &EmitContext<'_>, from: BlockId, to: BlockId, sink: &mut dyn CodegenSink) {
+    let moves = ctx.edge_moves(from, to);
+    if !moves.is_empty() {
+        sink.emit_moves(moves);
+    }
+    let target = ctx.edge_target(from, to);
+    sink.emit_branch(target);
+}
+
+fn edge_target_for_cond(ctx: &EmitContext<'_>, from: BlockId, to: BlockId) -> CodegenBlockId {
+    let moves = ctx.edge_moves(from, to);
+    if !moves.is_empty() {
+        panic!(
+            "ssa codegen: conditional edge {:?} -> {:?} has inline moves",
+            from, to
+        );
+    }
+    ctx.edge_target(from, to)
+}
+
+fn emit_ssa_block(ctx: &EmitContext<'_>, block: BlockId, sink: &mut dyn CodegenSink) {
+    let mut stream = ctx.graph.block_stream(ctx.func, block);
     while let Some(item) = stream.next() {
         match item {
             CodegenEmit::PreMoves(moves) | CodegenEmit::PostMoves(moves) => {
@@ -448,22 +517,10 @@ fn emit_ssa_block(
         }
     }
 
-    let term = func
-        .blocks
-        .iter()
-        .find(|b| b.id == block)
-        .unwrap_or_else(|| panic!("ssa codegen: missing block {:?}", block))
-        .term
-        .clone();
+    let term = ctx.ssa_block(block).term.clone();
     match &term {
         crate::ssa::model::ir::Terminator::Br { target, .. } => {
-            if let Some(moves) = graph.edge_moves(block, *target) {
-                if !moves.is_empty() {
-                    sink.emit_moves(moves);
-                }
-            }
-            let target = graph.edge_target(block, *target);
-            sink.emit_branch(target);
+            emit_edge_branch(ctx, block, *target, sink);
         }
         crate::ssa::model::ir::Terminator::CondBr {
             cond,
@@ -471,8 +528,8 @@ fn emit_ssa_block(
             else_bb,
             ..
         } => {
-            let then_target = graph.edge_target(block, *then_bb);
-            let else_target = graph.edge_target(block, *else_bb);
+            let then_target = edge_target_for_cond(ctx, block, *then_bb);
+            let else_target = edge_target_for_cond(ctx, block, *else_bb);
             sink.emit_cond_branch(*cond, then_target, else_target);
         }
         crate::ssa::model::ir::Terminator::Switch {
@@ -483,31 +540,22 @@ fn emit_ssa_block(
         } => {
             let mut case_labels = Vec::with_capacity(cases.len());
             for case in cases {
-                let target = graph.edge_target(block, case.target);
+                let target = edge_target_for_cond(ctx, block, case.target);
                 case_labels.push((case.value.clone(), target));
             }
-            let default_target = graph.edge_target(block, *default);
+            let default_target = edge_target_for_cond(ctx, block, *default);
             sink.emit_switch(*value, &case_labels, default_target);
         }
         _ => sink.emit_terminator(&term),
     }
 }
 
-fn emit_move_block(
-    graph: &CodegenGraph,
-    block: super::moves::MoveBlockId,
-    sink: &mut dyn CodegenSink,
-) {
-    let moves = graph
-        .blocks()
-        .iter()
-        .find(|b| b.id == CodegenBlockId::Move(block))
-        .map(|b| b.moves.as_slice())
-        .unwrap_or_else(|| panic!("ssa codegen: missing move block {:?}", block));
+fn emit_move_block(ctx: &EmitContext<'_>, block: MoveBlockId, sink: &mut dyn CodegenSink) {
+    let moves = ctx.move_block_moves(block);
     sink.emit_moves(moves);
 
     // Move blocks are single-successor by construction.
-    let succs = graph.succs(CodegenBlockId::Move(block));
+    let succs = ctx.graph.succs(CodegenBlockId::Move(block));
     let target = succs
         .first()
         .copied()
