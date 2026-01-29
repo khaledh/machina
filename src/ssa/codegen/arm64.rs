@@ -345,7 +345,7 @@ impl Arm64Emitter {
             }
             Location::StackAddr(slot) => {
                 let offset = self.stack_offset(slot);
-                self.emit_line(&format!("add {}, sp, #{}", scratch, offset));
+                self.emit_add_imm(scratch, "sp", offset);
                 scratch.to_string()
             }
         }
@@ -371,6 +371,58 @@ impl Arm64Emitter {
             }
             other => {
                 panic!("ssa codegen: unsupported scalar load size {other}");
+            }
+        }
+    }
+
+    fn emit_add_imm(&mut self, dst: &str, base: &str, offset: u32) {
+        self.emit_line(&format!("add {}, {}, #{}", dst, base, offset));
+    }
+
+    fn emit_load_ptr_sized(&mut self, dst_reg: &str, addr_reg: &str, size: u32) {
+        match size {
+            0 => {}
+            1 => {
+                let w = Self::w_reg(dst_reg);
+                self.emit_line(&format!("ldrb {}, [{}]", w, addr_reg));
+            }
+            2 => {
+                let w = Self::w_reg(dst_reg);
+                self.emit_line(&format!("ldrh {}, [{}]", w, addr_reg));
+            }
+            4 => {
+                let w = Self::w_reg(dst_reg);
+                self.emit_line(&format!("ldr {}, [{}]", w, addr_reg));
+            }
+            8 => {
+                self.emit_line(&format!("ldr {}, [{}]", dst_reg, addr_reg));
+            }
+            other => {
+                panic!("ssa codegen: unsupported scalar load size {other}");
+            }
+        }
+    }
+
+    fn emit_store_ptr_sized(&mut self, src_reg: &str, addr_reg: &str, size: u32) {
+        match size {
+            0 => {}
+            1 => {
+                let w = Self::w_reg(src_reg);
+                self.emit_line(&format!("strb {}, [{}]", w, addr_reg));
+            }
+            2 => {
+                let w = Self::w_reg(src_reg);
+                self.emit_line(&format!("strh {}, [{}]", w, addr_reg));
+            }
+            4 => {
+                let w = Self::w_reg(src_reg);
+                self.emit_line(&format!("str {}, [{}]", w, addr_reg));
+            }
+            8 => {
+                self.emit_line(&format!("str {}, [{}]", src_reg, addr_reg));
+            }
+            other => {
+                panic!("ssa codegen: unsupported scalar store size {other}");
             }
         }
     }
@@ -1178,26 +1230,7 @@ impl CodegenEmitter for Arm64Emitter {
                     if Self::is_reg_type(locs, ty) {
                         let (dst_reg, dst_slot) = self.value_dst_typed(locs, dst, "x9", "load", ty);
                         let size = locs.layout(ty).size() as u32;
-                        match size {
-                            1 => {
-                                let w = Self::w_reg(&dst_reg);
-                                self.emit_line(&format!("ldrb {}, [{}]", w, src));
-                            }
-                            2 => {
-                                let w = Self::w_reg(&dst_reg);
-                                self.emit_line(&format!("ldrh {}, [{}]", w, src));
-                            }
-                            4 => {
-                                let w = Self::w_reg(&dst_reg);
-                                self.emit_line(&format!("ldr {}, [{}]", w, src));
-                            }
-                            8 => {
-                                self.emit_line(&format!("ldr {}, [{}]", dst_reg, src));
-                            }
-                            other => {
-                                panic!("ssa codegen: unsupported scalar load size {other}");
-                            }
-                        }
+                        self.emit_load_ptr_sized(&dst_reg, &src, size);
                         self.store_if_needed_typed(locs, dst_slot, &dst_reg, ty);
                     } else {
                         let Location::Stack(slot) = dst else {
@@ -1222,7 +1255,7 @@ impl CodegenEmitter for Arm64Emitter {
                     let sp_offset = self.layout.saved_base().saturating_sub(offset_from_top);
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, "x9", "addr-of-local", dst_ty);
-                    self.emit_line(&format!("add {}, sp, #{}", dst_reg, sp_offset));
+                    self.emit_add_imm(&dst_reg, "sp", sp_offset);
                     self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
@@ -1248,7 +1281,7 @@ impl CodegenEmitter for Arm64Emitter {
                     let dst_ty = locs.value_ty(result.id);
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, "x9", "field-addr", dst_ty);
-                    self.emit_line(&format!("add {}, {}, #{}", dst_reg, base_reg, offset));
+                    self.emit_add_imm(&dst_reg, &base_reg, offset);
                     self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
                 }
             }
@@ -1318,26 +1351,7 @@ impl CodegenEmitter for Arm64Emitter {
                 if Self::is_reg_type(locs, value_ty) {
                     let val = self.load_value_typed(locs, value_loc, value_ty, "x10");
                     let size = locs.layout(value_ty).size() as u32;
-                    match size {
-                        1 => {
-                            let w = Self::w_reg(&val);
-                            self.emit_line(&format!("strb {}, [{}]", w, ptr));
-                        }
-                        2 => {
-                            let w = Self::w_reg(&val);
-                            self.emit_line(&format!("strh {}, [{}]", w, ptr));
-                        }
-                        4 => {
-                            let w = Self::w_reg(&val);
-                            self.emit_line(&format!("str {}, [{}]", w, ptr));
-                        }
-                        8 => {
-                            self.emit_line(&format!("str {}, [{}]", val, ptr));
-                        }
-                        other => {
-                            panic!("ssa codegen: unsupported scalar store size {other}");
-                        }
-                    }
+                    self.emit_store_ptr_sized(&val, &ptr, size);
                 } else {
                     let Location::Stack(slot) = value_loc else {
                         panic!(
