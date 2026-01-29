@@ -8,7 +8,133 @@ use crate::tree::NodeId;
 use crate::tree::semantic as sem;
 use crate::types::Type;
 use crate::types::TypeId;
+use std::collections::HashMap;
 use std::ptr::NonNull;
+
+/// Tracks drop-scope state and per-def liveness flags during lowering.
+///
+/// This struct only manages bookkeeping (scope stack + liveness flags). The
+/// caller is responsible for turning popped scopes into IR-level drop calls.
+pub(super) struct DropTracker<'a> {
+    plans: Option<&'a sem::DropPlanMap>,
+    scopes: Vec<NodeId>,
+    flags: HashMap<DefId, ValueId>,
+}
+
+impl<'a> DropTracker<'a> {
+    pub(super) fn new() -> Self {
+        Self {
+            plans: None,
+            scopes: Vec::new(),
+            flags: HashMap::new(),
+        }
+    }
+
+    pub(super) fn set_plans(&mut self, plans: &'a sem::DropPlanMap) {
+        self.plans = Some(plans);
+    }
+
+    pub(super) fn plans(&self) -> Option<&'a sem::DropPlanMap> {
+        self.plans
+    }
+
+    pub(super) fn is_active(&self) -> bool {
+        self.plans.is_some()
+    }
+
+    /// Clones the current scope stack for later restoration (e.g., across branches).
+    pub(super) fn snapshot(&self) -> Vec<NodeId> {
+        self.scopes.clone()
+    }
+
+    /// Restores a previously captured scope stack snapshot.
+    pub(super) fn restore(&mut self, snapshot: &[NodeId]) {
+        self.scopes = snapshot.to_vec();
+    }
+
+    pub(super) fn enter_scope(&mut self, id: NodeId) {
+        if self.is_active() {
+            self.scopes.push(id);
+        }
+    }
+
+    /// Pops the scope if it is the active scope and returns it for drop emission.
+    pub(super) fn exit_scope_if_active(&mut self, id: NodeId) -> Option<NodeId> {
+        if !self.is_active() {
+            return None;
+        }
+
+        match self.scopes.last().copied() {
+            Some(top) if top == id => Some(self.pop_scope(id)),
+            Some(_) => {
+                if self.scopes.iter().any(|scope_id| *scope_id == id) {
+                    panic!("ssa drop scope mismatch while dropping {:?}", id);
+                }
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Pops scopes until the requested depth and returns them in LIFO order.
+    pub(super) fn pop_to_depth(&mut self, depth: usize) -> Vec<NodeId> {
+        if !self.is_active() {
+            return Vec::new();
+        }
+
+        if depth > self.scopes.len() {
+            panic!(
+                "ssa drop depth {} exceeds scope depth {}",
+                depth,
+                self.scopes.len()
+            );
+        }
+
+        let mut scopes = Vec::new();
+        while self.scopes.len() > depth {
+            let scope_id = self
+                .scopes
+                .pop()
+                .unwrap_or_else(|| panic!("ssa drop scope underflow"));
+            scopes.push(scope_id);
+        }
+
+        scopes
+    }
+
+    /// Returns the target drop depth for a statement, if drop plans are active.
+    pub(super) fn depth_for_stmt(&self, stmt_id: NodeId) -> Option<usize> {
+        self.plans.map(|plans| {
+            plans
+                .depth_for(stmt_id)
+                .unwrap_or_else(|| panic!("ssa missing drop depth for {:?}", stmt_id))
+        })
+    }
+
+    /// Looks up the liveness flag for a definition.
+    pub(super) fn flag(&self, def_id: DefId) -> Option<ValueId> {
+        self.flags.get(&def_id).copied()
+    }
+
+    /// Records a liveness flag for a definition.
+    pub(super) fn insert_flag(&mut self, def_id: DefId, addr: ValueId) {
+        self.flags.insert(def_id, addr);
+    }
+
+    fn pop_scope(&mut self, id: NodeId) -> NodeId {
+        let scope_id = self
+            .scopes
+            .pop()
+            .unwrap_or_else(|| panic!("ssa drop scope underflow for {:?}", id));
+        if scope_id != id {
+            panic!(
+                "ssa drop scope mismatch: expected {:?}, got {:?}",
+                id, scope_id
+            );
+        }
+        scope_id
+    }
+}
 
 /// RAII guard that exits a drop scope when it falls out of scope.
 #[must_use = "drop scope guard must be kept alive for the duration of the scope"]
@@ -45,93 +171,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn set_drop_plans(&mut self, drop_plans: &'a sem::DropPlanMap) {
-        self.drop_plans = Some(drop_plans);
+        self.drop_tracker.set_plans(drop_plans);
     }
 
+    /// Captures the active drop scope stack for branch-local lowering.
     pub(super) fn drop_scopes_snapshot(&self) -> Vec<NodeId> {
-        self.drop_scopes.clone()
+        self.drop_tracker.snapshot()
     }
 
+    /// Restores a previously captured drop scope stack snapshot.
     pub(super) fn restore_drop_scopes(&mut self, snapshot: &[NodeId]) {
-        self.drop_scopes = snapshot.to_vec();
+        self.drop_tracker.restore(snapshot);
     }
 
     pub(super) fn enter_drop_scope(&mut self, id: NodeId) {
-        if self.drop_plans.is_some() {
-            self.drop_scopes.push(id);
-        }
+        self.drop_tracker.enter_scope(id);
     }
 
+    /// Pops and emits a scope if it is active, used by the RAII guard.
     fn exit_drop_scope_if_active(&mut self, id: NodeId) {
-        if self.drop_plans.is_none() {
-            return;
-        }
-
-        match self.drop_scopes.last().copied() {
-            Some(top) if top == id => {
-                if let Err(err) = self.exit_drop_scope(id) {
-                    panic!("ssa drop scope exit failed: {err:?}");
-                }
+        if let Some(scope_id) = self.drop_tracker.exit_scope_if_active(id) {
+            if let Err(err) = self.emit_drop_scope(scope_id) {
+                panic!("ssa drop scope exit failed: {err:?}");
             }
-            Some(_) => {
-                if self.drop_scopes.iter().any(|scope_id| *scope_id == id) {
-                    panic!("ssa drop scope mismatch while dropping {:?}", id);
-                }
-            }
-            None => {}
         }
     }
 
-    pub(super) fn exit_drop_scope(&mut self, id: NodeId) -> Result<(), LoweringError> {
-        if self.drop_plans.is_none() {
-            return Ok(());
-        }
-
-        let scope_id = self
-            .drop_scopes
-            .pop()
-            .unwrap_or_else(|| panic!("ssa drop scope underflow for {:?}", id));
-        if scope_id != id {
-            panic!(
-                "ssa drop scope mismatch: expected {:?}, got {:?}",
-                id, scope_id
-            );
-        }
-
-        self.emit_drop_scope(scope_id)
-    }
-
+    /// Emits drops until the drop scope stack is at the requested depth.
     pub(super) fn emit_drops_to_depth(&mut self, depth: usize) -> Result<(), LoweringError> {
-        if self.drop_plans.is_none() {
-            return Ok(());
-        }
-
-        if depth > self.drop_scopes.len() {
-            panic!(
-                "ssa drop depth {} exceeds scope depth {}",
-                depth,
-                self.drop_scopes.len()
-            );
-        }
-
-        while self.drop_scopes.len() > depth {
-            let scope_id = self
-                .drop_scopes
-                .pop()
-                .unwrap_or_else(|| panic!("ssa drop scope underflow"));
+        let scopes = self.drop_tracker.pop_to_depth(depth);
+        for scope_id in scopes {
             self.emit_drop_scope(scope_id)?;
         }
-
         Ok(())
     }
 
+    /// Emits drops corresponding to a semantic statement's drop depth.
     pub(super) fn emit_drops_for_stmt(&mut self, stmt_id: NodeId) -> Result<(), LoweringError> {
-        let Some(drop_plans) = self.drop_plans.as_ref() else {
+        let Some(depth) = self.drop_tracker.depth_for_stmt(stmt_id) else {
             return Ok(());
         };
-        let depth = drop_plans
-            .depth_for(stmt_id)
-            .unwrap_or_else(|| panic!("ssa missing drop depth for {:?}", stmt_id));
         self.emit_drops_to_depth(depth)
     }
 
@@ -140,7 +219,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         def_id: DefId,
         ty_id: TypeId,
     ) -> Result<(), LoweringError> {
-        if self.drop_plans.is_none() {
+        if !self.drop_tracker.is_active() {
             return Ok(());
         }
 
@@ -150,9 +229,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         let flag_addr = self
-            .drop_flags
-            .get(&def_id)
-            .copied()
+            .drop_tracker
+            .flag(def_id)
             .unwrap_or_else(|| panic!("ssa drop missing flag for {:?}", def_id));
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let cond = self.builder.load(flag_addr, bool_ty);
@@ -184,7 +262,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn set_drop_flag_for_def(&mut self, def_id: DefId, value: bool) {
-        if self.drop_plans.is_none() {
+        if !self.drop_tracker.is_active() {
             return;
         }
 
@@ -193,11 +271,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return;
         }
 
-        let flag_addr = match self.drop_flags.get(&def_id).copied() {
+        let flag_addr = match self.drop_tracker.flag(def_id) {
             Some(addr) => addr,
             None => {
                 let addr = self.create_drop_flag(def_id);
-                self.drop_flags.insert(def_id, addr);
+                self.drop_tracker.insert_flag(def_id, addr);
                 addr
             }
         };
@@ -206,8 +284,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn emit_drop_scope(&mut self, id: NodeId) -> Result<(), LoweringError> {
         let drop_plans = self
-            .drop_plans
-            .as_ref()
+            .drop_tracker
+            .plans()
             .unwrap_or_else(|| panic!("ssa drop scope missing drop plans"));
         let scope = drop_plans
             .scope_for(id)
@@ -227,11 +305,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(())
             }
             sem::DropGuard::IfInitialized => {
-                let flag_addr = match self.drop_flags.get(&item.def_id).copied() {
+                let flag_addr = match self.drop_tracker.flag(item.def_id) {
                     Some(addr) => addr,
                     None => {
                         let addr = self.create_drop_flag(item.def_id);
-                        self.drop_flags.insert(item.def_id, addr);
+                        self.drop_tracker.insert_flag(item.def_id, addr);
                         self.store_drop_flag(addr, false);
                         addr
                     }

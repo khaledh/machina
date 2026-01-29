@@ -132,15 +132,30 @@ fn test_lower_closure_invoke() {
             fn main() -> u64 {{
               locals:
                 %l0: main$closure$1
+                %l1: main$closure$1
+                %l2: main$closure$1
+                %l3: main$closure$1
+                %l4: main$closure$1
               bb0():
                 %v0: u64 = const 10:u64
                 %v1: ptr<main$closure$1> = addr_of %l0
                 %v2: ptr<u64> = field_addr %v1, 0
                 store %v2, %v0
                 %v3: main$closure$1 = load %v1
-                %v4: u64 = const 5:u64
-                %v5: u64 = call @{}(%v3, %v4)
-                ret %v5
+                %v4: ptr<main$closure$1> = addr_of %l1
+                %v5: ptr<main$closure$1> = addr_of %l2
+                store %v5, %v3
+                %v6: u64 = const 8:u64
+                memcpy %v4, %v5, %v6
+                %v7: main$closure$1 = load %v4
+                %v8: u64 = const 5:u64
+                %v9: ptr<main$closure$1> = addr_of %l3
+                %v10: ptr<main$closure$1> = addr_of %l4
+                store %v10, %v7
+                %v11: u64 = const 8:u64
+                memcpy %v9, %v10, %v11
+                %v12: u64 = call @{}(%v9, %v8)
+                ret %v12
             }}
         "},
         invoke_def_id
@@ -148,20 +163,17 @@ fn test_lower_closure_invoke() {
     assert_eq!(main_text, &expected_main);
 
     let expected_invoke = indoc! {"
-        fn main$closure$1$invoke(main$closure$1, u64) -> u64 {
+        fn main$closure$1$invoke(ptr<main$closure$1>, u64) -> u64 {
           locals:
             %l0: main$closure$1
-            %l1: main$closure$1
-          bb0(%v0: main$closure$1, %v1: u64):
+          bb0(%v0: ptr<main$closure$1>, %v1: u64):
             %v2: ptr<main$closure$1> = addr_of %l0
-            %v3: ptr<main$closure$1> = addr_of %l1
-            store %v3, %v0
-            %v4: u64 = const 8:u64
-            memcpy %v2, %v3, %v4
-            %v5: ptr<u64> = field_addr %v2, 0
-            %v6: u64 = load %v5
-            %v7: u64 = add %v6, %v1
-            ret %v7
+            %v3: u64 = const 8:u64
+            memcpy %v2, %v0, %v3
+            %v4: ptr<u64> = field_addr %v2, 0
+            %v5: u64 = load %v4
+            %v6: u64 = add %v5, %v1
+            ret %v6
         }
     "};
     assert_eq!(invoke_text, expected_invoke);
@@ -233,8 +245,16 @@ fn test_lower_closure_borrow_capture() {
               locals:
                 %l0: main$closure$1
                 %l1: u64
-                %l2: main$closure$2
-                %l3: u64
+                %l2: main$closure$1
+                %l3: main$closure$1
+                %l4: main$closure$2
+                %l5: u64
+                %l6: main$closure$2
+                %l7: main$closure$2
+                %l8: main$closure$1
+                %l9: main$closure$1
+                %l10: main$closure$2
+                %l11: main$closure$2
               bb0():
                 %v0: u64 = const 1:u64
                 %v1: u64 = const 2:u64
@@ -244,18 +264,40 @@ fn test_lower_closure_borrow_capture() {
                 %v4: ptr<ptr<u64>> = field_addr %v2, 0
                 store %v4, %v3
                 %v5: main$closure$1 = load %v2
-                %v6: ptr<main$closure$2> = addr_of %l2
-                %v7: ptr<u64> = addr_of %l3
-                store %v7, %v1
-                %v8: ptr<ptr<u64>> = field_addr %v6, 0
-                store %v8, %v7
-                %v9: main$closure$2 = load %v6
-                %v10: u64 = const 5:u64
-                %v11: u64 = call @{}(%v5, %v10)
-                %v12: u64 = const 3:u64
-                %v13: u64 = call @{}(%v9, %v12)
-                %v14: u64 = add %v11, %v13
-                ret %v14
+                %v6: ptr<main$closure$1> = addr_of %l2
+                %v7: ptr<main$closure$1> = addr_of %l3
+                store %v7, %v5
+                %v8: u64 = const 8:u64
+                memcpy %v6, %v7, %v8
+                %v9: ptr<main$closure$2> = addr_of %l4
+                %v10: ptr<u64> = addr_of %l5
+                store %v10, %v1
+                %v11: ptr<ptr<u64>> = field_addr %v9, 0
+                store %v11, %v10
+                %v12: main$closure$2 = load %v9
+                %v13: ptr<main$closure$2> = addr_of %l6
+                %v14: ptr<main$closure$2> = addr_of %l7
+                store %v14, %v12
+                %v15: u64 = const 8:u64
+                memcpy %v13, %v14, %v15
+                %v16: main$closure$1 = load %v6
+                %v17: u64 = const 5:u64
+                %v18: ptr<main$closure$1> = addr_of %l8
+                %v19: ptr<main$closure$1> = addr_of %l9
+                store %v19, %v16
+                %v20: u64 = const 8:u64
+                memcpy %v18, %v19, %v20
+                %v21: u64 = call @{}(%v18, %v17)
+                %v22: main$closure$2 = load %v13
+                %v23: u64 = const 3:u64
+                %v24: ptr<main$closure$2> = addr_of %l10
+                %v25: ptr<main$closure$2> = addr_of %l11
+                store %v25, %v22
+                %v26: u64 = const 8:u64
+                memcpy %v24, %v25, %v26
+                %v27: u64 = call @{}(%v24, %v23)
+                %v28: u64 = add %v21, %v27
+                ret %v28
             }}
         "},
         add_invoke_def_id, bump_invoke_def_id
@@ -263,47 +305,41 @@ fn test_lower_closure_borrow_capture() {
     assert_eq!(main_text, &expected_main);
 
     let expected_add_invoke = indoc! {"
-        fn main$closure$1$invoke(main$closure$1, u64) -> u64 {
+        fn main$closure$1$invoke(ptr<main$closure$1>, u64) -> u64 {
           locals:
             %l0: main$closure$1
-            %l1: main$closure$1
-          bb0(%v0: main$closure$1, %v1: u64):
+          bb0(%v0: ptr<main$closure$1>, %v1: u64):
             %v2: ptr<main$closure$1> = addr_of %l0
-            %v3: ptr<main$closure$1> = addr_of %l1
-            store %v3, %v0
-            %v4: u64 = const 8:u64
-            memcpy %v2, %v3, %v4
-            %v5: ptr<ptr<u64>> = field_addr %v2, 0
-            %v6: ptr<u64> = load %v5
-            %v7: u64 = load %v6
-            %v8: u64 = add %v7, %v1
-            ret %v8
+            %v3: u64 = const 8:u64
+            memcpy %v2, %v0, %v3
+            %v4: ptr<ptr<u64>> = field_addr %v2, 0
+            %v5: ptr<u64> = load %v4
+            %v6: u64 = load %v5
+            %v7: u64 = add %v6, %v1
+            ret %v7
         }
     "};
     assert_eq!(add_invoke_text, expected_add_invoke);
 
     let expected_bump_invoke = indoc! {"
-        fn main$closure$2$invoke(main$closure$2, u64) -> u64 {
+        fn main$closure$2$invoke(ptr<main$closure$2>, u64) -> u64 {
           locals:
             %l0: main$closure$2
-            %l1: main$closure$2
-          bb0(%v0: main$closure$2, %v1: u64):
+          bb0(%v0: ptr<main$closure$2>, %v1: u64):
             %v2: ptr<main$closure$2> = addr_of %l0
-            %v3: ptr<main$closure$2> = addr_of %l1
-            store %v3, %v0
-            %v4: u64 = const 8:u64
-            memcpy %v2, %v3, %v4
-            %v5: ptr<ptr<u64>> = field_addr %v2, 0
-            %v6: ptr<u64> = load %v5
-            %v7: u64 = load %v6
-            %v8: u64 = add %v7, %v1
-            %v9: ptr<ptr<u64>> = field_addr %v2, 0
-            %v10: ptr<u64> = load %v9
-            store %v10, %v8
-            %v11: ptr<ptr<u64>> = field_addr %v2, 0
-            %v12: ptr<u64> = load %v11
-            %v13: u64 = load %v12
-            ret %v13
+            %v3: u64 = const 8:u64
+            memcpy %v2, %v0, %v3
+            %v4: ptr<ptr<u64>> = field_addr %v2, 0
+            %v5: ptr<u64> = load %v4
+            %v6: u64 = load %v5
+            %v7: u64 = add %v6, %v1
+            %v8: ptr<ptr<u64>> = field_addr %v2, 0
+            %v9: ptr<u64> = load %v8
+            store %v9, %v7
+            %v10: ptr<ptr<u64>> = field_addr %v2, 0
+            %v11: ptr<u64> = load %v10
+            %v12: u64 = load %v11
+            ret %v12
         }
     "};
     assert_eq!(bump_invoke_text, expected_bump_invoke);

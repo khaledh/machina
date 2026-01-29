@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::resolve::{Def, DefId, DefTable};
 use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::drops::DropTracker;
 use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::locals::{LocalMap, LocalValue};
 use crate::ssa::lower::types::TypeLowerer;
@@ -71,9 +72,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) param_tys: Vec<IrTypeId>,
     pub(super) param_modes: Vec<ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
-    pub(super) drop_plans: Option<&'a sem::DropPlanMap>,
-    pub(super) drop_scopes: Vec<NodeId>,
-    pub(super) drop_flags: HashMap<DefId, ValueId>,
+    pub(super) drop_tracker: DropTracker<'a>,
     pub(super) globals: &'g mut GlobalArena,
 }
 
@@ -102,13 +101,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.type_map
             .lookup_def_type(self.def(def_id))
             .unwrap_or_else(|| panic!("ssa missing def type {:?}", def_id))
-    }
-
-    /// Looks up a node's semantic type, panicking on missing entries.
-    pub(super) fn node_type(&self, node_id: NodeId) -> Type {
-        self.type_map
-            .lookup_node_type(node_id)
-            .unwrap_or_else(|| panic!("ssa missing node type {:?}", node_id))
     }
 
     /// Fetches the lowering plan for a node.
@@ -220,9 +212,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys,
             param_modes,
             loop_stack: Vec::new(),
-            drop_plans: None,
-            drop_scopes: Vec::new(),
-            drop_flags: HashMap::new(),
+            drop_tracker: DropTracker::new(),
             globals,
         }
     }
@@ -331,9 +321,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys,
             param_modes,
             loop_stack: Vec::new(),
-            drop_plans: None,
-            drop_scopes: Vec::new(),
-            drop_flags: HashMap::new(),
+            drop_tracker: DropTracker::new(),
             globals,
         }
     }

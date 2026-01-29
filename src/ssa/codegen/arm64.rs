@@ -875,6 +875,64 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
                 }
+                (Location::Reg(src), Location::IncomingArg(offset)) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    match mov.size {
+                        1 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strb {}, [sp, #{}]", src, offset));
+                        }
+                        2 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strh {}, [sp, #{}]", src, offset));
+                        }
+                        4 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("str {}, [sp, #{}]", src, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "str {}, [sp, #{}]",
+                                Self::reg_name(src),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported reg->incoming move size {other}");
+                        }
+                    }
+                }
+                (Location::Stack(src), Location::IncomingArg(offset)) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    let src_offset = self.stack_offset(src);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", offset));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported stack->incoming move size {other}");
+                        }
+                    }
+                }
+                (Location::StackAddr(src), Location::IncomingArg(offset)) => {
+                    let src_offset = self.stack_offset(src);
+                    let out_offset = self.layout.incoming_offset(offset);
+                    self.emit_line(&format!("add x9, sp, #{}", src_offset));
+                    self.emit_line(&format!("str x9, [sp, #{}]", out_offset));
+                }
                 (Location::IncomingArg(offset), Location::Reg(dst)) => {
                     let offset = self.layout.incoming_offset(offset);
                     match mov.size {

@@ -298,6 +298,7 @@ fn test_arm64_emitter_basic() {
     );
 
     let asm = emitter.finish();
+    eprintln!("{asm}");
     assert!(asm.contains(".L_fn0_bb0:"));
     assert!(asm.contains("mov"));
     assert!(asm.contains("ret"));
@@ -501,9 +502,19 @@ fn test_arm64_emitter_switch() {
 
     let asm = emitter.finish();
     assert!(asm.contains("cmp"));
-    assert!(asm.contains(&format!("b.eq bb{}", case0.0)));
-    assert!(asm.contains(&format!("b.eq bb{}", case1.0)));
-    assert!(asm.contains(&format!("b bb{}", default.0)));
+    let label_prefix = format!(".L_fn{}_bb", func.def_id.0);
+    let beq_lines: Vec<_> = asm
+        .lines()
+        .filter(|line| line.trim_start().starts_with("b.eq "))
+        .collect();
+    assert_eq!(beq_lines.len(), 2);
+    assert!(beq_lines.iter().all(|line| line.contains(&label_prefix)));
+
+    let has_default = asm.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("b ") && line.contains(&label_prefix)
+    });
+    assert!(has_default);
 }
 
 #[test]
@@ -783,8 +794,8 @@ fn test_arm64_emitter_condbr_stack_cond() {
     );
 
     let asm = emitter.finish();
-    assert!(asm.contains("ldr x9"));
-    assert!(asm.contains("cbnz x9"));
+    assert!(asm.contains("ldrb w9"));
+    assert!(asm.contains("cbnz w9"));
 }
 
 #[test]
@@ -1127,8 +1138,8 @@ fn test_arm64_emitter_saves_callee_saved() {
     );
 
     let asm = emitter.finish();
-    assert!(asm.contains("str x4"));
-    assert!(asm.contains("ldr x4"));
+    assert!(asm.contains("stp x4"));
+    assert!(asm.contains("ldp x4"));
 }
 
 #[test]

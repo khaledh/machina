@@ -125,10 +125,23 @@ fn test_lower_method_call_param() {
 
     let expected = format!(
         indoc! {"
-            fn main(Pair) -> u64 {{
-              bb0(%v0: Pair):
-                %v1: u64 = call @{}(%v0)
-                ret %v1
+            fn main(ptr<Pair>) -> u64 {{
+              locals:
+                %l0: Pair
+                %l1: Pair
+                %l2: Pair
+              bb0(%v0: ptr<Pair>):
+                %v1: ptr<Pair> = addr_of %l0
+                %v2: u64 = const 16:u64
+                memcpy %v1, %v0, %v2
+                %v3: Pair = load %v1
+                %v4: ptr<Pair> = addr_of %l1
+                %v5: ptr<Pair> = addr_of %l2
+                store %v5, %v3
+                %v6: u64 = const 16:u64
+                memcpy %v4, %v5, %v6
+                %v7: u64 = call @{}(%v4)
+                ret %v7
             }}
         "},
         method_def_id
@@ -197,6 +210,8 @@ fn test_lower_call_array_to_slice_arg() {
                 %l1: u64[3]
                 %l2: u64[3]
                 %l3: struct {{ ptr: ptr<u64>, len: u64 }}
+                %l4: struct {{ ptr: ptr<u64>, len: u64 }}
+                %l5: struct {{ ptr: ptr<u64>, len: u64 }}
               bb0():
                 %v0: ptr<u64[3]> = addr_of %l0
                 %v1: u64 = const 1:u64
@@ -229,8 +244,13 @@ fn test_lower_call_array_to_slice_arg() {
                 %v22: ptr<u64> = field_addr %v20, 1
                 store %v22, %v19
                 %v23: struct {{ ptr: ptr<u64>, len: u64 }} = load %v20
-                %v24: u64 = call @{}(%v23)
-                ret %v24
+                %v24: ptr<struct {{ ptr: ptr<u64>, len: u64 }}> = addr_of %l4
+                %v25: ptr<struct {{ ptr: ptr<u64>, len: u64 }}> = addr_of %l5
+                store %v25, %v23
+                %v26: u64 = const 16:u64
+                memcpy %v24, %v25, %v26
+                %v27: u64 = call @{}(%v24)
+                ret %v27
             }}
         "},
         take_id
@@ -312,7 +332,7 @@ fn test_lower_out_param_def() {
             %v2: ptr<u64> = field_addr %v0, 0
             store %v2, %v1
             %v3: () = const ()
-            ret %v3
+            ret
         }
     "};
     assert_eq!(text, expected);

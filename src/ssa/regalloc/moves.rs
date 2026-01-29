@@ -254,7 +254,7 @@ fn edge_moves_for(
     block_params: &HashMap<BlockId, Vec<ValueId>>,
     alloc_map: &ValueAllocMap,
     value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
-    types: &IrTypeCache,
+    types: &mut IrTypeCache,
 ) -> Vec<MoveOp> {
     let params = block_params.get(&to).unwrap_or_else(|| {
         panic!(
@@ -367,7 +367,7 @@ fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::
 }
 
 fn move_size_for(
-    types: &IrTypeCache,
+    types: &mut IrTypeCache,
     ty: crate::ssa::IrTypeId,
     src: Location,
     dst: Location,
@@ -442,7 +442,7 @@ fn plan_call_moves(
     result: Option<&crate::ssa::model::ir::ValueDef>,
     alloc_map: &ValueAllocMap,
     value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
-    types: &IrTypeCache,
+    types: &mut IrTypeCache,
     target: &dyn TargetSpec,
     param_reg_count: usize,
 ) -> Option<CallMove> {

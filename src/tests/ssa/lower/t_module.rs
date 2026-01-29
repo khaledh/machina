@@ -83,10 +83,23 @@ fn test_lower_module_method_defs() {
 
     let expected_main = format!(
         indoc! {"
-            fn main(Pair) -> u64 {{
-              bb0(%v0: Pair):
-                %v1: u64 = call @{}(%v0)
-                ret %v1
+            fn main(ptr<Pair>) -> u64 {{
+              locals:
+                %l0: Pair
+                %l1: Pair
+                %l2: Pair
+              bb0(%v0: ptr<Pair>):
+                %v1: ptr<Pair> = addr_of %l0
+                %v2: u64 = const 16:u64
+                memcpy %v1, %v0, %v2
+                %v3: Pair = load %v1
+                %v4: ptr<Pair> = addr_of %l1
+                %v5: ptr<Pair> = addr_of %l2
+                store %v5, %v3
+                %v6: u64 = const 16:u64
+                memcpy %v4, %v5, %v6
+                %v7: u64 = call @{}(%v4)
+                ret %v7
             }}
         "},
         method_def_id
@@ -94,22 +107,19 @@ fn test_lower_module_method_defs() {
     assert_eq!(main_text, &expected_main);
 
     let expected_sum = indoc! {"
-        fn Pair$sum(Pair) -> u64 {
+        fn Pair$sum(ptr<Pair>) -> u64 {
           locals:
             %l0: Pair
-            %l1: Pair
-          bb0(%v0: Pair):
+          bb0(%v0: ptr<Pair>):
             %v1: ptr<Pair> = addr_of %l0
-            %v2: ptr<Pair> = addr_of %l1
-            store %v2, %v0
-            %v3: u64 = const 16:u64
-            memcpy %v1, %v2, %v3
-            %v4: ptr<u64> = field_addr %v1, 0
-            %v5: u64 = load %v4
-            %v6: ptr<u64> = field_addr %v1, 1
-            %v7: u64 = load %v6
-            %v8: u64 = add %v5, %v7
-            ret %v8
+            %v2: u64 = const 16:u64
+            memcpy %v1, %v0, %v2
+            %v3: ptr<u64> = field_addr %v1, 0
+            %v4: u64 = load %v3
+            %v5: ptr<u64> = field_addr %v1, 1
+            %v6: u64 = load %v5
+            %v7: u64 = add %v4, %v6
+            ret %v7
         }
     "};
     assert_eq!(sum_text, expected_sum);
