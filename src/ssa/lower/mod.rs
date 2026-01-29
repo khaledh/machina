@@ -17,6 +17,7 @@ mod lowerer;
 mod mapping;
 mod r#match;
 mod place;
+mod proj;
 mod slots;
 mod types;
 mod util;

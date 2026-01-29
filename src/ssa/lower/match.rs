@@ -429,21 +429,15 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                     curr_ty = (*elem_ty).clone();
                 }
                 sem::MatchProjection::Field { index } => match &curr_ty {
-                    Type::Tuple { field_tys } => {
-                        let field_ty = field_tys
-                            .get(*index)
-                            .unwrap_or_else(|| panic!("ssa match tuple field out of range {index}"))
-                            .clone();
-                        let field_ir_ty = self.lowerer.type_lowerer.lower_type(&field_ty);
+                    Type::Tuple { .. } => {
+                        let (field_ty, field_ir_ty) =
+                            self.lowerer.tuple_field_from_type(&curr_ty, *index);
                         addr = self.lowerer.field_addr_typed(addr, *index, field_ir_ty);
                         curr_ty = field_ty;
                     }
-                    Type::Struct { fields, .. } => {
-                        let field = fields.get(*index).unwrap_or_else(|| {
-                            panic!("ssa match struct field out of range {index}")
-                        });
-                        let field_ty = field.ty.clone();
-                        let field_ir_ty = self.lowerer.type_lowerer.lower_type(&field_ty);
+                    Type::Struct { .. } => {
+                        let (field_ty, field_ir_ty) =
+                            self.lowerer.struct_field_from_index(&curr_ty, *index);
                         addr = self.lowerer.field_addr_typed(addr, *index, field_ir_ty);
                         curr_ty = field_ty;
                     }

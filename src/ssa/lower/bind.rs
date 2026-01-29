@@ -39,20 +39,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(())
             }
             sem::BindPatternKind::Tuple { fields } => {
-                let Type::Tuple { field_tys } = value_ty else {
+                let Type::Tuple { .. } = value_ty else {
                     panic!("ssa bind tuple on {:?}", value_ty);
                 };
                 let slot = self.slot_for_value_typed(value, value_ty);
 
                 // Destructure each tuple field into a local binding.
                 for field in fields {
-                    let field_ty = field_tys
-                        .get(field.index)
-                        .unwrap_or_else(|| {
-                            panic!("ssa bind tuple field out of range {}", field.index)
-                        })
-                        .clone();
-                    let field_ir_ty = self.type_lowerer.lower_type(&field_ty);
+                    let (field_ty, field_ir_ty) = self.tuple_field_from_type(value_ty, field.index);
                     let field_val = self.load_field(slot.addr, field.index, field_ir_ty);
                     self.bind_pattern(
                         &field.pattern,
@@ -63,22 +57,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(())
             }
             sem::BindPatternKind::Struct { fields, .. } => {
-                let Type::Struct {
-                    fields: struct_fields,
-                    ..
-                } = value_ty
-                else {
+                let Type::Struct { .. } = value_ty else {
                     panic!("ssa bind struct on {:?}", value_ty);
                 };
                 let slot = self.slot_for_value_typed(value, value_ty);
 
                 // Destructure each struct field into a local binding.
                 for field in fields {
-                    let struct_field = struct_fields.get(field.field_index).unwrap_or_else(|| {
-                        panic!("ssa bind struct field out of range {}", field.field_index)
-                    });
-                    let field_ty = struct_field.ty.clone();
-                    let field_ir_ty = self.type_lowerer.lower_type(&field_ty);
+                    let (field_ty, field_ir_ty) =
+                        self.struct_field_from_index(value_ty, field.field_index);
                     let field_val = self.load_field(slot.addr, field.field_index, field_ir_ty);
                     self.bind_pattern(
                         &field.pattern,
