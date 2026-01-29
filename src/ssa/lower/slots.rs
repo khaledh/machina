@@ -38,6 +38,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         slot
     }
 
+    /// Materializes a typed value into a stack slot and returns its address.
+    pub(super) fn materialize_value_addr(&mut self, value: ValueId, value_ty: &Type) -> ValueId {
+        let ir_ty = self.type_lowerer.lower_type(value_ty);
+        let slot = self.alloc_value_slot(ir_ty);
+        self.store_value_into_addr(slot.addr, value, value_ty, ir_ty);
+        slot.addr
+    }
+
     /// Loads a value from a slot.
     pub(super) fn load_slot(&mut self, slot: &ValueSlot) -> ValueId {
         self.builder.load(slot.addr, slot.ty)

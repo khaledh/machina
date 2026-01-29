@@ -35,6 +35,59 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn call_input_from_value_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+    ) -> Result<Option<CallInputValue>, LoweringError> {
+        let drop_def = drop_def_for_value_expr(expr);
+        let Some(value) = self.lower_value_expr_opt(expr)? else {
+            return Ok(None);
+        };
+        let ty = self.type_map.type_table().get(expr.ty).clone();
+        Ok(Some(CallInputValue {
+            value,
+            ty,
+            is_addr: false,
+            drop_def,
+        }))
+    }
+
+    fn call_input_from_place_expr(
+        &mut self,
+        place: &sem::PlaceExpr,
+    ) -> Result<CallInputValue, LoweringError> {
+        let drop_def = drop_def_for_place_expr(place);
+        let addr = self.lower_place_addr(place)?;
+        let ty = self.type_map.type_table().get(place.ty).clone();
+        Ok(CallInputValue {
+            value: addr.addr,
+            ty,
+            is_addr: true,
+            drop_def,
+        })
+    }
+
+    fn lower_call_arg_values(
+        &mut self,
+        args: &[sem::CallArg],
+    ) -> Result<Option<Vec<CallInputValue>>, LoweringError> {
+        let mut arg_values = Vec::with_capacity(args.len());
+        for arg in args {
+            match arg {
+                sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                    let Some(input) = self.call_input_from_value_expr(expr)? else {
+                        return Ok(None);
+                    };
+                    arg_values.push(input);
+                }
+                sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                    arg_values.push(self.call_input_from_place_expr(place)?);
+                }
+            }
+        }
+        Ok(Some(arg_values))
+    }
+
     /// Lowers a call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_call_expr(
         &mut self,
@@ -67,35 +120,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         // Lower argument expressions.
-        let mut arg_values = Vec::with_capacity(args.len());
-        for arg in args {
-            match arg {
-                sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let drop_def = drop_def_for_value_expr(expr);
-                    let Some(value) = self.lower_value_expr_opt(expr)? else {
-                        return Ok(None);
-                    };
-                    let ty = self.type_map.type_table().get(expr.ty).clone();
-                    arg_values.push(CallInputValue {
-                        value,
-                        ty,
-                        is_addr: false,
-                        drop_def,
-                    });
-                }
-                sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
-                    let drop_def = drop_def_for_place_expr(place);
-                    let addr = self.lower_place_addr(place)?;
-                    let ty = self.type_map.type_table().get(place.ty).clone();
-                    arg_values.push(CallInputValue {
-                        value: addr.addr,
-                        ty,
-                        is_addr: true,
-                        drop_def,
-                    });
-                }
-            }
-        }
+        let Some(arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
 
         // Apply the call plan to reorder/transform arguments.
         let call_args =
@@ -126,29 +153,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Lower the receiver.
         let receiver_value = match receiver {
             sem::MethodReceiver::ValueExpr(expr) => {
-                let drop_def = drop_def_for_value_expr(expr);
-                let Some(value) = self.lower_value_expr_opt(expr)? else {
+                let Some(input) = self.call_input_from_value_expr(expr)? else {
                     return Ok(None);
                 };
-                let ty = self.type_map.type_table().get(expr.ty).clone();
-                CallInputValue {
-                    value,
-                    ty,
-                    is_addr: false,
-                    drop_def,
-                }
+                input
             }
-            sem::MethodReceiver::PlaceExpr(place) => {
-                let drop_def = drop_def_for_place_expr(place);
-                let addr = self.lower_place_addr(place)?;
-                let ty = self.type_map.type_table().get(place.ty).clone();
-                CallInputValue {
-                    value: addr.addr,
-                    ty,
-                    is_addr: true,
-                    drop_def,
-                }
-            }
+            sem::MethodReceiver::PlaceExpr(place) => self.call_input_from_place_expr(place)?,
         };
 
         // Resolve the callee.
@@ -179,35 +189,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         // Lower argument expressions.
-        let mut arg_values = Vec::with_capacity(args.len());
-        for arg in args {
-            match arg {
-                sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let drop_def = drop_def_for_value_expr(expr);
-                    let Some(value) = self.lower_value_expr_opt(expr)? else {
-                        return Ok(None);
-                    };
-                    let ty = self.type_map.type_table().get(expr.ty).clone();
-                    arg_values.push(CallInputValue {
-                        value,
-                        ty,
-                        is_addr: false,
-                        drop_def,
-                    });
-                }
-                sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
-                    let drop_def = drop_def_for_place_expr(place);
-                    let addr = self.lower_place_addr(place)?;
-                    let ty = self.type_map.type_table().get(place.ty).clone();
-                    arg_values.push(CallInputValue {
-                        value: addr.addr,
-                        ty,
-                        is_addr: true,
-                        drop_def,
-                    });
-                }
-            }
-        }
+        let Some(arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
 
         // Apply the call plan to build the final argument list.
         let call_args = self.lower_call_args_from_plan(
@@ -294,15 +278,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     if input_value.is_addr || input_value.ty.is_scalar() {
                         call_args.push(input_value.value);
                     } else {
-                        let ir_ty = self.type_lowerer.lower_type(&input_value.ty);
-                        let slot = self.alloc_value_slot(ir_ty);
-                        self.store_value_into_addr(
-                            slot.addr,
-                            input_value.value,
-                            &input_value.ty,
-                            ir_ty,
-                        );
-                        call_args.push(slot.addr);
+                        let addr = self.materialize_value_addr(input_value.value, &input_value.ty);
+                        call_args.push(addr);
                     }
                 }
                 sem::ArgLowering::PtrLen { input, len_bits } => {
