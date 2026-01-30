@@ -260,3 +260,39 @@ fn test_store_field_addr_elim() {
     assert!(!text.contains("store "));
     assert!(text.contains(&format!("field_addr %v{}, 0", param.0)));
 }
+
+#[test]
+fn test_local_load_forward() {
+    let mut types = IrTypeCache::new();
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let u64_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "local_load_forward",
+        FunctionSig {
+            params: vec![],
+            ret: u64_ty,
+        },
+    );
+
+    let local = builder.add_local(u64_ty, None);
+    let addr = builder.addr_of_local(local, u64_ptr);
+    let value = builder.const_int(42, false, 64, u64_ty);
+    builder.store(addr, value);
+    let loaded = builder.load(addr, u64_ty);
+    builder.terminate(Terminator::Return {
+        value: Some(loaded),
+    });
+
+    let mut func = builder.finish();
+    let mut manager = PassManager::new();
+    manager.run(std::slice::from_mut(&mut func));
+    let text = formact_func(&func, &types);
+
+    assert!(!text.contains("load "));
+    assert!(text.contains("const 42:u64"));
+}

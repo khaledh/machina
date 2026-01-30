@@ -6,6 +6,7 @@ pub use crate::ssa::opt::Pass;
 
 pub mod const_fold;
 pub mod index_addr_simplify;
+pub mod local_load_forward;
 pub mod store_field_addr_simplify;
 
 pub struct PassManager {
@@ -17,6 +18,7 @@ impl PassManager {
         Self {
             passes: vec![
                 Box::new(const_fold::ConstFold),
+                Box::new(local_load_forward::LocalLoadForward),
                 Box::new(store_field_addr_simplify::StoreFieldAddrSimplify),
                 Box::new(index_addr_simplify::IndexAddrSimplify),
             ],
