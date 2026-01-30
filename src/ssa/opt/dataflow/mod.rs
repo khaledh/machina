@@ -5,6 +5,7 @@ use crate::ssa::opt::Pass;
 
 pub mod byref_copy_elim;
 pub mod dce;
+pub mod local_memcpy_elim;
 pub mod memops;
 
 pub struct PassManager {
@@ -15,6 +16,7 @@ impl PassManager {
     pub fn new() -> Self {
         Self {
             passes: vec![
+                Box::new(local_memcpy_elim::LocalMemCopyElim),
                 Box::new(byref_copy_elim::ByRefCopyElim),
                 Box::new(dce::DeadCodeElim),
                 Box::new(memops::MemOps),
