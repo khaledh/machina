@@ -5,6 +5,7 @@ use crate::ssa::model::ir::Function;
 pub use crate::ssa::opt::Pass;
 
 pub mod const_fold;
+pub mod index_addr_simplify;
 
 pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
@@ -13,7 +14,10 @@ pub struct PassManager {
 impl PassManager {
     pub fn new() -> Self {
         Self {
-            passes: vec![Box::new(const_fold::ConstFold)],
+            passes: vec![
+                Box::new(const_fold::ConstFold),
+                Box::new(index_addr_simplify::IndexAddrSimplify),
+            ],
         }
     }
 

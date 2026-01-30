@@ -3,11 +3,15 @@ use crate::elaborate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize::normalize;
 use crate::parse::Parser;
+use crate::resolve::DefId;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::ssa::lower::lower_func;
+use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::format::formact_func;
+use crate::ssa::model::ir::FunctionSig;
 use crate::ssa::opt::cfg_free::PassManager;
+use crate::ssa::{IrTypeCache, IrTypeKind};
 use crate::typeck::type_check;
 use indoc::indoc;
 
@@ -95,4 +99,42 @@ fn test_const_fold_cond_br() {
         }
     "};
     assert_eq!(text, expected);
+}
+
+#[test]
+fn test_index_addr_zero_fold() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u8_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let u8_ptr = types.add(IrTypeKind::Ptr { elem: u8_ty });
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "idx_zero",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(u8_ty, None);
+    let base = builder.addr_of_local(local, u8_ptr);
+    let zero = builder.const_int(0, false, 64, u64_ty);
+    let idx = builder.index_addr(base, zero, u8_ptr);
+    let _load = builder.load(idx, u8_ty);
+    builder.terminate(crate::ssa::model::ir::Terminator::Return { value: None });
+
+    let mut func = builder.finish();
+    let mut manager = PassManager::new();
+    manager.run(std::slice::from_mut(&mut func));
+    let text = formact_func(&func, &types);
+
+    assert!(!text.contains("index_addr"));
 }
