@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ssa::IrTypeId;
-use crate::ssa::model::ir::{ConstValue, Function, InstKind, Terminator, ValueId};
+use crate::ssa::model::ir::{
+    ConstValue, Function, InstKind, Terminator, ValueId, replace_value_in_func,
+};
 use crate::ssa::opt::Pass;
 
 /// Eliminates `index_addr` when the index is constant zero and the pointer type is unchanged.
@@ -70,8 +72,8 @@ fn collect_types_and_zeros(func: &Function) -> (HashMap<ValueId, IrTypeId>, Hash
     let mut types = HashMap::new();
     let mut zeros = HashSet::new();
 
-    if let Some(entry) = func.blocks.first() {
-        for param in &entry.params {
+    for block in &func.blocks {
+        for param in &block.params {
             types.insert(param.value.id, param.value.ty);
         }
     }
@@ -92,123 +94,79 @@ fn collect_types_and_zeros(func: &Function) -> (HashMap<ValueId, IrTypeId>, Hash
         }
     }
 
+    let incoming = build_incoming_args(func);
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (block_idx, block) in func.blocks.iter().enumerate() {
+            for (param_idx, param) in block.params.iter().enumerate() {
+                if zeros.contains(&param.value.id) {
+                    continue;
+                }
+                let args = &incoming[block_idx][param_idx];
+                if args.is_empty() {
+                    continue;
+                }
+                if args.iter().all(|arg| zeros.contains(arg)) {
+                    zeros.insert(param.value.id);
+                    changed = true;
+                }
+            }
+        }
+    }
+
     (types, zeros)
 }
 
-fn replace_value_in_func(
-    func: &mut Function,
-    from: ValueId,
-    to: ValueId,
-    ignore: Option<(usize, usize)>,
-) {
-    for (block_idx, block) in func.blocks.iter_mut().enumerate() {
-        for (inst_idx, inst) in block.insts.iter_mut().enumerate() {
-            if Some((block_idx, inst_idx)) == ignore {
-                continue;
-            }
-            replace_value_in_inst(&mut inst.kind, from, to);
-        }
-        replace_value_in_term(&mut block.term, from, to);
-    }
-}
+fn build_incoming_args(func: &Function) -> Vec<Vec<Vec<ValueId>>> {
+    let mut incoming: Vec<Vec<Vec<ValueId>>> = func
+        .blocks
+        .iter()
+        .map(|block| vec![Vec::new(); block.params.len()])
+        .collect();
 
-fn replace_value_in_inst(kind: &mut InstKind, from: ValueId, to: ValueId) {
-    let replace = |value: &mut ValueId| {
-        if *value == from {
-            *value = to;
-        }
-    };
-
-    match kind {
-        InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
-            replace(lhs);
-            replace(rhs);
-        }
-        InstKind::UnOp { value, .. }
-        | InstKind::IntTrunc { value, .. }
-        | InstKind::IntExtend { value, .. }
-        | InstKind::Cast { value, .. }
-        | InstKind::FieldAddr { base: value, .. }
-        | InstKind::Load { ptr: value } => replace(value),
-        InstKind::IndexAddr { base, index } => {
-            replace(base);
-            replace(index);
-        }
-        InstKind::Store { ptr, value } => {
-            replace(ptr);
-            replace(value);
-        }
-        InstKind::MemCopy { dst, src, len } => {
-            replace(dst);
-            replace(src);
-            replace(len);
-        }
-        InstKind::MemSet { dst, byte, len } => {
-            replace(dst);
-            replace(byte);
-            replace(len);
-        }
-        InstKind::Call { callee, args } => {
-            if let crate::ssa::model::ir::Callee::Value(value) = callee {
-                replace(value);
+    for block in &func.blocks {
+        match &block.term {
+            Terminator::Br { target, args } => {
+                push_args(&mut incoming, *target, args);
             }
-            for arg in args {
-                replace(arg);
+            Terminator::CondBr {
+                then_bb,
+                then_args,
+                else_bb,
+                else_args,
+                ..
+            } => {
+                push_args(&mut incoming, *then_bb, then_args);
+                push_args(&mut incoming, *else_bb, else_args);
             }
-        }
-        InstKind::Drop { ptr } => replace(ptr),
-        InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => {}
-    }
-}
-
-fn replace_value_in_term(term: &mut Terminator, from: ValueId, to: ValueId) {
-    let replace = |value: &mut ValueId| {
-        if *value == from {
-            *value = to;
-        }
-    };
-
-    match term {
-        Terminator::Br { args, .. } => {
-            for value in args {
-                replace(value);
-            }
-        }
-        Terminator::CondBr {
-            cond,
-            then_args,
-            else_args,
-            ..
-        } => {
-            replace(cond);
-            for value in then_args {
-                replace(value);
-            }
-            for value in else_args {
-                replace(value);
-            }
-        }
-        Terminator::Switch {
-            value,
-            cases,
-            default_args,
-            ..
-        } => {
-            replace(value);
-            for case in cases {
-                for arg in &mut case.args {
-                    replace(arg);
+            Terminator::Switch {
+                cases,
+                default,
+                default_args,
+                ..
+            } => {
+                for case in cases {
+                    push_args(&mut incoming, case.target, &case.args);
                 }
+                push_args(&mut incoming, *default, default_args);
             }
-            for value in default_args {
-                replace(value);
-            }
+            Terminator::Return { .. } | Terminator::Unreachable => {}
         }
-        Terminator::Return { value } => {
-            if let Some(value) = value {
-                replace(value);
-            }
+    }
+
+    incoming
+}
+
+fn push_args(
+    incoming: &mut [Vec<Vec<ValueId>>],
+    target: crate::ssa::model::ir::BlockId,
+    args: &[ValueId],
+) {
+    let slots = &mut incoming[target.index()];
+    for (idx, value) in args.iter().enumerate() {
+        if let Some(slot) = slots.get_mut(idx) {
+            slot.push(*value);
         }
-        Terminator::Unreachable => {}
     }
 }

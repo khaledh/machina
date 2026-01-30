@@ -2,7 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ssa::model::ir::{Function, InstKind, Terminator, ValueId, for_each_inst_use};
+use crate::ssa::model::ir::{
+    Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
+};
 use crate::ssa::opt::Pass;
 
 /// Drops MemCopy-to-local when the local is only read through derived pointers.
@@ -136,122 +138,4 @@ fn is_read_only_ptr(
     }
 
     true
-}
-
-fn replace_value_in_func(
-    func: &mut Function,
-    from: ValueId,
-    to: ValueId,
-    ignore: Option<(usize, usize)>,
-) {
-    for (block_idx, block) in func.blocks.iter_mut().enumerate() {
-        for (inst_idx, inst) in block.insts.iter_mut().enumerate() {
-            if Some((block_idx, inst_idx)) == ignore {
-                continue;
-            }
-            replace_value_in_inst(&mut inst.kind, from, to);
-        }
-        replace_value_in_term(&mut block.term, from, to);
-    }
-}
-
-fn replace_value_in_inst(kind: &mut InstKind, from: ValueId, to: ValueId) {
-    let replace = |value: &mut ValueId| {
-        if *value == from {
-            *value = to;
-        }
-    };
-
-    match kind {
-        InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
-            replace(lhs);
-            replace(rhs);
-        }
-        InstKind::UnOp { value, .. }
-        | InstKind::IntTrunc { value, .. }
-        | InstKind::IntExtend { value, .. }
-        | InstKind::Cast { value, .. }
-        | InstKind::FieldAddr { base: value, .. }
-        | InstKind::Load { ptr: value } => replace(value),
-        InstKind::IndexAddr { base, index } => {
-            replace(base);
-            replace(index);
-        }
-        InstKind::Store { ptr, value } => {
-            replace(ptr);
-            replace(value);
-        }
-        InstKind::MemCopy { dst, src, len } => {
-            replace(dst);
-            replace(src);
-            replace(len);
-        }
-        InstKind::MemSet { dst, byte, len } => {
-            replace(dst);
-            replace(byte);
-            replace(len);
-        }
-        InstKind::Call { callee, args } => {
-            if let crate::ssa::model::ir::Callee::Value(value) = callee {
-                replace(value);
-            }
-            for arg in args {
-                replace(arg);
-            }
-        }
-        InstKind::Drop { ptr } => replace(ptr),
-        InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => {}
-    }
-}
-
-fn replace_value_in_term(term: &mut Terminator, from: ValueId, to: ValueId) {
-    let replace = |value: &mut ValueId| {
-        if *value == from {
-            *value = to;
-        }
-    };
-
-    match term {
-        Terminator::Br { args, .. } => {
-            for value in args {
-                replace(value);
-            }
-        }
-        Terminator::CondBr {
-            cond,
-            then_args,
-            else_args,
-            ..
-        } => {
-            replace(cond);
-            for value in then_args {
-                replace(value);
-            }
-            for value in else_args {
-                replace(value);
-            }
-        }
-        Terminator::Switch {
-            value,
-            cases,
-            default_args,
-            ..
-        } => {
-            replace(value);
-            for case in cases {
-                for arg in &mut case.args {
-                    replace(arg);
-                }
-            }
-            for value in default_args {
-                replace(value);
-            }
-        }
-        Terminator::Return { value } => {
-            if let Some(value) = value {
-                replace(value);
-            }
-        }
-        Terminator::Unreachable => {}
-    }
 }
