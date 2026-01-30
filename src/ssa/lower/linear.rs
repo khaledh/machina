@@ -4,7 +4,7 @@ use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
-use crate::ssa::model::ir::{BinOp, Callee, RuntimeFn, Terminator, UnOp, ValueId};
+use crate::ssa::model::ir::{BinOp, Callee, CastKind, RuntimeFn, Terminator, UnOp, ValueId};
 use crate::tree::semantic as sem;
 use crate::tree::{BinaryOp, ParamMode, UnaryOp};
 use crate::types::Type;
@@ -108,8 +108,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 // pointer to global bytes
                 let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
                 let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
-                let global_id = self.add_global_bytes(value.as_bytes().to_vec());
-                let ptr_val = self.builder.const_global_addr(global_id, u8_ptr_ty);
+                let ptr_val = if value.is_empty() {
+                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                    let zero = self.builder.const_int(0, false, 64, u64_ty);
+                    self.builder.cast(CastKind::IntToPtr, zero, u8_ptr_ty)
+                } else {
+                    let global_id = self.add_global_bytes(value.as_bytes().to_vec());
+                    self.builder.const_global_addr(global_id, u8_ptr_ty)
+                };
 
                 // length and capacity (same for string literals)
                 let len_ty = self.type_lowerer.lower_type(&Type::uint(32));

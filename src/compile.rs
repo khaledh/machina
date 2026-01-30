@@ -457,6 +457,10 @@ fn format_globals(globals: &[mcir::types::GlobalItem]) -> String {
 fn format_ssa_globals(globals: &[ssa::model::ir::GlobalData]) -> String {
     let mut out = String::new();
     for global in globals {
+        if let Some(text) = format_bytes_as_string(&global.bytes) {
+            out.push_str(&format!("global _g{} = \"{}\"\n", global.id.0, text));
+            continue;
+        }
         out.push_str(&format!("global _g{} = bytes [", global.id.0));
         for (idx, byte) in global.bytes.iter().enumerate() {
             if idx > 0 {
@@ -470,6 +474,24 @@ fn format_ssa_globals(globals: &[ssa::model::ir::GlobalData]) -> String {
         out.push('\n');
     }
     out
+}
+
+fn format_bytes_as_string(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ' ' => out.push(' '),
+            _ if ch.is_ascii_graphic() => out.push(ch),
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 fn replace_func_addrs(text: &str, def_names: &HashMap<DefId, String>) -> String {

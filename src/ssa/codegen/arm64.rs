@@ -593,18 +593,28 @@ impl CodegenEmitter for Arm64Emitter {
 
         let _ = writeln!(self.output, "{}:", label);
 
-        // Emit bytes verbatim; empty globals still reserve a byte.
-        if global.bytes.is_empty() {
-            self.emit_line(".byte 0");
-        } else {
-            let data = global
-                .bytes
-                .iter()
-                .map(|b| b.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            self.emit_line(&format!(".byte {}", data));
+        // Emit ASCII strings when possible, otherwise fall back to raw bytes.
+        if let Some(text) = format_bytes_as_ascii(&global.bytes) {
+            if text.is_empty() {
+                self.emit_line(".space 0");
+            } else {
+                self.emit_line(&format!(".ascii \"{}\"", text));
+            }
+            return;
         }
+
+        if global.bytes.is_empty() {
+            self.emit_line(".space 0");
+            return;
+        }
+
+        let data = global
+            .bytes
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.emit_line(&format!(".byte {}", data));
     }
 
     fn begin_function(&mut self, name: &str, frame_size: u32, callee_saved: &[PhysReg]) {
@@ -1666,6 +1676,24 @@ impl CodegenEmitter for Arm64Emitter {
             }
         }
     }
+}
+
+fn format_bytes_as_ascii(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ' ' => out.push(' '),
+            _ if ch.is_ascii_graphic() => out.push(ch),
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 trait ConstValueExt {
