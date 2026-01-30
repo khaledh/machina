@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::ssa::IrTypeId;
 use crate::ssa::analysis::cfg::Cfg;
 use crate::ssa::analysis::liveness::LiveMap;
-use crate::ssa::model::ir::{Callee, Function, InstKind, Terminator, ValueId};
+use crate::ssa::model::ir::{Function, InstKind, Terminator, ValueId, for_each_inst_use};
 
 /// Half-open live interval [start, end) in instruction index space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,9 +68,9 @@ pub fn analyze(func: &Function, live_map: &LiveMap) -> IntervalAnalysis {
         }
 
         for inst in &block.insts {
-            for value in inst_uses(&inst.kind) {
+            for_each_inst_use(&inst.kind, |value| {
                 mark_use(value, inst_idx + 1, &mut map);
-            }
+            });
 
             if let Some(result) = &inst.result {
                 mark_def(result.id, inst_idx, &mut map);
@@ -141,34 +141,6 @@ fn mark_def(value: ValueId, start: u32, map: &mut LiveIntervalMap) {
             start,
             end: start + 1,
         });
-}
-
-fn inst_uses(kind: &InstKind) -> Vec<ValueId> {
-    match kind {
-        InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => Vec::new(),
-        InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
-            vec![*lhs, *rhs]
-        }
-        InstKind::UnOp { value, .. }
-        | InstKind::IntTrunc { value, .. }
-        | InstKind::IntExtend { value, .. }
-        | InstKind::Cast { value, .. }
-        | InstKind::FieldAddr { base: value, .. }
-        | InstKind::Load { ptr: value } => vec![*value],
-        InstKind::IndexAddr { base, index } => vec![*base, *index],
-        InstKind::Store { ptr, value } => vec![*ptr, *value],
-        InstKind::MemCopy { dst, src, len } => vec![*dst, *src, *len],
-        InstKind::MemSet { dst, byte, len } => vec![*dst, *byte, *len],
-        InstKind::Call { callee, args } => {
-            let mut values = Vec::with_capacity(args.len() + 1);
-            if let Callee::Value(value) = callee {
-                values.push(*value);
-            }
-            values.extend(args.iter().cloned());
-            values
-        }
-        InstKind::Drop { ptr } => vec![*ptr],
-    }
 }
 
 fn term_uses(term: &Terminator) -> Vec<ValueId> {

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::analysis::dataflow::{DataflowGraph, solve_backward};
 use crate::ssa::analysis::cfg::Cfg;
-use crate::ssa::model::ir::{Block, Callee, Function, InstKind, Terminator, ValueId};
+use crate::ssa::model::ir::{Block, Function, Terminator, ValueId, for_each_inst_use};
 
 #[derive(Debug, Clone, Default)]
 pub struct LiveSet {
@@ -96,7 +96,7 @@ fn block_use_def(block: &Block) -> UseDef {
     }
 
     for inst in &block.insts {
-        inst_uses(&inst.kind, &mut use_def);
+        for_each_inst_use(&inst.kind, |value| use_def.add_use(value));
         if let Some(result) = &inst.result {
             use_def.add_def(result.id);
         }
@@ -134,53 +134,6 @@ fn block_edge_uses(block: &Block) -> HashSet<ValueId> {
         Terminator::Return { .. } | Terminator::Unreachable => {}
     }
     uses
-}
-
-fn inst_uses(kind: &InstKind, use_def: &mut UseDef) {
-    match kind {
-        InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => {}
-        InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
-            use_def.add_use(*lhs);
-            use_def.add_use(*rhs);
-        }
-        InstKind::UnOp { value, .. }
-        | InstKind::IntTrunc { value, .. }
-        | InstKind::IntExtend { value, .. }
-        | InstKind::Cast { value, .. }
-        | InstKind::FieldAddr { base: value, .. }
-        | InstKind::Load { ptr: value } => {
-            use_def.add_use(*value);
-        }
-        InstKind::IndexAddr { base, index } => {
-            use_def.add_use(*base);
-            use_def.add_use(*index);
-        }
-        InstKind::Store { ptr, value } => {
-            use_def.add_use(*ptr);
-            use_def.add_use(*value);
-        }
-        InstKind::MemCopy { dst, src, len } => {
-            use_def.add_use(*dst);
-            use_def.add_use(*src);
-            use_def.add_use(*len);
-        }
-        InstKind::MemSet { dst, byte, len } => {
-            use_def.add_use(*dst);
-            use_def.add_use(*byte);
-            use_def.add_use(*len);
-        }
-        InstKind::Call { callee, args } => {
-            if let Callee::Value(value) = callee {
-                use_def.add_use(*value);
-            }
-            for arg in args {
-                use_def.add_use(*arg);
-            }
-        }
-        InstKind::Drop { ptr } => {
-            use_def.add_use(*ptr);
-        }
-    }
 }
 
 fn term_uses(term: &Terminator, use_def: &mut UseDef) {

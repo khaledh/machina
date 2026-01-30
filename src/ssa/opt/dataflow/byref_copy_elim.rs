@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ssa::model::ir::{Function, InstKind, Terminator, ValueId};
+use crate::ssa::model::ir::{Function, InstKind, Terminator, ValueId, for_each_inst_use};
 use crate::ssa::opt::Pass;
 
 /// Drops MemCopy-to-local when the local is only read through derived pointers.
@@ -91,41 +91,13 @@ fn build_use_maps(
                 def_inst.insert(result.id, (block_idx, inst_idx));
             }
 
-            for value in inst_uses(&inst.kind) {
+            for_each_inst_use(&inst.kind, |value| {
                 uses.entry(value).or_default().push((block_idx, inst_idx));
-            }
+            });
         }
     }
 
     (def_inst, uses)
-}
-
-fn inst_uses(kind: &InstKind) -> Vec<ValueId> {
-    match kind {
-        InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => Vec::new(),
-        InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
-            vec![*lhs, *rhs]
-        }
-        InstKind::UnOp { value, .. }
-        | InstKind::IntTrunc { value, .. }
-        | InstKind::IntExtend { value, .. }
-        | InstKind::Cast { value, .. }
-        | InstKind::FieldAddr { base: value, .. }
-        | InstKind::Load { ptr: value } => vec![*value],
-        InstKind::IndexAddr { base, index } => vec![*base, *index],
-        InstKind::Store { ptr, value } => vec![*ptr, *value],
-        InstKind::MemCopy { dst, src, len } => vec![*dst, *src, *len],
-        InstKind::MemSet { dst, byte, len } => vec![*dst, *byte, *len],
-        InstKind::Call { callee, args } => {
-            let mut values = Vec::with_capacity(args.len() + 1);
-            if let crate::ssa::model::ir::Callee::Value(value) = callee {
-                values.push(*value);
-            }
-            values.extend(args.iter().cloned());
-            values
-        }
-        InstKind::Drop { ptr } => vec![*ptr],
-    }
 }
 
 fn is_read_only_ptr(

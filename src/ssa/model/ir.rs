@@ -277,6 +277,50 @@ pub enum InstKind {
     },
 }
 
+/// Visits each SSA value used by an instruction.
+pub fn for_each_inst_use(kind: &InstKind, mut f: impl FnMut(ValueId)) {
+    match kind {
+        InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => {}
+        InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
+            f(*lhs);
+            f(*rhs);
+        }
+        InstKind::UnOp { value, .. }
+        | InstKind::IntTrunc { value, .. }
+        | InstKind::IntExtend { value, .. }
+        | InstKind::Cast { value, .. }
+        | InstKind::FieldAddr { base: value, .. }
+        | InstKind::Load { ptr: value } => f(*value),
+        InstKind::IndexAddr { base, index } => {
+            f(*base);
+            f(*index);
+        }
+        InstKind::Store { ptr, value } => {
+            f(*ptr);
+            f(*value);
+        }
+        InstKind::MemCopy { dst, src, len } => {
+            f(*dst);
+            f(*src);
+            f(*len);
+        }
+        InstKind::MemSet { dst, byte, len } => {
+            f(*dst);
+            f(*byte);
+            f(*len);
+        }
+        InstKind::Call { callee, args } => {
+            if let Callee::Value(value) = callee {
+                f(*value);
+            }
+            for arg in args {
+                f(*arg);
+            }
+        }
+        InstKind::Drop { ptr } => f(*ptr),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchCase {
     pub value: ConstValue,
