@@ -149,3 +149,16 @@ fn test_memops_to_runtime_calls_array() {
 
     assert!(text.contains("__rt_memcpy"));
 }
+
+#[test]
+fn test_byref_copy_elim_reads_only() {
+    let text = lower_and_optimize(indoc! {"
+        type Pair = { x: u64, y: u64 }
+
+        fn sum(p: Pair) -> u64 {
+            p.x + p.y
+        }
+    "});
+
+    assert!(!text.contains("__rt_memcpy"));
+}

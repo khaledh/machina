@@ -3,6 +3,7 @@
 use crate::ssa::model::ir::Function;
 use crate::ssa::opt::Pass;
 
+pub mod byref_copy_elim;
 pub mod dce;
 pub mod memops;
 
@@ -13,7 +14,11 @@ pub struct PassManager {
 impl PassManager {
     pub fn new() -> Self {
         Self {
-            passes: vec![Box::new(dce::DeadCodeElim), Box::new(memops::MemOps)],
+            passes: vec![
+                Box::new(byref_copy_elim::ByRefCopyElim),
+                Box::new(dce::DeadCodeElim),
+                Box::new(memops::MemOps),
+            ],
         }
     }
 
