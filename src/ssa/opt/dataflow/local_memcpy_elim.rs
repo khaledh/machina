@@ -7,6 +7,7 @@ use crate::ssa::model::ir::{
     Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
 };
 use crate::ssa::opt::Pass;
+use crate::ssa::opt::dataflow::ptr_utils::{is_read_only_ptr, peel_ptr_cast, source_stable_after};
 
 /// Drops MemCopy between locals when the destination is read-only and the source is not written after.
 pub struct LocalMemCopyElim;
@@ -28,7 +29,10 @@ impl Pass for LocalMemCopyElim {
                     continue;
                 };
 
-                let Some((dst_def_block, dst_def_idx)) = def_inst.get(dst) else {
+                let dst_root = peel_ptr_cast(*dst, func, &def_inst);
+                let src_root = peel_ptr_cast(*src, func, &def_inst);
+
+                let Some((dst_def_block, dst_def_idx)) = def_inst.get(&dst_root) else {
                     continue;
                 };
                 let dst_def = &func.blocks[*dst_def_block].insts[*dst_def_idx];
@@ -36,7 +40,7 @@ impl Pass for LocalMemCopyElim {
                     continue;
                 }
 
-                let Some((src_def_block, src_def_idx)) = def_inst.get(src) else {
+                let Some((src_def_block, src_def_idx)) = def_inst.get(&src_root) else {
                     continue;
                 };
                 let src_def = &func.blocks[*src_def_block].insts[*src_def_idx];
@@ -215,93 +219,4 @@ fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
         }
     }
     uses
-}
-
-fn is_read_only_ptr(
-    value: ValueId,
-    func: &Function,
-    uses: &HashMap<ValueId, Vec<(usize, usize)>>,
-    ignore: Option<(usize, usize)>,
-    visiting: &mut HashSet<ValueId>,
-) -> bool {
-    if !visiting.insert(value) {
-        return true;
-    }
-
-    let Some(users) = uses.get(&value) else {
-        return true;
-    };
-
-    for (block_idx, inst_idx) in users {
-        if Some((*block_idx, *inst_idx)) == ignore {
-            continue;
-        }
-
-        let inst = &func.blocks[*block_idx].insts[*inst_idx];
-        match &inst.kind {
-            InstKind::Load { .. } => {}
-            InstKind::FieldAddr { .. } | InstKind::IndexAddr { .. } => {
-                let Some(result) = &inst.result else {
-                    return false;
-                };
-                if !is_read_only_ptr(result.id, func, uses, ignore, visiting) {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
-    }
-
-    true
-}
-
-fn source_stable_after(
-    value: ValueId,
-    block_idx: usize,
-    inst_idx: usize,
-    func: &Function,
-    uses: &HashMap<ValueId, Vec<(usize, usize)>>,
-    ignore: Option<(usize, usize)>,
-    visiting: &mut HashSet<ValueId>,
-) -> bool {
-    if !visiting.insert(value) {
-        return true;
-    }
-
-    let Some(users) = uses.get(&value) else {
-        return true;
-    };
-
-    for (use_block, use_idx) in users {
-        if Some((*use_block, *use_idx)) == ignore {
-            continue;
-        }
-
-        let inst = &func.blocks[*use_block].insts[*use_idx];
-        match &inst.kind {
-            InstKind::Load { .. } => {}
-            InstKind::FieldAddr { .. } | InstKind::IndexAddr { .. } => {
-                let Some(result) = &inst.result else {
-                    return false;
-                };
-                if !source_stable_after(
-                    result.id, block_idx, inst_idx, func, uses, ignore, visiting,
-                ) {
-                    return false;
-                }
-            }
-            InstKind::Store { .. }
-            | InstKind::MemCopy { .. }
-            | InstKind::MemSet { .. }
-            | InstKind::Drop { .. }
-            | InstKind::Call { .. } => {
-                if *use_block != block_idx || *use_idx > inst_idx {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
-    }
-
-    true
 }

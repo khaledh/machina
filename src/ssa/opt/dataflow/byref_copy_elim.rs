@@ -6,6 +6,7 @@ use crate::ssa::model::ir::{
     Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
 };
 use crate::ssa::opt::Pass;
+use crate::ssa::opt::dataflow::ptr_utils::{is_read_only_ptr, peel_ptr_cast};
 
 /// Drops MemCopy-to-local when the local is only read through derived pointers.
 pub struct ByRefCopyElim;
@@ -34,7 +35,8 @@ impl Pass for ByRefCopyElim {
                     continue;
                 }
 
-                let Some((def_block, def_idx)) = def_inst.get(dst) else {
+                let dst_root = peel_ptr_cast(*dst, func, &def_inst);
+                let Some((def_block, def_idx)) = def_inst.get(&dst_root) else {
                     continue;
                 };
                 let def = &func.blocks[*def_block].insts[*def_idx];
@@ -100,42 +102,4 @@ fn build_use_maps(
     }
 
     (def_inst, uses)
-}
-
-fn is_read_only_ptr(
-    value: ValueId,
-    func: &Function,
-    uses: &HashMap<ValueId, Vec<(usize, usize)>>,
-    ignore: Option<(usize, usize)>,
-    visiting: &mut HashSet<ValueId>,
-) -> bool {
-    if !visiting.insert(value) {
-        return true;
-    }
-
-    let Some(users) = uses.get(&value) else {
-        return true;
-    };
-
-    for (block_idx, inst_idx) in users {
-        if Some((*block_idx, *inst_idx)) == ignore {
-            continue;
-        }
-
-        let inst = &func.blocks[*block_idx].insts[*inst_idx];
-        match &inst.kind {
-            InstKind::Load { .. } => {}
-            InstKind::FieldAddr { .. } | InstKind::IndexAddr { .. } => {
-                let Some(result) = &inst.result else {
-                    return false;
-                };
-                if !is_read_only_ptr(result.id, func, uses, ignore, visiting) {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
-    }
-
-    true
 }

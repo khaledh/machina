@@ -7,6 +7,7 @@ pub mod byref_copy_elim;
 pub mod dce;
 pub mod local_memcpy_elim;
 pub mod memops;
+pub mod ptr_utils;
 pub mod stack_temp_copy_elim;
 
 pub struct PassManager {

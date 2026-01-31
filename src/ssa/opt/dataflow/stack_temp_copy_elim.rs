@@ -15,9 +15,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ssa::model::ir::{
-    Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
+    CastKind, Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
 };
 use crate::ssa::opt::Pass;
+use crate::ssa::opt::dataflow::ptr_utils::{peel_ptr_cast, source_stable_after};
 
 /// Removes store+memcpy patterns that only shuttle data between locals.
 pub struct StackTempCopyElim;
@@ -39,7 +40,10 @@ impl Pass for StackTempCopyElim {
                 };
 
                 // Only consider memcpy between locals (addr_of_local results).
-                let Some((dst_def_block, dst_def_idx)) = def_inst.get(dst) else {
+                let dst_root = peel_ptr_cast(*dst, func, &def_inst);
+                let src_root = peel_ptr_cast(*src, func, &def_inst);
+
+                let Some((dst_def_block, dst_def_idx)) = def_inst.get(&dst_root) else {
                     continue;
                 };
                 let dst_def = &func.blocks[*dst_def_block].insts[*dst_def_idx];
@@ -47,7 +51,7 @@ impl Pass for StackTempCopyElim {
                     continue;
                 }
 
-                let Some((src_def_block, src_def_idx)) = def_inst.get(src) else {
+                let Some((src_def_block, src_def_idx)) = def_inst.get(&src_root) else {
                     continue;
                 };
                 let src_def = &func.blocks[*src_def_block].insts[*src_def_idx];
@@ -242,61 +246,15 @@ fn store_to_local_before(
             } if store_ptr == ptr => {
                 last_store = Some((*use_block, *use_idx, value));
             }
-            InstKind::Load { .. } | InstKind::FieldAddr { .. } | InstKind::IndexAddr { .. } => {}
+            InstKind::Load { .. }
+            | InstKind::FieldAddr { .. }
+            | InstKind::IndexAddr { .. }
+            | InstKind::Cast {
+                kind: CastKind::PtrToPtr,
+                ..
+            } => {}
             _ => return None,
         }
     }
     last_store
-}
-
-fn source_stable_after(
-    value: ValueId,
-    block_idx: usize,
-    inst_idx: usize,
-    func: &Function,
-    uses: &HashMap<ValueId, Vec<(usize, usize)>>,
-    ignore: Option<(usize, usize)>,
-    visiting: &mut HashSet<ValueId>,
-) -> bool {
-    // Recursively ensure the value and any derived addresses are not mutated after inst_idx.
-    if !visiting.insert(value) {
-        return true;
-    }
-
-    let Some(users) = uses.get(&value) else {
-        return true;
-    };
-
-    for (use_block, use_idx) in users {
-        if Some((*use_block, *use_idx)) == ignore {
-            continue;
-        }
-
-        let inst = &func.blocks[*use_block].insts[*use_idx];
-        match &inst.kind {
-            InstKind::Load { .. } => {}
-            InstKind::FieldAddr { .. } | InstKind::IndexAddr { .. } => {
-                let Some(result) = &inst.result else {
-                    return false;
-                };
-                if !source_stable_after(
-                    result.id, block_idx, inst_idx, func, uses, ignore, visiting,
-                ) {
-                    return false;
-                }
-            }
-            InstKind::Store { .. }
-            | InstKind::MemCopy { .. }
-            | InstKind::MemSet { .. }
-            | InstKind::Drop { .. }
-            | InstKind::Call { .. } => {
-                if *use_block != block_idx || *use_idx > inst_idx {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
-    }
-
-    true
 }
