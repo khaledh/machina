@@ -174,7 +174,11 @@ fn main() {
                         .output
                         .clone()
                         .unwrap_or_else(|| default_exe_path(input_path));
-                    let result = compile_prelude_impl_object(&opts).and_then(|(asm, obj)| {
+                    let result = compile_prelude_impl_object(
+                        &opts,
+                        input_path.parent().unwrap_or_else(|| Path::new(".")),
+                    )
+                    .and_then(|(asm, obj)| {
                         let link_result = link_executable(&asm_path, &[obj.clone()], &exe_path);
                         if link_result.is_ok() {
                             let _ = std::fs::remove_file(&asm);
@@ -190,7 +194,11 @@ fn main() {
                 }
                 DriverKind::Run => {
                     let exe_path = default_exe_path(input_path);
-                    let link_result = compile_prelude_impl_object(&opts).and_then(|(asm, obj)| {
+                    let link_result = compile_prelude_impl_object(
+                        &opts,
+                        input_path.parent().unwrap_or_else(|| Path::new(".")),
+                    )
+                    .and_then(|(asm, obj)| {
                         let link_result = link_executable(&asm_path, &[obj.clone()], &exe_path);
                         if link_result.is_ok() {
                             let _ = std::fs::remove_file(&asm);
@@ -338,7 +346,10 @@ fn temp_named_asm_path(name: &str) -> PathBuf {
     path
 }
 
-fn compile_prelude_impl_object(opts: &CompileOptions) -> Result<(PathBuf, PathBuf), String> {
+fn compile_prelude_impl_object(
+    opts: &CompileOptions,
+    ir_dir: &Path,
+) -> Result<(PathBuf, PathBuf), String> {
     let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("stdlib")
         .join("prelude_impl.mc");
@@ -348,8 +359,8 @@ fn compile_prelude_impl_object(opts: &CompileOptions) -> Result<(PathBuf, PathBu
     let impl_opts = CompileOptions {
         dump: None,
         target: opts.target,
-        emit_ir: false,
-        trace_alloc: false,
+        emit_ir: opts.emit_ir,
+        trace_alloc: opts.trace_alloc,
         backend: opts.backend,
         inject_prelude: false,
     };
@@ -361,6 +372,13 @@ fn compile_prelude_impl_object(opts: &CompileOptions) -> Result<(PathBuf, PathBu
         }
         message
     })?;
+
+    if let Some(ir) = output.ir.as_ref() {
+        let ir_path = ir_dir.join("prelude_impl.ir");
+        if let Err(e) = std::fs::write(&ir_path, ir) {
+            eprintln!("[WARN] failed to write {}: {e}", ir_path.display());
+        }
+    }
 
     let asm_path = temp_named_asm_path("prelude_impl");
     let obj_path = temp_obj_path("prelude_impl");

@@ -23,6 +23,7 @@ use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
 use crate::typeck::type_check;
 
+#[derive(Debug)]
 pub struct CompileOptions {
     pub dump: Option<String>,
     pub target: TargetKind,
