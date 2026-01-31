@@ -5,6 +5,7 @@ use crate::ssa::model::ir::Function;
 pub use crate::ssa::opt::Pass;
 
 pub mod const_fold;
+pub mod empty_string_print;
 pub mod field_addr_cse;
 pub mod index_addr_simplify;
 pub mod load_cse;
@@ -21,6 +22,7 @@ impl PassManager {
         Self {
             passes: vec![
                 Box::new(const_fold::ConstFold),
+                Box::new(empty_string_print::EmptyStringPrint),
                 Box::new(local_addr_copy_elim::LocalAddrCopyElim),
                 Box::new(local_load_forward::LocalLoadForward),
                 Box::new(store_field_addr_simplify::StoreFieldAddrSimplify),

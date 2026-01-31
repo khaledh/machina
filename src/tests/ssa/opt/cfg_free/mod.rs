@@ -47,6 +47,7 @@ fn lower_and_optimize(source: &str) -> String {
 }
 
 mod t_const_fold;
+mod t_empty_string_print;
 mod t_field_addr_cse;
 mod t_index_addr_simplify;
 mod t_load_cse;

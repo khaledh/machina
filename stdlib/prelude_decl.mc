@@ -9,7 +9,7 @@ fn __rt_u64_to_dec(inout buf: u8[], value: u64) -> u64;
 fn __rt_memset(inout buf: u8[], value: u8);
 
 @[runtime]
-fn __rt_string_from_bytes(inout dst: string, bytes: u8[]);
+fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
 fn __rt_alloc(size: u64, align: u64) -> u64;
 fn __rt_realloc(ptr: u64, size: u64, align: u64) -> u64;

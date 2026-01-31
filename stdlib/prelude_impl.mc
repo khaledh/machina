@@ -9,12 +9,12 @@ fn __rt_u64_to_dec(inout buf: u8[], value: u64) -> u64;
 fn __rt_memset(inout buf: u8[], value: u8);
 
 @[runtime]
-fn __rt_string_from_bytes(inout dst: string, bytes: u8[]);
+fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
 // String helpers
 fn string_from_bytes(bytes: u8[]) -> string {
-  var s = "";
-  __rt_string_from_bytes(inout s, bytes);
+  var s: string;
+  __rt_string_from_bytes(out s, bytes);
   s
 }
 
@@ -35,13 +35,15 @@ fn println() {
 fn print(value: u64) {
   var buf = u8[0; 32];
   let len = __rt_u64_to_dec(inout buf[..], value);
-  let s = string_from_bytes(buf[..len]);
+  var s: string;
+  __rt_string_from_bytes(out s, buf[..len]);
   __rt_print(s, 0);
 }
 
 fn println(value: u64) {
   var buf = u8[0; 32];
   let len = __rt_u64_to_dec(inout buf[..], value);
-  let s = string_from_bytes(buf[..len]);
+  var s: string;
+  __rt_string_from_bytes(out s, buf[..len]);
   __rt_print(s, 1);
 }
