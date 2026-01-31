@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ssa::IrTypeId;
 use crate::ssa::model::ir::{
-    ConstValue, Function, InstKind, Terminator, ValueId, replace_value_in_func,
+    CastKind, ConstValue, Function, InstKind, Terminator, ValueId, replace_value_in_func,
 };
 use crate::ssa::opt::Pass;
 
-/// Eliminates `index_addr` when the index is constant zero and the pointer type is unchanged.
+/// Eliminates `index_addr` when the index is constant zero, inserting a ptr cast if needed.
 pub struct IndexAddrSimplify;
 
 impl Pass for IndexAddrSimplify {
@@ -34,10 +34,12 @@ impl Pass for IndexAddrSimplify {
                 let Some(base_ty) = value_types.get(&base) else {
                     continue;
                 };
-                if *base_ty != result.ty {
+                if *base_ty == result.ty {
+                    candidates.push((block_idx, inst_idx, result.id, base, false));
                     continue;
                 }
-                candidates.push((block_idx, inst_idx, result.id, base));
+
+                candidates.push((block_idx, inst_idx, result.id, base, true));
             }
         }
 
@@ -47,10 +49,20 @@ impl Pass for IndexAddrSimplify {
 
         let remove: HashSet<(usize, usize)> = candidates
             .iter()
-            .map(|(block_idx, inst_idx, _, _)| (*block_idx, *inst_idx))
+            .filter(|(_, _, _, _, needs_cast)| !*needs_cast)
+            .map(|(block_idx, inst_idx, _, _, _)| (*block_idx, *inst_idx))
             .collect();
 
-        for (block_idx, inst_idx, from, to) in &candidates {
+        for (block_idx, inst_idx, from, to, needs_cast) in &candidates {
+            if *needs_cast {
+                let inst = &mut func.blocks[*block_idx].insts[*inst_idx];
+                inst.kind = InstKind::Cast {
+                    kind: CastKind::PtrToPtr,
+                    value: *to,
+                    ty: inst.result.as_ref().expect("cast result").ty,
+                };
+                continue;
+            }
             replace_value_in_func(func, *from, *to, Some((*block_idx, *inst_idx)));
         }
 

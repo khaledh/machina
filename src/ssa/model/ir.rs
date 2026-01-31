@@ -133,6 +133,7 @@ pub enum CmpOp {
 pub enum CastKind {
     PtrToInt,
     IntToPtr,
+    PtrToPtr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

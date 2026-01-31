@@ -120,7 +120,12 @@ impl<'a> Formatter<'a> {
                 );
             }
             InstKind::Cast { kind, value, ty } => {
-                let _ = write!(&mut self.out, "cast.{:?} %v{} to ", kind, value.0);
+                let kind = match kind {
+                    CastKind::PtrToInt => "ptr_to_int",
+                    CastKind::IntToPtr => "int_to_ptr",
+                    CastKind::PtrToPtr => "ptr",
+                };
+                let _ = write!(&mut self.out, "cast.{} %v{} to ", kind, value.0);
                 self.write_type(*ty);
             }
             InstKind::AddrOfLocal { local } => {

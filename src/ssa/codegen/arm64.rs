@@ -1330,7 +1330,7 @@ impl CodegenEmitter for Arm64Emitter {
                         self.value_dst_typed(locs, dst, scratch, "cast", dst_ty);
 
                     match kind {
-                        CastKind::PtrToInt | CastKind::IntToPtr => {
+                        CastKind::PtrToInt | CastKind::IntToPtr | CastKind::PtrToPtr => {
                             self.emit_line(&format!("mov {}, {}", dst_reg, src_reg));
                         }
                     }
