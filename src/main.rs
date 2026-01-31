@@ -133,6 +133,7 @@ fn main() {
         emit_ir,
         trace_alloc,
         backend,
+        inject_prelude: true,
     };
     let output = compile(&source, &opts);
 
@@ -173,7 +174,14 @@ fn main() {
                         .output
                         .clone()
                         .unwrap_or_else(|| default_exe_path(input_path));
-                    let result = link_executable(&asm_path, &exe_path);
+                    let result = compile_prelude_impl_object(&opts).and_then(|(asm, obj)| {
+                        let link_result = link_executable(&asm_path, &[obj.clone()], &exe_path);
+                        if link_result.is_ok() {
+                            let _ = std::fs::remove_file(&asm);
+                            let _ = std::fs::remove_file(&obj);
+                        }
+                        link_result
+                    });
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
                     }
@@ -182,7 +190,14 @@ fn main() {
                 }
                 DriverKind::Run => {
                     let exe_path = default_exe_path(input_path);
-                    let link_result = link_executable(&asm_path, &exe_path);
+                    let link_result = compile_prelude_impl_object(&opts).and_then(|(asm, obj)| {
+                        let link_result = link_executable(&asm_path, &[obj.clone()], &exe_path);
+                        if link_result.is_ok() {
+                            let _ = std::fs::remove_file(&asm);
+                            let _ = std::fs::remove_file(&obj);
+                        }
+                        link_result
+                    });
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));
                     result.map(|exit_code| DriverResult::RunExit {
@@ -284,7 +299,7 @@ fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), String> {
     }
 }
 
-fn link_executable(asm_path: &Path, exe_path: &Path) -> Result<(), String> {
+fn link_executable(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path) -> Result<(), String> {
     let runtime_paths = runtime_source_paths();
     for runtime_path in &runtime_paths {
         if !runtime_path.exists() {
@@ -298,6 +313,7 @@ fn link_executable(asm_path: &Path, exe_path: &Path) -> Result<(), String> {
         .arg("-o")
         .arg(exe_path)
         .arg(asm_path)
+        .args(extra_objs)
         .args(&runtime_paths)
         .status()
         .map_err(|e| format!("failed to invoke cc: {e}"))?;
@@ -306,6 +322,54 @@ fn link_executable(asm_path: &Path, exe_path: &Path) -> Result<(), String> {
     } else {
         Err(format!("cc exited with status {}", status))
     }
+}
+
+fn temp_obj_path(name: &str) -> PathBuf {
+    let pid = std::process::id();
+    let mut path = std::env::temp_dir();
+    path.push(format!("machina_{pid}_{name}.o"));
+    path
+}
+
+fn temp_named_asm_path(name: &str) -> PathBuf {
+    let pid = std::process::id();
+    let mut path = std::env::temp_dir();
+    path.push(format!("machina_{pid}_{name}.s"));
+    path
+}
+
+fn compile_prelude_impl_object(opts: &CompileOptions) -> Result<(PathBuf, PathBuf), String> {
+    let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("prelude_impl.mc");
+    let prelude_src = std::fs::read_to_string(&prelude_path)
+        .map_err(|e| format!("failed to read {}: {e}", prelude_path.display()))?;
+
+    let impl_opts = CompileOptions {
+        dump: None,
+        target: opts.target,
+        emit_ir: false,
+        trace_alloc: false,
+        backend: opts.backend,
+        inject_prelude: false,
+    };
+
+    let output = compile(&prelude_src, &impl_opts).map_err(|errs| {
+        let mut message = String::new();
+        for err in errs {
+            message.push_str(&format!("{err}\n"));
+        }
+        message
+    })?;
+
+    let asm_path = temp_named_asm_path("prelude_impl");
+    let obj_path = temp_obj_path("prelude_impl");
+
+    std::fs::write(&asm_path, output.asm)
+        .map_err(|e| format!("failed to write {}: {e}", asm_path.display()))?;
+    assemble_object(&asm_path, &obj_path)?;
+
+    Ok((asm_path, obj_path))
 }
 
 fn run_executable(exe_path: &Path) -> Result<i32, String> {

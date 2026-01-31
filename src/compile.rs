@@ -29,6 +29,7 @@ pub struct CompileOptions {
     pub emit_ir: bool,
     pub trace_alloc: bool,
     pub backend: BackendKind,
+    pub inject_prelude: bool,
 }
 
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]
@@ -97,21 +98,26 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     let id_gen = NodeIdGen::new();
 
-    // load stdlib/prelude.mc
-    let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("stdlib")
-        .join("prelude.mc");
-    let prelude_src = std::fs::read_to_string(&prelude_path)
-        .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
+    let (module, id_gen) = if opts.inject_prelude {
+        // load stdlib/prelude_decl.mc
+        let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("stdlib")
+            .join("prelude_decl.mc");
+        let prelude_src = std::fs::read_to_string(&prelude_path)
+            .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
 
-    let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
-    let (user_module, id_gen) = parse_with_id_gen(source, id_gen)?;
+        let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
+        let (user_module, id_gen) = parse_with_id_gen(source, id_gen)?;
 
-    // combine top_level_items: prelude first, then user
-    let mut top_level_items = Vec::new();
-    top_level_items.extend(prelude_module.top_level_items);
-    top_level_items.extend(user_module.top_level_items);
-    let module = Module { top_level_items };
+        // combine top_level_items: prelude first, then user
+        let mut top_level_items = Vec::new();
+        top_level_items.extend(prelude_module.top_level_items);
+        top_level_items.extend(user_module.top_level_items);
+        (Module { top_level_items }, id_gen)
+    } else {
+        let (user_module, id_gen) = parse_with_id_gen(source, id_gen)?;
+        (user_module, id_gen)
+    };
 
     if dump_ast {
         println!("Parsed Tree:");

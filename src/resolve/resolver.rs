@@ -335,13 +335,7 @@ impl SymbolResolver {
         for callable in callables {
             match callable {
                 CallableRef::FuncDecl(func_decl) => {
-                    // Check if the function decl name is already defined
                     let name = func_decl.sig.name.clone();
-                    if self.lookup_symbol(&name).is_some() || self.func_decl_names.contains(&name) {
-                        self.errors
-                            .push(ResolveError::SymbolAlreadyDefined(name, func_decl.span));
-                        return;
-                    }
                     self.func_decl_names.insert(name);
                     self.populate_callable(callable);
                 }
