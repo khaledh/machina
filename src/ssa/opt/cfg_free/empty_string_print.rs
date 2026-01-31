@@ -20,7 +20,8 @@ impl Pass for EmptyStringPrint {
         let mut changed = false;
 
         for block in func.blocks.iter_mut() {
-            let defs = build_defs(block);
+            let mut defs = build_defs(block);
+            let mut block_changed = false;
 
             for call_idx in 0..block.insts.len() {
                 let Some((null_ptr, zero_u64, drop_idx)) =
@@ -35,7 +36,33 @@ impl Pass for EmptyStringPrint {
                 }
                 block.insts.remove(drop_idx);
                 changed = true;
+                block_changed = true;
                 break;
+            }
+
+            if block_changed {
+                defs = build_defs(block);
+            }
+
+            let mut to_remove = Vec::new();
+            for (idx, inst) in block.insts.iter().enumerate() {
+                let drop_base = match &inst.kind {
+                    InstKind::Call {
+                        callee: Callee::Runtime(RuntimeFn::StringDrop),
+                        args,
+                    } if args.len() == 1 => args[0],
+                    _ => continue,
+                };
+                if has_literal_init(block, &defs, drop_base) {
+                    to_remove.push(idx);
+                }
+            }
+
+            if !to_remove.is_empty() {
+                for idx in to_remove.into_iter().rev() {
+                    block.insts.remove(idx);
+                }
+                changed = true;
             }
         }
 
@@ -212,6 +239,37 @@ fn has_empty_init(block: &Block, defs: &HashMap<ValueId, usize>, base: ValueId) 
     has_ptr && has_len && has_cap
 }
 
+fn has_literal_init(block: &Block, defs: &HashMap<ValueId, usize>, base: ValueId) -> bool {
+    let mut has_ptr = false;
+    let mut has_len = false;
+    let mut has_cap = false;
+    for inst in &block.insts {
+        let InstKind::Store { ptr, value } = inst.kind else {
+            continue;
+        };
+        let Some(field_inst) = inst_of(block, defs, ptr) else {
+            continue;
+        };
+        let InstKind::FieldAddr {
+            base: store_base,
+            index,
+        } = field_inst
+        else {
+            continue;
+        };
+        if *store_base != base {
+            continue;
+        }
+        match index {
+            0 => has_ptr |= is_global_addr(block, defs, value),
+            1 => has_len |= is_const_int(block, defs, value),
+            2 => has_cap |= is_const_zero(block, defs, value),
+            _ => {}
+        }
+    }
+    has_ptr && has_len && has_cap
+}
+
 fn empty_constants(
     block: &Block,
     defs: &HashMap<ValueId, usize>,
@@ -260,6 +318,24 @@ fn is_const_zero(block: &Block, defs: &HashMap<ValueId, usize>, value: ValueId) 
         InstKind::Const {
             value: ConstValue::Int { value: 0, .. }
         }
+    )
+}
+
+fn is_const_int(block: &Block, defs: &HashMap<ValueId, usize>, value: ValueId) -> bool {
+    matches!(
+        inst_of(block, defs, value),
+        Some(InstKind::Const {
+            value: ConstValue::Int { .. }
+        })
+    )
+}
+
+fn is_global_addr(block: &Block, defs: &HashMap<ValueId, usize>, value: ValueId) -> bool {
+    matches!(
+        inst_of(block, defs, value),
+        Some(InstKind::Const {
+            value: ConstValue::GlobalAddr { .. }
+        })
     )
 }
 
