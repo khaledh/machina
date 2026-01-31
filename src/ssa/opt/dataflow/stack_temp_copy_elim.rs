@@ -1,4 +1,16 @@
 //! Eliminates redundant stack-temp copies followed by memcpy.
+//!
+//! Example:
+//! ```
+//! %t: ptr<u64[3]> = addr_of %l2
+//! %v: u64[3] = load %src
+//! store %t, %v
+//! call @__rt_memcpy(%dst, %t, %len)
+//! ```
+//! becomes:
+//! ```
+//! call @__rt_memcpy(%dst, %src, %len)
+//! ```
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,6 +30,7 @@ impl Pass for StackTempCopyElim {
     fn run(&mut self, func: &mut Function) -> bool {
         let (def_inst, uses) = build_maps(func);
         let mut candidates = Vec::new();
+        let mut direct_memcpy = Vec::new();
 
         for (block_idx, block) in func.blocks.iter().enumerate() {
             for (inst_idx, inst) in block.insts.iter().enumerate() {
@@ -25,6 +38,7 @@ impl Pass for StackTempCopyElim {
                     continue;
                 };
 
+                // Only consider memcpy between locals (addr_of_local results).
                 let Some((dst_def_block, dst_def_idx)) = def_inst.get(dst) else {
                     continue;
                 };
@@ -41,12 +55,37 @@ impl Pass for StackTempCopyElim {
                     continue;
                 }
 
-                let Some((store_block, store_idx, _stored_val)) =
+                // Look for: store temp = load src_ptr; memcpy dst, temp
+                let Some((store_block, store_idx, stored_val)) =
                     store_to_local_before(*src, block_idx, inst_idx, func, &uses)
                 else {
                     continue;
                 };
 
+                // If the stored value is a load from another local, rewrite memcpy to use the
+                // original pointer directly and drop the temp store.
+                if let Some((load_block, load_idx, load_ptr)) =
+                    load_source_of_value(stored_val, func, &def_inst)
+                {
+                    if load_block == block_idx
+                        && load_idx < store_idx
+                        && store_idx < inst_idx
+                        && !has_uses_between(load_ptr, block_idx, load_idx, inst_idx, &uses)
+                    {
+                        direct_memcpy.push((
+                            block_idx,
+                            inst_idx,
+                            *src,
+                            load_ptr,
+                            store_block,
+                            store_idx,
+                        ));
+                        continue;
+                    }
+                }
+
+                // Fall back to the existing elimination strategy: if both dst/src are stable
+                // after the memcpy, we can just replace dst with src and remove memcpy+store.
                 if !source_stable_after(
                     *dst,
                     block_idx,
@@ -75,11 +114,19 @@ impl Pass for StackTempCopyElim {
             }
         }
 
-        if candidates.is_empty() {
+        if candidates.is_empty() && direct_memcpy.is_empty() {
             return false;
         }
 
         let mut remove: HashSet<(usize, usize)> = HashSet::new();
+        let mut rewrite: HashMap<(usize, usize), ValueId> = HashMap::new();
+
+        // For direct-memcpy cases, rewrite the memcpy source and drop the temp store.
+        for (block_idx, inst_idx, _src, new_src, store_block, store_idx) in &direct_memcpy {
+            rewrite.insert((*block_idx, *inst_idx), *new_src);
+            remove.insert((*store_block, *store_idx));
+        }
+        // For replace-value cases, substitute dst with src and remove both memcpy+store.
         for (block_idx, inst_idx, dst, src, store_block, store_idx) in &candidates {
             replace_value_in_func(func, *dst, *src, Some((*block_idx, *inst_idx)));
             remove.insert((*block_idx, *inst_idx));
@@ -88,8 +135,22 @@ impl Pass for StackTempCopyElim {
 
         for (block_idx, block) in func.blocks.iter_mut().enumerate() {
             if !remove.iter().any(|(b, _)| *b == block_idx) {
+                if !rewrite.keys().any(|(b, _)| *b == block_idx) {
+                    continue;
+                }
+            }
+            // Apply in-place rewrites for memcpy sources.
+            for (inst_idx, inst) in block.insts.iter_mut().enumerate() {
+                if let Some(new_src) = rewrite.get(&(block_idx, inst_idx)) {
+                    if let InstKind::MemCopy { src, .. } = &mut inst.kind {
+                        *src = *new_src;
+                    }
+                }
+            }
+            if !remove.iter().any(|(b, _)| *b == block_idx) {
                 continue;
             }
+            // Drop the now-redundant store/memcpy instructions.
             let mut new_insts = Vec::with_capacity(block.insts.len());
             for (inst_idx, inst) in block.insts.iter().enumerate() {
                 if !remove.contains(&(block_idx, inst_idx)) {
@@ -109,6 +170,7 @@ fn build_maps(
     HashMap<ValueId, (usize, usize)>,
     HashMap<ValueId, Vec<(usize, usize)>>,
 ) {
+    // Build def/use maps so we can reason about local addresses within a block.
     let mut def_inst = HashMap::new();
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
 
@@ -126,6 +188,36 @@ fn build_maps(
     (def_inst, uses)
 }
 
+fn load_source_of_value(
+    value: ValueId,
+    func: &Function,
+    def_inst: &HashMap<ValueId, (usize, usize)>,
+) -> Option<(usize, usize, ValueId)> {
+    // If the value was defined by a load, return the loaded pointer and location.
+    let (block_idx, inst_idx) = def_inst.get(&value).copied()?;
+    let inst = func.blocks.get(block_idx)?.insts.get(inst_idx)?;
+    match &inst.kind {
+        InstKind::Load { ptr } => Some((block_idx, inst_idx, *ptr)),
+        _ => None,
+    }
+}
+
+fn has_uses_between(
+    value: ValueId,
+    block_idx: usize,
+    start_idx: usize,
+    end_idx: usize,
+    uses: &HashMap<ValueId, Vec<(usize, usize)>>,
+) -> bool {
+    // Checks for any use of `value` between two instruction indices in the same block.
+    let Some(users) = uses.get(&value) else {
+        return false;
+    };
+    users
+        .iter()
+        .any(|(b, i)| *b == block_idx && *i > start_idx && *i < end_idx)
+}
+
 fn store_to_local_before(
     ptr: ValueId,
     block_idx: usize,
@@ -133,6 +225,7 @@ fn store_to_local_before(
     func: &Function,
     uses: &HashMap<ValueId, Vec<(usize, usize)>>,
 ) -> Option<(usize, usize, ValueId)> {
+    // Find the last store into `ptr` before the current instruction in the same block.
     let mut last_store = None;
     let Some(users) = uses.get(&ptr) else {
         return None;
@@ -165,6 +258,7 @@ fn source_stable_after(
     ignore: Option<(usize, usize)>,
     visiting: &mut HashSet<ValueId>,
 ) -> bool {
+    // Recursively ensure the value and any derived addresses are not mutated after inst_idx.
     if !visiting.insert(value) {
         return true;
     }
