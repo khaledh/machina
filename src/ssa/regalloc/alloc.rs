@@ -27,8 +27,19 @@ impl<'a> LinearScan<'a> {
         types: &'a mut IrTypeCache,
         target: &dyn TargetSpec,
     ) -> Self {
-        let allocatable = target.allocatable_regs().to_vec();
         let caller_saved: HashSet<PhysReg> = target.caller_saved().iter().copied().collect();
+        let mut caller_saved_regs = Vec::new();
+        let mut callee_saved_regs = Vec::new();
+        for reg in target.allocatable_regs() {
+            if caller_saved.contains(reg) {
+                caller_saved_regs.push(*reg);
+            } else {
+                callee_saved_regs.push(*reg);
+            }
+        }
+        // Prefer caller-saved regs for short-lived values by making them pop first.
+        let mut allocatable = callee_saved_regs;
+        allocatable.extend(caller_saved_regs);
         // Call-safe regs exclude caller-saved regs when an interval crosses a call.
         let call_safe = allocatable
             .iter()

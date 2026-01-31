@@ -31,10 +31,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: dst has no def (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -43,11 +40,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: dst def in bb{} (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            dst_def_block,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, dst_def_block, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -57,10 +50,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: dst not addr_of_local (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -70,10 +60,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: value has no def (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -82,11 +69,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: value def in bb{} (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            val_def_block,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, val_def_block, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -96,10 +79,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: value not load (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -109,10 +89,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: src has no def (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -121,11 +98,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: src def in bb{} (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            src_def_block,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, src_def_block, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -135,10 +108,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: src not addr_of_local (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -148,10 +118,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: dst has no users (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -180,14 +147,12 @@ impl Pass for LocalAddrCopyElim {
                                 valid = false;
                                 break;
                             }
-                            last_call = Some(last_call.map_or(*use_idx, |prev: usize| {
-                                prev.max(*use_idx)
-                            }));
+                            last_call =
+                                Some(last_call.map_or(*use_idx, |prev: usize| prev.max(*use_idx)));
                         }
                         InstKind::Drop { ptr } if ptr == dst => {
-                            last_drop = Some(last_drop.map_or(*use_idx, |prev: usize| {
-                                prev.max(*use_idx)
-                            }));
+                            last_drop =
+                                Some(last_drop.map_or(*use_idx, |prev: usize| prev.max(*use_idx)));
                         }
                         _ => {
                             valid = false;
@@ -207,10 +172,7 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: no call/drop use (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -220,30 +182,18 @@ impl Pass for LocalAddrCopyElim {
                     if trace_func {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: invalid uses (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
                 }
 
-                if !src_unmodified_between(
-                    src,
-                    block_idx,
-                    *val_def_idx,
-                    last_use_idx,
-                    func,
-                    &uses,
-                ) {
+                if !src_unmodified_between(src, block_idx, *val_def_idx, last_use_idx, func, &uses)
+                {
                     if trace {
                         eprintln!(
                             "[local-addr-copy-elim] skip {:?} in {}: src modified between load and use (bb{}, inst{})",
-                            dst,
-                            func.name,
-                            block_idx,
-                            inst_idx
+                            dst, func.name, block_idx, inst_idx
                         );
                     }
                     continue;
@@ -252,11 +202,7 @@ impl Pass for LocalAddrCopyElim {
                 if trace {
                     eprintln!(
                         "[local-addr-copy-elim] candidate {:?} -> {:?} in {} (bb{}, inst{})",
-                        dst,
-                        src,
-                        func.name,
-                        block_idx,
-                        inst_idx
+                        dst, src, func.name, block_idx, inst_idx
                     );
                 }
                 candidates.push((block_idx, inst_idx, *dst, src, last_use_idx));
@@ -369,13 +315,7 @@ fn src_unmodified_between_inner(
                     return false;
                 };
                 if !src_unmodified_between_inner(
-                    result.id,
-                    block_idx,
-                    start_idx,
-                    end_idx,
-                    func,
-                    uses,
-                    visiting,
+                    result.id, block_idx, start_idx, end_idx, func, uses, visiting,
                 ) {
                     return false;
                 }

@@ -152,7 +152,7 @@ impl Arm64Emitter {
             }
             if !emitted {
                 if shift == 0 {
-                    self.emit_line(&format!("movz {}, #{}", reg, chunk));
+                    self.emit_line(&format!("mov {}, #{}", reg, chunk));
                 } else {
                     self.emit_line(&format!("movz {}, #{}, lsl #{}", reg, chunk, shift));
                 }
@@ -376,6 +376,12 @@ impl Arm64Emitter {
     }
 
     fn emit_add_imm(&mut self, dst: &str, base: &str, offset: u32) {
+        if offset == 0 {
+            if dst != base {
+                self.emit_line(&format!("mov {}, {}", dst, base));
+            }
+            return;
+        }
         self.emit_line(&format!("add {}, {}, #{}", dst, base, offset));
     }
 
@@ -425,6 +431,48 @@ impl Arm64Emitter {
                 panic!("ssa codegen: unsupported scalar store size {other}");
             }
         }
+    }
+
+    fn emit_store_ptr_sized_offset(
+        &mut self,
+        src_reg: &str,
+        base_reg: &str,
+        offset: u32,
+        size: u32,
+    ) {
+        if offset == 0 {
+            self.emit_store_ptr_sized(src_reg, base_reg, size);
+            return;
+        }
+
+        let scaled = offset % size == 0 && (offset / size) <= 4095;
+        if scaled {
+            match size {
+                1 => {
+                    let w = Self::w_reg(src_reg);
+                    self.emit_line(&format!("strb {}, [{}, #{}]", w, base_reg, offset));
+                }
+                2 => {
+                    let w = Self::w_reg(src_reg);
+                    self.emit_line(&format!("strh {}, [{}, #{}]", w, base_reg, offset));
+                }
+                4 => {
+                    let w = Self::w_reg(src_reg);
+                    self.emit_line(&format!("str {}, [{}, #{}]", w, base_reg, offset));
+                }
+                8 => {
+                    self.emit_line(&format!("str {}, [{}, #{}]", src_reg, base_reg, offset));
+                }
+                other => {
+                    panic!("ssa codegen: unsupported scalar store size {other}");
+                }
+            }
+            return;
+        }
+
+        let scratch = if base_reg == "x15" { "x14" } else { "x15" };
+        self.emit_add_imm(scratch, base_reg, offset);
+        self.emit_store_ptr_sized(src_reg, scratch, size);
     }
 
     fn value_dst_typed(
@@ -1025,6 +1073,9 @@ impl CodegenEmitter for Arm64Emitter {
             InstKind::Const { value } => {
                 // Materialize immediates into a register or stack slot.
                 if let Some(result) = &inst.result {
+                    if locs.const_zero_skips.contains(&result.id) {
+                        return;
+                    }
                     let dst = locs.value(result.id);
                     let dst_ty = locs.value_ty(result.id);
                     match value {
@@ -1330,6 +1381,9 @@ impl CodegenEmitter for Arm64Emitter {
             InstKind::FieldAddr { base, index } => {
                 // Compute base + field offset for a struct field address.
                 if let Some(result) = &inst.result {
+                    if locs.field_addr_folds.contains_key(&result.id) {
+                        return;
+                    }
                     let dst = locs.value(result.id);
                     let base_loc = locs.value(*base);
                     // Base is a pointer value; ensure we have it in a register.
@@ -1415,12 +1469,66 @@ impl CodegenEmitter for Arm64Emitter {
                 let value_loc = locs.value(value_id);
                 let value_ty = locs.value_ty(value_id);
                 let ptr_ty = locs.value_ty(ptr_id);
+                let zero_store = locs.const_zero_values.contains(&value_id)
+                    && matches!(
+                        locs.types.kind(value_ty),
+                        IrTypeKind::Bool | IrTypeKind::Int { .. }
+                    );
+
+                // Fast path: fold `field_addr` + `store` so we store directly at base+offset.
+                if let Some((base, offset)) = locs.field_addr_folds.get(&ptr_id).copied() {
+                    let base_loc = locs.value(base);
+                    let base_ty = locs.value_ty(base);
+                    let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x15");
+
+                    if Self::is_reg_type(locs, value_ty) {
+                        // Scalar stores can use scaled immediate offsets.
+                        let size = locs.layout(value_ty).size() as u32;
+                        if size > 0 {
+                            let val = if zero_store {
+                                if size <= 4 { "wzr" } else { "xzr" }.to_string()
+                            } else {
+                                self.load_value_typed(locs, value_loc, value_ty, "x10")
+                            };
+                            self.emit_store_ptr_sized_offset(&val, &base_reg, offset, size);
+                        }
+                    } else {
+                        // Aggregate stores copy from a stack slot into the folded address.
+                        let Location::Stack(slot) = value_loc else {
+                            panic!(
+                                "ssa codegen: aggregate store needs stack src, got {:?}",
+                                value_loc
+                            );
+                        };
+                        let size = locs.layout(value_ty).size() as u32;
+                        if size > 0 {
+                            if offset == 0 {
+                                self.copy_stack_to_ptr(self.stack_offset(slot), &base_reg, size);
+                            } else {
+                                let scratch = if base_reg == "x15" { "x14" } else { "x15" };
+                                self.emit_add_imm(scratch, &base_reg, offset);
+                                self.copy_stack_to_ptr(self.stack_offset(slot), scratch, size);
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                // General case: load the pointer value then store through it.
                 let ptr = self.load_value_typed(locs, ptr, ptr_ty, "x15");
                 if Self::is_reg_type(locs, value_ty) {
-                    let val = self.load_value_typed(locs, value_loc, value_ty, "x10");
+                    // Scalar stores write the loaded register directly.
                     let size = locs.layout(value_ty).size() as u32;
-                    self.emit_store_ptr_sized(&val, &ptr, size);
+                    if size > 0 {
+                        let val = if zero_store {
+                            if size <= 4 { "wzr" } else { "xzr" }.to_string()
+                        } else {
+                            self.load_value_typed(locs, value_loc, value_ty, "x10")
+                        };
+                        self.emit_store_ptr_sized(&val, &ptr, size);
+                    }
                 } else {
+                    // Aggregate stores copy from a stack slot into the pointer target.
                     let Location::Stack(slot) = value_loc else {
                         panic!(
                             "ssa codegen: aggregate store needs stack src, got {:?}",

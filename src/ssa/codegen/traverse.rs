@@ -2,10 +2,10 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::ssa::IrTypeId;
 use crate::ssa::model::ir::{BlockId, Function, LocalId, ValueId};
 use crate::ssa::regalloc::ValueAllocMap;
 use crate::ssa::regalloc::moves::MoveOp;
+use crate::ssa::{IrTypeId, IrTypeKind};
 
 use super::emitter::{CodegenEmitter, LocationResolver};
 use super::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
@@ -104,6 +104,10 @@ pub fn emit_graph_with_emitter(
         }
     }
     let layouts = build_layouts(types, func, &value_types);
+    let field_addr_folds = build_field_addr_folds(func, &value_types, &layouts, types);
+    let const_zero_values = build_const_zero_values(func);
+    let const_zero_skips =
+        build_const_zero_store_only(func, &value_types, &const_zero_values, types);
     let (local_offsets, locals_size) = build_local_offsets(func, &layouts, frame_size);
     let total_frame_size = frame_size.saturating_add(locals_size);
     let mut callee_saved = callee_saved.to_vec();
@@ -124,6 +128,9 @@ pub fn emit_graph_with_emitter(
             types,
             layouts: &layouts,
             def_names,
+            field_addr_folds: &field_addr_folds,
+            const_zero_values: &const_zero_values,
+            const_zero_skips: &const_zero_skips,
         },
         label_prefix: format!(".L{}", func_label),
     };
@@ -274,6 +281,141 @@ fn build_layouts(
         collect_layouts(types, ty, &mut layouts);
     }
     layouts
+}
+
+fn build_field_addr_folds(
+    func: &Function,
+    value_types: &HashMap<ValueId, IrTypeId>,
+    layouts: &HashMap<IrTypeId, crate::ssa::model::layout::IrLayout>,
+    types: &crate::ssa::IrTypeCache,
+) -> HashMap<ValueId, (ValueId, u32)> {
+    let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            crate::ssa::model::ir::for_each_inst_use(&inst.kind, |value| {
+                uses.entry(value).or_default().push((block_idx, inst_idx));
+            });
+        }
+    }
+
+    let mut folds = HashMap::new();
+
+    for (_block_idx, block) in func.blocks.iter().enumerate() {
+        for (_inst_idx, inst) in block.insts.iter().enumerate() {
+            let crate::ssa::model::ir::InstKind::FieldAddr { base, index } = &inst.kind else {
+                continue;
+            };
+            let Some(result) = &inst.result else {
+                continue;
+            };
+
+            let Some(users) = uses.get(&result.id) else {
+                continue;
+            };
+            if users.is_empty() {
+                continue;
+            }
+            let mut ok = true;
+            for (use_block, use_idx) in users {
+                let use_inst = &func.blocks[*use_block].insts[*use_idx];
+                match &use_inst.kind {
+                    crate::ssa::model::ir::InstKind::Store { ptr, .. } if ptr == &result.id => {}
+                    _ => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if !ok {
+                continue;
+            }
+
+            let Some(base_ty) = value_types.get(base).copied() else {
+                continue;
+            };
+            let elem_ty = match types.kind(base_ty) {
+                IrTypeKind::Ptr { elem } => *elem,
+                _ => continue,
+            };
+            let Some(layout) = layouts.get(&elem_ty) else {
+                continue;
+            };
+            let offset = layout.field_offsets().get(*index).copied().unwrap_or(0) as u32;
+            folds.insert(result.id, (*base, offset));
+        }
+    }
+
+    folds
+}
+
+fn build_const_zero_values(func: &Function) -> HashSet<ValueId> {
+    let mut zeros = HashSet::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            let Some(result) = &inst.result else {
+                continue;
+            };
+            if let crate::ssa::model::ir::InstKind::Const { value } = &inst.kind {
+                if let crate::ssa::model::ir::ConstValue::Int { value, .. } = value {
+                    if *value == 0 {
+                        zeros.insert(result.id);
+                    }
+                }
+                if let crate::ssa::model::ir::ConstValue::Bool(false) = value {
+                    zeros.insert(result.id);
+                }
+            }
+        }
+    }
+    zeros
+}
+
+fn build_const_zero_store_only(
+    func: &Function,
+    value_types: &HashMap<ValueId, IrTypeId>,
+    const_zero_values: &HashSet<ValueId>,
+    types: &crate::ssa::IrTypeCache,
+) -> HashSet<ValueId> {
+    let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            crate::ssa::model::ir::for_each_inst_use(&inst.kind, |value| {
+                uses.entry(value).or_default().push((block_idx, inst_idx));
+            });
+        }
+    }
+
+    let mut elidable = HashSet::new();
+    'value: for value in const_zero_values {
+        let Some(ty) = value_types.get(value) else {
+            continue;
+        };
+        match types.kind(*ty) {
+            IrTypeKind::Bool | IrTypeKind::Int { .. } => {}
+            _ => continue,
+        }
+
+        let Some(users) = uses.get(value) else {
+            continue;
+        };
+        if users.is_empty() {
+            continue;
+        }
+
+        for (block_idx, inst_idx) in users {
+            let inst = &func.blocks[*block_idx].insts[*inst_idx];
+            match &inst.kind {
+                crate::ssa::model::ir::InstKind::Store {
+                    value: store_value, ..
+                } if store_value == value => {}
+                _ => continue 'value,
+            }
+        }
+
+        elidable.insert(*value);
+    }
+
+    elidable
 }
 
 fn collect_layouts(
