@@ -1412,12 +1412,9 @@ impl CodegenEmitter for Arm64Emitter {
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
                     let base_loc = locs.value(*base);
-                    let index_loc = locs.value(*index);
                     // Load base/index into registers for address arithmetic.
                     let base_ty = locs.value_ty(*base);
-                    let index_ty = locs.value_ty(*index);
                     let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x9");
-                    let index_reg = self.load_value_typed(locs, index_loc, index_ty, "x10");
 
                     let elem_ty = match locs.types.kind(result.ty) {
                         IrTypeKind::Ptr { elem } => *elem,
@@ -1430,6 +1427,17 @@ impl CodegenEmitter for Arm64Emitter {
                     let dst_ty = locs.value_ty(result.id);
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, "x11", "index-addr", dst_ty);
+
+                    // Index 0: collapse to the base address without an add.
+                    if locs.const_zero_values.contains(index) {
+                        self.emit_line(&format!("mov {}, {}", dst_reg, base_reg));
+                        self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);
+                        return;
+                    }
+
+                    let index_loc = locs.value(*index);
+                    let index_ty = locs.value_ty(*index);
+                    let index_reg = self.load_value_typed(locs, index_loc, index_ty, "x10");
 
                     // Prefer scaled addressing when stride is a power of two.
                     if stride == 0 {
