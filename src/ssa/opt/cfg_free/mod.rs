@@ -8,6 +8,7 @@ pub mod const_fold;
 pub mod field_addr_cse;
 pub mod index_addr_simplify;
 pub mod load_cse;
+pub mod local_addr_copy_elim;
 pub mod local_load_forward;
 pub mod store_field_addr_simplify;
 
@@ -20,6 +21,7 @@ impl PassManager {
         Self {
             passes: vec![
                 Box::new(const_fold::ConstFold),
+                Box::new(local_addr_copy_elim::LocalAddrCopyElim),
                 Box::new(local_load_forward::LocalLoadForward),
                 Box::new(store_field_addr_simplify::StoreFieldAddrSimplify),
                 Box::new(field_addr_cse::FieldAddrCse),

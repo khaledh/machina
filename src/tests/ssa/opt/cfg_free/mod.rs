@@ -50,5 +50,6 @@ mod t_const_fold;
 mod t_field_addr_cse;
 mod t_index_addr_simplify;
 mod t_load_cse;
+mod t_local_addr_copy_elim;
 mod t_local_load_forward;
 mod t_store_field_addr_simplify;
