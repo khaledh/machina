@@ -106,6 +106,7 @@ pub fn emit_graph_with_emitter(
     let layouts = build_layouts(types, func, &value_types);
     let field_addr_folds = build_field_addr_folds(func, &value_types, &layouts, types);
     let const_zero_values = build_const_zero_values(func);
+    let index_addr_folds = build_index_addr_folds(func, &const_zero_values);
     let const_zero_skips =
         build_const_zero_store_only(func, &value_types, &const_zero_values, types);
     let (local_offsets, locals_size) = build_local_offsets(func, &layouts, frame_size);
@@ -129,6 +130,7 @@ pub fn emit_graph_with_emitter(
             layouts: &layouts,
             def_names,
             field_addr_folds: &field_addr_folds,
+            index_addr_folds: &index_addr_folds,
             const_zero_values: &const_zero_values,
             const_zero_skips: &const_zero_skips,
         },
@@ -342,6 +344,63 @@ fn build_field_addr_folds(
             };
             let offset = layout.field_offsets().get(*index).copied().unwrap_or(0) as u32;
             folds.insert(result.id, (*base, offset));
+        }
+    }
+
+    folds
+}
+
+fn build_index_addr_folds(
+    func: &Function,
+    const_zero_values: &HashSet<ValueId>,
+) -> HashMap<ValueId, (ValueId, u32)> {
+    let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            crate::ssa::model::ir::for_each_inst_use(&inst.kind, |value| {
+                uses.entry(value).or_default().push((block_idx, inst_idx));
+            });
+        }
+    }
+
+    let mut folds = HashMap::new();
+
+    for block in &func.blocks {
+        for inst in &block.insts {
+            let crate::ssa::model::ir::InstKind::IndexAddr { base, index } = inst.kind else {
+                continue;
+            };
+            if !const_zero_values.contains(&index) {
+                continue;
+            }
+            let Some(result) = &inst.result else {
+                continue;
+            };
+
+            let Some(users) = uses.get(&result.id) else {
+                continue;
+            };
+            if users.is_empty() {
+                continue;
+            }
+            let mut ok = true;
+            for (use_block, use_idx) in users {
+                let use_inst = &func.blocks[*use_block].insts[*use_idx];
+                match &use_inst.kind {
+                    crate::ssa::model::ir::InstKind::Store { ptr, .. } if ptr == &result.id => {}
+                    crate::ssa::model::ir::InstKind::Load { ptr } if ptr == &result.id => {}
+                    _ => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if !ok {
+                continue;
+            }
+
+            // Index 0 folds to the base address with offset 0 when used only for loads/stores.
+            folds.insert(result.id, (base, 0));
         }
     }
 

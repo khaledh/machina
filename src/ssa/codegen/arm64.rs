@@ -1340,16 +1340,30 @@ impl CodegenEmitter for Arm64Emitter {
             }
             InstKind::Load { ptr } => {
                 // Load through a pointer value into the destination.
-                let src = locs.value(*ptr);
                 if let Some(result) = &inst.result {
                     let dst = locs.value(result.id);
                     let ty = result.ty;
-                    let src_ty = locs.value_ty(*ptr);
-                    let src = self.load_value_typed(locs, src, src_ty, "x15");
+                    let addr = if let Some((base, offset)) = locs.index_addr_folds.get(ptr).copied()
+                    {
+                        let base_loc = locs.value(base);
+                        let base_ty = locs.value_ty(base);
+                        let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x15");
+                        if offset == 0 {
+                            base_reg
+                        } else {
+                            let scratch = if base_reg == "x15" { "x14" } else { "x15" };
+                            self.emit_add_imm(scratch, &base_reg, offset);
+                            scratch.to_string()
+                        }
+                    } else {
+                        let src = locs.value(*ptr);
+                        let src_ty = locs.value_ty(*ptr);
+                        self.load_value_typed(locs, src, src_ty, "x15")
+                    };
                     if Self::is_reg_type(locs, ty) {
                         let (dst_reg, dst_slot) = self.value_dst_typed(locs, dst, "x9", "load", ty);
                         let size = locs.layout(ty).size() as u32;
-                        self.emit_load_ptr_sized(&dst_reg, &src, size);
+                        self.emit_load_ptr_sized(&dst_reg, &addr, size);
                         self.store_if_needed_typed(locs, dst_slot, &dst_reg, ty);
                     } else {
                         let Location::Stack(slot) = dst else {
@@ -1358,7 +1372,7 @@ impl CodegenEmitter for Arm64Emitter {
                         let size = locs.layout(ty).size() as u32;
                         if size > 0 {
                             let dst_offset = self.stack_offset(slot);
-                            self.copy_ptr_to_stack(&src, dst_offset, size);
+                            self.copy_ptr_to_stack(&addr, dst_offset, size);
                         }
                     }
                 }
@@ -1410,6 +1424,9 @@ impl CodegenEmitter for Arm64Emitter {
             InstKind::IndexAddr { base, index } => {
                 // Compute base + index * stride for array/slice indexing.
                 if let Some(result) = &inst.result {
+                    if locs.index_addr_folds.contains_key(&result.id) {
+                        return;
+                    }
                     let dst = locs.value(result.id);
                     let base_loc = locs.value(*base);
                     // Load base/index into registers for address arithmetic.
@@ -1502,6 +1519,43 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     } else {
                         // Aggregate stores copy from a stack slot into the folded address.
+                        let Location::Stack(slot) = value_loc else {
+                            panic!(
+                                "ssa codegen: aggregate store needs stack src, got {:?}",
+                                value_loc
+                            );
+                        };
+                        let size = locs.layout(value_ty).size() as u32;
+                        if size > 0 {
+                            if offset == 0 {
+                                self.copy_stack_to_ptr(self.stack_offset(slot), &base_reg, size);
+                            } else {
+                                let scratch = if base_reg == "x15" { "x14" } else { "x15" };
+                                self.emit_add_imm(scratch, &base_reg, offset);
+                                self.copy_stack_to_ptr(self.stack_offset(slot), scratch, size);
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                // Fast path: fold `index_addr` with constant-zero index to store directly at base.
+                if let Some((base, offset)) = locs.index_addr_folds.get(&ptr_id).copied() {
+                    let base_loc = locs.value(base);
+                    let base_ty = locs.value_ty(base);
+                    let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x15");
+
+                    if Self::is_reg_type(locs, value_ty) {
+                        let size = locs.layout(value_ty).size() as u32;
+                        if size > 0 {
+                            let val = if zero_store {
+                                if size <= 4 { "wzr" } else { "xzr" }.to_string()
+                            } else {
+                                self.load_value_typed(locs, value_loc, value_ty, "x10")
+                            };
+                            self.emit_store_ptr_sized_offset(&val, &base_reg, offset, size);
+                        }
+                    } else {
                         let Location::Stack(slot) = value_loc else {
                             panic!(
                                 "ssa codegen: aggregate store needs stack src, got {:?}",

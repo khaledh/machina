@@ -71,6 +71,7 @@ pub struct LocationResolver<'a> {
     pub layouts: &'a HashMap<IrTypeId, IrLayout>,
     pub def_names: &'a HashMap<DefId, String>,
     pub field_addr_folds: &'a HashMap<ValueId, (ValueId, u32)>,
+    pub index_addr_folds: &'a HashMap<ValueId, (ValueId, u32)>,
     pub const_zero_values: &'a std::collections::HashSet<ValueId>,
     pub const_zero_skips: &'a std::collections::HashSet<ValueId>,
 }
