@@ -7,6 +7,7 @@ pub use crate::ssa::opt::Pass;
 pub mod const_fold;
 pub mod field_addr_cse;
 pub mod index_addr_simplify;
+pub mod load_cse;
 pub mod local_load_forward;
 pub mod store_field_addr_simplify;
 
@@ -22,6 +23,7 @@ impl PassManager {
                 Box::new(local_load_forward::LocalLoadForward),
                 Box::new(store_field_addr_simplify::StoreFieldAddrSimplify),
                 Box::new(field_addr_cse::FieldAddrCse),
+                Box::new(load_cse::LoadCse),
                 Box::new(index_addr_simplify::IndexAddrSimplify),
             ],
         }
