@@ -7,6 +7,7 @@ pub mod byref_copy_elim;
 pub mod dce;
 pub mod local_memcpy_elim;
 pub mod memops;
+pub mod stack_temp_copy_elim;
 
 pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
@@ -16,6 +17,7 @@ impl PassManager {
     pub fn new() -> Self {
         Self {
             passes: vec![
+                Box::new(stack_temp_copy_elim::StackTempCopyElim),
                 Box::new(local_memcpy_elim::LocalMemCopyElim),
                 Box::new(byref_copy_elim::ByRefCopyElim),
                 Box::new(dce::DeadCodeElim),
@@ -25,9 +27,18 @@ impl PassManager {
     }
 
     pub fn run(&mut self, funcs: &mut [Function]) {
-        for pass in &mut self.passes {
-            for func in funcs.iter_mut() {
-                pass.run(func);
+        const MAX_ITERS: usize = 3;
+
+        // Iterate to a small fixpoint; dataflow passes enable each other.
+        for _ in 0..MAX_ITERS {
+            let mut changed = false;
+            for pass in &mut self.passes {
+                for func in funcs.iter_mut() {
+                    changed |= pass.run(func);
+                }
+            }
+            if !changed {
+                break;
             }
         }
     }

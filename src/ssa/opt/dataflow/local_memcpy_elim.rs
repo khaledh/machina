@@ -18,6 +18,7 @@ impl Pass for LocalMemCopyElim {
 
     fn run(&mut self, func: &mut Function) -> bool {
         let (value_types, def_inst, uses) = build_maps(func);
+        let local_ptrs = collect_local_ptrs(func);
         let term_uses = collect_term_uses(func);
         let mut candidates = Vec::new();
 
@@ -39,9 +40,10 @@ impl Pass for LocalMemCopyElim {
                     continue;
                 };
                 let src_def = &func.blocks[*src_def_block].insts[*src_def_idx];
-                if !matches!(src_def.kind, InstKind::AddrOfLocal { .. }) {
-                    continue;
-                }
+                let src_local = match src_def.kind {
+                    InstKind::AddrOfLocal { local } => local,
+                    _ => continue,
+                };
 
                 let Some(dst_ty) = value_types.get(dst) else {
                     continue;
@@ -57,20 +59,43 @@ impl Pass for LocalMemCopyElim {
                     continue;
                 }
 
+                if uses.get(dst).is_some_and(|dst_uses| {
+                    dst_uses
+                        .iter()
+                        .any(|(b, i)| *b == block_idx && *i < inst_idx)
+                }) {
+                    continue;
+                }
+
                 let ignore = Some((block_idx, inst_idx));
                 if !is_read_only_ptr(*dst, func, &uses, ignore, &mut HashSet::new()) {
                     continue;
                 }
 
-                if !source_stable_after(
-                    *src,
-                    block_idx,
-                    inst_idx,
-                    func,
-                    &uses,
-                    ignore,
-                    &mut HashSet::new(),
-                ) {
+                let fallback = [*src];
+                let alias_ptrs = local_ptrs
+                    .get(&src_local)
+                    .map(|values| values.as_slice())
+                    .unwrap_or(&fallback);
+                if alias_ptrs.len() > 1 {
+                    continue;
+                }
+                let mut stable = true;
+                for alias in alias_ptrs {
+                    if !source_stable_after(
+                        *alias,
+                        block_idx,
+                        inst_idx,
+                        func,
+                        &uses,
+                        ignore,
+                        &mut HashSet::new(),
+                    ) {
+                        stable = false;
+                        break;
+                    }
+                }
+                if !stable {
                     continue;
                 }
 
@@ -136,6 +161,20 @@ fn build_maps(
     }
 
     (value_types, def_inst, uses)
+}
+
+fn collect_local_ptrs(func: &Function) -> HashMap<crate::ssa::model::ir::LocalId, Vec<ValueId>> {
+    let mut ptrs: HashMap<crate::ssa::model::ir::LocalId, Vec<ValueId>> = HashMap::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            if let InstKind::AddrOfLocal { local } = inst.kind {
+                if let Some(result) = &inst.result {
+                    ptrs.entry(local).or_default().push(result.id);
+                }
+            }
+        }
+    }
+    ptrs
 }
 
 fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
