@@ -48,5 +48,5 @@ impl PassManager {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/ssa/opt/t_cfg_free.rs"]
+#[path = "../../../tests/ssa/opt/cfg_free/mod.rs"]
 mod tests;

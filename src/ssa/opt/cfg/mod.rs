@@ -543,5 +543,5 @@ fn renumber_blocks(func: &mut Function) {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/ssa/opt/t_cfg_cleanup.rs"]
+#[path = "../../../tests/ssa/opt/cfg/mod.rs"]
 mod tests;

@@ -45,5 +45,5 @@ impl PassManager {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/ssa/opt/t_dataflow.rs"]
+#[path = "../../../tests/ssa/opt/dataflow/mod.rs"]
 mod tests;

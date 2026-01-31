@@ -2,14 +2,8 @@ use crate::resolve::DefId;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::format::formact_func;
 use crate::ssa::model::ir::{ConstValue, FunctionSig, SwitchCase, Terminator};
-use crate::ssa::opt::cfg::PassManager;
 use crate::ssa::{IrTypeCache, IrTypeKind};
 use indoc::indoc;
-
-fn run_cleanup(func: &mut crate::ssa::model::ir::Function) {
-    let mut manager = PassManager::new();
-    manager.run(std::slice::from_mut(func));
-}
 
 #[test]
 fn test_cleanup_removes_unreachable_block() {
@@ -45,7 +39,7 @@ fn test_cleanup_removes_unreachable_block() {
     builder.terminate(Terminator::Return { value: Some(value) });
 
     let mut func = builder.finish();
-    run_cleanup(&mut func);
+    super::run_cleanup(&mut func);
 
     let text = formact_func(&func, &types);
     let expected = indoc! {"
@@ -96,7 +90,7 @@ fn test_cleanup_prunes_empty_block() {
     builder.terminate(Terminator::Return { value: Some(value) });
 
     let mut func = builder.finish();
-    run_cleanup(&mut func);
+    super::run_cleanup(&mut func);
 
     let text = formact_func(&func, &types);
     let expected = indoc! {"
@@ -138,7 +132,7 @@ fn test_cleanup_merges_single_pred_block() {
     builder.terminate(Terminator::Return { value: Some(value) });
 
     let mut func = builder.finish();
-    run_cleanup(&mut func);
+    super::run_cleanup(&mut func);
 
     let text = formact_func(&func, &types);
     let expected = indoc! {"
@@ -192,7 +186,7 @@ fn test_cleanup_collapses_switch_targets() {
     builder.terminate(Terminator::Return { value: Some(param) });
 
     let mut func = builder.finish();
-    run_cleanup(&mut func);
+    super::run_cleanup(&mut func);
 
     let text = formact_func(&func, &types);
     let expected = indoc! {"
@@ -239,7 +233,7 @@ fn test_cleanup_prunes_unused_block_param() {
     builder.terminate(Terminator::Return { value: Some(value) });
 
     let mut func = builder.finish();
-    run_cleanup(&mut func);
+    super::run_cleanup(&mut func);
 
     let text = formact_func(&func, &types);
     let expected = indoc! {"
