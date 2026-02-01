@@ -2,7 +2,7 @@ use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{FunctionSig, Terminator};
+use crate::ssa::model::ir::{BinOp, Callee, FunctionSig, Terminator};
 use crate::ssa::regalloc::{Location, TargetSpec, regalloc};
 use crate::ssa::{IrTypeCache, IrTypeKind};
 
@@ -232,6 +232,52 @@ fn test_regalloc_prefers_call_safe_regs() {
 
     let location = alloc.alloc_map.get(&param).expect("missing alloc");
     assert!(matches!(location, Location::Reg(reg) if reg.0 != 0));
+}
+
+#[test]
+fn test_regalloc_avoids_indirect_call_reg_across_call() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let fn_ty = types.add(IrTypeKind::Fn {
+        params: vec![],
+        ret: unit_ty,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_clobber_indirect",
+        FunctionSig {
+            params: vec![],
+            ret: u64_ty,
+        },
+    );
+
+    let live = builder.const_int(1, false, 64, u64_ty);
+    let callee = builder.const_func_addr(DefId(1), fn_ty);
+    builder.call(Callee::Value(callee), vec![], unit_ty);
+    let sum = builder.binop(BinOp::Add, live, live, u64_ty);
+    builder.terminate(Terminator::Return { value: Some(sum) });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = SplitTarget::new(
+        vec![PhysReg(0), PhysReg(1)],
+        vec![PhysReg(0)], // indirect call reg is caller-saved
+        vec![PhysReg(1)], // only call-safe reg
+        vec![],
+        PhysReg(0),
+    );
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let location = alloc.alloc_map.get(&live).expect("missing alloc");
+    assert!(
+        !matches!(location, Location::Reg(PhysReg(0))),
+        "call-crossing value should avoid indirect call reg"
+    );
 }
 
 #[test]

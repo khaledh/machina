@@ -59,6 +59,17 @@ impl TestTarget {
             PhysReg(0),
         )
     }
+
+    /// Creates a target with caller-saved + callee-saved regs for call-crossing tests.
+    fn with_callee_saved_pool() -> Self {
+        Self::new(
+            vec![PhysReg(0), PhysReg(1), PhysReg(2)],
+            vec![PhysReg(0), PhysReg(1)],
+            vec![PhysReg(0), PhysReg(1)], // r0/r1 are caller-saved
+            vec![PhysReg(2)],             // r2 is callee-saved
+            PhysReg(0),
+        )
+    }
 }
 
 impl TargetSpec for TestTarget {
@@ -261,6 +272,49 @@ fn test_param_not_precolored_crosses_call_caller_saved() {
     assert!(
         !constraints.fixed_regs.contains_key(&param),
         "param crossing call in caller-saved reg should not be precolored"
+    );
+}
+
+/// Live value crossing a call should avoid caller-saved regs if a callee-saved
+/// register is available.
+#[test]
+fn test_cross_call_avoids_caller_saved() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "cross_call_alloc",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let val = builder.const_int(42, false, 64, u64_ty);
+    builder.call(Callee::Direct(DefId(1)), vec![], unit_ty);
+    let use_after = builder.binop(BinOp::Add, val, val, u64_ty);
+    builder.terminate(Terminator::Return {
+        value: Some(use_after),
+    });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TestTarget::with_callee_saved_pool();
+    let alloc = crate::ssa::regalloc::regalloc(&func, &mut types, &live_map, &target);
+
+    let loc = alloc.alloc_map.get(&val).expect("missing alloc for value");
+    assert!(
+        matches!(
+            loc,
+            crate::ssa::regalloc::Location::Reg(PhysReg(2))
+                | crate::ssa::regalloc::Location::Stack(_)
+        ),
+        "expected call-crossing value to avoid caller-saved regs, got {loc:?}"
     );
 }
 

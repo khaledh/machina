@@ -293,6 +293,61 @@ fn test_regalloc_call_moves_stack_args() {
     );
 }
 
+/// Mixed-width args: stack slots remain 8-byte spaced even for small integer types.
+#[test]
+fn test_regalloc_call_moves_mixed_width_stack_args() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u8_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let u16_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 16,
+    });
+    let u32_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 32,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_mixed_stack_args",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let args = vec![
+        builder.const_int(1, false, 8, u8_ty),
+        builder.const_int(2, false, 16, u16_ty),
+        builder.const_int(3, false, 32, u32_ty),
+    ];
+    let _call = builder.call(Callee::Direct(DefId(1)), args, unit_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = CallTarget::new(vec![], vec![], PhysReg(0), None);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    let mut stack_sizes = Vec::new();
+    for mov in &call_move.pre_moves {
+        if let Location::OutgoingArg(offset) = mov.dst {
+            stack_sizes.push((offset, mov.size));
+        }
+    }
+
+    assert_eq!(stack_sizes.len(), 3);
+    stack_sizes.sort_by_key(|(offset, _)| *offset);
+    assert_eq!(stack_sizes[0], (0, 1));
+    assert_eq!(stack_sizes[1], (8, 2));
+    assert_eq!(stack_sizes[2], (16, 4));
+}
+
 /// Struct return (sret): aggregate result address passed via indirect_result_reg.
 #[test]
 fn test_regalloc_call_moves_sret() {
@@ -341,6 +396,132 @@ fn test_regalloc_call_moves_sret() {
         (mov.src, mov.dst),
         (Location::StackAddr(_), Location::Reg(reg)) if reg == PhysReg(8)
     )));
+}
+
+/// Struct return (sret) with stack args: ensure sret pre-move plus stack arg moves.
+#[test]
+fn test_regalloc_call_moves_sret_with_stack_args() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_sret_stack_args",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let args = vec![
+        builder.const_int(1, false, 64, u64_ty),
+        builder.const_int(2, false, 64, u64_ty),
+        builder.const_int(3, false, 64, u64_ty),
+        builder.const_int(4, false, 64, u64_ty),
+    ];
+    let call = builder.call(Callee::Direct(DefId(1)), args, pair_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = CallTarget::new(
+        vec![],
+        vec![PhysReg(1), PhysReg(2)],
+        PhysReg(0),
+        Some(PhysReg(8)),
+    );
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let result_loc = alloc.alloc_map.get(&call).expect("missing call alloc");
+    assert!(matches!(result_loc, Location::Stack(_)));
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    assert!(call_move.post_moves.is_empty());
+    assert!(call_move.pre_moves.iter().any(|mov| matches!(
+        (mov.src, mov.dst),
+        (Location::StackAddr(_), Location::Reg(reg)) if reg == PhysReg(8)
+    )));
+    assert!(
+        call_move
+            .pre_moves
+            .iter()
+            .any(|mov| matches!(mov.dst, Location::OutgoingArg(0) | Location::OutgoingArg(8)))
+    );
+}
+
+/// Small aggregate returns in registers (no sret).
+#[test]
+fn test_regalloc_call_moves_small_aggregate_return() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u32_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 32,
+    });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u32_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u32_ty,
+            },
+        ],
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_small_aggregate",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let call = builder.call(Callee::Direct(DefId(1)), vec![], pair_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = CallTarget::new(vec![], vec![PhysReg(0)], PhysReg(0), Some(PhysReg(8)));
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let result_loc = alloc.alloc_map.get(&call).expect("missing call alloc");
+    assert!(matches!(result_loc, Location::Stack(_)));
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    assert!(
+        !call_move.pre_moves.iter().any(|mov| matches!(
+            (mov.src, mov.dst),
+            (Location::StackAddr(_), Location::Reg(reg)) if reg == PhysReg(8)
+        )),
+        "small aggregate return should not use sret"
+    );
+    assert!(
+        call_move.post_moves.iter().any(|mov| matches!(
+            (mov.src, mov.dst),
+            (Location::Reg(reg), Location::Stack(_)) if reg == PhysReg(0)
+        )),
+        "small aggregate return should move result reg to stack"
+    );
 }
 
 /// Indirect call: function pointer moves to indirect_call_reg before the call.

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::ssa::model::ir::{BlockId, Function, LocalId, ValueId};
 use crate::ssa::regalloc::ValueAllocMap;
 use crate::ssa::regalloc::moves::MoveOp;
-use crate::ssa::{IrTypeId, IrTypeKind};
+use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
 
 use super::emitter::{CodegenEmitter, LocationResolver};
 use super::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
@@ -39,7 +39,7 @@ pub fn emit_graph_with_emitter(
     alloc_map: &ValueAllocMap,
     frame_size: u32,
     callee_saved: &[crate::regalloc::target::PhysReg],
-    types: &mut crate::ssa::IrTypeCache,
+    types: &mut IrTypeCache,
     def_names: &HashMap<crate::resolve::DefId, String>,
     func_label: &str,
     emitter: &mut dyn CodegenEmitter,
@@ -271,7 +271,7 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
 }
 
 fn build_layouts(
-    types: &mut crate::ssa::IrTypeCache,
+    types: &mut IrTypeCache,
     func: &Function,
     value_types: &HashMap<ValueId, IrTypeId>,
 ) -> HashMap<IrTypeId, crate::ssa::model::layout::IrLayout> {
@@ -290,7 +290,7 @@ fn build_field_addr_folds(
     func: &Function,
     value_types: &HashMap<ValueId, IrTypeId>,
     layouts: &HashMap<IrTypeId, crate::ssa::model::layout::IrLayout>,
-    types: &crate::ssa::IrTypeCache,
+    types: &IrTypeCache,
 ) -> HashMap<ValueId, (ValueId, u32)> {
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
     for (block_idx, block) in func.blocks.iter().enumerate() {
@@ -434,7 +434,7 @@ fn build_const_zero_store_only(
     func: &Function,
     value_types: &HashMap<ValueId, IrTypeId>,
     const_zero_values: &HashSet<ValueId>,
-    types: &crate::ssa::IrTypeCache,
+    types: &IrTypeCache,
 ) -> HashSet<ValueId> {
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
     for (block_idx, block) in func.blocks.iter().enumerate() {
@@ -479,7 +479,7 @@ fn build_const_zero_store_only(
 }
 
 fn collect_layouts(
-    types: &mut crate::ssa::IrTypeCache,
+    types: &mut IrTypeCache,
     ty: IrTypeId,
     layouts: &mut HashMap<IrTypeId, crate::ssa::model::layout::IrLayout>,
 ) {
@@ -548,13 +548,12 @@ fn align_to(value: u32, align: u32) -> u32 {
     (value + align - 1) & !(align - 1)
 }
 
-fn needs_sret(types: &crate::ssa::IrTypeCache, ty: IrTypeId) -> bool {
+fn needs_sret(types: &mut IrTypeCache, ty: IrTypeId) -> bool {
     match types.kind(ty) {
-        crate::ssa::IrTypeKind::Unit
-        | crate::ssa::IrTypeKind::Bool
-        | crate::ssa::IrTypeKind::Int { .. }
-        | crate::ssa::IrTypeKind::Ptr { .. } => false,
-        _ => true,
+        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
+            false
+        }
+        _ => types.layout(ty).size() as u32 > 8,
     }
 }
 

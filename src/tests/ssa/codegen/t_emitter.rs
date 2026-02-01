@@ -827,6 +827,183 @@ fn test_arm64_emitter_stack_args() {
 }
 
 #[test]
+fn test_arm64_emitter_sret_with_stack_args() {
+    let mut tt = TestTypes::new();
+    let pair_ty = tt.types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: tt.u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: tt.u64_ty,
+            },
+        ],
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_sret_stack_args",
+        FunctionSig {
+            params: vec![],
+            ret: tt.unit_ty,
+        },
+    );
+
+    let mut args = Vec::new();
+    for i in 0..10 {
+        args.push(builder.const_int(i, false, 64, tt.u64_ty));
+    }
+    let _call = builder.call(Callee::Direct(DefId(1)), args, pair_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let target = AapcsTarget::new();
+    let (asm, alloc) = emit_function_with_alloc(&func, &mut tt.types, &target);
+
+    assert!(asm.contains("add x8, sp, #"));
+
+    let mut callee_saved = alloc.used_callee_saved.clone();
+    if !callee_saved.iter().any(|reg| reg.0 == 30) {
+        callee_saved.push(PhysReg(30));
+    }
+    callee_saved.sort_by_key(|reg| reg.0);
+    let saved_size = (callee_saved.len() as u32) * 8;
+    let total = alloc.frame_size.saturating_add(saved_size);
+    let aligned = (total + 15) & !15;
+    let outgoing_base = aligned.saturating_sub(alloc.frame_size.saturating_add(saved_size));
+    let first = outgoing_base;
+    let second = outgoing_base.saturating_add(8);
+    assert!(asm.contains(&format!("[sp, #{}]", first)));
+    assert!(asm.contains(&format!("[sp, #{}]", second)));
+}
+
+#[test]
+fn test_arm64_emitter_mixed_width_stack_args() {
+    let mut tt = TestTypes::new();
+    let u16_ty = tt.types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 16,
+    });
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_mixed_stack_args",
+        FunctionSig {
+            params: vec![],
+            ret: tt.unit_ty,
+        },
+    );
+
+    let mut args = Vec::new();
+    for i in 0..8 {
+        args.push(builder.const_int(i, false, 64, tt.u64_ty));
+    }
+    args.push(builder.const_int(1, false, 8, tt.u8_ty));
+    args.push(builder.const_int(2, false, 16, u16_ty));
+    args.push(builder.const_int(3, false, 32, tt.u32_ty));
+    let _call = builder.call(Callee::Direct(DefId(1)), args, tt.unit_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let target = AapcsTarget::new();
+    let (asm, alloc) = emit_function_with_alloc(&func, &mut tt.types, &target);
+
+    let mut callee_saved = alloc.used_callee_saved.clone();
+    if !callee_saved.iter().any(|reg| reg.0 == 30) {
+        callee_saved.push(PhysReg(30));
+    }
+    callee_saved.sort_by_key(|reg| reg.0);
+    let saved_size = (callee_saved.len() as u32) * 8;
+    let total = alloc.frame_size.saturating_add(saved_size);
+    let aligned = (total + 15) & !15;
+    let outgoing_base = aligned.saturating_sub(alloc.frame_size.saturating_add(saved_size));
+
+    let off0 = outgoing_base;
+    let off1 = outgoing_base.saturating_add(8);
+    let off2 = outgoing_base.saturating_add(16);
+
+    fn has_store(asm: &str, offset: u32, mnemonic: &str) -> bool {
+        let needle = format!("[sp, #{}]", offset);
+        asm.lines()
+            .any(|line| line.contains(mnemonic) && line.contains(&needle))
+    }
+
+    assert!(has_store(&asm, off0, "strb"));
+    assert!(has_store(&asm, off1, "strh"));
+    assert!(has_store(&asm, off2, "str "));
+}
+
+#[test]
+fn test_arm64_emitter_incoming_mixed_width_stack_args() {
+    let mut tt = TestTypes::new();
+    let u16_ty = tt.types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 16,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "emit_incoming_mixed_stack_args",
+        FunctionSig {
+            params: vec![
+                tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty,
+                tt.u64_ty, tt.u8_ty, u16_ty, tt.u32_ty,
+            ],
+            ret: tt.u64_ty,
+        },
+    );
+
+    let entry = builder.current_block();
+    let param_tys = [
+        tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty, tt.u64_ty,
+        tt.u8_ty, u16_ty, tt.u32_ty,
+    ];
+    let mut params = Vec::new();
+    for ty in param_tys {
+        params.push(builder.add_block_param(entry, ty));
+    }
+    let p8 = params[8];
+    let p9 = params[9];
+    let p10 = params[10];
+
+    let p8_ext = builder.int_extend(p8, tt.u64_ty, false);
+    let p9_ext = builder.int_extend(p9, tt.u64_ty, false);
+    let p10_ext = builder.int_extend(p10, tt.u64_ty, false);
+    let sum = builder.binop(BinOp::Add, p8_ext, p9_ext, tt.u64_ty);
+    let sum = builder.binop(BinOp::Add, sum, p10_ext, tt.u64_ty);
+    builder.terminate(Terminator::Return { value: Some(sum) });
+
+    let func = builder.finish();
+    let target = AapcsTarget::new();
+    let (asm, alloc) = emit_function_with_alloc(&func, &mut tt.types, &target);
+
+    let mut callee_saved = alloc.used_callee_saved.clone();
+    if !callee_saved.iter().any(|reg| reg.0 == 30) {
+        callee_saved.push(PhysReg(30));
+    }
+    callee_saved.sort_by_key(|reg| reg.0);
+    let saved_size = (callee_saved.len() as u32) * 8;
+    let total = alloc.frame_size.saturating_add(saved_size);
+    let aligned = (total + 15) & !15;
+    let incoming_base = aligned;
+
+    let off0 = incoming_base;
+    let off1 = incoming_base.saturating_add(8);
+    let off2 = incoming_base.saturating_add(16);
+
+    fn has_load(asm: &str, offset: u32, mnemonic: &str) -> bool {
+        let needle = format!("[sp, #{}]", offset);
+        asm.lines()
+            .any(|line| line.contains(mnemonic) && line.contains(&needle))
+    }
+
+    assert!(has_load(&asm, off0, "ldrb"));
+    assert!(has_load(&asm, off1, "ldrh"));
+    assert!(has_load(&asm, off2, "ldr "));
+}
+
+#[test]
 fn test_arm64_emitter_sret_call_setup() {
     let mut tt = TestTypes::new();
     let pair_ty = tt.types.add(IrTypeKind::Struct {

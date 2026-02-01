@@ -1843,6 +1843,6 @@ fn needs_sret(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> bool {
         IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
             false
         }
-        _ => true,
+        _ => locs.layout(ty).size() as u32 > 8,
     }
 }

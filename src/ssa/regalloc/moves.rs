@@ -321,8 +321,14 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, crate::ssa::IrTypeId> 
 ///
 /// Types that don't fit in a register (aggregates, arrays) must be returned
 /// via a pointer passed by the caller.
-fn needs_sret(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
-    !types.is_reg_type(ty)
+fn needs_sret(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
+    if types.is_reg_type(ty) {
+        return false;
+    }
+
+    // Allow small aggregates to return in registers (AAPCS-like behavior).
+    let size = types.layout(ty).size() as u32;
+    size > 8
 }
 
 // ============================================================================
