@@ -839,6 +839,10 @@ fn test_arm64_emitter_sret_with_stack_args() {
                 name: "b".to_string(),
                 ty: tt.u64_ty,
             },
+            IrStructField {
+                name: "c".to_string(),
+                ty: tt.u64_ty,
+            },
         ],
     });
 
@@ -1016,6 +1020,10 @@ fn test_arm64_emitter_sret_call_setup() {
                 name: "b".to_string(),
                 ty: tt.u64_ty,
             },
+            IrStructField {
+                name: "c".to_string(),
+                ty: tt.u64_ty,
+            },
         ],
     });
 
@@ -1049,6 +1057,10 @@ fn test_arm64_emitter_sret_return() {
             },
             IrStructField {
                 name: "b".to_string(),
+                ty: tt.u64_ty,
+            },
+            IrStructField {
+                name: "c".to_string(),
                 ty: tt.u64_ty,
             },
         ],

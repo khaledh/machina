@@ -553,7 +553,7 @@ fn needs_sret(types: &mut IrTypeCache, ty: IrTypeId) -> bool {
         IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
             false
         }
-        _ => types.layout(ty).size() as u32 > 8,
+        _ => types.layout(ty).size() as u32 > 16,
     }
 }
 

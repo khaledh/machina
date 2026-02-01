@@ -367,6 +367,10 @@ fn test_regalloc_call_moves_sret() {
                 name: "b".to_string(),
                 ty: u64_ty,
             },
+            IrStructField {
+                name: "c".to_string(),
+                ty: u64_ty,
+            },
         ],
     });
 
@@ -415,6 +419,10 @@ fn test_regalloc_call_moves_sret_with_stack_args() {
             },
             IrStructField {
                 name: "b".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "c".to_string(),
                 ty: u64_ty,
             },
         ],
@@ -522,6 +530,81 @@ fn test_regalloc_call_moves_small_aggregate_return() {
         )),
         "small aggregate return should move result reg to stack"
     );
+}
+
+/// Small aggregate arguments are passed by value in registers.
+#[test]
+fn test_regalloc_call_moves_by_value_aggregate_arg() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let u64_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+    let pair_ptr = types.add(IrTypeKind::Ptr { elem: pair_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_by_value_agg_arg",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(pair_ty, None);
+    let addr = builder.addr_of_local(local, pair_ptr);
+    let field0 = builder.field_addr(addr, 0, u64_ptr);
+    let field1 = builder.field_addr(addr, 1, u64_ptr);
+    let v0 = builder.const_int(1, false, 64, u64_ty);
+    let v1 = builder.const_int(2, false, 64, u64_ty);
+    builder.store(field0, v0);
+    builder.store(field1, v1);
+    let agg = builder.load(addr, pair_ty);
+
+    builder.call(Callee::Direct(DefId(1)), vec![agg], unit_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = CallTarget::new(
+        vec![],
+        vec![PhysReg(0), PhysReg(1)],
+        PhysReg(0),
+        Some(PhysReg(8)),
+    );
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let agg_loc = alloc.alloc_map.get(&agg).expect("missing arg alloc");
+    let Location::Stack(slot) = *agg_loc else {
+        panic!(
+            "expected aggregate arg to be stack-backed, got {:?}",
+            agg_loc
+        );
+    };
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    assert!(call_move.pre_moves.iter().any(|mov| matches!(
+        (mov.src, mov.dst, mov.size),
+        (Location::StackOffset(s, 0), Location::Reg(reg), 8) if s == slot && reg == PhysReg(0)
+    )));
+    assert!(call_move.pre_moves.iter().any(|mov| matches!(
+        (mov.src, mov.dst, mov.size),
+        (Location::StackOffset(s, 8), Location::Reg(reg), 8) if s == slot && reg == PhysReg(1)
+    )));
 }
 
 /// Indirect call: function pointer moves to indirect_call_reg before the call.

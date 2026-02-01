@@ -23,6 +23,8 @@ pub enum Location {
     Stack(StackSlotId),
     /// Address of a stack slot (used for sret setup moves).
     StackAddr(StackSlotId),
+    /// Byte offset into a stack slot (used for partial aggregate moves).
+    StackOffset(StackSlotId, u32),
     /// Incoming stack argument at the given byte offset from SP (post-prologue).
     IncomingArg(u32),
     /// Outgoing stack argument at the given byte offset from SP (post-prologue).
@@ -63,16 +65,22 @@ pub fn regalloc(
     let param_reg_count = constraints.param_reg_count;
 
     // Reserve space for stack-passed call arguments.
-    let mut max_stack_args = 0usize;
+    let mut max_stack_bytes = 0u32;
     for block in &func.blocks {
         for inst in &block.insts {
             if let crate::ssa::model::ir::InstKind::Call { args, .. } = &inst.kind {
-                let stack_args = args.len().saturating_sub(param_reg_count);
-                max_stack_args = max_stack_args.max(stack_args);
+                let stack_bytes = moves::outgoing_stack_bytes_for_call(
+                    args,
+                    &analysis.value_types,
+                    types,
+                    target,
+                    param_reg_count,
+                );
+                max_stack_bytes = max_stack_bytes.max(stack_bytes);
             }
         }
     }
-    let outgoing_arg_size = (max_stack_args as u32) * 8;
+    let outgoing_arg_size = max_stack_bytes;
     result.frame_size = result.frame_size.saturating_add(outgoing_arg_size);
 
     // Map stack-passed incoming params to their SP-relative slots.

@@ -326,6 +326,15 @@ impl Arm64Emitter {
                     scratch.to_string()
                 }
             }
+            Location::StackOffset(slot, extra) => {
+                let offset = self.stack_offset(slot).saturating_add(extra);
+                self.emit_load_sized(scratch, offset, size);
+                if size > 0 && size <= 4 {
+                    Self::w_reg(scratch)
+                } else {
+                    scratch.to_string()
+                }
+            }
             Location::IncomingArg(offset) => {
                 let offset = self.layout.incoming_offset(offset);
                 self.emit_load_sized(scratch, offset, size);
@@ -780,8 +789,62 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
                 }
+                (Location::Reg(src), Location::StackOffset(dst, extra)) => {
+                    let offset = self.stack_offset(dst).saturating_add(extra);
+                    match mov.size {
+                        1 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strb {}, [sp, #{}]", src, offset));
+                        }
+                        2 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("strh {}, [sp, #{}]", src, offset));
+                        }
+                        4 => {
+                            let src = Self::w_reg(Self::reg_name(src));
+                            self.emit_line(&format!("str {}, [sp, #{}]", src, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "str {}, [sp, #{}]",
+                                Self::reg_name(src),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported reg->stack move size {other}");
+                        }
+                    }
+                }
                 (Location::Stack(src), Location::Reg(dst)) => {
                     let offset = self.stack_offset(src);
+                    match mov.size {
+                        1 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldrb {}, [sp, #{}]", dst, offset));
+                        }
+                        2 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldrh {}, [sp, #{}]", dst, offset));
+                        }
+                        4 => {
+                            let dst = Self::w_reg(Self::reg_name(dst));
+                            self.emit_line(&format!("ldr {}, [sp, #{}]", dst, offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!(
+                                "ldr {}, [sp, #{}]",
+                                Self::reg_name(dst),
+                                offset
+                            ));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported stack->reg move size {other}");
+                        }
+                    }
+                }
+                (Location::StackOffset(src, extra), Location::Reg(dst)) => {
+                    let offset = self.stack_offset(src).saturating_add(extra);
                     match mov.size {
                         1 => {
                             let dst = Self::w_reg(Self::reg_name(dst));
@@ -810,6 +873,84 @@ impl CodegenEmitter for Arm64Emitter {
                 (Location::Stack(src), Location::Stack(dst)) => {
                     let src_offset = self.stack_offset(src);
                     let dst_offset = self.stack_offset(dst);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", dst_offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", dst_offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", dst_offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
+                        }
+                        other => {
+                            self.emit_line(&format!("add x9, sp, #{}", src_offset));
+                            self.copy_ptr_to_stack("x9", dst_offset, other);
+                        }
+                    }
+                }
+                (Location::Stack(src), Location::StackOffset(dst, extra)) => {
+                    let src_offset = self.stack_offset(src);
+                    let dst_offset = self.stack_offset(dst).saturating_add(extra);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", dst_offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", dst_offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", dst_offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
+                        }
+                        other => {
+                            self.emit_line(&format!("add x9, sp, #{}", src_offset));
+                            self.copy_ptr_to_stack("x9", dst_offset, other);
+                        }
+                    }
+                }
+                (Location::StackOffset(src, extra), Location::Stack(dst)) => {
+                    let src_offset = self.stack_offset(src).saturating_add(extra);
+                    let dst_offset = self.stack_offset(dst);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", dst_offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", dst_offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", dst_offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
+                        }
+                        other => {
+                            self.emit_line(&format!("add x9, sp, #{}", src_offset));
+                            self.copy_ptr_to_stack("x9", dst_offset, other);
+                        }
+                    }
+                }
+                (Location::StackOffset(src, src_extra), Location::StackOffset(dst, dst_extra)) => {
+                    let src_offset = self.stack_offset(src).saturating_add(src_extra);
+                    let dst_offset = self.stack_offset(dst).saturating_add(dst_extra);
                     match mov.size {
                         1 => {
                             self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
@@ -885,6 +1026,31 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
                 }
+                (Location::StackOffset(src, extra), Location::OutgoingArg(offset)) => {
+                    let offset = self.layout.outgoing_offset(offset);
+                    let src_offset = self.stack_offset(src).saturating_add(extra);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", offset));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported stack->outgoing move size {other}");
+                        }
+                    }
+                }
                 (Location::Reg(src), Location::IncomingArg(offset)) => {
                     let offset = self.layout.incoming_offset(offset);
                     match mov.size {
@@ -915,6 +1081,31 @@ impl CodegenEmitter for Arm64Emitter {
                 (Location::Stack(src), Location::IncomingArg(offset)) => {
                     let offset = self.layout.incoming_offset(offset);
                     let src_offset = self.stack_offset(src);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", src_offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", offset));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported stack->incoming move size {other}");
+                        }
+                    }
+                }
+                (Location::StackOffset(src, extra), Location::IncomingArg(offset)) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    let src_offset = self.stack_offset(src).saturating_add(extra);
                     match mov.size {
                         1 => {
                             self.emit_line(&format!("ldrb w9, [sp, #{}]", src_offset));
@@ -995,6 +1186,31 @@ impl CodegenEmitter for Arm64Emitter {
                         }
                     }
                 }
+                (Location::IncomingArg(offset), Location::StackOffset(dst, extra)) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    let dst_offset = self.stack_offset(dst).saturating_add(extra);
+                    match mov.size {
+                        1 => {
+                            self.emit_line(&format!("ldrb w9, [sp, #{}]", offset));
+                            self.emit_line(&format!("strb w9, [sp, #{}]", dst_offset));
+                        }
+                        2 => {
+                            self.emit_line(&format!("ldrh w9, [sp, #{}]", offset));
+                            self.emit_line(&format!("strh w9, [sp, #{}]", dst_offset));
+                        }
+                        4 => {
+                            self.emit_line(&format!("ldr w9, [sp, #{}]", offset));
+                            self.emit_line(&format!("str w9, [sp, #{}]", dst_offset));
+                        }
+                        8 => {
+                            self.emit_line(&format!("ldr x9, [sp, #{}]", offset));
+                            self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
+                        }
+                        other => {
+                            panic!("ssa codegen: unsupported incoming->stack move size {other}");
+                        }
+                    }
+                }
                 (Location::StackAddr(src), Location::Reg(dst)) => {
                     let offset = self.stack_offset(src);
                     self.emit_line(&format!("add {}, sp, #{}", Self::reg_name(dst), offset));
@@ -1003,6 +1219,12 @@ impl CodegenEmitter for Arm64Emitter {
                     let offset = self.stack_offset(src);
                     self.emit_line(&format!("add x9, sp, #{}", offset));
                     self.emit_line(&format!("str x9, [sp, #{}]", self.stack_offset(dst)));
+                }
+                (Location::StackAddr(src), Location::StackOffset(dst, extra)) => {
+                    let offset = self.stack_offset(src);
+                    let dst_offset = self.stack_offset(dst).saturating_add(extra);
+                    self.emit_line(&format!("add x9, sp, #{}", offset));
+                    self.emit_line(&format!("str x9, [sp, #{}]", dst_offset));
                 }
                 (Location::StackAddr(src), Location::OutgoingArg(offset)) => {
                     let src_offset = self.stack_offset(src);
@@ -1745,14 +1967,35 @@ impl CodegenEmitter for Arm64Emitter {
                             }
                         }
                     } else {
-                        let src = locs.value(*value);
-                        let src = self.load_value_typed(locs, src, ty, "x9");
-                        let size = Self::scalar_size(locs, ty);
-                        if size > 0 && size <= 4 {
-                            let dst = Self::w_reg("x0");
-                            self.emit_line(&format!("mov {}, {}", dst, src));
+                        if locs.types.is_reg_type(ty) {
+                            let src = locs.value(*value);
+                            let src = self.load_value_typed(locs, src, ty, "x9");
+                            let size = Self::scalar_size(locs, ty);
+                            if size > 0 && size <= 4 {
+                                let dst = Self::w_reg("x0");
+                                self.emit_line(&format!("mov {}, {}", dst, src));
+                            } else {
+                                self.emit_line(&format!("mov x0, {}", src));
+                            }
                         } else {
-                            self.emit_line(&format!("mov x0, {}", src));
+                            let size = locs.layout(ty).size() as u32;
+                            let Location::Stack(slot) = locs.value(*value) else {
+                                panic!(
+                                    "ssa codegen: aggregate return must be stack-backed, got {:?}",
+                                    locs.value(*value)
+                                );
+                            };
+                            let base = self.stack_offset(slot);
+                            if size == 0 {
+                                self.emit_line("mov x0, #0");
+                            } else {
+                                let size0 = size.min(8);
+                                self.emit_load_sized("x0", base, size0);
+                                if size > 8 {
+                                    let size1 = size.saturating_sub(8).min(8);
+                                    self.emit_load_sized("x1", base.saturating_add(8), size1);
+                                }
+                            }
                         }
                     }
                 } else {
@@ -1843,6 +2086,6 @@ fn needs_sret(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> bool {
         IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
             false
         }
-        _ => locs.layout(ty).size() as u32 > 8,
+        _ => locs.layout(ty).size() as u32 > 16,
     }
 }

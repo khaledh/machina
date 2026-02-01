@@ -198,7 +198,10 @@ fn plan_entry_moves(
     param_reg_count: usize,
     plan: &mut MovePlan,
 ) {
-    for (idx, param) in entry.params.iter().enumerate() {
+    let mut next_reg = 0usize;
+    let mut next_stack = 0u32;
+
+    for param in entry.params.iter() {
         let param_id = param.value.id;
         let ty = param.value.ty;
         let alloc = alloc_map
@@ -206,43 +209,73 @@ fn plan_entry_moves(
             .copied()
             .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", param_id));
 
-        // Entry param source is either an ABI register or an incoming stack slot.
-        let src = if idx < param_reg_count {
-            let reg = target
-                .param_reg(idx as u32)
-                .unwrap_or_else(|| panic!("ssa regalloc: param {} has no ABI reg", idx));
-            Location::Reg(reg)
-        } else {
-            Location::IncomingArg(((idx - param_reg_count) as u32) * 8)
-        };
+        let pass = arg_pass_info(types, ty);
+        let src_locs = abi_arg_locations(
+            pass,
+            param_reg_count,
+            target,
+            &mut next_reg,
+            &mut next_stack,
+            ArgStackKind::Incoming,
+        );
 
-        // Register-typed params become entry moves.
-        if types.is_reg_type(ty) {
-            if src != alloc {
-                let size = move_size_for(types, ty, src, alloc);
-                plan.entry_moves.push(MoveOp {
-                    src,
-                    dst: alloc,
-                    size,
-                });
+        if pass.by_value {
+            if types.is_reg_type(ty) {
+                let src = src_locs
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| panic!("ssa regalloc: missing ABI src for param"));
+                if src != alloc {
+                    let size = move_size_for(types, ty, src, alloc);
+                    plan.entry_moves.push(MoveOp {
+                        src,
+                        dst: alloc,
+                        size,
+                    });
+                }
+                continue;
+            }
+
+            let Location::Stack(slot) = alloc else {
+                panic!(
+                    "ssa regalloc: aggregate param must be stack-backed, got {:?}",
+                    alloc
+                );
+            };
+            for (idx, src) in src_locs.iter().enumerate() {
+                let offset = (idx as u32) * 8;
+                let size = pass.size.saturating_sub(offset).min(8);
+                if size == 0 {
+                    continue;
+                }
+                let dst = Location::StackOffset(slot, offset);
+                if *src != dst {
+                    plan.entry_moves.push(MoveOp {
+                        src: *src,
+                        dst,
+                        size,
+                    });
+                }
             }
             continue;
         }
 
-        // Aggregate params are copied into their stack slot at entry.
+        // Aggregate params passed by reference are copied into their stack slot at entry.
         let Location::Stack(slot) = alloc else {
             panic!(
                 "ssa regalloc: aggregate param must be stack-backed, got {:?}",
                 alloc
             );
         };
-
-        let size = types.layout(ty).size() as u32;
-        if size > 0 {
+        if pass.size > 0 {
+            let src = src_locs
+                .first()
+                .copied()
+                .unwrap_or_else(|| panic!("ssa regalloc: missing ABI src for param"));
             plan.param_copies.push(ParamCopy {
                 src,
                 dst: slot,
-                size,
+                size: pass.size,
             });
         }
     }
@@ -328,7 +361,7 @@ fn needs_sret(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
 
     // Allow small aggregates to return in registers (AAPCS-like behavior).
     let size = types.layout(ty).size() as u32;
-    size > 8
+    size > 16
 }
 
 // ============================================================================
@@ -552,10 +585,18 @@ fn move_uses_scratch(mov: &MoveOp) -> bool {
             | (Location::Stack(_), Location::OutgoingArg(_))
             | (Location::IncomingArg(_), Location::Stack(_))
             | (Location::OutgoingArg(_), Location::Stack(_))
+            | (Location::StackOffset(_, _), Location::Stack(_))
+            | (Location::Stack(_), Location::StackOffset(_, _))
+            | (Location::StackOffset(_, _), Location::StackOffset(_, _))
+            | (Location::StackOffset(_, _), Location::IncomingArg(_))
+            | (Location::StackOffset(_, _), Location::OutgoingArg(_))
+            | (Location::IncomingArg(_), Location::StackOffset(_, _))
+            | (Location::OutgoingArg(_), Location::StackOffset(_, _))
             | (Location::IncomingArg(_), Location::OutgoingArg(_))
             | (Location::OutgoingArg(_), Location::IncomingArg(_))
             // Loading a stack address into memory also needs scratch
             | (Location::StackAddr(_), Location::Stack(_))
+            | (Location::StackAddr(_), Location::StackOffset(_, _))
             | (Location::StackAddr(_), Location::IncomingArg(_))
             | (Location::StackAddr(_), Location::OutgoingArg(_))
     )
@@ -581,6 +622,80 @@ fn move_size_for(
 // Call Move Generation
 // ============================================================================
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ArgStackKind {
+    Incoming,
+    Outgoing,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ArgPassInfo {
+    by_value: bool,
+    size: u32,
+}
+
+pub(crate) fn arg_pass_info(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> ArgPassInfo {
+    let size = types.layout(ty).size() as u32;
+    if types.is_reg_type(ty) {
+        return ArgPassInfo {
+            by_value: true,
+            size,
+        };
+    }
+
+    ArgPassInfo {
+        by_value: size <= 16,
+        size,
+    }
+}
+
+fn stack_arg_location(kind: ArgStackKind, offset: u32) -> Location {
+    match kind {
+        ArgStackKind::Incoming => Location::IncomingArg(offset),
+        ArgStackKind::Outgoing => Location::OutgoingArg(offset),
+    }
+}
+
+pub(crate) fn abi_arg_locations(
+    pass: ArgPassInfo,
+    param_reg_count: usize,
+    target: &dyn TargetSpec,
+    next_reg: &mut usize,
+    next_stack: &mut u32,
+    stack_kind: ArgStackKind,
+) -> Vec<Location> {
+    if !pass.by_value || pass.size <= 8 {
+        if *next_reg < param_reg_count {
+            let reg = target
+                .param_reg(*next_reg as u32)
+                .unwrap_or_else(|| panic!("ssa regalloc: arg {} has no ABI reg", *next_reg));
+            *next_reg += 1;
+            return vec![Location::Reg(reg)];
+        }
+        let offset = *next_stack;
+        *next_stack = next_stack.saturating_add(8);
+        return vec![stack_arg_location(stack_kind, offset)];
+    }
+
+    if *next_reg + 1 < param_reg_count {
+        let reg0 = target
+            .param_reg(*next_reg as u32)
+            .unwrap_or_else(|| panic!("ssa regalloc: arg {} has no ABI reg", *next_reg));
+        let reg1 = target
+            .param_reg((*next_reg + 1) as u32)
+            .unwrap_or_else(|| panic!("ssa regalloc: arg {} has no ABI reg", *next_reg + 1));
+        *next_reg += 2;
+        return vec![Location::Reg(reg0), Location::Reg(reg1)];
+    }
+
+    let offset = *next_stack;
+    *next_stack = next_stack.saturating_add(16);
+    vec![
+        stack_arg_location(stack_kind, offset),
+        stack_arg_location(stack_kind, offset.saturating_add(8)),
+    ]
+}
+
 /// Looks up the type of a call argument.
 fn call_arg_type(
     value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
@@ -593,52 +708,35 @@ fn call_arg_type(
 }
 
 /// Returns the source location for a call argument.
-///
-/// For register-sized types, returns the allocated location directly.
-/// For aggregates, returns the stack address (since aggregates are passed
-/// by pointer).
-fn call_arg_src(
-    arg: ValueId,
-    alloc_map: &ValueAllocMap,
-    value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
-    types: &IrTypeCache,
-) -> (Location, crate::ssa::IrTypeId) {
-    let arg_ty = call_arg_type(value_types, &arg);
-    let src = alloc_map
+fn call_arg_src(arg: ValueId, alloc_map: &ValueAllocMap) -> Location {
+    alloc_map
         .get(&arg)
         .copied()
-        .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", arg));
-    if types.is_reg_type(arg_ty) {
-        return (src, arg_ty);
-    }
-    // Aggregate types are passed by pointer - return stack address
-    let addr = match src {
-        Location::Stack(slot) => Location::StackAddr(slot),
-        Location::StackAddr(slot) => Location::StackAddr(slot),
-        other => {
-            panic!(
-                "ssa regalloc: aggregate arg must be stack-backed, got {:?}",
-                other
-            );
-        }
-    };
-    (addr, arg_ty)
+        .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", arg))
 }
 
-/// Returns the ABI destination for a call argument at the given index.
-///
-/// Arguments within the register limit go to parameter registers; overflow
-/// arguments go to outgoing stack slots.
-fn call_arg_dst(idx: usize, param_reg_count: usize, target: &dyn TargetSpec) -> Location {
-    if idx < param_reg_count {
-        let reg = target
-            .param_reg(idx as u32)
-            .unwrap_or_else(|| panic!("ssa regalloc: call arg {} has no ABI reg", idx));
-        Location::Reg(reg)
-    } else {
-        let offset = ((idx - param_reg_count) as u32) * 8;
-        Location::OutgoingArg(offset)
+pub(crate) fn outgoing_stack_bytes_for_call(
+    args: &[ValueId],
+    value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
+    types: &mut IrTypeCache,
+    target: &dyn TargetSpec,
+    param_reg_count: usize,
+) -> u32 {
+    let mut next_reg = 0usize;
+    let mut next_stack = 0u32;
+    for arg in args {
+        let arg_ty = call_arg_type(value_types, arg);
+        let pass = arg_pass_info(types, arg_ty);
+        let _ = abi_arg_locations(
+            pass,
+            param_reg_count,
+            target,
+            &mut next_reg,
+            &mut next_stack,
+            ArgStackKind::Outgoing,
+        );
     }
+    next_stack
 }
 
 /// Plans all moves for a single call instruction.
@@ -665,7 +763,8 @@ fn plan_call_moves(
 
     // For indirect calls, move the callee address to the indirect call register
     if let Callee::Value(value) = callee {
-        let (src, callee_ty) = call_arg_src(*value, alloc_map, value_types, types);
+        let src = call_arg_src(*value, alloc_map);
+        let callee_ty = call_arg_type(value_types, value);
         let dst = Location::Reg(target.indirect_call_reg());
         if src != dst {
             let size = move_size_for(types, callee_ty, src, dst);
@@ -701,27 +800,125 @@ fn plan_call_moves(
         }
     }
 
+    let mut next_reg = 0usize;
+    let mut next_stack = 0u32;
+
     // Move each argument to its ABI-specified location (register or stack slot)
-    for (idx, arg) in args.iter().enumerate() {
-        let (src, arg_ty) = call_arg_src(*arg, alloc_map, value_types, types);
-        let dst = call_arg_dst(idx, param_reg_count, target);
-        if src != dst {
-            let size = move_size_for(types, arg_ty, src, dst);
-            pre_moves.push(MoveOp { src, dst, size });
+    for arg in args {
+        let arg_ty = call_arg_type(value_types, arg);
+        let pass = arg_pass_info(types, arg_ty);
+        let dst_locs = abi_arg_locations(
+            pass,
+            param_reg_count,
+            target,
+            &mut next_reg,
+            &mut next_stack,
+            ArgStackKind::Outgoing,
+        );
+        if !pass.by_value {
+            let src = match call_arg_src(*arg, alloc_map) {
+                Location::Stack(slot) => Location::StackAddr(slot),
+                Location::StackAddr(slot) => Location::StackAddr(slot),
+                other => {
+                    panic!(
+                        "ssa regalloc: aggregate arg must be stack-backed, got {:?}",
+                        other
+                    );
+                }
+            };
+            let dst = dst_locs
+                .first()
+                .copied()
+                .unwrap_or_else(|| panic!("ssa regalloc: missing ABI dst for arg"));
+            if src != dst {
+                let size = move_size_for(types, arg_ty, src, dst);
+                pre_moves.push(MoveOp { src, dst, size });
+            }
+            continue;
+        }
+
+        if types.is_reg_type(arg_ty) {
+            let src = call_arg_src(*arg, alloc_map);
+            let dst = dst_locs
+                .first()
+                .copied()
+                .unwrap_or_else(|| panic!("ssa regalloc: missing ABI dst for arg"));
+            if src != dst {
+                let size = move_size_for(types, arg_ty, src, dst);
+                pre_moves.push(MoveOp { src, dst, size });
+            }
+            continue;
+        }
+
+        let src_slot = match call_arg_src(*arg, alloc_map) {
+            Location::Stack(slot) => slot,
+            other => {
+                panic!(
+                    "ssa regalloc: by-value aggregate arg must be stack-backed, got {:?}",
+                    other
+                );
+            }
+        };
+        for (idx, dst) in dst_locs.iter().enumerate() {
+            let offset = (idx as u32) * 8;
+            let size = pass.size.saturating_sub(offset).min(8);
+            if size == 0 {
+                continue;
+            }
+            let src = Location::StackOffset(src_slot, offset);
+            pre_moves.push(MoveOp {
+                src,
+                dst: *dst,
+                size,
+            });
         }
     }
 
     // For register-sized returns, move the result from the return register
     if let Some(result) = result {
         if !needs_sret(types, result.ty) {
-            let src = Location::Reg(target.result_reg());
-            let dst = alloc_map
+            let dst_loc = alloc_map
                 .get(&result.id)
                 .copied()
                 .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", result.id));
-            if src != dst {
-                let size = move_size_for(types, result.ty, src, dst);
-                post_moves.push(MoveOp { src, dst, size });
+            if types.is_reg_type(result.ty) {
+                let src = Location::Reg(target.result_reg());
+                if src != dst_loc {
+                    let size = move_size_for(types, result.ty, src, dst_loc);
+                    post_moves.push(MoveOp {
+                        src,
+                        dst: dst_loc,
+                        size,
+                    });
+                }
+            } else {
+                let size = types.layout(result.ty).size() as u32;
+                let Location::Stack(slot) = dst_loc else {
+                    panic!(
+                        "ssa regalloc: aggregate return must be stack-backed, got {:?}",
+                        dst_loc
+                    );
+                };
+                let src0 = Location::Reg(target.result_reg());
+                let size0 = size.min(8);
+                if size0 > 0 {
+                    post_moves.push(MoveOp {
+                        src: src0,
+                        dst: Location::StackOffset(slot, 0),
+                        size: size0,
+                    });
+                }
+                if size > 8 {
+                    let reg1 = target.param_reg(1).unwrap_or_else(|| {
+                        panic!("ssa regalloc: aggregate return requires second result reg")
+                    });
+                    let size1 = size.saturating_sub(8).min(8);
+                    post_moves.push(MoveOp {
+                        src: Location::Reg(reg1),
+                        dst: Location::StackOffset(slot, 8),
+                        size: size1,
+                    });
+                }
             }
         }
     }

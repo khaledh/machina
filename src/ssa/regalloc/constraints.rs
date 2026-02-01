@@ -30,6 +30,8 @@ use std::collections::{HashMap, HashSet};
 use crate::regalloc::target::{PhysReg, TargetSpec};
 use crate::ssa::IrTypeCache;
 use crate::ssa::model::ir::ValueId;
+use crate::ssa::regalloc::Location;
+use crate::ssa::regalloc::moves;
 
 use super::intervals::{IntervalAnalysis, LiveInterval};
 
@@ -95,8 +97,11 @@ pub fn build(
         }
     }
 
+    let mut next_reg = 0usize;
+    let mut next_stack = 0u32;
+
     // Precolor entry parameters into their ABI registers when safe.
-    for (index, value) in analysis.param_values.iter().enumerate() {
+    for value in &analysis.param_values {
         if fixed_regs.contains_key(value) {
             continue;
         }
@@ -105,8 +110,17 @@ pub fn build(
             .get(value)
             .copied()
             .unwrap_or_else(|| panic!("ssa regalloc: missing param type for {:?}", value));
+        let pass = moves::arg_pass_info(types, ty);
+        let src_locs = moves::abi_arg_locations(
+            pass,
+            param_reg_count,
+            target,
+            &mut next_reg,
+            &mut next_stack,
+            moves::ArgStackKind::Incoming,
+        );
         if types.is_reg_type(ty) {
-            if let Some(reg) = target.param_reg(index as u32) {
+            if let Some(Location::Reg(reg)) = src_locs.first().copied() {
                 let interval = analysis
                     .intervals
                     .get(value)
@@ -122,18 +136,27 @@ pub fn build(
 
     // Map stack-passed incoming params to their SP-relative offsets.
     let mut incoming_args = HashMap::new();
-    for (index, value) in analysis.param_values.iter().enumerate() {
-        if index < param_reg_count {
-            continue;
-        }
+    let mut next_reg = 0usize;
+    let mut next_stack = 0u32;
+    for value in &analysis.param_values {
         let ty = analysis
             .value_types
             .get(value)
             .copied()
             .unwrap_or_else(|| panic!("ssa regalloc: missing param type for {:?}", value));
+        let pass = moves::arg_pass_info(types, ty);
+        let src_locs = moves::abi_arg_locations(
+            pass,
+            param_reg_count,
+            target,
+            &mut next_reg,
+            &mut next_stack,
+            moves::ArgStackKind::Incoming,
+        );
         if types.is_reg_type(ty) {
-            let offset = ((index - param_reg_count) as u32) * 8;
-            incoming_args.insert(*value, offset);
+            if let Some(Location::IncomingArg(offset)) = src_locs.first().copied() {
+                incoming_args.insert(*value, offset);
+            }
         }
     }
 
