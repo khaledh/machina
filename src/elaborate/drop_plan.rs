@@ -133,7 +133,8 @@ impl<'a> DropPlanBuilder<'a> {
             if param.mode != crate::tree::ParamMode::Sink {
                 continue;
             }
-            self.register_def_drop(param.def_id, DropGuard::Always);
+            // Sink params can be moved; guard drops on the liveness flag.
+            self.register_def_drop(param.def_id, DropGuard::IfInitialized);
         }
 
         self.visit_value_expr(&func_def.body);
@@ -147,14 +148,16 @@ impl<'a> DropPlanBuilder<'a> {
 
         let self_param = &method_def.sig.self_param;
         if self_param.mode == crate::tree::ParamMode::Sink {
-            self.register_def_drop(self_param.def_id, DropGuard::Always);
+            // Sink receiver can be moved; guard drops on the liveness flag.
+            self.register_def_drop(self_param.def_id, DropGuard::IfInitialized);
         }
 
         for param in &method_def.sig.params {
             if param.mode != crate::tree::ParamMode::Sink {
                 continue;
             }
-            self.register_def_drop(param.def_id, DropGuard::Always);
+            // Sink params can be moved; guard drops on the liveness flag.
+            self.register_def_drop(param.def_id, DropGuard::IfInitialized);
         }
 
         self.visit_value_expr(&method_def.body);
