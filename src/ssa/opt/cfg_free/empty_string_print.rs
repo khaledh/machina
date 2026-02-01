@@ -1,6 +1,6 @@
 //! Simplify runtime prints of empty strings.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ssa::model::ir::{
     Block, Callee, CastKind, ConstValue, Function, InstKind, RuntimeFn, ValueId,
@@ -66,6 +66,32 @@ impl Pass for EmptyStringPrint {
             }
         }
 
+        let empty_bases = collect_empty_bases(func);
+        if !empty_bases.is_empty() {
+            for block in func.blocks.iter_mut() {
+                let mut to_remove = Vec::new();
+                for (idx, inst) in block.insts.iter().enumerate() {
+                    let drop_base = match &inst.kind {
+                        InstKind::Call {
+                            callee: Callee::Runtime(RuntimeFn::StringDrop),
+                            args,
+                        } if args.len() == 1 => args[0],
+                        _ => continue,
+                    };
+                    if empty_bases.contains(&drop_base) {
+                        to_remove.push(idx);
+                    }
+                }
+
+                if !to_remove.is_empty() {
+                    for idx in to_remove.into_iter().rev() {
+                        block.insts.remove(idx);
+                    }
+                    changed = true;
+                }
+            }
+        }
+
         changed
     }
 }
@@ -87,6 +113,30 @@ fn inst_of<'a>(
 ) -> Option<&'a InstKind> {
     let idx = defs.get(&id)?;
     Some(&block.insts[*idx].kind)
+}
+
+fn build_defs_global(func: &Function) -> HashMap<ValueId, (usize, usize)> {
+    let mut defs = HashMap::new();
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            if let Some(result) = &inst.result {
+                defs.insert(result.id, (block_idx, inst_idx));
+            }
+        }
+    }
+    defs
+}
+
+fn inst_of_global<'a>(
+    func: &'a Function,
+    defs: &HashMap<ValueId, (usize, usize)>,
+    id: ValueId,
+) -> Option<&'a InstKind> {
+    let (block_idx, inst_idx) = defs.get(&id)?;
+    func.blocks
+        .get(*block_idx)
+        .and_then(|block| block.insts.get(*inst_idx))
+        .map(|inst| &inst.kind)
 }
 
 fn match_empty_print(
@@ -178,6 +228,113 @@ fn match_empty_print(
         })?;
 
     Some((null_ptr, zero_u64, drop_idx))
+}
+
+fn collect_empty_bases(func: &Function) -> HashSet<ValueId> {
+    #[derive(Default)]
+    struct EmptyInitState {
+        has_ptr: bool,
+        has_len: bool,
+        has_cap: bool,
+        invalid: bool,
+        copied_from: Vec<ValueId>,
+    }
+
+    let defs = build_defs_global(func);
+    let mut states: HashMap<ValueId, EmptyInitState> = HashMap::new();
+
+    for block in &func.blocks {
+        for inst in &block.insts {
+            let InstKind::Store { ptr, value } = inst.kind else {
+                continue;
+            };
+            if let Some((base, index)) = match_field_addr_global(func, &defs, ptr) {
+                let state = states.entry(base).or_default();
+                if state.invalid {
+                    continue;
+                }
+
+                match index {
+                    0 => {
+                        if is_null_ptr_cast_global(func, &defs, value).is_some() {
+                            state.has_ptr = true;
+                        } else {
+                            state.invalid = true;
+                        }
+                    }
+                    1 => {
+                        if is_const_zero_global(func, &defs, value) {
+                            state.has_len = true;
+                        } else {
+                            state.invalid = true;
+                        }
+                    }
+                    2 => {
+                        if is_const_zero_global(func, &defs, value) {
+                            state.has_cap = true;
+                        } else {
+                            state.invalid = true;
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            let Some(dest_base) = resolve_addr_base_global(func, &defs, ptr) else {
+                continue;
+            };
+            let state = states.entry(dest_base).or_default();
+            if state.invalid {
+                continue;
+            }
+
+            let Some(value_inst) = inst_of_global(func, &defs, value) else {
+                state.invalid = true;
+                continue;
+            };
+            let InstKind::Load { ptr: src_ptr } = value_inst else {
+                state.invalid = true;
+                continue;
+            };
+            if let Some(src_base) = resolve_addr_base_global(func, &defs, *src_ptr) {
+                state.copied_from.push(src_base);
+            } else {
+                state.invalid = true;
+            }
+        }
+    }
+
+    let mut empty_bases: HashSet<ValueId> = states
+        .iter()
+        .filter_map(|(base, state)| {
+            if !state.invalid && state.has_ptr && state.has_len && state.has_cap {
+                Some(*base)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (base, state) in &states {
+            if state.invalid || empty_bases.contains(base) {
+                continue;
+            }
+            if state
+                .copied_from
+                .iter()
+                .any(|src| empty_bases.contains(src))
+            {
+                empty_bases.insert(*base);
+                changed = true;
+            }
+        }
+    }
+
+    empty_bases
 }
 
 fn find_empty_base(
@@ -321,6 +478,19 @@ fn is_const_zero(block: &Block, defs: &HashMap<ValueId, usize>, value: ValueId) 
     )
 }
 
+fn is_const_zero_global(
+    func: &Function,
+    defs: &HashMap<ValueId, (usize, usize)>,
+    value: ValueId,
+) -> bool {
+    matches!(
+        inst_of_global(func, defs, value),
+        Some(InstKind::Const {
+            value: ConstValue::Int { value: 0, .. }
+        })
+    )
+}
+
 fn is_const_int(block: &Block, defs: &HashMap<ValueId, usize>, value: ValueId) -> bool {
     matches!(
         inst_of(block, defs, value),
@@ -357,12 +527,57 @@ fn is_null_ptr_cast(
     }
 }
 
+fn is_null_ptr_cast_global(
+    func: &Function,
+    defs: &HashMap<ValueId, (usize, usize)>,
+    ptr_id: ValueId,
+) -> Option<(ValueId, ValueId)> {
+    let Some(inst) = inst_of_global(func, defs, ptr_id) else {
+        return None;
+    };
+    match inst {
+        InstKind::Cast {
+            kind: CastKind::IntToPtr,
+            value,
+            ..
+        } if is_const_zero_global(func, defs, *value) => Some((ptr_id, *value)),
+        _ => None,
+    }
+}
+
 fn is_u64_zero(block: &Block, defs: &HashMap<ValueId, usize>, value: ValueId) -> bool {
     match inst_of(block, defs, value) {
         Some(InstKind::Const {
             value: ConstValue::Int { value: 0, bits, .. },
         }) => *bits == 64,
         _ => false,
+    }
+}
+
+fn resolve_addr_base_global(
+    func: &Function,
+    defs: &HashMap<ValueId, (usize, usize)>,
+    ptr: ValueId,
+) -> Option<ValueId> {
+    match inst_of_global(func, defs, ptr) {
+        Some(InstKind::AddrOfLocal { .. }) => Some(ptr),
+        Some(InstKind::Cast {
+            kind: CastKind::PtrToPtr,
+            value,
+            ..
+        }) => resolve_addr_base_global(func, defs, *value),
+        _ => None,
+    }
+}
+
+fn match_field_addr_global(
+    func: &Function,
+    defs: &HashMap<ValueId, (usize, usize)>,
+    ptr: ValueId,
+) -> Option<(ValueId, usize)> {
+    match inst_of_global(func, defs, ptr) {
+        Some(InstKind::FieldAddr { base, index }) => Some((*base, *index)),
+        _ => None,
     }
 }
 
