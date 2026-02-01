@@ -7,14 +7,10 @@ fn main() {
     let hex = 0x2a;
     let grouped = 1_000_000;
 
-    print("dec = ");
+    println(f"dec = {dec}");
     println(dec);
-    print("bin = ");
-    println(bin);
-    print("oct = ");
-    println(oct);
-    print("hex = ");
-    println(hex);
-    print("grouped = ");
-    println(grouped);
+    println(f"bin = {bin}");
+    println(f"oct = {oct}");
+    println(f"hex = {hex}");
+    println(f"grouped = {grouped}");
 }

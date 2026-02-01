@@ -1,4 +1,4 @@
-use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
 
 #[test]
 fn test_lower_const() {
@@ -16,7 +16,7 @@ fn test_lower_const() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -44,7 +44,7 @@ fn test_lower_range_type_value() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -72,7 +72,7 @@ fn test_lower_range_lit_value() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -100,7 +100,7 @@ fn test_lower_stmt() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -130,7 +130,7 @@ fn test_lower_var_decl() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -163,7 +163,7 @@ fn test_lower_binop() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -193,7 +193,7 @@ fn test_lower_param_binop() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(u64, u64) -> u64 {
@@ -221,7 +221,7 @@ fn test_lower_unop() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -250,7 +250,7 @@ fn test_lower_unop_not() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> bool {
@@ -279,7 +279,7 @@ fn test_lower_char_lit() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u32 {
@@ -307,7 +307,7 @@ fn test_lower_string_lit() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> string {
@@ -347,7 +347,7 @@ fn test_lower_string_fmt_view() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("__rt_fmt_init"));
     assert!(text.contains("__rt_fmt_append_u64"));
@@ -370,7 +370,7 @@ fn test_lower_string_fmt_owned() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("__rt_string_ensure"));
     assert!(text.contains("__rt_string_append_bytes"));
@@ -392,7 +392,7 @@ fn test_lower_heap_alloc() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("__rt_alloc"));
     assert!(text.contains("store"));
@@ -415,7 +415,7 @@ fn test_lower_drop_string_local() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("__rt_string_drop"));
 }
@@ -436,7 +436,7 @@ fn test_lower_cmp() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> bool {
@@ -466,7 +466,7 @@ fn test_lower_tuple_lit() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> (u64, bool) {
@@ -504,7 +504,7 @@ fn test_lower_tuple_bind() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -555,7 +555,7 @@ fn test_lower_struct_lit() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> Pair {
@@ -595,7 +595,7 @@ fn test_lower_struct_bind() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -645,7 +645,7 @@ fn test_lower_array_bind() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -701,7 +701,7 @@ fn test_lower_struct_update() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> Pair {
@@ -760,7 +760,7 @@ fn test_lower_struct_update_multi_field() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> Pair {
@@ -824,7 +824,7 @@ fn test_lower_aggregate_assign_memcpy() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("memcpy"));
 }
@@ -850,7 +850,7 @@ fn test_lower_aggregate_assign_needs_drop_no_memcpy() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(!text.contains("memcpy"));
 }
@@ -873,7 +873,7 @@ fn test_lower_enum_variant_no_payload() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> Flag {
@@ -910,7 +910,7 @@ fn test_lower_enum_variant_payload() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> Option {
@@ -956,7 +956,7 @@ fn test_lower_drop_enum_payload() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("switch"));
     assert!(text.contains("__rt_string_drop"));
@@ -978,7 +978,7 @@ fn test_lower_array_lit_elems() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64[3] {
@@ -1021,7 +1021,7 @@ fn test_lower_array_lit_repeat() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64[3] {
@@ -1064,7 +1064,7 @@ fn test_lower_slice_expr_array() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -1150,7 +1150,7 @@ fn test_lower_slice_expr_string() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<string>) -> u64 {

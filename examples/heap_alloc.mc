@@ -10,7 +10,7 @@ fn consume_point(p: ^Point) -> u64 {
     0
 }
 
-fn main() -> u64 {
+fn main() {
     let p = make_point(1, 2);
     let q = p;
     consume_point(q);
@@ -40,6 +40,4 @@ fn main() -> u64 {
         Msg::Ping(n) => println(f"Ping({n})"),
         Msg::Pong(n) => println(f"Pong({n})"),
     };
-
-    0
 }

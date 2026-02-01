@@ -1,4 +1,4 @@
-use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
 
 #[test]
 fn test_lower_struct_field_load() {
@@ -19,7 +19,7 @@ fn test_lower_struct_field_load() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<Pair>) -> u64 {
@@ -58,7 +58,7 @@ fn test_lower_struct_field_assign() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<Pair>) -> u64 {
@@ -104,7 +104,7 @@ fn test_lower_array_index_load() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<u64[3]>) -> u64 {
@@ -155,7 +155,7 @@ fn test_lower_array_index_assign() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<u64[3]>) -> u64 {
@@ -229,7 +229,7 @@ fn test_lower_array_index_multi_dim() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<u64[2, 2]>) -> u64 {
@@ -293,7 +293,7 @@ fn test_lower_array_index_partial() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<u64[2, 2]>) -> u64[2] {
@@ -342,7 +342,7 @@ fn test_lower_slice_index_load() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<struct { ptr: ptr<u64>, len: u64 }>) -> u64 {
@@ -394,7 +394,7 @@ fn test_lower_slice_index_assign() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<struct { ptr: ptr<u64>, len: u64 }>) -> u64 {
@@ -470,7 +470,7 @@ fn test_lower_string_index_load() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main(ptr<string>) -> u8 {

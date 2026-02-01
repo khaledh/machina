@@ -34,7 +34,7 @@ pub(super) fn assert_ir_eq(actual: impl AsRef<str>, expected: impl AsRef<str>) {
 
 pub(super) use crate::ssa::lower::lower_func;
 pub(super) use crate::ssa::lower::lower_module;
-pub(super) use crate::ssa::model::format::formact_func;
+pub(super) use crate::ssa::model::format::format_func;
 pub(super) use indoc::indoc;
 
 #[path = "t_branching.rs"]

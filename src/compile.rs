@@ -353,12 +353,11 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                     if idx > 0 {
                         out.push('\n');
                     }
-                    out.push_str(&ssa::model::format::formact_func_with_comments_and_names(
+                    out.push_str(&ssa::model::format::format_func_with_comments_and_names(
                         &func.func,
                         &func.types,
                         &analyzed_context.symbols.def_names,
                     ));
-                    out.push('\n');
                 }
                 Some(out)
             } else {

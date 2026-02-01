@@ -1,4 +1,4 @@
-use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
 use crate::tree::semantic::MethodItem;
 
 #[test]
@@ -24,7 +24,7 @@ fn test_lower_call_with_params() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"
@@ -65,7 +65,7 @@ fn test_lower_call_stmt() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"
@@ -121,7 +121,7 @@ fn test_lower_method_call_param() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"
@@ -171,7 +171,7 @@ fn test_lower_call_drops_in_arg() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("__rt_string_drop"));
 }
@@ -200,7 +200,7 @@ fn test_lower_call_array_to_slice_arg() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"
@@ -282,7 +282,7 @@ fn test_lower_indirect_call() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"
@@ -323,7 +323,7 @@ fn test_lower_out_param_def() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn set(ptr<Pair>) -> () {

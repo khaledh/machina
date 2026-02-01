@@ -49,7 +49,7 @@ fn test_dce_keeps_call() {
 
     let mut manager = crate::ssa::opt::dataflow::PassManager::new();
     manager.run(std::slice::from_mut(&mut lowered.func));
-    let text = crate::ssa::model::format::formact_func(&lowered.func, &lowered.types);
+    let text = crate::ssa::model::format::format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"

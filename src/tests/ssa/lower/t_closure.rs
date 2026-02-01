@@ -1,4 +1,4 @@
-use super::{analyze, assert_ir_eq, formact_func, indoc, lower_module};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
 
 #[test]
 fn test_lower_closure_ref_captureless() {
@@ -38,7 +38,7 @@ fn test_lower_closure_ref_captureless() {
 
     let mut func_texts = std::collections::HashMap::new();
     for lowered_func in &lowered.funcs {
-        let text = formact_func(&lowered_func.func, &lowered_func.types);
+        let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);
     }
 
@@ -116,7 +116,7 @@ fn test_lower_closure_invoke() {
 
     let mut func_texts = std::collections::HashMap::new();
     for lowered_func in &lowered.funcs {
-        let text = formact_func(&lowered_func.func, &lowered_func.types);
+        let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);
     }
 
@@ -225,7 +225,7 @@ fn test_lower_closure_borrow_capture() {
 
     let mut func_texts = std::collections::HashMap::new();
     for lowered_func in &lowered.funcs {
-        let text = formact_func(&lowered_func.func, &lowered_func.types);
+        let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);
     }
 

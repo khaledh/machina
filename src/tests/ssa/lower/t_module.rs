@@ -1,4 +1,4 @@
-use super::{analyze, assert_ir_eq, formact_func, indoc, lower_module};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
 use std::collections::HashMap;
 
 #[test]
@@ -25,8 +25,8 @@ fn test_lower_module_globals() {
     assert_eq!(lowered.funcs.len(), 2);
     assert_eq!(lowered.globals.len(), 2);
 
-    let a_text = formact_func(&lowered.funcs[0].func, &lowered.funcs[0].types);
-    let b_text = formact_func(&lowered.funcs[1].func, &lowered.funcs[1].types);
+    let a_text = format_func(&lowered.funcs[0].func, &lowered.funcs[0].types);
+    let b_text = format_func(&lowered.funcs[1].func, &lowered.funcs[1].types);
 
     assert!(a_text.contains("@g0"));
     assert!(b_text.contains("@g1"));
@@ -70,7 +70,7 @@ fn test_lower_module_method_defs() {
 
     let mut func_texts = HashMap::new();
     for lowered_func in &lowered.funcs {
-        let text = formact_func(&lowered_func.func, &lowered_func.types);
+        let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);
     }
 

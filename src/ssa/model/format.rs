@@ -6,19 +6,19 @@ use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-pub fn formact_func(func: &Function, types: &IrTypeCache) -> String {
+pub fn format_func(func: &Function, types: &IrTypeCache) -> String {
     let mut formatter = Formatter::new(types, false);
     formatter.write_function(func);
     formatter.finish()
 }
 
-pub fn formact_func_with_comments(func: &Function, types: &IrTypeCache) -> String {
+pub fn format_func_with_comments(func: &Function, types: &IrTypeCache) -> String {
     let mut formatter = Formatter::new(types, true);
     formatter.write_function(func);
     formatter.finish()
 }
 
-pub fn formact_func_with_names(
+pub fn format_func_with_names(
     func: &Function,
     types: &IrTypeCache,
     def_names: &HashMap<DefId, String>,
@@ -28,7 +28,7 @@ pub fn formact_func_with_names(
     formatter.finish()
 }
 
-pub fn formact_func_with_comments_and_names(
+pub fn format_func_with_comments_and_names(
     func: &Function,
     types: &IrTypeCache,
     def_names: &HashMap<DefId, String>,

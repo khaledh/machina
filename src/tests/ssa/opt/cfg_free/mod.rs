@@ -6,7 +6,7 @@ use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::ssa::lower::lower_func;
-use crate::ssa::model::format::formact_func;
+use crate::ssa::model::format::format_func;
 use crate::ssa::opt::cfg_free::PassManager;
 use crate::typeck::type_check;
 
@@ -43,7 +43,7 @@ fn lower_and_optimize(source: &str) -> String {
 
     let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut lowered.func));
-    formact_func(&lowered.func, &lowered.types)
+    format_func(&lowered.func, &lowered.types)
 }
 
 pub(super) fn assert_ir_eq(actual: impl AsRef<str>, expected: impl AsRef<str>) {

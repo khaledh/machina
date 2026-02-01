@@ -10,11 +10,10 @@ fn id(x: Small) -> u64 {
     y + 100
 }
 
-fn main() -> u64 {
+fn main() {
     let a: Small = 5;
     let b = 20;
 
     println(id(a));
     println(id(b));
-    0
 }

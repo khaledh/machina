@@ -1,6 +1,6 @@
 use crate::resolve::DefId;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::format::formact_func;
+use crate::ssa::model::format::format_func;
 use crate::ssa::model::ir::{FunctionSig, Terminator};
 use crate::ssa::opt::cfg_free::PassManager;
 use crate::ssa::{IrTypeCache, IrTypeKind};
@@ -38,7 +38,7 @@ fn test_index_addr_zero_fold() {
     let mut func = builder.finish();
     let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut func));
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
 
     assert!(!text.contains("index_addr"));
 }
@@ -109,7 +109,7 @@ fn test_index_addr_zero_param_fold() {
     let mut func = builder.finish();
     let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut func));
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
 
     assert!(!text.contains("index_addr"));
 }

@@ -1,6 +1,6 @@
 use crate::resolve::DefId;
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::format::formact_func;
+use crate::ssa::model::format::format_func;
 use crate::ssa::model::ir::{ConstValue, FunctionSig, SwitchCase, Terminator};
 use crate::ssa::{IrTypeCache, IrTypeKind};
 use indoc::indoc;
@@ -41,7 +41,7 @@ fn test_cleanup_removes_unreachable_block() {
     let mut func = builder.finish();
     super::run_cleanup(&mut func);
 
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
@@ -92,7 +92,7 @@ fn test_cleanup_prunes_empty_block() {
     let mut func = builder.finish();
     super::run_cleanup(&mut func);
 
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
@@ -134,7 +134,7 @@ fn test_cleanup_merges_single_pred_block() {
     let mut func = builder.finish();
     super::run_cleanup(&mut func);
 
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
@@ -188,7 +188,7 @@ fn test_cleanup_collapses_switch_targets() {
     let mut func = builder.finish();
     super::run_cleanup(&mut func);
 
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
@@ -235,7 +235,7 @@ fn test_cleanup_prunes_unused_block_param() {
     let mut func = builder.finish();
     super::run_cleanup(&mut func);
 
-    let text = formact_func(&func, &types);
+    let text = format_func(&func, &types);
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():

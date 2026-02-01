@@ -1,4 +1,4 @@
-use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
 
 #[test]
 fn test_lower_match_enum_no_payload() {
@@ -21,7 +21,7 @@ fn test_lower_match_enum_no_payload() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -88,7 +88,7 @@ fn test_lower_match_enum_payload_binding() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
@@ -165,7 +165,7 @@ fn test_lower_match_tuple_decision_tree() {
         &ctx.drop_plans,
     )
     .expect("failed to lower");
-    let text = formact_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
         fn main() -> u64 {
