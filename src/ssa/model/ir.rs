@@ -206,6 +206,7 @@ pub enum Callee {
 pub struct Instruction {
     pub result: Option<ValueDef>,
     pub kind: InstKind,
+    pub comments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

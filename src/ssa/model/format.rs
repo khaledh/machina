@@ -5,20 +5,28 @@ use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
 use std::fmt::Write as _;
 
 pub fn formact_func(func: &Function, types: &IrTypeCache) -> String {
-    let mut formatter = Formatter::new(types);
+    let mut formatter = Formatter::new(types, false);
+    formatter.write_function(func);
+    formatter.finish()
+}
+
+pub fn formact_func_with_comments(func: &Function, types: &IrTypeCache) -> String {
+    let mut formatter = Formatter::new(types, true);
     formatter.write_function(func);
     formatter.finish()
 }
 
 struct Formatter<'a> {
     types: &'a IrTypeCache,
+    show_comments: bool,
     out: String,
 }
 
 impl<'a> Formatter<'a> {
-    fn new(types: &'a IrTypeCache) -> Self {
+    fn new(types: &'a IrTypeCache, show_comments: bool) -> Self {
         Self {
             types,
+            show_comments,
             out: String::new(),
         }
     }
@@ -79,6 +87,11 @@ impl<'a> Formatter<'a> {
     }
 
     fn write_instruction(&mut self, inst: &Instruction) {
+        if self.show_comments && !inst.comments.is_empty() {
+            for comment in &inst.comments {
+                let _ = writeln!(&mut self.out, "    // {}", comment);
+            }
+        }
         let _ = write!(&mut self.out, "    ");
         if let Some(result) = &inst.result {
             let _ = write!(&mut self.out, "%v{}: ", result.id.0);

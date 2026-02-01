@@ -14,6 +14,7 @@ use crate::ssa::model::ir::{BlockId, Function, FunctionSig, GlobalId, ValueId};
 use crate::ssa::{IrTypeCache, IrTypeId};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
+use crate::tree::format_compact::format_semantic_stmt_compact;
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
 use crate::types::Type;
@@ -411,6 +412,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     pub(super) fn finish(self) -> (Function, IrTypeCache) {
         (self.builder.finish(), self.type_lowerer.ir_type_cache)
+    }
+
+    pub(super) fn annotate_stmt(&mut self, stmt: &sem::StmtExpr) {
+        self.builder
+            .annotate_next_inst(format_semantic_stmt_compact(stmt));
     }
 
     pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ParamMode> {

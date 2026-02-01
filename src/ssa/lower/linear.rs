@@ -647,6 +647,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         stmt: &sem::StmtExpr,
     ) -> Result<StmtOutcome, LoweringError> {
+        self.annotate_stmt(stmt);
         match &stmt.kind {
             sem::StmtExprKind::LetBind { pattern, value, .. }
             | sem::StmtExprKind::VarBind { pattern, value, .. } => {

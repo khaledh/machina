@@ -188,11 +188,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<Option<BranchResult>, LoweringError> {
         match &stmt.kind {
             sem::StmtExprKind::While { cond, body } => {
+                self.annotate_stmt(stmt);
                 self.lower_while_stmt(cond, body)?;
                 Ok(None)
             }
-            sem::StmtExprKind::Break => Ok(Some(self.lower_break_stmt(stmt)?)),
-            sem::StmtExprKind::Continue => Ok(Some(self.lower_continue_stmt(stmt)?)),
+            sem::StmtExprKind::Break => {
+                self.annotate_stmt(stmt);
+                Ok(Some(self.lower_break_stmt(stmt)?))
+            }
+            sem::StmtExprKind::Continue => {
+                self.annotate_stmt(stmt);
+                Ok(Some(self.lower_continue_stmt(stmt)?))
+            }
             _ => match self.lower_stmt_expr_linear(stmt)? {
                 StmtOutcome::Continue => Ok(None),
                 StmtOutcome::Return => Ok(Some(BranchResult::Return)),

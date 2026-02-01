@@ -350,7 +350,10 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                     if idx > 0 {
                         out.push('\n');
                     }
-                    out.push_str(&ssa::model::format::formact_func(&func.func, &func.types));
+                    out.push_str(&ssa::model::format::formact_func_with_comments(
+                        &func.func,
+                        &func.types,
+                    ));
                     out.push('\n');
                 }
                 Some(out)

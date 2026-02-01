@@ -18,6 +18,7 @@ pub struct FunctionBuilder {
     next_block: u32,
     next_local: u32,
     cursor: BlockId,
+    pending_comments: Vec<String>,
 }
 
 impl FunctionBuilder {
@@ -43,6 +44,7 @@ impl FunctionBuilder {
             next_block: 1, // Entry block is 0
             next_local: 0,
             cursor: BlockId(0),
+            pending_comments: Vec::new(),
         }
     }
 
@@ -53,6 +55,15 @@ impl FunctionBuilder {
     /// Returns a mutable reference to the current block.
     fn current_block_mut(&mut self) -> &mut Block {
         self.block_mut(self.cursor)
+    }
+
+    fn push_inst(&mut self, result: Option<ValueDef>, kind: InstKind) {
+        let comments = self.take_pending_comments();
+        self.current_block_mut().insts.push(Instruction {
+            result,
+            kind,
+            comments,
+        });
     }
 
     /// Returns a mutable reference to a block by ID.
@@ -67,6 +78,11 @@ impl FunctionBuilder {
     /// Sets the current block cursor for instruction emission.
     pub fn select_block(&mut self, block: BlockId) {
         self.cursor = block;
+    }
+
+    /// Annotates the next instruction emitted in the current block.
+    pub fn annotate_next_inst(&mut self, text: impl Into<String>) {
+        self.pending_comments.push(text.into());
     }
 
     /// Appends a new basic block and returns its ID.
@@ -103,207 +119,192 @@ impl FunctionBuilder {
     /// Emits an integer constant instruction at the cursor.
     pub fn const_int(&mut self, value: i128, signed: bool, bits: u8, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Const {
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Const {
                 value: ConstValue::Int {
                     value,
                     signed,
                     bits,
                 },
             },
-        });
+        );
         result
     }
 
     /// Emits a unit constant instruction at the cursor.
     pub fn const_unit(&mut self, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Const {
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Const {
                 value: ConstValue::Unit,
             },
-        });
+        );
         result
     }
 
     /// Emits a boolean constant instruction at the cursor.
     pub fn const_bool(&mut self, value: bool, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Const {
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Const {
                 value: ConstValue::Bool(value),
             },
-        });
+        );
         result
     }
 
     /// Emits a global address constant instruction at the cursor.
     pub fn const_global_addr(&mut self, id: GlobalId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Const {
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Const {
                 value: ConstValue::GlobalAddr { id },
             },
-        });
+        );
         result
     }
 
     /// Emits a function address constant instruction at the cursor.
     pub fn const_func_addr(&mut self, def: DefId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Const {
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Const {
                 value: ConstValue::FuncAddr { def },
             },
-        });
+        );
         result
     }
 
     /// Emits a binary operation instruction at the cursor.
     pub fn binop(&mut self, op: BinOp, lhs: ValueId, rhs: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::BinOp { op, lhs, rhs },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::BinOp { op, lhs, rhs },
+        );
         result
     }
 
     /// Emits a comparison instruction at the cursor.
     pub fn cmp(&mut self, op: CmpOp, lhs: ValueId, rhs: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Cmp { op, lhs, rhs },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Cmp { op, lhs, rhs },
+        );
         result
     }
 
     /// Emits an integer truncation instruction at the cursor.
     pub fn int_trunc(&mut self, value: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::IntTrunc { value, ty },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::IntTrunc { value, ty },
+        );
         result
     }
 
     /// Emits an integer extension instruction at the cursor.
     pub fn int_extend(&mut self, value: ValueId, ty: IrTypeId, signed: bool) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::IntExtend { value, ty, signed },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::IntExtend { value, ty, signed },
+        );
         result
     }
 
     /// Emits a pointer/integer cast instruction at the cursor.
     pub fn cast(&mut self, kind: CastKind, value: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Cast { kind, value, ty },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Cast { kind, value, ty },
+        );
         result
     }
 
     /// Emits a unary operation instruction at the cursor.
     pub fn unop(&mut self, op: UnOp, value: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::UnOp { op, value },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::UnOp { op, value },
+        );
         result
     }
 
     /// Emits a call instruction at the cursor.
     pub fn call(&mut self, callee: Callee, args: Vec<ValueId>, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Call { callee, args },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::Call { callee, args },
+        );
         result
     }
 
     /// Emits an addr-of-local instruction at the cursor.
     pub fn addr_of_local(&mut self, local: LocalId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::AddrOfLocal { local },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::AddrOfLocal { local },
+        );
         result
     }
 
     /// Emits a field-address (GEP) instruction at the cursor.
     pub fn field_addr(&mut self, base: ValueId, index: usize, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::FieldAddr { base, index },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::FieldAddr { base, index },
+        );
         result
     }
 
     /// Emits an index-address (GEP) instruction at the cursor.
     pub fn index_addr(&mut self, base: ValueId, index: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::IndexAddr { base, index },
-        });
+        self.push_inst(
+            Some(ValueDef { id: result, ty }),
+            InstKind::IndexAddr { base, index },
+        );
         result
     }
 
     /// Emits a drop instruction at the cursor.
     pub fn drop_ptr(&mut self, ptr: ValueId) {
-        self.current_block_mut().insts.push(Instruction {
-            result: None,
-            kind: InstKind::Drop { ptr },
-        });
+        self.push_inst(None, InstKind::Drop { ptr });
     }
 
     /// Emits a load instruction at the cursor.
     pub fn load(&mut self, ptr: ValueId, ty: IrTypeId) -> ValueId {
         let result = self.alloc_value(ty);
-        self.current_block_mut().insts.push(Instruction {
-            result: Some(ValueDef { id: result, ty }),
-            kind: InstKind::Load { ptr },
-        });
+        self.push_inst(Some(ValueDef { id: result, ty }), InstKind::Load { ptr });
         result
     }
 
     /// Emits a store instruction at the cursor.
     pub fn store(&mut self, ptr: ValueId, value: ValueId) {
-        self.current_block_mut().insts.push(Instruction {
-            result: None,
-            kind: InstKind::Store { ptr, value },
-        });
+        self.push_inst(None, InstKind::Store { ptr, value });
     }
 
     /// Emits a memory copy instruction at the cursor.
     pub fn memcopy(&mut self, dst: ValueId, src: ValueId, len: ValueId) {
-        self.current_block_mut().insts.push(Instruction {
-            result: None,
-            kind: InstKind::MemCopy { dst, src, len },
-        });
+        self.push_inst(None, InstKind::MemCopy { dst, src, len });
     }
 
     /// Emits a memory set instruction at the cursor.
     pub fn memset(&mut self, dst: ValueId, byte: ValueId, len: ValueId) {
-        self.current_block_mut().insts.push(Instruction {
-            result: None,
-            kind: InstKind::MemSet { dst, byte, len },
-        });
+        self.push_inst(None, InstKind::MemSet { dst, byte, len });
     }
 
     /// Sets the terminator for the current block.
@@ -319,6 +320,10 @@ impl FunctionBuilder {
     /// Finalizes the builder and returns the constructed function.
     pub fn finish(self) -> Function {
         self.func
+    }
+
+    fn take_pending_comments(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_comments)
     }
 
     /// Allocates a fresh SSA value ID.
