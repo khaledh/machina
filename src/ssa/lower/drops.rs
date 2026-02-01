@@ -136,6 +136,24 @@ impl<'a> DropTracker<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DropKind<'a> {
+    Trivial,
+    Shallow(&'a str),
+    Deep,
+}
+
+fn drop_kind(ty: &Type) -> DropKind<'_> {
+    if let Some(name) = shallow_named(ty) {
+        return DropKind::Shallow(name);
+    }
+    if ty.needs_drop() {
+        DropKind::Deep
+    } else {
+        DropKind::Trivial
+    }
+}
+
 /// RAII guard that exits a drop scope when it falls out of scope.
 #[must_use = "drop scope guard must be kept alive for the duration of the scope"]
 pub(super) struct DropScopeGuard<'a, 'g> {
@@ -411,187 +429,211 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         match ty {
-            Type::String => {
-                let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
-                let _ =
-                    self.builder
-                        .call(Callee::Runtime(RuntimeFn::StringDrop), vec![addr], unit_ty);
-                Ok(())
-            }
-            Type::Heap { elem_ty } => {
-                let ptr_ty = self.type_lowerer.lower_type(ty);
-                let ptr_val = self.builder.load(addr, ptr_ty);
+            Type::String => self.drop_string(addr),
+            Type::Heap { elem_ty } => self.drop_heap(addr, elem_ty),
+            Type::Struct { fields, .. } => self.drop_struct(addr, fields),
+            Type::Tuple { field_tys } => self.drop_tuple(addr, field_tys),
+            Type::Array { dims, .. } => self.drop_array(addr, ty, dims),
+            Type::Enum { variants, .. } => self.drop_enum(addr, ty, variants),
+            other => panic!("ssa drop not implemented for {:?}", other),
+        }
+    }
 
-                match drop_kind(elem_ty) {
-                    DropKind::Trivial => {}
-                    DropKind::Shallow(name) => {
-                        let def_id = self.drop_glue.def_id_for(name, elem_ty);
-                        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
-                        let _ = self
-                            .builder
-                            .call(Callee::Direct(def_id), vec![ptr_val], unit_ty);
-                    }
-                    DropKind::Deep => {
-                        self.drop_value_at_addr(ptr_val, elem_ty)?;
-                    }
-                }
+    fn drop_string(&mut self, addr: ValueId) -> Result<(), LoweringError> {
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ =
+            self.builder
+                .call(Callee::Runtime(RuntimeFn::StringDrop), vec![addr], unit_ty);
+        Ok(())
+    }
 
+    fn drop_heap(&mut self, addr: ValueId, elem_ty: &Type) -> Result<(), LoweringError> {
+        let ptr_ty = self.type_lowerer.lower_type(&Type::Heap {
+            elem_ty: Box::new(elem_ty.clone()),
+        });
+        let ptr_val = self.builder.load(addr, ptr_ty);
+
+        match drop_kind(elem_ty) {
+            DropKind::Trivial => {}
+            DropKind::Shallow(name) => {
+                let def_id = self.drop_glue.def_id_for(name, elem_ty);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ = self
                     .builder
-                    .call(Callee::Runtime(RuntimeFn::Free), vec![ptr_val], unit_ty);
-                Ok(())
+                    .call(Callee::Direct(def_id), vec![ptr_val], unit_ty);
             }
-            Type::Struct { fields, .. } => {
-                for (index, field) in fields.iter().enumerate().rev() {
-                    if matches!(drop_kind(&field.ty), DropKind::Trivial) {
-                        continue;
-                    }
-                    let field_ty = self.type_lowerer.lower_type(&field.ty);
-                    let field_addr = self.field_addr_typed(addr, index, field_ty);
-                    self.drop_value_at_addr(field_addr, &field.ty)?;
-                }
-                Ok(())
+            DropKind::Deep => {
+                self.drop_value_at_addr(ptr_val, elem_ty)?;
             }
-            Type::Tuple { field_tys } => {
-                for (index, field_ty) in field_tys.iter().enumerate().rev() {
-                    if matches!(drop_kind(field_ty), DropKind::Trivial) {
-                        continue;
-                    }
-                    let field_ir_ty = self.type_lowerer.lower_type(field_ty);
-                    let field_addr = self.field_addr_typed(addr, index, field_ir_ty);
-                    self.drop_value_at_addr(field_addr, field_ty)?;
-                }
-                Ok(())
-            }
-            Type::Array { dims, .. } => {
-                let Some(elem_ty) = ty.array_item_type() else {
-                    panic!("ssa drop array missing element type");
-                };
-                if matches!(drop_kind(&elem_ty), DropKind::Trivial) {
-                    return Ok(());
-                }
-
-                let len = *dims
-                    .first()
-                    .unwrap_or_else(|| panic!("ssa drop array missing dims"));
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                let idx_ty = self.type_lowerer.lower_type(&Type::uint(64));
-
-                for i in (0..len).rev() {
-                    let idx_val = self.builder.const_int(i as i128, false, 64, idx_ty);
-                    let elem_addr = self.builder.index_addr(addr, idx_val, elem_ptr_ty);
-                    self.drop_value_at_addr(elem_addr, &elem_ty)?;
-                }
-                Ok(())
-            }
-            Type::Enum { variants, .. } => {
-                let ty_id = self.type_id_for_enum(ty);
-                // Copy layout data out of the type lowerer to avoid holding a mutable borrow
-                // while emitting IR instructions that need &mut self.
-                let (tag_ty, blob_ty, layout_variants) = {
-                    let layout = self.type_lowerer.enum_layout(ty_id);
-                    let variants = layout
-                        .variants
-                        .iter()
-                        .map(|variant| {
-                            (
-                                variant.tag,
-                                variant.field_offsets.clone(),
-                                variant.name.clone(),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    (layout.tag_ty, layout.blob_ty, variants)
-                };
-
-                let mut needs_drop = false;
-                for variant in variants {
-                    if variant
-                        .payload
-                        .iter()
-                        .any(|ty| !matches!(drop_kind(ty), DropKind::Trivial))
-                    {
-                        needs_drop = true;
-                        break;
-                    }
-                }
-                if !needs_drop {
-                    return Ok(());
-                }
-
-                let switch_bb = self.builder.current_block();
-                let tag_addr = self.field_addr_typed(addr, 0, tag_ty);
-                let tag_val = self.builder.load(tag_addr, tag_ty);
-                let ret_bb = self.builder.add_block();
-                let mut cases = Vec::new();
-
-                // Emit a tag-based switch that drops the active variant's payload.
-                for (variant, (tag, field_offsets, name)) in
-                    variants.iter().zip(layout_variants.iter())
-                {
-                    if !variant
-                        .payload
-                        .iter()
-                        .any(|ty| !matches!(drop_kind(ty), DropKind::Trivial))
-                    {
-                        continue;
-                    }
-
-                    if variant.payload.len() != field_offsets.len() {
-                        panic!(
-                            "ssa enum drop payload mismatch for {}: {} offsets, {} tys",
-                            name,
-                            field_offsets.len(),
-                            variant.payload.len()
-                        );
-                    }
-
-                    let case_bb = self.builder.add_block();
-                    cases.push(SwitchCase {
-                        value: ConstValue::Int {
-                            value: *tag as i128,
-                            signed: false,
-                            bits: 32,
-                        },
-                        target: case_bb,
-                        args: Vec::new(),
-                    });
-
-                    self.builder.select_block(case_bb);
-
-                    let payload_ptr = self.field_addr_typed(addr, 1, blob_ty);
-                    // Drop payload fields in reverse order, using blob offsets.
-                    for (payload_ty, offset) in
-                        variant.payload.iter().zip(field_offsets.iter()).rev()
-                    {
-                        if matches!(drop_kind(payload_ty), DropKind::Trivial) {
-                            continue;
-                        }
-                        let field_addr = self.byte_offset_addr(payload_ptr, *offset);
-                        self.drop_value_at_addr(field_addr, payload_ty)?;
-                    }
-
-                    self.builder.terminate(Terminator::Br {
-                        target: ret_bb,
-                        args: Vec::new(),
-                    });
-                }
-
-                self.builder.select_block(switch_bb);
-                self.builder.terminate(Terminator::Switch {
-                    value: tag_val,
-                    cases,
-                    default: ret_bb,
-                    default_args: Vec::new(),
-                });
-
-                self.builder.select_block(ret_bb);
-                Ok(())
-            }
-            other => panic!("ssa drop not implemented for {:?}", other),
         }
+
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::Free), vec![ptr_val], unit_ty);
+        Ok(())
+    }
+
+    fn drop_struct(
+        &mut self,
+        addr: ValueId,
+        fields: &[crate::types::StructField],
+    ) -> Result<(), LoweringError> {
+        for (index, field) in fields.iter().enumerate().rev() {
+            if matches!(drop_kind(&field.ty), DropKind::Trivial) {
+                continue;
+            }
+            let field_ty = self.type_lowerer.lower_type(&field.ty);
+            let field_addr = self.field_addr_typed(addr, index, field_ty);
+            self.drop_value_at_addr(field_addr, &field.ty)?;
+        }
+        Ok(())
+    }
+
+    fn drop_tuple(&mut self, addr: ValueId, field_tys: &[Type]) -> Result<(), LoweringError> {
+        for (index, field_ty) in field_tys.iter().enumerate().rev() {
+            if matches!(drop_kind(field_ty), DropKind::Trivial) {
+                continue;
+            }
+            let field_ir_ty = self.type_lowerer.lower_type(field_ty);
+            let field_addr = self.field_addr_typed(addr, index, field_ir_ty);
+            self.drop_value_at_addr(field_addr, field_ty)?;
+        }
+        Ok(())
+    }
+
+    fn drop_array(
+        &mut self,
+        addr: ValueId,
+        ty: &Type,
+        dims: &[usize],
+    ) -> Result<(), LoweringError> {
+        let Some(elem_ty) = ty.array_item_type() else {
+            panic!("ssa drop array missing element type");
+        };
+        if matches!(drop_kind(&elem_ty), DropKind::Trivial) {
+            return Ok(());
+        }
+
+        let len = *dims
+            .first()
+            .unwrap_or_else(|| panic!("ssa drop array missing dims"));
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let idx_ty = self.type_lowerer.lower_type(&Type::uint(64));
+
+        for i in (0..len).rev() {
+            let idx_val = self.builder.const_int(i as i128, false, 64, idx_ty);
+            let elem_addr = self.builder.index_addr(addr, idx_val, elem_ptr_ty);
+            self.drop_value_at_addr(elem_addr, &elem_ty)?;
+        }
+        Ok(())
+    }
+
+    fn drop_enum(
+        &mut self,
+        addr: ValueId,
+        ty: &Type,
+        variants: &[crate::types::EnumVariant],
+    ) -> Result<(), LoweringError> {
+        let ty_id = self.type_id_for_enum(ty);
+        // Copy layout data out of the type lowerer to avoid holding a mutable borrow
+        // while emitting IR instructions that need &mut self.
+        let (tag_ty, blob_ty, layout_variants) = {
+            let layout = self.type_lowerer.enum_layout(ty_id);
+            let variants = layout
+                .variants
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.tag,
+                        variant.field_offsets.clone(),
+                        variant.name.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            (layout.tag_ty, layout.blob_ty, variants)
+        };
+
+        let mut needs_drop = false;
+        for variant in variants {
+            if variant
+                .payload
+                .iter()
+                .any(|ty| !matches!(drop_kind(ty), DropKind::Trivial))
+            {
+                needs_drop = true;
+                break;
+            }
+        }
+        if !needs_drop {
+            return Ok(());
+        }
+
+        let switch_bb = self.builder.current_block();
+        let tag_addr = self.field_addr_typed(addr, 0, tag_ty);
+        let tag_val = self.builder.load(tag_addr, tag_ty);
+        let ret_bb = self.builder.add_block();
+        let mut cases = Vec::new();
+
+        // Emit a tag-based switch that drops the active variant's payload.
+        for (variant, (tag, field_offsets, name)) in variants.iter().zip(layout_variants.iter()) {
+            if !variant
+                .payload
+                .iter()
+                .any(|ty| !matches!(drop_kind(ty), DropKind::Trivial))
+            {
+                continue;
+            }
+
+            if variant.payload.len() != field_offsets.len() {
+                panic!(
+                    "ssa enum drop payload mismatch for {}: {} offsets, {} tys",
+                    name,
+                    field_offsets.len(),
+                    variant.payload.len()
+                );
+            }
+
+            let case_bb = self.builder.add_block();
+            cases.push(SwitchCase {
+                value: ConstValue::Int {
+                    value: *tag as i128,
+                    signed: false,
+                    bits: 32,
+                },
+                target: case_bb,
+                args: Vec::new(),
+            });
+
+            self.builder.select_block(case_bb);
+
+            let payload_ptr = self.field_addr_typed(addr, 1, blob_ty);
+            // Drop payload fields in reverse order, using blob offsets.
+            for (payload_ty, offset) in variant.payload.iter().zip(field_offsets.iter()).rev() {
+                if matches!(drop_kind(payload_ty), DropKind::Trivial) {
+                    continue;
+                }
+                let field_addr = self.byte_offset_addr(payload_ptr, *offset);
+                self.drop_value_at_addr(field_addr, payload_ty)?;
+            }
+
+            self.builder.terminate(Terminator::Br {
+                target: ret_bb,
+                args: Vec::new(),
+            });
+        }
+
+        self.builder.select_block(switch_bb);
+        self.builder.terminate(Terminator::Switch {
+            value: tag_val,
+            cases,
+            default: ret_bb,
+            default_args: Vec::new(),
+        });
+
+        self.builder.select_block(ret_bb);
+        Ok(())
     }
 
     fn type_id_for_enum(&self, ty: &Type) -> TypeId {
@@ -621,23 +663,5 @@ fn shallow_named(ty: &Type) -> Option<&str> {
         Type::Struct { name, fields } if fields.is_empty() => Some(name.as_str()),
         Type::Enum { name, variants } if variants.is_empty() => Some(name.as_str()),
         _ => None,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DropKind<'a> {
-    Trivial,
-    Shallow(&'a str),
-    Deep,
-}
-
-fn drop_kind(ty: &Type) -> DropKind<'_> {
-    if let Some(name) = shallow_named(ty) {
-        return DropKind::Shallow(name);
-    }
-    if ty.needs_drop() {
-        DropKind::Deep
-    } else {
-        DropKind::Trivial
     }
 }
