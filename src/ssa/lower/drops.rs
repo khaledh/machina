@@ -9,7 +9,6 @@ use crate::tree::semantic as sem;
 use crate::types::Type;
 use crate::types::TypeId;
 use std::collections::HashMap;
-use std::ptr::NonNull;
 
 /// Tracks drop-scope state and per-def liveness flags during lowering.
 ///
@@ -154,38 +153,16 @@ fn drop_kind(ty: &Type) -> DropKind<'_> {
     }
 }
 
-/// RAII guard that exits a drop scope when it falls out of scope.
-#[must_use = "drop scope guard must be kept alive for the duration of the scope"]
-pub(super) struct DropScopeGuard<'a, 'g> {
-    lowerer: NonNull<FuncLowerer<'a, 'g>>,
-    id: NodeId,
-}
-
-impl<'a, 'g> Drop for DropScopeGuard<'a, 'g> {
-    fn drop(&mut self) {
-        // SAFETY: the guard is created from a live FuncLowerer and dropped before it is moved.
-        unsafe {
-            self.lowerer.as_mut().exit_drop_scope_if_active(self.id);
-        }
-    }
-}
-
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn with_drop_scope<R>(
         &mut self,
         id: NodeId,
         f: impl FnOnce(&mut Self) -> Result<R, LoweringError>,
     ) -> Result<R, LoweringError> {
-        let _guard = self.drop_scope(id);
-        f(self)
-    }
-
-    pub(super) fn drop_scope(&mut self, id: NodeId) -> DropScopeGuard<'a, 'g> {
         self.enter_drop_scope(id);
-        DropScopeGuard {
-            lowerer: NonNull::from(self),
-            id,
-        }
+        let result = f(self);
+        self.exit_drop_scope_if_active(id);
+        result
     }
 
     pub(super) fn set_drop_plans(&mut self, drop_plans: &'a sem::DropPlanMap) {
