@@ -1,4 +1,30 @@
 //! Move planning for SSA register allocation.
+//!
+//! This module collects the concrete moves required by control-flow edges
+//! (block parameters) and by the call ABI, then orders them so parallel
+//! moves don't clobber values that are still needed.
+//!
+//! # Overview
+//!
+//! SSA form uses block parameters to pass values between basic blocks. When
+//! lowering to machine code, these become parallel moves that must be
+//! sequenced carefully to avoid overwriting sources before they're read.
+//!
+//! Similarly, function calls require moving arguments into ABI-specified
+//! locations (registers or stack slots) before the call, and moving the
+//! result out of the return register afterward.
+//!
+//! # Parallel Move Resolution
+//!
+//! Given a set of parallel moves like `{r1 <- r2, r2 <- r1}`, we must break
+//! cycles using a scratch register. The algorithm:
+//!
+//! 1. Emit moves whose destinations are not used as sources by other moves
+//! 2. When all remaining moves form cycles, break one cycle by saving a
+//!    source to the scratch register, then continue
+//!
+//! Some move pairs (e.g., stack-to-stack) implicitly use the scratch register
+//! as an intermediary, which must be accounted for in the ordering.
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,15 +35,23 @@ use crate::ssa::model::ir::{BlockId, Callee, Function, InstKind, Terminator, Val
 
 use super::{Location, ValueAllocMap};
 
-/// A single move between two allocated locations.
+// ============================================================================
+// Data Structures
+// ============================================================================
+
+/// A single move operation between two allocated locations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoveOp {
     pub src: Location,
     pub dst: Location,
+    /// Size in bytes of the value being moved.
     pub size: u32,
 }
 
-/// Moves needed on a control-flow edge from `from` to `to`.
+/// Moves required on a control-flow edge between two blocks.
+///
+/// These moves transfer arguments passed at a branch/jump to the
+/// corresponding block parameters of the target block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeMove {
     pub from: BlockId,
@@ -25,7 +59,10 @@ pub struct EdgeMove {
     pub moves: Vec<MoveOp>,
 }
 
-/// Moves needed around a call instruction.
+/// Moves required around a call instruction.
+///
+/// - `pre_moves`: Move arguments into ABI locations before the call
+/// - `post_moves`: Move the return value from the ABI register afterward
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallMove {
     pub block: BlockId,
@@ -34,7 +71,10 @@ pub struct CallMove {
     pub post_moves: Vec<MoveOp>,
 }
 
-/// Collection of planned moves for one function.
+/// Complete move plan for a function.
+///
+/// Contains all edge moves (for block parameters) and call moves
+/// (for ABI compliance) that the code generator must emit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MovePlan {
     pub edge_moves: Vec<EdgeMove>,
@@ -42,7 +82,11 @@ pub struct MovePlan {
 }
 
 impl MovePlan {
-    /// Orders parallel move lists and breaks register cycles using a scratch register.
+    /// Resolves all parallel move lists, ordering them to avoid clobbers.
+    ///
+    /// Uses the first scratch register to break any register cycles that
+    /// would otherwise cause a move to overwrite a value still needed as
+    /// a source.
     pub fn resolve_parallel_moves(&mut self, scratch_regs: &[crate::regalloc::target::PhysReg]) {
         if scratch_regs.is_empty() {
             return;
@@ -60,7 +104,18 @@ impl MovePlan {
     }
 }
 
-/// Build move plans for block arguments and call ABI requirements.
+// ============================================================================
+// Move Plan Construction
+// ============================================================================
+
+/// Builds a complete move plan for a function.
+///
+/// Scans the function for:
+/// - Block edges with arguments (branches, conditional branches, switches)
+/// - Call instructions requiring ABI-compliant argument/result moves
+///
+/// Returns a `MovePlan` containing all required moves, which can then be
+/// resolved with `resolve_parallel_moves` before code generation.
 pub fn build_move_plan(
     func: &Function,
     alloc_map: &ValueAllocMap,
@@ -71,6 +126,7 @@ pub fn build_move_plan(
     let param_reg_count = param_reg_count(target);
     let value_types = build_value_types(func);
 
+    // Build a map of block ID -> parameter value IDs for edge move generation
     let mut block_params: HashMap<BlockId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
         let params = block.params.iter().map(|param| param.value.id).collect();
@@ -78,6 +134,7 @@ pub fn build_move_plan(
     }
 
     for block in &func.blocks {
+        // Collect call moves for each call instruction
         for (inst_index, inst) in block.insts.iter().enumerate() {
             if let InstKind::Call { callee, args } = &inst.kind {
                 if let Some(call_move) = plan_call_moves(
@@ -97,6 +154,7 @@ pub fn build_move_plan(
             }
         }
 
+        // Collect edge moves for each control-flow edge with arguments
         match &block.term {
             Terminator::Br { target, args } => {
                 let moves = edge_moves_for(
@@ -206,6 +264,11 @@ pub fn build_move_plan(
     plan
 }
 
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Builds a map from value IDs to their types for the entire function.
 fn build_value_types(func: &Function) -> HashMap<ValueId, crate::ssa::IrTypeId> {
     let mut map = HashMap::new();
     for block in &func.blocks {
@@ -221,6 +284,7 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, crate::ssa::IrTypeId> 
     map
 }
 
+/// Counts the number of parameter registers available for the target ABI.
 fn param_reg_count(target: &dyn TargetSpec) -> usize {
     const MAX_PARAM_REGS: u32 = 32;
     let mut count = 0usize;
@@ -239,6 +303,10 @@ fn param_reg_count(target: &dyn TargetSpec) -> usize {
     count
 }
 
+/// Returns true if the type requires struct-return (sret) ABI.
+///
+/// Types that don't fit in a register (aggregates, arrays) must be returned
+/// via a pointer passed by the caller.
 fn needs_sret(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
     match types.kind(ty) {
         IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
@@ -248,6 +316,14 @@ fn needs_sret(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
     }
 }
 
+// ============================================================================
+// Edge Move Generation
+// ============================================================================
+
+/// Generates moves for a control-flow edge from `from` to `to`.
+///
+/// Maps each argument at the branch site to the corresponding block parameter
+/// at the target, creating a move if their allocated locations differ.
 fn edge_moves_for(
     from: BlockId,
     to: BlockId,
@@ -302,71 +378,178 @@ fn edge_moves_for(
     moves
 }
 
+// ============================================================================
+// Parallel Move Resolution
+// ============================================================================
+
+/// Orders a parallel move list to avoid destination-before-source conflicts.
+///
+/// The algorithm repeatedly selects moves whose destinations are not needed
+/// as sources by other pending moves. When no such move exists, all remaining
+/// moves form cycles, which are broken by saving one source to the scratch
+/// register.
+///
+/// Moves that implicitly use the scratch register (e.g., stack-to-stack) are
+/// treated as also writing to the scratch register for dependency tracking.
 fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::PhysReg) {
     if moves.len() <= 1 {
         return;
     }
 
+    // Take ownership of moves; we'll rebuild the list in the correct order
     let mut pending = std::mem::take(moves);
+
+    // Track which registers each pending move reads from
+    let mut pending_srcs: Vec<HashSet<crate::regalloc::target::PhysReg>> = pending
+        .iter()
+        .map(|mov| {
+            let mut regs = HashSet::new();
+            if let Location::Reg(reg) = mov.src {
+                regs.insert(reg);
+            }
+            regs
+        })
+        .collect();
+
+    // Count how many pending moves read from each register
+    let mut src_counts: HashMap<crate::regalloc::target::PhysReg, usize> = HashMap::new();
+    for regs in &pending_srcs {
+        for reg in regs {
+            *src_counts.entry(*reg).or_insert(0) += 1;
+        }
+    }
+
     let mut ordered = Vec::with_capacity(pending.len());
 
     while !pending.is_empty() {
+        // Phase 1: Find a move whose destination isn't needed by other moves
         let mut ready_idx = None;
         for (idx, mov) in pending.iter().enumerate() {
-            match mov.dst {
-                Location::Reg(dst_reg) => {
-                    let mut used_elsewhere = false;
-                    for (other_idx, other) in pending.iter().enumerate() {
-                        if other_idx == idx {
-                            continue;
-                        }
-                        if let Location::Reg(src_reg) = other.src {
-                            if src_reg == dst_reg {
-                                used_elsewhere = true;
-                                break;
-                            }
-                        }
-                    }
+            // Collect all registers this move would clobber
+            let mut dst_regs = Vec::new();
+            if let Location::Reg(dst_reg) = mov.dst {
+                dst_regs.push(dst_reg);
+            }
+            if move_uses_scratch(mov) {
+                dst_regs.push(scratch);
+            }
 
-                    if !used_elsewhere {
-                        ready_idx = Some(idx);
-                        break;
-                    }
-                }
-                _ => {
-                    ready_idx = Some(idx);
+            // Moves to non-register locations are always ready
+            if dst_regs.is_empty() {
+                ready_idx = Some(idx);
+                break;
+            }
+
+            // Check if any other move still needs our destination as a source
+            let mut ready = true;
+            for reg in dst_regs {
+                let total = src_counts.get(&reg).copied().unwrap_or(0);
+                // Exclude self-references (e.g., r1 <- r1 + r2 wouldn't block itself)
+                let self_uses = if pending_srcs[idx].contains(&reg) {
+                    1
+                } else {
+                    0
+                };
+                if total > self_uses {
+                    ready = false;
                     break;
                 }
             }
+
+            if ready {
+                ready_idx = Some(idx);
+                break;
+            }
         }
 
+        // If we found a ready move, emit it and update bookkeeping
         if let Some(idx) = ready_idx {
-            ordered.push(pending.remove(idx));
+            let removed = pending.remove(idx);
+            let removed_srcs = pending_srcs.remove(idx);
+            for reg in removed_srcs {
+                if let Some(count) = src_counts.get_mut(&reg) {
+                    *count -= 1;
+                    if *count == 0 {
+                        src_counts.remove(&reg);
+                    }
+                }
+            }
+            ordered.push(removed);
             continue;
         }
 
+        // Phase 2: No ready moves - all remaining moves form cycles.
+        // Break a cycle by saving one source to the scratch register.
         let cycle_idx = pending
             .iter()
             .position(|mov| matches!((&mov.src, &mov.dst), (Location::Reg(_), Location::Reg(_))))
             .expect("cycle resolution requires reg-to-reg move");
+        // Remove the cycle participant and update bookkeeping
         let mut mov = pending.remove(cycle_idx);
+        let removed_srcs = pending_srcs.remove(cycle_idx);
+        for reg in removed_srcs {
+            if let Some(count) = src_counts.get_mut(&reg) {
+                *count -= 1;
+                if *count == 0 {
+                    src_counts.remove(&reg);
+                }
+            }
+        }
+
         let Location::Reg(src_reg) = mov.src else {
             unreachable!("cycle candidate must be reg -> reg");
         };
 
+        // Save the source to scratch: src_reg -> scratch
         ordered.push(MoveOp {
             src: Location::Reg(src_reg),
             dst: Location::Reg(scratch),
             size: mov.size,
         });
 
+        // Rewrite the move to read from scratch instead, and re-add to pending
         mov.src = Location::Reg(scratch);
+        let mut regs = HashSet::new();
+        if let Location::Reg(reg) = mov.src {
+            regs.insert(reg);
+        }
+        for reg in &regs {
+            *src_counts.entry(*reg).or_insert(0) += 1;
+        }
+        pending_srcs.push(regs);
         pending.push(mov);
     }
 
     *moves = ordered;
 }
 
+/// Returns true if emitting this move requires the scratch register.
+///
+/// Memory-to-memory moves cannot be done directly on most architectures,
+/// so they use the scratch register as an intermediary. This must be
+/// accounted for when ordering moves to avoid clobbering the scratch.
+fn move_uses_scratch(mov: &MoveOp) -> bool {
+    matches!(
+        (mov.src, mov.dst),
+        // Stack-to-stack and stack-to-arg moves need scratch as intermediary
+        (Location::Stack(_), Location::Stack(_))
+            | (Location::Stack(_), Location::IncomingArg(_))
+            | (Location::Stack(_), Location::OutgoingArg(_))
+            | (Location::IncomingArg(_), Location::Stack(_))
+            | (Location::OutgoingArg(_), Location::Stack(_))
+            | (Location::IncomingArg(_), Location::OutgoingArg(_))
+            | (Location::OutgoingArg(_), Location::IncomingArg(_))
+            // Loading a stack address into memory also needs scratch
+            | (Location::StackAddr(_), Location::Stack(_))
+            | (Location::StackAddr(_), Location::IncomingArg(_))
+            | (Location::StackAddr(_), Location::OutgoingArg(_))
+    )
+}
+
+/// Determines the byte size for a move operation.
+///
+/// Stack addresses are always pointer-sized (8 bytes). For other moves,
+/// uses the type's layout size.
 fn move_size_for(
     types: &mut IrTypeCache,
     ty: crate::ssa::IrTypeId,
@@ -374,12 +557,12 @@ fn move_size_for(
     dst: Location,
 ) -> u32 {
     if matches!(src, Location::StackAddr(_)) || matches!(dst, Location::StackAddr(_)) {
-        return 8;
+        return 8; // Pointer size
     }
-
     types.layout(ty).size() as u32
 }
 
+/// Returns true if the type fits in a general-purpose register.
 fn is_reg_type(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
     matches!(
         types.kind(ty),
@@ -391,6 +574,11 @@ fn is_reg_type(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
     )
 }
 
+// ============================================================================
+// Call Move Generation
+// ============================================================================
+
+/// Looks up the type of a call argument.
 fn call_arg_type(
     value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
     arg: &ValueId,
@@ -401,6 +589,11 @@ fn call_arg_type(
         .unwrap_or_else(|| panic!("ssa regalloc: missing type for arg {:?}", arg))
 }
 
+/// Returns the source location for a call argument.
+///
+/// For register-sized types, returns the allocated location directly.
+/// For aggregates, returns the stack address (since aggregates are passed
+/// by pointer).
 fn call_arg_src(
     arg: ValueId,
     alloc_map: &ValueAllocMap,
@@ -415,6 +608,7 @@ fn call_arg_src(
     if is_reg_type(types, arg_ty) {
         return (src, arg_ty);
     }
+    // Aggregate types are passed by pointer - return stack address
     let addr = match src {
         Location::Stack(slot) => Location::StackAddr(slot),
         Location::StackAddr(slot) => Location::StackAddr(slot),
@@ -428,6 +622,10 @@ fn call_arg_src(
     (addr, arg_ty)
 }
 
+/// Returns the ABI destination for a call argument at the given index.
+///
+/// Arguments within the register limit go to parameter registers; overflow
+/// arguments go to outgoing stack slots.
 fn call_arg_dst(idx: usize, param_reg_count: usize, target: &dyn TargetSpec) -> Location {
     if idx < param_reg_count {
         let reg = target
@@ -440,6 +638,13 @@ fn call_arg_dst(idx: usize, param_reg_count: usize, target: &dyn TargetSpec) -> 
     }
 }
 
+/// Plans all moves for a single call instruction.
+///
+/// Generates:
+/// - Pre-moves for indirect callee (if applicable)
+/// - Pre-moves for sret pointer (if returning aggregate)
+/// - Pre-moves for all arguments to their ABI locations
+/// - Post-moves for the return value (if any)
 fn plan_call_moves(
     block: BlockId,
     inst_index: usize,
@@ -455,6 +660,7 @@ fn plan_call_moves(
     let mut pre_moves = Vec::new();
     let mut post_moves = Vec::new();
 
+    // For indirect calls, move the callee address to the indirect call register
     if let Callee::Value(value) = callee {
         let (src, callee_ty) = call_arg_src(*value, alloc_map, value_types, types);
         let dst = Location::Reg(target.indirect_call_reg());
@@ -464,6 +670,7 @@ fn plan_call_moves(
         }
     }
 
+    // For aggregate returns (sret), pass the result address in the indirect result register
     if let Some(result) = result {
         if needs_sret(types, result.ty) {
             let reg = target
@@ -491,6 +698,7 @@ fn plan_call_moves(
         }
     }
 
+    // Move each argument to its ABI-specified location (register or stack slot)
     for (idx, arg) in args.iter().enumerate() {
         let (src, arg_ty) = call_arg_src(*arg, alloc_map, value_types, types);
         let dst = call_arg_dst(idx, param_reg_count, target);
@@ -500,6 +708,7 @@ fn plan_call_moves(
         }
     }
 
+    // For register-sized returns, move the result from the return register
     if let Some(result) = result {
         if !needs_sret(types, result.ty) {
             let src = Location::Reg(target.result_reg());
