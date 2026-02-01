@@ -6,6 +6,7 @@ use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 use crate::semck::SemCheckError;
 use crate::ssa::lower::LoweringError as SsaLoweringError;
+use crate::ssa::verify::VerifyError as SsaVerifyError;
 use crate::targets::CodegenError;
 use crate::typeck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
@@ -33,6 +34,9 @@ pub enum CompileError {
 
     #[error("SSA lowering error")]
     SsaLowering(#[from] SsaLoweringError),
+
+    #[error(transparent)]
+    SsaVerify(#[from] SsaVerifyError),
 
     #[error(transparent)]
     Codegen(#[from] CodegenError),

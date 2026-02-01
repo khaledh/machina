@@ -4,6 +4,7 @@ pub mod lower;
 pub mod model;
 pub mod opt;
 pub mod regalloc;
+pub mod verify;
 
 pub use lower::*;
 pub use model::*;

@@ -28,6 +28,7 @@ pub struct CompileOptions {
     pub dump: Option<String>,
     pub target: TargetKind,
     pub emit_ir: bool,
+    pub verify_ir: bool,
     pub trace_alloc: bool,
     pub trace_drops: bool,
     pub backend: BackendKind,
@@ -347,6 +348,10 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                 funcs: optimized_funcs,
                 globals: lowered.globals.clone(),
             };
+
+            if opts.verify_ir {
+                ssa::verify::verify_module(&lowered).map_err(|e| vec![e.into()])?;
+            }
 
             let ir = if opts.emit_ir {
                 let mut out = String::new();

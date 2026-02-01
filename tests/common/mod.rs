@@ -8,6 +8,23 @@ use machina::targets::TargetKind;
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn run_program(name: &str, source: &str) -> Output {
+    run_program_with_opts(
+        name,
+        source,
+        CompileOptions {
+            dump: None,
+            target: TargetKind::Arm64,
+            backend: BackendKind::Ssa,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+        },
+    )
+}
+
+pub(crate) fn run_program_with_opts(name: &str, source: &str, opts: CompileOptions) -> Output {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let run_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
@@ -21,7 +38,7 @@ pub(crate) fn run_program(name: &str, source: &str) -> Output {
     let source_path = temp_dir.join(format!("{name}.mc"));
     std::fs::write(&source_path, source).expect("failed to write temp source");
 
-    let output = compile_source(&source_path);
+    let output = compile_source_with_opts(&source_path, &opts);
 
     let asm_path = temp_dir.join(format!("{name}.s"));
     let exe_path = temp_dir.join(name);
@@ -72,18 +89,12 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
     run
 }
 
-fn compile_source(source_path: &Path) -> machina::compile::CompileOutput {
+fn compile_source_with_opts(
+    source_path: &Path,
+    opts: &CompileOptions,
+) -> machina::compile::CompileOutput {
     let source = std::fs::read_to_string(source_path).expect("failed to read temp source");
-    let opts = CompileOptions {
-        dump: None,
-        target: TargetKind::Arm64,
-        backend: BackendKind::Ssa,
-        emit_ir: false,
-        trace_alloc: false,
-        trace_drops: false,
-        inject_prelude: true,
-    };
-    compile(&source, &opts).expect("compile failed")
+    compile(&source, opts).expect("compile failed")
 }
 
 fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
@@ -94,6 +105,7 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
         target: TargetKind::Arm64,
         backend: BackendKind::Ssa,
         emit_ir: false,
+        verify_ir: false,
         trace_alloc: false,
         trace_drops: false,
         inject_prelude: false,

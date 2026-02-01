@@ -42,6 +42,10 @@ struct Args {
     #[clap(long = "trace-drops", global = true)]
     trace_drops: bool,
 
+    /// Verify SSA IR invariants after SSA lowering/optimization.
+    #[clap(long = "verify-ir", global = true)]
+    verify_ir: bool,
+
     /// Backend pipeline to use: legacy MCIR or new SSA.
     #[clap(long, value_enum, default_value_t = BackendKind::Ssa, global = true)]
     backend: BackendKind,
@@ -103,6 +107,7 @@ fn main() {
         emit,
         trace_alloc,
         trace_drops,
+        verify_ir,
         backend,
     } = Args::parse();
     let invocation = match cmd {
@@ -136,6 +141,7 @@ fn main() {
         dump,
         target,
         emit_ir,
+        verify_ir,
         trace_alloc,
         trace_drops,
         backend,
@@ -268,6 +274,9 @@ fn main() {
                     CompileError::SsaLowering(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
+                    CompileError::SsaVerify(e) => {
+                        println!("{}", format_error(&source, Span::default(), e));
+                    }
                     CompileError::Codegen(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
@@ -366,6 +375,7 @@ fn compile_prelude_impl_object(
         dump: None,
         target: opts.target,
         emit_ir: opts.emit_ir,
+        verify_ir: opts.verify_ir,
         trace_alloc: opts.trace_alloc,
         trace_drops: opts.trace_drops,
         backend: opts.backend,
