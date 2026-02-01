@@ -245,6 +245,25 @@ fn collect_empty_bases(func: &Function) -> HashSet<ValueId> {
 
     for block in &func.blocks {
         for inst in &block.insts {
+            if let InstKind::Call {
+                callee:
+                    Callee::Runtime(
+                        RuntimeFn::StringAppendBytes
+                        | RuntimeFn::StringFromBytes
+                        | RuntimeFn::StringEnsure,
+                    ),
+                args,
+            } = &inst.kind
+            {
+                if let Some(base) = args
+                    .get(0)
+                    .and_then(|arg| resolve_addr_base_global(func, &defs, *arg))
+                {
+                    let state = states.entry(base).or_default();
+                    state.invalid = true;
+                }
+                continue;
+            }
             let InstKind::Store { ptr, value } = inst.kind else {
                 continue;
             };
