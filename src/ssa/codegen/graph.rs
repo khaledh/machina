@@ -86,6 +86,9 @@ impl CodegenGraph {
 
     /// Returns edge moves scheduled for an SSA edge, if any.
     pub fn edge_moves(&self, from: BlockId, to: BlockId) -> Option<&[MoveOp]> {
+        if matches!(self.edge_target(from, to), CodegenBlockId::Move(_)) {
+            return None;
+        }
         self.schedule.edge_moves(from, to)
     }
 
