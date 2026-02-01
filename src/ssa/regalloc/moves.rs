@@ -30,7 +30,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::regalloc::target::TargetSpec;
 use crate::ssa::IrTypeCache;
-use crate::ssa::IrTypeKind;
 use crate::ssa::model::ir::{BlockId, Callee, Function, InstKind, Terminator, ValueId};
 
 use super::{Location, ValueAllocMap};
@@ -121,9 +120,9 @@ pub fn build_move_plan(
     alloc_map: &ValueAllocMap,
     types: &mut IrTypeCache,
     target: &dyn TargetSpec,
+    param_reg_count: usize,
 ) -> MovePlan {
     let mut plan = MovePlan::default();
-    let param_reg_count = param_reg_count(target);
     let value_types = build_value_types(func);
 
     // Build a map of block ID -> parameter value IDs for edge move generation
@@ -284,36 +283,12 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, crate::ssa::IrTypeId> 
     map
 }
 
-/// Counts the number of parameter registers available for the target ABI.
-fn param_reg_count(target: &dyn TargetSpec) -> usize {
-    const MAX_PARAM_REGS: u32 = 32;
-    let mut count = 0usize;
-    let mut seen = HashSet::new();
-    for idx in 0..MAX_PARAM_REGS {
-        match target.param_reg(idx) {
-            Some(reg) => {
-                if !seen.insert(reg) {
-                    break;
-                }
-                count += 1;
-            }
-            None => break,
-        }
-    }
-    count
-}
-
 /// Returns true if the type requires struct-return (sret) ABI.
 ///
 /// Types that don't fit in a register (aggregates, arrays) must be returned
 /// via a pointer passed by the caller.
 fn needs_sret(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
-    match types.kind(ty) {
-        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
-            false
-        }
-        _ => true,
-    }
+    !types.is_reg_type(ty)
 }
 
 // ============================================================================
@@ -562,18 +537,6 @@ fn move_size_for(
     types.layout(ty).size() as u32
 }
 
-/// Returns true if the type fits in a general-purpose register.
-fn is_reg_type(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
-    matches!(
-        types.kind(ty),
-        IrTypeKind::Unit
-            | IrTypeKind::Bool
-            | IrTypeKind::Int { .. }
-            | IrTypeKind::Ptr { .. }
-            | IrTypeKind::Fn { .. }
-    )
-}
-
 // ============================================================================
 // Call Move Generation
 // ============================================================================
@@ -605,7 +568,7 @@ fn call_arg_src(
         .get(&arg)
         .copied()
         .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", arg));
-    if is_reg_type(types, arg_ty) {
+    if types.is_reg_type(arg_ty) {
         return (src, arg_ty);
     }
     // Aggregate types are passed by pointer - return stack address

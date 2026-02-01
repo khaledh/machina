@@ -8,6 +8,7 @@ use crate::regalloc::target::{PhysReg, TargetSpec};
 use crate::ssa::IrTypeCache;
 use crate::ssa::model::ir::ValueId;
 
+use super::constraints::AbiConstraints;
 use super::intervals::{IntervalAnalysis, LiveInterval};
 use super::{AllocationResult, Location, ValueAllocMap};
 
@@ -26,6 +27,7 @@ impl<'a> LinearScan<'a> {
         analysis: &'a IntervalAnalysis,
         types: &'a mut IrTypeCache,
         target: &dyn TargetSpec,
+        constraints: &AbiConstraints,
     ) -> Self {
         let caller_saved: HashSet<PhysReg> = target.caller_saved().iter().copied().collect();
         let mut caller_saved_regs = Vec::new();
@@ -53,58 +55,8 @@ impl<'a> LinearScan<'a> {
         for (value, ty) in &analysis.value_types {
             let slots = stack_slots_for(types, *ty);
             slot_sizes.insert(*value, slots);
-            if !is_reg_type(types, *ty) {
+            if !types.is_reg_type(*ty) {
                 needs_stack.insert(*value);
-            }
-        }
-
-        let param_set: HashSet<ValueId> = analysis.param_values.iter().copied().collect();
-
-        // Precolor return values into the ABI result register only when they
-        // do not cross a call (caller-saved regs are not safe across calls).
-        let mut fixed_regs = HashMap::new();
-        let result_reg = target.result_reg();
-        for value in &analysis.return_values {
-            let ty = analysis
-                .value_types
-                .get(value)
-                .copied()
-                .unwrap_or_else(|| panic!("ssa regalloc: missing return type for {:?}", value));
-            if !param_set.contains(value) && is_reg_type(types, ty) {
-                let interval = analysis
-                    .intervals
-                    .get(value)
-                    .copied()
-                    .unwrap_or(LiveInterval { start: 0, end: 0 });
-                let crosses_call = interval_crosses_call(interval, &analysis.call_positions);
-                if !crosses_call {
-                    fixed_regs.insert(*value, result_reg);
-                }
-            }
-        }
-
-        // Precolor entry parameters into their ABI registers if available.
-        for (index, value) in analysis.param_values.iter().enumerate() {
-            if fixed_regs.contains_key(value) {
-                continue;
-            }
-            let ty = analysis
-                .value_types
-                .get(value)
-                .copied()
-                .unwrap_or_else(|| panic!("ssa regalloc: missing param type for {:?}", value));
-            if is_reg_type(types, ty) {
-                if let Some(reg) = target.param_reg(index as u32) {
-                    let interval = analysis
-                        .intervals
-                        .get(value)
-                        .copied()
-                        .unwrap_or(LiveInterval { start: 0, end: 0 });
-                    let crosses_call = interval_crosses_call(interval, &analysis.call_positions);
-                    if !(crosses_call && caller_saved.contains(&reg)) {
-                        fixed_regs.insert(*value, reg);
-                    }
-                }
             }
         }
 
@@ -113,7 +65,7 @@ impl<'a> LinearScan<'a> {
             allocatable,
             call_safe,
             slot_sizes,
-            fixed_regs,
+            fixed_regs: constraints.fixed_regs.clone(),
             needs_stack,
         }
     }
@@ -373,16 +325,4 @@ fn alloc_stack_for(
 ) -> crate::regalloc::stack::StackSlotId {
     let slots = slot_sizes.get(&value).copied().unwrap_or(1);
     allocator.alloc_slots(slots)
-}
-
-/// Returns true if the type can live in a single machine register.
-fn is_reg_type(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
-    matches!(
-        types.kind(ty),
-        crate::ssa::IrTypeKind::Unit
-            | crate::ssa::IrTypeKind::Bool
-            | crate::ssa::IrTypeKind::Int { .. }
-            | crate::ssa::IrTypeKind::Ptr { .. }
-            | crate::ssa::IrTypeKind::Fn { .. }
-    )
 }

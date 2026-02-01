@@ -105,4 +105,19 @@ impl IrTypeCache {
     pub fn layout(&mut self, id: IrTypeId) -> IrLayout {
         self.layout_cache.layout(&self.types, id)
     }
+
+    /// Returns true if the type fits in a general-purpose register.
+    ///
+    /// Scalar types (unit, bool, integers, pointers, function pointers) fit in
+    /// registers. Aggregate types (arrays, tuples, structs, blobs) do not.
+    pub fn is_reg_type(&self, id: IrTypeId) -> bool {
+        matches!(
+            self.kind(id),
+            IrTypeKind::Unit
+                | IrTypeKind::Bool
+                | IrTypeKind::Int { .. }
+                | IrTypeKind::Ptr { .. }
+                | IrTypeKind::Fn { .. }
+        )
+    }
 }

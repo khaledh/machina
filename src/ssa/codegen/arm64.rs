@@ -534,17 +534,6 @@ impl Arm64Emitter {
         }
     }
 
-    fn is_reg_type(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> bool {
-        matches!(
-            locs.types.kind(ty),
-            IrTypeKind::Unit
-                | IrTypeKind::Bool
-                | IrTypeKind::Int { .. }
-                | IrTypeKind::Ptr { .. }
-                | IrTypeKind::Fn { .. }
-        )
-    }
-
     fn copy_ptr_to_stack(&mut self, src_reg: &str, dst_offset: u32, size: u32) {
         let mut offset = 0u32;
 
@@ -738,7 +727,7 @@ impl CodegenEmitter for Arm64Emitter {
             let dst = locs.value(param.value.id);
             let src = Location::Reg(PhysReg(idx as u8));
 
-            if Self::is_reg_type(locs, ty) {
+            if locs.types.is_reg_type(ty) {
                 if src != dst {
                     let size = locs.layout(ty).size() as u32;
                     moves.push(MoveOp { src, dst, size });
@@ -752,7 +741,7 @@ impl CodegenEmitter for Arm64Emitter {
 
         for (idx, param) in entry.params.iter().enumerate() {
             let ty = locs.value_ty(param.value.id);
-            if Self::is_reg_type(locs, ty) {
+            if locs.types.is_reg_type(ty) {
                 continue;
             }
 
@@ -1365,7 +1354,7 @@ impl CodegenEmitter for Arm64Emitter {
                         let src_ty = locs.value_ty(*ptr);
                         self.load_value_typed(locs, src, src_ty, "x15")
                     };
-                    if Self::is_reg_type(locs, ty) {
+                    if locs.types.is_reg_type(ty) {
                         let (dst_reg, dst_slot) = self.value_dst_typed(locs, dst, "x9", "load", ty);
                         let size = locs.layout(ty).size() as u32;
                         self.emit_load_ptr_sized(&dst_reg, &addr, size);
@@ -1511,7 +1500,7 @@ impl CodegenEmitter for Arm64Emitter {
                     let base_ty = locs.value_ty(base);
                     let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x15");
 
-                    if Self::is_reg_type(locs, value_ty) {
+                    if locs.types.is_reg_type(value_ty) {
                         // Scalar stores can use scaled immediate offsets.
                         let size = locs.layout(value_ty).size() as u32;
                         if size > 0 {
@@ -1550,7 +1539,7 @@ impl CodegenEmitter for Arm64Emitter {
                     let base_ty = locs.value_ty(base);
                     let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x15");
 
-                    if Self::is_reg_type(locs, value_ty) {
+                    if locs.types.is_reg_type(value_ty) {
                         let size = locs.layout(value_ty).size() as u32;
                         if size > 0 {
                             let val = if zero_store {
@@ -1583,7 +1572,7 @@ impl CodegenEmitter for Arm64Emitter {
 
                 // General case: load the pointer value then store through it.
                 let ptr = self.load_value_typed(locs, ptr, ptr_ty, "x15");
-                if Self::is_reg_type(locs, value_ty) {
+                if locs.types.is_reg_type(value_ty) {
                     // Scalar stores write the loaded register directly.
                     let size = locs.layout(value_ty).size() as u32;
                     if size > 0 {
