@@ -77,12 +77,15 @@ impl<'a> Elaborator<'a> {
 
         let has_receiver = call_sig.receiver.is_some();
         let mut drop_mask = Vec::new();
+        let mut input_modes = Vec::new();
         if let Some(receiver) = &call_sig.receiver {
             // Receiver sits at input index 0 when present.
+            input_modes.push(receiver.mode.clone());
             drop_mask.push(receiver.mode == ParamMode::In && receiver.ty.needs_drop());
         }
         for param in &call_sig.params {
             // Non-receiver inputs follow in order.
+            input_modes.push(param.mode.clone());
             drop_mask.push(param.mode == ParamMode::In && param.ty.needs_drop());
         }
 
@@ -258,6 +261,7 @@ impl<'a> Elaborator<'a> {
             target,
             args,
             drop_mask,
+            input_modes,
             has_receiver,
         }
     }

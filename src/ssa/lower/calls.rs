@@ -5,6 +5,7 @@ use crate::resolve::DefId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue};
 use crate::ssa::model::ir::{Callee, RuntimeFn, ValueId};
+use crate::tree::ParamMode;
 use crate::tree::{NodeId, semantic as sem};
 use crate::types::Type;
 
@@ -130,6 +131,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let ty = self.type_lowerer.lower_type_id(expr.ty);
         let result = self.builder.call(callee, call_args, ty);
         self.emit_call_drops(&call_plan, None, &arg_values)?;
+        self.clear_sink_drop_flags(&call_plan, None, &arg_values);
         Ok(Some(result))
     }
 
@@ -204,6 +206,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let ty = self.type_lowerer.lower_type_id(expr.ty);
         let result = self.builder.call(callee, call_args, ty);
         self.emit_call_drops(&call_plan, Some(&receiver_value), &arg_values)?;
+        self.clear_sink_drop_flags(&call_plan, Some(&receiver_value), &arg_values);
         Ok(Some(result))
     }
 
@@ -245,6 +248,49 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         Ok(())
+    }
+
+    fn clear_sink_drop_flags(
+        &mut self,
+        call_plan: &sem::CallPlan,
+        receiver_value: Option<&CallInputValue>,
+        arg_values: &[CallInputValue],
+    ) {
+        let expected = (call_plan.has_receiver as usize) + arg_values.len();
+        if call_plan.input_modes.len() != expected {
+            panic!(
+                "ssa call input modes length mismatch: expected {}, got {}",
+                expected,
+                call_plan.input_modes.len()
+            );
+        }
+
+        let mut input_index = 0;
+        if call_plan.has_receiver {
+            let receiver = receiver_value.unwrap_or_else(|| {
+                panic!("ssa call input modes missing receiver value for call plan");
+            });
+            if call_plan.input_modes[input_index] == ParamMode::Sink {
+                self.clear_sink_flag_for_input(receiver);
+            }
+            input_index += 1;
+        }
+
+        for arg in arg_values {
+            if call_plan.input_modes[input_index] == ParamMode::Sink {
+                self.clear_sink_flag_for_input(arg);
+            }
+            input_index += 1;
+        }
+    }
+
+    fn clear_sink_flag_for_input(&mut self, input: &CallInputValue) {
+        let Some(def_id) = input.drop_def else {
+            return;
+        };
+        if input.ty.needs_drop() {
+            self.set_drop_flag_for_def(def_id, false);
+        }
     }
 
     fn lower_call_args_from_plan(
