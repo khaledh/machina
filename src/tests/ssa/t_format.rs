@@ -30,7 +30,8 @@ fn test_format_const_return() {
     let expected = indoc! {"
         fn const_42() -> u64 {
           bb0():
-            %v0: u64 = const 42:u64
+            %v0: u64 = const 42
+
             ret %v0
         }
     "};

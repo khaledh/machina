@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_module};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_module};
 use std::collections::HashMap;
 
 #[test]
@@ -104,7 +104,7 @@ fn test_lower_module_method_defs() {
         "},
         method_def_id
     );
-    assert_eq!(main_text, &expected_main);
+    assert_ir_eq(main_text, &expected_main);
 
     let expected_sum = indoc! {"
         fn Pair$sum(ptr<Pair>) -> u64 {
@@ -122,5 +122,5 @@ fn test_lower_module_method_defs() {
             ret %v7
         }
     "};
-    assert_eq!(sum_text, expected_sum);
+    assert_ir_eq(sum_text, expected_sum);
 }

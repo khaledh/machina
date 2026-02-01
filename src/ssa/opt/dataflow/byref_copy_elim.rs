@@ -68,9 +68,24 @@ impl Pass for ByRefCopyElim {
 
         for (block_idx, block) in func.blocks.iter_mut().enumerate() {
             let mut new_insts = Vec::with_capacity(block.insts.len());
+            let mut pending_comments = Vec::new();
             for (inst_idx, inst) in block.insts.iter().enumerate() {
                 if !remove.contains(&(block_idx, inst_idx)) {
-                    new_insts.push(inst.clone());
+                    let mut kept = inst.clone();
+                    if !pending_comments.is_empty() {
+                        let mut combined = Vec::new();
+                        combined.append(&mut pending_comments);
+                        combined.append(&mut kept.comments);
+                        kept.comments = combined;
+                    }
+                    new_insts.push(kept);
+                } else if !inst.comments.is_empty() {
+                    pending_comments.extend(inst.comments.iter().cloned());
+                }
+            }
+            if !pending_comments.is_empty() {
+                if let Some(last) = new_insts.last_mut() {
+                    last.comments.extend(pending_comments);
                 }
             }
             block.insts = new_insts;

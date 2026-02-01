@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
 
 #[test]
 fn test_lower_if_return() {
@@ -40,7 +40,7 @@ fn test_lower_if_return() {
             ret %v1
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn test_lower_if_return_stmt() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn test_lower_if_stmt_side_effect() {
             ret %v3
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn test_lower_tuple_with_branching_elem() {
             ret %v8
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn test_lower_if_cmp_return() {
             ret %v3
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn test_lower_logical_and() {
             ret %v1
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn test_lower_logical_or() {
             ret %v1
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn test_lower_while_stmt() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -396,7 +396,7 @@ fn test_lower_for_range_stmt() {
             ret %v6
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -441,7 +441,7 @@ fn test_lower_while_return_stmt() {
             ret %v6
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn test_lower_while_break_stmt() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -527,5 +527,5 @@ fn test_lower_while_continue_stmt() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }

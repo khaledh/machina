@@ -1,3 +1,4 @@
+use super::assert_ir_eq;
 use super::lower_and_optimize;
 use super::lower_and_optimize_all;
 use indoc::indoc;
@@ -39,5 +40,5 @@ fn test_pipeline_exact_ir_const_return() {
             ret %v1
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(text, expected);
 }

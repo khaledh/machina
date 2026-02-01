@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_module};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_module};
 
 #[test]
 fn test_lower_closure_ref_captureless() {
@@ -61,7 +61,7 @@ fn test_lower_closure_ref_captureless() {
         "},
         closure_def_id
     );
-    assert_eq!(main_text, &expected_main);
+    assert_ir_eq(main_text, &expected_main);
 
     let expected_closure = format!(
         indoc! {"
@@ -74,7 +74,7 @@ fn test_lower_closure_ref_captureless() {
         "},
         closure_name
     );
-    assert_eq!(closure_text, &expected_closure);
+    assert_ir_eq(closure_text, &expected_closure);
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn test_lower_closure_invoke() {
         "},
         invoke_def_id
     );
-    assert_eq!(main_text, &expected_main);
+    assert_ir_eq(main_text, &expected_main);
 
     let expected_invoke = indoc! {"
         fn main$closure$1$invoke(ptr<main$closure$1>, u64) -> u64 {
@@ -176,7 +176,7 @@ fn test_lower_closure_invoke() {
             ret %v6
         }
     "};
-    assert_eq!(invoke_text, expected_invoke);
+    assert_ir_eq(invoke_text, expected_invoke);
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn test_lower_closure_borrow_capture() {
         "},
         add_invoke_def_id, bump_invoke_def_id
     );
-    assert_eq!(main_text, &expected_main);
+    assert_ir_eq(main_text, &expected_main);
 
     let expected_add_invoke = indoc! {"
         fn main$closure$1$invoke(ptr<main$closure$1>, u64) -> u64 {
@@ -319,7 +319,7 @@ fn test_lower_closure_borrow_capture() {
             ret %v7
         }
     "};
-    assert_eq!(add_invoke_text, expected_add_invoke);
+    assert_ir_eq(add_invoke_text, expected_add_invoke);
 
     let expected_bump_invoke = indoc! {"
         fn main$closure$2$invoke(ptr<main$closure$2>, u64) -> u64 {
@@ -342,5 +342,5 @@ fn test_lower_closure_borrow_capture() {
             ret %v12
         }
     "};
-    assert_eq!(bump_invoke_text, expected_bump_invoke);
+    assert_ir_eq(bump_invoke_text, expected_bump_invoke);
 }

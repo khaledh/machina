@@ -30,6 +30,7 @@ impl Pass for StackTempCopyElim {
 
     fn run(&mut self, func: &mut Function) -> bool {
         let (def_inst, uses) = build_maps(func);
+        let local_ptrs = collect_local_ptrs(func);
         let mut candidates = Vec::new();
         let mut direct_memcpy = Vec::new();
 
@@ -47,9 +48,10 @@ impl Pass for StackTempCopyElim {
                     continue;
                 };
                 let dst_def = &func.blocks[*dst_def_block].insts[*dst_def_idx];
-                if !matches!(dst_def.kind, InstKind::AddrOfLocal { .. }) {
-                    continue;
-                }
+                let dst_local = match dst_def.kind {
+                    InstKind::AddrOfLocal { local } => local,
+                    _ => continue,
+                };
 
                 let Some((src_def_block, src_def_idx)) = def_inst.get(&src_root) else {
                     continue;
@@ -90,6 +92,13 @@ impl Pass for StackTempCopyElim {
 
                 // Fall back to the existing elimination strategy: if both dst/src are stable
                 // after the memcpy, we can just replace dst with src and remove memcpy+store.
+                if local_ptrs
+                    .get(&dst_local)
+                    .is_some_and(|values| values.len() > 1)
+                {
+                    continue;
+                }
+
                 if !source_stable_after(
                     *dst,
                     block_idx,
@@ -156,9 +165,24 @@ impl Pass for StackTempCopyElim {
             }
             // Drop the now-redundant store/memcpy instructions.
             let mut new_insts = Vec::with_capacity(block.insts.len());
+            let mut pending_comments = Vec::new();
             for (inst_idx, inst) in block.insts.iter().enumerate() {
                 if !remove.contains(&(block_idx, inst_idx)) {
-                    new_insts.push(inst.clone());
+                    let mut kept = inst.clone();
+                    if !pending_comments.is_empty() {
+                        let mut combined = Vec::new();
+                        combined.append(&mut pending_comments);
+                        combined.append(&mut kept.comments);
+                        kept.comments = combined;
+                    }
+                    new_insts.push(kept);
+                } else if !inst.comments.is_empty() {
+                    pending_comments.extend(inst.comments.iter().cloned());
+                }
+            }
+            if !pending_comments.is_empty() {
+                if let Some(last) = new_insts.last_mut() {
+                    last.comments.extend(pending_comments);
                 }
             }
             block.insts = new_insts;
@@ -190,6 +214,20 @@ fn build_maps(
     }
 
     (def_inst, uses)
+}
+
+fn collect_local_ptrs(func: &Function) -> HashMap<crate::ssa::model::ir::LocalId, Vec<ValueId>> {
+    let mut ptrs: HashMap<crate::ssa::model::ir::LocalId, Vec<ValueId>> = HashMap::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            if let InstKind::AddrOfLocal { local } = inst.kind {
+                if let Some(result) = &inst.result {
+                    ptrs.entry(local).or_default().push(result.id);
+                }
+            }
+        }
+    }
+    ptrs
 }
 
 fn load_source_of_value(

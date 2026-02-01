@@ -324,8 +324,11 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
             // --- Optimize SSA ---
             let mut funcs: Vec<_> = lowered.funcs.iter().map(|f| f.func.clone()).collect();
-            let mut pipeline = ssa::opt::Pipeline::new();
-            pipeline.run(&mut funcs);
+            let skip_opt = std::env::var("MACHINA_DISABLE_SSA_OPT").ok().is_some();
+            if !skip_opt {
+                let mut pipeline = ssa::opt::Pipeline::new();
+                pipeline.run(&mut funcs);
+            }
 
             let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
             for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
@@ -350,9 +353,10 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                     if idx > 0 {
                         out.push('\n');
                     }
-                    out.push_str(&ssa::model::format::formact_func_with_comments(
+                    out.push_str(&ssa::model::format::formact_func_with_comments_and_names(
                         &func.func,
                         &func.types,
+                        &analyzed_context.symbols.def_names,
                     ));
                     out.push('\n');
                 }

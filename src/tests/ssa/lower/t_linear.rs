@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
 
 #[test]
 fn test_lower_const() {
@@ -25,7 +25,7 @@ fn test_lower_const() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_lower_range_type_value() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn test_lower_range_lit_value() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn test_lower_stmt() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn test_lower_var_decl() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn test_lower_binop() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn test_lower_param_binop() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn test_lower_unop() {
             ret %v1
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn test_lower_unop_not() {
             ret %v1
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn test_lower_char_lit() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn test_lower_string_lit() {
             ret %v7
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -349,9 +349,9 @@ fn test_lower_string_fmt_view() {
     .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("call @__rt_fmt_init"));
-    assert!(text.contains("call @__rt_fmt_append_u64"));
-    assert!(text.contains("call @__rt_fmt_finish"));
+    assert!(text.contains("__rt_fmt_init"));
+    assert!(text.contains("__rt_fmt_append_u64"));
+    assert!(text.contains("__rt_fmt_finish"));
 }
 
 #[test]
@@ -372,8 +372,8 @@ fn test_lower_string_fmt_owned() {
     .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("call @__rt_string_ensure"));
-    assert!(text.contains("call @__rt_string_append_bytes"));
+    assert!(text.contains("__rt_string_ensure"));
+    assert!(text.contains("__rt_string_append_bytes"));
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn test_lower_heap_alloc() {
     .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("call @__rt_alloc"));
+    assert!(text.contains("__rt_alloc"));
     assert!(text.contains("store"));
 }
 
@@ -417,7 +417,7 @@ fn test_lower_drop_string_local() {
     .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("call @__rt_string_drop"));
+    assert!(text.contains("__rt_string_drop"));
 }
 
 #[test]
@@ -447,7 +447,7 @@ fn test_lower_cmp() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn test_lower_tuple_lit() {
             ret %v5
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -534,7 +534,7 @@ fn test_lower_tuple_bind() {
             ret %v13
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -573,7 +573,7 @@ fn test_lower_struct_lit() {
             ret %v5
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -625,7 +625,7 @@ fn test_lower_struct_bind() {
             ret %v13
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -679,7 +679,7 @@ fn test_lower_array_bind() {
             ret %v17
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -738,7 +738,7 @@ fn test_lower_struct_update() {
             ret %v15
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -800,7 +800,7 @@ fn test_lower_struct_update_multi_field() {
             ret %v17
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -889,7 +889,7 @@ fn test_lower_enum_variant_no_payload() {
             ret %v4
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -934,7 +934,7 @@ fn test_lower_enum_variant_payload() {
             ret %v9
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -959,7 +959,7 @@ fn test_lower_drop_enum_payload() {
     let text = formact_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("switch"));
-    assert!(text.contains("call @__rt_string_drop"));
+    assert!(text.contains("__rt_string_drop"));
 }
 
 #[test]
@@ -1002,7 +1002,7 @@ fn test_lower_array_lit_elems() {
             ret %v10
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -1043,7 +1043,7 @@ fn test_lower_array_lit_repeat() {
             ret %v8
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -1130,7 +1130,7 @@ fn test_lower_slice_expr_array() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -1200,5 +1200,5 @@ fn test_lower_slice_expr_string() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }

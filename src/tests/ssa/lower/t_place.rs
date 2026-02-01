@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
 
 #[test]
 fn test_lower_struct_field_load() {
@@ -34,7 +34,7 @@ fn test_lower_struct_field_load() {
             ret %v4
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn test_lower_struct_field_assign() {
             ret %v10
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn test_lower_array_index_load() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn test_lower_array_index_assign() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn test_lower_array_index_multi_dim() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -322,7 +322,7 @@ fn test_lower_array_index_partial() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn test_lower_slice_index_load() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -450,7 +450,7 @@ fn test_lower_slice_index_assign() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -501,5 +501,5 @@ fn test_lower_string_index_load() {
             unreachable
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }

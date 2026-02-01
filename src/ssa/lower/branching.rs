@@ -30,6 +30,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                                 }
                             }
                             sem::BlockItem::Expr(expr) => {
+                                lowerer.annotate_expr(expr);
                                 // Statement-position expression: lower using the plan.
                                 if let BranchResult::Return = lowerer.lower_value_expr(expr)? {
                                     return Ok(BranchResult::Return);
@@ -39,6 +40,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
 
                     if let Some(tail) = tail {
+                        lowerer.annotate_expr(tail);
                         return match lowerer.lower_value_expr(tail)? {
                             BranchResult::Value(value) => Ok(BranchResult::Value(value)),
                             BranchResult::Return => Ok(BranchResult::Return),

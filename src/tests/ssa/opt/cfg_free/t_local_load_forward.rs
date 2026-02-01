@@ -38,7 +38,7 @@ fn test_local_load_forward() {
     let text = formact_func(&func, &types);
 
     assert!(!text.contains("load "));
-    assert!(text.contains("const 42:u64"));
+    assert!(text.contains("const 42"));
 }
 
 #[test]

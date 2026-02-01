@@ -60,12 +60,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                                 }
                             }
                             sem::BlockItem::Expr(expr) => {
+                                lowerer.annotate_expr(expr);
                                 let _ = lowerer.lower_linear_value_expr(expr)?;
                             }
                         }
                     }
 
                     if let Some(tail) = tail {
+                        lowerer.annotate_expr(tail);
                         return lowerer
                             .lower_linear_value_expr(tail)
                             .map(Into::into);

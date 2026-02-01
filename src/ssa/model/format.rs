@@ -1,7 +1,9 @@
 //! Text formatter for SSA IR.
 
 use super::ir::*;
+use crate::resolve::DefId;
 use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 pub fn formact_func(func: &Function, types: &IrTypeCache) -> String {
@@ -16,8 +18,29 @@ pub fn formact_func_with_comments(func: &Function, types: &IrTypeCache) -> Strin
     formatter.finish()
 }
 
+pub fn formact_func_with_names(
+    func: &Function,
+    types: &IrTypeCache,
+    def_names: &HashMap<DefId, String>,
+) -> String {
+    let mut formatter = Formatter::new_with_names(types, false, def_names);
+    formatter.write_function(func);
+    formatter.finish()
+}
+
+pub fn formact_func_with_comments_and_names(
+    func: &Function,
+    types: &IrTypeCache,
+    def_names: &HashMap<DefId, String>,
+) -> String {
+    let mut formatter = Formatter::new_with_names(types, true, def_names);
+    formatter.write_function(func);
+    formatter.finish()
+}
+
 struct Formatter<'a> {
     types: &'a IrTypeCache,
+    def_names: Option<&'a HashMap<DefId, String>>,
     show_comments: bool,
     out: String,
 }
@@ -26,6 +49,20 @@ impl<'a> Formatter<'a> {
     fn new(types: &'a IrTypeCache, show_comments: bool) -> Self {
         Self {
             types,
+            def_names: None,
+            show_comments,
+            out: String::new(),
+        }
+    }
+
+    fn new_with_names(
+        types: &'a IrTypeCache,
+        show_comments: bool,
+        def_names: &'a HashMap<DefId, String>,
+    ) -> Self {
+        Self {
+            types,
+            def_names: Some(def_names),
             show_comments,
             out: String::new(),
         }
@@ -80,14 +117,20 @@ impl<'a> Formatter<'a> {
         }
         let _ = writeln!(&mut self.out, "):");
 
-        for inst in &block.insts {
-            self.write_instruction(inst);
+        for (idx, inst) in block.insts.iter().enumerate() {
+            self.write_instruction(inst, idx > 0);
+        }
+        if !block.insts.is_empty() {
+            let _ = writeln!(&mut self.out);
         }
         self.write_terminator(&block.term);
     }
 
-    fn write_instruction(&mut self, inst: &Instruction) {
+    fn write_instruction(&mut self, inst: &Instruction, add_blank_before_comments: bool) {
         if self.show_comments && !inst.comments.is_empty() {
+            if add_blank_before_comments {
+                let _ = writeln!(&mut self.out);
+            }
             for comment in &inst.comments {
                 let _ = writeln!(&mut self.out, "    // {}", comment);
             }
@@ -257,13 +300,19 @@ impl<'a> Formatter<'a> {
     fn write_callee(&mut self, callee: &Callee) {
         match callee {
             Callee::Direct(def_id) => {
-                let _ = write!(&mut self.out, "@{}", def_id);
+                if let Some(def_names) = self.def_names
+                    && let Some(name) = def_names.get(def_id)
+                {
+                    let _ = write!(&mut self.out, "{}", name);
+                } else {
+                    let _ = write!(&mut self.out, "@{}", def_id);
+                }
             }
             Callee::Value(value) => {
                 let _ = write!(&mut self.out, "%v{}", value.0);
             }
             Callee::Runtime(func) => {
-                let _ = write!(&mut self.out, "@{}", func.name());
+                let _ = write!(&mut self.out, "{}", func.name());
             }
         }
     }
@@ -276,19 +325,20 @@ impl<'a> Formatter<'a> {
             ConstValue::Bool(value) => {
                 let _ = write!(&mut self.out, "{}", value);
             }
-            ConstValue::Int {
-                value,
-                signed,
-                bits,
-            } => {
-                let prefix = if *signed { "i" } else { "u" };
-                let _ = write!(&mut self.out, "{}:{}{}", value, prefix, bits);
+            ConstValue::Int { value, .. } => {
+                let _ = write!(&mut self.out, "{}", value);
             }
             ConstValue::GlobalAddr { id } => {
                 let _ = write!(&mut self.out, "@g{}", id.0);
             }
             ConstValue::FuncAddr { def } => {
-                let _ = write!(&mut self.out, "@{}", def);
+                if let Some(def_names) = self.def_names
+                    && let Some(name) = def_names.get(def)
+                {
+                    let _ = write!(&mut self.out, "{}", name);
+                } else {
+                    let _ = write!(&mut self.out, "@{}", def);
+                }
             }
         }
     }

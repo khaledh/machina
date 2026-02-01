@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
 
 #[test]
 fn test_lower_match_enum_no_payload() {
@@ -64,7 +64,7 @@ fn test_lower_match_enum_no_payload() {
             ret %v10
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn test_lower_match_enum_payload_binding() {
             ret %v15
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -239,5 +239,5 @@ fn test_lower_match_tuple_decision_tree() {
             ret %v25
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }

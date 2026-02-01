@@ -1,4 +1,4 @@
-use super::{analyze, formact_func, indoc, lower_func};
+use super::{analyze, assert_ir_eq, formact_func, indoc, lower_func};
 use crate::tree::semantic::MethodItem;
 
 #[test]
@@ -38,7 +38,7 @@ fn test_lower_call_with_params() {
         "},
         add_id
     );
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_lower_call_stmt() {
         "},
         add_id
     );
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn test_lower_method_call_param() {
         "},
         method_def_id
     );
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn test_lower_call_drops_in_arg() {
     .expect("failed to lower");
     let text = formact_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("call @__rt_string_drop"));
+    assert!(text.contains("__rt_string_drop"));
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn test_lower_call_array_to_slice_arg() {
         "},
         take_id
     );
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn test_lower_indirect_call() {
         "},
         add_id
     );
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }
 
 #[test]
@@ -335,5 +335,5 @@ fn test_lower_out_param_def() {
             ret
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(&text, expected);
 }

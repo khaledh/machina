@@ -49,7 +49,7 @@ fn test_cleanup_removes_unreachable_block() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    super::assert_ir_eq(text, expected);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn test_cleanup_prunes_empty_block() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    super::assert_ir_eq(text, expected);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn test_cleanup_merges_single_pred_block() {
             ret %v0
         }
     "};
-    assert_eq!(text, expected);
+    super::assert_ir_eq(text, expected);
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn test_cleanup_collapses_switch_targets() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    super::assert_ir_eq(text, expected);
 }
 
 #[test]
@@ -244,5 +244,5 @@ fn test_cleanup_prunes_unused_block_param() {
             ret %v2
         }
     "};
-    assert_eq!(text, expected);
+    super::assert_ir_eq(text, expected);
 }

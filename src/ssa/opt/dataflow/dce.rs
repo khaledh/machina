@@ -26,18 +26,39 @@ impl Pass for DeadCodeElim {
             add_term_uses(&block.term, &mut live);
 
             let mut kept = Vec::with_capacity(block.insts.len());
+            let mut pending_comments = Vec::new();
 
             for inst in block.insts.iter().rev() {
                 // Backward sweep: a def is dead if it doesn't reach any use and has no effects.
                 if should_keep(inst, &live) {
+                    let mut kept_inst = inst.clone();
+                    if !pending_comments.is_empty() {
+                        let mut combined = Vec::new();
+                        combined.append(&mut pending_comments);
+                        combined.append(&mut kept_inst.comments);
+                        kept_inst.comments = combined;
+                    }
                     update_live(inst, &mut live);
-                    kept.push(inst.clone());
+                    kept.push(kept_inst);
                 } else {
                     changed = true;
+                    if !inst.comments.is_empty() {
+                        let mut combined = inst.comments.clone();
+                        combined.append(&mut pending_comments);
+                        pending_comments = combined;
+                    }
                 }
             }
 
             kept.reverse();
+            if !pending_comments.is_empty() {
+                if let Some(first) = kept.first_mut() {
+                    let mut combined = Vec::new();
+                    combined.append(&mut pending_comments);
+                    combined.append(&mut first.comments);
+                    first.comments = combined;
+                }
+            }
             block.insts = kept;
         }
 

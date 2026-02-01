@@ -1,3 +1,4 @@
+use super::assert_ir_eq;
 use super::lower_and_optimize;
 use indoc::indoc;
 
@@ -17,7 +18,7 @@ fn test_dce_removes_unused_binop() {
             ret %v3
         }
     "};
-    assert_eq!(text, expected);
+    assert_ir_eq(text, expected);
 }
 
 #[test]
@@ -61,5 +62,5 @@ fn test_dce_keeps_call() {
         "},
         side_id
     );
-    assert_eq!(text, expected);
+    assert_ir_eq(text, expected);
 }
