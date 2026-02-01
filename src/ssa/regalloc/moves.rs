@@ -198,8 +198,7 @@ fn plan_entry_moves(
     param_reg_count: usize,
     plan: &mut MovePlan,
 ) {
-    let mut next_reg = 0usize;
-    let mut next_stack = 0u32;
+    let mut assigner = AbiAssigner::new(target, param_reg_count, ArgStackKind::Incoming);
 
     for param in entry.params.iter() {
         let param_id = param.value.id;
@@ -210,17 +209,10 @@ fn plan_entry_moves(
             .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", param_id));
 
         let pass = arg_pass_info(types, ty);
-        let src_locs = abi_arg_locations(
-            pass,
-            param_reg_count,
-            target,
-            &mut next_reg,
-            &mut next_stack,
-            ArgStackKind::Incoming,
-        );
+        let src_locs = assigner.next_locs(pass);
 
-        if pass.by_value {
-            if types.is_reg_type(ty) {
+        match pass.kind {
+            PassKind::Reg => {
                 let src = src_locs
                     .first()
                     .copied()
@@ -233,50 +225,46 @@ fn plan_entry_moves(
                         size,
                     });
                 }
-                continue;
             }
-
-            let Location::Stack(slot) = alloc else {
-                panic!(
-                    "ssa regalloc: aggregate param must be stack-backed, got {:?}",
-                    alloc
-                );
-            };
-            for (idx, src) in src_locs.iter().enumerate() {
-                let offset = (idx as u32) * 8;
-                let size = pass.size.saturating_sub(offset).min(8);
-                if size == 0 {
-                    continue;
-                }
-                let dst = Location::StackOffset(slot, offset);
-                if *src != dst {
-                    plan.entry_moves.push(MoveOp {
-                        src: *src,
-                        dst,
-                        size,
+            PassKind::ByValueAgg => {
+                let Location::Stack(slot) = alloc else {
+                    panic!(
+                        "ssa regalloc: aggregate param must be stack-backed, got {:?}",
+                        alloc
+                    );
+                };
+                for_each_agg_chunk(pass.size, |offset, size, idx| {
+                    let Some(src) = src_locs.get(idx) else { return };
+                    let dst = Location::StackOffset(slot, offset);
+                    if *src != dst {
+                        plan.entry_moves.push(MoveOp {
+                            src: *src,
+                            dst,
+                            size,
+                        });
+                    }
+                });
+            }
+            PassKind::ByRef => {
+                // Aggregate params passed by reference are copied into their stack slot at entry.
+                let Location::Stack(slot) = alloc else {
+                    panic!(
+                        "ssa regalloc: aggregate param must be stack-backed, got {:?}",
+                        alloc
+                    );
+                };
+                if pass.size > 0 {
+                    let src = src_locs
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| panic!("ssa regalloc: missing ABI src for param"));
+                    plan.param_copies.push(ParamCopy {
+                        src,
+                        dst: slot,
+                        size: pass.size,
                     });
                 }
             }
-            continue;
-        }
-
-        // Aggregate params passed by reference are copied into their stack slot at entry.
-        let Location::Stack(slot) = alloc else {
-            panic!(
-                "ssa regalloc: aggregate param must be stack-backed, got {:?}",
-                alloc
-            );
-        };
-        if pass.size > 0 {
-            let src = src_locs
-                .first()
-                .copied()
-                .unwrap_or_else(|| panic!("ssa regalloc: missing ABI src for param"));
-            plan.param_copies.push(ParamCopy {
-                src,
-                dst: slot,
-                size: pass.size,
-            });
         }
     }
 }
@@ -628,9 +616,16 @@ pub(crate) enum ArgStackKind {
     Outgoing,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PassKind {
+    Reg,
+    ByValueAgg,
+    ByRef,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ArgPassInfo {
-    by_value: bool,
+    pub(crate) kind: PassKind,
     size: u32,
 }
 
@@ -638,13 +633,17 @@ pub(crate) fn arg_pass_info(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -
     let size = types.layout(ty).size() as u32;
     if types.is_reg_type(ty) {
         return ArgPassInfo {
-            by_value: true,
+            kind: PassKind::Reg,
             size,
         };
     }
 
     ArgPassInfo {
-        by_value: size <= 16,
+        kind: if size <= 16 {
+            PassKind::ByValueAgg
+        } else {
+            PassKind::ByRef
+        },
         size,
     }
 }
@@ -664,7 +663,7 @@ pub(crate) fn abi_arg_locations(
     next_stack: &mut u32,
     stack_kind: ArgStackKind,
 ) -> Vec<Location> {
-    if !pass.by_value || pass.size <= 8 {
+    if pass.kind != PassKind::ByValueAgg || pass.size <= 8 {
         if *next_reg < param_reg_count {
             let reg = target
                 .param_reg(*next_reg as u32)
@@ -696,6 +695,41 @@ pub(crate) fn abi_arg_locations(
     ]
 }
 
+struct AbiAssigner<'a> {
+    target: &'a dyn TargetSpec,
+    param_reg_count: usize,
+    next_reg: usize,
+    next_stack: u32,
+    stack_kind: ArgStackKind,
+}
+
+impl<'a> AbiAssigner<'a> {
+    fn new(target: &'a dyn TargetSpec, param_reg_count: usize, stack_kind: ArgStackKind) -> Self {
+        Self {
+            target,
+            param_reg_count,
+            next_reg: 0,
+            next_stack: 0,
+            stack_kind,
+        }
+    }
+
+    fn next_locs(&mut self, pass: ArgPassInfo) -> Vec<Location> {
+        abi_arg_locations(
+            pass,
+            self.param_reg_count,
+            self.target,
+            &mut self.next_reg,
+            &mut self.next_stack,
+            self.stack_kind,
+        )
+    }
+
+    fn stack_bytes(&self) -> u32 {
+        self.next_stack
+    }
+}
+
 /// Looks up the type of a call argument.
 fn call_arg_type(
     value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
@@ -722,21 +756,13 @@ pub(crate) fn outgoing_stack_bytes_for_call(
     target: &dyn TargetSpec,
     param_reg_count: usize,
 ) -> u32 {
-    let mut next_reg = 0usize;
-    let mut next_stack = 0u32;
+    let mut assigner = AbiAssigner::new(target, param_reg_count, ArgStackKind::Outgoing);
     for arg in args {
         let arg_ty = call_arg_type(value_types, arg);
         let pass = arg_pass_info(types, arg_ty);
-        let _ = abi_arg_locations(
-            pass,
-            param_reg_count,
-            target,
-            &mut next_reg,
-            &mut next_stack,
-            ArgStackKind::Outgoing,
-        );
+        let _ = assigner.next_locs(pass);
     }
-    next_stack
+    assigner.stack_bytes()
 }
 
 /// Plans all moves for a single call instruction.
@@ -800,77 +826,65 @@ fn plan_call_moves(
         }
     }
 
-    let mut next_reg = 0usize;
-    let mut next_stack = 0u32;
+    let mut assigner = AbiAssigner::new(target, param_reg_count, ArgStackKind::Outgoing);
 
     // Move each argument to its ABI-specified location (register or stack slot)
     for arg in args {
         let arg_ty = call_arg_type(value_types, arg);
         let pass = arg_pass_info(types, arg_ty);
-        let dst_locs = abi_arg_locations(
-            pass,
-            param_reg_count,
-            target,
-            &mut next_reg,
-            &mut next_stack,
-            ArgStackKind::Outgoing,
-        );
-        if !pass.by_value {
-            let src = match call_arg_src(*arg, alloc_map) {
-                Location::Stack(slot) => Location::StackAddr(slot),
-                Location::StackAddr(slot) => Location::StackAddr(slot),
-                other => {
-                    panic!(
-                        "ssa regalloc: aggregate arg must be stack-backed, got {:?}",
-                        other
-                    );
+        let dst_locs = assigner.next_locs(pass);
+        match pass.kind {
+            PassKind::Reg => {
+                let src = call_arg_src(*arg, alloc_map);
+                let dst = dst_locs
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| panic!("ssa regalloc: missing ABI dst for arg"));
+                if src != dst {
+                    let size = move_size_for(types, arg_ty, src, dst);
+                    pre_moves.push(MoveOp { src, dst, size });
                 }
-            };
-            let dst = dst_locs
-                .first()
-                .copied()
-                .unwrap_or_else(|| panic!("ssa regalloc: missing ABI dst for arg"));
-            if src != dst {
-                let size = move_size_for(types, arg_ty, src, dst);
-                pre_moves.push(MoveOp { src, dst, size });
             }
-            continue;
-        }
-
-        if types.is_reg_type(arg_ty) {
-            let src = call_arg_src(*arg, alloc_map);
-            let dst = dst_locs
-                .first()
-                .copied()
-                .unwrap_or_else(|| panic!("ssa regalloc: missing ABI dst for arg"));
-            if src != dst {
-                let size = move_size_for(types, arg_ty, src, dst);
-                pre_moves.push(MoveOp { src, dst, size });
+            PassKind::ByRef => {
+                let src = match call_arg_src(*arg, alloc_map) {
+                    Location::Stack(slot) => Location::StackAddr(slot),
+                    Location::StackAddr(slot) => Location::StackAddr(slot),
+                    other => {
+                        panic!(
+                            "ssa regalloc: aggregate arg must be stack-backed, got {:?}",
+                            other
+                        );
+                    }
+                };
+                let dst = dst_locs
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| panic!("ssa regalloc: missing ABI dst for arg"));
+                if src != dst {
+                    let size = move_size_for(types, arg_ty, src, dst);
+                    pre_moves.push(MoveOp { src, dst, size });
+                }
             }
-            continue;
-        }
-
-        let src_slot = match call_arg_src(*arg, alloc_map) {
-            Location::Stack(slot) => slot,
-            other => {
-                panic!(
-                    "ssa regalloc: by-value aggregate arg must be stack-backed, got {:?}",
-                    other
-                );
+            PassKind::ByValueAgg => {
+                let src_slot = match call_arg_src(*arg, alloc_map) {
+                    Location::Stack(slot) => slot,
+                    other => {
+                        panic!(
+                            "ssa regalloc: by-value aggregate arg must be stack-backed, got {:?}",
+                            other
+                        );
+                    }
+                };
+                for_each_agg_chunk(pass.size, |offset, size, idx| {
+                    let Some(dst) = dst_locs.get(idx) else { return };
+                    let src = Location::StackOffset(src_slot, offset);
+                    pre_moves.push(MoveOp {
+                        src,
+                        dst: *dst,
+                        size,
+                    });
+                });
             }
-        };
-        for (idx, dst) in dst_locs.iter().enumerate() {
-            let offset = (idx as u32) * 8;
-            let size = pass.size.saturating_sub(offset).min(8);
-            if size == 0 {
-                continue;
-            }
-            let src = Location::StackOffset(src_slot, offset);
-            pre_moves.push(MoveOp {
-                src,
-                dst: *dst,
-                size,
-            });
         }
     }
 
@@ -881,7 +895,8 @@ fn plan_call_moves(
                 .get(&result.id)
                 .copied()
                 .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", result.id));
-            if types.is_reg_type(result.ty) {
+            let pass = arg_pass_info(types, result.ty);
+            if pass.kind == PassKind::Reg {
                 let src = Location::Reg(target.result_reg());
                 if src != dst_loc {
                     let size = move_size_for(types, result.ty, src, dst_loc);
@@ -892,33 +907,27 @@ fn plan_call_moves(
                     });
                 }
             } else {
-                let size = types.layout(result.ty).size() as u32;
                 let Location::Stack(slot) = dst_loc else {
                     panic!(
                         "ssa regalloc: aggregate return must be stack-backed, got {:?}",
                         dst_loc
                     );
                 };
-                let src0 = Location::Reg(target.result_reg());
-                let size0 = size.min(8);
-                if size0 > 0 {
+                for_each_agg_chunk(pass.size, |offset, size, idx| {
+                    let src = if idx == 0 {
+                        Location::Reg(target.result_reg())
+                    } else {
+                        let reg1 = target.param_reg(1).unwrap_or_else(|| {
+                            panic!("ssa regalloc: aggregate return requires second result reg")
+                        });
+                        Location::Reg(reg1)
+                    };
                     post_moves.push(MoveOp {
-                        src: src0,
-                        dst: Location::StackOffset(slot, 0),
-                        size: size0,
+                        src,
+                        dst: Location::StackOffset(slot, offset),
+                        size,
                     });
-                }
-                if size > 8 {
-                    let reg1 = target.param_reg(1).unwrap_or_else(|| {
-                        panic!("ssa regalloc: aggregate return requires second result reg")
-                    });
-                    let size1 = size.saturating_sub(8).min(8);
-                    post_moves.push(MoveOp {
-                        src: Location::Reg(reg1),
-                        dst: Location::StackOffset(slot, 8),
-                        size: size1,
-                    });
-                }
+                });
             }
         }
     }
@@ -932,5 +941,22 @@ fn plan_call_moves(
             pre_moves,
             post_moves,
         })
+    }
+}
+
+fn for_each_agg_chunk(mut size: u32, mut f: impl FnMut(u32, u32, usize)) {
+    if size == 0 {
+        return;
+    }
+    let size0 = size.min(8);
+    if size0 > 0 {
+        f(0, size0, 0);
+    }
+    if size > 8 {
+        size = size.saturating_sub(8);
+        let size1 = size.min(8);
+        if size1 > 0 {
+            f(8, size1, 1);
+        }
     }
 }

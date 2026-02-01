@@ -526,7 +526,7 @@ fn test_regalloc_call_moves_small_aggregate_return() {
     assert!(
         call_move.post_moves.iter().any(|mov| matches!(
             (mov.src, mov.dst),
-            (Location::Reg(reg), Location::Stack(_)) if reg == PhysReg(0)
+            (Location::Reg(reg), Location::StackOffset(_, 0)) if reg == PhysReg(0)
         )),
         "small aggregate return should move result reg to stack"
     );

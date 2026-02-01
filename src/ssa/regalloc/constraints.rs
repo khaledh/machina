@@ -84,7 +84,8 @@ pub fn build(
             .get(value)
             .copied()
             .unwrap_or_else(|| panic!("ssa regalloc: missing return type for {:?}", value));
-        if !param_set.contains(value) && types.is_reg_type(ty) {
+        let pass = moves::arg_pass_info(types, ty);
+        if !param_set.contains(value) && pass.kind == moves::PassKind::Reg {
             let interval = analysis
                 .intervals
                 .get(value)
@@ -119,7 +120,7 @@ pub fn build(
             &mut next_stack,
             moves::ArgStackKind::Incoming,
         );
-        if types.is_reg_type(ty) {
+        if pass.kind == moves::PassKind::Reg {
             if let Some(Location::Reg(reg)) = src_locs.first().copied() {
                 let interval = analysis
                     .intervals
@@ -153,7 +154,7 @@ pub fn build(
             &mut next_stack,
             moves::ArgStackKind::Incoming,
         );
-        if types.is_reg_type(ty) {
+        if pass.kind == moves::PassKind::Reg {
             if let Some(Location::IncomingArg(offset)) = src_locs.first().copied() {
                 incoming_args.insert(*value, offset);
             }
