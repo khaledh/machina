@@ -13,6 +13,7 @@ use crate::ssa::model::ir::{
 };
 use crate::ssa::regalloc::moves::MoveOp;
 use crate::ssa::regalloc::{Location, StackSlotId};
+use crate::targets::arm64::regs::INDIRECT_CALL_REG;
 
 #[derive(Debug, Clone, Copy)]
 struct FrameLayout {
@@ -536,7 +537,11 @@ impl Arm64Emitter {
     fn is_reg_type(locs: &LocationResolver, ty: crate::ssa::IrTypeId) -> bool {
         matches!(
             locs.types.kind(ty),
-            IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. }
+            IrTypeKind::Unit
+                | IrTypeKind::Bool
+                | IrTypeKind::Int { .. }
+                | IrTypeKind::Ptr { .. }
+                | IrTypeKind::Fn { .. }
         )
     }
 
@@ -1649,10 +1654,8 @@ impl CodegenEmitter for Arm64Emitter {
                 Callee::Runtime(rt) => {
                     self.emit_line(&format!("bl _{}", rt.name()));
                 }
-                Callee::Value(value) => {
-                    let callee = locs.value(*value);
-                    let callee_ty = locs.value_ty(*value);
-                    let reg = self.load_value_typed(locs, callee, callee_ty, "x9");
+                Callee::Value(_) => {
+                    let reg = Self::reg_name(INDIRECT_CALL_REG);
                     self.emit_line(&format!("blr {}", reg));
                 }
             },

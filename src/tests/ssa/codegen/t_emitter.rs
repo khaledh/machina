@@ -78,7 +78,7 @@ impl TargetSpec for TinyTarget {
     }
 
     fn indirect_call_reg(&self) -> PhysReg {
-        PhysReg(0)
+        PhysReg(16)
     }
 
     fn scratch_regs(&self) -> &[PhysReg] {
@@ -142,7 +142,7 @@ impl TargetSpec for AapcsTarget {
     }
 
     fn indirect_call_reg(&self) -> PhysReg {
-        PhysReg(9)
+        PhysReg(16)
     }
 
     fn scratch_regs(&self) -> &[PhysReg] {

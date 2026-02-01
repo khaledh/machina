@@ -104,6 +104,7 @@ pub fn regalloc(
                     | crate::ssa::IrTypeKind::Bool
                     | crate::ssa::IrTypeKind::Int { .. }
                     | crate::ssa::IrTypeKind::Ptr { .. }
+                    | crate::ssa::IrTypeKind::Fn { .. }
             );
             if is_reg {
                 let offset = ((index - param_reg_count) as u32) * 8;

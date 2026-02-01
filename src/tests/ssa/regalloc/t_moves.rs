@@ -74,6 +74,58 @@ impl TargetSpec for CallTarget {
     }
 }
 
+struct IndirectCallTarget {
+    allocatable: Vec<PhysReg>,
+    indirect_call: PhysReg,
+}
+
+impl IndirectCallTarget {
+    fn new(allocatable: Vec<PhysReg>, indirect_call: PhysReg) -> Self {
+        Self {
+            allocatable,
+            indirect_call,
+        }
+    }
+}
+
+impl TargetSpec for IndirectCallTarget {
+    fn allocatable_regs(&self) -> &[PhysReg] {
+        &self.allocatable
+    }
+
+    fn caller_saved(&self) -> &[PhysReg] {
+        &self.allocatable
+    }
+
+    fn callee_saved(&self) -> &[PhysReg] {
+        &[]
+    }
+
+    fn param_reg(&self, _index: u32) -> Option<PhysReg> {
+        None
+    }
+
+    fn result_reg(&self) -> PhysReg {
+        PhysReg(99)
+    }
+
+    fn indirect_result_reg(&self) -> Option<PhysReg> {
+        None
+    }
+
+    fn indirect_call_reg(&self) -> PhysReg {
+        self.indirect_call
+    }
+
+    fn scratch_regs(&self) -> &[PhysReg] {
+        &[]
+    }
+
+    fn reg_name(&self, _reg: PhysReg) -> &'static str {
+        "rx"
+    }
+}
+
 #[test]
 fn test_regalloc_edge_moves_for_block_args() {
     let mut types = IrTypeCache::new();
@@ -271,6 +323,42 @@ fn test_regalloc_call_moves_sret() {
         (mov.src, mov.dst),
         (Location::StackAddr(_), Location::Reg(reg)) if reg == PhysReg(8)
     )));
+}
+
+#[test]
+fn test_regalloc_call_moves_indirect_callee() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let fn_ty = types.add(IrTypeKind::Fn {
+        params: vec![],
+        ret: unit_ty,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "call_indirect",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let func_ptr = builder.const_func_addr(DefId(1), fn_ty);
+    builder.call(Callee::Value(func_ptr), vec![], unit_ty);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = IndirectCallTarget::new(vec![PhysReg(1), PhysReg(2)], PhysReg(0));
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let call_move = alloc.call_moves.first().expect("missing call moves");
+    assert_eq!(call_move.pre_moves.len(), 1);
+    assert!(call_move.post_moves.iter().all(|mov| mov.size == 0));
+    assert_eq!(
+        call_move.pre_moves[0].dst,
+        Location::Reg(target.indirect_call_reg())
+    );
 }
 
 #[test]

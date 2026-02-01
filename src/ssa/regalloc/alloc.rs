@@ -383,5 +383,6 @@ fn is_reg_type(types: &mut IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
             | crate::ssa::IrTypeKind::Bool
             | crate::ssa::IrTypeKind::Int { .. }
             | crate::ssa::IrTypeKind::Ptr { .. }
+            | crate::ssa::IrTypeKind::Fn { .. }
     )
 }

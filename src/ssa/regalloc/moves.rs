@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::regalloc::target::TargetSpec;
 use crate::ssa::IrTypeCache;
 use crate::ssa::IrTypeKind;
-use crate::ssa::model::ir::{BlockId, Function, InstKind, Terminator, ValueId};
+use crate::ssa::model::ir::{BlockId, Callee, Function, InstKind, Terminator, ValueId};
 
 use super::{Location, ValueAllocMap};
 
@@ -79,10 +79,11 @@ pub fn build_move_plan(
 
     for block in &func.blocks {
         for (inst_index, inst) in block.insts.iter().enumerate() {
-            if let InstKind::Call { args, .. } = &inst.kind {
+            if let InstKind::Call { callee, args } = &inst.kind {
                 if let Some(call_move) = plan_call_moves(
                     block.id,
                     inst_index,
+                    callee,
                     args,
                     inst.result.as_ref(),
                     alloc_map,
@@ -382,7 +383,11 @@ fn move_size_for(
 fn is_reg_type(types: &IrTypeCache, ty: crate::ssa::IrTypeId) -> bool {
     matches!(
         types.kind(ty),
-        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. }
+        IrTypeKind::Unit
+            | IrTypeKind::Bool
+            | IrTypeKind::Int { .. }
+            | IrTypeKind::Ptr { .. }
+            | IrTypeKind::Fn { .. }
     )
 }
 
@@ -438,6 +443,7 @@ fn call_arg_dst(idx: usize, param_reg_count: usize, target: &dyn TargetSpec) -> 
 fn plan_call_moves(
     block: BlockId,
     inst_index: usize,
+    callee: &Callee,
     args: &[ValueId],
     result: Option<&crate::ssa::model::ir::ValueDef>,
     alloc_map: &ValueAllocMap,
@@ -448,6 +454,15 @@ fn plan_call_moves(
 ) -> Option<CallMove> {
     let mut pre_moves = Vec::new();
     let mut post_moves = Vec::new();
+
+    if let Callee::Value(value) = callee {
+        let (src, callee_ty) = call_arg_src(*value, alloc_map, value_types, types);
+        let dst = Location::Reg(target.indirect_call_reg());
+        if src != dst {
+            let size = move_size_for(types, callee_ty, src, dst);
+            pre_moves.push(MoveOp { src, dst, size });
+        }
+    }
 
     if let Some(result) = result {
         if needs_sret(types, result.ty) {
