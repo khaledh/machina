@@ -306,6 +306,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         // The exit block should see the same drop scope depth as before the loop.
         self.restore_drop_scopes(&drop_snapshot);
+        // Loop exits merge control flow; conservatively drop liveness knowledge.
+        self.invalidate_drop_liveness();
 
         Ok(())
     }

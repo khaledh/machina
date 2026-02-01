@@ -79,6 +79,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) drop_tracker: DropTracker<'a>,
     pub(super) drop_glue: &'g mut DropGlueRegistry,
     pub(super) globals: &'g mut GlobalArena,
+    pub(super) trace_drops: bool,
 }
 
 /// Base pointer + length pair for slice-like lowering.
@@ -155,6 +156,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
+        trace_drops: bool,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
 
@@ -221,6 +223,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             drop_tracker: DropTracker::new(),
             drop_glue,
             globals,
+            trace_drops,
         }
     }
 
@@ -236,6 +239,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
+        trace_drops: bool,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
 
@@ -332,6 +336,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             drop_tracker: DropTracker::new(),
             drop_glue,
             globals,
+            trace_drops,
         }
     }
 
@@ -344,6 +349,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
+        trace_drops: bool,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
         let param_ir = type_lowerer.lower_type(&param_ty);
@@ -369,6 +375,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             drop_tracker: DropTracker::new(),
             drop_glue,
             globals,
+            trace_drops,
         }
     }
 
@@ -424,6 +431,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn annotate_expr(&mut self, expr: &sem::ValueExpr) {
         self.builder
             .annotate_next_inst(format_semantic_value_expr_compact(expr));
+    }
+
+    pub(super) fn trace_drop(&mut self, message: impl Into<String>) {
+        if self.trace_drops {
+            self.builder.annotate_next_inst(message);
+        }
     }
 
     pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ParamMode> {

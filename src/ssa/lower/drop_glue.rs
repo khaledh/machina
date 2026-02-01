@@ -86,6 +86,7 @@ impl DropGlueRegistry {
         def_table: &DefTable,
         type_map: &TypeMap,
         globals: &mut GlobalArena,
+        trace_drops: bool,
     ) -> Result<Vec<LoweredFunction>, LoweringError> {
         let mut funcs = Vec::new();
         let empty_plans: HashMap<NodeId, sem::LoweringPlan> = HashMap::new();
@@ -109,6 +110,7 @@ impl DropGlueRegistry {
                 &empty_plans,
                 self,
                 globals,
+                trace_drops,
             );
 
             let entry = lowerer.builder.current_block();

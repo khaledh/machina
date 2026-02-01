@@ -29,6 +29,7 @@ pub struct CompileOptions {
     pub target: TargetKind,
     pub emit_ir: bool,
     pub trace_alloc: bool,
+    pub trace_drops: bool,
     pub backend: BackendKind,
     pub inject_prelude: bool,
 }
@@ -319,6 +320,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                 &analyzed_context.lowering_plans,
                 &analyzed_context.drop_plans,
                 opts.trace_alloc,
+                opts.trace_drops,
             )
             .map_err(|e| vec![e.into()])?;
 

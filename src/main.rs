@@ -38,6 +38,10 @@ struct Args {
     #[clap(long = "trace-alloc", global = true)]
     trace_alloc: bool,
 
+    /// Emit SSA drop trace comments into the IR.
+    #[clap(long = "trace-drops", global = true)]
+    trace_drops: bool,
+
     /// Backend pipeline to use: legacy MCIR or new SSA.
     #[clap(long, value_enum, default_value_t = BackendKind::Ssa, global = true)]
     backend: BackendKind,
@@ -98,6 +102,7 @@ fn main() {
         target,
         emit,
         trace_alloc,
+        trace_drops,
         backend,
     } = Args::parse();
     let invocation = match cmd {
@@ -132,6 +137,7 @@ fn main() {
         target,
         emit_ir,
         trace_alloc,
+        trace_drops,
         backend,
         inject_prelude: true,
     };
@@ -361,6 +367,7 @@ fn compile_prelude_impl_object(
         target: opts.target,
         emit_ir: opts.emit_ir,
         trace_alloc: opts.trace_alloc,
+        trace_drops: opts.trace_drops,
         backend: opts.backend,
         inject_prelude: false,
     };

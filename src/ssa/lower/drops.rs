@@ -18,6 +18,13 @@ pub(super) struct DropTracker<'a> {
     plans: Option<&'a sem::DropPlanMap>,
     scopes: Vec<NodeId>,
     flags: HashMap<DefId, ValueId>,
+    known_live: HashMap<DefId, bool>,
+}
+
+#[derive(Clone)]
+pub(super) struct DropSnapshot {
+    scopes: Vec<NodeId>,
+    known_live: HashMap<DefId, bool>,
 }
 
 impl<'a> DropTracker<'a> {
@@ -26,6 +33,7 @@ impl<'a> DropTracker<'a> {
             plans: None,
             scopes: Vec::new(),
             flags: HashMap::new(),
+            known_live: HashMap::new(),
         }
     }
 
@@ -42,13 +50,17 @@ impl<'a> DropTracker<'a> {
     }
 
     /// Clones the current scope stack for later restoration (e.g., across branches).
-    pub(super) fn snapshot(&self) -> Vec<NodeId> {
-        self.scopes.clone()
+    pub(super) fn snapshot(&self) -> DropSnapshot {
+        DropSnapshot {
+            scopes: self.scopes.clone(),
+            known_live: self.known_live.clone(),
+        }
     }
 
     /// Restores a previously captured scope stack snapshot.
-    pub(super) fn restore(&mut self, snapshot: &[NodeId]) {
-        self.scopes = snapshot.to_vec();
+    pub(super) fn restore(&mut self, snapshot: &DropSnapshot) {
+        self.scopes = snapshot.scopes.clone();
+        self.known_live = snapshot.known_live.clone();
     }
 
     pub(super) fn enter_scope(&mut self, id: NodeId) {
@@ -120,6 +132,18 @@ impl<'a> DropTracker<'a> {
         self.flags.insert(def_id, addr);
     }
 
+    pub(super) fn set_known_live(&mut self, def_id: DefId, value: bool) {
+        self.known_live.insert(def_id, value);
+    }
+
+    pub(super) fn known_live(&self, def_id: DefId) -> Option<bool> {
+        self.known_live.get(&def_id).copied()
+    }
+
+    pub(super) fn invalidate_known_live(&mut self) {
+        self.known_live.clear();
+    }
+
     fn pop_scope(&mut self, id: NodeId) -> NodeId {
         let scope_id = self
             .scopes
@@ -170,13 +194,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Captures the active drop scope stack for branch-local lowering.
-    pub(super) fn drop_scopes_snapshot(&self) -> Vec<NodeId> {
+    pub(super) fn drop_scopes_snapshot(&self) -> DropSnapshot {
         self.drop_tracker.snapshot()
     }
 
     /// Restores a previously captured drop scope stack snapshot.
-    pub(super) fn restore_drop_scopes(&mut self, snapshot: &[NodeId]) {
+    pub(super) fn restore_drop_scopes(&mut self, snapshot: &DropSnapshot) {
         self.drop_tracker.restore(snapshot);
+    }
+
+    pub(super) fn invalidate_drop_liveness(&mut self) {
+        self.drop_tracker.invalidate_known_live();
     }
 
     pub(super) fn enter_drop_scope(&mut self, id: NodeId) {
@@ -228,6 +256,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .flag(def_id)
             .unwrap_or_else(|| panic!("ssa drop missing flag for {:?}", def_id));
         self.emit_drop_if_flag(flag_addr, |lowerer| {
+            lowerer.trace_drop(format!("drop-if-live {}", lowerer.def(def_id).name));
             let local = lowerer.lookup_local(def_id);
             let (value, is_addr) = match local.storage {
                 crate::ssa::lower::locals::LocalStorage::Value(value) => (value, false),
@@ -255,6 +284,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 addr
             }
         };
+        self.trace_drop(format!("drop-flag {} = {}", self.def(def_id).name, value));
+        self.drop_tracker.set_known_live(def_id, value);
         self.store_drop_flag(flag_addr, value);
     }
 
@@ -275,9 +306,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     fn emit_drop_item(&mut self, item: &sem::DropItem) -> Result<(), LoweringError> {
+        if self.drop_tracker.known_live(item.def_id) == Some(false) {
+            return Ok(());
+        }
+
         match item.guard {
             sem::DropGuard::Always => {
-                self.emit_drop_for_def(item.def_id, item.ty)?;
+                if let Some(flag_addr) = self.drop_tracker.flag(item.def_id) {
+                    self.emit_drop_if_flag(flag_addr, |lowerer| {
+                        lowerer.emit_drop_for_def(item.def_id, item.ty)
+                    })?;
+                } else {
+                    self.emit_drop_for_def(item.def_id, item.ty)?;
+                }
                 Ok(())
             }
             sem::DropGuard::IfInitialized => {
@@ -327,11 +368,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn emit_drop_for_def(
-        &mut self,
-        def_id: DefId,
-        ty_id: crate::types::TypeId,
-    ) -> Result<(), LoweringError> {
+    fn emit_drop_for_def(&mut self, def_id: DefId, ty_id: TypeId) -> Result<(), LoweringError> {
+        self.trace_drop(format!("drop {}", self.def(def_id).name));
         let ty = self.type_map.type_table().get(ty_id).clone();
         let value_ty = self.type_lowerer.lower_type_id(ty_id);
         let addr = self.ensure_local_addr(def_id, value_ty);

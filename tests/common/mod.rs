@@ -80,6 +80,7 @@ fn compile_source(source_path: &Path) -> machina::compile::CompileOutput {
         backend: BackendKind::Ssa,
         emit_ir: false,
         trace_alloc: false,
+        trace_drops: false,
         inject_prelude: true,
     };
     compile(&source, &opts).expect("compile failed")
@@ -94,6 +95,7 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
         backend: BackendKind::Ssa,
         emit_ir: false,
         trace_alloc: false,
+        trace_drops: false,
         inject_prelude: false,
     };
     let prelude = compile(&source, &opts).expect("compile failed");

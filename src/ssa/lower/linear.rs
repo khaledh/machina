@@ -692,8 +692,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
                         if let Some(mode) = self.param_mode_for(*def_id) {
                             if matches!(mode, ParamMode::Out | ParamMode::InOut) {
+                                if !init.is_init && !init.promotes_full {
+                                    self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;
+                                }
                                 let ty = self.type_lowerer.lower_type_id(value_expr.ty);
                                 self.assign_local_value(*def_id, value, ty);
+                                self.set_drop_flag_for_def(*def_id, true);
                                 return Ok(StmtOutcome::Continue);
                             }
                         }
@@ -709,9 +713,33 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let dest_ty = self.type_map.type_table().get(assignee.ty).clone();
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
                         let place_addr = self.lower_place_addr(assignee)?;
+                        if !init.is_init && !init.promotes_full {
+                            self.drop_value_at_addr(place_addr.addr, &dest_ty)?;
+                        }
                         let ir_ty = self.type_lowerer.lower_type_id(value_expr.ty);
                         let sem_ty = self.type_map.type_table().get(value_expr.ty);
                         self.store_value_into_addr(place_addr.addr, value, sem_ty, ir_ty);
+                        if init.promotes_full {
+                            let mut cursor = assignee.as_ref();
+                            let mut base_def = None;
+                            loop {
+                                match &cursor.kind {
+                                    sem::PlaceExprKind::Var { def_id, .. } => {
+                                        base_def = Some(*def_id);
+                                        break;
+                                    }
+                                    sem::PlaceExprKind::StructField { target, .. }
+                                    | sem::PlaceExprKind::TupleField { target, .. }
+                                    | sem::PlaceExprKind::ArrayIndex { target, .. } => {
+                                        cursor = target.as_ref();
+                                    }
+                                    sem::PlaceExprKind::Deref { .. } => break,
+                                }
+                            }
+                            if let Some(def_id) = base_def {
+                                self.set_drop_flag_for_def(def_id, true);
+                            }
+                        }
                         Ok(StmtOutcome::Continue)
                     }
                 }

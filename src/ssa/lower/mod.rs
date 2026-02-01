@@ -62,7 +62,15 @@ pub fn lower_func(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
 ) -> Result<LoweredFunction, LoweringError> {
-    lower_func_with_opts(func, def_table, type_map, lowering_plans, drop_plans, false)
+    lower_func_with_opts(
+        func,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_plans,
+        false,
+        false,
+    )
 }
 
 /// Lowers a semantic function with optional SSA lowering flags.
@@ -73,6 +81,7 @@ pub fn lower_func_with_opts(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
+    trace_drops: bool,
 ) -> Result<LoweredFunction, LoweringError> {
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
@@ -83,6 +92,7 @@ pub fn lower_func_with_opts(
         lowering_plans,
         drop_plans,
         trace_alloc,
+        trace_drops,
         &mut drop_glue,
         &mut globals,
     )
@@ -102,6 +112,7 @@ pub fn lower_module(
         lowering_plans,
         drop_plans,
         false,
+        false,
     )
 }
 
@@ -113,6 +124,7 @@ pub fn lower_module_with_opts(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
+    trace_drops: bool,
 ) -> Result<LoweredModule, LoweringError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
@@ -126,6 +138,7 @@ pub fn lower_module_with_opts(
             lowering_plans,
             drop_plans,
             trace_alloc,
+            trace_drops,
             &mut drop_glue,
             &mut globals,
         )?;
@@ -145,6 +158,7 @@ pub fn lower_module_with_opts(
                 lowering_plans,
                 drop_plans,
                 trace_alloc,
+                trace_drops,
                 &mut drop_glue,
                 &mut globals,
             )?;
@@ -152,7 +166,8 @@ pub fn lower_module_with_opts(
         }
     }
 
-    let mut glue_funcs = drop_glue.take_glue_functions(def_table, type_map, &mut globals)?;
+    let mut glue_funcs =
+        drop_glue.take_glue_functions(def_table, type_map, &mut globals, trace_drops)?;
     funcs.append(&mut glue_funcs);
 
     Ok(LoweredModule {
@@ -168,6 +183,7 @@ fn lower_func_with_globals(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
+    trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
@@ -195,6 +211,7 @@ fn lower_func_with_globals(
         lowering_plans,
         drop_glue,
         globals,
+        trace_drops,
     );
     lowerer.set_drop_plans(drop_plans);
     lowerer.enter_drop_scope(func.id);
@@ -244,6 +261,7 @@ fn lower_method_def_with_globals(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
+    trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
@@ -266,6 +284,7 @@ fn lower_method_def_with_globals(
         lowering_plans,
         drop_glue,
         globals,
+        trace_drops,
     );
     lowerer.set_drop_plans(drop_plans);
     lowerer.enter_drop_scope(method_def.id);

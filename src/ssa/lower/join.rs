@@ -4,9 +4,9 @@ use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
 use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::drops::DropSnapshot;
 use crate::ssa::lower::locals::{LocalSnapshot, LocalValue};
 use crate::ssa::model::ir::{BlockId, Terminator, ValueId};
-use crate::tree::NodeId;
 use crate::tree::semantic as sem;
 
 /// Plan for joining control flow from multiple branches (e.g., if/else arms).
@@ -24,7 +24,7 @@ pub(super) struct JoinPlan {
 pub(super) struct JoinSession {
     plan: JoinPlan,
     saved_locals: LocalSnapshot,
-    saved_drop_scopes: Vec<NodeId>,
+    saved_drop_scopes: DropSnapshot,
 }
 
 impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
@@ -103,7 +103,7 @@ impl JoinSession {
     pub(super) fn new(
         plan: JoinPlan,
         saved_locals: LocalSnapshot,
-        saved_drop_scopes: Vec<NodeId>,
+        saved_drop_scopes: DropSnapshot,
     ) -> Self {
         Self {
             plan,
@@ -135,6 +135,7 @@ impl JoinSession {
 
     pub(super) fn finalize(self, lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>) {
         lowerer.restore_drop_scopes(&self.saved_drop_scopes);
+        lowerer.invalidate_drop_liveness();
         lowerer.builder.select_block(self.plan.join_bb);
         lowerer.locals.set_from_params_like(
             &self.plan.defs,

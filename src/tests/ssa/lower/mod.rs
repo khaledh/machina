@@ -43,6 +43,8 @@ mod branching;
 mod calls;
 #[path = "t_closure.rs"]
 mod closure;
+#[path = "t_drop.rs"]
+mod drop;
 #[path = "t_linear.rs"]
 mod linear;
 #[path = "t_match.rs"]

@@ -5,9 +5,14 @@ use crate::resolve::DefId;
 use crate::ssa::lower::LoweringError;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue};
 use crate::ssa::model::ir::{Callee, RuntimeFn, ValueId};
-use crate::tree::ParamMode;
+use crate::tree::{InitInfo, ParamMode};
 use crate::tree::{NodeId, semantic as sem};
 use crate::types::Type;
+
+enum OutProj<'a> {
+    Struct(&'a str),
+    Tuple(usize),
+}
 
 struct CallInputValue {
     value: ValueId,
@@ -98,7 +103,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     };
                     let should_set = match place.kind {
                         sem::PlaceExprKind::Var { .. } => init.is_init || init.promotes_full,
-                        _ => init.promotes_full,
+                        _ => init.promotes_full || self.out_place_promotes_full(place, init),
                     };
                     if should_set {
                         self.set_drop_flag_for_def(def_id, true);
@@ -111,6 +116,37 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn out_place_promotes_full(&self, place: &sem::PlaceExpr, init: &InitInfo) -> bool {
+        if init.promotes_full || !init.is_init {
+            return false;
+        }
+
+        let (base_def, proj) = match &place.kind {
+            sem::PlaceExprKind::StructField { target, field } => match &target.kind {
+                sem::PlaceExprKind::Var { def_id, .. } => {
+                    (*def_id, OutProj::Struct(field.as_str()))
+                }
+                _ => return false,
+            },
+            sem::PlaceExprKind::TupleField { target, index } => match &target.kind {
+                sem::PlaceExprKind::Var { def_id, .. } => (*def_id, OutProj::Tuple(*index)),
+                _ => return false,
+            },
+            _ => return false,
+        };
+
+        let base_ty = self.def_type(base_def);
+        match (proj, base_ty) {
+            (OutProj::Struct(field), Type::Struct { fields, .. }) => {
+                fields.len() == 1 && fields[0].name == *field
+            }
+            (OutProj::Tuple(index), Type::Tuple { field_tys }) => {
+                field_tys.len() == 1 && index == 0
+            }
+            _ => false,
         }
     }
 
