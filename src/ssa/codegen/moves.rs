@@ -5,19 +5,30 @@ use std::collections::HashMap;
 use crate::ssa::analysis::cfg::Cfg;
 use crate::ssa::model::ir::{BlockId, Function};
 use crate::ssa::regalloc::Location;
-use crate::ssa::regalloc::moves::{CallMove, EdgeMove, MoveOp};
+use crate::ssa::regalloc::moves::{CallMove, EdgeMove, MoveOp, ParamCopy};
 
 /// Move schedule keyed by edges and call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MoveSchedule {
+    entry_moves: Vec<MoveOp>,
+    param_copies: Vec<ParamCopy>,
     edge_moves: HashMap<(BlockId, BlockId), Vec<MoveOp>>,
     call_moves: HashMap<(BlockId, usize), (Vec<MoveOp>, Vec<MoveOp>)>,
 }
 
 impl MoveSchedule {
     /// Build a schedule from regalloc edge/call move lists.
-    pub fn from_moves(edge_moves: &[EdgeMove], call_moves: &[CallMove]) -> Self {
+    pub fn from_moves(
+        edge_moves: &[EdgeMove],
+        call_moves: &[CallMove],
+        entry_moves: &[MoveOp],
+        param_copies: &[ParamCopy],
+    ) -> Self {
         let mut schedule = MoveSchedule::default();
+
+        validate_moves("entry", entry_moves);
+        schedule.entry_moves = entry_moves.to_vec();
+        schedule.param_copies = param_copies.to_vec();
 
         for edge in edge_moves {
             validate_moves(
@@ -52,6 +63,16 @@ impl MoveSchedule {
         self.edge_moves
             .get(&(from, to))
             .map(|moves: &Vec<MoveOp>| moves.as_slice())
+    }
+
+    /// Returns the entry moves executed before the entry block.
+    pub fn entry_moves(&self) -> &[MoveOp] {
+        &self.entry_moves
+    }
+
+    /// Returns parameter copies for aggregate params.
+    pub fn param_copies(&self) -> &[ParamCopy] {
+        &self.param_copies
     }
 
     /// Returns the pre-/post-moves for a call site.

@@ -138,7 +138,8 @@ pub fn emit_graph_with_emitter(
     };
     sink.emitter
         .begin_function(func_label, total_frame_size, &callee_saved);
-    sink.emitter.emit_param_moves(func, &sink.locs);
+    sink.emitter.emit_param_copies(graph.param_copies());
+    sink.emitter.emit_moves(graph.entry_moves());
     emit_graph(graph, func, &mut sink);
     sink.emitter.end_function();
 }

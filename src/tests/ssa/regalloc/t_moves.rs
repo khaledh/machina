@@ -388,6 +388,8 @@ fn test_regalloc_call_moves_indirect_callee() {
 #[test]
 fn test_move_plan_resolves_cycle_with_scratch() {
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),
@@ -441,6 +443,8 @@ fn test_move_plan_resolves_cycle_with_scratch() {
 fn test_move_plan_respects_scratch_clobber() {
     let scratch = PhysReg(0);
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),
@@ -607,6 +611,8 @@ fn test_regalloc_multiple_block_params() {
 fn test_move_plan_three_way_cycle() {
     // Test cycle: r0 -> r1 -> r2 -> r0
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),
@@ -650,6 +656,8 @@ fn test_move_plan_three_way_cycle() {
 fn test_move_plan_no_cycle() {
     // Non-cyclic moves: r0 -> r1, r2 -> r3 (independent, no ordering needed)
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),
@@ -681,6 +689,8 @@ fn test_move_plan_no_cycle() {
 fn test_move_plan_chain_ordering() {
     // Chain: r0 -> r1, r1 -> r2 (must emit r1->r2 before r0->r1)
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),
@@ -725,6 +735,8 @@ fn test_move_plan_chain_ordering() {
 #[test]
 fn test_move_plan_single_move_unchanged() {
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),
@@ -749,6 +761,8 @@ fn test_move_plan_single_move_unchanged() {
 #[test]
 fn test_move_plan_empty_scratch_noop() {
     let mut plan = MovePlan {
+        entry_moves: Vec::new(),
+        param_copies: Vec::new(),
         edge_moves: vec![EdgeMove {
             from: BlockId(0),
             to: BlockId(1),

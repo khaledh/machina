@@ -40,6 +40,10 @@ pub struct AllocationResult {
     pub stack_slot_count: u32,
     /// Callee-saved registers that must be preserved by the prologue/epilogue.
     pub used_callee_saved: Vec<PhysReg>,
+    /// Entry moves for register-valued params.
+    pub entry_moves: Vec<moves::MoveOp>,
+    /// Aggregate parameter copies emitted at function entry.
+    pub param_copies: Vec<moves::ParamCopy>,
     pub edge_moves: Vec<moves::EdgeMove>,
     pub call_moves: Vec<moves::CallMove>,
 }
@@ -82,6 +86,8 @@ pub fn regalloc(
     let moves = moves::build_move_plan(func, &result.alloc_map, types, target, param_reg_count);
     let mut moves = moves;
     moves.resolve_parallel_moves(target.scratch_regs());
+    result.entry_moves = moves.entry_moves;
+    result.param_copies = moves.param_copies;
     result.edge_moves = moves.edge_moves;
     result.call_moves = moves.call_moves;
 

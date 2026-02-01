@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::ssa::model::ir::{BlockId, Function, Terminator};
 
 use super::moves::{EdgeMovePlan, EdgeTarget, MoveBlockId, MoveSchedule};
-use crate::ssa::regalloc::moves::MoveOp;
+use crate::ssa::regalloc::moves::{MoveOp, ParamCopy};
 
 /// Identifier for a codegen block (SSA block or synthetic move block).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,6 +114,16 @@ impl CodegenGraph {
     /// Returns the pre-/post-moves for a call site.
     pub fn call_moves(&self, block: BlockId, inst_index: usize) -> Option<(&[MoveOp], &[MoveOp])> {
         self.schedule.call_moves(block, inst_index)
+    }
+
+    /// Returns entry moves emitted before the entry block.
+    pub fn entry_moves(&self) -> &[MoveOp] {
+        self.schedule.entry_moves()
+    }
+
+    /// Returns aggregate parameter copies emitted at function entry.
+    pub fn param_copies(&self) -> &[ParamCopy] {
+        self.schedule.param_copies()
     }
 
     /// Produces a linearized emission stream for a block.

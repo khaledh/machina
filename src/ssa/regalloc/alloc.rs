@@ -150,6 +150,8 @@ impl<'a> LinearScan<'a> {
             frame_size: allocator.frame_size_bytes(),
             stack_slot_count: allocator.total_slots(),
             used_callee_saved: Vec::new(),
+            entry_moves: Vec::new(),
+            param_copies: Vec::new(),
             edge_moves: Vec::new(),
             call_moves: Vec::new(),
         }

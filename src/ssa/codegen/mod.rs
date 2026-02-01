@@ -51,7 +51,12 @@ fn emit_function_with_emitter(
     let mut types = func.types.clone();
     let alloc = regalloc(&func.func, &mut types, &live_map, target);
 
-    let schedule = moves::MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let schedule = moves::MoveSchedule::from_moves(
+        &alloc.edge_moves,
+        &alloc.call_moves,
+        &alloc.entry_moves,
+        &alloc.param_copies,
+    );
     let plan = moves::EdgeMovePlan::new(&func.func, schedule);
     let graph = graph::CodegenGraph::new(&func.func, &plan);
 

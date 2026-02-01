@@ -11,7 +11,7 @@ use crate::ssa::model::ir::{
     BinOp, Callee, CastKind, CmpOp, ConstValue, GlobalData, InstKind, Instruction, Terminator,
     UnOp, ValueId,
 };
-use crate::ssa::regalloc::moves::MoveOp;
+use crate::ssa::regalloc::moves::{MoveOp, ParamCopy};
 use crate::ssa::regalloc::{Location, StackSlotId};
 use crate::targets::arm64::regs::INDIRECT_CALL_REG;
 
@@ -707,68 +707,26 @@ impl CodegenEmitter for Arm64Emitter {
         }
     }
 
-    fn emit_param_moves(
-        &mut self,
-        func: &crate::ssa::model::ir::Function,
-        locs: &crate::ssa::codegen::emitter::LocationResolver,
-    ) {
-        const PARAM_REG_COUNT: usize = 8;
-        let Some(entry) = func.blocks.first() else {
-            return;
-        };
-
-        let mut moves = Vec::new();
-        for (idx, param) in entry.params.iter().enumerate() {
-            if idx >= PARAM_REG_COUNT {
+    fn emit_param_copies(&mut self, copies: &[ParamCopy]) {
+        for copy in copies {
+            if copy.size == 0 {
                 continue;
             }
 
-            let ty = locs.value_ty(param.value.id);
-            let dst = locs.value(param.value.id);
-            let src = Location::Reg(PhysReg(idx as u8));
-
-            if locs.types.is_reg_type(ty) {
-                if src != dst {
-                    let size = locs.layout(ty).size() as u32;
-                    moves.push(MoveOp { src, dst, size });
+            let src_reg = match copy.src {
+                Location::Reg(reg) => Self::reg_name(reg).to_string(),
+                Location::IncomingArg(offset) => {
+                    let offset = self.layout.incoming_offset(offset);
+                    self.emit_ldr_sp(PhysReg(15), offset);
+                    "x15".to_string()
                 }
-            }
-        }
-
-        if !moves.is_empty() {
-            self.emit_moves(&moves);
-        }
-
-        for (idx, param) in entry.params.iter().enumerate() {
-            let ty = locs.value_ty(param.value.id);
-            if locs.types.is_reg_type(ty) {
-                continue;
-            }
-
-            let Location::Stack(slot) = locs.value(param.value.id) else {
-                panic!(
-                    "ssa codegen: aggregate param must be stack-backed, got {:?}",
-                    locs.value(param.value.id)
-                );
+                other => {
+                    panic!("ssa codegen: unsupported param copy source {:?}", other);
+                }
             };
 
-            let size = locs.layout(ty).size() as u32;
-            if size == 0 {
-                continue;
-            }
-
-            let src_reg = if idx < PARAM_REG_COUNT {
-                Self::reg_name(PhysReg(idx as u8))
-            } else {
-                let offset = self
-                    .layout
-                    .incoming_offset((idx - PARAM_REG_COUNT) as u32 * 8);
-                self.emit_ldr_sp(PhysReg(15), offset);
-                "x15"
-            };
-
-            let dst_offset = self.stack_offset(slot);
-            self.copy_ptr_to_stack(src_reg, dst_offset, size);
+            let dst_offset = self.stack_offset(copy.dst);
+            self.copy_ptr_to_stack(&src_reg, dst_offset, copy.size);
         }
     }
 

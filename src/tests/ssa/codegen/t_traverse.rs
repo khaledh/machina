@@ -103,7 +103,7 @@ fn test_codegen_traverse_emits_moves_and_insts() {
             size: 8,
         }],
     }];
-    let schedule = MoveSchedule::from_moves(&[], &call_moves);
+    let schedule = MoveSchedule::from_moves(&[], &call_moves, &[], &[]);
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
 

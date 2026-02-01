@@ -95,7 +95,12 @@ fn test_codegen_move_schedule_for_call() {
     let live_map = liveness::analyze(&func);
     let target = CallTarget::new(vec![], vec![PhysReg(1)], PhysReg(0));
     let alloc = regalloc(&func, &mut types, &live_map, &target);
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
+    let schedule = MoveSchedule::from_moves(
+        &alloc.edge_moves,
+        &alloc.call_moves,
+        &alloc.entry_moves,
+        &alloc.param_copies,
+    );
 
     let call_index = func.blocks[0]
         .insts
@@ -159,7 +164,7 @@ fn test_codegen_edge_move_plan_splits_on_multi_succ() {
             size: 8,
         }],
     }];
-    let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
+    let schedule = MoveSchedule::from_moves(&edge_moves, &[], &[], &[]);
     let plan = EdgeMovePlan::new(&func, schedule);
 
     let placement = plan
@@ -221,7 +226,7 @@ fn test_codegen_edge_move_plan_inserts_in_pred() {
             size: 8,
         }],
     }];
-    let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
+    let schedule = MoveSchedule::from_moves(&edge_moves, &[], &[], &[]);
     let plan = EdgeMovePlan::new(&func, schedule);
 
     let placement = plan

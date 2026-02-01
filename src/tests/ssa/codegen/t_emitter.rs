@@ -14,7 +14,119 @@ use crate::ssa::model::ir::{
     Terminator,
 };
 use crate::ssa::regalloc::{TargetSpec, ValueAllocMap, regalloc};
-use crate::ssa::{IrStructField, IrTypeCache, IrTypeKind};
+use crate::ssa::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+/// Common IR types used across most tests.
+struct TestTypes {
+    types: IrTypeCache,
+    unit_ty: IrTypeId,
+    u8_ty: IrTypeId,
+    u32_ty: IrTypeId,
+    u64_ty: IrTypeId,
+    bool_ty: IrTypeId,
+}
+
+impl TestTypes {
+    fn new() -> Self {
+        let mut types = IrTypeCache::new();
+        let unit_ty = types.add(IrTypeKind::Unit);
+        let u8_ty = types.add(IrTypeKind::Int {
+            signed: false,
+            bits: 8,
+        });
+        let u32_ty = types.add(IrTypeKind::Int {
+            signed: false,
+            bits: 32,
+        });
+        let u64_ty = types.add(IrTypeKind::Int {
+            signed: false,
+            bits: 64,
+        });
+        let bool_ty = types.add(IrTypeKind::Bool);
+        Self {
+            types,
+            unit_ty,
+            u8_ty,
+            u32_ty,
+            u64_ty,
+            bool_ty,
+        }
+    }
+
+    fn ptr_to(&mut self, elem: IrTypeId) -> IrTypeId {
+        self.types.add(IrTypeKind::Ptr { elem })
+    }
+
+    fn fn_ty(&mut self, params: Vec<IrTypeId>, ret: IrTypeId) -> IrTypeId {
+        self.types.add(IrTypeKind::Fn { params, ret })
+    }
+}
+
+/// Runs the full codegen pipeline on a function and returns the assembly output.
+fn emit_function(
+    func: &crate::ssa::model::ir::Function,
+    types: &mut IrTypeCache,
+    target: &dyn TargetSpec,
+) -> String {
+    let live_map = liveness::analyze(func);
+    let alloc = regalloc(func, types, &live_map, target);
+    let schedule = MoveSchedule::from_moves(
+        &alloc.edge_moves,
+        &alloc.call_moves,
+        &alloc.entry_moves,
+        &alloc.param_copies,
+    );
+    let plan = EdgeMovePlan::new(func, schedule);
+    let graph = CodegenGraph::new(func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        types,
+        &mut emitter,
+    );
+    emitter.finish()
+}
+
+/// Variant that returns both the asm and the allocation result for tests that need frame info.
+fn emit_function_with_alloc(
+    func: &crate::ssa::model::ir::Function,
+    types: &mut IrTypeCache,
+    target: &dyn TargetSpec,
+) -> (String, crate::ssa::regalloc::AllocationResult) {
+    let live_map = liveness::analyze(func);
+    let alloc = regalloc(func, types, &live_map, target);
+    let schedule = MoveSchedule::from_moves(
+        &alloc.edge_moves,
+        &alloc.call_moves,
+        &alloc.entry_moves,
+        &alloc.param_copies,
+    );
+    let plan = EdgeMovePlan::new(func, schedule);
+    let graph = CodegenGraph::new(func, &plan);
+    let mut emitter = Arm64Emitter::new();
+    emit_graph_with_emitter(
+        &graph,
+        func,
+        &alloc.alloc_map,
+        alloc.frame_size,
+        &alloc.used_callee_saved,
+        types,
+        &mut emitter,
+    );
+    (emitter.finish(), alloc)
+}
+
+// ============================================================================
+// Test Target Specs
+// ============================================================================
 
 struct TinyTarget {
     regs: Vec<PhysReg>,
@@ -255,50 +367,69 @@ impl TargetSpec for CalleeSavedTarget {
     }
 }
 
+struct MultiCalleeSavedTarget {
+    regs: Vec<PhysReg>,
+}
+
+impl TargetSpec for MultiCalleeSavedTarget {
+    fn allocatable_regs(&self) -> &[PhysReg] {
+        &self.regs
+    }
+
+    fn caller_saved(&self) -> &[PhysReg] {
+        &[]
+    }
+
+    fn callee_saved(&self) -> &[PhysReg] {
+        &self.regs
+    }
+
+    fn param_reg(&self, index: u32) -> Option<PhysReg> {
+        self.regs.get(index as usize).copied()
+    }
+
+    fn result_reg(&self) -> PhysReg {
+        self.regs[0]
+    }
+
+    fn indirect_result_reg(&self) -> Option<PhysReg> {
+        None
+    }
+
+    fn indirect_call_reg(&self) -> PhysReg {
+        self.regs[0]
+    }
+
+    fn scratch_regs(&self) -> &[PhysReg] {
+        &[]
+    }
+
+    fn reg_name(&self, _reg: PhysReg) -> &'static str {
+        "r0"
+    }
+}
+
 #[test]
 fn test_arm64_emitter_basic() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_basic",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let a = builder.const_int(1, false, 64, u64_ty);
-    let b = builder.const_int(2, false, 64, u64_ty);
-    let _sum = builder.binop(BinOp::Add, a, b, u64_ty);
+    let a = builder.const_int(1, false, 64, tt.u64_ty);
+    let b = builder.const_int(2, false, 64, tt.u64_ty);
+    let _sum = builder.binop(BinOp::Add, a, b, tt.u64_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
-    eprintln!("{asm}");
     assert!(asm.contains(".L_fn0_bb0:"));
     assert!(asm.contains("mov"));
     assert!(asm.contains("ret"));
@@ -376,67 +507,38 @@ fn test_arm64_emit_module() {
 
 #[test]
 fn test_arm64_emitter_cmp_cset() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let bool_ty = types.add(IrTypeKind::Bool);
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_cmp",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let lhs = builder.const_int(1, false, 64, u64_ty);
-    let rhs = builder.const_int(2, false, 64, u64_ty);
-    let _cmp = builder.cmp(CmpOp::Lt, lhs, rhs, bool_ty);
+    let lhs = builder.const_int(1, false, 64, tt.u64_ty);
+    let rhs = builder.const_int(2, false, 64, tt.u64_ty);
+    let _cmp = builder.cmp(CmpOp::Lt, lhs, rhs, tt.bool_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("cmp"));
     assert!(asm.contains("cset"));
 }
 
 #[test]
 fn test_arm64_emitter_switch() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_switch",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
@@ -444,7 +546,7 @@ fn test_arm64_emitter_switch() {
     let case0 = builder.add_block();
     let case1 = builder.add_block();
     let default = builder.add_block();
-    let value = builder.const_int(1, false, 64, u64_ty);
+    let value = builder.const_int(1, false, 64, tt.u64_ty);
 
     builder.set_terminator(
         entry,
@@ -483,24 +585,9 @@ fn test_arm64_emitter_switch() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(1);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let asm = emitter.finish();
     assert!(asm.contains("cmp"));
     let label_prefix = format!(".L_fn{}_bb", func.def_id.0);
     let beq_lines: Vec<_> = asm
@@ -519,149 +606,92 @@ fn test_arm64_emitter_switch() {
 
 #[test]
 fn test_arm64_emitter_memcopy() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u8_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 8,
-    });
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let u8_ptr = types.add(IrTypeKind::Ptr { elem: u8_ty });
+    let mut tt = TestTypes::new();
+    let u8_ptr = tt.ptr_to(tt.u8_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_memcopy",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let dst = builder.add_local(u8_ty, None);
-    let src = builder.add_local(u8_ty, None);
+    let dst = builder.add_local(tt.u8_ty, None);
+    let src = builder.add_local(tt.u8_ty, None);
     let dst_addr = builder.addr_of_local(dst, u8_ptr);
     let src_addr = builder.addr_of_local(src, u8_ptr);
-    let len = builder.const_int(16, false, 64, u64_ty);
+    let len = builder.const_int(16, false, 64, tt.u64_ty);
     builder.memcopy(dst_addr, src_addr, len);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let asm = emitter.finish();
     assert!(asm.contains("bl ___rt_memcpy"));
 }
 
 #[test]
 fn test_arm64_emitter_memset() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u8_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 8,
-    });
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let u8_ptr = types.add(IrTypeKind::Ptr { elem: u8_ty });
+    let mut tt = TestTypes::new();
+    let u8_ptr = tt.ptr_to(tt.u8_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_memset",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let dst = builder.add_local(u8_ty, None);
+    let dst = builder.add_local(tt.u8_ty, None);
     let dst_addr = builder.addr_of_local(dst, u8_ptr);
-    let byte = builder.const_int(0x7f, false, 8, u8_ty);
-    let len = builder.const_int(8, false, 64, u64_ty);
+    let byte = builder.const_int(0x7f, false, 8, tt.u8_ty);
+    let len = builder.const_int(8, false, 64, tt.u64_ty);
     builder.memset(dst_addr, byte, len);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let asm = emitter.finish();
     assert!(asm.contains("bl ___rt_memset"));
 }
 
 #[test]
 fn test_arm64_emitter_drop_string() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u8_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 8,
-    });
-    let u32_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 32,
-    });
-    let u8_ptr = types.add(IrTypeKind::Ptr { elem: u8_ty });
-    let string_ty = types.add_named(
+    let mut tt = TestTypes::new();
+    let u8_ptr = tt.ptr_to(tt.u8_ty);
+    let string_ty = tt.types.add_named(
         IrTypeKind::Struct {
             fields: vec![
-                crate::ssa::IrStructField {
+                IrStructField {
                     name: "ptr".to_string(),
                     ty: u8_ptr,
                 },
-                crate::ssa::IrStructField {
+                IrStructField {
                     name: "len".to_string(),
-                    ty: u32_ty,
+                    ty: tt.u32_ty,
                 },
-                crate::ssa::IrStructField {
+                IrStructField {
                     name: "cap".to_string(),
-                    ty: u32_ty,
+                    ty: tt.u32_ty,
                 },
             ],
         },
         "string".to_string(),
     );
-    let string_ptr = types.add(IrTypeKind::Ptr { elem: string_ty });
+    let string_ptr = tt.ptr_to(string_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_drop_string",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
@@ -671,43 +701,23 @@ fn test_arm64_emitter_drop_string() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("bl ___rt_string_drop"));
 }
 
 #[test]
 fn test_arm64_emitter_const_func_addr() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let fn_ty = types.add(IrTypeKind::Fn {
-        params: vec![],
-        ret: unit_ty,
-    });
+    let mut tt = TestTypes::new();
+    let fn_ty = tt.fn_ty(vec![], tt.unit_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_const_func_addr",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
@@ -715,48 +725,29 @@ fn test_arm64_emitter_const_func_addr() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(1);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("adrp"));
     assert!(asm.contains("fn2"));
 }
 
 #[test]
 fn test_arm64_emitter_condbr_stack_cond() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let bool_ty = types.add(IrTypeKind::Bool);
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_condbr_stack",
         FunctionSig {
-            params: vec![bool_ty],
-            ret: unit_ty,
+            params: vec![tt.bool_ty],
+            ret: tt.unit_ty,
         },
     );
 
     let entry = builder.current_block();
     let then_bb = builder.add_block();
     let else_bb = builder.add_block();
-    let cond = builder.add_block_param(entry, bool_ty);
+    let cond = builder.add_block_param(entry, tt.bool_ty);
 
     builder.set_terminator(
         entry,
@@ -775,114 +766,58 @@ fn test_arm64_emitter_condbr_stack_cond() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = NoRegTarget;
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("ldrb w9"));
     assert!(asm.contains("cbnz w9"));
 }
 
 #[test]
 fn test_arm64_emitter_runtime_call() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_runtime_call",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let _call = builder.call(Callee::Runtime(RuntimeFn::Trap), vec![], unit_ty);
+    let _call = builder.call(Callee::Runtime(RuntimeFn::Trap), vec![], tt.unit_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(1);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("__rt_trap"));
 }
 
 #[test]
 fn test_arm64_emitter_stack_args() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_stack_args",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
     let mut args = Vec::new();
     for i in 0..10 {
-        args.push(builder.const_int(i, false, 64, u64_ty));
+        args.push(builder.const_int(i, false, 64, tt.u64_ty));
     }
-    let _call = builder.call(Callee::Direct(DefId(1)), args, u64_ty);
+    let _call = builder.call(Callee::Direct(DefId(1)), args, tt.u64_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = AapcsTarget::new();
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let (asm, alloc) = emit_function_with_alloc(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     let aligned = (alloc.frame_size + 15) & !15;
     let outgoing_base = aligned.saturating_sub(alloc.frame_size);
     let first = outgoing_base;
@@ -893,21 +828,16 @@ fn test_arm64_emitter_stack_args() {
 
 #[test]
 fn test_arm64_emitter_sret_call_setup() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let pair_ty = types.add(IrTypeKind::Struct {
+    let mut tt = TestTypes::new();
+    let pair_ty = tt.types.add(IrTypeKind::Struct {
         fields: vec![
             IrStructField {
                 name: "a".to_string(),
-                ty: u64_ty,
+                ty: tt.u64_ty,
             },
             IrStructField {
                 name: "b".to_string(),
-                ty: u64_ty,
+                ty: tt.u64_ty,
             },
         ],
     });
@@ -917,7 +847,7 @@ fn test_arm64_emitter_sret_call_setup() {
         "emit_sret_call",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
@@ -925,48 +855,28 @@ fn test_arm64_emitter_sret_call_setup() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = AapcsTarget::new();
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("add x8, sp"));
 }
 
 #[test]
 fn test_arm64_emitter_sret_return() {
-    let mut types = IrTypeCache::new();
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let pair_ty = types.add(IrTypeKind::Struct {
+    let mut tt = TestTypes::new();
+    let pair_ty = tt.types.add(IrTypeKind::Struct {
         fields: vec![
             IrStructField {
                 name: "a".to_string(),
-                ty: u64_ty,
+                ty: tt.u64_ty,
             },
             IrStructField {
                 name: "b".to_string(),
-                ty: u64_ty,
+                ty: tt.u64_ty,
             },
         ],
     });
-    let pair_ptr = types.add(IrTypeKind::Ptr { elem: pair_ty });
+    let pair_ptr = tt.ptr_to(pair_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
@@ -983,332 +893,161 @@ fn test_arm64_emitter_sret_return() {
     builder.terminate(Terminator::Return { value: Some(value) });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = AapcsTarget::new();
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("mov x0, x8"));
     assert!(asm.contains("bl ___rt_memcpy"));
 }
 
 #[test]
 fn test_arm64_emitter_indirect_call() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let fn_ty = types.add(IrTypeKind::Fn {
-        params: vec![],
-        ret: unit_ty,
-    });
+    let mut tt = TestTypes::new();
+    let fn_ty = tt.fn_ty(vec![], tt.unit_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_indirect_call",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
     let func_ptr = builder.const_func_addr(DefId(1), fn_ty);
-    let _call = builder.call(Callee::Value(func_ptr), vec![], unit_ty);
+    let _call = builder.call(Callee::Value(func_ptr), vec![], tt.unit_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(1);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("blr"));
 }
 
 #[test]
 fn test_arm64_emitter_stack_frame_prologue() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_stack_frame",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let _value = builder.const_int(123, false, 64, u64_ty);
+    let _value = builder.const_int(123, false, 64, tt.u64_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = NoRegTarget;
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("sub sp, sp"));
     assert!(asm.contains("add sp, sp"));
 }
 
 #[test]
 fn test_arm64_emitter_saves_callee_saved() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_callee_saved",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let value = builder.const_int(7, false, 64, u64_ty);
-    let _call = builder.call(Callee::Runtime(RuntimeFn::Print), vec![value], unit_ty);
+    let value = builder.const_int(7, false, 64, tt.u64_ty);
+    let _call = builder.call(Callee::Runtime(RuntimeFn::Print), vec![value], tt.unit_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = CalleeSavedTarget::new(PhysReg(4));
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("stp x4"));
     assert!(asm.contains("ldp x4"));
 }
 
 #[test]
 fn test_arm64_emitter_saves_multiple_callee_saved() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-
+    let mut tt = TestTypes::new();
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_multi_callee_saved",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let value = builder.const_int(11, false, 64, u64_ty);
-    let _call = builder.call(Callee::Runtime(RuntimeFn::Print), vec![value], unit_ty);
+    let value = builder.const_int(11, false, 64, tt.u64_ty);
+    let _call = builder.call(Callee::Runtime(RuntimeFn::Print), vec![value], tt.unit_ty);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
-
-    struct MultiCalleeSavedTarget {
-        regs: Vec<PhysReg>,
-    }
-
-    impl TargetSpec for MultiCalleeSavedTarget {
-        fn allocatable_regs(&self) -> &[PhysReg] {
-            &self.regs
-        }
-
-        fn caller_saved(&self) -> &[PhysReg] {
-            &[]
-        }
-
-        fn callee_saved(&self) -> &[PhysReg] {
-            &self.regs
-        }
-
-        fn param_reg(&self, index: u32) -> Option<PhysReg> {
-            self.regs.get(index as usize).copied()
-        }
-
-        fn result_reg(&self) -> PhysReg {
-            self.regs[0]
-        }
-
-        fn indirect_result_reg(&self) -> Option<PhysReg> {
-            None
-        }
-
-        fn indirect_call_reg(&self) -> PhysReg {
-            self.regs[0]
-        }
-
-        fn scratch_regs(&self) -> &[PhysReg] {
-            &[]
-        }
-
-        fn reg_name(&self, _reg: PhysReg) -> &'static str {
-            "r0"
-        }
-    }
-
     let target = MultiCalleeSavedTarget {
         regs: vec![PhysReg(4), PhysReg(5)],
     };
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("stp x4, x5"));
     assert!(asm.contains("ldp x4, x5"));
 }
 
 #[test]
 fn test_arm64_emitter_addr_of_local() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let u64_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+    let mut tt = TestTypes::new();
+    let u64_ptr = tt.ptr_to(tt.u64_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_addr_of_local",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let local = builder.add_local(u64_ty, None);
+    let local = builder.add_local(tt.u64_ty, None);
     let _addr = builder.addr_of_local(local, u64_ptr);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("add"));
     assert!(asm.contains("sp"));
 }
 
 #[test]
 fn test_arm64_emitter_field_addr() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let struct_ty = types.add(IrTypeKind::Struct {
+    let mut tt = TestTypes::new();
+    let struct_ty = tt.types.add(IrTypeKind::Struct {
         fields: vec![
-            crate::ssa::IrStructField {
+            IrStructField {
                 name: "a".to_string(),
-                ty: u64_ty,
+                ty: tt.u64_ty,
             },
-            crate::ssa::IrStructField {
+            IrStructField {
                 name: "b".to_string(),
-                ty: u64_ty,
+                ty: tt.u64_ty,
             },
         ],
     });
-    let struct_ptr = types.add(IrTypeKind::Ptr { elem: struct_ty });
-    let field_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+    let struct_ptr = tt.ptr_to(struct_ty);
+    let field_ptr = tt.ptr_to(tt.u64_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_field_addr",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
@@ -1318,72 +1057,35 @@ fn test_arm64_emitter_field_addr() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("#8"));
 }
 
 #[test]
 fn test_arm64_emitter_index_addr() {
-    let mut types = IrTypeCache::new();
-    let unit_ty = types.add(IrTypeKind::Unit);
-    let u64_ty = types.add(IrTypeKind::Int {
-        signed: false,
-        bits: 64,
-    });
-    let u64_ptr = types.add(IrTypeKind::Ptr { elem: u64_ty });
+    let mut tt = TestTypes::new();
+    let u64_ptr = tt.ptr_to(tt.u64_ty);
 
     let mut builder = FunctionBuilder::new(
         DefId(0),
         "emit_index_addr",
         FunctionSig {
             params: vec![],
-            ret: unit_ty,
+            ret: tt.unit_ty,
         },
     );
 
-    let local = builder.add_local(u64_ty, None);
+    let local = builder.add_local(tt.u64_ty, None);
     let base = builder.addr_of_local(local, u64_ptr);
-    let index = builder.const_int(2, false, 64, u64_ty);
+    let index = builder.const_int(2, false, 64, tt.u64_ty);
     let _elem = builder.index_addr(base, index, u64_ptr);
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let live_map = liveness::analyze(&func);
     let target = TinyTarget::new(2);
-    let alloc = regalloc(&func, &mut types, &live_map, &target);
+    let asm = emit_function(&func, &mut tt.types, &target);
 
-    let schedule = MoveSchedule::from_moves(&alloc.edge_moves, &alloc.call_moves);
-    let plan = EdgeMovePlan::new(&func, schedule);
-    let graph = CodegenGraph::new(&func, &plan);
-    let mut emitter = Arm64Emitter::new();
-    emit_graph_with_emitter(
-        &graph,
-        &func,
-        &alloc.alloc_map,
-        alloc.frame_size,
-        &alloc.used_callee_saved,
-        &mut types,
-        &mut emitter,
-    );
-
-    let asm = emitter.finish();
     assert!(asm.contains("lsl #3"));
 }

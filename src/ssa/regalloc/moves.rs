@@ -47,6 +47,14 @@ pub struct MoveOp {
     pub size: u32,
 }
 
+/// Copies parameter data from an incoming pointer into a local stack slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParamCopy {
+    pub src: Location,
+    pub dst: crate::ssa::regalloc::StackSlotId,
+    pub size: u32,
+}
+
 /// Moves required on a control-flow edge between two blocks.
 ///
 /// These moves transfer arguments passed at a branch/jump to the
@@ -76,6 +84,8 @@ pub struct CallMove {
 /// (for ABI compliance) that the code generator must emit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MovePlan {
+    pub entry_moves: Vec<MoveOp>,
+    pub param_copies: Vec<ParamCopy>,
     pub edge_moves: Vec<EdgeMove>,
     pub call_moves: Vec<CallMove>,
 }
@@ -91,6 +101,8 @@ impl MovePlan {
             return;
         }
         let scratch = scratch_regs[0];
+
+        resolve_move_list(&mut self.entry_moves, scratch);
 
         for edge in &mut self.edge_moves {
             resolve_move_list(&mut edge.moves, scratch);
@@ -110,6 +122,7 @@ impl MovePlan {
 /// Builds a complete move plan for a function.
 ///
 /// Scans the function for:
+/// - Entry block parameters requiring moves from ABI locations
 /// - Block edges with arguments (branches, conditional branches, switches)
 /// - Call instructions requiring ABI-compliant argument/result moves
 ///
@@ -130,6 +143,11 @@ pub fn build_move_plan(
     for block in &func.blocks {
         let params = block.params.iter().map(|param| param.value.id).collect();
         block_params.insert(block.id, params);
+    }
+
+    // Plan entry moves for function parameters
+    if let Some(entry) = func.blocks.first() {
+        plan_entry_moves(entry, alloc_map, types, target, param_reg_count, &mut plan);
     }
 
     for block in &func.blocks {
@@ -154,113 +172,129 @@ pub fn build_move_plan(
         }
 
         // Collect edge moves for each control-flow edge with arguments
-        match &block.term {
-            Terminator::Br { target, args } => {
-                let moves = edge_moves_for(
-                    block.id,
-                    *target,
-                    args,
-                    &block_params,
-                    alloc_map,
-                    &value_types,
-                    types,
-                );
-                if !moves.is_empty() {
-                    plan.edge_moves.push(EdgeMove {
-                        from: block.id,
-                        to: *target,
-                        moves,
-                    });
-                }
-            }
-            Terminator::CondBr {
-                then_bb,
-                then_args,
-                else_bb,
-                else_args,
-                ..
-            } => {
-                let then_moves = edge_moves_for(
-                    block.id,
-                    *then_bb,
-                    then_args,
-                    &block_params,
-                    alloc_map,
-                    &value_types,
-                    types,
-                );
-                if !then_moves.is_empty() {
-                    plan.edge_moves.push(EdgeMove {
-                        from: block.id,
-                        to: *then_bb,
-                        moves: then_moves,
-                    });
-                }
-
-                let else_moves = edge_moves_for(
-                    block.id,
-                    *else_bb,
-                    else_args,
-                    &block_params,
-                    alloc_map,
-                    &value_types,
-                    types,
-                );
-                if !else_moves.is_empty() {
-                    plan.edge_moves.push(EdgeMove {
-                        from: block.id,
-                        to: *else_bb,
-                        moves: else_moves,
-                    });
-                }
-            }
-            Terminator::Switch {
-                cases,
-                default,
-                default_args,
-                ..
-            } => {
-                for case in cases {
-                    let moves = edge_moves_for(
-                        block.id,
-                        case.target,
-                        &case.args,
-                        &block_params,
-                        alloc_map,
-                        &value_types,
-                        types,
-                    );
-                    if !moves.is_empty() {
-                        plan.edge_moves.push(EdgeMove {
-                            from: block.id,
-                            to: case.target,
-                            moves,
-                        });
-                    }
-                }
-
-                let default_moves = edge_moves_for(
-                    block.id,
-                    *default,
-                    default_args,
-                    &block_params,
-                    alloc_map,
-                    &value_types,
-                    types,
-                );
-                if !default_moves.is_empty() {
-                    plan.edge_moves.push(EdgeMove {
-                        from: block.id,
-                        to: *default,
-                        moves: default_moves,
-                    });
-                }
-            }
-            Terminator::Return { .. } | Terminator::Unreachable => {}
-        }
+        plan_terminator_edge_moves(
+            block,
+            &block_params,
+            alloc_map,
+            &value_types,
+            types,
+            &mut plan,
+        );
     }
 
     plan
+}
+
+/// Plans moves for entry block parameters.
+///
+/// Entry parameters arrive in ABI-specified locations (registers or incoming
+/// stack slots) and must be moved to their allocated locations. Register-typed
+/// params become entry moves; aggregate params become memory copies.
+fn plan_entry_moves(
+    entry: &crate::ssa::model::ir::Block,
+    alloc_map: &ValueAllocMap,
+    types: &mut IrTypeCache,
+    target: &dyn TargetSpec,
+    param_reg_count: usize,
+    plan: &mut MovePlan,
+) {
+    for (idx, param) in entry.params.iter().enumerate() {
+        let param_id = param.value.id;
+        let ty = param.value.ty;
+        let alloc = alloc_map
+            .get(&param_id)
+            .copied()
+            .unwrap_or_else(|| panic!("ssa regalloc: missing alloc for {:?}", param_id));
+
+        // Entry param source is either an ABI register or an incoming stack slot.
+        let src = if idx < param_reg_count {
+            let reg = target
+                .param_reg(idx as u32)
+                .unwrap_or_else(|| panic!("ssa regalloc: param {} has no ABI reg", idx));
+            Location::Reg(reg)
+        } else {
+            Location::IncomingArg(((idx - param_reg_count) as u32) * 8)
+        };
+
+        // Register-typed params become entry moves.
+        if types.is_reg_type(ty) {
+            if src != alloc {
+                let size = move_size_for(types, ty, src, alloc);
+                plan.entry_moves.push(MoveOp {
+                    src,
+                    dst: alloc,
+                    size,
+                });
+            }
+            continue;
+        }
+
+        // Aggregate params are copied into their stack slot at entry.
+        let Location::Stack(slot) = alloc else {
+            panic!(
+                "ssa regalloc: aggregate param must be stack-backed, got {:?}",
+                alloc
+            );
+        };
+
+        let size = types.layout(ty).size() as u32;
+        if size > 0 {
+            plan.param_copies.push(ParamCopy {
+                src,
+                dst: slot,
+                size,
+            });
+        }
+    }
+}
+
+/// Plans edge moves for a block's terminator.
+///
+/// Examines the terminator and generates edge moves for each outgoing edge
+/// that passes arguments to the target block's parameters.
+fn plan_terminator_edge_moves(
+    block: &crate::ssa::model::ir::Block,
+    block_params: &HashMap<BlockId, Vec<ValueId>>,
+    alloc_map: &ValueAllocMap,
+    value_types: &HashMap<ValueId, crate::ssa::IrTypeId>,
+    types: &mut IrTypeCache,
+    plan: &mut MovePlan,
+) {
+    // Helper closure to generate and push edge moves
+    let mut push_edge = |from: BlockId, to: BlockId, args: &[ValueId]| {
+        let moves = edge_moves_for(from, to, args, block_params, alloc_map, value_types, types);
+        if !moves.is_empty() {
+            plan.edge_moves.push(EdgeMove { from, to, moves });
+        }
+    };
+
+    match &block.term {
+        Terminator::Br { target, args } => {
+            push_edge(block.id, *target, args);
+        }
+        Terminator::CondBr {
+            then_bb,
+            then_args,
+            else_bb,
+            else_args,
+            ..
+        } => {
+            push_edge(block.id, *then_bb, then_args);
+            push_edge(block.id, *else_bb, else_args);
+        }
+        Terminator::Switch {
+            cases,
+            default,
+            default_args,
+            ..
+        } => {
+            for case in cases {
+                push_edge(block.id, case.target, &case.args);
+            }
+            push_edge(block.id, *default, default_args);
+        }
+        Terminator::Return { .. } | Terminator::Unreachable => {}
+    }
 }
 
 // ============================================================================

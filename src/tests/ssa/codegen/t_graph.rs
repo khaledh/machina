@@ -54,7 +54,7 @@ fn test_codegen_graph_inserts_move_block() {
             size: 8,
         }],
     }];
-    let schedule = MoveSchedule::from_moves(&edge_moves, &[]);
+    let schedule = MoveSchedule::from_moves(&edge_moves, &[], &[], &[]);
     let plan = EdgeMovePlan::new(&func, schedule);
 
     let graph = CodegenGraph::new(&func, &plan);
@@ -120,7 +120,7 @@ fn test_codegen_graph_exposes_call_moves() {
             size: 8,
         }],
     }];
-    let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves);
+    let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves, &[], &[]);
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
 
@@ -175,7 +175,7 @@ fn test_codegen_block_stream_orders_call_moves() {
             size: 8,
         }],
     }];
-    let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves);
+    let schedule = MoveSchedule::from_moves(&edge_moves, &call_moves, &[], &[]);
     let plan = EdgeMovePlan::new(&func, schedule);
     let graph = CodegenGraph::new(&func, &plan);
 

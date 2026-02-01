@@ -8,7 +8,7 @@ use crate::ssa::IrTypeCache;
 use crate::ssa::IrTypeId;
 use crate::ssa::codegen::graph::CodegenBlockId;
 use crate::ssa::model::ir::{
-    BinOp, ConstValue, Function, GlobalData, Instruction, LocalId, Terminator, ValueId,
+    BinOp, ConstValue, GlobalData, Instruction, LocalId, Terminator, ValueId,
 };
 use crate::ssa::model::layout::IrLayout;
 use crate::ssa::regalloc::Location;
@@ -19,8 +19,8 @@ pub trait CodegenEmitter {
     /// Begin emitting a function symbol and prologue.
     fn begin_function(&mut self, _name: &str, _frame_size: u32, _callee_saved: &[PhysReg]) {}
 
-    /// Emit moves that materialize incoming ABI params into allocated locations.
-    fn emit_param_moves(&mut self, _func: &Function, _locs: &LocationResolver) {}
+    /// Emit aggregate parameter copies required at function entry.
+    fn emit_param_copies(&mut self, _copies: &[crate::ssa::regalloc::moves::ParamCopy]) {}
 
     /// Begin emitting a new block label.
     fn begin_block(&mut self, label: &str);
