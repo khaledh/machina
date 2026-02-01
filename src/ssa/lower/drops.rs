@@ -232,33 +232,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .drop_tracker
             .flag(def_id)
             .unwrap_or_else(|| panic!("ssa drop missing flag for {:?}", def_id));
-        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-        let cond = self.builder.load(flag_addr, bool_ty);
-        let drop_bb = self.builder.add_block();
-        let cont_bb = self.builder.add_block();
-
-        self.builder.terminate(Terminator::CondBr {
-            cond,
-            then_bb: drop_bb,
-            then_args: Vec::new(),
-            else_bb: cont_bb,
-            else_args: Vec::new(),
-        });
-
-        self.builder.select_block(drop_bb);
-        let local = self.lookup_local(def_id);
-        let (value, is_addr) = match local.storage {
-            crate::ssa::lower::locals::LocalStorage::Value(value) => (value, false),
-            crate::ssa::lower::locals::LocalStorage::Addr(addr) => (addr, true),
-        };
-        self.emit_drop_for_value(value, &ty, is_addr)?;
-        self.builder.terminate(Terminator::Br {
-            target: cont_bb,
-            args: Vec::new(),
-        });
-
-        self.builder.select_block(cont_bb);
-        Ok(())
+        self.emit_drop_if_flag(flag_addr, |lowerer| {
+            let local = lowerer.lookup_local(def_id);
+            let (value, is_addr) = match local.storage {
+                crate::ssa::lower::locals::LocalStorage::Value(value) => (value, false),
+                crate::ssa::lower::locals::LocalStorage::Addr(addr) => (addr, true),
+            };
+            lowerer.emit_drop_for_value(value, &ty, is_addr)
+        })
     }
 
     pub(super) fn set_drop_flag_for_def(&mut self, def_id: DefId, value: bool) {
@@ -315,30 +296,40 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
                 };
 
-                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-                let cond = self.builder.load(flag_addr, bool_ty);
-                let drop_bb = self.builder.add_block();
-                let cont_bb = self.builder.add_block();
-
-                self.builder.terminate(Terminator::CondBr {
-                    cond,
-                    then_bb: drop_bb,
-                    then_args: Vec::new(),
-                    else_bb: cont_bb,
-                    else_args: Vec::new(),
-                });
-
-                self.builder.select_block(drop_bb);
-                self.emit_drop_for_def(item.def_id, item.ty)?;
-                self.builder.terminate(Terminator::Br {
-                    target: cont_bb,
-                    args: Vec::new(),
-                });
-
-                self.builder.select_block(cont_bb);
-                Ok(())
+                self.emit_drop_if_flag(flag_addr, |lowerer| {
+                    lowerer.emit_drop_for_def(item.def_id, item.ty)
+                })
             }
         }
+    }
+
+    fn emit_drop_if_flag(
+        &mut self,
+        flag_addr: ValueId,
+        f: impl FnOnce(&mut Self) -> Result<(), LoweringError>,
+    ) -> Result<(), LoweringError> {
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let cond = self.builder.load(flag_addr, bool_ty);
+        let drop_bb = self.builder.add_block();
+        let cont_bb = self.builder.add_block();
+
+        self.builder.terminate(Terminator::CondBr {
+            cond,
+            then_bb: drop_bb,
+            then_args: Vec::new(),
+            else_bb: cont_bb,
+            else_args: Vec::new(),
+        });
+
+        self.builder.select_block(drop_bb);
+        f(self)?;
+        self.builder.terminate(Terminator::Br {
+            target: cont_bb,
+            args: Vec::new(),
+        });
+
+        self.builder.select_block(cont_bb);
+        Ok(())
     }
 
     fn emit_drop_for_def(
