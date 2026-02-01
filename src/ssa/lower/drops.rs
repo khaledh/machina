@@ -224,7 +224,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         let ty = self.type_map.type_table().get(ty_id).clone();
-        if !ty.needs_drop() {
+        if !ty.needs_drop() && shallow_named(&ty).is_none() {
             return Ok(());
         }
 
@@ -267,7 +267,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         let ty = self.def_type(def_id);
-        if !ty.needs_drop() {
+        if !ty.needs_drop() && shallow_named(&ty).is_none() {
             return;
         }
 
@@ -358,7 +358,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         ty: &Type,
         is_addr: bool,
     ) -> Result<(), LoweringError> {
-        if !ty.needs_drop() {
+        if !ty.needs_drop() && shallow_named(ty).is_none() {
             return Ok(());
         }
 
@@ -367,7 +367,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 return self.drop_value_at_addr(value, ty);
             }
 
-            if elem_ty.needs_drop() {
+            if let Some(name) = shallow_named(elem_ty) {
+                let def_id = self.drop_glue.def_id_for(name, elem_ty);
+                let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+                let _ = self
+                    .builder
+                    .call(Callee::Direct(def_id), vec![value], unit_ty);
+            } else if elem_ty.needs_drop() {
                 self.drop_value_at_addr(value, elem_ty)?;
             }
             let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
@@ -387,7 +393,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.drop_value_at_addr(slot.addr, ty)
     }
 
-    fn drop_value_at_addr(&mut self, addr: ValueId, ty: &Type) -> Result<(), LoweringError> {
+    pub(super) fn drop_value_at_addr(
+        &mut self,
+        addr: ValueId,
+        ty: &Type,
+    ) -> Result<(), LoweringError> {
+        if let Some(name) = shallow_named(ty) {
+            let def_id = self.drop_glue.def_id_for(name, ty);
+            let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+            let _ = self
+                .builder
+                .call(Callee::Direct(def_id), vec![addr], unit_ty);
+            return Ok(());
+        }
+
         if !ty.needs_drop() {
             return Ok(());
         }
@@ -404,7 +423,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let ptr_ty = self.type_lowerer.lower_type(ty);
                 let ptr_val = self.builder.load(addr, ptr_ty);
 
-                if elem_ty.needs_drop() {
+                if let Some(name) = shallow_named(elem_ty) {
+                    let def_id = self.drop_glue.def_id_for(name, elem_ty);
+                    let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+                    let _ = self
+                        .builder
+                        .call(Callee::Direct(def_id), vec![ptr_val], unit_ty);
+                } else if elem_ty.needs_drop() {
                     self.drop_value_at_addr(ptr_val, elem_ty)?;
                 }
 
@@ -416,7 +441,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
             Type::Struct { fields, .. } => {
                 for (index, field) in fields.iter().enumerate().rev() {
-                    if !field.ty.needs_drop() {
+                    if !field.ty.needs_drop() && shallow_named(&field.ty).is_none() {
                         continue;
                     }
                     let field_ty = self.type_lowerer.lower_type(&field.ty);
@@ -427,7 +452,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
             Type::Tuple { field_tys } => {
                 for (index, field_ty) in field_tys.iter().enumerate().rev() {
-                    if !field_ty.needs_drop() {
+                    if !field_ty.needs_drop() && shallow_named(field_ty).is_none() {
                         continue;
                     }
                     let field_ir_ty = self.type_lowerer.lower_type(field_ty);
@@ -440,7 +465,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let Some(elem_ty) = ty.array_item_type() else {
                     panic!("ssa drop array missing element type");
                 };
-                if !elem_ty.needs_drop() {
+                if !elem_ty.needs_drop() && shallow_named(&elem_ty).is_none() {
                     return Ok(());
                 }
 
@@ -480,7 +505,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 let mut needs_drop = false;
                 for variant in variants {
-                    if variant.payload.iter().any(Type::needs_drop) {
+                    if variant
+                        .payload
+                        .iter()
+                        .any(|ty| ty.needs_drop() || shallow_named(ty).is_some())
+                    {
                         needs_drop = true;
                         break;
                     }
@@ -499,7 +528,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 for (variant, (tag, field_offsets, name)) in
                     variants.iter().zip(layout_variants.iter())
                 {
-                    if !variant.payload.iter().any(Type::needs_drop) {
+                    if !variant
+                        .payload
+                        .iter()
+                        .any(|ty| ty.needs_drop() || shallow_named(ty).is_some())
+                    {
                         continue;
                     }
 
@@ -530,7 +563,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     for (payload_ty, offset) in
                         variant.payload.iter().zip(field_offsets.iter()).rev()
                     {
-                        if !payload_ty.needs_drop() {
+                        if !payload_ty.needs_drop() && shallow_named(payload_ty).is_none() {
                             continue;
                         }
                         let field_addr = self.byte_offset_addr(payload_ptr, *offset);
@@ -577,5 +610,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let flag_val = self.builder.const_bool(value, bool_ty);
         self.builder.store(flag_addr, flag_val);
+    }
+}
+
+fn shallow_named(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct { name, fields } if fields.is_empty() => Some(name.as_str()),
+        Type::Enum { name, variants } if variants.is_empty() => Some(name.as_str()),
+        _ => None,
     }
 }

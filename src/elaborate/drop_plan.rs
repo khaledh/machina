@@ -190,7 +190,9 @@ impl<'a> DropPlanBuilder<'a> {
             sem::StmtExprKind::LetBind { pattern, value, .. }
             | sem::StmtExprKind::VarBind { pattern, value, .. } => {
                 self.visit_value_expr(value);
-                self.register_pattern_drop(pattern, DropGuard::Always);
+                // Use drop flags for move-sensitive bindings so moved-out values
+                // don't get dropped at scope exit.
+                self.register_pattern_drop(pattern, DropGuard::IfInitialized);
             }
             sem::StmtExprKind::VarDecl { def_id, .. } => {
                 self.register_def_drop(*def_id, DropGuard::IfInitialized);

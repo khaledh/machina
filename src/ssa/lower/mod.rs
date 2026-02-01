@@ -6,6 +6,7 @@
 mod bind;
 mod branching;
 mod calls;
+mod drop_glue;
 mod drops;
 mod error;
 mod fstring;
@@ -24,13 +25,17 @@ mod util;
 
 use crate::resolve::DefTable;
 use crate::ssa::IrTypeCache;
+use crate::ssa::lower::drop_glue::DropGlueRegistry;
 use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::lowerer::BranchResult;
 use crate::ssa::model::ir::{Function, GlobalData, Terminator};
+use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
+use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 use lowerer::FuncLowerer;
+use std::collections::HashMap;
 
 pub struct LoweredFunction {
     pub func: Function,
@@ -41,6 +46,24 @@ pub struct LoweredFunction {
 pub struct LoweredModule {
     pub funcs: Vec<LoweredFunction>,
     pub globals: Vec<GlobalData>,
+}
+
+fn build_full_type_defs(module: &sem::Module, def_table: &DefTable) -> HashMap<String, Type> {
+    let mut map = HashMap::new();
+    for type_def in module.type_defs() {
+        let type_expr = res::TypeExpr {
+            id: type_def.id,
+            kind: res::TypeExprKind::Named {
+                ident: type_def.name.clone(),
+                def_id: type_def.def_id,
+            },
+            span: type_def.span,
+        };
+        let ty = resolve_type_expr(def_table, module, &type_expr)
+            .unwrap_or_else(|err| panic!("ssa lower type def {}: {:?}", type_def.name, err));
+        map.insert(type_def.name.clone(), ty);
+    }
+    map
 }
 
 pub use error::LoweringError;
@@ -73,6 +96,7 @@ pub fn lower_func_with_opts(
     trace_alloc: bool,
 ) -> Result<LoweredFunction, LoweringError> {
     let mut globals = GlobalArena::new();
+    let mut drop_glue = DropGlueRegistry::new(def_table, HashMap::new());
     lower_func_with_globals(
         func,
         def_table,
@@ -80,6 +104,7 @@ pub fn lower_func_with_opts(
         lowering_plans,
         drop_plans,
         trace_alloc,
+        &mut drop_glue,
         &mut globals,
     )
 }
@@ -112,6 +137,8 @@ pub fn lower_module_with_opts(
 ) -> Result<LoweredModule, LoweringError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
+    let full_tys = build_full_type_defs(module, def_table);
+    let mut drop_glue = DropGlueRegistry::new(def_table, full_tys);
 
     for func_def in module.func_defs() {
         let lowered = lower_func_with_globals(
@@ -121,6 +148,7 @@ pub fn lower_module_with_opts(
             lowering_plans,
             drop_plans,
             trace_alloc,
+            &mut drop_glue,
             &mut globals,
         )?;
         funcs.push(lowered);
@@ -139,11 +167,15 @@ pub fn lower_module_with_opts(
                 lowering_plans,
                 drop_plans,
                 trace_alloc,
+                &mut drop_glue,
                 &mut globals,
             )?;
             funcs.push(lowered);
         }
     }
+
+    let mut glue_funcs = drop_glue.take_glue_functions(def_table, type_map, &mut globals)?;
+    funcs.append(&mut glue_funcs);
 
     Ok(LoweredModule {
         funcs,
@@ -158,6 +190,7 @@ fn lower_func_with_globals(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
+    drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
     let globals_start = globals.len();
@@ -177,7 +210,14 @@ fn lower_func_with_globals(
 
     // Initialize the lowerer with function metadata and type information.
     // The builder starts with the cursor at the entry block (block 0).
-    let mut lowerer = FuncLowerer::new(func, def_table, type_map, lowering_plans, globals);
+    let mut lowerer = FuncLowerer::new(
+        func,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_glue,
+        globals,
+    );
     lowerer.set_drop_plans(drop_plans);
     lowerer.enter_drop_scope(func.id);
 
@@ -226,6 +266,7 @@ fn lower_method_def_with_globals(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
+    drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
 ) -> Result<LoweredFunction, LoweringError> {
     let globals_start = globals.len();
@@ -245,6 +286,7 @@ fn lower_method_def_with_globals(
         def_table,
         type_map,
         lowering_plans,
+        drop_glue,
         globals,
     );
     lowerer.set_drop_plans(drop_plans);

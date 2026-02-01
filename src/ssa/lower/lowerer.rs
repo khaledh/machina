@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::resolve::{Def, DefId, DefTable};
 use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::drop_glue::DropGlueRegistry;
 use crate::ssa::lower::drops::DropTracker;
 use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::locals::{LocalMap, LocalValue};
@@ -73,6 +74,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) param_modes: Vec<ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
     pub(super) drop_tracker: DropTracker<'a>,
+    pub(super) drop_glue: &'g mut DropGlueRegistry,
     pub(super) globals: &'g mut GlobalArena,
 }
 
@@ -148,6 +150,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         def_table: &'a DefTable,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
@@ -213,6 +216,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_modes,
             loop_stack: Vec::new(),
             drop_tracker: DropTracker::new(),
+            drop_glue,
             globals,
         }
     }
@@ -227,6 +231,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         def_table: &'a DefTable,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
@@ -322,6 +327,44 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_modes,
             loop_stack: Vec::new(),
             drop_tracker: DropTracker::new(),
+            drop_glue,
+            globals,
+        }
+    }
+
+    pub(super) fn new_drop_glue(
+        def_id: DefId,
+        name: String,
+        param_ty: Type,
+        def_table: &'a DefTable,
+        type_map: &'a TypeMap,
+        lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        drop_glue: &'g mut DropGlueRegistry,
+        globals: &'g mut GlobalArena,
+    ) -> Self {
+        let mut type_lowerer = TypeLowerer::new(type_map);
+        let param_ir = type_lowerer.lower_type(&param_ty);
+        let param_ptr = type_lowerer.ptr_to(param_ir);
+        let unit_ty = type_lowerer.lower_type(&Type::Unit);
+        let sig = FunctionSig {
+            params: vec![param_ptr],
+            ret: unit_ty,
+        };
+        let builder = FunctionBuilder::new(def_id, name, sig);
+
+        Self {
+            def_table,
+            type_map,
+            type_lowerer,
+            builder,
+            locals: LocalMap::new(),
+            lowering_plans,
+            param_defs: Vec::new(),
+            param_tys: vec![param_ptr],
+            param_modes: vec![ParamMode::In],
+            loop_stack: Vec::new(),
+            drop_tracker: DropTracker::new(),
+            drop_glue,
             globals,
         }
     }
