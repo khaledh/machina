@@ -8,6 +8,7 @@ use crate::tree::normalized::{
 use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::typeck::type_map::resolve_type_expr;
 use crate::types::{Type, TypeId};
+use std::collections::HashMap;
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = ValueChecker::new(ctx);
@@ -19,6 +20,7 @@ struct ValueChecker<'a> {
     ctx: &'a NormalizedContext,
     errors: Vec<SemCheckError>,
     return_stack: Vec<Type>,
+    const_env: Vec<HashMap<DefId, i128>>,
 }
 
 impl<'a> ValueChecker<'a> {
@@ -27,6 +29,7 @@ impl<'a> ValueChecker<'a> {
             ctx,
             errors: Vec::new(),
             return_stack: Vec::new(),
+            const_env: Vec::new(),
         }
     }
 
@@ -40,6 +43,50 @@ impl<'a> ValueChecker<'a> {
 
     fn current_return_ty(&self) -> Option<&Type> {
         self.return_stack.last()
+    }
+
+    fn push_const_scope(&mut self) {
+        self.const_env.push(HashMap::new());
+    }
+
+    fn pop_const_scope(&mut self) {
+        self.const_env.pop();
+    }
+
+    fn set_const(&mut self, def_id: DefId, value: Option<i128>) {
+        let Some(scope) = self.const_env.last_mut() else {
+            return;
+        };
+        match value {
+            Some(value) => {
+                scope.insert(def_id, value);
+            }
+            None => {
+                scope.remove(&def_id);
+            }
+        }
+    }
+
+    fn lookup_const(&self, def_id: DefId) -> Option<i128> {
+        for scope in self.const_env.iter().rev() {
+            if let Some(value) = scope.get(&def_id) {
+                return Some(*value);
+            }
+        }
+        None
+    }
+
+    fn const_int_value(&self, expr: &Expr) -> Option<i128> {
+        match &expr.kind {
+            ExprKind::IntLit(value) => Some(*value as i128),
+            ExprKind::UnaryOp {
+                op: UnaryOp::Neg,
+                expr,
+            } => self.const_int_value(expr).map(|value| -value),
+            ExprKind::Var { def_id, .. } => self.lookup_const(*def_id),
+            ExprKind::Move { expr } => self.const_int_value(expr),
+            _ => None,
+        }
     }
 
     fn check_module(&mut self) {
@@ -176,6 +223,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
             .resolve_type(&func_def.sig.ret_ty_expr)
             .unwrap_or(Type::Unknown);
         self.push_return_ty(return_ty);
+        self.push_const_scope();
         walk_expr(self, &func_def.body);
 
         let ret_expr = match &func_def.body.kind {
@@ -189,28 +237,51 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
             self.check_return_value_range(ret_expr);
         }
 
+        self.pop_const_scope();
         self.pop_return_ty();
     }
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
-            StmtExprKind::LetBind { decl_ty, value, .. }
-            | StmtExprKind::VarBind { decl_ty, value, .. } => {
+            StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value,
+                ..
+            }
+            | StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+                ..
+            } => {
                 if let Some(ty) = decl_ty {
                     self.check_type_expr(ty);
                     if let Some(resolved_ty) = self.resolve_type(ty) {
                         self.check_range_binding_value(value, &resolved_ty);
                     }
                 }
+                if let crate::tree::normalized::BindPatternKind::Name { def_id, .. } = &pattern.kind
+                {
+                    let const_value = self.const_int_value(value);
+                    self.set_const(*def_id, const_value);
+                }
             }
-            StmtExprKind::VarDecl { decl_ty, .. } => {
+            StmtExprKind::VarDecl {
+                def_id, decl_ty, ..
+            } => {
                 self.check_type_expr(decl_ty);
+                self.set_const(*def_id, None);
             }
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
                 let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
                 self.check_range_binding_value(value, assignee_ty);
+                if let ExprKind::Var { def_id, .. } = assignee.kind {
+                    let const_value = self.const_int_value(value);
+                    self.set_const(def_id, const_value);
+                }
             }
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {
@@ -230,6 +301,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
         {
             let resolved_return_ty = self.resolve_type(return_ty).unwrap_or(Type::Unknown);
             self.push_return_ty(resolved_return_ty);
+            self.push_const_scope();
             walk_expr(self, expr);
 
             let body_expr = body.as_ref();
@@ -244,7 +316,15 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                 self.check_return_value_range(ret_expr);
             }
 
+            self.pop_const_scope();
             self.pop_return_ty();
+            return;
+        }
+
+        if matches!(expr.kind, ExprKind::Block { .. }) {
+            self.push_const_scope();
+            walk_expr(self, expr);
+            self.pop_const_scope();
             return;
         }
 
@@ -298,7 +378,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                 ..
             } => {
                 // Reject constant division by zero early.
-                if matches!(right.kind, ExprKind::IntLit(0)) {
+                if self.const_int_value(right) == Some(0) {
                     self.errors.push(SemCheckError::DivisionByZero(right.span));
                 }
             }

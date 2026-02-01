@@ -27,13 +27,21 @@ fn test_div_by_zero_traps_with_message_and_exit_code() {
     let run = run_program(
         "div_by_zero",
         r#"
-            fn main() -> u64 {
-                let z = 0;
+            fn div_by_zero(z: u64) -> u64 {
                 10 / z
+            }
+
+            fn main() -> u64 {
+                div_by_zero(0)
             }
         "#,
     );
-    assert_eq!(run.status.code(), Some(100));
+    assert_eq!(
+        run.status.code(),
+        Some(100),
+        "unexpected exit code: {:?}",
+        run.status.code()
+    );
 
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(

@@ -108,6 +108,28 @@ fn test_mod_by_zero_rejected() {
 }
 
 #[test]
+fn test_div_by_zero_via_const_binding() {
+    let source = r#"
+        fn test() -> u64 {
+            let z = 0;
+            let _x = 10 / z;
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::DivisionByZero(_) => {}
+            e => panic!("Expected DivisionByZero error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_range_invalid_bounds() {
     let source = r#"
         fn test() -> u64 {
