@@ -89,6 +89,31 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(Some(arg_values))
     }
 
+    fn mark_out_init_flags(&mut self, args: &[sem::CallArg], arg_values: &[CallInputValue]) {
+        for (arg, input) in args.iter().zip(arg_values.iter()) {
+            match arg {
+                sem::CallArg::Out { place, init, .. } => {
+                    let Some(def_id) = input.drop_def else {
+                        continue;
+                    };
+                    let should_set = match place.kind {
+                        sem::PlaceExprKind::Var { .. } => init.is_init || init.promotes_full,
+                        _ => init.promotes_full,
+                    };
+                    if should_set {
+                        self.set_drop_flag_for_def(def_id, true);
+                    }
+                }
+                sem::CallArg::InOut { .. } => {
+                    if let Some(def_id) = input.drop_def {
+                        self.set_drop_flag_for_def(def_id, true);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Lowers a call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_call_expr(
         &mut self,
@@ -132,6 +157,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let result = self.builder.call(callee, call_args, ty);
         self.emit_call_drops(&call_plan, None, &arg_values)?;
         self.clear_sink_drop_flags(&call_plan, None, &arg_values);
+        self.mark_out_init_flags(args, &arg_values);
         Ok(Some(result))
     }
 
@@ -207,6 +233,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let result = self.builder.call(callee, call_args, ty);
         self.emit_call_drops(&call_plan, Some(&receiver_value), &arg_values)?;
         self.clear_sink_drop_flags(&call_plan, Some(&receiver_value), &arg_values);
+        self.mark_out_init_flags(args, &arg_values);
         Ok(Some(result))
     }
 
