@@ -139,11 +139,11 @@ impl Pass for StackTempCopyElim {
             rewrite.insert((*block_idx, *inst_idx), *new_src);
             remove.insert((*store_block, *store_idx));
         }
-        // For replace-value cases, substitute dst with src and remove both memcpy+store.
-        for (block_idx, inst_idx, dst, src, store_block, store_idx) in &candidates {
+        // For replace-value cases, substitute dst with src and remove the memcpy.
+        // The temp store may still be needed to materialize the source value (e.g. call results).
+        for (block_idx, inst_idx, dst, src, _store_block, _store_idx) in &candidates {
             replace_value_in_func(func, *dst, *src, Some((*block_idx, *inst_idx)));
             remove.insert((*block_idx, *inst_idx));
-            remove.insert((*store_block, *store_idx));
         }
 
         for (block_idx, block) in func.blocks.iter_mut().enumerate() {

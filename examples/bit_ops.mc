@@ -11,16 +11,10 @@ fn main() {
     let shl_val = a << 2;
     let shr_val = a >> 1;
 
-    print("and = ");
-    println(and_val);
-    print("or = ");
-    println(or_val);
-    print("xor = ");
-    println(xor_val);
-    print("not = ");
-    println(not_val);
-    print("shl = ");
-    println(shl_val);
-    print("shr = ");
-    println(shr_val);
+    println(f"and = {and_val}");
+    println(f"or = {or_val}");
+    println(f"xor = {xor_val}");
+    println(f"not = {not_val}");
+    println(f"shl = {shl_val}");
+    println(f"shr = {shr_val}");
 }
