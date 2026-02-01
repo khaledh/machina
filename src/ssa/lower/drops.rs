@@ -379,7 +379,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             match drop_kind(elem_ty) {
                 DropKind::Trivial => {}
                 DropKind::Shallow(name) => {
-                    let def_id = self.drop_glue.def_id_for(name, elem_ty);
+                    let def_id = self.drop_glue.def_id_for(name, elem_ty, self.def_table);
                     let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                     let _ = self
                         .builder
@@ -414,7 +414,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match drop_kind(ty) {
             DropKind::Trivial => return Ok(()),
             DropKind::Shallow(name) => {
-                let def_id = self.drop_glue.def_id_for(name, ty);
+                let def_id = self.drop_glue.def_id_for(name, ty, self.def_table);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ = self
                     .builder
@@ -441,9 +441,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn drop_string(&mut self, addr: ValueId) -> Result<(), LoweringError> {
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
-        let _ =
-            self.builder
-                .call(Callee::Runtime(RuntimeFn::StringDrop), vec![addr], unit_ty);
+        let _ = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::StringDrop), vec![addr], unit_ty);
         Ok(())
     }
 
@@ -456,7 +456,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match drop_kind(elem_ty) {
             DropKind::Trivial => {}
             DropKind::Shallow(name) => {
-                let def_id = self.drop_glue.def_id_for(name, elem_ty);
+                let def_id = self.drop_glue.def_id_for(name, elem_ty, self.def_table);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ = self
                     .builder

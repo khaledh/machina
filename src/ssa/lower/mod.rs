@@ -29,13 +29,10 @@ use crate::ssa::lower::drop_glue::DropGlueRegistry;
 use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::lowerer::BranchResult;
 use crate::ssa::model::ir::{Function, GlobalData, Terminator};
-use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
-use crate::typeck::type_map::resolve_type_expr;
 use crate::types::Type;
 use lowerer::FuncLowerer;
-use std::collections::HashMap;
 
 pub struct LoweredFunction {
     pub func: Function,
@@ -46,24 +43,6 @@ pub struct LoweredFunction {
 pub struct LoweredModule {
     pub funcs: Vec<LoweredFunction>,
     pub globals: Vec<GlobalData>,
-}
-
-fn build_full_type_defs(module: &sem::Module, def_table: &DefTable) -> HashMap<String, Type> {
-    let mut map = HashMap::new();
-    for type_def in module.type_defs() {
-        let type_expr = res::TypeExpr {
-            id: type_def.id,
-            kind: res::TypeExprKind::Named {
-                ident: type_def.name.clone(),
-                def_id: type_def.def_id,
-            },
-            span: type_def.span,
-        };
-        let ty = resolve_type_expr(def_table, module, &type_expr)
-            .unwrap_or_else(|err| panic!("ssa lower type def {}: {:?}", type_def.name, err));
-        map.insert(type_def.name.clone(), ty);
-    }
-    map
 }
 
 pub use error::LoweringError;
@@ -96,7 +75,7 @@ pub fn lower_func_with_opts(
     trace_alloc: bool,
 ) -> Result<LoweredFunction, LoweringError> {
     let mut globals = GlobalArena::new();
-    let mut drop_glue = DropGlueRegistry::new(def_table, HashMap::new());
+    let mut drop_glue = DropGlueRegistry::new(def_table);
     lower_func_with_globals(
         func,
         def_table,
@@ -137,8 +116,7 @@ pub fn lower_module_with_opts(
 ) -> Result<LoweredModule, LoweringError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
-    let full_tys = build_full_type_defs(module, def_table);
-    let mut drop_glue = DropGlueRegistry::new(def_table, full_tys);
+    let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
 
     for func_def in module.func_defs() {
         let lowered = lower_func_with_globals(

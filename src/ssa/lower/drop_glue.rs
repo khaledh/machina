@@ -6,8 +6,9 @@ use crate::ssa::lower::lowerer::FuncLowerer;
 use crate::ssa::lower::{LoweredFunction, LoweringError};
 use crate::ssa::model::ir::Terminator;
 use crate::tree::NodeId;
+use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
-use crate::typeck::type_map::TypeMap;
+use crate::typeck::type_map::{TypeMap, resolve_type_expr};
 use crate::types::Type;
 
 /// Tracks drop-glue functions needed for recursive heap elements.
@@ -18,13 +19,37 @@ use crate::types::Type;
 /// inlining infinitely.
 pub(super) struct DropGlueRegistry {
     next_def: u32,
-    defs: HashMap<String, DefId>,
-    tys: HashMap<String, Type>,
-    full_tys: HashMap<String, Type>,
+    defs: HashMap<DefId, DefId>,
+    tys: HashMap<DefId, Type>,
+    full_tys: HashMap<DefId, Type>,
 }
 
 impl DropGlueRegistry {
-    pub(super) fn new(def_table: &DefTable, full_tys: HashMap<String, Type>) -> Self {
+    pub(super) fn new(def_table: &DefTable) -> Self {
+        Self {
+            next_def: def_table.next_def_id().0,
+            defs: HashMap::new(),
+            tys: HashMap::new(),
+            full_tys: HashMap::new(),
+        }
+    }
+
+    pub(super) fn from_module(def_table: &DefTable, module: &sem::Module) -> Self {
+        let mut full_tys = HashMap::new();
+        for type_def in module.type_defs() {
+            let type_expr = res::TypeExpr {
+                id: type_def.id,
+                kind: res::TypeExprKind::Named {
+                    ident: type_def.name.clone(),
+                    def_id: type_def.def_id,
+                },
+                span: type_def.span,
+            };
+            let ty = resolve_type_expr(def_table, module, &type_expr).unwrap_or_else(|err| {
+                panic!("ssa drop glue type def {}: {:?}", type_def.name, err)
+            });
+            full_tys.insert(type_def.def_id, ty);
+        }
         Self {
             next_def: def_table.next_def_id().0,
             defs: HashMap::new(),
@@ -33,21 +58,25 @@ impl DropGlueRegistry {
         }
     }
 
-    pub(super) fn def_id_for(&mut self, name: &str, ty: &Type) -> DefId {
-        if let Some(def_id) = self.defs.get(name).copied() {
+    pub(super) fn def_id_for(&mut self, name: &str, ty: &Type, def_table: &DefTable) -> DefId {
+        let type_def_id = def_table
+            .lookup_type_def_id(name)
+            .unwrap_or_else(|| panic!("ssa drop glue missing type def for {}", name));
+
+        if let Some(def_id) = self.defs.get(&type_def_id).copied() {
             return def_id;
         }
 
         let def_id = DefId(self.next_def);
         self.next_def += 1;
-        self.defs.insert(name.to_string(), def_id);
+        self.defs.insert(type_def_id, def_id);
 
         let full_ty = self
             .full_tys
-            .get(name)
+            .get(&type_def_id)
             .cloned()
             .unwrap_or_else(|| ty.clone());
-        self.tys.insert(name.to_string(), full_ty);
+        self.tys.insert(type_def_id, full_ty);
 
         def_id
     }
@@ -60,14 +89,17 @@ impl DropGlueRegistry {
     ) -> Result<Vec<LoweredFunction>, LoweringError> {
         let mut funcs = Vec::new();
         let empty_plans: HashMap<NodeId, sem::LoweringPlan> = HashMap::new();
-        let mut pending: Vec<(String, Type)> = self.tys.drain().collect();
-        while let Some((name, ty)) = pending.pop() {
+        let mut pending: Vec<(DefId, Type)> = self.tys.drain().collect();
+        while let Some((type_def_id, ty)) = pending.pop() {
             let def_id = self
                 .defs
-                .get(&name)
+                .get(&type_def_id)
                 .copied()
-                .unwrap_or_else(|| panic!("ssa drop glue missing def for {}", name));
-            let func_name = format!("__drop_{}", name);
+                .unwrap_or_else(|| panic!("ssa drop glue missing def for {:?}", type_def_id));
+            let type_def = def_table
+                .lookup_def(type_def_id)
+                .unwrap_or_else(|| panic!("ssa drop glue missing type def {:?}", type_def_id));
+            let func_name = format!("__drop_{}", type_def.name);
             let mut lowerer = FuncLowerer::new_drop_glue(
                 def_id,
                 func_name,
