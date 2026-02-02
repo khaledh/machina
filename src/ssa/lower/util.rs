@@ -2,7 +2,7 @@
 
 use crate::diag::Span;
 use crate::resolve::DefId;
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::locals::{LocalStorage, LocalValue};
 use crate::ssa::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
 use crate::ssa::model::ir::{BinOp, Callee, CmpOp, RuntimeFn, Terminator, ValueId};
@@ -220,7 +220,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         target: &sem::PlaceExpr,
         deref_count: usize,
-    ) -> Result<(ValueId, Type), LoweringError> {
+    ) -> Result<(ValueId, Type), LowerToIrError> {
         let mut base = self.lower_place_addr(target)?;
         let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
 
@@ -390,7 +390,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         value: ValueId,
         ty: &Type,
         len_bits: u8,
-    ) -> Result<(ValueId, ValueId), LoweringError> {
+    ) -> Result<(ValueId, ValueId), LowerToIrError> {
         let (ptr_ty, len_ty) = match ty {
             Type::String => {
                 if len_bits != 32 {

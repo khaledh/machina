@@ -3,10 +3,10 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::regalloc::stack::StackAllocator;
-use crate::regalloc::target::{PhysReg, TargetSpec};
 use crate::ssa::IrTypeCache;
 use crate::ssa::model::ir::ValueId;
+use crate::ssa::regalloc::stack::{StackAllocator, StackSlotId};
+use crate::ssa::regalloc::target::{PhysReg, TargetSpec};
 
 use super::constraints::AbiConstraints;
 use super::intervals::{IntervalAnalysis, LiveInterval};
@@ -324,7 +324,7 @@ fn alloc_stack_for(
     value: ValueId,
     slot_sizes: &HashMap<ValueId, u32>,
     allocator: &mut StackAllocator,
-) -> crate::regalloc::stack::StackSlotId {
+) -> StackSlotId {
     let slots = slot_sizes.get(&value).copied().unwrap_or(1);
     allocator.alloc_slots(slots)
 }

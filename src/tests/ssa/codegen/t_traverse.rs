@@ -93,13 +93,13 @@ fn test_codegen_traverse_emits_moves_and_insts() {
         block: func.blocks[0].id,
         inst_index: 1,
         pre_moves: vec![crate::ssa::regalloc::moves::MoveOp {
-            src: Location::Stack(crate::regalloc::stack::StackSlotId(0)),
-            dst: Location::Stack(crate::regalloc::stack::StackSlotId(1)),
+            src: Location::Stack(crate::ssa::regalloc::stack::StackSlotId(0)),
+            dst: Location::Stack(crate::ssa::regalloc::stack::StackSlotId(1)),
             size: 8,
         }],
         post_moves: vec![crate::ssa::regalloc::moves::MoveOp {
-            src: Location::Stack(crate::regalloc::stack::StackSlotId(1)),
-            dst: Location::Stack(crate::regalloc::stack::StackSlotId(2)),
+            src: Location::Stack(crate::ssa::regalloc::stack::StackSlotId(1)),
+            dst: Location::Stack(crate::ssa::regalloc::stack::StackSlotId(2)),
             size: 8,
         }],
     }];

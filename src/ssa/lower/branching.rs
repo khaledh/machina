@@ -2,7 +2,7 @@
 
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::ssa::lower::r#match::MatchLowerer;
 use crate::ssa::model::ir::{Terminator, ValueId};
@@ -17,7 +17,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_branching_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<BranchResult, LoweringError> {
+    ) -> Result<BranchResult, LowerToIrError> {
         match &expr.kind {
             // Block expression: process items sequentially.
             sem::ValueExprKind::Block { items, tail } => {
@@ -187,7 +187,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_stmt_expr_branching(
         &mut self,
         stmt: &sem::StmtExpr,
-    ) -> Result<Option<BranchResult>, LoweringError> {
+    ) -> Result<Option<BranchResult>, LowerToIrError> {
         match &stmt.kind {
             sem::StmtExprKind::While { cond, body } => {
                 self.annotate_stmt(stmt);
@@ -222,7 +222,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         cond: &sem::ValueExpr,
         body: &sem::ValueExpr,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         // Snapshot active drop scopes so we can restore them after lowering
         // control-flow edges that may exit the loop body early.
         let drop_snapshot = self.drop_scopes_snapshot();
@@ -313,7 +313,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Lowers a `break` statement by branching to the loop exit block.
-    fn lower_break_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LoweringError> {
+    fn lower_break_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LowerToIrError> {
         self.emit_drops_for_stmt(stmt.id)?;
         let ctx = self.current_loop();
         let exit_bb = ctx.exit_bb;
@@ -328,7 +328,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Lowers a `continue` statement by branching to the loop header block.
-    fn lower_continue_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LoweringError> {
+    fn lower_continue_stmt(
+        &mut self,
+        stmt: &sem::StmtExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
         self.emit_drops_for_stmt(stmt.id)?;
         let ctx = self.current_loop();
         let header_bb = ctx.header_bb;

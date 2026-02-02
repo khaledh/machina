@@ -1,6 +1,6 @@
 //! Bind pattern lowering for let/var bindings.
 
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::FuncLowerer;
 use crate::tree::semantic as sem;
@@ -13,7 +13,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         pattern: &sem::BindPattern,
         value: LocalValue,
         value_ty: &Type,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         match &pattern.kind {
             sem::BindPatternKind::Name { def_id, .. } => {
                 let dest_ty = self.def_type(*def_id);

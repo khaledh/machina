@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::regalloc::target::{PhysReg, TargetSpec};
+use crate::ssa::regalloc::target::{PhysReg, TargetSpec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]

@@ -1,4 +1,3 @@
-use crate::regalloc::stack::StackSlotId;
 use crate::resolve::DefId;
 use crate::ssa::codegen::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
 use crate::ssa::codegen::moves::{EdgeMovePlan, MoveSchedule};
@@ -6,6 +5,7 @@ use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{Callee, FunctionSig, InstKind, Terminator};
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::{EdgeMove, MoveOp};
+use crate::ssa::regalloc::stack::StackSlotId;
 use crate::ssa::{IrTypeCache, IrTypeKind};
 
 #[test]

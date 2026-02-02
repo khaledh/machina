@@ -1,9 +1,9 @@
-use crate::regalloc::target::PhysReg;
 use crate::ssa::RuntimeFn;
 use crate::ssa::codegen::emitter::LocationResolver;
 use crate::ssa::codegen::graph::CodegenBlockId;
 use crate::ssa::model::ir::{ConstValue, Terminator, ValueId};
 use crate::ssa::regalloc::Location;
+use crate::ssa::regalloc::target::PhysReg;
 
 use super::{Arm64Emitter, ConstValueExt, needs_sret};
 

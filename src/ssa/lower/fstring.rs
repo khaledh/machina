@@ -1,6 +1,6 @@
 //! F-string lowering helpers.
 
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue, ValueSlot};
 use crate::ssa::model::ir::{BinOp, Callee, CastKind, RuntimeFn, ValueId};
 use crate::tree::semantic as sem;
@@ -22,7 +22,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         plan: &sem::StringFmtPlan,
         string_ty: crate::ssa::IrTypeId,
-    ) -> Result<Option<LinearValue>, LoweringError> {
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
         let total_len = self.string_fmt_plan_len(plan);
         let buf_len = total_len.max(1);
 
@@ -114,7 +114,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         plan: &sem::StringFmtPlan,
         string_ty: crate::ssa::IrTypeId,
-    ) -> Result<Option<LinearValue>, LoweringError> {
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
         let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
@@ -247,7 +247,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         plan: &sem::StringFmtPlan,
         u8_ptr_ty: crate::ssa::IrTypeId,
         u64_ty: crate::ssa::IrTypeId,
-    ) -> Result<Option<(Vec<LoweredFmtSegment>, Vec<Option<ValueId>>)>, LoweringError> {
+    ) -> Result<Option<(Vec<LoweredFmtSegment>, Vec<Option<ValueId>>)>, LowerToIrError> {
         let mut segments = Vec::with_capacity(plan.segments.len());
         let mut string_lens = vec![None; plan.segments.len()];
 

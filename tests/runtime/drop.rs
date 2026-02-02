@@ -1,16 +1,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use machina::compile::{BackendKind, CompileOptions};
-use machina::targets::TargetKind;
+use machina::compile::CompileOptions;
 
 use crate::common::run_program_with_opts;
 
 fn trace_opts() -> CompileOptions {
     CompileOptions {
         dump: None,
-        target: TargetKind::Arm64,
-        backend: BackendKind::Ssa,
         emit_ir: false,
         verify_ir: false,
         trace_alloc: true,

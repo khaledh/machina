@@ -27,11 +27,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::regalloc::target::{PhysReg, TargetSpec};
 use crate::ssa::IrTypeCache;
 use crate::ssa::model::ir::ValueId;
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves;
+use crate::ssa::regalloc::target::{PhysReg, TargetSpec};
 
 use super::intervals::{IntervalAnalysis, LiveInterval};
 

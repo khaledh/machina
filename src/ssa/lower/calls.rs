@@ -2,7 +2,7 @@
 
 use crate::diag::Span;
 use crate::resolve::DefId;
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::lowerer::{FuncLowerer, LinearValue};
 use crate::ssa::model::ir::{Callee, RuntimeFn, ValueId};
 use crate::tree::{InitInfo, ParamMode};
@@ -44,7 +44,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn call_input_from_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<Option<CallInputValue>, LoweringError> {
+    ) -> Result<Option<CallInputValue>, LowerToIrError> {
         let drop_def = drop_def_for_value_expr(expr);
         let Some(value) = self.lower_value_expr_opt(expr)? else {
             return Ok(None);
@@ -61,7 +61,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn call_input_from_place_expr(
         &mut self,
         place: &sem::PlaceExpr,
-    ) -> Result<CallInputValue, LoweringError> {
+    ) -> Result<CallInputValue, LowerToIrError> {
         let drop_def = drop_def_for_place_expr(place);
         let addr = self.lower_place_addr(place)?;
         let ty = self.type_map.type_table().get(place.ty).clone();
@@ -76,7 +76,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_call_arg_values(
         &mut self,
         args: &[sem::CallArg],
-    ) -> Result<Option<Vec<CallInputValue>>, LoweringError> {
+    ) -> Result<Option<Vec<CallInputValue>>, LowerToIrError> {
         let mut arg_values = Vec::with_capacity(args.len());
         for arg in args {
             match arg {
@@ -156,7 +156,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         expr: &sem::ValueExpr,
         callee_expr: &sem::ValueExpr,
         args: &[sem::CallArg],
-    ) -> Result<Option<LinearValue>, LoweringError> {
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
         let call_plan = self.call_plan(expr.id);
 
         // Direct calls (no receiver) only for now.
@@ -203,7 +203,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         expr: &sem::ValueExpr,
         receiver: &sem::MethodReceiver,
         args: &[sem::CallArg],
-    ) -> Result<Option<LinearValue>, LoweringError> {
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
         let call_plan = self.call_plan(expr.id);
 
         // Method calls must have a receiver.
@@ -278,7 +278,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         call_plan: &sem::CallPlan,
         receiver_value: Option<&CallInputValue>,
         arg_values: &[CallInputValue],
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         let expected = (call_plan.has_receiver as usize) + arg_values.len();
         if call_plan.drop_mask.len() != expected {
             panic!(
@@ -363,7 +363,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         call_plan: &sem::CallPlan,
         mut receiver_value: Option<&mut CallInputValue>,
         arg_values: &mut [CallInputValue],
-    ) -> Result<Vec<ValueId>, LoweringError> {
+    ) -> Result<Vec<ValueId>, LowerToIrError> {
         if call_plan.has_receiver != receiver_value.is_some() {
             panic!(
                 "ssa lower_call_args_from_plan receiver mismatch for {:?}",
@@ -420,7 +420,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(call_args)
     }
 
-    fn runtime_for_call(&self, runtime: &sem::RuntimeCall) -> Result<RuntimeFn, LoweringError> {
+    fn runtime_for_call(&self, runtime: &sem::RuntimeCall) -> Result<RuntimeFn, LowerToIrError> {
         match runtime {
             sem::RuntimeCall::Print => Ok(RuntimeFn::Print),
             sem::RuntimeCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
@@ -435,7 +435,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         span: Span,
         receiver: &sem::MethodReceiver,
         receiver_value: &CallInputValue,
-    ) -> Result<ValueId, LoweringError> {
+    ) -> Result<ValueId, LowerToIrError> {
         if !matches!(receiver_value.ty, Type::String) {
             panic!(
                 "ssa string len intrinsic expects string receiver, got {:?}",

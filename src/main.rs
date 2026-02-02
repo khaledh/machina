@@ -1,7 +1,6 @@
 use clap::Parser as ClapParser;
-use machina::compile::{BackendKind, CompileOptions, compile};
+use machina::compile::{CompileOptions, compile};
 use machina::diag::{CompileError, Span, format_error};
-use machina::targets::TargetKind;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -22,7 +21,7 @@ struct Args {
     cmd: Command,
 
     /// Comma-separated list of compiler debug dumps: [tokens, ast, deftab,
-    /// typemap, nrvo, ir, liveness, intervals, regalloc, asm]
+    /// typemap, nrvo, ir, asm]
     #[clap(long, global = true)]
     dump: Option<String>,
 
@@ -45,10 +44,6 @@ struct Args {
     /// Verify SSA IR invariants after SSA lowering/optimization.
     #[clap(long = "verify-ir", global = true)]
     verify_ir: bool,
-
-    /// Backend pipeline to use: legacy MCIR or new SSA.
-    #[clap(long, value_enum, default_value_t = BackendKind::Ssa, global = true)]
-    backend: BackendKind,
 }
 
 #[derive(clap::Subcommand)]
@@ -81,6 +76,11 @@ enum EmitKind {
     Ir,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy)]
+enum TargetKind {
+    Arm64,
+}
+
 #[derive(Copy, Clone)]
 enum DriverKind {
     Compile,
@@ -103,12 +103,11 @@ fn main() {
     let Args {
         cmd,
         dump,
-        target,
+        target: _target,
         emit,
         trace_alloc,
         trace_drops,
         verify_ir,
-        backend,
     } = Args::parse();
     let invocation = match cmd {
         Command::Compile { input, output } => DriverInvocation {
@@ -139,12 +138,10 @@ fn main() {
     let emit_ir = emit.iter().any(|kind| matches!(kind, EmitKind::Ir));
     let opts = CompileOptions {
         dump,
-        target,
         emit_ir,
         verify_ir,
         trace_alloc,
         trace_drops,
-        backend,
         inject_prelude: true,
     };
     let output = compile(&source, &opts);
@@ -268,16 +265,10 @@ fn main() {
                     CompileError::SemCheck(e) => {
                         println!("{}", format_error(&source, e.span(), e));
                     }
-                    CompileError::Lower(e) => {
+                    CompileError::LowerToIr(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
-                    CompileError::SsaLowering(e) => {
-                        println!("{}", format_error(&source, Span::default(), e));
-                    }
-                    CompileError::SsaVerify(e) => {
-                        println!("{}", format_error(&source, Span::default(), e));
-                    }
-                    CompileError::Codegen(e) => {
+                    CompileError::VerifyIr(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
                     CompileError::Io(path, e) => {
@@ -373,12 +364,10 @@ fn compile_prelude_impl_object(
 
     let impl_opts = CompileOptions {
         dump: None,
-        target: opts.target,
         emit_ir: opts.emit_ir,
         verify_ir: opts.verify_ir,
         trace_alloc: opts.trace_alloc,
         trace_drops: opts.trace_drops,
-        backend: opts.backend,
         inject_prelude: false,
     };
 

@@ -8,11 +8,11 @@ use crate::ssa::model::ir::{
 use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
 
 #[derive(Debug, Clone)]
-pub struct VerifyError {
+pub struct VerifyIrError {
     message: String,
 }
 
-impl VerifyError {
+impl VerifyIrError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -20,15 +20,15 @@ impl VerifyError {
     }
 }
 
-impl fmt::Display for VerifyError {
+impl fmt::Display for VerifyIrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl std::error::Error for VerifyError {}
+impl std::error::Error for VerifyIrError {}
 
-pub fn verify_module(module: &LoweredModule) -> Result<(), VerifyError> {
+pub fn verify_module(module: &LoweredModule) -> Result<(), VerifyIrError> {
     for func in &module.funcs {
         verify_function(func)?;
     }
@@ -38,7 +38,7 @@ pub fn verify_module(module: &LoweredModule) -> Result<(), VerifyError> {
 #[cfg(test)]
 #[path = "../tests/ssa/verify/t_verify.rs"]
 mod tests;
-fn verify_function(lowered: &LoweredFunction) -> Result<(), VerifyError> {
+fn verify_function(lowered: &LoweredFunction) -> Result<(), VerifyIrError> {
     let func = &lowered.func;
     let types = &lowered.types;
 
@@ -117,7 +117,7 @@ fn verify_inst_types(
     value_types: &HashMap<ValueId, IrTypeId>,
     types: &IrTypeCache,
     func: &crate::ssa::model::ir::Function,
-) -> Result<(), VerifyError> {
+) -> Result<(), VerifyIrError> {
     match kind {
         InstKind::AddrOfLocal { local } => {
             let result = result
@@ -176,7 +176,7 @@ fn verify_terminator(
     blocks: &HashMap<BlockId, &Block>,
     value_types: &HashMap<ValueId, IrTypeId>,
     types: &IrTypeCache,
-) -> Result<(), VerifyError> {
+) -> Result<(), VerifyIrError> {
     match &block.term {
         Terminator::Br { target, args } => {
             check_block_args(func_name, block.id, *target, args, blocks, value_types)?;
@@ -250,7 +250,7 @@ fn check_block_args(
     args: &[ValueId],
     blocks: &HashMap<BlockId, &Block>,
     value_types: &HashMap<ValueId, IrTypeId>,
-) -> Result<(), VerifyError> {
+) -> Result<(), VerifyIrError> {
     let target_block = blocks.get(&target).ok_or_else(|| {
         err(
             func_name,
@@ -291,7 +291,7 @@ fn value_ty(
     block_id: BlockId,
     value: ValueId,
     value_types: &HashMap<ValueId, IrTypeId>,
-) -> Result<IrTypeId, VerifyError> {
+) -> Result<IrTypeId, VerifyIrError> {
     value_types.get(&value).copied().ok_or_else(|| {
         err(
             func_name,
@@ -307,7 +307,7 @@ fn require_ptr(
     value: ValueId,
     value_types: &HashMap<ValueId, IrTypeId>,
     types: &IrTypeCache,
-) -> Result<(), VerifyError> {
+) -> Result<(), VerifyIrError> {
     let ty = value_ty(func_name, block_id, value, value_types)?;
     if !matches!(types.kind(ty), IrTypeKind::Ptr { .. }) {
         return Err(err(
@@ -325,7 +325,7 @@ fn require_bool(
     value: ValueId,
     value_types: &HashMap<ValueId, IrTypeId>,
     types: &IrTypeCache,
-) -> Result<(), VerifyError> {
+) -> Result<(), VerifyIrError> {
     let ty = value_ty(func_name, block_id, value, value_types)?;
     if !matches!(types.kind(ty), IrTypeKind::Bool) {
         return Err(err(
@@ -337,10 +337,10 @@ fn require_bool(
     Ok(())
 }
 
-fn err(func_name: &str, block_id: Option<BlockId>, message: impl Into<String>) -> VerifyError {
+fn err(func_name: &str, block_id: Option<BlockId>, message: impl Into<String>) -> VerifyIrError {
     let message = match block_id {
         Some(block_id) => format!("ssa verify: {func_name} {:?}: {}", block_id, message.into()),
         None => format!("ssa verify: {func_name}: {}", message.into()),
     };
-    VerifyError::new(message)
+    VerifyIrError::new(message)
 }

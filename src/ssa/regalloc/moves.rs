@@ -28,9 +28,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::regalloc::target::TargetSpec;
 use crate::ssa::IrTypeCache;
 use crate::ssa::model::ir::{BlockId, Callee, Function, InstKind, Terminator, ValueId};
+use crate::ssa::regalloc::target::{PhysReg, TargetSpec};
 
 use super::{Location, ValueAllocMap};
 
@@ -96,7 +96,7 @@ impl MovePlan {
     /// Uses the first scratch register to break any register cycles that
     /// would otherwise cause a move to overwrite a value still needed as
     /// a source.
-    pub fn resolve_parallel_moves(&mut self, scratch_regs: &[crate::regalloc::target::PhysReg]) {
+    pub fn resolve_parallel_moves(&mut self, scratch_regs: &[PhysReg]) {
         if scratch_regs.is_empty() {
             return;
         }
@@ -427,7 +427,7 @@ fn edge_moves_for(
 ///
 /// Moves that implicitly use the scratch register (e.g., stack-to-stack) are
 /// treated as also writing to the scratch register for dependency tracking.
-fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::PhysReg) {
+fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: PhysReg) {
     if moves.len() <= 1 {
         return;
     }
@@ -436,7 +436,7 @@ fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::
     let mut pending = std::mem::take(moves);
 
     // Track which registers each pending move reads from
-    let mut pending_srcs: Vec<HashSet<crate::regalloc::target::PhysReg>> = pending
+    let mut pending_srcs: Vec<HashSet<PhysReg>> = pending
         .iter()
         .map(|mov| {
             let mut regs = HashSet::new();
@@ -448,7 +448,7 @@ fn resolve_move_list(moves: &mut Vec<MoveOp>, scratch: crate::regalloc::target::
         .collect();
 
     // Count how many pending moves read from each register
-    let mut src_counts: HashMap<crate::regalloc::target::PhysReg, usize> = HashMap::new();
+    let mut src_counts: HashMap<PhysReg, usize> = HashMap::new();
     for regs in &pending_srcs {
         for reg in regs {
             *src_counts.entry(*reg).or_insert(0) += 1;

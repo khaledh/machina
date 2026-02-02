@@ -3,7 +3,7 @@
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::drops::DropSnapshot;
 use crate::ssa::lower::locals::{LocalSnapshot, LocalValue};
 use crate::ssa::model::ir::{BlockId, Terminator, ValueId};
@@ -83,7 +83,7 @@ impl crate::ssa::lower::lowerer::FuncLowerer<'_, '_> {
         plan: &JoinPlan,
         value: ValueId,
         _span: Span,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         // Build arguments: result value + locals in stable order, coercing storage
         // to match the join plan's expected locals.
         let local_args = self.local_args_for_like(&plan.defs, &plan.locals);
@@ -117,7 +117,7 @@ impl JoinSession {
         lowerer: &mut crate::ssa::lower::lowerer::FuncLowerer<'_, '_>,
         value: ValueId,
         span: Span,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         lowerer.emit_join_branch(&self.plan, value, span)
     }
 

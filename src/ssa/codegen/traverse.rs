@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::ssa::model::ir::{BlockId, Function, LocalId, ValueId};
 use crate::ssa::regalloc::ValueAllocMap;
 use crate::ssa::regalloc::moves::MoveOp;
+use crate::ssa::regalloc::target::PhysReg;
 use crate::ssa::{IrTypeCache, IrTypeId, IrTypeKind};
 
 use super::emitter::{CodegenEmitter, LocationResolver};
@@ -38,7 +39,7 @@ pub fn emit_graph_with_emitter(
     func: &Function,
     alloc_map: &ValueAllocMap,
     frame_size: u32,
-    callee_saved: &[crate::regalloc::target::PhysReg],
+    callee_saved: &[PhysReg],
     types: &mut IrTypeCache,
     def_names: &HashMap<crate::resolve::DefId, String>,
     func_label: &str,
@@ -113,7 +114,7 @@ pub fn emit_graph_with_emitter(
     let total_frame_size = frame_size.saturating_add(locals_size);
     let mut callee_saved = callee_saved.to_vec();
     if needs_sret(types, func.sig.ret) {
-        let sret_reg = crate::regalloc::target::PhysReg(8);
+        let sret_reg = PhysReg(8);
         if !callee_saved.iter().any(|reg| *reg == sret_reg) {
             callee_saved.push(sret_reg);
             callee_saved.sort_by_key(|reg| reg.0);

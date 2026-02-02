@@ -1,4 +1,3 @@
-use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::codegen::arm64::Arm64Emitter;
@@ -13,6 +12,7 @@ use crate::ssa::model::ir::{
     BinOp, Callee, CmpOp, ConstValue, FunctionSig, GlobalData, GlobalId, RuntimeFn, SwitchCase,
     Terminator,
 };
+use crate::ssa::regalloc::target::PhysReg;
 use crate::ssa::regalloc::{TargetSpec, ValueAllocMap, regalloc};
 use crate::ssa::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
 

@@ -1,4 +1,3 @@
-use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::model::builder::FunctionBuilder;
@@ -6,6 +5,7 @@ use crate::ssa::model::ir::{BinOp, Callee, FunctionSig, Terminator};
 use crate::ssa::regalloc::TargetSpec;
 use crate::ssa::regalloc::constraints;
 use crate::ssa::regalloc::intervals;
+use crate::ssa::regalloc::target::PhysReg;
 use crate::ssa::{IrTypeCache, IrTypeKind};
 
 // ============================================================================

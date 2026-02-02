@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use machina::compile::{BackendKind, CompileOptions, compile};
-use machina::targets::TargetKind;
+use machina::compile::{CompileOptions, compile};
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -13,8 +12,6 @@ pub(crate) fn run_program(name: &str, source: &str) -> Output {
         source,
         CompileOptions {
             dump: None,
-            target: TargetKind::Arm64,
-            backend: BackendKind::Ssa,
             emit_ir: false,
             verify_ir: false,
             trace_alloc: false,
@@ -102,8 +99,6 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
     let source = std::fs::read_to_string(&prelude_path).expect("failed to read prelude_impl");
     let opts = CompileOptions {
         dump: None,
-        target: TargetKind::Arm64,
-        backend: BackendKind::Ssa,
         emit_ir: false,
         verify_ir: false,
         trace_alloc: false,

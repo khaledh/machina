@@ -45,7 +45,7 @@ pub struct LoweredModule {
     pub globals: Vec<GlobalData>,
 }
 
-pub use error::LoweringError;
+pub use error::LowerToIrError;
 
 /// Lowers a semantic function definition into SSA IR.
 ///
@@ -61,7 +61,7 @@ pub fn lower_func(
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
-) -> Result<LoweredFunction, LoweringError> {
+) -> Result<LoweredFunction, LowerToIrError> {
     lower_func_with_opts(
         func,
         def_table,
@@ -82,7 +82,7 @@ pub fn lower_func_with_opts(
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
-) -> Result<LoweredFunction, LoweringError> {
+) -> Result<LoweredFunction, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
     lower_func_with_globals(
@@ -104,7 +104,7 @@ pub fn lower_module(
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
-) -> Result<LoweredModule, LoweringError> {
+) -> Result<LoweredModule, LowerToIrError> {
     lower_module_with_opts(
         module,
         def_table,
@@ -125,7 +125,7 @@ pub fn lower_module_with_opts(
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
-) -> Result<LoweredModule, LoweringError> {
+) -> Result<LoweredModule, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
     let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
@@ -186,7 +186,7 @@ fn lower_func_with_globals(
     trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
-) -> Result<LoweredFunction, LoweringError> {
+) -> Result<LoweredFunction, LowerToIrError> {
     let globals_start = globals.len();
     let ret_ty = {
         let def = def_table
@@ -264,7 +264,7 @@ fn lower_method_def_with_globals(
     trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
-) -> Result<LoweredFunction, LoweringError> {
+) -> Result<LoweredFunction, LowerToIrError> {
     let globals_start = globals.len();
     let ret_ty = type_map.lookup_node_type(method_def.id).unwrap_or_else(|| {
         panic!(

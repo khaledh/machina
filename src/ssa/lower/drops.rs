@@ -1,7 +1,7 @@
 //! Drop-plan helpers for SSA lowering.
 
 use crate::resolve::DefId;
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::lowerer::FuncLowerer;
 use crate::ssa::model::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
 use crate::tree::NodeId;
@@ -181,8 +181,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn with_drop_scope<R>(
         &mut self,
         id: NodeId,
-        f: impl FnOnce(&mut Self) -> Result<R, LoweringError>,
-    ) -> Result<R, LoweringError> {
+        f: impl FnOnce(&mut Self) -> Result<R, LowerToIrError>,
+    ) -> Result<R, LowerToIrError> {
         self.enter_drop_scope(id);
         let result = f(self);
         self.exit_drop_scope_if_active(id);
@@ -221,7 +221,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Emits drops until the drop scope stack is at the requested depth.
-    pub(super) fn emit_drops_to_depth(&mut self, depth: usize) -> Result<(), LoweringError> {
+    pub(super) fn emit_drops_to_depth(&mut self, depth: usize) -> Result<(), LowerToIrError> {
         let scopes = self.drop_tracker.pop_to_depth(depth);
         for scope_id in scopes {
             self.emit_drop_scope(scope_id)?;
@@ -230,7 +230,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Emits drops corresponding to a semantic statement's drop depth.
-    pub(super) fn emit_drops_for_stmt(&mut self, stmt_id: NodeId) -> Result<(), LoweringError> {
+    pub(super) fn emit_drops_for_stmt(&mut self, stmt_id: NodeId) -> Result<(), LowerToIrError> {
         let Some(depth) = self.drop_tracker.depth_for_stmt(stmt_id) else {
             return Ok(());
         };
@@ -241,7 +241,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         def_id: DefId,
         ty_id: TypeId,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         if !self.drop_tracker.is_active() {
             return Ok(());
         }
@@ -289,7 +289,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.store_drop_flag(flag_addr, value);
     }
 
-    fn emit_drop_scope(&mut self, id: NodeId) -> Result<(), LoweringError> {
+    fn emit_drop_scope(&mut self, id: NodeId) -> Result<(), LowerToIrError> {
         let drop_plans = self
             .drop_tracker
             .plans()
@@ -305,7 +305,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn emit_drop_item(&mut self, item: &sem::DropItem) -> Result<(), LoweringError> {
+    fn emit_drop_item(&mut self, item: &sem::DropItem) -> Result<(), LowerToIrError> {
         if self.drop_tracker.known_live(item.def_id) == Some(false) {
             return Ok(());
         }
@@ -342,8 +342,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn emit_drop_if_flag(
         &mut self,
         flag_addr: ValueId,
-        f: impl FnOnce(&mut Self) -> Result<(), LoweringError>,
-    ) -> Result<(), LoweringError> {
+        f: impl FnOnce(&mut Self) -> Result<(), LowerToIrError>,
+    ) -> Result<(), LowerToIrError> {
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let cond = self.builder.load(flag_addr, bool_ty);
         let drop_bb = self.builder.add_block();
@@ -368,7 +368,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn emit_drop_for_def(&mut self, def_id: DefId, ty_id: TypeId) -> Result<(), LoweringError> {
+    fn emit_drop_for_def(&mut self, def_id: DefId, ty_id: TypeId) -> Result<(), LowerToIrError> {
         self.trace_drop(format!("drop {}", self.def(def_id).name));
         let ty = self.type_map.type_table().get(ty_id).clone();
         let value_ty = self.type_lowerer.lower_type_id(ty_id);
@@ -381,7 +381,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         value: ValueId,
         ty: &Type,
         is_addr: bool,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         if matches!(drop_kind(ty), DropKind::Trivial) {
             return Ok(());
         }
@@ -425,7 +425,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         addr: ValueId,
         ty: &Type,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         match drop_kind(ty) {
             DropKind::Trivial => return Ok(()),
             DropKind::Shallow(name) => {
@@ -454,7 +454,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn drop_string(&mut self, addr: ValueId) -> Result<(), LoweringError> {
+    fn drop_string(&mut self, addr: ValueId) -> Result<(), LowerToIrError> {
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
         let _ = self
             .builder
@@ -462,7 +462,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn drop_heap(&mut self, addr: ValueId, elem_ty: &Type) -> Result<(), LoweringError> {
+    fn drop_heap(&mut self, addr: ValueId, elem_ty: &Type) -> Result<(), LowerToIrError> {
         let ptr_ty = self.type_lowerer.lower_type(&Type::Heap {
             elem_ty: Box::new(elem_ty.clone()),
         });
@@ -493,7 +493,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         addr: ValueId,
         fields: &[crate::types::StructField],
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         for (index, field) in fields.iter().enumerate().rev() {
             if matches!(drop_kind(&field.ty), DropKind::Trivial) {
                 continue;
@@ -505,7 +505,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn drop_tuple(&mut self, addr: ValueId, field_tys: &[Type]) -> Result<(), LoweringError> {
+    fn drop_tuple(&mut self, addr: ValueId, field_tys: &[Type]) -> Result<(), LowerToIrError> {
         for (index, field_ty) in field_tys.iter().enumerate().rev() {
             if matches!(drop_kind(field_ty), DropKind::Trivial) {
                 continue;
@@ -522,7 +522,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         addr: ValueId,
         ty: &Type,
         dims: &[usize],
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         let Some(elem_ty) = ty.array_item_type() else {
             panic!("ssa drop array missing element type");
         };
@@ -550,7 +550,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         addr: ValueId,
         ty: &Type,
         variants: &[crate::types::EnumVariant],
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         let ty_id = self.type_id_for_enum(ty);
         // Copy layout data out of the type lowerer to avoid holding a mutable borrow
         // while emitting IR instructions that need &mut self.

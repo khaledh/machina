@@ -8,8 +8,12 @@ use std::collections::HashMap;
 
 use crate::ssa::model::ir::ValueId;
 
-pub use crate::regalloc::stack::StackSlotId;
-pub use crate::regalloc::target::{PhysReg, TargetSpec};
+pub mod arm64;
+pub mod stack;
+pub mod target;
+
+pub use stack::StackSlotId;
+pub use target::{PhysReg, TargetSpec};
 
 pub mod alloc;
 pub mod constraints;

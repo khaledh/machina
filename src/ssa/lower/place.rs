@@ -1,6 +1,6 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::model::ir::ValueId;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -16,7 +16,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
     pub(super) fn lower_place_addr(
         &mut self,
         place: &sem::PlaceExpr,
-    ) -> Result<PlaceAddr, LoweringError> {
+    ) -> Result<PlaceAddr, LowerToIrError> {
         match &place.kind {
             sem::PlaceExprKind::Var { def_id, .. } => {
                 let value_ty = self.type_lowerer.lower_type_id(place.ty);
@@ -131,7 +131,7 @@ impl<'a, 'g> crate::ssa::lower::lowerer::FuncLowerer<'a, 'g> {
     fn lower_place_deref_base(
         &mut self,
         target: &sem::PlaceExpr,
-    ) -> Result<(ValueId, Type), LoweringError> {
+    ) -> Result<(ValueId, Type), LowerToIrError> {
         let mut base = self.lower_place_addr(target)?;
         let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
 

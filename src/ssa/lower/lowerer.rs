@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::resolve::{Def, DefId, DefTable};
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::drop_glue::DropGlueRegistry;
 use crate::ssa::lower::drops::DropTracker;
 use crate::ssa::lower::globals::GlobalArena;
@@ -458,7 +458,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<BranchResult, LoweringError> {
+    ) -> Result<BranchResult, LowerToIrError> {
         match self.lowering_plan(expr.id) {
             sem::LoweringPlan::Linear => {
                 // The plan guarantees linearity; any failure here is a compiler bug.
@@ -481,7 +481,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_value_expr_opt(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<Option<ValueId>, LoweringError> {
+    ) -> Result<Option<ValueId>, LowerToIrError> {
         match self.lower_value_expr(expr)? {
             BranchResult::Value(value) => Ok(Some(value)),
             BranchResult::Return => Ok(None),

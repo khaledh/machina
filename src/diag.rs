@@ -1,13 +1,11 @@
 use std::path::PathBuf;
 
 use crate::lexer::LexError;
-use crate::lower::errors::LowerError;
 use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 use crate::semck::SemCheckError;
-use crate::ssa::lower::LoweringError as SsaLoweringError;
-use crate::ssa::verify::VerifyError as SsaVerifyError;
-use crate::targets::CodegenError;
+use crate::ssa::lower::LowerToIrError as SsaLoweringError;
+use crate::ssa::verify::VerifyIrError as SsaVerifyError;
 use crate::typeck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;
@@ -29,17 +27,11 @@ pub enum CompileError {
     #[error(transparent)]
     SemCheck(#[from] SemCheckError),
 
-    #[error(transparent)]
-    Lower(#[from] LowerError),
-
-    #[error("SSA lowering error")]
-    SsaLowering(#[from] SsaLoweringError),
+    #[error("IR lowering error")]
+    LowerToIr(#[from] SsaLoweringError),
 
     #[error(transparent)]
-    SsaVerify(#[from] SsaVerifyError),
-
-    #[error(transparent)]
-    Codegen(#[from] CodegenError),
+    VerifyIr(#[from] SsaVerifyError),
 
     #[error("IO error: {0}")]
     Io(PathBuf, std::io::Error),

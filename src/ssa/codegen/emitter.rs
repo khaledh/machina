@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 
-use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::IrTypeCache;
 use crate::ssa::IrTypeId;
@@ -13,6 +12,7 @@ use crate::ssa::model::ir::{
 use crate::ssa::model::layout::IrLayout;
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::MoveOp;
+use crate::ssa::regalloc::target::PhysReg;
 
 /// Minimal instruction selection interface for SSA codegen.
 pub trait CodegenEmitter {

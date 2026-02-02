@@ -4,7 +4,7 @@
 //! precomputed match plans to avoid pattern re-derivation.
 
 use crate::ssa::IrTypeId;
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer};
 use crate::ssa::model::ir::{CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
@@ -24,7 +24,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         expr: &'a sem::ValueExpr,
         scrutinee: &sem::ValueExpr,
         arms: &'a [sem::MatchArm],
-    ) -> Result<BranchResult, LoweringError> {
+    ) -> Result<BranchResult, LowerToIrError> {
         let plan = lowerer.match_plan(expr.id);
 
         // Evaluate the scrutinee once and store it for address-based projections.
@@ -63,7 +63,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         arms: &[sem::MatchArm],
         arm_plans: &[sem::MatchArmPlan],
         tree: &sem::MatchDecisionNode,
-    ) -> Result<BranchResult, LoweringError> {
+    ) -> Result<BranchResult, LowerToIrError> {
         if arms.len() != arm_plans.len() {
             panic!(
                 "ssa match plan arm mismatch: {} arms vs {} plans",
@@ -126,7 +126,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         arms: &[sem::MatchArm],
         arm_plans: &[sem::MatchArmPlan],
         switch: &sem::MatchSwitch,
-    ) -> Result<BranchResult, LoweringError> {
+    ) -> Result<BranchResult, LowerToIrError> {
         if arms.len() != arm_plans.len() {
             panic!(
                 "ssa match plan arm mismatch: {} arms vs {} plans",
@@ -223,7 +223,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         node: &sem::MatchDecisionNode,
         entry_bb: crate::ssa::model::ir::BlockId,
         arm_blocks: &[crate::ssa::model::ir::BlockId],
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         match node {
             sem::MatchDecisionNode::Leaf { arm_index } => {
                 self.lowerer.builder.select_block(entry_bb);
@@ -262,7 +262,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         tests: &[sem::MatchTest],
         on_match_bb: crate::ssa::model::ir::BlockId,
         on_fail_bb: crate::ssa::model::ir::BlockId,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<(), LowerToIrError> {
         if tests.is_empty() {
             self.lowerer.builder.select_block(entry_bb);
             self.lowerer.builder.terminate(Terminator::Br {
@@ -298,7 +298,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         Ok(())
     }
 
-    fn lower_test_cond(&mut self, test: &sem::MatchTest) -> Result<ValueId, LoweringError> {
+    fn lower_test_cond(&mut self, test: &sem::MatchTest) -> Result<ValueId, LowerToIrError> {
         let bool_ty = self.lowerer.type_lowerer.lower_type(&Type::Bool);
 
         match &test.kind {
@@ -349,7 +349,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     fn lower_discriminant(
         &mut self,
         discr: &sem::MatchPlace,
-    ) -> Result<(ValueId, Type), LoweringError> {
+    ) -> Result<(ValueId, Type), LowerToIrError> {
         let (addr, ty) = self.lower_place_addr(discr)?;
 
         // Enums are lowered as tagged structs in SSA, so extract field 0.
@@ -380,7 +380,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         Ok((value, ty))
     }
 
-    fn lower_bindings(&mut self, bindings: &[sem::MatchBinding]) -> Result<(), LoweringError> {
+    fn lower_bindings(&mut self, bindings: &[sem::MatchBinding]) -> Result<(), LowerToIrError> {
         for binding in bindings {
             let (value, value_ty) = self.lower_place_value(&binding.source)?;
             self.lowerer
@@ -393,7 +393,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     fn lower_place_value(
         &mut self,
         place: &sem::MatchPlace,
-    ) -> Result<(ValueId, IrTypeId), LoweringError> {
+    ) -> Result<(ValueId, IrTypeId), LowerToIrError> {
         let (addr, ty) = self.lower_place_addr(place)?;
         let ir_ty = self.lowerer.type_lowerer.lower_type(&ty);
         let value = self.lowerer.builder.load(addr, ir_ty);
@@ -403,7 +403,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     fn lower_place_addr(
         &mut self,
         place: &sem::MatchPlace,
-    ) -> Result<(ValueId, Type), LoweringError> {
+    ) -> Result<(ValueId, Type), LowerToIrError> {
         let mut addr = self.scrutinee_addr;
         let mut curr_ty = self
             .lowerer

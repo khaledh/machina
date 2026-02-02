@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::resolve::{DefId, DefTable};
 use crate::ssa::lower::globals::GlobalArena;
 use crate::ssa::lower::lowerer::FuncLowerer;
-use crate::ssa::lower::{LoweredFunction, LoweringError};
+use crate::ssa::lower::{LowerToIrError, LoweredFunction};
 use crate::ssa::model::ir::Terminator;
 use crate::tree::NodeId;
 use crate::tree::resolved as res;
@@ -87,7 +87,7 @@ impl DropGlueRegistry {
         type_map: &TypeMap,
         globals: &mut GlobalArena,
         trace_drops: bool,
-    ) -> Result<Vec<LoweredFunction>, LoweringError> {
+    ) -> Result<Vec<LoweredFunction>, LowerToIrError> {
         let mut funcs = Vec::new();
         let empty_plans: HashMap<NodeId, sem::LoweringPlan> = HashMap::new();
         let mut pending: Vec<(DefId, Type)> = self.tys.drain().collect();

@@ -3,12 +3,12 @@
 use std::fmt;
 
 #[derive(Clone, Debug)]
-pub struct LoweringError;
+pub struct LowerToIrError;
 
-impl fmt::Display for LoweringError {
+impl fmt::Display for LowerToIrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ssa lowering error")
+        write!(f, "ir lowering error")
     }
 }
 
-impl std::error::Error for LoweringError {}
+impl std::error::Error for LowerToIrError {}

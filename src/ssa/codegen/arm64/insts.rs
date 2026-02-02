@@ -1,8 +1,8 @@
 use crate::ssa::codegen::emitter::{LocationResolver, binop_mnemonic};
 use crate::ssa::model::ir::{BinOp, Callee, CastKind, ConstValue, InstKind, Instruction, UnOp};
 use crate::ssa::regalloc::Location;
+use crate::ssa::regalloc::arm64::INDIRECT_CALL_REG;
 use crate::ssa::{IrTypeKind, RuntimeFn};
-use crate::targets::arm64::regs::INDIRECT_CALL_REG;
 
 use super::{Arm64Emitter, ConstValueExt};
 

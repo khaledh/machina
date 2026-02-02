@@ -2,13 +2,13 @@
 
 use std::fmt::Write;
 
-use crate::regalloc::target::PhysReg;
 use crate::ssa::IrTypeKind;
 use crate::ssa::codegen::emitter::{CodegenEmitter, LocationResolver};
 use crate::ssa::codegen::graph::CodegenBlockId;
 use crate::ssa::model::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
 use crate::ssa::regalloc::Location;
 use crate::ssa::regalloc::moves::{MoveOp, ParamCopy};
+use crate::ssa::regalloc::target::PhysReg;
 
 mod frame;
 mod globals;

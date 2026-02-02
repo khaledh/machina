@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::regalloc::target::PhysReg;
+use crate::ssa::regalloc::target::PhysReg;
 
 use super::Arm64Emitter;
 

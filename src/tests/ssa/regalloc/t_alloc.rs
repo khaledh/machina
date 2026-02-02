@@ -1,8 +1,8 @@
-use crate::regalloc::target::PhysReg;
 use crate::resolve::DefId;
 use crate::ssa::analysis::liveness;
 use crate::ssa::model::builder::FunctionBuilder;
 use crate::ssa::model::ir::{BinOp, Callee, FunctionSig, Terminator};
+use crate::ssa::regalloc::target::PhysReg;
 use crate::ssa::regalloc::{Location, TargetSpec, regalloc};
 use crate::ssa::{IrTypeCache, IrTypeKind};
 

@@ -1,6 +1,6 @@
 //! Straight-line (single-block) lowering routines.
 
-use crate::ssa::lower::LoweringError;
+use crate::ssa::lower::LowerToIrError;
 use crate::ssa::lower::locals::LocalValue;
 use crate::ssa::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::ssa::lower::mapping::{map_binop, map_cmp};
@@ -16,7 +16,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_linear_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<LinearValue, LoweringError> {
+    ) -> Result<LinearValue, LowerToIrError> {
         match self.lower_value_expr_value(expr)? {
             BranchResult::Value(value) => Ok(value),
             BranchResult::Return => {
@@ -32,7 +32,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_value_expr_value(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<BranchResult, LoweringError> {
+    ) -> Result<BranchResult, LowerToIrError> {
         macro_rules! eval_value {
             ($expr:expr) => {
                 match self.lower_value_expr_opt($expr)? {
@@ -648,7 +648,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_stmt_expr_linear(
         &mut self,
         stmt: &sem::StmtExpr,
-    ) -> Result<StmtOutcome, LoweringError> {
+    ) -> Result<StmtOutcome, LowerToIrError> {
         self.annotate_stmt(stmt);
         match &stmt.kind {
             sem::StmtExprKind::LetBind { pattern, value, .. }
@@ -781,7 +781,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_linear_expr_value(
         &mut self,
         expr: &sem::ValueExpr,
-    ) -> Result<LinearValue, LoweringError> {
+    ) -> Result<LinearValue, LowerToIrError> {
         match self.lower_value_expr(expr)? {
             BranchResult::Value(value) => Ok(value),
             BranchResult::Return => {
