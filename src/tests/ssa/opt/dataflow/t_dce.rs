@@ -22,6 +22,26 @@ fn test_dce_removes_unused_binop() {
 }
 
 #[test]
+fn test_dce_removes_unused_cmp() {
+    let text = lower_and_optimize(indoc! {"
+        fn main() -> u64 {
+            let x = 1;
+            let y = x < 2;
+            4
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main() -> u64 {
+          bb0():
+            %v3: u64 = const 4:u64
+            ret %v3
+        }
+    "};
+    assert_ir_eq(text, expected);
+}
+
+#[test]
 fn test_dce_keeps_call() {
     let ctx = super::analyze(indoc! {"
         fn main() -> u64 {
