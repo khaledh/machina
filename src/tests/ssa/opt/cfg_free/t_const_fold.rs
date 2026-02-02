@@ -51,3 +51,34 @@ fn test_const_fold_cond_br() {
     "};
     assert_ir_eq(text, expected);
 }
+
+#[test]
+fn test_const_fold_cross_block_param() {
+    let text = lower_and_optimize(indoc! {"
+        fn pick(flag: bool) -> u64 {
+            let x = if flag { 1 } else { 1 };
+            x + 2
+        }
+    "});
+
+    let expected = indoc! {"
+        fn pick(bool) -> u64 {
+          bb0(%v0: bool):
+            cbr %v0, bb1, bb2
+
+          bb1():
+            %v3: u64 = const 1:u64
+            br bb3(%v3, %v0)
+
+          bb2():
+            %v4: u64 = const 1:u64
+            br bb3(%v4, %v0)
+
+          bb3(%v1: u64, %v2: bool):
+            %v5: u64 = const 2:u64
+            %v6: u64 = const 3:u64
+            ret %v6
+        }
+    "};
+    assert_ir_eq(text, expected);
+}

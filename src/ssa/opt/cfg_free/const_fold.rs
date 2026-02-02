@@ -1,6 +1,8 @@
 //! Constant folding and trivial branch simplification for SSA.
 
 use crate::ssa::IrTypeId;
+use std::collections::HashMap;
+
 use crate::ssa::model::ir::{
     BinOp, ConstValue, Function, InstKind, Terminator, UnOp, ValueDef, ValueId,
 };
@@ -17,62 +19,95 @@ impl Pass for ConstFold {
     fn run(&mut self, func: &mut Function) -> bool {
         let mut changed = false;
         let mut env = ConstEnv::new();
+        let mut consts: HashMap<ValueId, ConstValue> = HashMap::new();
 
-        for block in &mut func.blocks {
-            // Keep this pass block-local; no cross-block constant propagation.
-            env.clear();
+        const MAX_ITERS: usize = 4;
+        for _ in 0..MAX_ITERS {
+            let mut iter_changed = false;
+            let incoming = build_incoming_args(func);
+            let param_consts = compute_param_consts(func, &incoming, &consts);
 
-            for inst in &mut block.insts {
-                if let Some(result) = &inst.result {
-                    env.remove(result.id);
+            for (block_idx, block) in func.blocks.iter_mut().enumerate() {
+                env.clear();
+
+                for (param_idx, param) in block.params.iter().enumerate() {
+                    if let Some(value) = param_consts[block_idx][param_idx].clone() {
+                        env.insert(&param.value, value.clone());
+                        if update_global_const(&mut consts, &param.value, &value) {
+                            iter_changed = true;
+                        }
+                    }
                 }
 
-                match &mut inst.kind {
-                    InstKind::Const { value } => {
-                        if let Some(result) = &inst.result {
-                            env.insert(result, value.clone());
-                        }
+                for inst in &mut block.insts {
+                    if let Some(result) = &inst.result {
+                        env.remove(result.id);
                     }
-                    InstKind::BinOp { op, lhs, rhs } => {
-                        if let Some(result) = &inst.result {
-                            if let Some(value) = fold_binop(*op, *lhs, *rhs, &env) {
-                                inst.kind = InstKind::Const {
-                                    value: value.clone(),
-                                };
-                                env.insert(result, value);
-                                changed = true;
+
+                    match &mut inst.kind {
+                        InstKind::Const { value } => {
+                            if let Some(result) = &inst.result {
+                                env.insert(result, value.clone());
+                                if update_global_const(&mut consts, result, value) {
+                                    iter_changed = true;
+                                }
                             }
                         }
-                    }
-                    InstKind::Cmp { op, lhs, rhs } => {
-                        if let Some(result) = &inst.result {
-                            if let Some(value) = fold_cmp(*op, *lhs, *rhs, &env) {
-                                inst.kind = InstKind::Const {
-                                    value: value.clone(),
-                                };
-                                env.insert(result, value);
-                                changed = true;
+                        InstKind::BinOp { op, lhs, rhs } => {
+                            if let Some(result) = &inst.result {
+                                if let Some(value) = fold_binop(*op, *lhs, *rhs, &env) {
+                                    inst.kind = InstKind::Const {
+                                        value: value.clone(),
+                                    };
+                                    env.insert(result, value.clone());
+                                    if update_global_const(&mut consts, result, &value) {
+                                        iter_changed = true;
+                                    }
+                                    changed = true;
+                                }
                             }
                         }
-                    }
-                    InstKind::UnOp { op, value } => {
-                        if let Some(result) = &inst.result {
-                            if let Some(value) = fold_unop(*op, *value, &env) {
-                                inst.kind = InstKind::Const {
-                                    value: value.clone(),
-                                };
-                                env.insert(result, value);
-                                changed = true;
+                        InstKind::Cmp { op, lhs, rhs } => {
+                            if let Some(result) = &inst.result {
+                                if let Some(value) = fold_cmp(*op, *lhs, *rhs, &env) {
+                                    inst.kind = InstKind::Const {
+                                        value: value.clone(),
+                                    };
+                                    env.insert(result, value.clone());
+                                    if update_global_const(&mut consts, result, &value) {
+                                        iter_changed = true;
+                                    }
+                                    changed = true;
+                                }
                             }
                         }
+                        InstKind::UnOp { op, value } => {
+                            if let Some(result) = &inst.result {
+                                if let Some(value) = fold_unop(*op, *value, &env) {
+                                    inst.kind = InstKind::Const {
+                                        value: value.clone(),
+                                    };
+                                    env.insert(result, value.clone());
+                                    if update_global_const(&mut consts, result, &value) {
+                                        iter_changed = true;
+                                    }
+                                    changed = true;
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                }
+
+                // Fold terminators when the condition is known in this block.
+                if simplify_terminator(&mut block.term, &env) {
+                    iter_changed = true;
+                    changed = true;
                 }
             }
 
-            // Only fold terminators when the condition is known in this block.
-            if simplify_terminator(&mut block.term, &env) {
-                changed = true;
+            if !iter_changed {
+                break;
             }
         }
 
@@ -274,5 +309,112 @@ fn simplify_terminator(term: &mut Terminator, env: &ConstEnv) -> bool {
             }
         }
         _ => false,
+    }
+}
+
+fn update_global_const(
+    consts: &mut HashMap<ValueId, ConstValue>,
+    result: &ValueDef,
+    value: &ConstValue,
+) -> bool {
+    let Some(existing) = consts.get(&result.id) else {
+        consts.insert(result.id, value.clone());
+        return true;
+    };
+    if existing == value {
+        false
+    } else {
+        consts.insert(result.id, value.clone());
+        true
+    }
+}
+
+fn compute_param_consts(
+    func: &Function,
+    incoming: &[Vec<Vec<ValueId>>],
+    consts: &HashMap<ValueId, ConstValue>,
+) -> Vec<Vec<Option<ConstValue>>> {
+    let mut out = Vec::with_capacity(func.blocks.len());
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        let mut params = Vec::with_capacity(block.params.len());
+        for param_idx in 0..block.params.len() {
+            let args = &incoming[block_idx][param_idx];
+            if args.is_empty() {
+                params.push(None);
+                continue;
+            }
+            let mut first: Option<ConstValue> = None;
+            let mut all_same = true;
+            for arg in args {
+                let Some(value) = consts.get(arg).cloned() else {
+                    all_same = false;
+                    break;
+                };
+                if let Some(prev) = &first {
+                    if *prev != value {
+                        all_same = false;
+                        break;
+                    }
+                } else {
+                    first = Some(value);
+                }
+            }
+            params.push(if all_same { first } else { None });
+        }
+        out.push(params);
+    }
+    out
+}
+
+fn build_incoming_args(func: &Function) -> Vec<Vec<Vec<ValueId>>> {
+    let mut incoming: Vec<Vec<Vec<ValueId>>> = func
+        .blocks
+        .iter()
+        .map(|block| vec![Vec::new(); block.params.len()])
+        .collect();
+
+    for block in &func.blocks {
+        match &block.term {
+            Terminator::Br { target, args } => {
+                push_args(&mut incoming, *target, args);
+            }
+            Terminator::CondBr {
+                then_bb,
+                then_args,
+                else_bb,
+                else_args,
+                ..
+            } => {
+                push_args(&mut incoming, *then_bb, then_args);
+                push_args(&mut incoming, *else_bb, else_args);
+            }
+            Terminator::Switch {
+                cases,
+                default,
+                default_args,
+                ..
+            } => {
+                for case in cases {
+                    push_args(&mut incoming, case.target, &case.args);
+                }
+                push_args(&mut incoming, *default, default_args);
+            }
+            Terminator::Return { .. } | Terminator::Unreachable => {}
+        }
+    }
+
+    incoming
+}
+
+fn push_args(
+    incoming: &mut [Vec<Vec<ValueId>>],
+    target: crate::ssa::model::ir::BlockId,
+    args: &[ValueId],
+) {
+    let slots = &mut incoming[target.index()];
+    for (idx, value) in args.iter().enumerate() {
+        if let Some(slot) = slots.get_mut(idx) {
+            slot.push(*value);
+        }
     }
 }
