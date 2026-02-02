@@ -328,20 +328,29 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             // --- Optimize SSA ---
             let mut funcs: Vec<_> = lowered.funcs.iter().map(|f| f.func.clone()).collect();
             let skip_opt = std::env::var("MACHINA_DISABLE_SSA_OPT").ok().is_some();
-            if !skip_opt {
+            let reachable = if skip_opt {
+                None
+            } else {
                 let mut pipeline = ssa::opt::Pipeline::new();
                 pipeline.run(&mut funcs);
-            }
+                Some(ssa::opt::module_dce::reachable_def_ids(&funcs))
+            };
 
             let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
             for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
-                let types = lowered_func.types.clone();
-                let globals = lowered_func.globals.clone();
-                optimized_funcs.push(ssa::lower::LoweredFunction {
-                    func,
-                    types,
-                    globals,
-                });
+                let should_keep = reachable
+                    .as_ref()
+                    .map(|defs| defs.contains(&func.def_id))
+                    .unwrap_or(true);
+                if should_keep {
+                    let types = lowered_func.types.clone();
+                    let globals = lowered_func.globals.clone();
+                    optimized_funcs.push(ssa::lower::LoweredFunction {
+                        func,
+                        types,
+                        globals,
+                    });
+                }
             }
 
             let lowered = ssa::lower::LoweredModule {

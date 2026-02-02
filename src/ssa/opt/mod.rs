@@ -5,6 +5,7 @@ use crate::ssa::model::ir::Function;
 pub mod cfg;
 pub mod cfg_free;
 pub mod dataflow;
+pub mod module_dce;
 
 /// SSA optimization pass trait.
 pub trait Pass {
