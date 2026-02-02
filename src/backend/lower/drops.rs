@@ -1,13 +1,14 @@
 //! Drop-plan helpers for SSA lowering.
 
 use crate::backend::lower::LowerToIrError;
+use crate::backend::lower::locals::LocalStorage;
 use crate::backend::lower::lowerer::FuncLowerer;
-use crate::ir::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
+use crate::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
 use crate::resolve::DefId;
 use crate::tree::NodeId;
 use crate::tree::semantic as sem;
 use crate::types::Type;
-use crate::types::TypeId;
+use crate::types::{EnumVariant, StructField, TypeId};
 use std::collections::HashMap;
 
 /// Tracks drop-scope state and per-def liveness flags during lowering.
@@ -259,8 +260,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             lowerer.trace_drop(format!("drop-if-live {}", lowerer.def(def_id).name));
             let local = lowerer.lookup_local(def_id);
             let (value, is_addr) = match local.storage {
-                crate::backend::lower::locals::LocalStorage::Value(value) => (value, false),
-                crate::backend::lower::locals::LocalStorage::Addr(addr) => (addr, true),
+                LocalStorage::Value(value) => (value, false),
+                LocalStorage::Addr(addr) => (addr, true),
             };
             lowerer.emit_drop_for_value(value, &ty, is_addr)
         })
@@ -489,11 +490,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn drop_struct(
-        &mut self,
-        addr: ValueId,
-        fields: &[crate::types::StructField],
-    ) -> Result<(), LowerToIrError> {
+    fn drop_struct(&mut self, addr: ValueId, fields: &[StructField]) -> Result<(), LowerToIrError> {
         for (index, field) in fields.iter().enumerate().rev() {
             if matches!(drop_kind(&field.ty), DropKind::Trivial) {
                 continue;
@@ -549,7 +546,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         addr: ValueId,
         ty: &Type,
-        variants: &[crate::types::EnumVariant],
+        variants: &[EnumVariant],
     ) -> Result<(), LowerToIrError> {
         let ty_id = self.type_id_for_enum(ty);
         // Copy layout data out of the type lowerer to avoid holding a mutable borrow

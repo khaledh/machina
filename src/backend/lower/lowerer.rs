@@ -8,9 +8,8 @@ use crate::backend::lower::drops::DropTracker;
 use crate::backend::lower::globals::GlobalArena;
 use crate::backend::lower::locals::{LocalMap, LocalValue};
 use crate::backend::lower::types::TypeLowerer;
-use crate::backend::{IrTypeCache, IrTypeId};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{BlockId, Function, FunctionSig, GlobalId, ValueId};
+use crate::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
 use crate::resolve::{Def, DefId, DefTable};
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
@@ -54,7 +53,7 @@ pub(super) struct LoopContext {
     pub(super) header_bb: BlockId,
     pub(super) exit_bb: BlockId,
     pub(super) defs: Vec<DefId>,
-    pub(super) locals: Vec<crate::backend::lower::locals::LocalValue>,
+    pub(super) locals: Vec<LocalValue>,
 }
 
 /// Main state for lowering a single function to SSA IR.
@@ -231,6 +230,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ///
     /// Methods include an explicit `self` parameter that is lowered as the
     /// first SSA parameter before the user-declared parameters.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new_method(
         type_name: &str,
         method_def: &sem::MethodDef,
@@ -340,6 +340,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new_drop_glue(
         def_id: DefId,
         name: String,

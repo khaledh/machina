@@ -5,5 +5,4 @@ pub mod opt;
 pub mod regalloc;
 pub mod verify;
 
-pub use crate::ir::*;
 pub use lower::*;

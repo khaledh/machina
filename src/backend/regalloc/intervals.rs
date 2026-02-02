@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::backend::IrTypeId;
 use crate::backend::analysis::cfg::Cfg;
 use crate::backend::analysis::liveness::LiveMap;
-use crate::ir::ir::{Function, InstKind, Terminator, ValueId, for_each_inst_use};
+use crate::ir::IrTypeId;
+use crate::ir::{Function, InstKind, Terminator, ValueId, for_each_inst_use};
 
 /// Half-open live interval [start, end) in instruction index space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

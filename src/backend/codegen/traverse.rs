@@ -5,8 +5,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::backend::regalloc::ValueAllocMap;
 use crate::backend::regalloc::moves::MoveOp;
 use crate::backend::regalloc::target::PhysReg;
-use crate::backend::{IrTypeCache, IrTypeId, IrTypeKind};
-use crate::ir::ir::{BlockId, Function, LocalId, ValueId};
+use crate::ir::for_each_inst_use;
+use crate::ir::layout::IrLayout;
+use crate::ir::{
+    Block, BlockId, Callee, ConstValue, Function, InstKind, Instruction, LocalId, Terminator,
+    ValueId,
+};
+use crate::ir::{IrTypeCache, IrTypeId, IrTypeKind};
+use crate::resolve::DefId;
 
 use super::emitter::{CodegenEmitter, LocationResolver};
 use super::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
@@ -16,8 +22,8 @@ use super::moves::MoveBlockId;
 pub trait CodegenSink {
     fn enter_block(&mut self, block: CodegenBlockId);
     fn emit_moves(&mut self, moves: &[MoveOp]);
-    fn emit_inst(&mut self, inst: &crate::ir::ir::Instruction);
-    fn emit_terminator(&mut self, term: &crate::ir::ir::Terminator);
+    fn emit_inst(&mut self, inst: &Instruction);
+    fn emit_terminator(&mut self, term: &Terminator);
     fn emit_branch(&mut self, target: CodegenBlockId);
     fn emit_cond_branch(
         &mut self,
@@ -28,12 +34,13 @@ pub trait CodegenSink {
     fn emit_switch(
         &mut self,
         value: ValueId,
-        cases: &[(crate::ir::ir::ConstValue, CodegenBlockId)],
+        cases: &[(ConstValue, CodegenBlockId)],
         default_target: CodegenBlockId,
     );
 }
 
 /// Emits code using a target emitter and allocation map.
+#[allow(clippy::too_many_arguments)]
 pub fn emit_graph_with_emitter(
     graph: &CodegenGraph,
     func: &Function,
@@ -41,7 +48,7 @@ pub fn emit_graph_with_emitter(
     frame_size: u32,
     callee_saved: &[PhysReg],
     types: &mut IrTypeCache,
-    def_names: &HashMap<crate::resolve::DefId, String>,
+    def_names: &HashMap<DefId, String>,
     func_label: &str,
     emitter: &mut dyn CodegenEmitter,
 ) {
@@ -65,11 +72,11 @@ pub fn emit_graph_with_emitter(
             self.emitter.emit_moves(moves);
         }
 
-        fn emit_inst(&mut self, inst: &crate::ir::ir::Instruction) {
+        fn emit_inst(&mut self, inst: &Instruction) {
             self.emitter.emit_inst(inst, &self.locs);
         }
 
-        fn emit_terminator(&mut self, term: &crate::ir::ir::Terminator) {
+        fn emit_terminator(&mut self, term: &Terminator) {
             self.emitter.emit_terminator(term, &self.locs);
         }
 
@@ -90,7 +97,7 @@ pub fn emit_graph_with_emitter(
         fn emit_switch(
             &mut self,
             value: ValueId,
-            cases: &[(crate::ir::ir::ConstValue, CodegenBlockId)],
+            cases: &[(ConstValue, CodegenBlockId)],
             default_target: CodegenBlockId,
         ) {
             self.emitter
@@ -148,7 +155,7 @@ pub fn emit_graph_with_emitter(
 struct EmitContext<'a> {
     graph: &'a CodegenGraph,
     func: &'a Function,
-    blocks_by_id: HashMap<BlockId, &'a crate::ir::ir::Block>,
+    blocks_by_id: HashMap<BlockId, &'a Block>,
     move_blocks: HashMap<MoveBlockId, &'a [MoveOp]>,
 }
 
@@ -174,7 +181,7 @@ impl<'a> EmitContext<'a> {
         }
     }
 
-    fn ssa_block(&self, id: BlockId) -> &crate::ir::ir::Block {
+    fn ssa_block(&self, id: BlockId) -> &Block {
         self.blocks_by_id
             .get(&id)
             .copied()
@@ -242,10 +249,10 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
 
     for block in &func.blocks {
         match &block.term {
-            crate::ir::ir::Terminator::Br { target, args } => {
+            Terminator::Br { target, args } => {
                 fill_args(*target, args);
             }
-            crate::ir::ir::Terminator::CondBr {
+            Terminator::CondBr {
                 then_bb,
                 then_args,
                 else_bb,
@@ -255,7 +262,7 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
                 fill_args(*then_bb, then_args);
                 fill_args(*else_bb, else_args);
             }
-            crate::ir::ir::Terminator::Switch {
+            Terminator::Switch {
                 cases,
                 default,
                 default_args,
@@ -266,7 +273,7 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
                 }
                 fill_args(*default, default_args);
             }
-            crate::ir::ir::Terminator::Return { .. } | crate::ir::ir::Terminator::Unreachable => {}
+            Terminator::Return { .. } | Terminator::Unreachable => {}
         }
     }
 
@@ -277,7 +284,7 @@ fn build_layouts(
     types: &mut IrTypeCache,
     func: &Function,
     value_types: &HashMap<ValueId, IrTypeId>,
-) -> HashMap<IrTypeId, crate::ir::layout::IrLayout> {
+) -> HashMap<IrTypeId, IrLayout> {
     let mut layouts = HashMap::new();
     for ty in value_types
         .values()
@@ -292,13 +299,13 @@ fn build_layouts(
 fn build_field_addr_folds(
     func: &Function,
     value_types: &HashMap<ValueId, IrTypeId>,
-    layouts: &HashMap<IrTypeId, crate::ir::layout::IrLayout>,
+    layouts: &HashMap<IrTypeId, IrLayout>,
     types: &IrTypeCache,
 ) -> HashMap<ValueId, (ValueId, u32)> {
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
     for (block_idx, block) in func.blocks.iter().enumerate() {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
-            crate::ir::ir::for_each_inst_use(&inst.kind, |value| {
+            for_each_inst_use(&inst.kind, |value| {
                 uses.entry(value).or_default().push((block_idx, inst_idx));
             });
         }
@@ -308,7 +315,7 @@ fn build_field_addr_folds(
 
     for block in func.blocks.iter() {
         for inst in block.insts.iter() {
-            let crate::ir::ir::InstKind::FieldAddr { base, index } = &inst.kind else {
+            let InstKind::FieldAddr { base, index } = &inst.kind else {
                 continue;
             };
             let Some(result) = &inst.result else {
@@ -325,7 +332,7 @@ fn build_field_addr_folds(
             for (use_block, use_idx) in users {
                 let use_inst = &func.blocks[*use_block].insts[*use_idx];
                 match &use_inst.kind {
-                    crate::ir::ir::InstKind::Store { ptr, .. } if ptr == &result.id => {}
+                    InstKind::Store { ptr, .. } if ptr == &result.id => {}
                     _ => {
                         ok = false;
                         break;
@@ -361,7 +368,7 @@ fn build_index_addr_folds(
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
     for (block_idx, block) in func.blocks.iter().enumerate() {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
-            crate::ir::ir::for_each_inst_use(&inst.kind, |value| {
+            for_each_inst_use(&inst.kind, |value| {
                 uses.entry(value).or_default().push((block_idx, inst_idx));
             });
         }
@@ -371,7 +378,7 @@ fn build_index_addr_folds(
 
     for block in &func.blocks {
         for inst in &block.insts {
-            let crate::ir::ir::InstKind::IndexAddr { base, index } = inst.kind else {
+            let InstKind::IndexAddr { base, index } = inst.kind else {
                 continue;
             };
             if !const_zero_values.contains(&index) {
@@ -391,8 +398,8 @@ fn build_index_addr_folds(
             for (use_block, use_idx) in users {
                 let use_inst = &func.blocks[*use_block].insts[*use_idx];
                 match &use_inst.kind {
-                    crate::ir::ir::InstKind::Store { ptr, .. } if ptr == &result.id => {}
-                    crate::ir::ir::InstKind::Load { ptr } if ptr == &result.id => {}
+                    InstKind::Store { ptr, .. } if ptr == &result.id => {}
+                    InstKind::Load { ptr } if ptr == &result.id => {}
                     _ => {
                         ok = false;
                         break;
@@ -418,13 +425,13 @@ fn build_const_zero_values(func: &Function) -> HashSet<ValueId> {
             let Some(result) = &inst.result else {
                 continue;
             };
-            if let crate::ir::ir::InstKind::Const { value } = &inst.kind {
-                if let crate::ir::ir::ConstValue::Int { value, .. } = value
+            if let InstKind::Const { value } = &inst.kind {
+                if let ConstValue::Int { value, .. } = value
                     && *value == 0
                 {
                     zeros.insert(result.id);
                 }
-                if let crate::ir::ir::ConstValue::Bool(false) = value {
+                if let ConstValue::Bool(false) = value {
                     zeros.insert(result.id);
                 }
             }
@@ -442,7 +449,7 @@ fn build_const_zero_store_only(
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
     for (block_idx, block) in func.blocks.iter().enumerate() {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
-            crate::ir::ir::for_each_inst_use(&inst.kind, |value| {
+            for_each_inst_use(&inst.kind, |value| {
                 uses.entry(value).or_default().push((block_idx, inst_idx));
             });
         }
@@ -468,7 +475,7 @@ fn build_const_zero_store_only(
         for (block_idx, inst_idx) in users {
             let inst = &func.blocks[*block_idx].insts[*inst_idx];
             match &inst.kind {
-                crate::ir::ir::InstKind::Store {
+                InstKind::Store {
                     value: store_value, ..
                 } if store_value == value => {}
                 _ => continue 'value,
@@ -484,7 +491,7 @@ fn build_const_zero_store_only(
 fn collect_layouts(
     types: &mut IrTypeCache,
     ty: IrTypeId,
-    layouts: &mut HashMap<IrTypeId, crate::ir::layout::IrLayout>,
+    layouts: &mut HashMap<IrTypeId, IrLayout>,
 ) {
     if layouts.contains_key(&ty) {
         return;
@@ -495,38 +502,35 @@ fn collect_layouts(
 
     let kind = types.kind(ty).clone();
     match kind {
-        crate::backend::IrTypeKind::Ptr { elem } => {
+        IrTypeKind::Ptr { elem } => {
             collect_layouts(types, elem, layouts);
         }
-        crate::backend::IrTypeKind::Array { elem, .. } => {
+        IrTypeKind::Array { elem, .. } => {
             collect_layouts(types, elem, layouts);
         }
-        crate::backend::IrTypeKind::Tuple { fields } => {
+        IrTypeKind::Tuple { fields } => {
             for field in fields {
                 collect_layouts(types, field, layouts);
             }
         }
-        crate::backend::IrTypeKind::Struct { fields } => {
+        IrTypeKind::Struct { fields } => {
             for field in fields {
                 collect_layouts(types, field.ty, layouts);
             }
         }
-        crate::backend::IrTypeKind::Fn { params, ret } => {
+        IrTypeKind::Fn { params, ret } => {
             for param in params {
                 collect_layouts(types, param, layouts);
             }
             collect_layouts(types, ret, layouts);
         }
-        crate::backend::IrTypeKind::Unit
-        | crate::backend::IrTypeKind::Bool
-        | crate::backend::IrTypeKind::Int { .. }
-        | crate::backend::IrTypeKind::Blob { .. } => {}
+        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Blob { .. } => {}
     }
 }
 
 fn build_local_offsets(
     func: &Function,
-    layouts: &HashMap<IrTypeId, crate::ir::layout::IrLayout>,
+    layouts: &HashMap<IrTypeId, IrLayout>,
     spill_size: u32,
 ) -> (HashMap<LocalId, u32>, u32) {
     let mut offsets = HashMap::new();
@@ -568,46 +572,44 @@ fn validate_value_types(
         for inst in &block.insts {
             let mut uses = Vec::new();
             match &inst.kind {
-                crate::ir::ir::InstKind::Const { .. }
-                | crate::ir::ir::InstKind::AddrOfLocal { .. } => {}
-                crate::ir::ir::InstKind::BinOp { lhs, rhs, .. }
-                | crate::ir::ir::InstKind::Cmp { lhs, rhs, .. } => {
+                InstKind::Const { .. } | InstKind::AddrOfLocal { .. } => {}
+                InstKind::BinOp { lhs, rhs, .. } | InstKind::Cmp { lhs, rhs, .. } => {
                     uses.push(*lhs);
                     uses.push(*rhs);
                 }
-                crate::ir::ir::InstKind::UnOp { value, .. }
-                | crate::ir::ir::InstKind::IntTrunc { value, .. }
-                | crate::ir::ir::InstKind::IntExtend { value, .. }
-                | crate::ir::ir::InstKind::Cast { value, .. }
-                | crate::ir::ir::InstKind::FieldAddr { base: value, .. }
-                | crate::ir::ir::InstKind::Load { ptr: value } => {
+                InstKind::UnOp { value, .. }
+                | InstKind::IntTrunc { value, .. }
+                | InstKind::IntExtend { value, .. }
+                | InstKind::Cast { value, .. }
+                | InstKind::FieldAddr { base: value, .. }
+                | InstKind::Load { ptr: value } => {
                     uses.push(*value);
                 }
-                crate::ir::ir::InstKind::IndexAddr { base, index } => {
+                InstKind::IndexAddr { base, index } => {
                     uses.push(*base);
                     uses.push(*index);
                 }
-                crate::ir::ir::InstKind::Store { ptr, value } => {
+                InstKind::Store { ptr, value } => {
                     uses.push(*ptr);
                     uses.push(*value);
                 }
-                crate::ir::ir::InstKind::MemCopy { dst, src, len } => {
+                InstKind::MemCopy { dst, src, len } => {
                     uses.push(*dst);
                     uses.push(*src);
                     uses.push(*len);
                 }
-                crate::ir::ir::InstKind::MemSet { dst, byte, len } => {
+                InstKind::MemSet { dst, byte, len } => {
                     uses.push(*dst);
                     uses.push(*byte);
                     uses.push(*len);
                 }
-                crate::ir::ir::InstKind::Call { callee, args } => {
-                    if let crate::ir::ir::Callee::Value(value) = callee {
+                InstKind::Call { callee, args } => {
+                    if let Callee::Value(value) = callee {
                         uses.push(*value);
                     }
                     uses.extend(args.iter().copied());
                 }
-                crate::ir::ir::InstKind::Drop { ptr } => {
+                InstKind::Drop { ptr } => {
                     uses.push(*ptr);
                 }
             }
@@ -624,10 +626,10 @@ fn validate_value_types(
 
         let mut term_uses = Vec::new();
         match &block.term {
-            crate::ir::ir::Terminator::Br { args, .. } => {
+            Terminator::Br { args, .. } => {
                 term_uses.extend(args.iter().copied());
             }
-            crate::ir::ir::Terminator::CondBr {
+            Terminator::CondBr {
                 cond,
                 then_args,
                 else_args,
@@ -637,7 +639,7 @@ fn validate_value_types(
                 term_uses.extend(then_args.iter().copied());
                 term_uses.extend(else_args.iter().copied());
             }
-            crate::ir::ir::Terminator::Switch {
+            Terminator::Switch {
                 value,
                 cases,
                 default_args,
@@ -649,12 +651,12 @@ fn validate_value_types(
                 }
                 term_uses.extend(default_args.iter().copied());
             }
-            crate::ir::ir::Terminator::Return { value } => {
+            Terminator::Return { value } => {
                 if let Some(value) = value {
                     term_uses.push(*value);
                 }
             }
-            crate::ir::ir::Terminator::Unreachable => {}
+            Terminator::Unreachable => {}
         }
 
         for value in term_uses {
@@ -711,8 +713,7 @@ fn edge_target_for_cond(ctx: &EmitContext<'_>, from: BlockId, to: BlockId) -> Co
 }
 
 fn emit_ssa_block(ctx: &EmitContext<'_>, block: BlockId, sink: &mut dyn CodegenSink) {
-    let mut stream = ctx.graph.block_stream(ctx.func, block);
-    while let Some(item) = stream.next() {
+    for item in ctx.graph.block_stream(ctx.func, block) {
         match item {
             CodegenEmit::PreMoves(moves) | CodegenEmit::PostMoves(moves) => {
                 sink.emit_moves(moves);
@@ -723,10 +724,10 @@ fn emit_ssa_block(ctx: &EmitContext<'_>, block: BlockId, sink: &mut dyn CodegenS
 
     let term = ctx.ssa_block(block).term.clone();
     match &term {
-        crate::ir::ir::Terminator::Br { target, .. } => {
+        Terminator::Br { target, .. } => {
             emit_edge_branch(ctx, block, *target, sink);
         }
-        crate::ir::ir::Terminator::CondBr {
+        Terminator::CondBr {
             cond,
             then_bb,
             else_bb,
@@ -736,7 +737,7 @@ fn emit_ssa_block(ctx: &EmitContext<'_>, block: BlockId, sink: &mut dyn CodegenS
             let else_target = edge_target_for_cond(ctx, block, *else_bb);
             sink.emit_cond_branch(*cond, then_target, else_target);
         }
-        crate::ir::ir::Terminator::Switch {
+        Terminator::Switch {
             value,
             cases,
             default,

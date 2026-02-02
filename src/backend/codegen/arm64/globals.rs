@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::ir::ir::{GlobalData, GlobalId};
+use crate::ir::{GlobalData, GlobalId};
 
 use super::{Arm64Emitter, AsmSection};
 

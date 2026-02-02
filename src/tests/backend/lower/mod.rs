@@ -1,4 +1,4 @@
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, SemanticContext};
 use crate::elaborate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize::normalize;
@@ -7,7 +7,7 @@ use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::typeck::type_check;
 
-pub(super) fn analyze(source: &str) -> crate::context::SemanticContext {
+pub(super) fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

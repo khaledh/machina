@@ -1,9 +1,8 @@
-use crate::backend::RuntimeFn;
 use crate::backend::codegen::emitter::LocationResolver;
 use crate::backend::codegen::graph::CodegenBlockId;
 use crate::backend::regalloc::Location;
 use crate::backend::regalloc::target::PhysReg;
-use crate::ir::ir::{ConstValue, Terminator, ValueId};
+use crate::ir::{ConstValue, RuntimeFn, Terminator, ValueId};
 
 use super::{Arm64Emitter, ConstValueExt, needs_sret};
 

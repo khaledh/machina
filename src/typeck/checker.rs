@@ -351,7 +351,7 @@ impl TypeChecker {
         if matches!(
             type_assignable(&body_ty, &ret_type),
             TypeAssignability::Incompatible
-        ) && !(has_return && !has_tail)
+        ) && (!has_return || has_tail)
         {
             self.errors.push(
                 TypeCheckErrorKind::DeclTypeMismatch(
@@ -447,7 +447,7 @@ impl TypeChecker {
         if matches!(
             type_assignable(&body_ty, &ret_type),
             TypeAssignability::Incompatible
-        ) && !(has_return && !has_tail)
+        ) && (!has_return || has_tail)
         {
             self.errors.push(
                 TypeCheckErrorKind::DeclTypeMismatch(
@@ -508,7 +508,7 @@ impl TypeChecker {
         if matches!(
             type_assignable(&body_ty, &return_ty),
             TypeAssignability::Incompatible
-        ) && !(has_return && !has_tail)
+        ) && (!has_return || has_tail)
         {
             return Err(
                 TypeCheckErrorKind::DeclTypeMismatch(return_ty, body_ty, return_span).into(),

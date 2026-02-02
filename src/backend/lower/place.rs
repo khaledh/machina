@@ -1,17 +1,19 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
 use crate::backend::lower::LowerToIrError;
-use crate::ir::ir::ValueId;
+use crate::ir::{IrTypeId, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::Type;
+
+use super::FuncLowerer;
 
 /// Address + value type for a lowered place.
 pub(super) struct PlaceAddr {
     pub(super) addr: ValueId,
-    pub(super) value_ty: crate::backend::IrTypeId,
+    pub(super) value_ty: IrTypeId,
 }
 
-impl<'a, 'g> crate::backend::lower::lowerer::FuncLowerer<'a, 'g> {
+impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a place expression into an address and its value type.
     pub(super) fn lower_place_addr(
         &mut self,
@@ -135,12 +137,7 @@ impl<'a, 'g> crate::backend::lower::lowerer::FuncLowerer<'a, 'g> {
         let mut base = self.lower_place_addr(target)?;
         let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
 
-        loop {
-            let elem_ty = match curr_ty {
-                Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
-                _ => break,
-            };
-
+        while let Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } = curr_ty {
             let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
             let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
             base.addr = self.builder.load(base.addr, ptr_ir_ty);

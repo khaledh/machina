@@ -5,6 +5,8 @@ use crate::backend::regalloc::arm64::Arm64Target;
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
 use crate::elaborate;
+use crate::ir::GlobalData;
+use crate::ir::format::format_func_with_comments_and_names;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
@@ -230,7 +232,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             if idx > 0 {
                 out.push('\n');
             }
-            out.push_str(&crate::ir::format::format_func_with_comments_and_names(
+            out.push_str(&format_func_with_comments_and_names(
                 &func.func,
                 &func.types,
                 &analyzed_context.symbols.def_names,
@@ -285,7 +287,7 @@ fn parse_with_id_gen(
 }
 
 // --- Formatting ---
-fn format_ssa_globals(globals: &[crate::ir::ir::GlobalData]) -> String {
+fn format_ssa_globals(globals: &[GlobalData]) -> String {
     let mut out = String::new();
     for global in globals {
         if let Some(text) = format_bytes_as_string(&global.bytes) {

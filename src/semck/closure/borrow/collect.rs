@@ -6,9 +6,10 @@
 use std::collections::HashSet;
 
 use crate::resolve::DefId;
+use crate::tree::cfg::TreeCfgItem;
 use crate::tree::normalized::{
-    BindPattern, BindPatternKind, Expr, ExprKind, MatchPattern, MatchPatternBinding, StmtExpr,
-    StmtExprKind,
+    BindPattern, BindPatternKind, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternBinding,
+    StmtExpr, StmtExprKind,
 };
 use crate::tree::visit::{Visitor, walk_bind_pattern, walk_expr, walk_match_pattern};
 use crate::types::TypeId;
@@ -31,13 +32,10 @@ pub(super) fn collect_assignee_defs(assignee: &Expr, defs: &mut HashSet<DefId>) 
     }
 }
 
-pub(super) fn collect_item_var_uses(
-    item: &crate::tree::cfg::TreeCfgItem<'_, TypeId>,
-    uses: &mut HashSet<DefId>,
-) {
+pub(super) fn collect_item_var_uses(item: &TreeCfgItem<'_, TypeId>, uses: &mut HashSet<DefId>) {
     match item {
-        crate::tree::cfg::TreeCfgItem::Stmt(stmt) => collect_stmt_var_uses(stmt, uses),
-        crate::tree::cfg::TreeCfgItem::Expr(expr) => collect_expr_var_uses(expr, uses),
+        TreeCfgItem::Stmt(stmt) => collect_stmt_var_uses(stmt, uses),
+        TreeCfgItem::Expr(expr) => collect_expr_var_uses(expr, uses),
     }
 }
 
@@ -159,7 +157,7 @@ struct VarUseCollector<'a> {
 }
 
 impl Visitor<DefId, TypeId> for VarUseCollector<'_> {
-    fn visit_match_arm(&mut self, arm: &crate::tree::normalized::MatchArm) {
+    fn visit_match_arm(&mut self, arm: &MatchArm) {
         let mut defs = HashSet::new();
         collect_match_pattern_defs(&arm.pattern, &mut defs);
         self.visit_expr(&arm.body);

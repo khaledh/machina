@@ -2,10 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::IrTypeId;
 use crate::backend::opt::Pass;
-use crate::ir::ir::{
-    CastKind, ConstValue, Function, InstKind, Terminator, ValueId, replace_value_in_func,
+use crate::ir::IrTypeId;
+use crate::ir::{
+    BlockId, CastKind, ConstValue, Function, InstKind, Terminator, ValueId, replace_value_in_func,
 };
 
 /// Eliminates `index_addr` when the index is constant zero, inserting a ptr cast if needed.
@@ -169,7 +169,7 @@ fn build_incoming_args(func: &Function) -> Vec<Vec<Vec<ValueId>>> {
     incoming
 }
 
-fn push_args(incoming: &mut [Vec<Vec<ValueId>>], target: crate::ir::ir::BlockId, args: &[ValueId]) {
+fn push_args(incoming: &mut [Vec<Vec<ValueId>>], target: BlockId, args: &[ValueId]) {
     let slots = &mut incoming[target.index()];
     for (idx, value) in args.iter().enumerate() {
         if let Some(slot) = slots.get_mut(idx) {

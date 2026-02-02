@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::backend::opt::Pass;
-use crate::ir::ir::{Function, InstKind, Terminator, ValueId, replace_value_in_func};
+use crate::ir::{Callee, Function, InstKind, Terminator, ValueId, replace_value_in_func};
 
 /// Eliminates `load` from a local address when a dominating store is in the same block.
 pub struct LocalLoadForward;
@@ -133,7 +133,7 @@ fn collect_safe_addr_of_locals(func: &Function) -> HashSet<ValueId> {
                     }
                 }
                 InstKind::Call { callee, args } => {
-                    if let crate::ir::ir::Callee::Value(value) = callee
+                    if let Callee::Value(value) = callee
                         && addr_ptrs.contains(value)
                     {
                         unsafe_ptrs.insert(*value);

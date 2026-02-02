@@ -188,7 +188,8 @@ fn main() {
                         input_path.parent().unwrap_or_else(|| Path::new(".")),
                     )
                     .and_then(|(asm, obj)| {
-                        let link_result = link_executable(&asm_path, &[obj.clone()], &exe_path);
+                        let link_result =
+                            link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path);
                         if link_result.is_ok() {
                             let _ = std::fs::remove_file(&asm);
                             let _ = std::fs::remove_file(&obj);
@@ -208,7 +209,8 @@ fn main() {
                         input_path.parent().unwrap_or_else(|| Path::new(".")),
                     )
                     .and_then(|(asm, obj)| {
-                        let link_result = link_executable(&asm_path, &[obj.clone()], &exe_path);
+                        let link_result =
+                            link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path);
                         if link_result.is_ok() {
                             let _ = std::fs::remove_file(&asm);
                             let _ = std::fs::remove_file(&obj);

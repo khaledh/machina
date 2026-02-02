@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::backend::analysis::cfg::Cfg;
 use crate::backend::regalloc::Location;
 use crate::backend::regalloc::moves::{CallMove, EdgeMove, MoveOp, ParamCopy};
-use crate::ir::ir::{BlockId, Function};
+use crate::ir::{BlockId, Function};
 
 /// Move schedule keyed by edges and call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

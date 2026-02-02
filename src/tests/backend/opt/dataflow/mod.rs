@@ -1,7 +1,7 @@
 use crate::backend::lower::lower_func;
 use crate::backend::opt::cfg_free::PassManager as CfgPassManager;
 use crate::backend::opt::dataflow::PassManager;
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, SemanticContext};
 use crate::elaborate::elaborate;
 use crate::ir::format::format_func;
 use crate::lexer::{LexError, Lexer, Token};
@@ -11,7 +11,7 @@ use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::typeck::type_check;
 
-fn analyze(source: &str) -> crate::context::SemanticContext {
+fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

@@ -15,7 +15,7 @@ use crate::semck::closure::capture::CaptureMode;
 use crate::semck::closure::capture::ClosureCapture;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
-use crate::tree::{InitInfo, NodeId, NodeIdGen};
+use crate::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
 use crate::typeck::type_map::{CallSigMap, TypeMap};
 use crate::types::{Type, TypeId};
 
@@ -41,7 +41,7 @@ pub(super) struct CaptureField {
 pub(super) struct ClosureInfo {
     pub(super) type_name: String,
     pub(super) type_id: TypeId,
-    pub(super) param_modes: Vec<crate::tree::ParamMode>,
+    pub(super) param_modes: Vec<ParamMode>,
     pub(super) ty: Type,
     pub(super) self_def_id: DefId,
     pub(super) captures: Vec<CaptureField>,
@@ -114,6 +114,7 @@ pub struct Elaborator<'a> {
 }
 
 impl<'a> Elaborator<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         def_table: &'a mut DefTable,
         type_map: &'a mut TypeMap,

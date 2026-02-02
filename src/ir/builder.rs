@@ -3,8 +3,8 @@
 //! Provides a small API for creating SSA functions for tests and early
 //! lowering without exposing the raw ID allocation details.
 
-use super::ir::*;
-use crate::backend::IrTypeId;
+use super::model::*;
+use crate::ir::IrTypeId;
 use crate::resolve::DefId;
 
 /// Constructs SSA functions while managing ID allocation.

@@ -2,11 +2,14 @@
 
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::lowerer::{FuncLowerer, LinearValue, ValueSlot};
-use crate::ir::ir::{BinOp, Callee, CastKind, RuntimeFn, ValueId};
+use crate::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;
+
+type LowerFmtSegmentsResult =
+    Result<Option<(Vec<LoweredFmtSegment>, Vec<Option<ValueId>>)>, LowerToIrError>;
 
 enum LoweredFmtSegment {
     Literal { ptr: ValueId, len: ValueId },
@@ -21,7 +24,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_string_fmt_view(
         &mut self,
         plan: &sem::StringFmtPlan,
-        string_ty: crate::backend::IrTypeId,
+        string_ty: IrTypeId,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
         let total_len = self.string_fmt_plan_len(plan);
         let buf_len = total_len.max(1);
@@ -113,7 +116,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lower_string_fmt_owned(
         &mut self,
         plan: &sem::StringFmtPlan,
-        string_ty: crate::backend::IrTypeId,
+        string_ty: IrTypeId,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
@@ -245,9 +248,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_fmt_segments(
         &mut self,
         plan: &sem::StringFmtPlan,
-        u8_ptr_ty: crate::backend::IrTypeId,
-        u64_ty: crate::backend::IrTypeId,
-    ) -> Result<Option<(Vec<LoweredFmtSegment>, Vec<Option<ValueId>>)>, LowerToIrError> {
+        u8_ptr_ty: IrTypeId,
+        u64_ty: IrTypeId,
+    ) -> LowerFmtSegmentsResult {
         let mut segments = Vec::with_capacity(plan.segments.len());
         let mut string_lens = vec![None; plan.segments.len()];
 
@@ -302,7 +305,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         value: ValueId,
         signed: bool,
         bits: u8,
-        target_ty: crate::backend::IrTypeId,
+        target_ty: IrTypeId,
     ) -> ValueId {
         if bits == 64 {
             return value;

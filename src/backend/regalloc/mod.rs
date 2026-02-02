@@ -6,19 +6,19 @@
 
 use std::collections::HashMap;
 
-use crate::ir::ir::ValueId;
+use crate::backend::analysis::liveness::LiveMap;
+use crate::ir::{Function, InstKind, IrTypeCache, ValueId};
 
+pub mod alloc;
 pub mod arm64;
+pub mod constraints;
+pub mod intervals;
+pub mod moves;
 pub mod stack;
 pub mod target;
 
 pub use stack::StackSlotId;
 pub use target::{PhysReg, TargetSpec};
-
-pub mod alloc;
-pub mod constraints;
-pub mod intervals;
-pub mod moves;
 
 /// Location assigned to an SSA value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +56,9 @@ pub struct AllocationResult {
 
 /// Run SSA register allocation for a single function.
 pub fn regalloc(
-    func: &crate::ir::ir::Function,
-    types: &mut crate::backend::IrTypeCache,
-    live_map: &crate::backend::analysis::liveness::LiveMap,
+    func: &Function,
+    types: &mut IrTypeCache,
+    live_map: &LiveMap,
     target: &dyn TargetSpec,
 ) -> AllocationResult {
     // Build live intervals and allocate registers/stack slots.
@@ -72,7 +72,7 @@ pub fn regalloc(
     let mut max_stack_bytes = 0u32;
     for block in &func.blocks {
         for inst in &block.insts {
-            if let crate::ir::ir::InstKind::Call { args, .. } = &inst.kind {
+            if let InstKind::Call { args, .. } = &inst.kind {
                 let stack_bytes = moves::outgoing_stack_bytes_for_call(
                     args,
                     &analysis.value_types,

@@ -27,11 +27,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::IrTypeCache;
 use crate::backend::regalloc::Location;
 use crate::backend::regalloc::moves;
 use crate::backend::regalloc::target::{PhysReg, TargetSpec};
-use crate::ir::ir::ValueId;
+use crate::ir::IrTypeCache;
+use crate::ir::ValueId;
 
 use super::intervals::{IntervalAnalysis, LiveInterval};
 

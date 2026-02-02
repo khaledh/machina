@@ -1,6 +1,6 @@
 //! SSA optimization passes.
 
-use crate::ir::ir::Function;
+use crate::ir::Function;
 
 pub mod cfg;
 pub mod cfg_free;

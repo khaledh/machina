@@ -3,9 +3,8 @@
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::backend::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
-use crate::backend::{IrTypeId, IrTypeKind};
 use crate::diag::Span;
-use crate::ir::ir::{BinOp, Callee, CmpOp, RuntimeFn, Terminator, ValueId};
+use crate::ir::{BinOp, Callee, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId};
 use crate::resolve::DefId;
 use crate::tree::semantic as sem;
 use crate::types::{Type, TypeAssignability, type_assignable};

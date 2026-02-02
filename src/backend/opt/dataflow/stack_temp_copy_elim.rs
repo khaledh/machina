@@ -16,9 +16,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::backend::opt::Pass;
 use crate::backend::opt::dataflow::ptr_utils::{peel_ptr_cast, source_stable_after};
-use crate::ir::ir::{
-    CastKind, Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
+use crate::ir::{
+    CastKind, Function, InstKind, LocalId, ValueId, for_each_inst_use, replace_value_in_func,
 };
+
+type DefUseMaps = (
+    HashMap<ValueId, (usize, usize)>,
+    HashMap<ValueId, Vec<(usize, usize)>>,
+);
 
 /// Removes store+memcpy patterns that only shuttle data between locals.
 pub struct StackTempCopyElim;
@@ -190,12 +195,7 @@ impl Pass for StackTempCopyElim {
     }
 }
 
-fn build_maps(
-    func: &Function,
-) -> (
-    HashMap<ValueId, (usize, usize)>,
-    HashMap<ValueId, Vec<(usize, usize)>>,
-) {
+fn build_maps(func: &Function) -> DefUseMaps {
     // Build def/use maps so we can reason about local addresses within a block.
     let mut def_inst = HashMap::new();
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
@@ -214,8 +214,8 @@ fn build_maps(
     (def_inst, uses)
 }
 
-fn collect_local_ptrs(func: &Function) -> HashMap<crate::ir::ir::LocalId, Vec<ValueId>> {
-    let mut ptrs: HashMap<crate::ir::ir::LocalId, Vec<ValueId>> = HashMap::new();
+fn collect_local_ptrs(func: &Function) -> HashMap<LocalId, Vec<ValueId>> {
+    let mut ptrs: HashMap<LocalId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
         for inst in &block.insts {
             if let InstKind::AddrOfLocal { local } = inst.kind
@@ -267,9 +267,7 @@ fn store_to_local_before(
 ) -> Option<(usize, usize, ValueId)> {
     // Find the last store into `ptr` before the current instruction in the same block.
     let mut last_store = None;
-    let Some(users) = uses.get(&ptr) else {
-        return None;
-    };
+    let users = uses.get(&ptr)?;
     for (use_block, use_idx) in users {
         if *use_block != block_idx || *use_idx >= inst_idx {
             continue;

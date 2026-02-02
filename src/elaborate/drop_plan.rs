@@ -6,6 +6,7 @@
 use crate::resolve::{DefId, DefTable};
 use crate::tree::semantic as sem;
 use crate::tree::semantic::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
+use crate::tree::{NodeId, ParamMode};
 use crate::typeck::type_map::TypeMap;
 
 pub fn build_drop_plans(
@@ -62,7 +63,7 @@ impl<'a> DropPlanBuilder<'a> {
         self.scope_stack.push(DropScopePlan::default());
     }
 
-    fn exit_scope(&mut self, id: crate::tree::NodeId) {
+    fn exit_scope(&mut self, id: NodeId) {
         let scope = self
             .scope_stack
             .pop()
@@ -130,7 +131,7 @@ impl<'a> DropPlanBuilder<'a> {
         self.enter_scope();
 
         for param in &func_def.sig.params {
-            if param.mode != crate::tree::ParamMode::Sink {
+            if param.mode != ParamMode::Sink {
                 continue;
             }
             // Sink params can be moved; guard drops on the liveness flag.
@@ -147,13 +148,13 @@ impl<'a> DropPlanBuilder<'a> {
         self.enter_scope();
 
         let self_param = &method_def.sig.self_param;
-        if self_param.mode == crate::tree::ParamMode::Sink {
+        if self_param.mode == ParamMode::Sink {
             // Sink receiver can be moved; guard drops on the liveness flag.
             self.register_def_drop(self_param.def_id, DropGuard::IfInitialized);
         }
 
         for param in &method_def.sig.params {
-            if param.mode != crate::tree::ParamMode::Sink {
+            if param.mode != ParamMode::Sink {
                 continue;
             }
             // Sink params can be moved; guard drops on the liveness flag.

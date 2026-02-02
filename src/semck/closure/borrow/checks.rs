@@ -6,10 +6,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::NormalizedContext;
+use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::semck::closure::capture::CaptureMode;
+use crate::tree::NodeId;
 use crate::tree::cfg::{TreeCfgBuilder, TreeCfgItem, TreeCfgTerminator};
+use crate::tree::normalized::ArrayLitInit;
 use crate::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExprKind};
 use crate::tree::visit::{Visitor, walk_expr};
 use crate::types::TypeId;
@@ -96,7 +99,7 @@ pub(super) fn check_func_def(
     }
 }
 
-fn return_expr_id(func_def: &FuncDef) -> Option<crate::tree::NodeId> {
+fn return_expr_id(func_def: &FuncDef) -> Option<NodeId> {
     match &func_def.body.kind {
         ExprKind::Block { tail, .. } => tail.as_deref().map(|expr| expr.id),
         _ => Some(func_def.body.id),
@@ -266,7 +269,7 @@ impl<'a> MutBorrowConflictVisitor<'a> {
         }
     }
 
-    fn note_use(&mut self, def_id: DefId, span: crate::diag::Span) {
+    fn note_use(&mut self, def_id: DefId, span: Span) {
         let Some(mode) = self.borrowed_bases.get(&def_id) else {
             return;
         };
@@ -342,7 +345,7 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
         }
     }
 
-    fn check_move_target(&mut self, expr: &Expr, span: crate::diag::Span) {
+    fn check_move_target(&mut self, expr: &Expr, span: Span) {
         let Some(def_id) = lvalue_base_def_id(expr) else {
             return;
         };
@@ -521,13 +524,13 @@ impl Visitor<DefId, TypeId> for ClosureEscapeVisitor<'_> {
                 return;
             }
             ExprKind::ArrayLit { init, .. } => match init {
-                crate::tree::normalized::ArrayLitInit::Elems(elems) => {
+                ArrayLitInit::Elems(elems) => {
                     for elem in elems {
                         self.check_store_value(elem);
                         self.visit_expr(elem);
                     }
                 }
-                crate::tree::normalized::ArrayLitInit::Repeat(elem, _) => {
+                ArrayLitInit::Repeat(elem, _) => {
                     self.check_store_value(elem);
                     self.visit_expr(elem);
                 }

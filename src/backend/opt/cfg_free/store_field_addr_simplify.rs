@@ -2,9 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::IrTypeId;
 use crate::backend::opt::Pass;
-use crate::ir::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+use crate::ir::IrTypeId;
+use crate::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+
+type ValueDefUseMaps = (
+    HashMap<ValueId, IrTypeId>,
+    HashMap<ValueId, (usize, usize)>,
+    HashMap<ValueId, Vec<(usize, usize)>>,
+);
 
 /// Eliminates local stores when the local is only used to take field addresses.
 pub struct StoreFieldAddrSimplify;
@@ -86,13 +92,7 @@ impl Pass for StoreFieldAddrSimplify {
     }
 }
 
-fn build_maps(
-    func: &Function,
-) -> (
-    HashMap<ValueId, IrTypeId>,
-    HashMap<ValueId, (usize, usize)>,
-    HashMap<ValueId, Vec<(usize, usize)>>,
-) {
+fn build_maps(func: &Function) -> ValueDefUseMaps {
     let mut value_types = HashMap::new();
     let mut def_inst = HashMap::new();
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();

@@ -1,11 +1,12 @@
 use crate::backend::codegen::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
 use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::backend::regalloc::Location;
+use crate::backend::regalloc::moves::CallMove;
 use crate::backend::regalloc::moves::{EdgeMove, MoveOp};
 use crate::backend::regalloc::stack::StackSlotId;
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{Callee, FunctionSig, InstKind, Terminator};
+use crate::ir::{Callee, FunctionSig, InstKind, Terminator};
+use crate::ir::{IrTypeCache, IrTypeKind};
 use crate::resolve::DefId;
 
 #[test]
@@ -106,7 +107,7 @@ fn test_codegen_graph_exposes_call_moves() {
 
     let func = builder.finish();
     let edge_moves = Vec::new();
-    let call_moves = vec![crate::backend::regalloc::moves::CallMove {
+    let call_moves = vec![CallMove {
         block: func.blocks[0].id,
         inst_index: 1,
         pre_moves: vec![MoveOp {
@@ -161,7 +162,7 @@ fn test_codegen_block_stream_orders_call_moves() {
 
     let func = builder.finish();
     let edge_moves = Vec::new();
-    let call_moves = vec![crate::backend::regalloc::moves::CallMove {
+    let call_moves = vec![CallMove {
         block: func.blocks[0].id,
         inst_index: 1,
         pre_moves: vec![MoveOp {

@@ -1,5 +1,6 @@
 use std::fmt::Write;
 
+use crate::backend::regalloc::StackSlotId;
 use crate::backend::regalloc::target::PhysReg;
 
 use super::Arm64Emitter;
@@ -26,7 +27,7 @@ impl FrameLayout {
         (size + 15) & !15
     }
 
-    pub(super) fn slot_offset(self, slot: crate::backend::regalloc::StackSlotId) -> u32 {
+    pub(super) fn slot_offset(self, slot: StackSlotId) -> u32 {
         if self.aligned_size == 0 {
             return slot.offset_bytes();
         }

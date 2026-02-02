@@ -3,7 +3,7 @@
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::lowerer::{FuncLowerer, LinearValue};
 use crate::diag::Span;
-use crate::ir::ir::{Callee, RuntimeFn, ValueId};
+use crate::ir::{Callee, RuntimeFn, ValueId};
 use crate::resolve::DefId;
 use crate::tree::{InitInfo, ParamMode};
 use crate::tree::{NodeId, semantic as sem};

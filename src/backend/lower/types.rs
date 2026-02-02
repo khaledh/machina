@@ -1,6 +1,6 @@
 //! Type lowering from semantic types to SSA IR types.
 
-use crate::backend::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
+use crate::ir::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
 use crate::typeck::type_map::TypeMap;
 use crate::types::{FnParamMode, Type, TypeId};
 use std::collections::HashMap;

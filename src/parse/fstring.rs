@@ -36,7 +36,7 @@ impl<'a> Parser<'a> {
 
     fn parse_fstring_segments(
         &mut self,
-        value: &String,
+        value: &str,
         span: Span,
     ) -> Result<Vec<StringFmtSegment>, ParseError> {
         let mut segments = vec![];

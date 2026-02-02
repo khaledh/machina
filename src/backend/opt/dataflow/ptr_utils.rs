@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ir::ir::{CastKind, Function, InstKind, ValueId};
+use crate::ir::{CastKind, Function, InstKind, ValueId};
 
 pub(super) fn peel_ptr_cast(
     value: ValueId,

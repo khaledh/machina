@@ -1,4 +1,5 @@
 use crate::context::NormalizedContext;
+use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::tree::normalized::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
@@ -31,11 +32,11 @@ impl<'a> SliceEscapeChecker<'a> {
         )
     }
 
-    fn record_slice_store(&mut self, span: crate::diag::Span) {
+    fn record_slice_store(&mut self, span: Span) {
         self.errors.push(SemCheckError::SliceEscapeStore(span));
     }
 
-    fn record_slice_return(&mut self, span: crate::diag::Span) {
+    fn record_slice_return(&mut self, span: Span) {
         self.errors.push(SemCheckError::SliceEscapeReturn(span));
     }
 

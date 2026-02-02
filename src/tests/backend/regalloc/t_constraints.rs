@@ -1,11 +1,11 @@
 use crate::backend::analysis::liveness;
-use crate::backend::regalloc::TargetSpec;
 use crate::backend::regalloc::constraints;
 use crate::backend::regalloc::intervals;
 use crate::backend::regalloc::target::PhysReg;
-use crate::backend::{IrTypeCache, IrTypeKind};
+use crate::backend::regalloc::{Location, TargetSpec, regalloc};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{BinOp, Callee, FunctionSig, Terminator};
+use crate::ir::{BinOp, Callee, FunctionSig, Terminator};
+use crate::ir::{IrTypeCache, IrTypeKind};
 use crate::resolve::DefId;
 
 // ============================================================================
@@ -305,15 +305,11 @@ fn test_cross_call_avoids_caller_saved() {
     let func = builder.finish();
     let live_map = liveness::analyze(&func);
     let target = TestTarget::with_callee_saved_pool();
-    let alloc = crate::backend::regalloc::regalloc(&func, &mut types, &live_map, &target);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
 
     let loc = alloc.alloc_map.get(&val).expect("missing alloc for value");
     assert!(
-        matches!(
-            loc,
-            crate::backend::regalloc::Location::Reg(PhysReg(2))
-                | crate::backend::regalloc::Location::Stack(_)
-        ),
+        matches!(loc, Location::Reg(PhysReg(2)) | Location::Stack(_)),
         "expected call-crossing value to avoid caller-saved regs, got {loc:?}"
     );
 }

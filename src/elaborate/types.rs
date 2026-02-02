@@ -11,7 +11,7 @@
 use crate::diag::Span;
 use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::types::{FnParamMode, Type};
 
 use super::elaborator::Elaborator;
 
@@ -76,10 +76,10 @@ impl<'a> Elaborator<'a> {
                     .iter()
                     .map(|param| sem::FnTypeParam {
                         mode: match param.mode {
-                            crate::types::FnParamMode::In => ParamMode::In,
-                            crate::types::FnParamMode::InOut => ParamMode::InOut,
-                            crate::types::FnParamMode::Out => ParamMode::Out,
-                            crate::types::FnParamMode::Sink => ParamMode::Sink,
+                            FnParamMode::In => ParamMode::In,
+                            FnParamMode::InOut => ParamMode::InOut,
+                            FnParamMode::Out => ParamMode::Out,
+                            FnParamMode::Sink => ParamMode::Sink,
                         },
                         ty_expr: self.type_expr_from_type(&param.ty, span),
                     })

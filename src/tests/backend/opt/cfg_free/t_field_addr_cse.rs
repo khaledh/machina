@@ -1,7 +1,8 @@
 use crate::backend::opt::cfg_free::PassManager;
-use crate::backend::{IrStructField, IrTypeCache, IrTypeKind};
+use crate::ir::FunctionSig;
+use crate::ir::Terminator;
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::FunctionSig;
+use crate::ir::{BinOp, InstKind, IrStructField, IrTypeCache, IrTypeKind};
 use crate::resolve::DefId;
 
 #[test]
@@ -41,11 +42,8 @@ fn test_field_addr_cse() {
     let second = builder.field_addr(param, 0, u64_ptr);
     let a = builder.load(first, u64_ty);
     let b = builder.load(second, u64_ty);
-    let sum = builder.binop(crate::ir::ir::BinOp::Add, a, b, u64_ty);
-    builder.set_terminator(
-        entry,
-        crate::ir::ir::Terminator::Return { value: Some(sum) },
-    );
+    let sum = builder.binop(BinOp::Add, a, b, u64_ty);
+    builder.set_terminator(entry, Terminator::Return { value: Some(sum) });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();
@@ -55,7 +53,7 @@ fn test_field_addr_cse() {
         .blocks
         .iter()
         .flat_map(|block| &block.insts)
-        .filter(|inst| matches!(inst.kind, crate::ir::InstKind::FieldAddr { .. }))
+        .filter(|inst| matches!(inst.kind, InstKind::FieldAddr { .. }))
         .count();
     assert_eq!(field_addr_count, 1);
 }
@@ -97,11 +95,8 @@ fn test_field_addr_cse_distinct_indices() {
     let second = builder.field_addr(param, 1, u64_ptr);
     let a = builder.load(first, u64_ty);
     let b = builder.load(second, u64_ty);
-    let sum = builder.binop(crate::ir::ir::BinOp::Add, a, b, u64_ty);
-    builder.set_terminator(
-        entry,
-        crate::ir::ir::Terminator::Return { value: Some(sum) },
-    );
+    let sum = builder.binop(BinOp::Add, a, b, u64_ty);
+    builder.set_terminator(entry, Terminator::Return { value: Some(sum) });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();
@@ -111,7 +106,7 @@ fn test_field_addr_cse_distinct_indices() {
         .blocks
         .iter()
         .flat_map(|block| &block.insts)
-        .filter(|inst| matches!(inst.kind, crate::ir::InstKind::FieldAddr { .. }))
+        .filter(|inst| matches!(inst.kind, InstKind::FieldAddr { .. }))
         .count();
     assert_eq!(field_addr_count, 2);
 }

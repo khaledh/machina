@@ -1,13 +1,15 @@
 //! Join-plan and join-session helpers for branching lowering.
 
-use crate::backend::IrTypeId;
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::drops::DropSnapshot;
 use crate::backend::lower::locals::{LocalSnapshot, LocalValue};
 use crate::diag::Span;
-use crate::ir::ir::{BlockId, Terminator, ValueId};
+use crate::ir::IrTypeId;
+use crate::ir::{BlockId, Terminator, ValueId};
 use crate::resolve::DefId;
 use crate::tree::semantic as sem;
+
+use super::FuncLowerer;
 
 /// Plan for joining control flow from multiple branches (e.g., if/else arms).
 ///
@@ -27,7 +29,7 @@ pub(super) struct JoinSession {
     saved_drop_scopes: DropSnapshot,
 }
 
-impl crate::backend::lower::lowerer::FuncLowerer<'_, '_> {
+impl FuncLowerer<'_, '_> {
     /// Builds a join plan for merging control flow from multiple branches.
     ///
     /// Creates the join block with:
@@ -114,17 +116,14 @@ impl JoinSession {
 
     pub(super) fn emit_branch(
         &self,
-        lowerer: &mut crate::backend::lower::lowerer::FuncLowerer<'_, '_>,
+        lowerer: &mut FuncLowerer<'_, '_>,
         value: ValueId,
         span: Span,
     ) -> Result<(), LowerToIrError> {
         lowerer.emit_join_branch(&self.plan, value, span)
     }
 
-    pub(super) fn restore_locals(
-        &self,
-        lowerer: &mut crate::backend::lower::lowerer::FuncLowerer<'_, '_>,
-    ) {
+    pub(super) fn restore_locals(&self, lowerer: &mut FuncLowerer<'_, '_>) {
         lowerer.locals.restore(&self.saved_locals);
         lowerer.restore_drop_scopes(&self.saved_drop_scopes);
     }
@@ -133,10 +132,7 @@ impl JoinSession {
         self.plan.join_value
     }
 
-    pub(super) fn finalize(
-        self,
-        lowerer: &mut crate::backend::lower::lowerer::FuncLowerer<'_, '_>,
-    ) {
+    pub(super) fn finalize(self, lowerer: &mut FuncLowerer<'_, '_>) {
         lowerer.restore_drop_scopes(&self.saved_drop_scopes);
         lowerer.invalidate_drop_liveness();
         lowerer.builder.select_block(self.plan.join_bb);

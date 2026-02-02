@@ -1,10 +1,10 @@
 //! Branching (multi-block) lowering routines.
 
-use crate::backend::IrTypeId;
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::backend::lower::r#match::MatchLowerer;
-use crate::ir::ir::{Terminator, ValueId};
+use crate::ir::IrTypeId;
+use crate::ir::{Terminator, ValueId};
 use crate::resolve::DefId;
 use crate::tree::{BinaryOp, semantic as sem};
 

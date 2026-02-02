@@ -2,9 +2,8 @@ use crate::backend::analysis::liveness;
 use crate::backend::regalloc::moves::{EdgeMove, MoveOp, MovePlan};
 use crate::backend::regalloc::target::PhysReg;
 use crate::backend::regalloc::{Location, StackSlotId, TargetSpec, regalloc};
-use crate::backend::{IrStructField, IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{BlockId, Callee, FunctionSig, Terminator};
+use crate::ir::{BlockId, Callee, FunctionSig, IrStructField, IrTypeCache, IrTypeKind, Terminator};
 use crate::resolve::DefId;
 
 // ============================================================================

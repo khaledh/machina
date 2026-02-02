@@ -1,8 +1,7 @@
 use crate::backend::opt::cfg_free::PassManager;
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
 use crate::ir::format::format_func;
-use crate::ir::ir::FunctionSig;
+use crate::ir::{Callee, FunctionSig, InstKind, IrTypeCache, IrTypeKind, RuntimeFn, Terminator};
 use crate::resolve::DefId;
 
 #[test]
@@ -28,7 +27,7 @@ fn test_local_load_forward() {
     let value = builder.const_int(42, false, 64, u64_ty);
     builder.store(addr, value);
     let loaded = builder.load(addr, u64_ty);
-    builder.terminate(crate::ir::ir::Terminator::Return {
+    builder.terminate(Terminator::Return {
         value: Some(loaded),
     });
 
@@ -71,12 +70,12 @@ fn test_local_load_forward_blocked_by_call() {
     let zero_len = builder.const_int(0, false, 64, u64_ty);
     let zero_byte = builder.const_int(0, false, 8, u8_ty);
     let _call = builder.call(
-        crate::ir::ir::Callee::Runtime(crate::ir::ir::RuntimeFn::MemSet),
+        Callee::Runtime(RuntimeFn::MemSet),
         vec![addr, zero_len, zero_byte],
         unit_ty,
     );
     let _load = builder.load(addr, u8_ty);
-    builder.terminate(crate::ir::ir::Terminator::Return { value: None });
+    builder.terminate(Terminator::Return { value: None });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();
@@ -86,7 +85,7 @@ fn test_local_load_forward_blocked_by_call() {
         .blocks
         .iter()
         .flat_map(|block| &block.insts)
-        .filter(|inst| matches!(inst.kind, crate::ir::InstKind::Load { .. }))
+        .filter(|inst| matches!(inst.kind, InstKind::Load { .. }))
         .count();
     assert_eq!(load_count, 1);
 }

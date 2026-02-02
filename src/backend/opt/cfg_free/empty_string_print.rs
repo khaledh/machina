@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::backend::opt::Pass;
-use crate::ir::ir::{Block, Callee, CastKind, ConstValue, Function, InstKind, RuntimeFn, ValueId};
+use crate::ir::{Block, Callee, CastKind, ConstValue, Function, InstKind, RuntimeFn, ValueId};
 
 /// Replace empty-string `__rt_print` calls with direct null/zero arguments and
 /// drop the now-redundant `__rt_string_drop`.
@@ -531,9 +531,7 @@ fn is_null_ptr_cast(
     defs: &HashMap<ValueId, usize>,
     ptr_id: ValueId,
 ) -> Option<(ValueId, ValueId)> {
-    let Some(inst) = inst_of(block, defs, ptr_id) else {
-        return None;
-    };
+    let inst = inst_of(block, defs, ptr_id)?;
     match inst {
         InstKind::Cast {
             kind: CastKind::IntToPtr,
@@ -549,9 +547,7 @@ fn is_null_ptr_cast_global(
     defs: &HashMap<ValueId, (usize, usize)>,
     ptr_id: ValueId,
 ) -> Option<(ValueId, ValueId)> {
-    let Some(inst) = inst_of_global(func, defs, ptr_id) else {
-        return None;
-    };
+    let inst = inst_of_global(func, defs, ptr_id)?;
     match inst {
         InstKind::Cast {
             kind: CastKind::IntToPtr,

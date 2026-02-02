@@ -1,7 +1,7 @@
 //! Dataflow-based SSA optimizations.
 
 use crate::backend::opt::Pass;
-use crate::ir::ir::Function;
+use crate::ir::Function;
 
 pub mod byref_copy_elim;
 pub mod dce;

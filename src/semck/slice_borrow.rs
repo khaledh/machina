@@ -627,6 +627,7 @@ impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
 
 /// Extract the base variable's DefId from an lvalue expression.
 /// E.g., `arr[0].field` -> DefId of `arr`.
+#[allow(clippy::only_used_in_recursion)]
 fn base_def_id(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     match &expr.kind {
         ExprKind::Var { def_id, .. } => Some(*def_id),

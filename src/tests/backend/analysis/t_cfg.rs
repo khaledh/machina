@@ -1,6 +1,6 @@
 use crate::backend::analysis::cfg::Cfg;
 use crate::backend::lower::lower_func;
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, SemanticContext};
 use crate::elaborate::elaborate;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize::normalize;
@@ -10,7 +10,7 @@ use crate::semck::sem_check;
 use crate::typeck::type_check;
 use indoc::indoc;
 
-fn analyze(source: &str) -> crate::context::SemanticContext {
+fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

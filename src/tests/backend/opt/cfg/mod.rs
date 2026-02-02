@@ -1,5 +1,5 @@
 use crate::backend::opt::cfg::PassManager;
-use crate::ir::ir::Function;
+use crate::ir::Function;
 
 pub(super) fn assert_ir_eq(actual: impl AsRef<str>, expected: impl AsRef<str>) {
     let actual = normalize_ir(actual.as_ref());

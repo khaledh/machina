@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::dataflow::solve_forward;
 use crate::context::NormalizedContext;
+use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::semck::ast_liveness::{self, AstLiveness};
@@ -192,7 +193,7 @@ impl<'a> MoveVisitor<'a> {
     }
 
     /// Process an explicit move capture: validate and mark the base as moved.
-    fn handle_move_capture(&mut self, def_id: DefId, span: crate::diag::Span) {
+    fn handle_move_capture(&mut self, def_id: DefId, span: Span) {
         let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
             return;
         };

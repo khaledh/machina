@@ -1,7 +1,6 @@
 use crate::backend::opt::cfg_free::PassManager;
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::FunctionSig;
+use crate::ir::{BinOp, FunctionSig, InstKind, IrTypeCache, IrTypeKind, Terminator};
 use crate::resolve::DefId;
 
 #[test]
@@ -26,8 +25,8 @@ fn test_load_cse() {
     let addr = builder.add_block_param(entry, u64_ptr);
     let first = builder.load(addr, u64_ty);
     let second = builder.load(addr, u64_ty);
-    let sum = builder.binop(crate::ir::ir::BinOp::Add, first, second, u64_ty);
-    builder.terminate(crate::ir::ir::Terminator::Return { value: Some(sum) });
+    let sum = builder.binop(BinOp::Add, first, second, u64_ty);
+    builder.terminate(Terminator::Return { value: Some(sum) });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();
@@ -37,7 +36,7 @@ fn test_load_cse() {
         .blocks
         .iter()
         .flat_map(|block| &block.insts)
-        .filter(|inst| matches!(inst.kind, crate::ir::InstKind::Load { .. }))
+        .filter(|inst| matches!(inst.kind, InstKind::Load { .. }))
         .count();
     assert_eq!(load_count, 1);
 }
@@ -66,8 +65,8 @@ fn test_load_cse_blocked_by_store() {
     let value = builder.const_int(7, false, 64, u64_ty);
     builder.store(addr, value);
     let second = builder.load(addr, u64_ty);
-    let sum = builder.binop(crate::ir::ir::BinOp::Add, first, second, u64_ty);
-    builder.terminate(crate::ir::ir::Terminator::Return { value: Some(sum) });
+    let sum = builder.binop(BinOp::Add, first, second, u64_ty);
+    builder.terminate(Terminator::Return { value: Some(sum) });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();
@@ -77,7 +76,7 @@ fn test_load_cse_blocked_by_store() {
         .blocks
         .iter()
         .flat_map(|block| &block.insts)
-        .filter(|inst| matches!(inst.kind, crate::ir::InstKind::Load { .. }))
+        .filter(|inst| matches!(inst.kind, InstKind::Load { .. }))
         .count();
     assert_eq!(load_count, 2);
 }

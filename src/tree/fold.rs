@@ -1,5 +1,8 @@
 use crate::tree::*;
 
+type FoldBlockResult<O, E> = Result<(Vec<O>, Option<O>), E>;
+type FoldIfResult<O, E> = Result<(O, O, O), E>;
+
 /// Tree folder with default traversal helpers.
 ///
 /// Implement the methods you care about (e.g. `visit_expr`) and call the
@@ -68,7 +71,7 @@ pub trait TreeFolder<D = String, T = ()> {
         &mut self,
         items: &[BlockItem<D, T>],
         tail: Option<&Expr<D, T>>,
-    ) -> Result<(Vec<Self::Output>, Option<Self::Output>), Self::Error> {
+    ) -> FoldBlockResult<Self::Output, Self::Error> {
         walk_block(self, items, tail)
     }
 
@@ -131,7 +134,7 @@ pub trait TreeFolder<D = String, T = ()> {
         cond: &Expr<D, T>,
         then_body: &Expr<D, T>,
         else_body: &Expr<D, T>,
-    ) -> Result<(Self::Output, Self::Output, Self::Output), Self::Error> {
+    ) -> FoldIfResult<Self::Output, Self::Error> {
         walk_if(self, cond, then_body, else_body)
     }
 
@@ -236,7 +239,7 @@ pub fn walk_block<F: TreeFolder<D, T> + ?Sized, D, T>(
     f: &mut F,
     items: &[BlockItem<D, T>],
     tail: Option<&Expr<D, T>>,
-) -> Result<(Vec<F::Output>, Option<F::Output>), F::Error> {
+) -> FoldBlockResult<F::Output, F::Error> {
     let item_outputs = items
         .iter()
         .map(|item| f.visit_block_item(item))
@@ -307,7 +310,7 @@ pub fn walk_if<F: TreeFolder<D, T> + ?Sized, D, T>(
     cond: &Expr<D, T>,
     then_body: &Expr<D, T>,
     else_body: &Expr<D, T>,
-) -> Result<(F::Output, F::Output, F::Output), F::Error> {
+) -> FoldIfResult<F::Output, F::Error> {
     Ok((
         walk_expr(f, cond)?,
         walk_expr(f, then_body)?,

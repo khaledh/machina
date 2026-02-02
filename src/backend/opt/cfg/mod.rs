@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::backend::analysis::cfg::Cfg;
 use crate::backend::opt::Pass;
-use crate::ir::ir::{Block, BlockId, Callee, Function, InstKind, Terminator, ValueId};
+use crate::ir::{Block, BlockId, Callee, Function, InstKind, Terminator, ValueId};
 
 pub struct CfgCleanup;
 

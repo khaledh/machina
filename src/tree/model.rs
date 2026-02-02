@@ -99,15 +99,15 @@ impl<D, T> Module<D, T> {
                 TopLevelItem::MethodBlock(method_block) => method_block
                     .method_items
                     .iter()
-                    .filter_map(|method_item| match method_item {
-                        MethodItem::Decl(method_decl) => Some(CallableRef::MethodDecl {
+                    .map(|method_item| match method_item {
+                        MethodItem::Decl(method_decl) => CallableRef::MethodDecl {
                             type_name: &method_block.type_name,
                             method_decl,
-                        }),
-                        MethodItem::Def(method_def) => Some(CallableRef::MethodDef {
+                        },
+                        MethodItem::Def(method_def) => CallableRef::MethodDef {
                             type_name: &method_block.type_name,
                             method_def,
-                        }),
+                        },
                     })
                     .collect(),
                 TopLevelItem::ClosureDef(closure_decl) => {
@@ -341,6 +341,7 @@ pub struct MethodBlock<D, T = ()> {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum MethodItem<D, T = ()> {
     Decl(MethodDecl<D>),
     Def(MethodDef<D, T>),

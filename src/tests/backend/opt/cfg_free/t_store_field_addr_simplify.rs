@@ -1,8 +1,7 @@
 use crate::backend::opt::cfg_free::PassManager;
-use crate::backend::{IrStructField, IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
 use crate::ir::format::format_func;
-use crate::ir::ir::FunctionSig;
+use crate::ir::{FunctionSig, IrStructField, IrTypeCache, IrTypeKind, Terminator};
 use crate::resolve::DefId;
 
 #[test]
@@ -45,10 +44,7 @@ fn test_store_field_addr_elim() {
     builder.store(local_addr, loaded);
     let field_ptr = builder.field_addr(local_addr, 0, u64_ptr);
     let field = builder.load(field_ptr, u64_ty);
-    builder.set_terminator(
-        entry,
-        crate::ir::ir::Terminator::Return { value: Some(field) },
-    );
+    builder.set_terminator(entry, Terminator::Return { value: Some(field) });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();

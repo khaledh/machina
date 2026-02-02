@@ -345,7 +345,7 @@ fn check_bool_match(arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckErro
         }
     }
 
-    if !has_wildcard && !(saw_true && saw_false) {
+    if !(has_wildcard || (saw_true && saw_false)) {
         errors.push(SemCheckError::NonExhaustiveMatch(span));
     }
 }

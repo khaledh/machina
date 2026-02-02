@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::ir::ir::{BlockId, Function, Terminator};
+use crate::ir::{Block, BlockId, Function, InstKind, Instruction, Terminator};
 
 use super::moves::{EdgeMovePlan, EdgeTarget, MoveBlockId, MoveSchedule};
 use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
@@ -196,14 +196,14 @@ fn edge_target(plan: &EdgeMovePlan, from: BlockId, to: BlockId) -> CodegenBlockI
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodegenEmit<'a> {
     PreMoves(&'a [MoveOp]),
-    Inst(&'a crate::ir::ir::Instruction),
+    Inst(&'a Instruction),
     PostMoves(&'a [MoveOp]),
 }
 
 /// Iterator-like helper that yields instructions with pre/post call moves.
 #[derive(Debug)]
 pub struct CodegenBlockStream<'a> {
-    block: &'a crate::ir::ir::Block,
+    block: &'a Block,
     schedule: &'a MoveSchedule,
     cursor: usize,
     stage: StreamStage,
@@ -217,7 +217,7 @@ enum StreamStage {
 }
 
 impl<'a> CodegenBlockStream<'a> {
-    fn new(block: &'a crate::ir::ir::Block, schedule: &'a MoveSchedule) -> Self {
+    fn new(block: &'a Block, schedule: &'a MoveSchedule) -> Self {
         Self {
             block,
             schedule,
@@ -225,14 +225,15 @@ impl<'a> CodegenBlockStream<'a> {
             stage: StreamStage::Pre,
         }
     }
+}
 
-    pub fn next(&mut self) -> Option<CodegenEmit<'a>> {
+impl<'a> Iterator for CodegenBlockStream<'a> {
+    type Item = CodegenEmit<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         while self.cursor < self.block.insts.len() {
             let inst_index = self.cursor;
-            let has_call = matches!(
-                self.block.insts[inst_index].kind,
-                crate::ir::InstKind::Call { .. }
-            );
+            let has_call = matches!(self.block.insts[inst_index].kind, InstKind::Call { .. });
 
             if has_call {
                 match self.stage {

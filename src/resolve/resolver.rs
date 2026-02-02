@@ -8,6 +8,7 @@ use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::resolve::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TypeAttrs};
 use crate::tree::ParamMode;
 use crate::tree::parsed::*;
+use crate::tree::resolved::builder::build_module;
 use crate::tree::visit::*;
 use crate::types::{BUILTIN_TYPES, Type};
 
@@ -1085,8 +1086,7 @@ pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<Resolv
     let (def_table, node_def_lookup) = resolver.resolve(&ast_context.module)?;
 
     // Build resolved tree from parsed tree + NodeDefLookup
-    let resolved_module =
-        crate::tree::resolved::builder::build_module(&node_def_lookup, &ast_context.module);
+    let resolved_module = build_module(&node_def_lookup, &ast_context.module);
 
     let resolved_context = ast_context.with_def_table(def_table, resolved_module);
 

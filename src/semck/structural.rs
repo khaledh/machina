@@ -1,4 +1,5 @@
 use crate::context::NormalizedContext;
+use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::resolve::DefKind;
 use crate::semck::SemCheckError;
@@ -76,7 +77,7 @@ impl<'a> StructuralChecker<'a> {
         self.visit_module(&self.ctx.module);
     }
 
-    fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: crate::diag::Span) {
+    fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: Span) {
         // Enforce struct field existence, duplicates, and missing fields.
         let Some(struct_fields) = self.struct_fields.get(name) else {
             self.errors
@@ -216,7 +217,7 @@ impl<'a> StructuralChecker<'a> {
         enum_name: &str,
         variant_name: &str,
         payload_len: usize,
-        span: crate::diag::Span,
+        span: Span,
     ) {
         // Verify enum existence, variant existence, and payload arity.
         let Some(variants) = self.enum_variants.get(enum_name) else {
@@ -245,7 +246,7 @@ impl<'a> StructuralChecker<'a> {
         }
     }
 
-    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm], span: crate::diag::Span) {
+    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm], span: Span) {
         match_check::check_match(self.ctx, scrutinee, arms, span, &mut self.errors);
     }
 

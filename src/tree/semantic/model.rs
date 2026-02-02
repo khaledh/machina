@@ -133,15 +133,15 @@ impl Module {
                 TopLevelItem::MethodBlock(method_block) => method_block
                     .method_items
                     .iter()
-                    .filter_map(|method_item| match method_item {
-                        MethodItem::Decl(method_decl) => Some(CallableRef::MethodDecl {
+                    .map(|method_item| match method_item {
+                        MethodItem::Decl(method_decl) => CallableRef::MethodDecl {
                             type_name: &method_block.type_name,
                             method_decl,
-                        }),
-                        MethodItem::Def(method_def) => Some(CallableRef::MethodDef {
+                        },
+                        MethodItem::Def(method_def) => CallableRef::MethodDef {
                             type_name: &method_block.type_name,
                             method_def,
-                        }),
+                        },
                     })
                     .collect(),
                 TopLevelItem::TypeDef(_) => vec![],

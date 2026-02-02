@@ -4,7 +4,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::backend::opt::Pass;
 use crate::backend::opt::dataflow::ptr_utils::{is_read_only_ptr, peel_ptr_cast};
-use crate::ir::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+use crate::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+
+type DefUseMaps = (
+    HashMap<ValueId, (usize, usize)>,
+    HashMap<ValueId, Vec<(usize, usize)>>,
+);
 
 /// Drops MemCopy-to-local when the local is only read through derived pointers.
 pub struct ByRefCopyElim;
@@ -93,12 +98,7 @@ impl Pass for ByRefCopyElim {
     }
 }
 
-fn build_use_maps(
-    func: &Function,
-) -> (
-    HashMap<ValueId, (usize, usize)>,
-    HashMap<ValueId, Vec<(usize, usize)>>,
-) {
+fn build_use_maps(func: &Function) -> DefUseMaps {
     let mut def_inst = HashMap::new();
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
 

@@ -1,9 +1,11 @@
 //! Constant folding and trivial branch simplification for SSA.
 
-use crate::backend::IrTypeId;
+use crate::ir::IrTypeId;
 use std::collections::HashMap;
 
-use crate::ir::ir::{BinOp, ConstValue, Function, InstKind, Terminator, UnOp, ValueDef, ValueId};
+use crate::ir::{
+    BinOp, BlockId, CmpOp, ConstValue, Function, InstKind, Terminator, UnOp, ValueDef, ValueId,
+};
 
 use super::Pass;
 
@@ -211,12 +213,7 @@ fn fold_binop(op: BinOp, lhs: ValueId, rhs: ValueId, env: &ConstEnv) -> Option<C
 }
 
 /// Fold integer comparisons into boolean constants when operands are constant.
-fn fold_cmp(
-    op: crate::ir::ir::CmpOp,
-    lhs: ValueId,
-    rhs: ValueId,
-    env: &ConstEnv,
-) -> Option<ConstValue> {
+fn fold_cmp(op: CmpOp, lhs: ValueId, rhs: ValueId, env: &ConstEnv) -> Option<ConstValue> {
     let (lhs_val, signed, bits) = env.get_int(lhs)?;
     let (rhs_val, rhs_signed, rhs_bits) = env.get_int(rhs)?;
     if signed != rhs_signed || bits != rhs_bits {
@@ -224,12 +221,12 @@ fn fold_cmp(
     }
 
     let value = match op {
-        crate::ir::ir::CmpOp::Eq => lhs_val == rhs_val,
-        crate::ir::ir::CmpOp::Ne => lhs_val != rhs_val,
-        crate::ir::ir::CmpOp::Lt => lhs_val < rhs_val,
-        crate::ir::ir::CmpOp::Le => lhs_val <= rhs_val,
-        crate::ir::ir::CmpOp::Gt => lhs_val > rhs_val,
-        crate::ir::ir::CmpOp::Ge => lhs_val >= rhs_val,
+        CmpOp::Eq => lhs_val == rhs_val,
+        CmpOp::Ne => lhs_val != rhs_val,
+        CmpOp::Lt => lhs_val < rhs_val,
+        CmpOp::Le => lhs_val <= rhs_val,
+        CmpOp::Gt => lhs_val > rhs_val,
+        CmpOp::Ge => lhs_val >= rhs_val,
     };
 
     Some(ConstValue::Bool(value))
@@ -335,8 +332,7 @@ fn compute_param_consts(
     let mut out = Vec::with_capacity(func.blocks.len());
     for (block_idx, block) in func.blocks.iter().enumerate() {
         let mut params = Vec::with_capacity(block.params.len());
-        for param_idx in 0..block.params.len() {
-            let args = &incoming[block_idx][param_idx];
+        for args in incoming[block_idx].iter().take(block.params.len()) {
             if args.is_empty() {
                 params.push(None);
                 continue;
@@ -404,7 +400,7 @@ fn build_incoming_args(func: &Function) -> Vec<Vec<Vec<ValueId>>> {
     incoming
 }
 
-fn push_args(incoming: &mut [Vec<Vec<ValueId>>], target: crate::ir::ir::BlockId, args: &[ValueId]) {
+fn push_args(incoming: &mut [Vec<Vec<ValueId>>], target: BlockId, args: &[ValueId]) {
     let slots = &mut incoming[target.index()];
     for (idx, value) in args.iter().enumerate() {
         if let Some(slot) = slots.get_mut(idx) {

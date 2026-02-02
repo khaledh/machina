@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::backend::lower::{LoweredFunction, LoweredModule};
-use crate::ir::ir::{Callee, ConstValue, Function, GlobalId, InstKind, Terminator};
+use crate::ir::{Callee, ConstValue, Function, GlobalId, InstKind, Terminator};
 use crate::resolve::DefId;
 
 /// Computes the set of reachable function DefIds for a module.

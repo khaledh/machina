@@ -1,6 +1,6 @@
 //! CFG-free SSA optimizations.
 
-use crate::ir::ir::Function;
+use crate::ir::Function;
 
 pub use crate::backend::opt::Pass;
 

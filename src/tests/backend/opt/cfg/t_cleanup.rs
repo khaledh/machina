@@ -1,7 +1,6 @@
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
 use crate::ir::format::format_func;
-use crate::ir::ir::{ConstValue, FunctionSig, SwitchCase, Terminator};
+use crate::ir::{ConstValue, FunctionSig, IrTypeCache, IrTypeKind, SwitchCase, Terminator};
 use crate::resolve::DefId;
 use indoc::indoc;
 

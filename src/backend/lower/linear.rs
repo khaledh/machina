@@ -4,9 +4,10 @@ use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::locals::LocalValue;
 use crate::backend::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::backend::lower::mapping::{map_binop, map_cmp};
-use crate::ir::ir::{BinOp, Callee, CastKind, RuntimeFn, Terminator, UnOp, ValueId};
+use crate::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, Terminator, UnOp, ValueId};
+use crate::resolve::DefKind;
 use crate::tree::semantic as sem;
-use crate::tree::{BinaryOp, ParamMode, UnaryOp};
+use crate::tree::{BinaryOp, CoerceKind, ParamMode, UnaryOp};
 use crate::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -506,7 +507,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             sem::ValueExprKind::Coerce { kind, expr: inner } => match kind {
-                crate::tree::CoerceKind::ArrayToSlice => {
+                CoerceKind::ArrayToSlice => {
                     let plan = self.slice_plan(expr.id);
 
                     let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
@@ -588,8 +589,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     } else {
                         let def = self.def(*def_id);
                         match def.kind {
-                            crate::resolve::DefKind::FuncDef { .. }
-                            | crate::resolve::DefKind::FuncDecl { .. } => {
+                            DefKind::FuncDef { .. }
+                            | DefKind::FuncDecl { .. } => {
                                 let value_ty = self.type_lowerer.lower_type_id(place.ty);
                                 Ok(self.builder.const_func_addr(*def_id, value_ty).into())
                             }
@@ -794,11 +795,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Builds a slice value from a base pointer and length.
+    #[allow(clippy::too_many_arguments)]
     fn emit_slice_value(
         &mut self,
-        slice_ty: crate::backend::IrTypeId,
-        elem_ptr_ty: crate::backend::IrTypeId,
-        u64_ty: crate::backend::IrTypeId,
+        slice_ty: IrTypeId,
+        elem_ptr_ty: IrTypeId,
+        u64_ty: IrTypeId,
         base_ptr: ValueId,
         _base_len: ValueId,
         start_val: ValueId,

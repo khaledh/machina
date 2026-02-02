@@ -1,7 +1,8 @@
 use crate::backend::opt::cfg_free::PassManager;
-use crate::backend::{IrStructField, IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{Callee, FunctionSig, InstKind};
+use crate::ir::{
+    Callee, FunctionSig, InstKind, IrStructField, IrTypeCache, IrTypeKind, Terminator,
+};
 use crate::resolve::DefId;
 
 #[test]
@@ -44,7 +45,7 @@ fn test_local_addr_copy_elim() {
     builder.call(Callee::Direct(DefId(1)), vec![tmp_ptr], unit);
     builder.store(drop_ptr, loaded);
     builder.drop_ptr(drop_ptr);
-    builder.terminate(crate::ir::ir::Terminator::Return { value: None });
+    builder.terminate(Terminator::Return { value: None });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();

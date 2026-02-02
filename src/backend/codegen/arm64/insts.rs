@@ -1,8 +1,9 @@
 use crate::backend::codegen::emitter::{LocationResolver, binop_mnemonic};
 use crate::backend::regalloc::Location;
 use crate::backend::regalloc::arm64::INDIRECT_CALL_REG;
-use crate::backend::{IrTypeKind, RuntimeFn};
-use crate::ir::ir::{BinOp, Callee, CastKind, ConstValue, InstKind, Instruction, UnOp};
+use crate::ir::{
+    BinOp, Callee, CastKind, ConstValue, InstKind, Instruction, IrTypeKind, RuntimeFn, UnOp,
+};
 
 use super::{Arm64Emitter, ConstValueExt};
 

@@ -1,5 +1,8 @@
 use super::assert_ir_eq;
 use super::lower_and_optimize;
+use crate::backend::lower::lower_func;
+use crate::backend::opt::dataflow::PassManager;
+use crate::ir::format::format_func;
 use indoc::indoc;
 
 #[test]
@@ -58,7 +61,7 @@ fn test_dce_keeps_call() {
     let side_def = ctx.module.func_defs()[1];
     let side_id = side_def.def_id;
 
-    let mut lowered = crate::backend::lower::lower_func(
+    let mut lowered = lower_func(
         main_def,
         &ctx.def_table,
         &ctx.type_map,
@@ -67,9 +70,9 @@ fn test_dce_keeps_call() {
     )
     .expect("failed to lower");
 
-    let mut manager = crate::backend::opt::dataflow::PassManager::new();
+    let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut lowered.func));
-    let text = crate::ir::format::format_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     let expected = format!(
         indoc! {"

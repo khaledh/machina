@@ -1,4 +1,6 @@
 use super::{analyze, format_func, indoc, lower_func};
+use crate::backend::lower::lower_module_with_opts;
+use crate::ir::format::format_func_with_comments;
 
 fn count(text: &str, needle: &str) -> usize {
     text.matches(needle).count()
@@ -16,7 +18,7 @@ fn test_drop_on_field_overwrite() {
         }
     "});
 
-    let lowered = crate::backend::lower::lower_module_with_opts(
+    let lowered = lower_module_with_opts(
         &ctx.module,
         &ctx.def_table,
         &ctx.type_map,
@@ -32,7 +34,7 @@ fn test_drop_on_field_overwrite() {
         .iter()
         .find(|func| func.func.name == "main")
         .unwrap_or_else(|| panic!("missing main function in {func_names:?}"));
-    let text = crate::ir::format::format_func_with_comments(&main.func, &main.types);
+    let text = format_func_with_comments(&main.func, &main.types);
 
     assert!(
         count(&text, "__rt_string_drop") >= 2,
@@ -56,7 +58,7 @@ fn test_drop_promotes_full_init() {
         }
     "});
 
-    let lowered = crate::backend::lower::lower_module_with_opts(
+    let lowered = lower_module_with_opts(
         &ctx.module,
         &ctx.def_table,
         &ctx.type_map,
@@ -72,7 +74,7 @@ fn test_drop_promotes_full_init() {
         .iter()
         .find(|func| func.func.name == "main")
         .unwrap_or_else(|| panic!("missing main function in {func_names:?}"));
-    let text = crate::ir::format::format_func_with_comments(&main.func, &main.types);
+    let text = format_func_with_comments(&main.func, &main.types);
 
     assert!(
         text.contains("drop s") || text.contains("drop-if-live s"),

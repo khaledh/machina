@@ -2,9 +2,9 @@ use crate::analysis::dataflow::DataflowGraph;
 use crate::backend::analysis::cfg::Cfg;
 use crate::backend::analysis::liveness::analyze as liveness_analyze;
 use crate::backend::lower::lower_func;
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, SemanticContext};
 use crate::elaborate::elaborate;
-use crate::ir::ir::Terminator;
+use crate::ir::Terminator;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize::normalize;
 use crate::parse::Parser;
@@ -13,7 +13,7 @@ use crate::semck::sem_check;
 use crate::typeck::type_check;
 use indoc::indoc;
 
-fn analyze(source: &str) -> crate::context::SemanticContext {
+fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

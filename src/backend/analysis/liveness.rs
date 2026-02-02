@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::analysis::dataflow::{DataflowGraph, solve_backward};
 use crate::backend::analysis::cfg::Cfg;
-use crate::ir::ir::{Block, Function, Terminator, ValueId, for_each_inst_use};
+use crate::ir::{Block, Function, Terminator, ValueId, for_each_inst_use};
 
 #[derive(Debug, Clone, Default)]
 pub struct LiveSet {

@@ -2,12 +2,20 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::IrTypeId;
 use crate::backend::opt::Pass;
 use crate::backend::opt::dataflow::ptr_utils::{
     is_read_only_ptr, peel_ptr_cast, source_stable_after,
 };
-use crate::ir::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+use crate::ir::IrTypeId;
+use crate::ir::{
+    Function, InstKind, LocalId, Terminator, ValueId, for_each_inst_use, replace_value_in_func,
+};
+
+type ValueDefUseMaps = (
+    HashMap<ValueId, IrTypeId>,
+    HashMap<ValueId, (usize, usize)>,
+    HashMap<ValueId, Vec<(usize, usize)>>,
+);
 
 /// Drops MemCopy between locals when the destination is read-only and the source is not written after.
 pub struct LocalMemCopyElim;
@@ -143,8 +151,7 @@ impl Pass for LocalMemCopyElim {
                 let Some(src_local) = candidate.3 else {
                     return true;
                 };
-                let keep =
-                    !(memcpy_dsts.contains(&src_local) && !candidate_dsts.contains(&src_local));
+                let keep = !memcpy_dsts.contains(&src_local) || candidate_dsts.contains(&src_local);
                 changed |= !keep;
                 keep
             });
@@ -209,13 +216,7 @@ impl Pass for LocalMemCopyElim {
     }
 }
 
-fn build_maps(
-    func: &Function,
-) -> (
-    HashMap<ValueId, IrTypeId>,
-    HashMap<ValueId, (usize, usize)>,
-    HashMap<ValueId, Vec<(usize, usize)>>,
-) {
+fn build_maps(func: &Function) -> ValueDefUseMaps {
     let mut value_types = HashMap::new();
     let mut def_inst = HashMap::new();
     let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
@@ -242,8 +243,8 @@ fn build_maps(
     (value_types, def_inst, uses)
 }
 
-fn collect_local_ptrs(func: &Function) -> HashMap<crate::ir::ir::LocalId, Vec<ValueId>> {
-    let mut ptrs: HashMap<crate::ir::ir::LocalId, Vec<ValueId>> = HashMap::new();
+fn collect_local_ptrs(func: &Function) -> HashMap<LocalId, Vec<ValueId>> {
+    let mut ptrs: HashMap<LocalId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
         for inst in &block.insts {
             if let InstKind::AddrOfLocal { local } = inst.kind
@@ -270,10 +271,10 @@ fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
     let mut uses = HashSet::new();
     for block in &func.blocks {
         match &block.term {
-            crate::ir::ir::Terminator::Br { args, .. } => {
+            Terminator::Br { args, .. } => {
                 uses.extend(args.iter().cloned());
             }
-            crate::ir::ir::Terminator::CondBr {
+            Terminator::CondBr {
                 cond,
                 then_args,
                 else_args,
@@ -283,7 +284,7 @@ fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
                 uses.extend(then_args.iter().cloned());
                 uses.extend(else_args.iter().cloned());
             }
-            crate::ir::ir::Terminator::Switch {
+            Terminator::Switch {
                 value,
                 cases,
                 default_args,
@@ -295,12 +296,12 @@ fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
                 }
                 uses.extend(default_args.iter().cloned());
             }
-            crate::ir::ir::Terminator::Return { value } => {
+            Terminator::Return { value } => {
                 if let Some(value) = value {
                     uses.insert(*value);
                 }
             }
-            crate::ir::ir::Terminator::Unreachable => {}
+            Terminator::Unreachable => {}
         }
     }
     uses
@@ -309,7 +310,7 @@ fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
 fn collect_memcpy_dsts(
     func: &Function,
     def_inst: &HashMap<ValueId, (usize, usize)>,
-) -> HashSet<crate::ir::ir::LocalId> {
+) -> HashSet<LocalId> {
     let mut locals = HashSet::new();
     for block in &func.blocks {
         for inst in &block.insts {
@@ -330,14 +331,8 @@ fn collect_memcpy_dsts(
 }
 
 fn build_replacement_map(
-    candidates: &[(
-        usize,
-        usize,
-        crate::ir::ir::LocalId,
-        Option<crate::ir::ir::LocalId>,
-        ValueId,
-    )],
-) -> HashMap<crate::ir::ir::LocalId, ValueId> {
+    candidates: &[(usize, usize, LocalId, Option<LocalId>, ValueId)],
+) -> HashMap<LocalId, ValueId> {
     let mut map = HashMap::new();
     for (_, _, dst_local, _, src) in candidates {
         map.insert(*dst_local, *src);
@@ -346,8 +341,8 @@ fn build_replacement_map(
 }
 
 fn resolve_replacement(
-    local: crate::ir::ir::LocalId,
-    replacements: &HashMap<crate::ir::ir::LocalId, ValueId>,
+    local: LocalId,
+    replacements: &HashMap<LocalId, ValueId>,
     func: &Function,
     def_inst: &HashMap<ValueId, (usize, usize)>,
 ) -> ValueId {

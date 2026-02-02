@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::backend::{IrTypeId, IrTypeKind};
+use crate::ir::{IrTypeId, IrTypeKind};
 use crate::resolve::DefId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

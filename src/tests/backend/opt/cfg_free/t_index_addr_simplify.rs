@@ -1,8 +1,7 @@
 use crate::backend::opt::cfg_free::PassManager;
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
 use crate::ir::format::format_func;
-use crate::ir::ir::{FunctionSig, Terminator};
+use crate::ir::{FunctionSig, IrTypeCache, IrTypeKind, Terminator};
 use crate::resolve::DefId;
 
 #[test]
@@ -33,7 +32,7 @@ fn test_index_addr_zero_fold() {
     let zero = builder.const_int(0, false, 64, u64_ty);
     let idx = builder.index_addr(base, zero, u8_ptr);
     let _load = builder.load(idx, u8_ty);
-    builder.terminate(crate::ir::ir::Terminator::Return { value: None });
+    builder.terminate(Terminator::Return { value: None });
 
     let mut func = builder.finish();
     let mut manager = PassManager::new();

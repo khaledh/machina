@@ -1,9 +1,10 @@
 use crate::context::NormalizedContext;
+use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::tree::normalized::{
-    BinaryOp, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind, TypeDef, TypeDefKind,
-    TypeExpr, TypeExprKind, UnaryOp,
+    BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
+    TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::typeck::type_map::resolve_type_expr;
@@ -103,14 +104,14 @@ impl<'a> ValueChecker<'a> {
     }
 
     /// Validate that a literal fits within a target integer type's bounds.
-    fn check_int_range(&mut self, value: i128, min: i128, max_excl: i128, span: crate::diag::Span) {
+    fn check_int_range(&mut self, value: i128, min: i128, max_excl: i128, span: Span) {
         if value < min || value >= max_excl {
             self.errors
                 .push(SemCheckError::ValueOutOfRange(value, min, max_excl, span));
         }
     }
 
-    fn check_range_value(&mut self, value: u64, min: u64, max: u64, span: crate::diag::Span) {
+    fn check_range_value(&mut self, value: u64, min: u64, max: u64, span: Span) {
         if value < min || value >= max {
             self.errors.push(SemCheckError::ValueOutOfRange(
                 value as i128,
@@ -261,8 +262,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                         self.check_range_binding_value(value, &resolved_ty);
                     }
                 }
-                if let crate::tree::normalized::BindPatternKind::Name { def_id, .. } = &pattern.kind
-                {
+                if let BindPatternKind::Name { def_id, .. } = &pattern.kind {
                     let const_value = self.const_int_value(value);
                     self.set_const(*def_id, const_value);
                 }
@@ -283,11 +283,10 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                     self.set_const(def_id, const_value);
                 }
             }
-            StmtExprKind::Return { value } => {
-                if let Some(value) = value {
-                    self.check_return_value_range(value);
-                }
+            StmtExprKind::Return { value: Some(value) } => {
+                self.check_return_value_range(value);
             }
+            StmtExprKind::Return { value: None } => {}
             _ => {}
         }
 

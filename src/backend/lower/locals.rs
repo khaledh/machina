@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::backend::IrTypeId;
-use crate::ir::ir::ValueId;
+use crate::ir::IrTypeId;
+use crate::ir::ValueId;
 use crate::resolve::DefId;
 
 /// Storage kind for a local variable.

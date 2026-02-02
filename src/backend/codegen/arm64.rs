@@ -2,13 +2,13 @@
 
 use std::fmt::Write;
 
-use crate::backend::IrTypeKind;
 use crate::backend::codegen::emitter::{CodegenEmitter, LocationResolver};
 use crate::backend::codegen::graph::CodegenBlockId;
-use crate::backend::regalloc::Location;
 use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
 use crate::backend::regalloc::target::PhysReg;
-use crate::ir::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
+use crate::backend::regalloc::{Location, StackSlotId};
+use crate::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
+use crate::ir::{IrTypeId, IrTypeKind};
 
 mod frame;
 mod globals;
@@ -224,7 +224,7 @@ impl Arm64Emitter {
         }
     }
 
-    fn scalar_size(locs: &LocationResolver, ty: crate::backend::IrTypeId) -> u32 {
+    fn scalar_size(locs: &LocationResolver, ty: IrTypeId) -> u32 {
         match locs.types.kind(ty) {
             IrTypeKind::Unit => 0,
             IrTypeKind::Bool => 1,
@@ -234,7 +234,7 @@ impl Arm64Emitter {
         }
     }
 
-    fn reg_for_type(locs: &LocationResolver, ty: crate::backend::IrTypeId, reg: PhysReg) -> String {
+    fn reg_for_type(locs: &LocationResolver, ty: IrTypeId, reg: PhysReg) -> String {
         let name = Self::reg_name(reg).to_string();
         let size = Self::scalar_size(locs, ty);
         if size > 0 && size <= 4 {
@@ -244,7 +244,7 @@ impl Arm64Emitter {
         }
     }
 
-    fn stack_offset(&self, slot: crate::backend::regalloc::StackSlotId) -> u32 {
+    fn stack_offset(&self, slot: StackSlotId) -> u32 {
         // Stack slots live below the callee-saved area at the top of the frame.
         self.layout.slot_offset(slot)
     }
@@ -347,25 +347,25 @@ trait ConstValueExt {
     fn as_int(&self) -> i128;
 }
 
-impl ConstValueExt for crate::ir::ir::ConstValue {
+impl ConstValueExt for ConstValue {
     fn as_int(&self) -> i128 {
         match self {
-            crate::ir::ir::ConstValue::Int { value, .. } => *value,
-            crate::ir::ir::ConstValue::Bool(value) => {
+            ConstValue::Int { value, .. } => *value,
+            ConstValue::Bool(value) => {
                 if *value {
                     1
                 } else {
                     0
                 }
             }
-            crate::ir::ir::ConstValue::Unit => 0,
-            crate::ir::ir::ConstValue::FuncAddr { .. } => 0,
-            crate::ir::ir::ConstValue::GlobalAddr { .. } => 0,
+            ConstValue::Unit => 0,
+            ConstValue::FuncAddr { .. } => 0,
+            ConstValue::GlobalAddr { .. } => 0,
         }
     }
 }
 
-fn needs_sret(locs: &LocationResolver, ty: crate::backend::IrTypeId) -> bool {
+fn needs_sret(locs: &LocationResolver, ty: IrTypeId) -> bool {
     match locs.types.kind(ty) {
         IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
             false

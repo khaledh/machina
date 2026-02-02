@@ -1,7 +1,7 @@
 //! Shared projection helpers for SSA lowering.
 
-use crate::backend::IrTypeId;
 use crate::backend::lower::lowerer::FuncLowerer;
+use crate::ir::IrTypeId;
 use crate::types::{Type, TypeId};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {

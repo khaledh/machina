@@ -1,4 +1,4 @@
-use crate::backend::{IrStructField, IrTypeCache, IrTypeKind};
+use crate::ir::{IrStructField, IrTypeCache, IrTypeKind};
 
 #[test]
 fn test_layout_tuple_offsets() {

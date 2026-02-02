@@ -1,9 +1,9 @@
 //! Helpers for materializing values into addressable slots.
 
-use crate::backend::IrTypeId;
 use crate::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::backend::lower::lowerer::{FuncLowerer, ValueSlot};
-use crate::ir::ir::ValueId;
+use crate::ir::IrTypeId;
+use crate::ir::ValueId;
 use crate::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {

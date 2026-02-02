@@ -1,9 +1,8 @@
 use crate::backend::analysis::liveness;
 use crate::backend::regalloc::target::PhysReg;
 use crate::backend::regalloc::{Location, TargetSpec, regalloc};
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{BinOp, Callee, FunctionSig, Terminator};
+use crate::ir::{BinOp, Callee, FunctionSig, IrTypeCache, IrTypeKind, Terminator};
 use crate::resolve::DefId;
 
 struct TestTarget {
@@ -211,8 +210,8 @@ fn test_regalloc_prefers_call_safe_regs() {
     let entry = builder.current_block();
     let param = builder.add_block_param(entry, u64_ty);
     let callee = DefId(1);
-    let call = builder.call(crate::ir::ir::Callee::Direct(callee), vec![param], u64_ty);
-    let sum = builder.binop(crate::ir::ir::BinOp::Add, param, call, u64_ty);
+    let call = builder.call(Callee::Direct(callee), vec![param], u64_ty);
+    let sum = builder.binop(BinOp::Add, param, call, u64_ty);
     builder.terminate(Terminator::Return { value: Some(sum) });
 
     let func = builder.finish();
@@ -299,7 +298,7 @@ fn test_regalloc_prefers_call_safe_regs_for_drop() {
     let local = builder.add_local(u64_ty, None);
     let addr = builder.addr_of_local(local, ptr_u64_ty);
     builder.drop_ptr(addr);
-    let sum = builder.binop(crate::ir::ir::BinOp::Add, param, param, u64_ty);
+    let sum = builder.binop(BinOp::Add, param, param, u64_ty);
     builder.terminate(Terminator::Return { value: Some(sum) });
 
     let func = builder.finish();

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::backend::lower::globals::GlobalArena;
 use crate::backend::lower::lowerer::FuncLowerer;
 use crate::backend::lower::{LowerToIrError, LoweredFunction};
-use crate::ir::ir::Terminator;
+use crate::ir::Terminator;
 use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved as res;

@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::NormalizedContext;
+use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::semck::SemCheckError;
 use crate::tree::normalized::{
@@ -186,7 +187,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         expr: &Expr,
         locals: &HashSet<DefId>,
         captures: &mut HashMap<DefId, CaptureMode>,
-        span: crate::diag::Span,
+        span: Span,
     ) -> Option<DefId> {
         let Some(def_id) = Self::lvalue_base_def_id(expr) else {
             panic!("compiler bug: expected lvalue base for write at {}", span);
@@ -200,7 +201,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         expr: &Expr,
         locals: &HashSet<DefId>,
         captures: &mut HashMap<DefId, CaptureMode>,
-        span: crate::diag::Span,
+        span: Span,
     ) -> Option<DefId> {
         let Some(def_id) = Self::lvalue_base_def_id(expr) else {
             panic!("compiler bug: expected lvalue base for move at {}", span);

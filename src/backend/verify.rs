@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::backend::lower::{LoweredFunction, LoweredModule};
-use crate::backend::{IrTypeCache, IrTypeId, IrTypeKind};
-use crate::ir::ir::{Block, BlockId, Callee, InstKind, Terminator, ValueId, for_each_inst_use};
+use crate::ir::{
+    Block, BlockId, Callee, Function, InstKind, IrTypeCache, IrTypeId, IrTypeKind, Terminator,
+    ValueDef, ValueId, for_each_inst_use,
+};
 
 #[derive(Debug, Clone)]
 pub struct VerifyIrError {
@@ -111,10 +113,10 @@ fn verify_inst_types(
     func_name: &str,
     block_id: BlockId,
     kind: &InstKind,
-    result: Option<&crate::ir::ir::ValueDef>,
+    result: Option<&ValueDef>,
     value_types: &HashMap<ValueId, IrTypeId>,
     types: &IrTypeCache,
-    func: &crate::ir::ir::Function,
+    func: &Function,
 ) -> Result<(), VerifyIrError> {
     match kind {
         InstKind::AddrOfLocal { local } => {

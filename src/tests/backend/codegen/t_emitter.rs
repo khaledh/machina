@@ -7,12 +7,11 @@ use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::backend::codegen::traverse::emit_graph_with_emitter as emit_graph_with_emitter_impl;
 use crate::backend::lower::{LoweredFunction, LoweredModule};
 use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{TargetSpec, ValueAllocMap, regalloc};
-use crate::backend::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
+use crate::backend::regalloc::{AllocationResult, TargetSpec, ValueAllocMap, regalloc};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{
-    BinOp, Callee, CmpOp, ConstValue, FunctionSig, GlobalData, GlobalId, RuntimeFn, SwitchCase,
-    Terminator,
+use crate::ir::{
+    BinOp, Callee, CmpOp, ConstValue, Function, FunctionSig, GlobalData, GlobalId, IrStructField,
+    IrTypeCache, IrTypeId, IrTypeKind, RuntimeFn, SwitchCase, Terminator,
 };
 use crate::resolve::DefId;
 
@@ -67,11 +66,7 @@ impl TestTypes {
 }
 
 /// Runs the full codegen pipeline on a function and returns the assembly output.
-fn emit_function(
-    func: &crate::ir::ir::Function,
-    types: &mut IrTypeCache,
-    target: &dyn TargetSpec,
-) -> String {
+fn emit_function(func: &Function, types: &mut IrTypeCache, target: &dyn TargetSpec) -> String {
     let live_map = liveness::analyze(func);
     let alloc = regalloc(func, types, &live_map, target);
     let schedule = MoveSchedule::from_moves(
@@ -97,10 +92,10 @@ fn emit_function(
 
 /// Variant that returns both the asm and the allocation result for tests that need frame info.
 fn emit_function_with_alloc(
-    func: &crate::ir::ir::Function,
+    func: &Function,
     types: &mut IrTypeCache,
     target: &dyn TargetSpec,
-) -> (String, crate::backend::regalloc::AllocationResult) {
+) -> (String, AllocationResult) {
     let live_map = liveness::analyze(func);
     let alloc = regalloc(func, types, &live_map, target);
     let schedule = MoveSchedule::from_moves(
@@ -134,7 +129,7 @@ struct TinyTarget {
 
 fn emit_graph_with_emitter(
     graph: &CodegenGraph,
-    func: &crate::ir::ir::Function,
+    func: &Function,
     alloc_map: &ValueAllocMap,
     frame_size: u32,
     callee_saved: &[PhysReg],

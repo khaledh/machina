@@ -1,7 +1,7 @@
 //! Bind pattern lowering for let/var bindings.
 
 use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::locals::LocalValue;
+use crate::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::backend::lower::lowerer::FuncLowerer;
 use crate::tree::semantic as sem;
 use crate::types::Type;
@@ -17,7 +17,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match &pattern.kind {
             sem::BindPatternKind::Name { def_id, .. } => {
                 let dest_ty = self.def_type(*def_id);
-                if let crate::backend::lower::locals::LocalStorage::Value(value) = value.storage {
+                if let LocalStorage::Value(value) = value.storage {
                     self.emit_conversion_check(value_ty, &dest_ty, value);
                 }
                 if value_ty.is_scalar() {

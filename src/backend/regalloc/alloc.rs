@@ -3,10 +3,10 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::IrTypeCache;
 use crate::backend::regalloc::stack::{StackAllocator, StackSlotId};
 use crate::backend::regalloc::target::{PhysReg, TargetSpec};
-use crate::ir::ir::ValueId;
+use crate::ir::ValueId;
+use crate::ir::{IrTypeCache, IrTypeId};
 
 use super::constraints::AbiConstraints;
 use super::intervals::{IntervalAnalysis, LiveInterval};
@@ -240,6 +240,7 @@ fn spill_at_interval(
 
 /// Force a fixed register assignment, spilling any active interval that
 /// currently occupies that register.
+#[allow(clippy::too_many_arguments)]
 fn force_assign_fixed(
     value: ValueId,
     interval: LiveInterval,
@@ -311,7 +312,7 @@ fn take_free_reg_matching(
 }
 
 /// Compute how many 8-byte stack slots a value of the given type needs.
-fn stack_slots_for(types: &mut IrTypeCache, ty: crate::backend::IrTypeId) -> u32 {
+fn stack_slots_for(types: &mut IrTypeCache, ty: IrTypeId) -> u32 {
     let size = types.layout(ty).size();
     let slots = size.div_ceil(8);
     slots.max(1) as u32

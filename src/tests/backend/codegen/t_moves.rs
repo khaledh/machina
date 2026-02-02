@@ -4,9 +4,9 @@ use crate::backend::regalloc::moves::{EdgeMove, MoveOp};
 use crate::backend::regalloc::stack::StackSlotId;
 use crate::backend::regalloc::target::PhysReg;
 use crate::backend::regalloc::{Location, TargetSpec, regalloc};
-use crate::backend::{IrTypeCache, IrTypeKind};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{Callee, FunctionSig, Terminator};
+use crate::ir::{Callee, FunctionSig, InstKind, Terminator};
+use crate::ir::{IrTypeCache, IrTypeKind};
 use crate::resolve::DefId;
 
 struct CallTarget {
@@ -105,7 +105,7 @@ fn test_codegen_move_schedule_for_call() {
     let call_index = func.blocks[0]
         .insts
         .iter()
-        .position(|inst| matches!(inst.kind, crate::ir::InstKind::Call { .. }))
+        .position(|inst| matches!(inst.kind, InstKind::Call { .. }))
         .expect("missing call inst");
     let (pre, post) = schedule
         .call_moves(func.blocks[0].id, call_index)

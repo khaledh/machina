@@ -1,18 +1,19 @@
-use crate::backend::IrTypeKind;
 use crate::backend::lower::types::TypeLowerer;
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, SemanticContext};
 use crate::elaborate::elaborate;
+use crate::ir::IrTypeKind;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
+use crate::tree::semantic as sem;
 use crate::typeck::type_check;
 use crate::typeck::type_map::resolve_type_expr;
-use crate::types::{EnumVariant, FnParam, FnParamMode, Type};
+use crate::types::{EnumVariant, FnParam, FnParamMode, Type, TypeId};
 use indoc::indoc;
 
-fn analyze(source: &str) -> crate::context::SemanticContext {
+fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -31,7 +32,7 @@ fn analyze(source: &str) -> crate::context::SemanticContext {
     elaborate(sem_checked_context)
 }
 
-fn enum_type_id(ctx: &crate::context::SemanticContext, name: &str) -> crate::types::TypeId {
+fn enum_type_id(ctx: &SemanticContext, name: &str) -> TypeId {
     let type_def = ctx
         .module
         .type_defs()
@@ -39,7 +40,7 @@ fn enum_type_id(ctx: &crate::context::SemanticContext, name: &str) -> crate::typ
         .find(|def| def.name == name)
         .unwrap_or_else(|| panic!("missing enum type def {name}"));
     let variants = match &type_def.kind {
-        crate::tree::semantic::TypeDefKind::Enum { variants } => variants,
+        sem::TypeDefKind::Enum { variants } => variants,
         other => panic!("expected enum type def, found {:?}", other),
     };
 

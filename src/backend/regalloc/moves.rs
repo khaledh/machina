@@ -28,9 +28,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::IrTypeCache;
+use crate::backend::regalloc::StackSlotId;
 use crate::backend::regalloc::target::{PhysReg, TargetSpec};
-use crate::ir::ir::{BlockId, Callee, Function, InstKind, Terminator, ValueId};
+use crate::ir::IrTypeCache;
+use crate::ir::{
+    Block, BlockId, Callee, Function, InstKind, IrTypeId, Terminator, ValueDef, ValueId,
+};
 
 use super::{Location, ValueAllocMap};
 
@@ -51,7 +54,7 @@ pub struct MoveOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParamCopy {
     pub src: Location,
-    pub dst: crate::backend::regalloc::StackSlotId,
+    pub dst: StackSlotId,
     pub size: u32,
 }
 
@@ -191,7 +194,7 @@ pub fn build_move_plan(
 /// stack slots) and must be moved to their allocated locations. Register-typed
 /// params become entry moves; aggregate params become memory copies.
 fn plan_entry_moves(
-    entry: &crate::ir::ir::Block,
+    entry: &Block,
     alloc_map: &ValueAllocMap,
     types: &mut IrTypeCache,
     target: &dyn TargetSpec,
@@ -274,10 +277,10 @@ fn plan_entry_moves(
 /// Examines the terminator and generates edge moves for each outgoing edge
 /// that passes arguments to the target block's parameters.
 fn plan_terminator_edge_moves(
-    block: &crate::ir::ir::Block,
+    block: &Block,
     block_params: &HashMap<BlockId, Vec<ValueId>>,
     alloc_map: &ValueAllocMap,
-    value_types: &HashMap<ValueId, crate::backend::IrTypeId>,
+    value_types: &HashMap<ValueId, IrTypeId>,
     types: &mut IrTypeCache,
     plan: &mut MovePlan,
 ) {
@@ -323,7 +326,7 @@ fn plan_terminator_edge_moves(
 // ============================================================================
 
 /// Builds a map from value IDs to their types for the entire function.
-fn build_value_types(func: &Function) -> HashMap<ValueId, crate::backend::IrTypeId> {
+fn build_value_types(func: &Function) -> HashMap<ValueId, IrTypeId> {
     let mut map = HashMap::new();
     for block in &func.blocks {
         for param in &block.params {
@@ -342,7 +345,7 @@ fn build_value_types(func: &Function) -> HashMap<ValueId, crate::backend::IrType
 ///
 /// Types that don't fit in a register (aggregates, arrays) must be returned
 /// via a pointer passed by the caller.
-fn needs_sret(types: &mut IrTypeCache, ty: crate::backend::IrTypeId) -> bool {
+fn needs_sret(types: &mut IrTypeCache, ty: IrTypeId) -> bool {
     if types.is_reg_type(ty) {
         return false;
     }
@@ -366,7 +369,7 @@ fn edge_moves_for(
     args: &[ValueId],
     block_params: &HashMap<BlockId, Vec<ValueId>>,
     alloc_map: &ValueAllocMap,
-    value_types: &HashMap<ValueId, crate::backend::IrTypeId>,
+    value_types: &HashMap<ValueId, IrTypeId>,
     types: &mut IrTypeCache,
 ) -> Vec<MoveOp> {
     let params = block_params.get(&to).unwrap_or_else(|| {
@@ -594,12 +597,7 @@ fn move_uses_scratch(mov: &MoveOp) -> bool {
 ///
 /// Stack addresses are always pointer-sized (8 bytes). For other moves,
 /// uses the type's layout size.
-fn move_size_for(
-    types: &mut IrTypeCache,
-    ty: crate::backend::IrTypeId,
-    src: Location,
-    dst: Location,
-) -> u32 {
+fn move_size_for(types: &mut IrTypeCache, ty: IrTypeId, src: Location, dst: Location) -> u32 {
     if matches!(src, Location::StackAddr(_)) || matches!(dst, Location::StackAddr(_)) {
         return 8; // Pointer size
     }
@@ -629,7 +627,7 @@ pub(crate) struct ArgPassInfo {
     size: u32,
 }
 
-pub(crate) fn arg_pass_info(types: &mut IrTypeCache, ty: crate::backend::IrTypeId) -> ArgPassInfo {
+pub(crate) fn arg_pass_info(types: &mut IrTypeCache, ty: IrTypeId) -> ArgPassInfo {
     let size = types.layout(ty).size() as u32;
     if types.is_reg_type(ty) {
         return ArgPassInfo {
@@ -731,10 +729,7 @@ impl<'a> AbiAssigner<'a> {
 }
 
 /// Looks up the type of a call argument.
-fn call_arg_type(
-    value_types: &HashMap<ValueId, crate::backend::IrTypeId>,
-    arg: &ValueId,
-) -> crate::backend::IrTypeId {
+fn call_arg_type(value_types: &HashMap<ValueId, IrTypeId>, arg: &ValueId) -> IrTypeId {
     value_types
         .get(arg)
         .copied()
@@ -751,7 +746,7 @@ fn call_arg_src(arg: ValueId, alloc_map: &ValueAllocMap) -> Location {
 
 pub(crate) fn outgoing_stack_bytes_for_call(
     args: &[ValueId],
-    value_types: &HashMap<ValueId, crate::backend::IrTypeId>,
+    value_types: &HashMap<ValueId, IrTypeId>,
     types: &mut IrTypeCache,
     target: &dyn TargetSpec,
     param_reg_count: usize,
@@ -772,14 +767,15 @@ pub(crate) fn outgoing_stack_bytes_for_call(
 /// - Pre-moves for sret pointer (if returning aggregate)
 /// - Pre-moves for all arguments to their ABI locations
 /// - Post-moves for the return value (if any)
+#[allow(clippy::too_many_arguments)]
 fn plan_call_moves(
     block: BlockId,
     inst_index: usize,
     callee: &Callee,
     args: &[ValueId],
-    result: Option<&crate::ir::ir::ValueDef>,
+    result: Option<&ValueDef>,
     alloc_map: &ValueAllocMap,
-    value_types: &HashMap<ValueId, crate::backend::IrTypeId>,
+    value_types: &HashMap<ValueId, IrTypeId>,
     types: &mut IrTypeCache,
     target: &dyn TargetSpec,
     param_reg_count: usize,

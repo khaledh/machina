@@ -116,6 +116,7 @@ impl<'a> Elaborator<'a> {
     }
 
     /// Ensure that a captureless closure is lifted to a top-level function.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn ensure_closure_func(
         &mut self,
         ident: &str,
@@ -253,6 +254,7 @@ impl<'a> Elaborator<'a> {
     /// the `invoke` method, and caches the result. Subsequent calls return
     /// the cached info. This lazy approach handles forward references to
     /// closures that haven't been elaborated yet.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn ensure_closure_info(
         &mut self,
         ident: &str,

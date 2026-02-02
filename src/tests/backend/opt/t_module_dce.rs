@@ -3,11 +3,13 @@ use std::collections::HashSet;
 use crate::backend::lower::{LoweredFunction, LoweredModule};
 use crate::backend::opt::module_dce::{prune_globals, reachable_def_ids};
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{Callee, FunctionSig, GlobalData, GlobalId, InstKind, Terminator};
-use crate::ir::types::{IrTypeCache, IrTypeId, IrTypeKind};
+use crate::ir::{
+    Callee, ConstValue, FunctionSig, GlobalData, GlobalId, InstKind, IrTypeCache, IrTypeId,
+    IrTypeKind, RuntimeFn, Terminator,
+};
 use crate::resolve::DefId;
 
-fn unit_sig(types: &mut IrTypeCache) -> (FunctionSig, crate::backend::IrTypeId) {
+fn unit_sig(types: &mut IrTypeCache) -> (FunctionSig, IrTypeId) {
     let unit = types.add(IrTypeKind::Unit);
     (
         FunctionSig {
@@ -103,11 +105,7 @@ fn test_module_dce_prunes_unused_globals() {
 
     let mut main = FunctionBuilder::new(DefId(0), "main", sig);
     main.const_global_addr(GlobalId(1), ptr_ty);
-    main.call(
-        Callee::Runtime(crate::ir::ir::RuntimeFn::Trap),
-        vec![],
-        unit,
-    );
+    main.call(Callee::Runtime(RuntimeFn::Trap), vec![], unit);
     finalize_void(&mut main);
 
     let func = main.finish();
@@ -152,7 +150,7 @@ fn test_module_dce_prunes_unused_globals() {
 
     let inst = &module.funcs[0].func.blocks[0].insts[0];
     let InstKind::Const {
-        value: crate::ir::ir::ConstValue::GlobalAddr { id },
+        value: ConstValue::GlobalAddr { id },
     } = &inst.kind
     else {
         panic!("expected global addr const");

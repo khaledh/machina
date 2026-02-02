@@ -2,14 +2,13 @@
 
 use std::collections::HashMap;
 
-use crate::backend::IrTypeCache;
-use crate::backend::IrTypeId;
 use crate::backend::codegen::graph::CodegenBlockId;
-use crate::backend::regalloc::Location;
-use crate::backend::regalloc::moves::MoveOp;
+use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
 use crate::backend::regalloc::target::PhysReg;
-use crate::ir::ir::{BinOp, ConstValue, GlobalData, Instruction, LocalId, Terminator, ValueId};
+use crate::backend::regalloc::{Location, ValueAllocMap};
 use crate::ir::layout::IrLayout;
+use crate::ir::{BinOp, ConstValue, GlobalData, Instruction, LocalId, Terminator, ValueId};
+use crate::ir::{IrTypeCache, IrTypeId};
 use crate::resolve::DefId;
 
 /// Minimal instruction selection interface for SSA codegen.
@@ -18,7 +17,7 @@ pub trait CodegenEmitter {
     fn begin_function(&mut self, _name: &str, _frame_size: u32, _callee_saved: &[PhysReg]) {}
 
     /// Emit aggregate parameter copies required at function entry.
-    fn emit_param_copies(&mut self, _copies: &[crate::backend::regalloc::moves::ParamCopy]) {}
+    fn emit_param_copies(&mut self, _copies: &[ParamCopy]) {}
 
     /// Begin emitting a new block label.
     fn begin_block(&mut self, label: &str);
@@ -62,7 +61,7 @@ pub trait CodegenEmitter {
 
 /// Resolves SSA values to allocated locations.
 pub struct LocationResolver<'a> {
-    pub map: &'a crate::backend::regalloc::ValueAllocMap,
+    pub map: &'a ValueAllocMap,
     pub value_types: &'a HashMap<ValueId, IrTypeId>,
     pub local_offsets: &'a HashMap<LocalId, u32>,
     pub types: &'a IrTypeCache,
@@ -75,7 +74,7 @@ pub struct LocationResolver<'a> {
 }
 
 impl<'a> LocationResolver<'a> {
-    pub fn value(&self, id: crate::ir::ir::ValueId) -> Location {
+    pub fn value(&self, id: ValueId) -> Location {
         *self
             .map
             .get(&id)

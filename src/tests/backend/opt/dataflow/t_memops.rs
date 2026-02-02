@@ -1,8 +1,9 @@
 use super::lower_and_optimize;
-use crate::backend::{IrTypeCache, IrTypeKind};
+use crate::backend::lower::lower_func;
+use crate::backend::opt::dataflow::PassManager;
 use crate::ir::builder::FunctionBuilder;
 use crate::ir::format::format_func;
-use crate::ir::ir::{FunctionSig, Terminator};
+use crate::ir::{FunctionSig, IrTypeCache, IrTypeKind, Terminator};
 use crate::resolve::DefId;
 use indoc::indoc;
 
@@ -17,7 +18,7 @@ fn test_memops_to_runtime_calls() {
     "});
 
     let func_def = ctx.module.func_defs()[0];
-    let mut lowered = crate::backend::lower::lower_func(
+    let mut lowered = lower_func(
         func_def,
         &ctx.def_table,
         &ctx.type_map,
@@ -26,9 +27,9 @@ fn test_memops_to_runtime_calls() {
     )
     .expect("failed to lower");
 
-    let mut manager = crate::backend::opt::dataflow::PassManager::new();
+    let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut lowered.func));
-    let text = crate::ir::format::format_func(&lowered.func, &lowered.types);
+    let text = format_func(&lowered.func, &lowered.types);
 
     assert!(text.contains("__rt_memcpy"));
 }
@@ -92,7 +93,7 @@ fn test_memops_elides_zero_len_memcpy() {
     builder.terminate(Terminator::Return { value: None });
 
     let mut func = builder.finish();
-    let mut manager = crate::backend::opt::dataflow::PassManager::new();
+    let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut func));
     let text = format_func(&func, &types);
 
@@ -130,7 +131,7 @@ fn test_memops_elides_zero_len_memset() {
     builder.terminate(Terminator::Return { value: None });
 
     let mut func = builder.finish();
-    let mut manager = crate::backend::opt::dataflow::PassManager::new();
+    let mut manager = PassManager::new();
     manager.run(std::slice::from_mut(&mut func));
     let text = format_func(&func, &types);
 

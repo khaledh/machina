@@ -1,6 +1,6 @@
 //! Operator mapping helpers for SSA lowering.
 
-use crate::ir::ir::{BinOp, CmpOp};
+use crate::ir::{BinOp, CmpOp};
 use crate::tree::BinaryOp;
 
 pub(super) fn map_binop(op: BinaryOp) -> Option<BinOp> {

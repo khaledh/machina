@@ -3,11 +3,11 @@
 //! Implements switch-based lowering for enum/bool/int matches, using
 //! precomputed match plans to avoid pattern re-derivation.
 
-use crate::backend::IrTypeId;
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::locals::LocalValue;
 use crate::backend::lower::lowerer::{BranchResult, FuncLowerer};
-use crate::ir::ir::{CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
+use crate::ir::IrTypeId;
+use crate::ir::{BlockId, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::{Type, TypeId};
 
@@ -221,8 +221,8 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     fn emit_decision_node(
         &mut self,
         node: &sem::MatchDecisionNode,
-        entry_bb: crate::ir::ir::BlockId,
-        arm_blocks: &[crate::ir::ir::BlockId],
+        entry_bb: BlockId,
+        arm_blocks: &[BlockId],
     ) -> Result<(), LowerToIrError> {
         match node {
             sem::MatchDecisionNode::Leaf { arm_index } => {
@@ -258,10 +258,10 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn emit_tests_chain(
         &mut self,
-        entry_bb: crate::ir::ir::BlockId,
+        entry_bb: BlockId,
         tests: &[sem::MatchTest],
-        on_match_bb: crate::ir::ir::BlockId,
-        on_fail_bb: crate::ir::ir::BlockId,
+        on_match_bb: BlockId,
+        on_fail_bb: BlockId,
     ) -> Result<(), LowerToIrError> {
         if tests.is_empty() {
             self.lowerer.builder.select_block(entry_bb);

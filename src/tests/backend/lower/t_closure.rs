@@ -1,3 +1,5 @@
+use crate::tree::semantic as sem;
+
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
 
 #[test]
@@ -96,9 +98,7 @@ fn test_lower_closure_invoke() {
         .find(|block| block.type_name == "main$closure$1")
         .and_then(|block| {
             block.method_items.iter().find_map(|item| match item {
-                crate::tree::semantic::MethodItem::Def(def) if def.sig.name == "invoke" => {
-                    Some(def)
-                }
+                sem::MethodItem::Def(def) if def.sig.name == "invoke" => Some(def),
                 _ => None,
             })
         })
@@ -203,9 +203,7 @@ fn test_lower_closure_borrow_capture() {
             .find(|block| block.type_name == type_name)
             .and_then(|block| {
                 block.method_items.iter().find_map(|item| match item {
-                    crate::tree::semantic::MethodItem::Def(def) if def.sig.name == "invoke" => {
-                        Some(def.def_id)
-                    }
+                    sem::MethodItem::Def(def) if def.sig.name == "invoke" => Some(def.def_id),
                     _ => None,
                 })
             })

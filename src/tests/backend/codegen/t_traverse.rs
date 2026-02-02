@@ -1,11 +1,13 @@
+use crate::backend::codegen::graph::CodegenBlockId;
 use crate::backend::codegen::graph::CodegenGraph;
 use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::backend::codegen::traverse::{CodegenSink, emit_graph};
 use crate::backend::regalloc::Location;
-use crate::backend::regalloc::moves::CallMove;
-use crate::backend::{IrTypeCache, IrTypeKind};
+use crate::backend::regalloc::moves::{CallMove, MoveOp};
+use crate::backend::regalloc::stack::StackSlotId;
 use crate::ir::builder::FunctionBuilder;
-use crate::ir::ir::{Callee, FunctionSig, Terminator};
+use crate::ir::{Callee, ConstValue, FunctionSig, Instruction, Terminator, ValueId};
+use crate::ir::{IrTypeCache, IrTypeKind};
 use crate::resolve::DefId;
 
 struct DummySink {
@@ -25,41 +27,38 @@ impl DummySink {
 }
 
 impl CodegenSink for DummySink {
-    fn enter_block(&mut self, _block: crate::backend::codegen::graph::CodegenBlockId) {}
+    fn enter_block(&mut self, _block: CodegenBlockId) {}
 
-    fn emit_moves(&mut self, moves: &[crate::backend::regalloc::moves::MoveOp]) {
+    fn emit_moves(&mut self, moves: &[MoveOp]) {
         self.emitted_moves += moves.len();
     }
 
-    fn emit_inst(&mut self, _inst: &crate::ir::ir::Instruction) {
+    fn emit_inst(&mut self, _inst: &Instruction) {
         self.emitted_insts += 1;
     }
 
-    fn emit_terminator(&mut self, _term: &crate::ir::ir::Terminator) {
+    fn emit_terminator(&mut self, _term: &Terminator) {
         self.emitted_terms += 1;
     }
 
-    fn emit_branch(&mut self, _target: crate::backend::codegen::graph::CodegenBlockId) {
+    fn emit_branch(&mut self, _target: CodegenBlockId) {
         self.emitted_terms += 1;
     }
 
     fn emit_cond_branch(
         &mut self,
-        _cond: crate::ir::ir::ValueId,
-        _then_target: crate::backend::codegen::graph::CodegenBlockId,
-        _else_target: crate::backend::codegen::graph::CodegenBlockId,
+        _cond: ValueId,
+        _then_target: CodegenBlockId,
+        _else_target: CodegenBlockId,
     ) {
         self.emitted_terms += 1;
     }
 
     fn emit_switch(
         &mut self,
-        _value: crate::ir::ir::ValueId,
-        _cases: &[(
-            crate::ir::ir::ConstValue,
-            crate::backend::codegen::graph::CodegenBlockId,
-        )],
-        _default_target: crate::backend::codegen::graph::CodegenBlockId,
+        _value: ValueId,
+        _cases: &[(ConstValue, CodegenBlockId)],
+        _default_target: CodegenBlockId,
     ) {
         self.emitted_terms += 1;
     }
@@ -92,14 +91,14 @@ fn test_codegen_traverse_emits_moves_and_insts() {
     let call_moves = vec![CallMove {
         block: func.blocks[0].id,
         inst_index: 1,
-        pre_moves: vec![crate::backend::regalloc::moves::MoveOp {
-            src: Location::Stack(crate::backend::regalloc::stack::StackSlotId(0)),
-            dst: Location::Stack(crate::backend::regalloc::stack::StackSlotId(1)),
+        pre_moves: vec![MoveOp {
+            src: Location::Stack(StackSlotId(0)),
+            dst: Location::Stack(StackSlotId(1)),
             size: 8,
         }],
-        post_moves: vec![crate::backend::regalloc::moves::MoveOp {
-            src: Location::Stack(crate::backend::regalloc::stack::StackSlotId(1)),
-            dst: Location::Stack(crate::backend::regalloc::stack::StackSlotId(2)),
+        post_moves: vec![MoveOp {
+            src: Location::Stack(StackSlotId(1)),
+            dst: Location::Stack(StackSlotId(2)),
             size: 8,
         }],
     }];

@@ -1,8 +1,11 @@
+use crate::backend::lower::LoweredModule;
 use crate::backend::lower::lower_module;
 use crate::backend::verify::verify_module;
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, SemanticContext};
 use crate::elaborate::elaborate;
-use crate::ir::ir::{BinOp, InstKind, Instruction, Terminator, ValueDef, ValueId};
+use crate::ir::{
+    BinOp, ConstValue, InstKind, Instruction, IrTypeKind, Terminator, ValueDef, ValueId,
+};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::normalize::normalize;
 use crate::parse::Parser;
@@ -10,7 +13,7 @@ use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::typeck::type_check;
 
-fn analyze(source: &str) -> crate::context::SemanticContext {
+fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -29,7 +32,7 @@ fn analyze(source: &str) -> crate::context::SemanticContext {
     elaborate(sem_checked_context)
 }
 
-fn lower(source: &str) -> crate::backend::lower::LoweredModule {
+fn lower(source: &str) -> LoweredModule {
     let ctx = analyze(source);
     lower_module(
         &ctx.module,
@@ -141,7 +144,7 @@ fn main() -> u64 {
         .iter()
         .flat_map(|block| block.insts.iter())
         .filter_map(|inst| inst.result.as_ref())
-        .find(|value| !matches!(types.kind(value.ty), crate::backend::IrTypeKind::Ptr { .. }))
+        .find(|value| !matches!(types.kind(value.ty), IrTypeKind::Ptr { .. }))
         .map(|value| value.id);
     let next_id = func
         .blocks
@@ -154,7 +157,7 @@ fn main() -> u64 {
     let non_ptr_local = func
         .locals
         .iter()
-        .find(|local| !matches!(types.kind(local.ty), crate::backend::IrTypeKind::Ptr { .. }))
+        .find(|local| !matches!(types.kind(local.ty), IrTypeKind::Ptr { .. }))
         .map(|local| local.ty);
 
     for block in &mut func.blocks {
@@ -178,7 +181,7 @@ fn main() -> u64 {
                     ty: local_ty,
                 }),
                 kind: InstKind::Const {
-                    value: crate::ir::ir::ConstValue::Int {
+                    value: ConstValue::Int {
                         value: 0,
                         signed: false,
                         bits: 64,

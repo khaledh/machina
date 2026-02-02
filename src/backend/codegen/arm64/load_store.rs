@@ -1,5 +1,6 @@
 use super::*;
 use crate::backend::regalloc::StackSlotId;
+use crate::ir::IrTypeId;
 
 impl Arm64Emitter {
     pub(super) fn emit_add_imm(&mut self, dst: &str, base: &str, offset: u32) {
@@ -18,7 +19,7 @@ impl Arm64Emitter {
         dst: Location,
         scratch: &str,
         context: &str,
-        ty: crate::backend::IrTypeId,
+        ty: IrTypeId,
     ) -> (String, Option<StackSlotId>) {
         match dst {
             Location::Reg(reg) => (Self::reg_for_type(locs, ty, reg), None),
@@ -41,7 +42,7 @@ impl Arm64Emitter {
         locs: &LocationResolver,
         slot: Option<StackSlotId>,
         reg: &str,
-        ty: crate::backend::IrTypeId,
+        ty: IrTypeId,
     ) {
         if let Some(slot) = slot {
             let size = Self::scalar_size(locs, ty);
@@ -73,7 +74,7 @@ impl Arm64Emitter {
         &mut self,
         locs: &LocationResolver,
         loc: Location,
-        ty: crate::backend::IrTypeId,
+        ty: IrTypeId,
         scratch: &str,
     ) -> String {
         let size = Self::scalar_size(locs, ty);

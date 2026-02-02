@@ -1,4 +1,5 @@
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
+use crate::tree::semantic as sem;
 use std::collections::HashMap;
 
 #[test]
@@ -54,8 +55,8 @@ fn test_lower_module_method_defs() {
         .iter()
         .flat_map(|block| block.method_items.iter())
         .find_map(|item| match item {
-            crate::tree::semantic::MethodItem::Def(def) => Some(def.def_id),
-            crate::tree::semantic::MethodItem::Decl(_) => None,
+            sem::MethodItem::Def(def) => Some(def.def_id),
+            sem::MethodItem::Decl(_) => None,
         })
         .expect("missing method def");
 

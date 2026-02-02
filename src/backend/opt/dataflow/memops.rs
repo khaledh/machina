@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::backend::opt::Pass;
-use crate::ir::ir::{Callee, ConstValue, InstKind, RuntimeFn, ValueId};
+use crate::ir::{Callee, ConstValue, Function, InstKind, RuntimeFn, ValueId};
 
 /// Lowers MemCopy/MemSet into call instructions so call clobbers are modeled.
 pub struct MemOps;
@@ -13,7 +13,7 @@ impl Pass for MemOps {
         "memops"
     }
 
-    fn run(&mut self, func: &mut crate::ir::ir::Function) -> bool {
+    fn run(&mut self, func: &mut Function) -> bool {
         let mut changed = false;
 
         for block in &mut func.blocks {

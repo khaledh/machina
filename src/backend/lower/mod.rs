@@ -23,11 +23,11 @@ mod slots;
 mod types;
 mod util;
 
-use crate::backend::IrTypeCache;
 use crate::backend::lower::drop_glue::DropGlueRegistry;
 use crate::backend::lower::globals::GlobalArena;
 use crate::backend::lower::lowerer::BranchResult;
-use crate::ir::ir::{Function, GlobalData, Terminator};
+use crate::ir::IrTypeCache;
+use crate::ir::{Function, GlobalData, Terminator};
 use crate::resolve::DefTable;
 use crate::tree::semantic as sem;
 use crate::typeck::type_map::TypeMap;
@@ -176,6 +176,7 @@ pub fn lower_module_with_opts(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_func_with_globals(
     func: &sem::FuncDef,
     def_table: &DefTable,
@@ -253,6 +254,7 @@ fn lower_func_with_globals(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_method_def_with_globals(
     method_block: &sem::MethodBlock,
     method_def: &sem::MethodDef,
