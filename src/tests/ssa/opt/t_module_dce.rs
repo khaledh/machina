@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
 use crate::resolve::DefId;
+use crate::ssa::lower::{LoweredFunction, LoweredModule};
 use crate::ssa::model::builder::FunctionBuilder;
-use crate::ssa::model::ir::{Callee, FunctionSig, Terminator};
-use crate::ssa::model::types::{IrTypeCache, IrTypeKind};
-use crate::ssa::opt::module_dce::reachable_def_ids;
+use crate::ssa::model::ir::{Callee, FunctionSig, GlobalData, GlobalId, InstKind, Terminator};
+use crate::ssa::model::types::{IrTypeCache, IrTypeId, IrTypeKind};
+use crate::ssa::opt::module_dce::{prune_globals, reachable_def_ids};
 
 fn unit_sig(types: &mut IrTypeCache) -> (FunctionSig, crate::ssa::IrTypeId) {
     let unit = types.add(IrTypeKind::Unit);
@@ -15,6 +16,14 @@ fn unit_sig(types: &mut IrTypeCache) -> (FunctionSig, crate::ssa::IrTypeId) {
         },
         unit,
     )
+}
+
+fn u8_ptr_ty(types: &mut IrTypeCache) -> IrTypeId {
+    let u8_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    types.add(IrTypeKind::Ptr { elem: u8_ty })
 }
 
 fn finalize_void(builder: &mut FunctionBuilder) {
@@ -84,4 +93,69 @@ fn test_module_dce_keeps_all_without_main() {
     let reachable = reachable_def_ids(&funcs);
     let expected: HashSet<_> = [DefId(0), DefId(1)].into_iter().collect();
     assert_eq!(reachable, expected);
+}
+
+#[test]
+fn test_module_dce_prunes_unused_globals() {
+    let mut types = IrTypeCache::new();
+    let (sig, unit) = unit_sig(&mut types);
+    let ptr_ty = u8_ptr_ty(&mut types);
+
+    let mut main = FunctionBuilder::new(DefId(0), "main", sig);
+    main.const_global_addr(GlobalId(1), ptr_ty);
+    main.call(
+        Callee::Runtime(crate::ssa::model::ir::RuntimeFn::Trap),
+        vec![],
+        unit,
+    );
+    finalize_void(&mut main);
+
+    let func = main.finish();
+    let lowered = LoweredFunction {
+        func,
+        types: types.clone(),
+        globals: vec![
+            GlobalData {
+                id: GlobalId(0),
+                bytes: vec![0],
+                align: 1,
+            },
+            GlobalData {
+                id: GlobalId(1),
+                bytes: vec![1],
+                align: 1,
+            },
+        ],
+    };
+
+    let mut module = LoweredModule {
+        funcs: vec![lowered],
+        globals: vec![
+            GlobalData {
+                id: GlobalId(0),
+                bytes: vec![0],
+                align: 1,
+            },
+            GlobalData {
+                id: GlobalId(1),
+                bytes: vec![1],
+                align: 1,
+            },
+        ],
+    };
+
+    let changed = prune_globals(&mut module);
+    assert!(changed);
+    assert_eq!(module.globals.len(), 1);
+    assert_eq!(module.globals[0].bytes, vec![1]);
+    assert_eq!(module.globals[0].id, GlobalId(0));
+
+    let inst = &module.funcs[0].func.blocks[0].insts[0];
+    let InstKind::Const {
+        value: crate::ssa::model::ir::ConstValue::GlobalAddr { id },
+    } = &inst.kind
+    else {
+        panic!("expected global addr const");
+    };
+    assert_eq!(*id, GlobalId(0));
 }

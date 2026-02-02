@@ -353,10 +353,14 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                 }
             }
 
-            let lowered = ssa::lower::LoweredModule {
+            let mut lowered = ssa::lower::LoweredModule {
                 funcs: optimized_funcs,
                 globals: lowered.globals.clone(),
             };
+
+            if !skip_opt {
+                ssa::opt::module_dce::prune_globals(&mut lowered);
+            }
 
             if opts.verify_ir {
                 ssa::verify::verify_module(&lowered).map_err(|e| vec![e.into()])?;
