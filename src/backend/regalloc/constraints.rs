@@ -120,17 +120,17 @@ pub fn build(
             &mut next_stack,
             moves::ArgStackKind::Incoming,
         );
-        if pass.kind == moves::PassKind::Reg {
-            if let Some(Location::Reg(reg)) = src_locs.first().copied() {
-                let interval = analysis
-                    .intervals
-                    .get(value)
-                    .copied()
-                    .unwrap_or(LiveInterval { start: 0, end: 0 });
-                let crosses_call = interval_crosses_call(interval, &analysis.call_positions);
-                if !(crosses_call && caller_saved.contains(&reg)) {
-                    fixed_regs.insert(*value, reg);
-                }
+        if pass.kind == moves::PassKind::Reg
+            && let Some(Location::Reg(reg)) = src_locs.first().copied()
+        {
+            let interval = analysis
+                .intervals
+                .get(value)
+                .copied()
+                .unwrap_or(LiveInterval { start: 0, end: 0 });
+            let crosses_call = interval_crosses_call(interval, &analysis.call_positions);
+            if !(crosses_call && caller_saved.contains(&reg)) {
+                fixed_regs.insert(*value, reg);
             }
         }
     }
@@ -154,10 +154,10 @@ pub fn build(
             &mut next_stack,
             moves::ArgStackKind::Incoming,
         );
-        if pass.kind == moves::PassKind::Reg {
-            if let Some(Location::IncomingArg(offset)) = src_locs.first().copied() {
-                incoming_args.insert(*value, offset);
-            }
+        if pass.kind == moves::PassKind::Reg
+            && let Some(Location::IncomingArg(offset)) = src_locs.first().copied()
+        {
+            incoming_args.insert(*value, offset);
         }
     }
 

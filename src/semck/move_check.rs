@@ -174,11 +174,9 @@ impl<'a> MoveVisitor<'a> {
                     return;
                 };
                 // Params can only be moved if they're sink params (owned).
-                if matches!(def.kind, DefKind::Param { .. }) {
-                    if !self.sink_params.contains(def_id) {
-                        self.errors.push(SemCheckError::MoveFromParam(expr.span));
-                        return;
-                    }
+                if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(def_id) {
+                    self.errors.push(SemCheckError::MoveFromParam(expr.span));
+                    return;
                 }
                 let ty = self.ctx.type_map.type_table().get(expr.ty);
                 // Only track moves for types that need ownership tracking.

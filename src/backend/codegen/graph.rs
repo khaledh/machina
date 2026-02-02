@@ -239,10 +239,9 @@ impl<'a> CodegenBlockStream<'a> {
                     StreamStage::Pre => {
                         self.stage = StreamStage::Inst;
                         if let Some((pre, _)) = self.schedule.call_moves(self.block.id, inst_index)
+                            && !pre.is_empty()
                         {
-                            if !pre.is_empty() {
-                                return Some(CodegenEmit::PreMoves(pre));
-                            }
+                            return Some(CodegenEmit::PreMoves(pre));
                         }
                     }
                     StreamStage::Inst => {
@@ -253,10 +252,9 @@ impl<'a> CodegenBlockStream<'a> {
                         self.stage = StreamStage::Pre;
                         self.cursor += 1;
                         if let Some((_, post)) = self.schedule.call_moves(self.block.id, inst_index)
+                            && !post.is_empty()
                         {
-                            if !post.is_empty() {
-                                return Some(CodegenEmit::PostMoves(post));
-                            }
+                            return Some(CodegenEmit::PostMoves(post));
                         }
                     }
                 }

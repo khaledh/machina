@@ -52,45 +52,45 @@ impl Pass for ConstFold {
                             }
                         }
                         InstKind::BinOp { op, lhs, rhs } => {
-                            if let Some(result) = &inst.result {
-                                if let Some(value) = fold_binop(*op, *lhs, *rhs, &env) {
-                                    inst.kind = InstKind::Const {
-                                        value: value.clone(),
-                                    };
-                                    env.insert(result, value.clone());
-                                    if update_global_const(&mut consts, result, &value) {
-                                        iter_changed = true;
-                                    }
-                                    changed = true;
+                            if let Some(result) = &inst.result
+                                && let Some(value) = fold_binop(*op, *lhs, *rhs, &env)
+                            {
+                                inst.kind = InstKind::Const {
+                                    value: value.clone(),
+                                };
+                                env.insert(result, value.clone());
+                                if update_global_const(&mut consts, result, &value) {
+                                    iter_changed = true;
                                 }
+                                changed = true;
                             }
                         }
                         InstKind::Cmp { op, lhs, rhs } => {
-                            if let Some(result) = &inst.result {
-                                if let Some(value) = fold_cmp(*op, *lhs, *rhs, &env) {
-                                    inst.kind = InstKind::Const {
-                                        value: value.clone(),
-                                    };
-                                    env.insert(result, value.clone());
-                                    if update_global_const(&mut consts, result, &value) {
-                                        iter_changed = true;
-                                    }
-                                    changed = true;
+                            if let Some(result) = &inst.result
+                                && let Some(value) = fold_cmp(*op, *lhs, *rhs, &env)
+                            {
+                                inst.kind = InstKind::Const {
+                                    value: value.clone(),
+                                };
+                                env.insert(result, value.clone());
+                                if update_global_const(&mut consts, result, &value) {
+                                    iter_changed = true;
                                 }
+                                changed = true;
                             }
                         }
                         InstKind::UnOp { op, value } => {
-                            if let Some(result) = &inst.result {
-                                if let Some(value) = fold_unop(*op, *value, &env) {
-                                    inst.kind = InstKind::Const {
-                                        value: value.clone(),
-                                    };
-                                    env.insert(result, value.clone());
-                                    if update_global_const(&mut consts, result, &value) {
-                                        iter_changed = true;
-                                    }
-                                    changed = true;
+                            if let Some(result) = &inst.result
+                                && let Some(value) = fold_unop(*op, *value, &env)
+                            {
+                                inst.kind = InstKind::Const {
+                                    value: value.clone(),
+                                };
+                                env.insert(result, value.clone());
+                                if update_global_const(&mut consts, result, &value) {
+                                    iter_changed = true;
                                 }
+                                changed = true;
                             }
                         }
                         _ => {}

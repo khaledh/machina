@@ -323,13 +323,13 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
         };
 
         // Treat inout/out/sink params as a write/move of the base.
-        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver) {
-            if matches!(
+        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver)
+            && matches!(
                 receiver_param.mode,
                 ParamMode::InOut | ParamMode::Out | ParamMode::Sink
-            ) {
-                self.check_move_target(receiver, receiver.span);
-            }
+            )
+        {
+            self.check_move_target(receiver, receiver.span);
         }
 
         for (param, arg) in sig.params.iter().zip(args) {

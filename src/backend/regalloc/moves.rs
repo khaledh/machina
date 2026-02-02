@@ -153,8 +153,8 @@ pub fn build_move_plan(
     for block in &func.blocks {
         // Collect call moves for each call instruction
         for (inst_index, inst) in block.insts.iter().enumerate() {
-            if let InstKind::Call { callee, args } = &inst.kind {
-                if let Some(call_move) = plan_call_moves(
+            if let InstKind::Call { callee, args } = &inst.kind
+                && let Some(call_move) = plan_call_moves(
                     block.id,
                     inst_index,
                     callee,
@@ -165,9 +165,9 @@ pub fn build_move_plan(
                     types,
                     target,
                     param_reg_count,
-                ) {
-                    plan.call_moves.push(call_move);
-                }
+                )
+            {
+                plan.call_moves.push(call_move);
             }
         }
 
@@ -799,31 +799,31 @@ fn plan_call_moves(
     }
 
     // For aggregate returns (sret), pass the result address in the indirect result register
-    if let Some(result) = result {
-        if needs_sret(types, result.ty) {
-            let reg = target.indirect_result_reg().unwrap_or_else(|| {
-                panic!("backend regalloc: call sret requires indirect result reg")
-            });
-            let loc = alloc_map
-                .get(&result.id)
-                .copied()
-                .unwrap_or_else(|| panic!("backend regalloc: missing alloc for {:?}", result.id));
-            let src = match loc {
-                Location::Stack(slot) => Location::StackAddr(slot),
-                _ => {
-                    panic!(
-                        "backend regalloc: sret result must be stack-backed, got {:?}",
-                        loc
-                    );
-                }
-            };
-            let size = move_size_for(types, result.ty, src, Location::Reg(reg));
-            pre_moves.push(MoveOp {
-                src,
-                dst: Location::Reg(reg),
-                size,
-            });
-        }
+    if let Some(result) = result
+        && needs_sret(types, result.ty)
+    {
+        let reg = target
+            .indirect_result_reg()
+            .unwrap_or_else(|| panic!("backend regalloc: call sret requires indirect result reg"));
+        let loc = alloc_map
+            .get(&result.id)
+            .copied()
+            .unwrap_or_else(|| panic!("backend regalloc: missing alloc for {:?}", result.id));
+        let src = match loc {
+            Location::Stack(slot) => Location::StackAddr(slot),
+            _ => {
+                panic!(
+                    "backend regalloc: sret result must be stack-backed, got {:?}",
+                    loc
+                );
+            }
+        };
+        let size = move_size_for(types, result.ty, src, Location::Reg(reg));
+        pre_moves.push(MoveOp {
+            src,
+            dst: Location::Reg(reg),
+            size,
+        });
     }
 
     let mut assigner = AbiAssigner::new(target, param_reg_count, ArgStackKind::Outgoing);
@@ -889,46 +889,46 @@ fn plan_call_moves(
     }
 
     // For register-sized returns, move the result from the return register
-    if let Some(result) = result {
-        if !needs_sret(types, result.ty) {
-            let dst_loc = alloc_map
-                .get(&result.id)
-                .copied()
-                .unwrap_or_else(|| panic!("backend regalloc: missing alloc for {:?}", result.id));
-            let pass = arg_pass_info(types, result.ty);
-            if pass.kind == PassKind::Reg {
-                let src = Location::Reg(target.result_reg());
-                if src != dst_loc {
-                    let size = move_size_for(types, result.ty, src, dst_loc);
-                    post_moves.push(MoveOp {
-                        src,
-                        dst: dst_loc,
-                        size,
-                    });
-                }
-            } else {
-                let Location::Stack(slot) = dst_loc else {
-                    panic!(
-                        "backend regalloc: aggregate return must be stack-backed, got {:?}",
-                        dst_loc
-                    );
-                };
-                for_each_agg_chunk(pass.size, |offset, size, idx| {
-                    let src = if idx == 0 {
-                        Location::Reg(target.result_reg())
-                    } else {
-                        let reg1 = target.param_reg(1).unwrap_or_else(|| {
-                            panic!("backend regalloc: aggregate return requires second result reg")
-                        });
-                        Location::Reg(reg1)
-                    };
-                    post_moves.push(MoveOp {
-                        src,
-                        dst: Location::StackOffset(slot, offset),
-                        size,
-                    });
+    if let Some(result) = result
+        && !needs_sret(types, result.ty)
+    {
+        let dst_loc = alloc_map
+            .get(&result.id)
+            .copied()
+            .unwrap_or_else(|| panic!("backend regalloc: missing alloc for {:?}", result.id));
+        let pass = arg_pass_info(types, result.ty);
+        if pass.kind == PassKind::Reg {
+            let src = Location::Reg(target.result_reg());
+            if src != dst_loc {
+                let size = move_size_for(types, result.ty, src, dst_loc);
+                post_moves.push(MoveOp {
+                    src,
+                    dst: dst_loc,
+                    size,
                 });
             }
+        } else {
+            let Location::Stack(slot) = dst_loc else {
+                panic!(
+                    "backend regalloc: aggregate return must be stack-backed, got {:?}",
+                    dst_loc
+                );
+            };
+            for_each_agg_chunk(pass.size, |offset, size, idx| {
+                let src = if idx == 0 {
+                    Location::Reg(target.result_reg())
+                } else {
+                    let reg1 = target.param_reg(1).unwrap_or_else(|| {
+                        panic!("backend regalloc: aggregate return requires second result reg")
+                    });
+                    Location::Reg(reg1)
+                };
+                post_moves.push(MoveOp {
+                    src,
+                    dst: Location::StackOffset(slot, offset),
+                    size,
+                });
+            });
         }
     }
 

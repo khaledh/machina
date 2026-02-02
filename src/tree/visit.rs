@@ -333,13 +333,10 @@ pub fn walk_bind_pattern<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, pattern: &B
 // --- Match Patterns ---
 
 pub fn walk_match_pattern<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, pattern: &MatchPattern<D>) {
-    match pattern {
-        MatchPattern::Tuple { patterns, .. } => {
-            for pattern in patterns {
-                v.visit_match_pattern(pattern);
-            }
+    if let MatchPattern::Tuple { patterns, .. } = pattern {
+        for pattern in patterns {
+            v.visit_match_pattern(pattern);
         }
-        _ => {}
     }
 }
 

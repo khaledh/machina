@@ -19,10 +19,10 @@ impl<'a> Elaborator<'a> {
     /// When inside a closure body, captured variable references are
     /// rewritten to access the `env` parameter's struct fields.
     pub(super) fn elab_place(&mut self, expr: &norm::Expr) -> sem::PlaceExpr {
-        if let norm::ExprKind::Var { def_id, .. } = &expr.kind {
-            if let Some(place) = self.capture_place_for(*def_id, expr.id, expr.span) {
-                return place;
-            }
+        if let norm::ExprKind::Var { def_id, .. } = &expr.kind
+            && let Some(place) = self.capture_place_for(*def_id, expr.id, expr.span)
+        {
+            return place;
         }
         let kind = match &expr.kind {
             norm::ExprKind::Var { ident, def_id } => sem::PlaceExprKind::Var {

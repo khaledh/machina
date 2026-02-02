@@ -56,6 +56,12 @@ pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
 }
 
+impl Default for PassManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PassManager {
     pub fn new() -> Self {
         Self {
@@ -145,10 +151,10 @@ fn remove_empty_blocks(func: &mut Function) -> bool {
             if Some(block.id) == entry {
                 continue;
             }
-            if let Some(target) = empty_br_target(block) {
-                if incoming_args_empty(func, block.id) {
-                    candidates.push((block.id, target));
-                }
+            if let Some(target) = empty_br_target(block)
+                && incoming_args_empty(func, block.id)
+            {
+                candidates.push((block.id, target));
             }
         }
 
@@ -213,11 +219,11 @@ fn merge_single_pred_blocks(func: &mut Function) -> bool {
                 continue;
             }
             let count = *pred_count.get(&block.id).unwrap_or(&0);
-            if count == 1 {
-                if let Some(pred) = br_pred.get(&block.id) {
-                    candidate = Some((*pred, block.id));
-                    break;
-                }
+            if count == 1
+                && let Some(pred) = br_pred.get(&block.id)
+            {
+                candidate = Some((*pred, block.id));
+                break;
             }
         }
 

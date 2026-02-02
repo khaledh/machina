@@ -254,7 +254,7 @@ fn collect_empty_bases(func: &Function) -> HashSet<ValueId> {
             } = &inst.kind
             {
                 if let Some(base) = args
-                    .get(0)
+                    .first()
                     .and_then(|arg| resolve_addr_base_global(func, &defs, *arg))
                 {
                     let state = states.entry(base).or_default();

@@ -99,10 +99,10 @@ pub fn emit_graph_with_emitter(
     }
 
     let value_types = build_value_types(func);
-    if cfg!(debug_assertions) {
-        if let Err(msg) = validate_value_types(func, &value_types) {
-            panic!("backend codegen: {msg}");
-        }
+    if cfg!(debug_assertions)
+        && let Err(msg) = validate_value_types(func, &value_types)
+    {
+        panic!("backend codegen: {msg}");
     }
     let layouts = build_layouts(types, func, &value_types);
     let field_addr_folds = build_field_addr_folds(func, &value_types, &layouts, types);
@@ -115,7 +115,7 @@ pub fn emit_graph_with_emitter(
     let mut callee_saved = callee_saved.to_vec();
     if needs_sret(types, func.sig.ret) {
         let sret_reg = PhysReg(8);
-        if !callee_saved.iter().any(|reg| *reg == sret_reg) {
+        if !callee_saved.contains(&sret_reg) {
             callee_saved.push(sret_reg);
             callee_saved.sort_by_key(|reg| reg.0);
         }
@@ -306,8 +306,8 @@ fn build_field_addr_folds(
 
     let mut folds = HashMap::new();
 
-    for (_block_idx, block) in func.blocks.iter().enumerate() {
-        for (_inst_idx, inst) in block.insts.iter().enumerate() {
+    for block in func.blocks.iter() {
+        for inst in block.insts.iter() {
             let crate::ir::ir::InstKind::FieldAddr { base, index } = &inst.kind else {
                 continue;
             };
@@ -419,10 +419,10 @@ fn build_const_zero_values(func: &Function) -> HashSet<ValueId> {
                 continue;
             };
             if let crate::ir::ir::InstKind::Const { value } = &inst.kind {
-                if let crate::ir::ir::ConstValue::Int { value, .. } = value {
-                    if *value == 0 {
-                        zeros.insert(result.id);
-                    }
+                if let crate::ir::ir::ConstValue::Int { value, .. } = value
+                    && *value == 0
+                {
+                    zeros.insert(result.id);
                 }
                 if let crate::ir::ir::ConstValue::Bool(false) = value {
                     zeros.insert(result.id);

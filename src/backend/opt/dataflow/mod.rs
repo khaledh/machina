@@ -14,6 +14,12 @@ pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
 }
 
+impl Default for PassManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PassManager {
     pub fn new() -> Self {
         Self {

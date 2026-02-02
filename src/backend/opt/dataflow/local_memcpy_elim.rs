@@ -197,10 +197,10 @@ impl Pass for LocalMemCopyElim {
                     pending_comments.extend(inst.comments.iter().cloned());
                 }
             }
-            if !pending_comments.is_empty() {
-                if let Some(last) = new_insts.last_mut() {
-                    last.comments.extend(pending_comments);
-                }
+            if !pending_comments.is_empty()
+                && let Some(last) = new_insts.last_mut()
+            {
+                last.comments.extend(pending_comments);
             }
             block.insts = new_insts;
         }
@@ -246,10 +246,10 @@ fn collect_local_ptrs(func: &Function) -> HashMap<crate::ir::ir::LocalId, Vec<Va
     let mut ptrs: HashMap<crate::ir::ir::LocalId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
         for inst in &block.insts {
-            if let InstKind::AddrOfLocal { local } = inst.kind {
-                if let Some(result) = &inst.result {
-                    ptrs.entry(local).or_default().push(result.id);
-                }
+            if let InstKind::AddrOfLocal { local } = inst.kind
+                && let Some(result) = &inst.result
+            {
+                ptrs.entry(local).or_default().push(result.id);
             }
         }
     }

@@ -78,7 +78,7 @@ impl<'a> DropTracker<'a> {
         match self.scopes.last().copied() {
             Some(top) if top == id => Some(self.pop_scope(id)),
             Some(_) => {
-                if self.scopes.iter().any(|scope_id| *scope_id == id) {
+                if self.scopes.contains(&id) {
                     panic!("backend drop scope mismatch while dropping {:?}", id);
                 }
                 None
@@ -213,10 +213,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     /// Pops and emits a scope if it is active, used by the RAII guard.
     fn exit_drop_scope_if_active(&mut self, id: NodeId) {
-        if let Some(scope_id) = self.drop_tracker.exit_scope_if_active(id) {
-            if let Err(err) = self.emit_drop_scope(scope_id) {
-                panic!("backend drop scope exit failed: {err:?}");
-            }
+        if let Some(scope_id) = self.drop_tracker.exit_scope_if_active(id)
+            && let Err(err) = self.emit_drop_scope(scope_id)
+        {
+            panic!("backend drop scope exit failed: {err:?}");
         }
     }
 

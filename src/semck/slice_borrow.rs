@@ -566,18 +566,16 @@ impl<'a> BorrowConflictVisitor<'a> {
             return;
         };
 
-        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver) {
-            if matches!(
+        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver)
+            && matches!(
                 receiver_param.mode,
                 ParamMode::InOut | ParamMode::Out | ParamMode::Sink
-            ) {
-                if let Some(def) = base_def_id(receiver, self.ctx)
-                    && self.borrowed_bases.contains(&def)
-                {
-                    self.errors
-                        .push(SemCheckError::SliceBorrowConflict(receiver.span));
-                }
-            }
+            )
+            && let Some(def) = base_def_id(receiver, self.ctx)
+            && self.borrowed_bases.contains(&def)
+        {
+            self.errors
+                .push(SemCheckError::SliceBorrowConflict(receiver.span));
         }
 
         for (param, arg) in sig.params.iter().zip(args) {

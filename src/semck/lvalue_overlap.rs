@@ -85,14 +85,14 @@ impl<'a> LvalueOverlapChecker<'a> {
 
         // Extract lvalue paths from arguments (non-lvalues like literals are ignored).
         let mut accesses = Vec::new();
-        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver) {
-            if let Some(path) = self.lvalue_path(receiver) {
-                accesses.push(ArgAccess {
-                    mode: receiver_param.mode.clone(),
-                    path,
-                    span: receiver.span,
-                });
-            }
+        if let (Some(receiver_param), Some(receiver)) = (sig.receiver.as_ref(), receiver)
+            && let Some(path) = self.lvalue_path(receiver)
+        {
+            accesses.push(ArgAccess {
+                mode: receiver_param.mode.clone(),
+                path,
+                span: receiver.span,
+            });
         }
         for (param, arg) in sig.params.iter().zip(args) {
             if let Some(path) = self.lvalue_path(&arg.expr) {
@@ -219,10 +219,10 @@ impl<'a> LvalueOverlapChecker<'a> {
                     }
                 }
                 (Projection::Index(left), Projection::Index(right)) => {
-                    if let (Index::Const(a), Index::Const(b)) = (left, right) {
-                        if a != b {
-                            return false; // Different constant indices are disjoint.
-                        }
+                    if let (Index::Const(a), Index::Const(b)) = (left, right)
+                        && a != b
+                    {
+                        return false; // Different constant indices are disjoint.
                     }
                     // Unknown (or equal) indices may still be disjoint if later projections
                     // diverge on fields, so keep scanning.

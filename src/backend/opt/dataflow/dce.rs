@@ -49,13 +49,13 @@ impl Pass for DeadCodeElim {
             }
 
             kept.reverse();
-            if !pending_comments.is_empty() {
-                if let Some(first) = kept.first_mut() {
-                    let mut combined = Vec::new();
-                    combined.append(&mut pending_comments);
-                    combined.append(&mut first.comments);
-                    first.comments = combined;
-                }
+            if !pending_comments.is_empty()
+                && let Some(first) = kept.first_mut()
+            {
+                let mut combined = Vec::new();
+                combined.append(&mut pending_comments);
+                combined.append(&mut first.comments);
+                first.comments = combined;
             }
             block.insts = kept;
         }

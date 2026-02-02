@@ -74,9 +74,7 @@ impl NrvoAnalyzer {
                 Self::place_var_def_id(place)
             }
 
-            VEK::Block { tail, .. } => tail
-                .as_deref()
-                .and_then(|expr| Self::find_ret_var_def_id(expr)),
+            VEK::Block { tail, .. } => tail.as_deref().and_then(Self::find_ret_var_def_id),
 
             VEK::Match { arms, .. } => {
                 let mut arm_def_id = None;
@@ -298,10 +296,10 @@ impl NrvoSafetyChecker {
     }
 
     fn check_place_value(&self, place: &PlaceExpr, at_return: bool) -> bool {
-        if let PEK::Var { def_id, .. } = &place.kind {
-            if *def_id == self.var_def_id {
-                return at_return;
-            }
+        if let PEK::Var { def_id, .. } = &place.kind
+            && *def_id == self.var_def_id
+        {
+            return at_return;
         }
 
         if self.is_lvalue_use(place) {

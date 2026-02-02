@@ -57,7 +57,7 @@ impl<'a> Parser<'a> {
                         ident: field_name.clone(),
                         def_id: (),
                     },
-                    span: parser.close(field_marker.clone()),
+                    span: parser.close(field_marker),
                 }
             };
 

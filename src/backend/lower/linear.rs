@@ -690,16 +690,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     sem::PlaceExprKind::Var { def_id, .. } => {
                         let dest_ty = self.def_type(*def_id);
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
-                        if let Some(mode) = self.param_mode_for(*def_id) {
-                            if matches!(mode, ParamMode::Out | ParamMode::InOut) {
-                                if !init.is_init && !init.promotes_full {
-                                    self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;
-                                }
-                                let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                                self.assign_local_value(*def_id, value, ty);
-                                self.set_drop_flag_for_def(*def_id, true);
-                                return Ok(StmtOutcome::Continue);
+                        if let Some(mode) = self.param_mode_for(*def_id)
+                            && matches!(mode, ParamMode::Out | ParamMode::InOut)
+                        {
+                            if !init.is_init && !init.promotes_full {
+                                self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;
                             }
+                            let ty = self.type_lowerer.lower_type_id(value_expr.ty);
+                            self.assign_local_value(*def_id, value, ty);
+                            self.set_drop_flag_for_def(*def_id, true);
+                            return Ok(StmtOutcome::Continue);
                         }
                         if !init.is_init && !init.promotes_full {
                             self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;

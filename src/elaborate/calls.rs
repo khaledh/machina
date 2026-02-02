@@ -39,16 +39,13 @@ impl<'a> Elaborator<'a> {
             // Intrinsics override the normal direct-call target with a lowering intent.
             if def.is_intrinsic() {
                 let intrinsic_name = def.link_name().unwrap_or(def.name.as_str());
-                match intrinsic_name {
-                    "len" => {
-                        if matches!(
-                            call_sig.receiver.as_ref().map(|recv| &recv.ty),
-                            Some(Type::String)
-                        ) {
-                            target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen);
-                        }
-                    }
-                    _ => {}
+                if intrinsic_name == "len"
+                    && matches!(
+                        call_sig.receiver.as_ref().map(|recv| &recv.ty),
+                        Some(Type::String)
+                    )
+                {
+                    target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen);
                 }
             } else if def.is_runtime() {
                 let runtime_name = def.link_name().unwrap_or(def.name.as_str());

@@ -35,6 +35,12 @@ pub struct Arm64Emitter {
     block_prefix: String,
 }
 
+impl Default for Arm64Emitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Arm64Emitter {
     pub fn new() -> Self {
         Self {
@@ -87,7 +93,7 @@ impl Arm64Emitter {
         } else {
             (1u128 << bits) - 1
         };
-        let imm = (value as i128 as u128) & mask;
+        let imm = (value as u128) & mask;
 
         if imm == 0 {
             self.emit_line(&format!("mov {}, #0", reg));
@@ -143,7 +149,7 @@ impl Arm64Emitter {
     }
 
     fn emit_stp_sp(&mut self, reg0: PhysReg, reg1: PhysReg, offset: u32) {
-        if offset <= 504 && offset % 8 == 0 {
+        if offset <= 504 && offset.is_multiple_of(8) {
             self.emit_line(&format!(
                 "stp {}, {}, [sp, #{}]",
                 Self::reg_name(reg0),
@@ -162,7 +168,7 @@ impl Arm64Emitter {
     }
 
     fn emit_ldp_sp(&mut self, reg0: PhysReg, reg1: PhysReg, offset: u32) {
-        if offset <= 504 && offset % 8 == 0 {
+        if offset <= 504 && offset.is_multiple_of(8) {
             self.emit_line(&format!(
                 "ldp {}, {}, [sp, #{}]",
                 Self::reg_name(reg0),

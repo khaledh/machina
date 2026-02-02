@@ -241,13 +241,11 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         None
     };
 
-    if dump_ir {
-        if let Some(ir) = formatted_ir.as_ref() {
-            println!("SSA IR:");
-            println!("--------------------------------");
-            println!("{ir}");
-            println!("--------------------------------");
-        }
+    if dump_ir && let Some(ir) = formatted_ir.as_ref() {
+        println!("SSA IR:");
+        println!("--------------------------------");
+        println!("{ir}");
+        println!("--------------------------------");
     }
 
     let ir = if opts.emit_ir { formatted_ir } else { None };

@@ -21,11 +21,8 @@ pub(super) struct ClosureLiveness {
 }
 
 pub(super) fn analyze_closure_liveness(cfg: &TreeCfg<'_, TypeId>) -> ClosureLiveness {
-    let analysis = liveness_util::analyze_liveness(
-        cfg,
-        |term, uses| add_terminator_uses(term, uses),
-        |item, defs, uses| collect_item_defs_uses(item, defs, uses),
-    );
+    let analysis =
+        liveness_util::analyze_liveness(cfg, add_terminator_uses, collect_item_defs_uses);
 
     ClosureLiveness {
         live_out: analysis.live_out,

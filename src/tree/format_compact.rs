@@ -222,7 +222,7 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
         }
         sem::ValueExprKind::Range { start, end } => format!("{start}..{end}"),
         sem::ValueExprKind::Slice { target, start, end } => {
-            let mut out = format!("{}", format_semantic_place_expr_compact(target));
+            let mut out = format_semantic_place_expr_compact(target).to_string();
             out.push('[');
             if let Some(expr) = start {
                 out.push_str(&format_semantic_value_expr_compact(expr));

@@ -435,7 +435,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
 
                 // Validate call-site argument modes and lvalue requirements.
                 if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
-                    self.check_call_arg_modes(&sig, args);
+                    self.check_call_arg_modes(sig, args);
                 }
                 self.visit_expr(callee);
                 for arg in args {
@@ -464,7 +464,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                             ParamMode::Sink => {}
                         }
                     }
-                    self.check_call_arg_modes(&sig, args);
+                    self.check_call_arg_modes(sig, args);
                 }
                 self.visit_expr(callee);
                 for arg in args {

@@ -199,40 +199,38 @@ fn spill_at_interval(
     let mut spill_entry = None;
 
     for (idx, entry) in active.iter().enumerate() {
-        if let Location::Reg(reg) = entry.location {
-            if allowed_regs.map_or(true, |set| set.contains(&reg)) {
-                if spill_entry
-                    .map(|spill: &Active| entry.interval.end > spill.interval.end)
-                    .unwrap_or(true)
-                {
-                    spill_idx = Some(idx);
-                    spill_entry = Some(entry);
-                }
-            }
+        if let Location::Reg(reg) = entry.location
+            && allowed_regs.is_none_or(|set| set.contains(&reg))
+            && spill_entry
+                .map(|spill: &Active| entry.interval.end > spill.interval.end)
+                .unwrap_or(true)
+        {
+            spill_idx = Some(idx);
+            spill_entry = Some(entry);
         }
     }
 
     // If the chosen spill candidate lives longer than the incoming interval,
     // spill it and reuse its register for the incoming value.
-    if let (Some(spill_idx), Some(spill)) = (spill_idx, spill_entry) {
-        if spill.interval.end > interval.end {
-            let spill_slot = alloc_stack_for(spill.value, slot_sizes, allocator);
-            alloc_map.insert(spill.value, Location::Stack(spill_slot));
+    if let (Some(spill_idx), Some(spill)) = (spill_idx, spill_entry)
+        && spill.interval.end > interval.end
+    {
+        let spill_slot = alloc_stack_for(spill.value, slot_sizes, allocator);
+        alloc_map.insert(spill.value, Location::Stack(spill_slot));
 
-            let reg = match spill.location {
-                Location::Reg(reg) => reg,
-                _ => return,
-            };
+        let reg = match spill.location {
+            Location::Reg(reg) => reg,
+            _ => return,
+        };
 
-            active.remove(spill_idx);
-            active.push(Active {
-                value,
-                interval,
-                location: Location::Reg(reg),
-            });
-            alloc_map.insert(value, Location::Reg(reg));
-            return;
-        }
+        active.remove(spill_idx);
+        active.push(Active {
+            value,
+            interval,
+            location: Location::Reg(reg),
+        });
+        alloc_map.insert(value, Location::Reg(reg));
+        return;
     }
 
     // Otherwise spill the incoming value to its own stack slot.
@@ -315,7 +313,7 @@ fn take_free_reg_matching(
 /// Compute how many 8-byte stack slots a value of the given type needs.
 fn stack_slots_for(types: &mut IrTypeCache, ty: crate::backend::IrTypeId) -> u32 {
     let size = types.layout(ty).size();
-    let slots = (size + 7) / 8;
+    let slots = size.div_ceil(8);
     slots.max(1) as u32
 }
 

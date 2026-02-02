@@ -207,7 +207,7 @@ impl Arm64Emitter {
             return;
         }
 
-        let scaled = offset % size == 0 && (offset / size) <= 4095;
+        let scaled = offset.is_multiple_of(size) && (offset / size) <= 4095;
         if scaled {
             match size {
                 1 => {

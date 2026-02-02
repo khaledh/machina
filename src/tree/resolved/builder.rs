@@ -35,7 +35,6 @@ impl<'a> TreeMapper for ResolvedTreeMapper<'a> {
         _payload: &Self::InT,
         _ctx: &mut Self::Context,
     ) -> Self::OutT {
-        ()
     }
 }
 

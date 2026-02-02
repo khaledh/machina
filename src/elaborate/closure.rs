@@ -57,7 +57,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn is_captureless_closure(&self, def_id: DefId) -> bool {
         self.closure_captures
             .get(&def_id)
-            .map_or(true, |captures| captures.is_empty())
+            .is_none_or(|captures| captures.is_empty())
     }
 
     /// Build capture field metadata for all variables captured by a closure.

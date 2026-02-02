@@ -74,10 +74,10 @@ fn collect_safe_addr_of_locals(func: &Function) -> HashSet<ValueId> {
     let mut addr_ptrs = HashSet::new();
     for block in &func.blocks {
         for inst in &block.insts {
-            if let InstKind::AddrOfLocal { .. } = inst.kind {
-                if let Some(result) = &inst.result {
-                    addr_ptrs.insert(result.id);
-                }
+            if let InstKind::AddrOfLocal { .. } = inst.kind
+                && let Some(result) = &inst.result
+            {
+                addr_ptrs.insert(result.id);
             }
         }
     }
@@ -133,10 +133,10 @@ fn collect_safe_addr_of_locals(func: &Function) -> HashSet<ValueId> {
                     }
                 }
                 InstKind::Call { callee, args } => {
-                    if let crate::ir::ir::Callee::Value(value) = callee {
-                        if addr_ptrs.contains(value) {
-                            unsafe_ptrs.insert(*value);
-                        }
+                    if let crate::ir::ir::Callee::Value(value) = callee
+                        && addr_ptrs.contains(value)
+                    {
+                        unsafe_ptrs.insert(*value);
                     }
                     for arg in args {
                         if addr_ptrs.contains(arg) {

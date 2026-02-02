@@ -152,7 +152,7 @@ fn check_func(
         AstBlockId(0),
         entry_state,
         bottom,
-        |states| intersect_states(states),
+        intersect_states,
         |block_id, in_state| {
             let mut checker = DefInitChecker::new(
                 ctx,
@@ -700,11 +700,9 @@ impl<'a> DefInitChecker<'a> {
             return;
         };
 
-        if allow_partial {
-            if let Some(path) = self.init_path_from_lvalue(assignee) {
-                self.mark_partial_init(path, assignee.id);
-                return;
-            }
+        if allow_partial && let Some(path) = self.init_path_from_lvalue(assignee) {
+            self.mark_partial_init(path, assignee.id);
+            return;
         }
 
         // For non-out params we still require a fully-initialized base.

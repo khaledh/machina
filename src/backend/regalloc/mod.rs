@@ -106,12 +106,11 @@ pub fn regalloc(
     // Record callee-saved registers that need prologue/epilogue saves.
     let mut used = Vec::new();
     for loc in result.alloc_map.values() {
-        if let Location::Reg(reg) = loc {
-            if target.callee_saved().iter().any(|saved| *saved == *reg) {
-                if !used.iter().any(|r| r == reg) {
-                    used.push(*reg);
-                }
-            }
+        if let Location::Reg(reg) = loc
+            && target.callee_saved().contains(reg)
+            && !used.iter().any(|r| r == reg)
+        {
+            used.push(*reg);
         }
     }
     used.sort_by_key(|reg| reg.0);

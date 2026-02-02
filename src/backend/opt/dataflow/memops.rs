@@ -23,10 +23,9 @@ impl Pass for MemOps {
             for mut inst in block.insts.drain(..) {
                 if let (Some(result), InstKind::Const { value }) =
                     (inst.result.as_ref(), &inst.kind)
+                    && let ConstValue::Int { value, .. } = value
                 {
-                    if let ConstValue::Int { value, .. } = value {
-                        const_ints.insert(result.id, *value);
-                    }
+                    const_ints.insert(result.id, *value);
                 }
 
                 match inst.kind {

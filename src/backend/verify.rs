@@ -66,14 +66,14 @@ fn verify_function(lowered: &LoweredFunction) -> Result<(), VerifyIrError> {
 
     for block in &func.blocks {
         for inst in &block.insts {
-            if let Some(result) = &inst.result {
-                if value_types.insert(result.id, result.ty).is_some() {
-                    return Err(err(
-                        func.name.as_str(),
-                        Some(block.id),
-                        format!("duplicate value {:?}", result.id),
-                    ));
-                }
+            if let Some(result) = &inst.result
+                && value_types.insert(result.id, result.ty).is_some()
+            {
+                return Err(err(
+                    func.name.as_str(),
+                    Some(block.id),
+                    format!("duplicate value {:?}", result.id),
+                ));
             }
 
             let mut use_error = None;

@@ -176,15 +176,15 @@ impl EdgeMovePlan {
     pub fn move_blocks(&self) -> Vec<MoveBlock> {
         let mut blocks = Vec::new();
         for ((from, to), placement) in &self.placements {
-            if let EdgeMovePlacement::Split { block } = *placement {
-                if let Some(moves) = self.move_blocks.get(&block) {
-                    blocks.push(MoveBlock {
-                        id: block,
-                        from: *from,
-                        to: *to,
-                        moves: moves.clone(),
-                    });
-                }
+            if let EdgeMovePlacement::Split { block } = *placement
+                && let Some(moves) = self.move_blocks.get(&block)
+            {
+                blocks.push(MoveBlock {
+                    id: block,
+                    from: *from,
+                    to: *to,
+                    moves: moves.clone(),
+                });
             }
         }
         blocks

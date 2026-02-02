@@ -89,10 +89,10 @@ pub fn analyze(func: &Function, live_map: &LiveMap) -> IntervalAnalysis {
         }
 
         // Track SSA values that flow into the function return.
-        if let Terminator::Return { value: Some(value) } = block.term {
-            if !return_values.contains(&value) {
-                return_values.push(value);
-            }
+        if let Terminator::Return { value: Some(value) } = block.term
+            && !return_values.contains(&value)
+        {
+            return_values.push(value);
         }
 
         inst_idx += 1; // Terminator slot.
@@ -172,7 +172,7 @@ fn term_uses(term: &Terminator) -> Vec<ValueId> {
             values.extend(default_args.iter().cloned());
             values
         }
-        Terminator::Return { value } => value.into_iter().cloned().collect(),
+        Terminator::Return { value } => value.iter().cloned().collect(),
         Terminator::Unreachable => Vec::new(),
     }
 }

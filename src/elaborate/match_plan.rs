@@ -227,7 +227,10 @@ impl<'a> Elaborator<'a> {
     /// (e.g., for heap-allocated scrutinees).
     fn scrutinee_place(&self, ty: &Type, deref_count: usize) -> sem::MatchPlace {
         let mut projections = Vec::with_capacity(deref_count);
-        projections.extend(std::iter::repeat(sem::MatchProjection::Deref).take(deref_count));
+        projections.extend(std::iter::repeat_n(
+            sem::MatchProjection::Deref,
+            deref_count,
+        ));
         sem::MatchPlace {
             base: sem::MatchBase::Scrutinee,
             projections,
@@ -259,7 +262,10 @@ impl<'a> Elaborator<'a> {
         ty: Type,
     ) -> sem::MatchPlace {
         let mut projections = place.projections.clone();
-        projections.extend(std::iter::repeat(sem::MatchProjection::Deref).take(deref_count));
+        projections.extend(std::iter::repeat_n(
+            sem::MatchProjection::Deref,
+            deref_count,
+        ));
         sem::MatchPlace {
             base: place.base.clone(),
             projections,

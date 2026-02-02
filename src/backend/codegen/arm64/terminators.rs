@@ -122,35 +122,33 @@ impl Arm64Emitter {
                                 panic!("backend codegen: unsupported sret source {:?}", src_loc);
                             }
                         }
-                    } else {
-                        if locs.types.is_reg_type(ty) {
-                            let src = locs.value(*value);
-                            let src = self.load_value_typed(locs, src, ty, "x9");
-                            let size = Self::scalar_size(locs, ty);
-                            if size > 0 && size <= 4 {
-                                let dst = Self::w_reg("x0");
-                                self.emit_line(&format!("mov {}, {}", dst, src));
-                            } else {
-                                self.emit_line(&format!("mov x0, {}", src));
-                            }
+                    } else if locs.types.is_reg_type(ty) {
+                        let src = locs.value(*value);
+                        let src = self.load_value_typed(locs, src, ty, "x9");
+                        let size = Self::scalar_size(locs, ty);
+                        if size > 0 && size <= 4 {
+                            let dst = Self::w_reg("x0");
+                            self.emit_line(&format!("mov {}, {}", dst, src));
                         } else {
-                            let size = locs.layout(ty).size() as u32;
-                            let Location::Stack(slot) = locs.value(*value) else {
-                                panic!(
-                                    "backend codegen: aggregate return must be stack-backed, got {:?}",
-                                    locs.value(*value)
-                                );
-                            };
-                            let base = self.stack_offset(slot);
-                            if size == 0 {
-                                self.emit_line("mov x0, #0");
-                            } else {
-                                let size0 = size.min(8);
-                                self.emit_load_sized("x0", base, size0);
-                                if size > 8 {
-                                    let size1 = size.saturating_sub(8).min(8);
-                                    self.emit_load_sized("x1", base.saturating_add(8), size1);
-                                }
+                            self.emit_line(&format!("mov x0, {}", src));
+                        }
+                    } else {
+                        let size = locs.layout(ty).size() as u32;
+                        let Location::Stack(slot) = locs.value(*value) else {
+                            panic!(
+                                "backend codegen: aggregate return must be stack-backed, got {:?}",
+                                locs.value(*value)
+                            );
+                        };
+                        let base = self.stack_offset(slot);
+                        if size == 0 {
+                            self.emit_line("mov x0, #0");
+                        } else {
+                            let size0 = size.min(8);
+                            self.emit_load_sized("x0", base, size0);
+                            if size > 8 {
+                                let size1 = size.saturating_sub(8).min(8);
+                                self.emit_load_sized("x1", base.saturating_add(8), size1);
                             }
                         }
                     }

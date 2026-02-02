@@ -81,10 +81,10 @@ impl Pass for ByRefCopyElim {
                     pending_comments.extend(inst.comments.iter().cloned());
                 }
             }
-            if !pending_comments.is_empty() {
-                if let Some(last) = new_insts.last_mut() {
-                    last.comments.extend(pending_comments);
-                }
+            if !pending_comments.is_empty()
+                && let Some(last) = new_insts.last_mut()
+            {
+                last.comments.extend(pending_comments);
             }
             block.insts = new_insts;
         }

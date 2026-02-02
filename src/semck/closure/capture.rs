@@ -314,11 +314,8 @@ impl<'a> Visitor<DefId, TypeId> for LocalCollector<'a> {
     }
 
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
-        match pattern {
-            MatchPattern::Binding { def_id, .. } => {
-                self.locals.insert(*def_id);
-            }
-            _ => {}
+        if let MatchPattern::Binding { def_id, .. } = pattern {
+            self.locals.insert(*def_id);
         }
         walk_match_pattern(self, pattern);
         walk_match_pattern_bindings(self, pattern);
@@ -423,13 +420,12 @@ impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         // Assignments are explicit writes that mark a mutable capture.
-        if let StmtExprKind::Assign { assignee, .. } = &stmt.kind {
-            if let Some(def_id) =
+        if let StmtExprKind::Assign { assignee, .. } = &stmt.kind
+            && let Some(def_id) =
                 self.checker
                     .check_write(assignee, self.locals, self.captures, assignee.span)
-            {
-                self.used.insert(def_id);
-            }
+        {
+            self.used.insert(def_id);
         }
         walk_stmt_expr(self, stmt);
     }

@@ -299,19 +299,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             let receiver = receiver_value.unwrap_or_else(|| {
                 panic!("backend call drop mask missing receiver value for call plan");
             });
-            if call_plan.drop_mask[input_index] {
-                if receiver.drop_def.is_none() {
-                    self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
-                }
+            if call_plan.drop_mask[input_index] && receiver.drop_def.is_none() {
+                self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
             }
             input_index += 1;
         }
 
         for arg in arg_values {
-            if call_plan.drop_mask[input_index] {
-                if arg.drop_def.is_none() {
-                    self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
-                }
+            if call_plan.drop_mask[input_index] && arg.drop_def.is_none() {
+                self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
             }
             input_index += 1;
         }

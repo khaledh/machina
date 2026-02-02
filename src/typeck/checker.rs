@@ -1381,12 +1381,10 @@ impl TypeChecker {
         let (def_id, param_types, param_modes, ret_type) = match resolved {
             Ok(resolved) => resolved,
             Err(err) => {
-                if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _)) {
-                    if let Some(param_types) = fallback_param_types {
-                        if let Err(err) = self.check_call_arg_types(args, &param_types) {
-                            return Err(err);
-                        }
-                    }
+                if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _))
+                    && let Some(param_types) = fallback_param_types
+                {
+                    self.check_call_arg_types(args, &param_types)?
                 }
                 return Err(err);
             }

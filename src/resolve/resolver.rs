@@ -244,11 +244,9 @@ impl SymbolResolver {
             name: name.to_string(),
             kind: Self::map_symbol_kind_to_def_kind(&kind),
         };
-        if intrinsic {
-            if let DefKind::TypeDef { attrs } = &mut def.kind {
-                attrs.intrinsic = true;
-                self.intrinsic_type_defs.insert(def_id);
-            }
+        if intrinsic && let DefKind::TypeDef { attrs } = &mut def.kind {
+            attrs.intrinsic = true;
+            self.intrinsic_type_defs.insert(def_id);
         }
         self.def_table_builder.record_def(def, NodeId(0));
         self.insert_symbol(

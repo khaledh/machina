@@ -98,10 +98,9 @@ fn collect_types_and_zeros(func: &Function) -> (HashMap<ValueId, IrTypeId>, Hash
             if let InstKind::Const {
                 value: ConstValue::Int { value: 0, .. },
             } = &inst.kind
+                && let Some(result) = &inst.result
             {
-                if let Some(result) = &inst.result {
-                    zeros.insert(result.id);
-                }
+                zeros.insert(result.id);
             }
         }
     }

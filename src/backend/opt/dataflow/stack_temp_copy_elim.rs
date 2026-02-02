@@ -72,22 +72,20 @@ impl Pass for StackTempCopyElim {
                 // original pointer directly and drop the temp store.
                 if let Some((load_block, load_idx, load_ptr)) =
                     load_source_of_value(stored_val, func, &def_inst)
+                    && load_block == block_idx
+                    && load_idx < store_idx
+                    && store_idx < inst_idx
+                    && !has_uses_between(load_ptr, block_idx, load_idx, inst_idx, &uses)
                 {
-                    if load_block == block_idx
-                        && load_idx < store_idx
-                        && store_idx < inst_idx
-                        && !has_uses_between(load_ptr, block_idx, load_idx, inst_idx, &uses)
-                    {
-                        direct_memcpy.push((
-                            block_idx,
-                            inst_idx,
-                            *src,
-                            load_ptr,
-                            store_block,
-                            store_idx,
-                        ));
-                        continue;
-                    }
+                    direct_memcpy.push((
+                        block_idx,
+                        inst_idx,
+                        *src,
+                        load_ptr,
+                        store_block,
+                        store_idx,
+                    ));
+                    continue;
                 }
 
                 // Fall back to the existing elimination strategy: if both dst/src are stable
@@ -147,17 +145,17 @@ impl Pass for StackTempCopyElim {
         }
 
         for (block_idx, block) in func.blocks.iter_mut().enumerate() {
-            if !remove.iter().any(|(b, _)| *b == block_idx) {
-                if !rewrite.keys().any(|(b, _)| *b == block_idx) {
-                    continue;
-                }
+            if !remove.iter().any(|(b, _)| *b == block_idx)
+                && !rewrite.keys().any(|(b, _)| *b == block_idx)
+            {
+                continue;
             }
             // Apply in-place rewrites for memcpy sources.
             for (inst_idx, inst) in block.insts.iter_mut().enumerate() {
-                if let Some(new_src) = rewrite.get(&(block_idx, inst_idx)) {
-                    if let InstKind::MemCopy { src, .. } = &mut inst.kind {
-                        *src = *new_src;
-                    }
+                if let Some(new_src) = rewrite.get(&(block_idx, inst_idx))
+                    && let InstKind::MemCopy { src, .. } = &mut inst.kind
+                {
+                    *src = *new_src;
                 }
             }
             if !remove.iter().any(|(b, _)| *b == block_idx) {
@@ -180,10 +178,10 @@ impl Pass for StackTempCopyElim {
                     pending_comments.extend(inst.comments.iter().cloned());
                 }
             }
-            if !pending_comments.is_empty() {
-                if let Some(last) = new_insts.last_mut() {
-                    last.comments.extend(pending_comments);
-                }
+            if !pending_comments.is_empty()
+                && let Some(last) = new_insts.last_mut()
+            {
+                last.comments.extend(pending_comments);
             }
             block.insts = new_insts;
         }
@@ -220,10 +218,10 @@ fn collect_local_ptrs(func: &Function) -> HashMap<crate::ir::ir::LocalId, Vec<Va
     let mut ptrs: HashMap<crate::ir::ir::LocalId, Vec<ValueId>> = HashMap::new();
     for block in &func.blocks {
         for inst in &block.insts {
-            if let InstKind::AddrOfLocal { local } = inst.kind {
-                if let Some(result) = &inst.result {
-                    ptrs.entry(local).or_default().push(result.id);
-                }
+            if let InstKind::AddrOfLocal { local } = inst.kind
+                && let Some(result) = &inst.result
+            {
+                ptrs.entry(local).or_default().push(result.id);
             }
         }
     }

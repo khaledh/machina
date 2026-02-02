@@ -56,32 +56,16 @@ pub enum DefKind {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeAttrs {
     pub intrinsic: bool,
 }
 
-impl Default for TypeAttrs {
-    fn default() -> Self {
-        Self { intrinsic: false }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FuncAttrs {
     pub intrinsic: bool,
     pub runtime: bool,
     pub link_name: Option<String>,
-}
-
-impl Default for FuncAttrs {
-    fn default() -> Self {
-        Self {
-            intrinsic: false,
-            runtime: false,
-            link_name: None,
-        }
-    }
 }
 
 impl fmt::Display for DefKind {

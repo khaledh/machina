@@ -121,19 +121,18 @@ fn remap_globals_in_func(func: &mut Function, remap: &HashMap<GlobalId, GlobalId
             if let InstKind::Const {
                 value: ConstValue::GlobalAddr { id },
             } = &mut inst.kind
+                && let Some(new_id) = remap.get(id)
             {
-                if let Some(new_id) = remap.get(id) {
-                    *id = *new_id;
-                }
+                *id = *new_id;
             }
         }
 
         if let Terminator::Switch { cases, .. } = &mut block.term {
             for case in cases {
-                if let ConstValue::GlobalAddr { id } = &mut case.value {
-                    if let Some(new_id) = remap.get(id) {
-                        *id = *new_id;
-                    }
+                if let ConstValue::GlobalAddr { id } = &mut case.value
+                    && let Some(new_id) = remap.get(id)
+                {
+                    *id = *new_id;
                 }
             }
         }
