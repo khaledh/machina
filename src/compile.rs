@@ -353,7 +353,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
                 ssa::verify::verify_module(&lowered).map_err(|e| vec![e.into()])?;
             }
 
-            let ir = if opts.emit_ir {
+            let formatted_ir = if opts.emit_ir || dump_ir {
                 let mut out = String::new();
                 out.push_str(&format_ssa_globals(&lowered.globals));
                 for (idx, func) in lowered.funcs.iter().enumerate() {
@@ -370,6 +370,17 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             } else {
                 None
             };
+
+            if dump_ir {
+                if let Some(ir) = formatted_ir.as_ref() {
+                    println!("SSA IR:");
+                    println!("--------------------------------");
+                    println!("{ir}");
+                    println!("--------------------------------");
+                }
+            }
+
+            let ir = if opts.emit_ir { formatted_ir } else { None };
 
             let asm = ssa::codegen::emit_module_arm64(
                 &lowered,
