@@ -176,7 +176,7 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
             }
             StmtExprKind::For { body, .. } => {
                 // For now, treat like while over an iterator expression.
-                // We can refine to model iter uses or desugaring later.
+                // We can refine to ir iter uses or desugaring later.
                 let cond_bb = self.new_block();
                 let exit_bb = self.new_block();
                 let loop_ctx = LoopContext {

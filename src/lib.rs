@@ -1,15 +1,16 @@
 pub mod analysis;
+pub mod backend;
 pub mod compile;
 pub mod context;
 pub mod diag;
 pub mod elaborate;
+pub mod ir;
 pub mod lexer;
 pub mod normalize;
 pub mod nrvo;
 pub mod parse;
 pub mod resolve;
 pub mod semck;
-pub mod ssa;
 pub mod symtab;
 pub mod tree;
 pub mod typeck;

@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
+use crate::backend::lower::LowerToIrError as SsaLoweringError;
+use crate::backend::verify::VerifyIrError as SsaVerifyError;
 use crate::lexer::LexError;
 use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 use crate::semck::SemCheckError;
-use crate::ssa::lower::LowerToIrError as SsaLoweringError;
-use crate::ssa::verify::VerifyIrError as SsaVerifyError;
 use crate::typeck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;

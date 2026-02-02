@@ -1,11 +1,11 @@
-//! Resolved tree model: resolved nodes with DefIds where available.
+//! Resolved tree ir: resolved nodes with DefIds where available.
 
 use crate::resolve::DefId;
 use crate::tree::model;
 
 pub use crate::tree::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
 
-// -- Resolved tree aliases (parsed model specialized with DefId) ---
+// -- Resolved tree aliases (parsed ir specialized with DefId) ---
 
 pub type Module = model::Module<DefId>;
 

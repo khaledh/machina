@@ -1,4 +1,4 @@
-//! Generic parsed tree model: parameterized over def/type IDs.
+//! Generic parsed tree ir: parameterized over def/type IDs.
 
 use crate::diag::Span;
 use crate::tree::NodeId;

@@ -1,4 +1,4 @@
-//! Typed tree model: nodes with DefIds and TypeIds.
+//! Typed tree ir: nodes with DefIds and TypeIds.
 
 use crate::resolve::DefId;
 use crate::tree as model;
@@ -6,7 +6,7 @@ use crate::types::TypeId;
 
 pub use crate::tree::{BinaryOp, CallArgMode, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
 
-// -- Typed tree aliases (parsed model specialized with DefId + TypeId) ---
+// -- Typed tree aliases (parsed ir specialized with DefId + TypeId) ---
 
 pub type Module = model::Module<DefId, TypeId>;
 

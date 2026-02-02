@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::backend;
+use crate::backend::regalloc::arm64::Arm64Target;
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
 use crate::elaborate;
@@ -9,8 +11,6 @@ use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
-use crate::ssa;
-use crate::ssa::regalloc::arm64::Arm64Target;
 use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
 use crate::typeck::type_check;
@@ -171,7 +171,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let target = Arm64Target::new();
 
     // --- Lower to SSA IR ---
-    let lowered = ssa::lower::lower_module_with_opts(
+    let lowered = backend::lower::lower_module_with_opts(
         &analyzed_context.module,
         &analyzed_context.def_table,
         &analyzed_context.type_map,
@@ -188,9 +188,9 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let reachable = if skip_opt {
         None
     } else {
-        let mut pipeline = ssa::opt::Pipeline::new();
+        let mut pipeline = backend::opt::Pipeline::new();
         pipeline.run(&mut funcs);
-        Some(ssa::opt::module_dce::reachable_def_ids(&funcs))
+        Some(backend::opt::module_dce::reachable_def_ids(&funcs))
     };
 
     let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
@@ -202,7 +202,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         if should_keep {
             let types = lowered_func.types.clone();
             let globals = lowered_func.globals.clone();
-            optimized_funcs.push(ssa::lower::LoweredFunction {
+            optimized_funcs.push(backend::lower::LoweredFunction {
                 func,
                 types,
                 globals,
@@ -210,17 +210,17 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
         }
     }
 
-    let mut lowered = ssa::lower::LoweredModule {
+    let mut lowered = backend::lower::LoweredModule {
         funcs: optimized_funcs,
         globals: lowered.globals.clone(),
     };
 
     if !skip_opt {
-        ssa::opt::module_dce::prune_globals(&mut lowered);
+        backend::opt::module_dce::prune_globals(&mut lowered);
     }
 
     if opts.verify_ir {
-        ssa::verify::verify_module(&lowered).map_err(|e| vec![e.into()])?;
+        backend::verify::verify_module(&lowered).map_err(|e| vec![e.into()])?;
     }
 
     let formatted_ir = if opts.emit_ir || dump_ir {
@@ -230,7 +230,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             if idx > 0 {
                 out.push('\n');
             }
-            out.push_str(&ssa::model::format::format_func_with_comments_and_names(
+            out.push_str(&crate::ir::format::format_func_with_comments_and_names(
                 &func.func,
                 &func.types,
                 &analyzed_context.symbols.def_names,
@@ -253,7 +253,7 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
     let ir = if opts.emit_ir { formatted_ir } else { None };
 
     let asm =
-        ssa::codegen::emit_module_arm64(&lowered, &analyzed_context.symbols.def_names, &target);
+        backend::codegen::emit_module_arm64(&lowered, &analyzed_context.symbols.def_names, &target);
 
     if dump_asm {
         println!("ASM:");
@@ -287,7 +287,7 @@ fn parse_with_id_gen(
 }
 
 // --- Formatting ---
-fn format_ssa_globals(globals: &[ssa::model::ir::GlobalData]) -> String {
+fn format_ssa_globals(globals: &[crate::ir::ir::GlobalData]) -> String {
     let mut out = String::new();
     for global in globals {
         if let Some(text) = format_bytes_as_string(&global.bytes) {

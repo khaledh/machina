@@ -1,4 +1,4 @@
-//! Normalized tree model: nodes with DefIds and TypeIds.
+//! Normalized tree ir: nodes with DefIds and TypeIds.
 
 use crate::resolve::DefId;
 use crate::tree as model;
@@ -6,7 +6,7 @@ use crate::types::TypeId;
 
 pub use crate::tree::{BinaryOp, CallArgMode, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
 
-// -- Normalized tree aliases (parsed model specialized with DefId + TypeId) ---
+// -- Normalized tree aliases (parsed ir specialized with DefId + TypeId) ---
 
 pub type Module = model::Module<DefId, TypeId>;
 pub type TopLevelItem = model::TopLevelItem<DefId, TypeId>;
