@@ -1,4 +1,9 @@
 use super::lower_and_optimize;
+use crate::resolve::DefId;
+use crate::ssa::model::builder::FunctionBuilder;
+use crate::ssa::model::format::format_func;
+use crate::ssa::model::ir::{FunctionSig, Terminator};
+use crate::ssa::{IrTypeCache, IrTypeKind};
 use indoc::indoc;
 
 #[test]
@@ -53,4 +58,81 @@ fn test_memops_lowers_memset() {
     "});
 
     assert!(text.contains("__rt_memset"));
+}
+
+#[test]
+fn test_memops_elides_zero_len_memcpy() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u8_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let ptr_u8_ty = types.add(IrTypeKind::Ptr { elem: u8_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "main",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let a = builder.add_local(u8_ty, None);
+    let b = builder.add_local(u8_ty, None);
+    let ptr_a = builder.addr_of_local(a, ptr_u8_ty);
+    let ptr_b = builder.addr_of_local(b, ptr_u8_ty);
+    let len = builder.const_int(0, false, 64, u64_ty);
+    builder.memcopy(ptr_a, ptr_b, len);
+    builder.terminate(Terminator::Return { value: None });
+
+    let mut func = builder.finish();
+    let mut manager = crate::ssa::opt::dataflow::PassManager::new();
+    manager.run(std::slice::from_mut(&mut func));
+    let text = format_func(&func, &types);
+
+    assert!(!text.contains("__rt_memcpy"));
+}
+
+#[test]
+fn test_memops_elides_zero_len_memset() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let u8_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let ptr_u8_ty = types.add(IrTypeKind::Ptr { elem: u8_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "main",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let a = builder.add_local(u8_ty, None);
+    let ptr_a = builder.addr_of_local(a, ptr_u8_ty);
+    let len = builder.const_int(0, false, 64, u64_ty);
+    let byte = builder.const_int(0, false, 8, u8_ty);
+    builder.memset(ptr_a, byte, len);
+    builder.terminate(Terminator::Return { value: None });
+
+    let mut func = builder.finish();
+    let mut manager = crate::ssa::opt::dataflow::PassManager::new();
+    manager.run(std::slice::from_mut(&mut func));
+    let text = format_func(&func, &types);
+
+    assert!(!text.contains("__rt_memset"));
 }
