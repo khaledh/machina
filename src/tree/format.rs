@@ -262,6 +262,13 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
             model::TypeExprKind::Named { ident, .. } => {
                 write!(f, "Named({})", ident)?;
             }
+            model::TypeExprKind::BoundedInt {
+                base_ty_expr,
+                min,
+                max,
+            } => {
+                write!(f, "BoundedInt({}, {}, {})", base_ty_expr, min, max)?;
+            }
             model::TypeExprKind::Array { elem_ty_expr, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;
@@ -272,9 +279,6 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
                     .map(|t| t.to_string())
                     .collect::<Vec<_>>();
                 write!(f, "Tuple([{}])", field_ty_exprs_str.join(", "))?;
-            }
-            model::TypeExprKind::Range { min, max } => {
-                write!(f, "Range({}, {})", min, max)?;
             }
             model::TypeExprKind::Slice { elem_ty_expr } => {
                 write!(f, "Slice({})", elem_ty_expr)?;

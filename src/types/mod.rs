@@ -22,9 +22,13 @@ pub enum Type {
     },
     Bool,
     Char,
+    BoundedInt {
+        base: Box<Type>,
+        min: u64,
+        max: u64,
+    },
     Range {
-        min: Option<u64>,
-        max: Option<u64>,
+        elem_ty: Box<Type>,
     },
     Fn {
         params: Vec<FnParam>,
@@ -92,15 +96,18 @@ impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                Type::Range {
+                Type::BoundedInt {
+                    base: lbase,
                     min: lmin,
                     max: lmax,
                 },
-                Type::Range {
+                Type::BoundedInt {
+                    base: rbase,
                     min: rmin,
                     max: rmax,
                 },
-            ) => lmin == rmin && lmax == rmax,
+            ) => lbase == rbase && lmin == rmin && lmax == rmax,
+            (Type::Range { elem_ty: l_elem }, Type::Range { elem_ty: r_elem }) => l_elem == r_elem,
             (
                 Type::Fn {
                     params: p1,
@@ -176,8 +183,9 @@ impl Hash for Type {
             Type::Char => {
                 4u8.hash(state);
             }
-            Type::Range { min, max } => {
+            Type::BoundedInt { base, min, max } => {
                 5u8.hash(state);
+                base.hash(state);
                 min.hash(state);
                 max.hash(state);
             }
@@ -186,38 +194,42 @@ impl Hash for Type {
                 params.hash(state);
                 ret_ty.hash(state);
             }
-            Type::String => {
+            Type::Range { elem_ty } => {
                 7u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::String => {
+                8u8.hash(state);
             }
             Type::Array { elem_ty, dims } => {
-                8u8.hash(state);
+                9u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
             }
             Type::Tuple { field_tys } => {
-                9u8.hash(state);
+                10u8.hash(state);
                 field_tys.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
-                10u8.hash(state);
+                11u8.hash(state);
                 name.hash(state);
             }
             Type::Enum { name, .. } => {
                 // Nominal type: only hash the name
-                11u8.hash(state);
+                12u8.hash(state);
                 name.hash(state);
             }
             Type::Slice { elem_ty } => {
-                12u8.hash(state);
-                elem_ty.hash(state);
-            }
-            Type::Heap { elem_ty } => {
                 13u8.hash(state);
                 elem_ty.hash(state);
             }
-            Type::Ref { mutable, elem_ty } => {
+            Type::Heap { elem_ty } => {
                 14u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::Ref { mutable, elem_ty } => {
+                15u8.hash(state);
                 mutable.hash(state);
                 elem_ty.hash(state);
             }
@@ -294,12 +306,13 @@ impl Type {
     }
 
     pub fn is_int(&self) -> bool {
-        matches!(self, Type::Int { .. })
+        matches!(self, Type::Int { .. } | Type::BoundedInt { .. })
     }
 
     pub fn int_signed_bits(&self) -> Option<(bool, u8)> {
         match self {
             Type::Int { signed, bits } => Some((*signed, *bits)),
+            Type::BoundedInt { base, .. } => base.int_signed_bits(),
             _ => None,
         }
     }
@@ -310,7 +323,8 @@ impl Type {
             Type::Int { bits, .. } => (*bits as usize) / 8,
             Type::Bool => 1,
             Type::Char => 4,
-            Type::Range { .. } => 8,
+            Type::BoundedInt { base, .. } => base.size_of(),
+            Type::Range { elem_ty } => elem_ty.size_of(),
             Type::Fn { .. } => 8,
             Type::String => 16,
             Type::Array { elem_ty, dims } => {
@@ -345,7 +359,8 @@ impl Type {
             Type::Int { bits, .. } => (*bits as usize) / 8,
             Type::Bool => 1,
             Type::Char => 4,
-            Type::Range { .. } => 8,
+            Type::BoundedInt { base, .. } => base.align_of(),
+            Type::Range { elem_ty } => elem_ty.align_of(),
             Type::Fn { .. } => 8,
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),

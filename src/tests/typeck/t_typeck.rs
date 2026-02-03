@@ -995,7 +995,7 @@ fn test_range_non_literal_assignment() {
     let source = r#"
         fn test() -> u64 {
             let y = 5;
-            let x: range(100) = y;  // allowed at compile-time; checked at runtime
+            let x: u64: bounds(100) = y;  // allowed at compile-time; checked at runtime
             0
         }
     "#;

@@ -46,14 +46,13 @@ impl<'a> Elaborator<'a> {
             Type::Bool => self.named_type_expr("bool", span),
             Type::Char => self.named_type_expr("char", span),
             Type::String => self.named_type_expr("string", span),
-            Type::Range { min, max } => {
-                let (Some(min), Some(max)) = (min, max) else {
-                    panic!("compiler bug: unbounded range type in type expression");
-                };
-                sem::TypeExprKind::Range {
-                    min: *min,
-                    max: *max,
-                }
+            Type::BoundedInt { base, min, max } => sem::TypeExprKind::BoundedInt {
+                base_ty_expr: Box::new(self.type_expr_from_type(base, span)),
+                min: *min,
+                max: *max,
+            },
+            Type::Range { .. } => {
+                panic!("compiler bug: range value type not representable in type expressions");
             }
             Type::Array { elem_ty, dims } => sem::TypeExprKind::Array {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),

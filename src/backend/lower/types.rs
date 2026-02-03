@@ -72,7 +72,8 @@ impl<'a> TypeLowerer<'a> {
                 signed: false,
                 bits: 32,
             }),
-            Type::Range { .. } => self.lower_type(&Type::uint(64)),
+            Type::BoundedInt { base, .. } => self.lower_type(base),
+            Type::Range { elem_ty } => self.lower_type(elem_ty),
             Type::Fn { params, ret_ty } => {
                 let params = params
                     .iter()
@@ -252,6 +253,13 @@ impl<'a> TypeLowerer<'a> {
     pub(super) fn int_info(&self, ty_id: TypeId) -> (bool, u8) {
         match self.type_map.type_table().get(ty_id) {
             Type::Int { signed, bits } => (*signed, *bits),
+            Type::BoundedInt { base, .. } => match base.as_ref() {
+                Type::Int { signed, bits } => (*signed, *bits),
+                other => panic!(
+                    "backend type lowering: expected bounded int base, found {:?}",
+                    other
+                ),
+            },
             other => panic!(
                 "backend type lowering: expected int type, found {:?}",
                 other

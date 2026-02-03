@@ -13,10 +13,10 @@ impl fmt::Display for Type {
             }
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
-            Type::Range { min, max } => match (min, max) {
-                (Some(min), Some(max)) => write!(f, "range({}, {})", min, max),
-                _ => write!(f, "range"),
-            },
+            Type::BoundedInt { base, min, max } => {
+                write!(f, "{}: bounds({}, {})", base, min, max)
+            }
+            Type::Range { elem_ty } => write!(f, "range<{}>", elem_ty),
             Type::Fn { params, ret_ty } => {
                 let params_str = params
                     .iter()

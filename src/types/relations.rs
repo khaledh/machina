@@ -20,9 +20,9 @@ use crate::types::Type;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeAssignability {
     Exact,
-    UInt64ToRange { min: u64, max: u64 },
+    UInt64ToBounded { min: u64, max: u64 },
     IntLitToInt { signed: bool, bits: u8 },
-    RangeToUInt64,
+    BoundedToUInt64,
     Incompatible,
 }
 
@@ -36,6 +36,7 @@ pub enum ValueAssignability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
     Int,
+    BoundedInt,
     Range,
     String,
     Other,
@@ -84,8 +85,8 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
     let assignability = type_assignable(from_ty, to_ty);
     match assignability {
         TypeAssignability::Exact
-        | TypeAssignability::RangeToUInt64
-        | TypeAssignability::UInt64ToRange { .. }
+        | TypeAssignability::BoundedToUInt64
+        | TypeAssignability::UInt64ToBounded { .. }
         | TypeAssignability::IntLitToInt { .. } => ValueAssignability::Assignable(assignability),
         TypeAssignability::Incompatible => ValueAssignability::Incompatible,
     }
@@ -101,6 +102,7 @@ pub fn array_to_slice_assignable(from: &Type, to: &Type) -> bool {
 fn type_tag(ty: &Type) -> TypeTag {
     match ty {
         Type::Int { .. } => TypeTag::Int,
+        Type::BoundedInt { .. } => TypeTag::BoundedInt,
         Type::Range { .. } => TypeTag::Range,
         Type::String => TypeTag::String,
         _ => TypeTag::Other,
@@ -110,27 +112,27 @@ fn type_tag(ty: &Type) -> TypeTag {
 // --- Type Rules ---
 
 const INT_TYPE_RULES: &[TypeRule] = &[TypeRule {
-    target: TypeTag::Range,
-    apply: u64_to_range,
+    target: TypeTag::BoundedInt,
+    apply: u64_to_bounded,
 }];
 
-const RANGE_TYPE_RULES: &[TypeRule] = &[TypeRule {
+const BOUNDED_TYPE_RULES: &[TypeRule] = &[TypeRule {
     target: TypeTag::Int,
-    apply: range_to_u64,
+    apply: bounded_to_u64,
 }];
 
 fn type_rules_for(tag: TypeTag) -> &'static [TypeRule] {
     match tag {
         TypeTag::Int => INT_TYPE_RULES,
-        TypeTag::Range => RANGE_TYPE_RULES,
+        TypeTag::BoundedInt => BOUNDED_TYPE_RULES,
         _ => &[],
     }
 }
 
-fn u64_to_range(from: &Type, to: &Type) -> Option<TypeAssignability> {
-    if !matches!(to, Type::Range { .. }) {
+fn u64_to_bounded(from: &Type, to: &Type) -> Option<TypeAssignability> {
+    let Type::BoundedInt { base, min, max } = to else {
         return None;
-    }
+    };
     let Type::Int {
         signed: false,
         bits: 64,
@@ -138,17 +140,28 @@ fn u64_to_range(from: &Type, to: &Type) -> Option<TypeAssignability> {
     else {
         return None;
     };
-    let Type::Range { min: Some(min), max: Some(max) } = to else {
+    let Type::Int {
+        signed: false,
+        bits: 64,
+    } = **base
+    else {
         return None;
     };
-    Some(TypeAssignability::UInt64ToRange {
+    Some(TypeAssignability::UInt64ToBounded {
         min: *min,
         max: *max,
     })
 }
 
-fn range_to_u64(from: &Type, to: &Type) -> Option<TypeAssignability> {
-    let Type::Range { min: Some(_), max: Some(_) } = from else {
+fn bounded_to_u64(from: &Type, to: &Type) -> Option<TypeAssignability> {
+    let Type::BoundedInt { base, .. } = from else {
+        return None;
+    };
+    let Type::Int {
+        signed: false,
+        bits: 64,
+    } = **base
+    else {
         return None;
     };
     matches!(
@@ -158,7 +171,7 @@ fn range_to_u64(from: &Type, to: &Type) -> Option<TypeAssignability> {
             bits: 64
         }
     )
-    .then_some(TypeAssignability::RangeToUInt64)
+    .then_some(TypeAssignability::BoundedToUInt64)
 }
 
 // --- Value Rules ---
@@ -167,8 +180,8 @@ fn range_to_u64(from: &Type, to: &Type) -> Option<TypeAssignability> {
 // when the value fits (no non-literal narrowing).
 const INT_LIT_VALUE_RULES: &[ValueRule] = &[
     ValueRule {
-        target: TypeTag::Range,
-        apply: value_u64_to_range,
+        target: TypeTag::BoundedInt,
+        apply: value_u64_to_bounded,
     },
     ValueRule {
         target: TypeTag::Int,
@@ -183,7 +196,7 @@ fn value_rules_for(tag: TypeTag) -> &'static [ValueRule] {
     }
 }
 
-fn value_u64_to_range(
+fn value_u64_to_bounded(
     from_value: &Expr,
     from_ty: &Type,
     to_ty: &Type,
@@ -197,10 +210,14 @@ fn value_u64_to_range(
     ) {
         return None;
     }
-    let Type::Range { min, max } = to_ty else {
+    let Type::BoundedInt { base, min, max } = to_ty else {
         return None;
     };
-    let (Some(min), Some(max)) = (min, max) else {
+    let Type::Int {
+        signed: false,
+        bits: 64,
+    } = **base
+    else {
         return None;
     };
     if let Some(value) = int_lit_value(from_value)
@@ -213,7 +230,7 @@ fn value_u64_to_range(
         });
     }
     Some(ValueAssignability::Assignable(
-        TypeAssignability::UInt64ToRange {
+        TypeAssignability::UInt64ToBounded {
             min: *min,
             max: *max,
         },

@@ -157,6 +157,9 @@ pub enum TypeCheckErrorKind {
     #[error("Invalid range bounds: {0} >= {1}")]
     InvalidRangeBounds(u64, u64, Span),
 
+    #[error("Bounds base type must be u64, found {0}")]
+    BoundsBaseNotU64(Type, Span),
+
     #[error("Value out of range: {0} not in range [{1},{2})")]
     ValueOutOfRange(i128, i128, i128, Span),
 
@@ -245,6 +248,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::DuplicateMatchVariant(_, span) => *span,
             TypeCheckErrorKind::StringIndexAssign(span) => *span,
             TypeCheckErrorKind::InvalidRangeBounds(_, _, span) => *span,
+            TypeCheckErrorKind::BoundsBaseNotU64(_, span) => *span,
             TypeCheckErrorKind::ValueOutOfRange(_, _, _, span) => *span,
             TypeCheckErrorKind::ForIterNotIterable(_, span) => *span,
             TypeCheckErrorKind::DivisionByZero(span) => *span,

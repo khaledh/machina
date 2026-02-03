@@ -55,7 +55,7 @@ fn test_range_check_traps_with_message_and_exit_code() {
     let run = run_program(
         "range_check",
         r#"
-            type MidRange = range(50, 100);
+            type MidRange = u64: bounds(50, 100);
 
             fn main() -> u64 {
                 let x = 42;

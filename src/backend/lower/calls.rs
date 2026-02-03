@@ -94,6 +94,77 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(Some(arg_values))
     }
 
+    fn call_param_types(
+        &self,
+        call_plan: &sem::CallPlan,
+        callee_expr: Option<&sem::ValueExpr>,
+        receiver_value: Option<&CallInputValue>,
+    ) -> Option<Vec<Type>> {
+        let fn_ty = match &call_plan.target {
+            sem::CallTarget::Direct(def_id) => {
+                let def = self.def_table.lookup_def(*def_id)?;
+                self.type_map.lookup_def_type(def)?
+            }
+            sem::CallTarget::Indirect => {
+                if let Some(callee_expr) = callee_expr {
+                    self.type_map.type_table().get(callee_expr.ty).clone()
+                } else if let Some(receiver_value) = receiver_value {
+                    receiver_value.ty.clone()
+                } else {
+                    return None;
+                }
+            }
+            sem::CallTarget::Intrinsic(_) | sem::CallTarget::Runtime(_) => {
+                let callee_expr = callee_expr?;
+                self.type_map.type_table().get(callee_expr.ty).clone()
+            }
+        };
+
+        let Type::Fn { params, .. } = fn_ty else {
+            return None;
+        };
+        Some(params.into_iter().map(|param| param.ty).collect())
+    }
+
+    fn emit_call_conversion_checks(
+        &mut self,
+        call_plan: &sem::CallPlan,
+        receiver_value: Option<&CallInputValue>,
+        arg_values: &[CallInputValue],
+        param_tys: &[Type],
+    ) {
+        let expected = (call_plan.has_receiver as usize) + arg_values.len();
+        if call_plan.input_modes.len() != expected || param_tys.len() != expected {
+            return;
+        }
+
+        let mut input_index = 0;
+        if call_plan.has_receiver {
+            let receiver = receiver_value.unwrap_or_else(|| {
+                panic!("backend call conversion checks missing receiver value for call plan");
+            });
+            if matches!(
+                call_plan.input_modes[input_index],
+                ParamMode::In | ParamMode::Sink
+            ) && !receiver.is_addr
+            {
+                self.emit_conversion_check(&receiver.ty, &param_tys[input_index], receiver.value);
+            }
+            input_index += 1;
+        }
+
+        for arg in arg_values {
+            if matches!(
+                call_plan.input_modes[input_index],
+                ParamMode::In | ParamMode::Sink
+            ) && !arg.is_addr
+            {
+                self.emit_conversion_check(&arg.ty, &param_tys[input_index], arg.value);
+            }
+            input_index += 1;
+        }
+    }
+
     fn mark_out_init_flags(&mut self, args: &[sem::CallArg], arg_values: &[CallInputValue]) {
         for (arg, input) in args.iter().zip(arg_values.iter()) {
             match arg {
@@ -189,6 +260,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(None);
         };
 
+        if let Some(param_tys) = self.call_param_types(&call_plan, Some(callee_expr), None) {
+            self.emit_call_conversion_checks(&call_plan, None, &arg_values, &param_tys);
+        }
+
         // Apply the call plan to reorder/transform arguments.
         let call_args =
             self.lower_call_args_from_plan(expr.id, expr.span, &call_plan, None, &mut arg_values)?;
@@ -262,6 +337,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
             return Ok(None);
         };
+
+        if let Some(param_tys) = self.call_param_types(&call_plan, None, Some(&receiver_value)) {
+            self.emit_call_conversion_checks(
+                &call_plan,
+                Some(&receiver_value),
+                &arg_values,
+                &param_tys,
+            );
+        }
 
         // Apply the call plan to build the final argument list.
         let call_args = self.lower_call_args_from_plan(

@@ -193,13 +193,13 @@ pub fn walk_enum_def_variant<V: VisitorMut<D, T> + ?Sized, D, T>(
 pub fn walk_type_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &mut TypeExpr<D>) {
     match &mut type_expr.kind {
         TypeExprKind::Named { .. } => {}
+        TypeExprKind::BoundedInt { base_ty_expr, .. } => v.visit_type_expr(base_ty_expr),
         TypeExprKind::Array { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Tuple { field_ty_exprs } => {
             for field in field_ty_exprs {
                 v.visit_type_expr(field);
             }
         }
-        TypeExprKind::Range { .. } => {}
         TypeExprKind::Slice { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Heap { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Ref { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),

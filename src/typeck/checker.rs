@@ -1334,13 +1334,6 @@ impl TypeChecker {
         }
     }
 
-    fn range_bound_lit(expr: &Expr) -> Option<u64> {
-        match expr.kind {
-            ExprKind::IntLit(value) => Some(value),
-            _ => None,
-        }
-    }
-
     fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
         for block in self.ctx.module.method_blocks() {
             for method_item in &block.method_items {
@@ -1496,7 +1489,7 @@ impl TypeChecker {
 
     fn iterable_item_type(&self, iter_ty: &Type, span: Span) -> Result<Type, TypeCheckError> {
         match iter_ty {
-            Type::Range { .. } => Ok(Type::uint(64)),
+            Type::Range { elem_ty } => Ok((**elem_ty).clone()),
             Type::Array { dims, .. } => {
                 if dims.is_empty() {
                     return Err(
@@ -2132,12 +2125,9 @@ impl TreeFolder<DefId> for TypeChecker {
                     if end_ty != Type::uint(64) {
                         return Err(TypeCheckErrorKind::IndexTypeNotInt(end_ty, end.span).into());
                     }
-                    let (min, max) =
-                        match (Self::range_bound_lit(start), Self::range_bound_lit(end)) {
-                            (Some(min), Some(max)) => (Some(min), Some(max)),
-                            _ => (None, None),
-                        };
-                    Ok(Type::Range { min, max })
+                    Ok(Type::Range {
+                        elem_ty: Box::new(Type::uint(64)),
+                    })
                 }
 
                 ExprKind::Slice { target, start, end } => self.check_slice(target, start, end),

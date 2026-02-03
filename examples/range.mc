@@ -1,12 +1,22 @@
 // Range type
 
-type MidRange = range(50, 100);
+type MidRange = u64: bounds(50, 100);
+
+fn take_bounded_int(x: MidRange) {
+    println(x);
+}
 
 fn main() {
-    let small: range(10) = 3;
+    let small: u64: bounds(10) = 3;
     let mid: MidRange = 75;
     let midhigh: MidRange = 99;
-    // let bad: MidRange = 42; // out of range
+
+    // let bad1: MidRange = 42; // Compile error: Value out of range: 42 not in range [50,100)
+    // take_bounded_int(42); // Compile error: Value out of range: 42 not in range [50,100)
+
+    let x = 42;
+    // let bad2: MidRange = x; // Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100
+    take_bounded_int(x); // Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100
 
     if mid < midhigh {
         println(mid);

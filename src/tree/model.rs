@@ -260,16 +260,17 @@ pub enum TypeExprKind<D> {
         ident: String,
         def_id: D,
     },
+    BoundedInt {
+        base_ty_expr: Box<TypeExpr<D>>,
+        min: u64,
+        max: u64,
+    },
     Array {
         elem_ty_expr: Box<TypeExpr<D>>,
         dims: Vec<usize>,
     },
     Tuple {
         field_ty_exprs: Vec<TypeExpr<D>>,
-    },
-    Range {
-        min: u64,
-        max: u64,
     },
     Slice {
         elem_ty_expr: Box<TypeExpr<D>>,

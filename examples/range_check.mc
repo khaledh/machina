@@ -1,6 +1,6 @@
 // Range check runtime error
 
-type MidRange = range(50, 100);
+type MidRange = u64: bounds(50, 100);
 
 fn main() -> u64 {
     let x = 42;

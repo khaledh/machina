@@ -206,7 +206,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn emit_conversion_check(&mut self, from_ty: &Type, to_ty: &Type, value: ValueId) {
-        if let TypeAssignability::UInt64ToRange { min, max } = type_assignable(from_ty, to_ty) {
+        if let TypeAssignability::UInt64ToBounded { min, max } = type_assignable(from_ty, to_ty) {
             let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
             let min_val = self.builder.const_int(min as i128, false, 64, u64_ty);
             let max_val = self.builder.const_int(max as i128, false, 64, u64_ty);

@@ -124,7 +124,12 @@ impl<'a> ValueChecker<'a> {
 
     fn check_type_expr(&mut self, ty: &TypeExpr) {
         match &ty.kind {
-            TypeExprKind::Range { min, max } => {
+            TypeExprKind::BoundedInt {
+                base_ty_expr,
+                min,
+                max,
+            } => {
+                self.check_type_expr(base_ty_expr);
                 if min >= max {
                     self.errors
                         .push(SemCheckError::InvalidRangeBounds(*min, *max, ty.span));
@@ -182,10 +187,7 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_range_binding_value(&mut self, value: &Expr, ty: &Type) {
-        let Type::Range { min, max } = ty else {
-            return;
-        };
-        let (Some(min), Some(max)) = (min, max) else {
+        let Type::BoundedInt { min, max, .. } = ty else {
             return;
         };
         if let Some(lit_value) = int_lit_value(value) {
@@ -203,10 +205,7 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_return_value_range(&mut self, expr: &Expr) {
-        let Some(Type::Range { min, max }) = self.current_return_ty() else {
-            return;
-        };
-        let (Some(min), Some(max)) = (min, max) else {
+        let Some(Type::BoundedInt { min, max, .. }) = self.current_return_ty() else {
             return;
         };
         if let Some(value) = int_lit_value(expr) {

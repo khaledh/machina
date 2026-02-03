@@ -96,10 +96,25 @@ fn resolve_type_expr_impl(
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
         }
-        res::TypeExprKind::Range { min, max } => Ok(Type::Range {
-            min: Some(*min),
-            max: Some(*max),
-        }),
+        res::TypeExprKind::BoundedInt {
+            base_ty_expr,
+            min,
+            max,
+        } => {
+            let base_ty =
+                resolve_type_expr_impl(def_table, module, base_ty_expr, in_progress, depth)?;
+            match base_ty {
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                } => Ok(Type::BoundedInt {
+                    base: Box::new(base_ty),
+                    min: *min,
+                    max: *max,
+                }),
+                other => Err(TypeCheckErrorKind::BoundsBaseNotU64(other, type_expr.span).into()),
+            }
+        }
         res::TypeExprKind::Slice { elem_ty_expr } => {
             let elem_ty =
                 resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;

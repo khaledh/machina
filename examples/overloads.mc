@@ -1,5 +1,5 @@
 // Demonstrate function overload resolution.
-type Small = range(0, 10);
+type Small = u64: bounds(0, 10);
 
 fn id(x: u64) -> u64 {
     x

@@ -31,7 +31,7 @@ fn test_lower_const() {
 #[test]
 fn test_lower_range_type_value() {
     let ctx = analyze(indoc! {"
-        fn main() -> range(0, 10) {
+        fn main() -> u64: bounds(0, 10) {
             3
         }
     "});
@@ -59,8 +59,8 @@ fn test_lower_range_type_value() {
 #[test]
 fn test_lower_range_lit_value() {
     let ctx = analyze(indoc! {"
-        fn main() -> range(0, 3) {
-            0..3
+        fn main() -> u64: bounds(0, 3) {
+            0
         }
     "});
     let func_def = ctx.module.func_defs()[0];

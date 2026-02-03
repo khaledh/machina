@@ -53,7 +53,7 @@ fn test_for_range_invalid_bounds() {
 fn test_range_literal_in_bounds() {
     let source = r#"
         fn test() -> u64 {
-            let x: range(100) = 42;
+            let x: u64: bounds(100) = 42;
             0
         }
     "#;
@@ -65,7 +65,7 @@ fn test_range_literal_in_bounds() {
 fn test_range_literal_out_of_bounds() {
     let source = r#"
         fn test() -> u64 {
-            let x: range(50, 100) = 42;
+            let x: u64: bounds(50, 100) = 42;
             0
         }
     "#;
@@ -133,7 +133,7 @@ fn test_div_by_zero_via_const_binding() {
 fn test_range_invalid_bounds() {
     let source = r#"
         fn test() -> u64 {
-            let x: range(10, 10) = 0;
+            let x: u64: bounds(10, 10) = 0;
             0
         }
     "#;

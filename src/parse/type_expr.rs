@@ -4,6 +4,10 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
         let mut typ = self.parse_type_atom()?;
 
+        if self.curr_token.kind == TK::Colon {
+            typ = self.parse_bounded_type(typ)?;
+        }
+
         if self.curr_token.kind == TK::LBracket {
             typ = self.parse_array_type(typ)?;
         }
@@ -28,10 +32,6 @@ impl<'a> Parser<'a> {
 
         if self.curr_token.kind == TK::KwFn {
             return self.parse_fn_type();
-        }
-
-        if self.curr_token.kind == TK::KwRange {
-            return self.parse_range_type();
         }
 
         if self.curr_token.kind == TK::LParen && self.peek().map(|t| &t.kind) != Some(&TK::RParen) {
@@ -157,10 +157,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_range_type(&mut self) -> Result<TypeExpr, ParseError> {
+    fn parse_bounded_type(&mut self, base_ty_expr: TypeExpr) -> Result<TypeExpr, ParseError> {
         let marker = self.mark();
 
-        self.consume_keyword(TK::KwRange)?;
+        self.consume(&TK::Colon)?;
+        self.consume_keyword(TK::KwBounds)?;
         self.consume(&TK::LParen)?;
 
         let first = self.parse_int_lit()?;
@@ -174,10 +175,16 @@ impl<'a> Parser<'a> {
 
         self.consume(&TK::RParen)?;
 
+        let bounds_span = self.close(marker);
+        let span = Span::merge_all(vec![base_ty_expr.span, bounds_span]);
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
-            kind: TypeExprKind::Range { min, max },
-            span: self.close(marker),
+            kind: TypeExprKind::BoundedInt {
+                base_ty_expr: Box::new(base_ty_expr),
+                min,
+                max,
+            },
+            span,
         })
     }
 }
