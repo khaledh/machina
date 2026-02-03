@@ -402,14 +402,12 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
                 ident: ident.clone(),
                 def_id: mapper.map_def_id(type_expr.id, def_id, ctx),
             },
-            TypeExprKind::BoundedInt {
+            TypeExprKind::Refined {
                 base_ty_expr,
-                min,
-                max,
-            } => TypeExprKind::BoundedInt {
+                refinement,
+            } => TypeExprKind::Refined {
                 base_ty_expr: Box::new(mapper.map_type_expr(base_ty_expr, ctx)),
-                min: *min,
-                max: *max,
+                refinement: refinement.clone(),
             },
             TypeExprKind::Array { elem_ty_expr, dims } => TypeExprKind::Array {
                 elem_ty_expr: Box::new(mapper.map_type_expr(elem_ty_expr, ctx)),

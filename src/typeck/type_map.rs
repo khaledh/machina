@@ -3,7 +3,7 @@ use crate::tree::normalized as norm;
 use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
 use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
-use crate::tree::{NodeId, ParamMode};
+use crate::tree::{NodeId, ParamMode, RefinementKind};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeCache, TypeId};
 use std::collections::{HashMap, HashSet};
@@ -96,23 +96,60 @@ fn resolve_type_expr_impl(
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
         }
-        res::TypeExprKind::BoundedInt {
+        res::TypeExprKind::Refined {
             base_ty_expr,
-            min,
-            max,
+            refinement: RefinementKind::Bounds { min, max },
         } => {
             let base_ty =
                 resolve_type_expr_impl(def_table, module, base_ty_expr, in_progress, depth)?;
             match base_ty {
                 Type::Int {
-                    signed: false,
-                    bits: 64,
-                } => Ok(Type::BoundedInt {
-                    base: Box::new(base_ty),
-                    min: *min,
-                    max: *max,
-                }),
-                other => Err(TypeCheckErrorKind::BoundsBaseNotU64(other, type_expr.span).into()),
+                    signed,
+                    bits,
+                    bounds,
+                } => {
+                    if signed {
+                        return Err(TypeCheckErrorKind::BoundsBaseNotUnsignedInt(
+                            Type::Int {
+                                signed,
+                                bits,
+                                bounds,
+                            },
+                            type_expr.span,
+                        )
+                        .into());
+                    }
+                    let (min_bound, max_bound) = if let Some(bounds) = bounds {
+                        (bounds.min, bounds.max_excl)
+                    } else {
+                        let min = 0;
+                        let max = 1i128 << (bits as u32);
+                        (min, max)
+                    };
+                    let min_val = *min as i128;
+                    let max_val = *max as i128;
+                    if min_val < min_bound || max_val > max_bound {
+                        return Err(TypeCheckErrorKind::BoundsOutOfRange(
+                            min_val,
+                            max_val,
+                            min_bound,
+                            max_bound,
+                            type_expr.span,
+                        )
+                        .into());
+                    }
+                    Ok(Type::Int {
+                        signed,
+                        bits,
+                        bounds: Some(crate::types::IntBounds {
+                            min: min_val,
+                            max_excl: max_val,
+                        }),
+                    })
+                }
+                other => {
+                    Err(TypeCheckErrorKind::BoundsBaseNotUnsignedInt(other, type_expr.span).into())
+                }
             }
         }
         res::TypeExprKind::Slice { elem_ty_expr } => {

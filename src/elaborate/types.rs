@@ -9,8 +9,8 @@
 //! produce the AST representation that would parse to that type.
 
 use crate::diag::Span;
-use crate::tree::ParamMode;
 use crate::tree::semantic as sem;
+use crate::tree::{ParamMode, RefinementKind};
 use crate::types::{FnParamMode, Type};
 
 use super::elaborator::Elaborator;
@@ -27,7 +27,11 @@ impl<'a> Elaborator<'a> {
                 panic!("compiler bug: unknown type in closure capture at {}", span)
             }
             Type::Unit => self.named_type_expr("()", span),
-            Type::Int { signed, bits } => {
+            Type::Int {
+                signed,
+                bits,
+                bounds,
+            } => {
                 let name = match (*signed, *bits) {
                     (false, 8) => "u8",
                     (false, 16) => "u16",
@@ -41,16 +45,29 @@ impl<'a> Elaborator<'a> {
                         panic!("compiler bug: unsupported int type signed={signed} bits={bits}")
                     }
                 };
-                self.named_type_expr(name, span)
+                if let Some(bounds) = bounds {
+                    let base_expr = sem::TypeExpr {
+                        id: self.node_id_gen.new_id(),
+                        kind: self.named_type_expr(name, span),
+                        span,
+                    };
+                    let min = u64::try_from(bounds.min).unwrap_or_else(|_| {
+                        panic!("compiler bug: negative bound {bounds:?} at {}", span)
+                    });
+                    let max = u64::try_from(bounds.max_excl).unwrap_or_else(|_| {
+                        panic!("compiler bug: negative bound {bounds:?} at {}", span)
+                    });
+                    sem::TypeExprKind::Refined {
+                        base_ty_expr: Box::new(base_expr),
+                        refinement: RefinementKind::Bounds { min, max },
+                    }
+                } else {
+                    self.named_type_expr(name, span)
+                }
             }
             Type::Bool => self.named_type_expr("bool", span),
             Type::Char => self.named_type_expr("char", span),
             Type::String => self.named_type_expr("string", span),
-            Type::BoundedInt { base, min, max } => sem::TypeExprKind::BoundedInt {
-                base_ty_expr: Box::new(self.type_expr_from_type(base, span)),
-                min: *min,
-                max: *max,
-            },
             Type::Range { .. } => {
                 panic!("compiler bug: range value type not representable in type expressions");
             }

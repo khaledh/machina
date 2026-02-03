@@ -7,15 +7,21 @@ impl fmt::Display for Type {
         match self {
             Type::Unknown => write!(f, "unknown"),
             Type::Unit => write!(f, "()"),
-            Type::Int { signed, bits } => {
+            Type::Int {
+                signed,
+                bits,
+                bounds,
+            } => {
                 let prefix = if *signed { "i" } else { "u" };
-                write!(f, "{}{}", prefix, bits)
+                let base = format!("{}{}", prefix, bits);
+                if let Some(bounds) = bounds {
+                    write!(f, "{}: bounds({}, {})", base, bounds.min, bounds.max_excl)
+                } else {
+                    write!(f, "{base}")
+                }
             }
             Type::Bool => write!(f, "bool"),
             Type::Char => write!(f, "char"),
-            Type::BoundedInt { base, min, max } => {
-                write!(f, "{}: bounds({}, {})", base, min, max)
-            }
             Type::Range { elem_ty } => write!(f, "range<{}>", elem_ty),
             Type::Fn { params, ret_ty } => {
                 let params_str = params

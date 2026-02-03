@@ -45,7 +45,7 @@ impl<'a> MatchRuleKind<'a> {
         match ty {
             Type::Enum { name, variants } => Self::Enum(EnumRule { name, variants }),
             Type::Bool => Self::Bool,
-            Type::Int { signed, bits } => Self::Int(IntRule {
+            Type::Int { signed, bits, .. } => Self::Int(IntRule {
                 signed: *signed,
                 bits: *bits,
             }),
@@ -192,6 +192,7 @@ impl IntRule {
                         Type::Int {
                             signed: self.signed,
                             bits: self.bits,
+                            bounds: None,
                         },
                         pattern_span(&arm.pattern),
                     ));
@@ -281,7 +282,7 @@ impl<'a> TupleRule<'a> {
                     }
                 }
                 MatchPattern::IntLit { value, span } => {
-                    let Type::Int { signed, bits } = peeled_ty else {
+                    let Type::Int { signed, bits, .. } = peeled_ty else {
                         errors.push(SemCheckError::InvalidMatchPattern(peeled_ty, *span));
                         continue;
                     };

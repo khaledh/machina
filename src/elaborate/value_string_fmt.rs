@@ -61,7 +61,7 @@ impl<'a> Elaborator<'a> {
                             });
                             reserve_terms.push(sem::LenTerm::StringValue { segment_index });
                         }
-                        Type::Int { signed, bits } => {
+                        Type::Int { signed, bits, .. } => {
                             // Integers contribute a conservative literal reserve bound.
                             plan_segments.push(sem::SegmentKind::Int {
                                 expr: Box::new(self.elab_value(expr)),

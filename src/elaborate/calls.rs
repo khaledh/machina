@@ -123,7 +123,7 @@ impl<'a> Elaborator<'a> {
                 if !matches!(
                     arg_ty,
                     Type::Slice { elem_ty }
-                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8 })
+                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8, .. })
                 ) {
                     panic!("compiler bug: intrinsic u64_to_dec expects u8[] arg, got {arg_ty:?}");
                 }
@@ -149,7 +149,7 @@ impl<'a> Elaborator<'a> {
                 if !matches!(
                     arg_ty,
                     Type::Slice { elem_ty }
-                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8 })
+                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8, .. })
                 ) {
                     panic!("compiler bug: intrinsic memset expects u8[] arg, got {arg_ty:?}");
                 }
@@ -181,7 +181,7 @@ impl<'a> Elaborator<'a> {
                 if !matches!(
                     arg_ty,
                     Type::Slice { elem_ty }
-                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8 })
+                        if matches!(**elem_ty, Type::Int { signed: false, bits: 8, .. })
                 ) {
                     panic!(
                         "compiler bug: intrinsic string_from_bytes expects u8[] arg, got {arg_ty:?}"
@@ -213,7 +213,8 @@ impl<'a> Elaborator<'a> {
                             **elem_ty,
                             Type::Int {
                                 signed: false,
-                                bits: 8
+                                bits: 8,
+                                ..
                             }
                         ) =>
                     {

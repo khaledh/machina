@@ -255,15 +255,19 @@ pub struct TypeExpr<D> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RefinementKind {
+    Bounds { min: u64, max: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExprKind<D> {
     Named {
         ident: String,
         def_id: D,
     },
-    BoundedInt {
+    Refined {
         base_ty_expr: Box<TypeExpr<D>>,
-        min: u64,
-        max: u64,
+        refinement: RefinementKind,
     },
     Array {
         elem_ty_expr: Box<TypeExpr<D>>,

@@ -2,6 +2,7 @@ use crate::context::NormalizedContext;
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
+use crate::tree::RefinementKind;
 use crate::tree::normalized::{
     BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
     TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
@@ -125,7 +126,7 @@ impl<'a> ValueChecker<'a> {
     fn check_type_expr(&mut self, ty: &TypeExpr) {
         self.run_type_rules(ty);
         match &ty.kind {
-            TypeExprKind::BoundedInt { base_ty_expr, .. } => {
+            TypeExprKind::Refined { base_ty_expr, .. } => {
                 self.check_type_expr(base_ty_expr);
             }
             TypeExprKind::Array { elem_ty_expr, .. } => self.check_type_expr(elem_ty_expr),
@@ -180,43 +181,61 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_range_binding_value(&mut self, value: &Expr, ty: &Type) {
-        let Type::BoundedInt { min, max, .. } = ty else {
+        let Type::Int {
+            bounds: Some(bounds),
+            ..
+        } = ty
+        else {
             return;
         };
         if let Some(const_value) = self.const_int_value(value) {
-            if const_value < 0 {
+            if const_value < bounds.min {
                 self.errors.push(SemCheckError::ValueOutOfRange(
                     const_value,
-                    *min as i128,
-                    *max as i128,
+                    bounds.min,
+                    bounds.max_excl,
                     value.span,
                 ));
             } else {
-                self.check_range_value(const_value as u64, *min, *max, value.span);
+                self.check_range_value(
+                    const_value as u64,
+                    bounds.min as u64,
+                    bounds.max_excl as u64,
+                    value.span,
+                );
             }
         }
     }
 
     fn check_return_value_range(&mut self, expr: &Expr) {
-        let Some(Type::BoundedInt { min, max, .. }) = self.current_return_ty() else {
+        let Some(Type::Int {
+            bounds: Some(bounds),
+            ..
+        }) = self.current_return_ty()
+        else {
             return;
         };
         if let Some(value) = int_lit_value(expr) {
-            if value < 0 {
+            if value < bounds.min {
                 self.errors.push(SemCheckError::ValueOutOfRange(
                     value,
-                    *min as i128,
-                    *max as i128,
+                    bounds.min,
+                    bounds.max_excl,
                     expr.span,
                 ));
             } else {
-                self.check_range_value(value as u64, *min, *max, expr.span);
+                self.check_range_value(
+                    value as u64,
+                    bounds.min as u64,
+                    bounds.max_excl as u64,
+                    expr.span,
+                );
             }
         }
     }
 
     fn run_type_rules(&mut self, ty: &TypeExpr) {
-        self.rule_bounded_int_type(ty);
+        self.rule_refined_type(ty);
     }
 
     fn run_expr_rules(&mut self, expr: &Expr) {
@@ -234,8 +253,12 @@ impl<'a> ValueChecker<'a> {
         self.rule_stmt_return_ranges(stmt);
     }
 
-    fn rule_bounded_int_type(&mut self, ty: &TypeExpr) {
-        let TypeExprKind::BoundedInt { min, max, .. } = &ty.kind else {
+    fn rule_refined_type(&mut self, ty: &TypeExpr) {
+        let TypeExprKind::Refined {
+            refinement: RefinementKind::Bounds { min, max },
+            ..
+        } = &ty.kind
+        else {
             return;
         };
         if min >= max {
@@ -248,7 +271,7 @@ impl<'a> ValueChecker<'a> {
         let Some(lit_value) = int_lit_value(expr) else {
             return;
         };
-        let Type::Int { signed, bits } = *self.ctx.type_map.type_table().get(expr.ty) else {
+        let Type::Int { signed, bits, .. } = *self.ctx.type_map.type_table().get(expr.ty) else {
             return;
         };
         let min = if signed {

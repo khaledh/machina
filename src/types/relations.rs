@@ -20,9 +20,9 @@ use crate::types::Type;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeAssignability {
     Exact,
-    UInt64ToBounded { min: u64, max: u64 },
+    IntToBounded { min: i128, max: i128 },
     IntLitToInt { signed: bool, bits: u8 },
-    BoundedToUInt64,
+    BoundedToInt,
     Incompatible,
 }
 
@@ -36,7 +36,6 @@ pub enum ValueAssignability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
     Int,
-    BoundedInt,
     Range,
     String,
     Other,
@@ -85,8 +84,8 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
     let assignability = type_assignable(from_ty, to_ty);
     match assignability {
         TypeAssignability::Exact
-        | TypeAssignability::BoundedToUInt64
-        | TypeAssignability::UInt64ToBounded { .. }
+        | TypeAssignability::BoundedToInt
+        | TypeAssignability::IntToBounded { .. }
         | TypeAssignability::IntLitToInt { .. } => ValueAssignability::Assignable(assignability),
         TypeAssignability::Incompatible => ValueAssignability::Incompatible,
     }
@@ -102,7 +101,6 @@ pub fn array_to_slice_assignable(from: &Type, to: &Type) -> bool {
 fn type_tag(ty: &Type) -> TypeTag {
     match ty {
         Type::Int { .. } => TypeTag::Int,
-        Type::BoundedInt { .. } => TypeTag::BoundedInt,
         Type::Range { .. } => TypeTag::Range,
         Type::String => TypeTag::String,
         _ => TypeTag::Other,
@@ -112,82 +110,60 @@ fn type_tag(ty: &Type) -> TypeTag {
 // --- Type Rules ---
 
 const INT_TYPE_RULES: &[TypeRule] = &[TypeRule {
-    target: TypeTag::BoundedInt,
-    apply: u64_to_bounded,
-}];
-
-const BOUNDED_TYPE_RULES: &[TypeRule] = &[TypeRule {
     target: TypeTag::Int,
-    apply: bounded_to_u64,
+    apply: int_to_int,
 }];
 
 fn type_rules_for(tag: TypeTag) -> &'static [TypeRule] {
     match tag {
         TypeTag::Int => INT_TYPE_RULES,
-        TypeTag::BoundedInt => BOUNDED_TYPE_RULES,
         _ => &[],
     }
 }
 
-fn u64_to_bounded(from: &Type, to: &Type) -> Option<TypeAssignability> {
-    let Type::BoundedInt { base, min, max } = to else {
-        return None;
-    };
+fn int_to_int(from: &Type, to: &Type) -> Option<TypeAssignability> {
     let Type::Int {
-        signed: false,
-        bits: 64,
+        signed: from_signed,
+        bits: from_bits,
+        bounds: from_bounds,
     } = from
     else {
         return None;
     };
     let Type::Int {
-        signed: false,
-        bits: 64,
-    } = **base
+        signed: to_signed,
+        bits: to_bits,
+        bounds: to_bounds,
+    } = to
     else {
         return None;
     };
-    Some(TypeAssignability::UInt64ToBounded {
-        min: *min,
-        max: *max,
-    })
-}
+    if from_signed != to_signed || from_bits != to_bits {
+        return None;
+    }
 
-fn bounded_to_u64(from: &Type, to: &Type) -> Option<TypeAssignability> {
-    let Type::BoundedInt { base, .. } = from else {
-        return None;
-    };
-    let Type::Int {
-        signed: false,
-        bits: 64,
-    } = **base
-    else {
-        return None;
-    };
-    matches!(
-        to,
-        Type::Int {
-            signed: false,
-            bits: 64
-        }
-    )
-    .then_some(TypeAssignability::BoundedToUInt64)
+    if let Some(bounds) = to_bounds {
+        return Some(TypeAssignability::IntToBounded {
+            min: bounds.min,
+            max: bounds.max_excl,
+        });
+    }
+
+    if from_bounds.is_some() {
+        return Some(TypeAssignability::BoundedToInt);
+    }
+
+    Some(TypeAssignability::Exact)
 }
 
 // --- Value Rules ---
 
 // Literal-only narrowing: integer literals may narrow to smaller integer types
 // when the value fits (no non-literal narrowing).
-const INT_LIT_VALUE_RULES: &[ValueRule] = &[
-    ValueRule {
-        target: TypeTag::BoundedInt,
-        apply: value_u64_to_bounded,
-    },
-    ValueRule {
-        target: TypeTag::Int,
-        apply: value_int_lit_to_int,
-    },
-];
+const INT_LIT_VALUE_RULES: &[ValueRule] = &[ValueRule {
+    target: TypeTag::Int,
+    apply: value_int_lit_to_int,
+}];
 
 fn value_rules_for(tag: TypeTag) -> &'static [ValueRule] {
     match tag {
@@ -196,53 +172,17 @@ fn value_rules_for(tag: TypeTag) -> &'static [ValueRule] {
     }
 }
 
-fn value_u64_to_bounded(
-    from_value: &Expr,
-    from_ty: &Type,
-    to_ty: &Type,
-) -> Option<ValueAssignability> {
-    if !matches!(
-        from_ty,
-        Type::Int {
-            signed: false,
-            bits: 64
-        }
-    ) {
-        return None;
-    }
-    let Type::BoundedInt { base, min, max } = to_ty else {
-        return None;
-    };
-    let Type::Int {
-        signed: false,
-        bits: 64,
-    } = **base
-    else {
-        return None;
-    };
-    if let Some(value) = int_lit_value(from_value)
-        && (value < *min as i128 || value >= *max as i128)
-    {
-        return Some(ValueAssignability::ValueOutOfRange {
-            value,
-            min: *min as i128,
-            max: *max as i128,
-        });
-    }
-    Some(ValueAssignability::Assignable(
-        TypeAssignability::UInt64ToBounded {
-            min: *min,
-            max: *max,
-        },
-    ))
-}
-
 fn value_int_lit_to_int(
     from_value: &Expr,
     _from_ty: &Type,
     to_ty: &Type,
 ) -> Option<ValueAssignability> {
-    let Type::Int { signed, bits } = to_ty else {
+    let Type::Int {
+        signed,
+        bits,
+        bounds,
+    } = to_ty
+    else {
         return None;
     };
     let value = int_lit_value(from_value)?;
@@ -256,6 +196,15 @@ fn value_int_lit_to_int(
     } else {
         1i128 << (*bits as u32)
     };
+    if let Some(bounds) = bounds
+        && (value < bounds.min || value >= bounds.max_excl)
+    {
+        return Some(ValueAssignability::ValueOutOfRange {
+            value,
+            min: bounds.min,
+            max: bounds.max_excl,
+        });
+    }
     if value < min || value >= max_excl {
         return Some(ValueAssignability::ValueOutOfRange {
             value,

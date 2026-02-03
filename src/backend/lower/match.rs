@@ -371,6 +371,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                 Type::Int {
                     signed: false,
                     bits: 32,
+                    bounds: None,
                 },
             ));
         }
@@ -460,6 +461,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                             0 => Type::Int {
                                 signed: false,
                                 bits: 32,
+                                bounds: None,
                             },
                             1 => Type::uint(8),
                             _ => unreachable!(),
@@ -480,7 +482,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     fn case_const(&self, value: u64, discr_ty: &Type) -> ConstValue {
         match discr_ty {
             Type::Bool => ConstValue::Bool(value != 0),
-            Type::Int { signed, bits } => ConstValue::Int {
+            Type::Int { signed, bits, .. } => ConstValue::Int {
                 value: value as i128,
                 signed: *signed,
                 bits: *bits,

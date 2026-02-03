@@ -64,7 +64,11 @@ impl<'a> TypeLowerer<'a> {
             // Primitive types map directly to their SSA equivalents.
             Type::Unit => self.ir_type_cache.add(IrTypeKind::Unit),
             Type::Bool => self.ir_type_cache.add(IrTypeKind::Bool),
-            Type::Int { signed, bits } => self.ir_type_cache.add(IrTypeKind::Int {
+            Type::Int {
+                signed,
+                bits,
+                bounds: _,
+            } => self.ir_type_cache.add(IrTypeKind::Int {
                 signed: *signed,
                 bits: *bits,
             }),
@@ -72,7 +76,6 @@ impl<'a> TypeLowerer<'a> {
                 signed: false,
                 bits: 32,
             }),
-            Type::BoundedInt { base, .. } => self.lower_type(base),
             Type::Range { elem_ty } => self.lower_type(elem_ty),
             Type::Fn { params, ret_ty } => {
                 let params = params
@@ -100,11 +103,13 @@ impl<'a> TypeLowerer<'a> {
                 let byte = self.lower_type(&Type::Int {
                     signed: false,
                     bits: 8,
+                    bounds: None,
                 });
                 let ptr = self.ir_type_cache.add(IrTypeKind::Ptr { elem: byte });
                 let u32 = self.lower_type(&Type::Int {
                     signed: false,
                     bits: 32,
+                    bounds: None,
                 });
                 let fields = vec![
                     IrStructField {
@@ -252,14 +257,7 @@ impl<'a> TypeLowerer<'a> {
     /// Returns signedness and bit-width for an integer type.
     pub(super) fn int_info(&self, ty_id: TypeId) -> (bool, u8) {
         match self.type_map.type_table().get(ty_id) {
-            Type::Int { signed, bits } => (*signed, *bits),
-            Type::BoundedInt { base, .. } => match base.as_ref() {
-                Type::Int { signed, bits } => (*signed, *bits),
-                other => panic!(
-                    "backend type lowering: expected bounded int base, found {:?}",
-                    other
-                ),
-            },
+            Type::Int { signed, bits, .. } => (*signed, *bits),
             other => panic!(
                 "backend type lowering: expected int type, found {:?}",
                 other
@@ -286,6 +284,7 @@ impl<'a> TypeLowerer<'a> {
         let tag_ty = self.lower_type(&Type::Int {
             signed: false,
             bits: 32,
+            bounds: None,
         });
 
         let mut max_payload_size = 0u64;

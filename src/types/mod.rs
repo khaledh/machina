@@ -19,14 +19,10 @@ pub enum Type {
     Int {
         signed: bool,
         bits: u8,
+        bounds: Option<IntBounds>,
     },
     Bool,
     Char,
-    BoundedInt {
-        base: Box<Type>,
-        min: u64,
-        max: u64,
-    },
     Range {
         elem_ty: Box<Type>,
     },
@@ -73,6 +69,12 @@ pub struct FnParam {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct IntBounds {
+    pub min: i128,
+    pub max_excl: i128,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FnParamMode {
     In,
     InOut,
@@ -96,17 +98,17 @@ impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                Type::BoundedInt {
-                    base: lbase,
-                    min: lmin,
-                    max: lmax,
+                Type::Int {
+                    signed: lsigned,
+                    bits: lbits,
+                    bounds: lbounds,
                 },
-                Type::BoundedInt {
-                    base: rbase,
-                    min: rmin,
-                    max: rmax,
+                Type::Int {
+                    signed: rsigned,
+                    bits: rbits,
+                    bounds: rbounds,
                 },
-            ) => lbase == rbase && lmin == rmin && lmax == rmax,
+            ) => lsigned == rsigned && lbits == rbits && lbounds == rbounds,
             (Type::Range { elem_ty: l_elem }, Type::Range { elem_ty: r_elem }) => l_elem == r_elem,
             (
                 Type::Fn {
@@ -120,16 +122,6 @@ impl PartialEq for Type {
             ) => p1 == p2 && r1 == r2,
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
-            (
-                Type::Int {
-                    signed: ls,
-                    bits: lb,
-                },
-                Type::Int {
-                    signed: rs,
-                    bits: rb,
-                },
-            ) => ls == rs && lb == rb,
             (Type::Bool, Type::Bool) => true,
             (Type::Char, Type::Char) => true,
             (Type::String, Type::String) => true,
@@ -172,22 +164,21 @@ impl Hash for Type {
             Type::Unit => {
                 1u8.hash(state);
             }
-            Type::Int { signed, bits } => {
+            Type::Int {
+                signed,
+                bits,
+                bounds,
+            } => {
                 2u8.hash(state);
                 signed.hash(state);
                 bits.hash(state);
+                bounds.hash(state);
             }
             Type::Bool => {
                 3u8.hash(state);
             }
             Type::Char => {
                 4u8.hash(state);
-            }
-            Type::BoundedInt { base, min, max } => {
-                5u8.hash(state);
-                base.hash(state);
-                min.hash(state);
-                max.hash(state);
             }
             Type::Fn { params, ret_ty } => {
                 6u8.hash(state);
@@ -242,34 +233,42 @@ pub const BUILTIN_TYPES: &[Type] = &[
     Type::Int {
         signed: false,
         bits: 8,
+        bounds: None,
     },
     Type::Int {
         signed: false,
         bits: 16,
+        bounds: None,
     },
     Type::Int {
         signed: false,
         bits: 32,
+        bounds: None,
     },
     Type::Int {
         signed: false,
         bits: 64,
+        bounds: None,
     },
     Type::Int {
         signed: true,
         bits: 8,
+        bounds: None,
     },
     Type::Int {
         signed: true,
         bits: 16,
+        bounds: None,
     },
     Type::Int {
         signed: true,
         bits: 32,
+        bounds: None,
     },
     Type::Int {
         signed: true,
         bits: 64,
+        bounds: None,
     },
     Type::Bool,
     Type::Char,
@@ -298,21 +297,25 @@ impl Type {
         Type::Int {
             signed: false,
             bits,
+            bounds: None,
         }
     }
 
     pub fn sint(bits: u8) -> Self {
-        Type::Int { signed: true, bits }
+        Type::Int {
+            signed: true,
+            bits,
+            bounds: None,
+        }
     }
 
     pub fn is_int(&self) -> bool {
-        matches!(self, Type::Int { .. } | Type::BoundedInt { .. })
+        matches!(self, Type::Int { .. })
     }
 
     pub fn int_signed_bits(&self) -> Option<(bool, u8)> {
         match self {
-            Type::Int { signed, bits } => Some((*signed, *bits)),
-            Type::BoundedInt { base, .. } => base.int_signed_bits(),
+            Type::Int { signed, bits, .. } => Some((*signed, *bits)),
             _ => None,
         }
     }
@@ -323,7 +326,6 @@ impl Type {
             Type::Int { bits, .. } => (*bits as usize) / 8,
             Type::Bool => 1,
             Type::Char => 4,
-            Type::BoundedInt { base, .. } => base.size_of(),
             Type::Range { elem_ty } => elem_ty.size_of(),
             Type::Fn { .. } => 8,
             Type::String => 16,
@@ -359,7 +361,6 @@ impl Type {
             Type::Int { bits, .. } => (*bits as usize) / 8,
             Type::Bool => 1,
             Type::Char => 4,
-            Type::BoundedInt { base, .. } => base.align_of(),
             Type::Range { elem_ty } => elem_ty.align_of(),
             Type::Fn { .. } => 8,
             Type::String => 8,
@@ -564,7 +565,9 @@ impl Type {
     pub fn min_value(&self) -> i128 {
         match self {
             Type::Int { signed: false, .. } => 0,
-            Type::Int { signed: true, bits } => -(1i128 << (*bits as u32 - 1)),
+            Type::Int {
+                signed: true, bits, ..
+            } => -(1i128 << (*bits as u32 - 1)),
             _ => panic!("Expected integer type"),
         }
     }
@@ -574,8 +577,11 @@ impl Type {
             Type::Int {
                 signed: false,
                 bits,
+                ..
             } => (1i128 << (*bits as u32)) - 1,
-            Type::Int { signed: true, bits } => (1i128 << (*bits as u32 - 1)) - 1,
+            Type::Int {
+                signed: true, bits, ..
+            } => (1i128 << (*bits as u32 - 1)) - 1,
             _ => panic!("Expected integer type"),
         }
     }

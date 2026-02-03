@@ -323,7 +323,7 @@ impl<'a> Elaborator<'a> {
             }
             norm::MatchPattern::IntLit { value, .. } => {
                 let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
-                let Type::Int { signed, bits } = peeled_ty else {
+                let Type::Int { signed, bits, .. } = peeled_ty else {
                     panic!("compiler bug: int pattern on non-int in arm {arm_id}");
                 };
                 let place = self.apply_deref_place(field_place, deref_count, peeled_ty.clone());

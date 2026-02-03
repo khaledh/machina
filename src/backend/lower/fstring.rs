@@ -287,6 +287,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let target_ty = self.type_lowerer.lower_type(&Type::Int {
                         signed: *signed,
                         bits: 64,
+                        bounds: None,
                     });
                     let value_64 = self.cast_int_value(value, *signed, *bits, target_ty);
                     segments.push(LoweredFmtSegment::Int {

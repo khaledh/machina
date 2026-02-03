@@ -183,7 +183,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let value = eval_value!(expr);
                         let elem_ty = self.type_lowerer.lower_type_id(expr.ty);
                         let sem_ty = self.type_map.type_table().get(expr.ty);
-                        if matches!(sem_ty, Type::Int { signed: false, bits: 8 }) {
+                        if matches!(sem_ty, Type::Int { signed: false, bits: 8, .. }) {
                             let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
                             let zero = self.builder.const_int(0, false, 64, u64_ty);
                             let len = self.builder.const_int(*count as i128, false, 64, u64_ty);

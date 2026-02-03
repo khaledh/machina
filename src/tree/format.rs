@@ -262,13 +262,14 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
             model::TypeExprKind::Named { ident, .. } => {
                 write!(f, "Named({})", ident)?;
             }
-            model::TypeExprKind::BoundedInt {
+            model::TypeExprKind::Refined {
                 base_ty_expr,
-                min,
-                max,
-            } => {
-                write!(f, "BoundedInt({}, {}, {})", base_ty_expr, min, max)?;
-            }
+                refinement,
+            } => match refinement {
+                model::RefinementKind::Bounds { min, max } => {
+                    write!(f, "Refined({}, bounds({}, {}))", base_ty_expr, min, max)?;
+                }
+            },
             model::TypeExprKind::Array { elem_ty_expr, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;

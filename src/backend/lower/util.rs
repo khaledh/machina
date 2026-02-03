@@ -121,7 +121,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     /// Emits a divide/modulo-by-zero check that traps if `rhs == 0`.
     pub(super) fn emit_div_by_zero_check(&mut self, rhs: ValueId, rhs_ty: &Type) {
-        let Type::Int { signed, bits } = rhs_ty else {
+        let Type::Int { signed, bits, .. } = rhs_ty else {
             panic!("backend div-by-zero check on non-int type {:?}", rhs_ty);
         };
 
@@ -206,10 +206,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn emit_conversion_check(&mut self, from_ty: &Type, to_ty: &Type, value: ValueId) {
-        if let TypeAssignability::UInt64ToBounded { min, max } = type_assignable(from_ty, to_ty) {
+        if let TypeAssignability::IntToBounded { min, max } = type_assignable(from_ty, to_ty) {
             let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-            let min_val = self.builder.const_int(min as i128, false, 64, u64_ty);
-            let max_val = self.builder.const_int(max as i128, false, 64, u64_ty);
+            let min_val = self.builder.const_int(min, false, 64, u64_ty);
+            let max_val = self.builder.const_int(max, false, 64, u64_ty);
             self.emit_range_check(value, min_val, max_val);
         }
     }

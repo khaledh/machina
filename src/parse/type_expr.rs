@@ -1,4 +1,5 @@
 use super::*;
+use crate::tree::RefinementKind;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
@@ -179,10 +180,9 @@ impl<'a> Parser<'a> {
         let span = Span::merge_all(vec![base_ty_expr.span, bounds_span]);
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
-            kind: TypeExprKind::BoundedInt {
+            kind: TypeExprKind::Refined {
                 base_ty_expr: Box::new(base_ty_expr),
-                min,
-                max,
+                refinement: RefinementKind::Bounds { min, max },
             },
             span,
         })
