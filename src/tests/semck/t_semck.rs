@@ -87,6 +87,44 @@ fn test_range_literal_out_of_bounds() {
 }
 
 #[test]
+fn test_signed_bounds_accept_negative_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let x: i8: bounds(-5, 5) = -3;
+            let _y: i8 = x;
+            0
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_signed_bounds_rejects_out_of_range_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let x: i8: bounds(-5, 5) = -6;
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::ValueOutOfRange(value, min, max, _) => {
+                assert_eq!(*value, -6);
+                assert_eq!(*min, -5);
+                assert_eq!(*max, 5);
+            }
+            e => panic!("Expected ValueOutOfRange error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_range_out_of_bounds_via_const_binding() {
     let source = r#"
         type MidRange = u64: bounds(50, 100);

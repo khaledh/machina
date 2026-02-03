@@ -1108,25 +1108,28 @@ fn test_lower_slice_expr_array() {
             cbr %v23, bb1, bb2
 
           bb1():
-            %v26: ptr<u64> = index_addr %v15, %v17
-            %v27: u64 = sub %v16, %v17
-            %v28: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l3
-            %v29: ptr<ptr<u64>> = field_addr %v28, 0
-            store %v29, %v26
-            %v30: ptr<u64> = field_addr %v28, 1
-            store %v30, %v27
-            %v31: struct { ptr: ptr<u64>, len: u64 } = load %v28
-            %v32: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l4
-            %v33: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l5
-            store %v33, %v31
-            %v34: u64 = const 16:u64
-            memcpy %v32, %v33, %v34
-            %v35: u64 = const 0:u64
-            ret %v35
+            %v29: ptr<u64> = index_addr %v15, %v17
+            %v30: u64 = sub %v16, %v17
+            %v31: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l3
+            %v32: ptr<ptr<u64>> = field_addr %v31, 0
+            store %v32, %v29
+            %v33: ptr<u64> = field_addr %v31, 1
+            store %v33, %v30
+            %v34: struct { ptr: ptr<u64>, len: u64 } = load %v31
+            %v35: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l4
+            %v36: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l5
+            store %v36, %v34
+            %v37: u64 = const 16:u64
+            memcpy %v35, %v36, %v37
+            %v38: u64 = const 0:u64
+            ret %v38
 
           bb2():
             %v24: u64 = const 2:u64
-            %v25: () = call @__rt_trap(%v24, %v17, %v18, %v20)
+            %v25: u64 = zext %v17 to u64
+            %v26: u64 = zext %v18 to u64
+            %v27: u64 = zext %v20 to u64
+            %v28: () = call @__rt_trap(%v24, %v25, %v26, %v27)
             unreachable
         }
     "};
@@ -1178,25 +1181,28 @@ fn test_lower_slice_expr_string() {
             cbr %v14, bb1, bb2
 
           bb1():
-            %v17: ptr<u8> = index_addr %v4, %v8
-            %v18: u64 = sub %v7, %v8
-            %v19: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l1
-            %v20: ptr<ptr<u8>> = field_addr %v19, 0
-            store %v20, %v17
-            %v21: ptr<u64> = field_addr %v19, 1
-            store %v21, %v18
-            %v22: struct { ptr: ptr<u8>, len: u64 } = load %v19
-            %v23: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l2
-            %v24: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l3
-            store %v24, %v22
-            %v25: u64 = const 16:u64
-            memcpy %v23, %v24, %v25
-            %v26: u64 = const 0:u64
-            ret %v26
+            %v20: ptr<u8> = index_addr %v4, %v8
+            %v21: u64 = sub %v7, %v8
+            %v22: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l1
+            %v23: ptr<ptr<u8>> = field_addr %v22, 0
+            store %v23, %v20
+            %v24: ptr<u64> = field_addr %v22, 1
+            store %v24, %v21
+            %v25: struct { ptr: ptr<u8>, len: u64 } = load %v22
+            %v26: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l2
+            %v27: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l3
+            store %v27, %v25
+            %v28: u64 = const 16:u64
+            memcpy %v26, %v27, %v28
+            %v29: u64 = const 0:u64
+            ret %v29
 
           bb2():
             %v15: u64 = const 2:u64
-            %v16: () = call @__rt_trap(%v15, %v8, %v9, %v11)
+            %v16: u64 = zext %v8 to u64
+            %v17: u64 = zext %v9 to u64
+            %v18: u64 = zext %v11 to u64
+            %v19: () = call @__rt_trap(%v15, %v16, %v17, %v18)
             unreachable
         }
     "};

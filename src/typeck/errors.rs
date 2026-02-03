@@ -155,10 +155,10 @@ pub enum TypeCheckErrorKind {
     StringIndexAssign(Span),
 
     #[error("Invalid range bounds: {0} >= {1}")]
-    InvalidRangeBounds(u64, u64, Span),
+    InvalidRangeBounds(i128, i128, Span),
 
-    #[error("Bounds base type must be an unsigned integer, found {0}")]
-    BoundsBaseNotUnsignedInt(Type, Span),
+    #[error("Bounds base type must be an integer, found {0}")]
+    BoundsBaseNotInt(Type, Span),
 
     #[error("Bounds [{0},{1}) are outside integer range [{2},{3})")]
     BoundsOutOfRange(i128, i128, i128, i128, Span),
@@ -251,7 +251,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::DuplicateMatchVariant(_, span) => *span,
             TypeCheckErrorKind::StringIndexAssign(span) => *span,
             TypeCheckErrorKind::InvalidRangeBounds(_, _, span) => *span,
-            TypeCheckErrorKind::BoundsBaseNotUnsignedInt(_, span) => *span,
+            TypeCheckErrorKind::BoundsBaseNotInt(_, span) => *span,
             TypeCheckErrorKind::BoundsOutOfRange(_, _, _, _, span) => *span,
             TypeCheckErrorKind::ValueOutOfRange(_, _, _, span) => *span,
             TypeCheckErrorKind::ForIterNotIterable(_, span) => *span,

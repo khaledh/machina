@@ -51,12 +51,8 @@ impl<'a> Elaborator<'a> {
                         kind: self.named_type_expr(name, span),
                         span,
                     };
-                    let min = u64::try_from(bounds.min).unwrap_or_else(|_| {
-                        panic!("compiler bug: negative bound {bounds:?} at {}", span)
-                    });
-                    let max = u64::try_from(bounds.max_excl).unwrap_or_else(|_| {
-                        panic!("compiler bug: negative bound {bounds:?} at {}", span)
-                    });
+                    let min = bounds.min;
+                    let max = bounds.max_excl;
                     sem::TypeExprKind::Refined {
                         base_ty_expr: Box::new(base_expr),
                         refinement: RefinementKind::Bounds { min, max },

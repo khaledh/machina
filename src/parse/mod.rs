@@ -161,6 +161,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_signed_int_lit(&mut self) -> Result<i128, ParseError> {
+        let neg = self.curr_token.kind == TK::Minus;
+        if neg {
+            self.advance();
+        }
+        let value = self.parse_int_lit()? as i128;
+        Ok(if neg { -value } else { value })
+    }
+
     fn parse_string_lit(&mut self) -> Result<String, ParseError> {
         if let TK::StringLit(value) = &self.curr_token.kind {
             self.advance();

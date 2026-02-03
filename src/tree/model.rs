@@ -256,7 +256,7 @@ pub struct TypeExpr<D> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RefinementKind {
-    Bounds { min: u64, max: u64 },
+    Bounds { min: i128, max: i128 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

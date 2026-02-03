@@ -108,26 +108,19 @@ fn resolve_type_expr_impl(
                     bits,
                     bounds,
                 } => {
-                    if signed {
-                        return Err(TypeCheckErrorKind::BoundsBaseNotUnsignedInt(
-                            Type::Int {
-                                signed,
-                                bits,
-                                bounds,
-                            },
-                            type_expr.span,
-                        )
-                        .into());
-                    }
                     let (min_bound, max_bound) = if let Some(bounds) = bounds {
                         (bounds.min, bounds.max_excl)
                     } else {
-                        let min = 0;
-                        let max = 1i128 << (bits as u32);
+                        let (min, max) = if signed {
+                            let max = 1i128 << (bits as u32 - 1);
+                            (-max, max)
+                        } else {
+                            (0, 1i128 << (bits as u32))
+                        };
                         (min, max)
                     };
-                    let min_val = *min as i128;
-                    let max_val = *max as i128;
+                    let min_val = *min;
+                    let max_val = *max;
                     if min_val < min_bound || max_val > max_bound {
                         return Err(TypeCheckErrorKind::BoundsOutOfRange(
                             min_val,
@@ -147,9 +140,7 @@ fn resolve_type_expr_impl(
                         }),
                     })
                 }
-                other => {
-                    Err(TypeCheckErrorKind::BoundsBaseNotUnsignedInt(other, type_expr.span).into())
-                }
+                other => Err(TypeCheckErrorKind::BoundsBaseNotInt(other, type_expr.span).into()),
             }
         }
         res::TypeExprKind::Slice { elem_ty_expr } => {

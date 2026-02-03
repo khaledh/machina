@@ -165,10 +165,10 @@ impl<'a> Parser<'a> {
         self.consume_keyword(TK::KwBounds)?;
         self.consume(&TK::LParen)?;
 
-        let first = self.parse_int_lit()?;
+        let first = self.parse_signed_int_lit()?;
         let (min, max) = if self.curr_token.kind == TK::Comma {
             self.advance();
-            let second = self.parse_int_lit()?;
+            let second = self.parse_signed_int_lit()?;
             (first, second)
         } else {
             (0, first)

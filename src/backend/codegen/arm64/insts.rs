@@ -238,7 +238,11 @@ impl Arm64Emitter {
                         } else {
                             (1u64 << dst_bits).saturating_sub(1)
                         };
-                        self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                        if mask == u64::MAX {
+                            self.emit_line(&format!("mov {}, {}", dst_reg, src_reg));
+                        } else {
+                            self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                        }
                     } else if *signed {
                         // Sign-extend by shifting up then arithmetic shifting down.
                         let shift = 64u32.saturating_sub(src_bits);
@@ -251,7 +255,11 @@ impl Arm64Emitter {
                         } else {
                             (1u64 << src_bits).saturating_sub(1)
                         };
-                        self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                        if mask == u64::MAX {
+                            self.emit_line(&format!("mov {}, {}", dst_reg, src_reg));
+                        } else {
+                            self.emit_line(&format!("and {}, {}, #0x{:x}", dst_reg, src_reg, mask));
+                        }
                     }
 
                     self.store_if_needed_typed(locs, dst_slot, &dst_reg, dst_ty);

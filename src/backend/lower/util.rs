@@ -171,7 +171,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Emits a range check guard that traps if `value` is outside [min, max_excl).
-    pub(super) fn emit_range_check(&mut self, value: ValueId, min: ValueId, max_excl: ValueId) {
+    pub(super) fn emit_range_check(
+        &mut self,
+        value: ValueId,
+        min: ValueId,
+        max_excl: ValueId,
+        signed: bool,
+    ) {
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let ge_min = self.builder.cmp(CmpOp::Ge, value, min, bool_ty);
         let lt_max = self.builder.cmp(CmpOp::Lt, value, max_excl, bool_ty);
@@ -192,11 +198,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Trap on out-of-range values.
         self.builder.select_block(trap_bb);
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let kind = self.builder.const_int(2, false, 64, u64_ty);
+        let kind = self
+            .builder
+            .const_int(if signed { 3 } else { 2 }, false, 64, u64_ty);
+        let trap_ty = if signed {
+            Type::sint(64)
+        } else {
+            Type::uint(64)
+        };
+        let trap_ir_ty = self.type_lowerer.lower_type(&trap_ty);
+        let trap_value = self.builder.int_extend(value, trap_ir_ty, signed);
+        let trap_min = self.builder.int_extend(min, trap_ir_ty, signed);
+        let trap_max = self.builder.int_extend(max_excl, trap_ir_ty, signed);
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
         let _ = self.builder.call(
             Callee::Runtime(RuntimeFn::Trap),
-            vec![kind, value, min, max_excl],
+            vec![kind, trap_value, trap_min, trap_max],
             unit_ty,
         );
         self.builder.terminate(Terminator::Unreachable);
@@ -207,10 +224,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     pub(super) fn emit_conversion_check(&mut self, from_ty: &Type, to_ty: &Type, value: ValueId) {
         if let TypeAssignability::IntToBounded { min, max } = type_assignable(from_ty, to_ty) {
-            let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-            let min_val = self.builder.const_int(min, false, 64, u64_ty);
-            let max_val = self.builder.const_int(max, false, 64, u64_ty);
-            self.emit_range_check(value, min_val, max_val);
+            let (signed, bits) = match from_ty {
+                Type::Int {
+                    signed,
+                    bits,
+                    bounds: _,
+                } => (*signed, *bits),
+                other => panic!("backend bounds check on non-int type {:?}", other),
+            };
+            let ir_ty = self.type_lowerer.lower_type(from_ty);
+            let min_val = self.builder.const_int(min, signed, bits, ir_ty);
+            let max_val = self.builder.const_int(max, signed, bits, ir_ty);
+            self.emit_range_check(value, min_val, max_val, signed);
         }
     }
 

@@ -158,7 +158,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .builder
             .const_int((u32::MAX as u64 + 1) as i128, false, 64, u64_ty);
         let zero = self.builder.const_int(0, false, 64, u64_ty);
-        self.emit_range_check(total, zero, max_excl);
+        self.emit_range_check(total, zero, max_excl, false);
 
         let total_u32 = self.builder.int_trunc(total, u32_ty);
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);

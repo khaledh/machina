@@ -10,7 +10,7 @@ pub enum SemCheckError {
     ValueOutOfRange(i128, i128, i128, Span),
 
     #[error("Invalid range bounds: {0} >= {1}")]
-    InvalidRangeBounds(u64, u64, Span),
+    InvalidRangeBounds(i128, i128, Span),
 
     #[error("Division by zero")]
     DivisionByZero(Span),

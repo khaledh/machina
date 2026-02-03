@@ -442,11 +442,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                     // Enforce start <= base_len when it is not trivially zero.
                     if start_check {
-                        self.emit_range_check(start_val, zero, max_excl);
+                        self.emit_range_check(start_val, zero, max_excl, false);
                     }
                     // Enforce start <= end <= base_len when an explicit end is provided.
                     if end_check {
-                        self.emit_range_check(end_val, start_val, max_excl);
+                        self.emit_range_check(end_val, start_val, max_excl, false);
                     }
                 }
 

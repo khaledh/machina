@@ -29,6 +29,16 @@ static void write_u64(uint64_t value) {
     (void)write(STDERR_FILENO, &buf[pos], sizeof(buf) - pos);
 }
 
+static void write_i64(int64_t value) {
+    if (value < 0) {
+        write_msg("-");
+        uint64_t mag = (uint64_t)(-(value + 1)) + 1;
+        write_u64(mag);
+    } else {
+        write_u64((uint64_t)value);
+    }
+}
+
 /*
  * Runtime trap handler called by generated code.
  * - kind: check kind discriminator
@@ -53,6 +63,11 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
     const char *range_msg_2 = ", min(incl)=";
     const char *range_msg_3 = ", max(excl)=";
 
+    // signed range check
+    const char *range_signed_msg_1 = "Value out of range: value=";
+    const char *range_signed_msg_2 = ", min(incl)=";
+    const char *range_signed_msg_3 = ", max(excl)=";
+
     // unknown trap
     const char *fallback_msg = "Unknown trap";
 
@@ -76,6 +91,15 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
             write_u64(arg1);
             write_msg(range_msg_3);
             write_u64(arg2);
+            break;
+
+        case 3: // signed range check
+            write_msg(range_signed_msg_1);
+            write_i64((int64_t)arg0);
+            write_msg(range_signed_msg_2);
+            write_i64((int64_t)arg1);
+            write_msg(range_signed_msg_3);
+            write_i64((int64_t)arg2);
             break;
 
         default: // unknown trap

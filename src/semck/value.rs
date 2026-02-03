@@ -112,17 +112,6 @@ impl<'a> ValueChecker<'a> {
         }
     }
 
-    fn check_range_value(&mut self, value: u64, min: u64, max: u64, span: Span) {
-        if value < min || value >= max {
-            self.errors.push(SemCheckError::ValueOutOfRange(
-                value as i128,
-                min as i128,
-                max as i128,
-                span,
-            ));
-        }
-    }
-
     fn check_type_expr(&mut self, ty: &TypeExpr) {
         self.run_type_rules(ty);
         match &ty.kind {
@@ -189,21 +178,7 @@ impl<'a> ValueChecker<'a> {
             return;
         };
         if let Some(const_value) = self.const_int_value(value) {
-            if const_value < bounds.min {
-                self.errors.push(SemCheckError::ValueOutOfRange(
-                    const_value,
-                    bounds.min,
-                    bounds.max_excl,
-                    value.span,
-                ));
-            } else {
-                self.check_range_value(
-                    const_value as u64,
-                    bounds.min as u64,
-                    bounds.max_excl as u64,
-                    value.span,
-                );
-            }
+            self.check_int_range(const_value, bounds.min, bounds.max_excl, value.span);
         }
     }
 
@@ -216,21 +191,7 @@ impl<'a> ValueChecker<'a> {
             return;
         };
         if let Some(value) = int_lit_value(expr) {
-            if value < bounds.min {
-                self.errors.push(SemCheckError::ValueOutOfRange(
-                    value,
-                    bounds.min,
-                    bounds.max_excl,
-                    expr.span,
-                ));
-            } else {
-                self.check_range_value(
-                    value as u64,
-                    bounds.min as u64,
-                    bounds.max_excl as u64,
-                    expr.span,
-                );
-            }
+            self.check_int_range(value, bounds.min, bounds.max_excl, expr.span);
         }
     }
 
@@ -298,8 +259,6 @@ impl<'a> ValueChecker<'a> {
         if start < 0 || end < 0 {
             return;
         }
-        let start = start as u64;
-        let end = end as u64;
         if start >= end {
             self.errors
                 .push(SemCheckError::InvalidRangeBounds(start, end, expr.span));
