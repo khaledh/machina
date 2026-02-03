@@ -135,8 +135,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(self.load_slot(&slot).into())
             }
 
-            sem::ValueExprKind::Range { start, .. } => {
-                // Range values are represented as u64 in SSA (bounds live in the type).
+            sem::ValueExprKind::Range { start, end } => {
+                let (sem::ValueExprKind::IntLit(start), sem::ValueExprKind::IntLit(_end)) =
+                    (&start.kind, &end.kind)
+                else {
+                    panic!("backend range values require literal bounds");
+                };
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self
                     .builder

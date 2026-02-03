@@ -1214,8 +1214,8 @@ fn test_parse_for_range_loop() {
         }
         match &iter.kind {
             ExprKind::Range { start, end } => {
-                assert_eq!(*start, 0);
-                assert_eq!(*end, 3);
+                assert!(matches!(start.kind, ExprKind::IntLit(0)));
+                assert!(matches!(end.kind, ExprKind::IntLit(3)));
             }
             _ => panic!("Expected range iterator"),
         }
@@ -1226,6 +1226,36 @@ fn test_parse_for_range_loop() {
 
     let tail = tail.expect("Expected block to have a tail expr");
     assert!(matches!(tail.kind, ExprKind::IntLit(0)));
+}
+
+#[test]
+fn test_parse_for_range_expr_bounds() {
+    let source = r#"
+        fn test() -> u64 {
+            let start = 0;
+            let end = 3;
+            for i in start..end { i; }
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _tail) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 2);
+
+    if let StmtExprKind::For { iter, .. } = &stmt.kind {
+        match &iter.kind {
+            ExprKind::Range { start, end } => {
+                assert!(matches!(start.kind, ExprKind::Var { .. }));
+                assert!(matches!(end.kind, ExprKind::Var { .. }));
+            }
+            _ => panic!("Expected range iterator"),
+        }
+    } else {
+        panic!("Expected for loop");
+    }
 }
 
 #[test]

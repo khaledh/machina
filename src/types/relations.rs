@@ -138,7 +138,7 @@ fn u64_to_range(from: &Type, to: &Type) -> Option<TypeAssignability> {
     else {
         return None;
     };
-    let Type::Range { min, max } = to else {
+    let Type::Range { min: Some(min), max: Some(max) } = to else {
         return None;
     };
     Some(TypeAssignability::UInt64ToRange {
@@ -147,7 +147,10 @@ fn u64_to_range(from: &Type, to: &Type) -> Option<TypeAssignability> {
     })
 }
 
-fn range_to_u64(_from: &Type, to: &Type) -> Option<TypeAssignability> {
+fn range_to_u64(from: &Type, to: &Type) -> Option<TypeAssignability> {
+    let Type::Range { min: Some(_), max: Some(_) } = from else {
+        return None;
+    };
     matches!(
         to,
         Type::Int {
@@ -195,6 +198,9 @@ fn value_u64_to_range(
         return None;
     }
     let Type::Range { min, max } = to_ty else {
+        return None;
+    };
+    let (Some(min), Some(max)) = (min, max) else {
         return None;
     };
     if let Some(value) = int_lit_value(from_value)

@@ -683,8 +683,8 @@ pub enum ExprKind<D, T = ()> {
 
     // Range
     Range {
-        start: u64,
-        end: u64, // exclusive
+        start: Box<Expr<D, T>>,
+        end: Box<Expr<D, T>>, // exclusive
     },
 
     // Slice

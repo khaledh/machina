@@ -124,6 +124,44 @@ fn test_struct_field_access_through_heap() {
 }
 
 #[test]
+fn test_for_range_expr_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            let start = 0;
+            let end = 4;
+            for i in start..end { i; }
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_len_intrinsic_on_array() {
+    let source = r#"
+        fn test() -> u64 {
+            let arr = [1, 2, 3];
+            arr.len()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_len_intrinsic_on_string() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = "hello";
+            s.len()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_if_without_else_requires_unit() {
     let source = r#"
         fn test() -> () {

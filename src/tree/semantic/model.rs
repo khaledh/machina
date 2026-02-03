@@ -465,8 +465,8 @@ pub enum ValueExprKind {
 
     // Range
     Range {
-        start: u64,
-        end: u64, // exclusive
+        start: Box<ValueExpr>,
+        end: Box<ValueExpr>, // exclusive
     },
 
     // Slice

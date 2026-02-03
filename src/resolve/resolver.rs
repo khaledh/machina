@@ -929,8 +929,12 @@ impl Visitor<()> for SymbolResolver {
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
-            | ExprKind::UnitLit
-            | ExprKind::Range { .. } => {}
+            | ExprKind::UnitLit => {}
+
+            ExprKind::Range { start, end } => {
+                self.visit_expr(start);
+                self.visit_expr(end);
+            }
 
             ExprKind::ArrayLit { elem_ty, .. } => {
                 if let Some(elem_ty) = elem_ty {

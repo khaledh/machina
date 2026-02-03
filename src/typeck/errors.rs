@@ -180,6 +180,9 @@ pub enum TypeCheckErrorKind {
 
     #[error("Format expression must be string or integer, found {0}")]
     StringFmtExprUnsupportedType(Type, Span),
+
+    #[error("len() target must be an lvalue")]
+    LenTargetNotLvalue(Span),
 }
 
 impl TypeCheckError {
@@ -250,6 +253,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::SliceTargetNotArrayOrString(_, span) => *span,
             TypeCheckErrorKind::SliceTargetZeroDimArray(_, span) => *span,
             TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,
+            TypeCheckErrorKind::LenTargetNotLvalue(span) => *span,
         }
     }
 }

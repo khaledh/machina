@@ -416,8 +416,12 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
         | ExprKind::CharLit(_)
         | ExprKind::StringLit { .. }
         | ExprKind::UnitLit
-        | ExprKind::Var { .. }
-        | ExprKind::Range { .. } => {}
+        | ExprKind::Var { .. } => {}
+
+        ExprKind::Range { start, end } => {
+            v.visit_expr(start);
+            v.visit_expr(end);
+        }
 
         ExprKind::StringFmt { segments } => {
             for segment in segments {

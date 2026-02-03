@@ -1274,6 +1274,27 @@ impl TypeChecker {
         let callee_ty = self.visit_expr(callee, None)?;
         let peeled_ty = self.expand_shallow_type(&callee_ty.peel_heap());
 
+        if method_name == "len" {
+            if !args.is_empty() {
+                return Err(TypeCheckErrorKind::ArgCountMismatch(
+                    "len".to_string(),
+                    0,
+                    args.len(),
+                    call_expr.span,
+                )
+                .into());
+            }
+            if !self.is_place_expr(callee) {
+                return Err(TypeCheckErrorKind::LenTargetNotLvalue(callee.span).into());
+            }
+            return match peeled_ty {
+                Type::Array { .. } | Type::Slice { .. } | Type::String => Ok(Type::uint(64)),
+                _ => {
+                    Err(TypeCheckErrorKind::InvalidStructFieldTarget(callee_ty, callee.span).into())
+                }
+            };
+        }
+
         // Check that the callee type is a struct or enum
         let type_name = match peeled_ty {
             Type::Struct { name, .. } | Type::Enum { name, .. } => name,
@@ -1299,6 +1320,25 @@ impl TypeChecker {
         let name = format!("{}::{}", type_name, method_name);
 
         self.check_named_call_common(&name, callee, call_expr, args, &overloads, true)
+    }
+
+    fn is_place_expr(&self, expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Var { .. }
+            | ExprKind::Deref { .. }
+            | ExprKind::ArrayIndex { .. }
+            | ExprKind::TupleField { .. }
+            | ExprKind::StructField { .. } => true,
+            ExprKind::Move { expr } => self.is_place_expr(expr),
+            _ => false,
+        }
+    }
+
+    fn range_bound_lit(expr: &Expr) -> Option<u64> {
+        match expr.kind {
+            ExprKind::IntLit(value) => Some(value),
+            _ => None,
+        }
     }
 
     fn lookup_method_self_mode(&self, def_id: DefId) -> ParamMode {
@@ -2081,10 +2121,24 @@ impl TreeFolder<DefId> for TypeChecker {
                     Ok(then_type)
                 }
 
-                ExprKind::Range { start, end } => Ok(Type::Range {
-                    min: *start,
-                    max: *end,
-                }),
+                ExprKind::Range { start, end } => {
+                    let start_ty = self.visit_expr(start, None)?;
+                    if start_ty != Type::uint(64) {
+                        return Err(
+                            TypeCheckErrorKind::IndexTypeNotInt(start_ty, start.span).into()
+                        );
+                    }
+                    let end_ty = self.visit_expr(end, None)?;
+                    if end_ty != Type::uint(64) {
+                        return Err(TypeCheckErrorKind::IndexTypeNotInt(end_ty, end.span).into());
+                    }
+                    let (min, max) =
+                        match (Self::range_bound_lit(start), Self::range_bound_lit(end)) {
+                            (Some(min), Some(max)) => (Some(min), Some(max)),
+                            _ => (None, None),
+                        };
+                    Ok(Type::Range { min, max })
+                }
 
                 ExprKind::Slice { target, start, end } => self.check_slice(target, start, end),
 

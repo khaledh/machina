@@ -185,6 +185,9 @@ impl<'a> ValueChecker<'a> {
         let Type::Range { min, max } = ty else {
             return;
         };
+        let (Some(min), Some(max)) = (min, max) else {
+            return;
+        };
         if let Some(lit_value) = int_lit_value(value) {
             if lit_value < 0 {
                 self.errors.push(SemCheckError::ValueOutOfRange(
@@ -201,6 +204,9 @@ impl<'a> ValueChecker<'a> {
 
     fn check_return_value_range(&mut self, expr: &Expr) {
         let Some(Type::Range { min, max }) = self.current_return_ty() else {
+            return;
+        };
+        let (Some(min), Some(max)) = (min, max) else {
             return;
         };
         if let Some(value) = int_lit_value(expr) {
@@ -346,10 +352,19 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
                 }
             }
             ExprKind::Range { start, end } => {
-                // Range bounds must be ordered (start < end).
-                if start >= end {
-                    self.errors
-                        .push(SemCheckError::InvalidRangeBounds(*start, *end, expr.span));
+                // If both bounds are constant, ensure start < end.
+                if let (Some(start), Some(end)) =
+                    (self.const_int_value(start), self.const_int_value(end))
+                {
+                    if start < 0 || end < 0 {
+                        return;
+                    }
+                    let start = start as u64;
+                    let end = end as u64;
+                    if start >= end {
+                        self.errors
+                            .push(SemCheckError::InvalidRangeBounds(start, end, expr.span));
+                    }
                 }
             }
             ExprKind::UnaryOp {

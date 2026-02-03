@@ -97,8 +97,8 @@ fn resolve_type_expr_impl(
             Ok(Type::Tuple { field_tys })
         }
         res::TypeExprKind::Range { min, max } => Ok(Type::Range {
-            min: *min,
-            max: *max,
+            min: Some(*min),
+            max: Some(*max),
         }),
         res::TypeExprKind::Slice { elem_ty_expr } => {
             let elem_ty =

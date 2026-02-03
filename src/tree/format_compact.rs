@@ -220,7 +220,11 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
         sem::ValueExprKind::If { cond, .. } => {
             format!("if {} {{ ... }}", format_semantic_value_expr_compact(cond))
         }
-        sem::ValueExprKind::Range { start, end } => format!("{start}..{end}"),
+        sem::ValueExprKind::Range { start, end } => format!(
+            "{}..{}",
+            format_semantic_value_expr_compact(start),
+            format_semantic_value_expr_compact(end)
+        ),
         sem::ValueExprKind::Slice { target, start, end } => {
             let mut out = format_semantic_place_expr_compact(target).to_string();
             out.push('[');

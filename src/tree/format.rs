@@ -741,8 +741,10 @@ impl Expr {
             ExprKind::Range { start, end } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Range [{}]", pad, self.id)?;
-                writeln!(f, "{}Start: {}", pad1, start)?;
-                writeln!(f, "{}End: {}", pad1, end)?;
+                writeln!(f, "{}Start:", pad1)?;
+                start.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}End:", pad1)?;
+                end.fmt_with_indent(f, level + 2)?;
             }
             ExprKind::Slice { target, start, end } => {
                 let pad1 = indent(level + 1);

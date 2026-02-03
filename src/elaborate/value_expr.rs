@@ -241,6 +241,12 @@ impl<'a> Elaborator<'a> {
         method_name: &str,
         args: &[norm::CallArg],
     ) -> sem::ValueExprKind {
+        if method_name == "len" && args.is_empty() {
+            let place = self.elab_place(callee);
+            return sem::ValueExprKind::Len {
+                place: Box::new(place),
+            };
+        }
         let call_sig = self.get_call_sig(expr.id);
         let receiver = call_sig
             .receiver
@@ -338,8 +344,8 @@ impl<'a> Elaborator<'a> {
                 else_body: Box::new(self.elab_value(else_body)),
             },
             norm::ExprKind::Range { start, end } => sem::ValueExprKind::Range {
-                start: *start,
-                end: *end,
+                start: Box::new(self.elab_value(start)),
+                end: Box::new(self.elab_value(end)),
             },
             norm::ExprKind::Slice { target, start, end } => {
                 let target_place = self.elab_place(target);

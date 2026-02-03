@@ -23,8 +23,8 @@ pub enum Type {
     Bool,
     Char,
     Range {
-        min: u64,
-        max: u64,
+        min: Option<u64>,
+        max: Option<u64>,
     },
     Fn {
         params: Vec<FnParam>,

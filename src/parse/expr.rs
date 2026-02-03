@@ -76,15 +76,17 @@ impl<'a> Parser<'a> {
         };
 
         if self.allow_range_expr && matches!(self.curr_token.kind, TK::DotDot) {
-            let start = match lhs.kind {
-                ExprKind::IntLit(value) => value,
-                _ => return Err(ParseError::ExpectedIntLit(self.curr_token.clone())),
-            };
             self.advance();
-            let end = self.parse_int_lit()?;
+            let allow_range_expr = self.allow_range_expr;
+            self.allow_range_expr = false;
+            let end = self.parse_expr(0)?;
+            self.allow_range_expr = allow_range_expr;
             lhs = Expr {
                 id: self.id_gen.new_id(),
-                kind: ExprKind::Range { start, end },
+                kind: ExprKind::Range {
+                    start: Box::new(lhs),
+                    end: Box::new(end),
+                },
                 ty: (),
                 span: self.close(marker),
             };
@@ -487,21 +489,6 @@ impl<'a> Parser<'a> {
                 then_body: Box::new(then_body),
                 else_body: Box::new(else_body),
             },
-            ty: (),
-            span: self.close(marker),
-        })
-    }
-
-    pub(super) fn parse_range_expr(&mut self) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-
-        let start = self.parse_int_lit()?;
-        self.consume(&TK::DotDot)?;
-        let end = self.parse_int_lit()?;
-
-        Ok(Expr {
-            id: self.id_gen.new_id(),
-            kind: ExprKind::Range { start, end },
             ty: (),
             span: self.close(marker),
         })

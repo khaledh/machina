@@ -996,8 +996,8 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
             else_body: Box::new(mapper.map_expr(else_body, ctx)),
         },
         ExprKind::Range { start, end } => ExprKind::Range {
-            start: *start,
-            end: *end,
+            start: Box::new(mapper.map_expr(start, ctx)),
+            end: Box::new(mapper.map_expr(end, ctx)),
         },
         ExprKind::Slice { target, start, end } => ExprKind::Slice {
             target: Box::new(mapper.map_expr(target, ctx)),

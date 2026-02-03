@@ -62,8 +62,8 @@ impl<'a> Elaborator<'a> {
 
         let (iter_place, idx_place, len_value, elem_ty, is_range) = match &iter.kind {
             norm::ExprKind::Range { start, end } => {
-                let len_expr = self.make_u64_lit(*end, span);
-                let start_expr = self.make_u64_lit(*start, span);
+                let start_expr = self.elab_value(start);
+                let len_expr = self.elab_value(end);
 
                 let idx_info = self.new_for_local("idx", u64_ty.clone(), true, span);
                 let idx_stmt = self.make_var_bind_stmt(idx_info.pattern.clone(), start_expr, span);

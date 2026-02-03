@@ -214,13 +214,7 @@ impl<'a> Parser<'a> {
         self.consume_keyword(TK::KwIn)?;
 
         self.allow_struct_lit = false;
-        let iter = if matches!(self.curr_token.kind, TK::IntLit(_))
-            && matches!(self.peek().map(|t| &t.kind), Some(TK::DotDot))
-        {
-            self.parse_range_expr()?
-        } else {
-            self.parse_expr(0)?
-        };
+        let iter = self.parse_expr(0)?;
         self.allow_struct_lit = true;
 
         let body = self.parse_block()?;
