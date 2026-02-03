@@ -57,8 +57,10 @@ fn test_range_check_traps_with_message_and_exit_code() {
         r#"
             type MidRange = u64: bounds(50, 100);
 
+            fn make() -> u64 { 42 }
+
             fn main() -> u64 {
-                let x = 42;
+                let x = make();
                 let y: MidRange = x;
                 y
             }

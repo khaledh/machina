@@ -123,17 +123,10 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_type_expr(&mut self, ty: &TypeExpr) {
+        self.run_type_rules(ty);
         match &ty.kind {
-            TypeExprKind::BoundedInt {
-                base_ty_expr,
-                min,
-                max,
-            } => {
+            TypeExprKind::BoundedInt { base_ty_expr, .. } => {
                 self.check_type_expr(base_ty_expr);
-                if min >= max {
-                    self.errors
-                        .push(SemCheckError::InvalidRangeBounds(*min, *max, ty.span));
-                }
             }
             TypeExprKind::Array { elem_ty_expr, .. } => self.check_type_expr(elem_ty_expr),
             TypeExprKind::Tuple { field_ty_exprs } => {
@@ -190,16 +183,16 @@ impl<'a> ValueChecker<'a> {
         let Type::BoundedInt { min, max, .. } = ty else {
             return;
         };
-        if let Some(lit_value) = int_lit_value(value) {
-            if lit_value < 0 {
+        if let Some(const_value) = self.const_int_value(value) {
+            if const_value < 0 {
                 self.errors.push(SemCheckError::ValueOutOfRange(
-                    lit_value,
+                    const_value,
                     *min as i128,
                     *max as i128,
                     value.span,
                 ));
             } else {
-                self.check_range_value(lit_value as u64, *min, *max, value.span);
+                self.check_range_value(const_value as u64, *min, *max, value.span);
             }
         }
     }
@@ -220,6 +213,176 @@ impl<'a> ValueChecker<'a> {
                 self.check_range_value(value as u64, *min, *max, expr.span);
             }
         }
+    }
+
+    fn run_type_rules(&mut self, ty: &TypeExpr) {
+        self.rule_bounded_int_type(ty);
+    }
+
+    fn run_expr_rules(&mut self, expr: &Expr) {
+        self.rule_int_literal_bounds(expr);
+        self.rule_range_bounds(expr);
+        self.rule_div_by_zero(expr);
+        self.rule_array_lit_elem_ty(expr);
+        self.rule_call_arg_ranges(expr);
+    }
+
+    fn run_stmt_rules(&mut self, stmt: &StmtExpr) {
+        self.rule_stmt_type_exprs(stmt);
+        self.rule_stmt_range_bindings(stmt);
+        self.rule_stmt_const_env(stmt);
+        self.rule_stmt_return_ranges(stmt);
+    }
+
+    fn rule_bounded_int_type(&mut self, ty: &TypeExpr) {
+        let TypeExprKind::BoundedInt { min, max, .. } = &ty.kind else {
+            return;
+        };
+        if min >= max {
+            self.errors
+                .push(SemCheckError::InvalidRangeBounds(*min, *max, ty.span));
+        }
+    }
+
+    fn rule_int_literal_bounds(&mut self, expr: &Expr) {
+        let Some(lit_value) = int_lit_value(expr) else {
+            return;
+        };
+        let Type::Int { signed, bits } = *self.ctx.type_map.type_table().get(expr.ty) else {
+            return;
+        };
+        let min = if signed {
+            -(1i128 << (bits as u32 - 1))
+        } else {
+            0
+        };
+        let max_excl = if signed {
+            1i128 << (bits as u32 - 1)
+        } else {
+            1i128 << (bits as u32)
+        };
+        self.check_int_range(lit_value, min, max_excl, expr.span);
+    }
+
+    fn rule_range_bounds(&mut self, expr: &Expr) {
+        let ExprKind::Range { start, end } = &expr.kind else {
+            return;
+        };
+        let (Some(start), Some(end)) = (self.const_int_value(start), self.const_int_value(end))
+        else {
+            return;
+        };
+        if start < 0 || end < 0 {
+            return;
+        }
+        let start = start as u64;
+        let end = end as u64;
+        if start >= end {
+            self.errors
+                .push(SemCheckError::InvalidRangeBounds(start, end, expr.span));
+        }
+    }
+
+    fn rule_div_by_zero(&mut self, expr: &Expr) {
+        let ExprKind::BinOp {
+            op: BinaryOp::Div | BinaryOp::Mod,
+            right,
+            ..
+        } = &expr.kind
+        else {
+            return;
+        };
+        if self.const_int_value(right) == Some(0) {
+            self.errors.push(SemCheckError::DivisionByZero(right.span));
+        }
+    }
+
+    fn rule_array_lit_elem_ty(&mut self, expr: &Expr) {
+        let ExprKind::ArrayLit {
+            elem_ty: Some(elem_ty),
+            ..
+        } = &expr.kind
+        else {
+            return;
+        };
+        self.check_type_expr(elem_ty);
+    }
+
+    fn rule_call_arg_ranges(&mut self, expr: &Expr) {
+        let (ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. }) = &expr.kind else {
+            return;
+        };
+        let Some(sig) = self.ctx.call_sigs.get(&expr.id) else {
+            return;
+        };
+        for (arg, param) in args.iter().zip(sig.params.iter()) {
+            self.check_range_binding_value(&arg.expr, &param.ty);
+        }
+    }
+
+    fn rule_stmt_type_exprs(&mut self, stmt: &StmtExpr) {
+        match &stmt.kind {
+            StmtExprKind::LetBind { decl_ty, .. } | StmtExprKind::VarBind { decl_ty, .. } => {
+                if let Some(ty) = decl_ty {
+                    self.check_type_expr(ty);
+                }
+            }
+            StmtExprKind::VarDecl { decl_ty, .. } => {
+                self.check_type_expr(decl_ty);
+            }
+            _ => {}
+        }
+    }
+
+    fn rule_stmt_range_bindings(&mut self, stmt: &StmtExpr) {
+        match &stmt.kind {
+            StmtExprKind::LetBind { decl_ty, value, .. }
+            | StmtExprKind::VarBind { decl_ty, value, .. } => {
+                if let Some(ty) = decl_ty
+                    && let Some(resolved_ty) = self.resolve_type(ty)
+                {
+                    self.check_range_binding_value(value, &resolved_ty);
+                }
+            }
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
+                let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
+                self.check_range_binding_value(value, assignee_ty);
+            }
+            _ => {}
+        }
+    }
+
+    fn rule_stmt_const_env(&mut self, stmt: &StmtExpr) {
+        match &stmt.kind {
+            StmtExprKind::LetBind { pattern, value, .. }
+            | StmtExprKind::VarBind { pattern, value, .. } => {
+                if let BindPatternKind::Name { def_id, .. } = &pattern.kind {
+                    let const_value = self.const_int_value(value);
+                    self.set_const(*def_id, const_value);
+                }
+            }
+            StmtExprKind::VarDecl { def_id, .. } => {
+                self.set_const(*def_id, None);
+            }
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
+                if let ExprKind::Var { def_id, .. } = assignee.kind {
+                    let const_value = self.const_int_value(value);
+                    self.set_const(def_id, const_value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn rule_stmt_return_ranges(&mut self, stmt: &StmtExpr) {
+        let StmtExprKind::Return { value: Some(value) } = &stmt.kind else {
+            return;
+        };
+        self.check_return_value_range(value);
     }
 }
 
@@ -248,53 +411,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
     }
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
-        match &stmt.kind {
-            StmtExprKind::LetBind {
-                pattern,
-                decl_ty,
-                value,
-                ..
-            }
-            | StmtExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value,
-                ..
-            } => {
-                if let Some(ty) = decl_ty {
-                    self.check_type_expr(ty);
-                    if let Some(resolved_ty) = self.resolve_type(ty) {
-                        self.check_range_binding_value(value, &resolved_ty);
-                    }
-                }
-                if let BindPatternKind::Name { def_id, .. } = &pattern.kind {
-                    let const_value = self.const_int_value(value);
-                    self.set_const(*def_id, const_value);
-                }
-            }
-            StmtExprKind::VarDecl {
-                def_id, decl_ty, ..
-            } => {
-                self.check_type_expr(decl_ty);
-                self.set_const(*def_id, None);
-            }
-            StmtExprKind::Assign {
-                assignee, value, ..
-            } => {
-                let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
-                self.check_range_binding_value(value, assignee_ty);
-                if let ExprKind::Var { def_id, .. } = assignee.kind {
-                    let const_value = self.const_int_value(value);
-                    self.set_const(def_id, const_value);
-                }
-            }
-            StmtExprKind::Return { value: Some(value) } => {
-                self.check_return_value_range(value);
-            }
-            StmtExprKind::Return { value: None } => {}
-            _ => {}
-        }
-
+        self.run_stmt_rules(stmt);
         walk_stmt_expr(self, stmt);
     }
 
@@ -331,86 +448,7 @@ impl Visitor<DefId, TypeId> for ValueChecker<'_> {
             self.pop_const_scope();
             return;
         }
-
-        match &expr.kind {
-            ExprKind::IntLit(value) => {
-                // Enforce integer literal ranges based on the resolved type.
-                let ty = self.ctx.type_map.type_table().get(expr.ty);
-                if let Type::Int { signed, bits } = *ty {
-                    let min = if signed {
-                        -(1i128 << (bits as u32 - 1))
-                    } else {
-                        0
-                    };
-                    let max_excl = if signed {
-                        1i128 << (bits as u32 - 1)
-                    } else {
-                        1i128 << (bits as u32)
-                    };
-                    self.check_int_range(*value as i128, min, max_excl, expr.span);
-                }
-            }
-            ExprKind::Range { start, end } => {
-                // If both bounds are constant, ensure start < end.
-                if let (Some(start), Some(end)) =
-                    (self.const_int_value(start), self.const_int_value(end))
-                {
-                    if start < 0 || end < 0 {
-                        return;
-                    }
-                    let start = start as u64;
-                    let end = end as u64;
-                    if start >= end {
-                        self.errors
-                            .push(SemCheckError::InvalidRangeBounds(start, end, expr.span));
-                    }
-                }
-            }
-            ExprKind::UnaryOp {
-                op: UnaryOp::Neg, ..
-            } => {
-                if let Some(lit_value) = int_lit_value(expr)
-                    && let Type::Int { signed, bits } = *self.ctx.type_map.type_table().get(expr.ty)
-                {
-                    let min = if signed {
-                        -(1i128 << (bits as u32 - 1))
-                    } else {
-                        0
-                    };
-                    let max_excl = if signed {
-                        1i128 << (bits as u32 - 1)
-                    } else {
-                        1i128 << (bits as u32)
-                    };
-                    self.check_int_range(lit_value, min, max_excl, expr.span);
-                }
-            }
-            ExprKind::BinOp {
-                op: BinaryOp::Div | BinaryOp::Mod,
-                right,
-                ..
-            } => {
-                // Reject constant division by zero early.
-                if self.const_int_value(right) == Some(0) {
-                    self.errors.push(SemCheckError::DivisionByZero(right.span));
-                }
-            }
-            ExprKind::ArrayLit {
-                elem_ty: Some(elem_ty),
-                ..
-            } => {
-                self.check_type_expr(elem_ty);
-            }
-            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
-                if let Some(sig) = self.ctx.call_sigs.get(&expr.id) {
-                    for (arg, param) in args.iter().zip(sig.params.iter()) {
-                        self.check_range_binding_value(&arg.expr, &param.ty);
-                    }
-                }
-            }
-            _ => {}
-        }
-
+        self.run_expr_rules(expr);
         walk_expr(self, expr);
     }
 }

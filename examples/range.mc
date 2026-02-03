@@ -15,8 +15,8 @@ fn main() {
     // take_bounded_int(42); // Compile error: Value out of range: 42 not in range [50,100)
 
     let x = 42;
-    // let bad2: MidRange = x; // Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100
-    take_bounded_int(x); // Runtime error: Value out of range: value=42, min(incl)=50, max(excl)=100
+    // let bad2: MidRange = x; // Compile error: Value out of range: 42 not in range [50,100)
+    // take_bounded_int(x); // Compile error: Value out of range: 42 not in range [50,100)
 
     if mid < midhigh {
         println(mid);

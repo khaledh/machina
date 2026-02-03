@@ -87,6 +87,35 @@ fn test_range_literal_out_of_bounds() {
 }
 
 #[test]
+fn test_range_out_of_bounds_via_const_binding() {
+    let source = r#"
+        type MidRange = u64: bounds(50, 100);
+
+        fn take_bounded_int(x: MidRange) -> u64 { x }
+
+        fn test() -> u64 {
+            let x = 42;
+            let bad2: MidRange = x;
+            take_bounded_int(x);
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|err| matches!(err, SemCheckError::ValueOutOfRange(42, 50, 100, _))),
+            "Expected ValueOutOfRange(42, 50, 100), got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
 fn test_mod_by_zero_rejected() {
     let source = r#"
         fn test() -> u64 {
