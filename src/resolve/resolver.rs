@@ -225,6 +225,9 @@ impl SymbolResolver {
                     };
                     resolved.link_name = Some(name.clone());
                 }
+                "__property_get" | "__property_set" => {
+                    // Internal marker attributes emitted by the parser for properties.
+                }
                 _ => self
                     .errors
                     .push(ResolveError::UnknownAttribute(attr.name.clone(), attr.span)),

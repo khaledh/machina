@@ -1092,6 +1092,143 @@ fn test_closure_return_mismatch_rejected() {
 }
 
 #[test]
+fn test_property_getter_typechecks() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            prop sum: u64 {
+                get { self.x + self.y }
+            }
+        }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            p.sum
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_property_setter_typechecks() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            prop y_val: u64 {
+                get { self.y }
+                set(v) { self.y = v; }
+            }
+        }
+
+        fn test() -> u64 {
+            var p = Point { x: 1, y: 2 };
+            p.y_val = 5;
+            p.y_val
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_property_read_only_rejects_assignment() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            prop sum: u64 {
+                get { self.x + self.y }
+            }
+        }
+
+        fn test() -> u64 {
+            var p = Point { x: 1, y: 2 };
+            p.sum = 3;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::PropertyNotWritable(name, _) => {
+                assert_eq!(name, "sum");
+            }
+            e => panic!("Expected PropertyNotWritable error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_property_write_only_rejects_read() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            prop y_val: u64 {
+                set(v) { self.y = v; }
+            }
+        }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            p.y_val
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::PropertyNotReadable(name, _) => {
+                assert_eq!(name, "y_val");
+            }
+            e => panic!("Expected PropertyNotReadable error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_property_conflicts_with_field() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            prop x: u64 {
+                get { self.x }
+            }
+        }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            p.x
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::PropertyConflictsWithField(name, field, _) => {
+                assert_eq!(name, "x");
+                assert_eq!(field, "x");
+            }
+            e => panic!("Expected PropertyConflictsWithField error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_fn_type_annotation_typechecks() {
     let source = r#"
         fn test() -> u64 {

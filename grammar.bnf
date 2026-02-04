@@ -51,11 +51,15 @@ FuncSig            ::= "fn" Identifier "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
 MethodBlock        ::= Identifier "::" "{" MethodItem* "}"
-MethodItem         ::= MethodDecl | MethodDef
+MethodItem         ::= MethodDecl | MethodDef | PropertyDef
 MethodDecl         ::= AttributeList MethodSig ";"
 MethodDef          ::= AttributeList MethodSig Block
 MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
 SelfParam          ::= ParamMode? "self"
+
+# Properties
+PropertyDef        ::= "prop" Identifier ":" TypeExpr "{" PropertyAccessor* "}"
+PropertyAccessor   ::= "get" Block | "set" "(" Identifier ")" Block
 
 # Closures
 ClosureSig         ::= "|" ParamList? "|" ( "->" TypeExpr )?

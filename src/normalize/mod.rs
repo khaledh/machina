@@ -6,8 +6,8 @@ use crate::tree::normalized::build_module;
 use crate::tree::visit_mut;
 use crate::tree::visit_mut::VisitorMut;
 use crate::typeck::type_map::{CallParam, CallSigMap, TypeMap};
-use crate::types::TypeId;
 use crate::types::array_to_slice_assignable;
+use crate::types::{Type, TypeId};
 
 /// Normalize a typed tree into a normalized tree.
 ///
@@ -109,13 +109,65 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
         visit_mut::walk_module(self, module);
     }
 
+    fn visit_block_item(&mut self, item: &mut norm::BlockItem) {
+        // Rewrite property assignments (`obj.prop = v`) into method calls
+        // (`obj.prop(v)`) using the call signature recorded by type checking.
+        let mut property_call = None;
+        if let norm::BlockItem::Stmt(stmt) = item {
+            if let norm::StmtExprKind::Assign {
+                assignee, value, ..
+            } = &stmt.kind
+                && let norm::ExprKind::StructField { target, field } = &assignee.kind
+                && self.call_sigs.contains_key(&assignee.id)
+            {
+                let call_expr = norm::Expr {
+                    id: assignee.id,
+                    kind: norm::ExprKind::MethodCall {
+                        callee: target.clone(),
+                        method_name: field.clone(),
+                        args: vec![norm::CallArg {
+                            mode: norm::CallArgMode::Default,
+                            expr: *value.clone(),
+                            init: norm::InitInfo::default(),
+                            span: value.span,
+                        }],
+                    },
+                    ty: self.type_map.insert_node_type(assignee.id, Type::Unit),
+                    span: stmt.span,
+                };
+                property_call = Some(call_expr);
+            }
+        }
+
+        if let Some(mut call_expr) = property_call {
+            // Normalize the synthesized call and replace the statement with
+            // an expression item so it follows the normal call lowering path.
+            self.visit_expr(&mut call_expr);
+            *item = norm::BlockItem::Expr(call_expr);
+        } else {
+            visit_mut::walk_block_item(self, item);
+        }
+    }
+
     fn visit_expr(&mut self, expr: &mut norm::Expr) {
         visit_mut::walk_expr(self, expr);
-        match &mut expr.kind {
-            norm::ExprKind::Call { args, .. } | norm::ExprKind::MethodCall { args, .. } => {
-                self.coerce_call_args(expr.id, args);
-            }
-            _ => {}
+        // Rewrite property reads (`obj.prop`) into zero-arg method calls
+        // (`obj.prop()`) when the type checker recorded a property getter.
+        if let norm::ExprKind::StructField { target, field } = &expr.kind
+            && self.call_sigs.contains_key(&expr.id)
+        {
+            expr.kind = norm::ExprKind::MethodCall {
+                callee: target.clone(),
+                method_name: field.clone(),
+                args: Vec::new(),
+            };
+        }
+
+        if let norm::ExprKind::Call { args, .. } | norm::ExprKind::MethodCall { args, .. } =
+            &mut expr.kind
+        {
+            // Apply call-argument coercions (e.g., array-to-slice).
+            self.coerce_call_args(expr.id, args);
         }
     }
 }

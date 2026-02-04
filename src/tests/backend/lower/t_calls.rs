@@ -305,7 +305,7 @@ fn test_lower_out_param_def() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64 }
 
-        fn set(out p: Pair) {
+        fn set_pair(out p: Pair) {
             p.a = 3;
         }
 
@@ -326,7 +326,7 @@ fn test_lower_out_param_def() {
     let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
-        fn set(ptr<Pair>) -> () {
+        fn set_pair(ptr<Pair>) -> () {
           bb0(%v0: ptr<Pair>):
             %v1: u64 = const 3:u64
             %v2: ptr<u64> = field_addr %v0, 0

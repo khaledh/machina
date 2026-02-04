@@ -121,6 +121,30 @@ pub enum TypeCheckErrorKind {
     #[error("Invalid struct field target: expected struct, found {0}")]
     InvalidStructFieldTarget(Type, Span),
 
+    #[error("Property {0} is read-only")]
+    PropertyNotWritable(String, Span),
+
+    #[error("Property {0} is write-only")]
+    PropertyNotReadable(String, Span),
+
+    #[error("Property getter {0} must not take parameters")]
+    PropertyGetterHasParams(String, Span),
+
+    #[error("Property setter {0} must take exactly one parameter, found {1}")]
+    PropertySetterParamCount(String, usize, Span),
+
+    #[error("Property setter {0} must return unit, found {1}")]
+    PropertySetterReturnType(String, Type, Span),
+
+    #[error("Property {0} getter/setter type mismatch: {1} vs {2}")]
+    PropertyAccessorTypeMismatch(String, Type, Type, Span),
+
+    #[error("Property {0} accessor already defined")]
+    PropertyAccessorDuplicate(String, Span),
+
+    #[error("Property {0} conflicts with struct field {1}")]
+    PropertyConflictsWithField(String, String, Span),
+
     #[error("Unknown enum type: {0}")]
     UnknownEnumType(String, Span),
 
@@ -245,6 +269,14 @@ impl TypeCheckError {
             TypeCheckErrorKind::UnknownStructField(_, span) => *span,
             TypeCheckErrorKind::StructFieldsMissing(_, span) => *span,
             TypeCheckErrorKind::InvalidStructFieldTarget(_, span) => *span,
+            TypeCheckErrorKind::PropertyNotWritable(_, span) => *span,
+            TypeCheckErrorKind::PropertyNotReadable(_, span) => *span,
+            TypeCheckErrorKind::PropertyGetterHasParams(_, span) => *span,
+            TypeCheckErrorKind::PropertySetterParamCount(_, _, span) => *span,
+            TypeCheckErrorKind::PropertySetterReturnType(_, _, span) => *span,
+            TypeCheckErrorKind::PropertyAccessorTypeMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::PropertyAccessorDuplicate(_, span) => *span,
+            TypeCheckErrorKind::PropertyConflictsWithField(_, _, span) => *span,
             TypeCheckErrorKind::UnknownEnumType(_, span) => *span,
             TypeCheckErrorKind::UnknownEnumVariant(_, _, span) => *span,
             TypeCheckErrorKind::InvalidStructUpdateTarget(_, span) => *span,

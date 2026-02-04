@@ -18,11 +18,29 @@ use super::errors::{TypeCheckError, TypeCheckErrorKind};
 use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
 use super::type_map::{CallParam, CallSig, CallSigMap, TypeMap, TypeMapBuilder, resolve_type_expr};
 
+#[derive(Debug, Clone)]
+struct PropertySig {
+    ty: Type,
+    getter: Option<DefId>,
+    setter: Option<DefId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PropertyAccessorKind {
+    Get,
+    Set,
+}
+
 pub struct TypeChecker {
     ctx: ResolvedContext,
     type_map_builder: TypeMapBuilder,
     func_sigs: HashMap<String, Vec<OverloadSig>>,
     method_sigs: HashMap<String, HashMap<String, Vec<OverloadSig>>>,
+    // Property accessors are tracked separately so `obj.x` only resolves when a
+    // `prop x { ... }` exists (not for ordinary methods).
+    property_sigs: HashMap<String, HashMap<String, PropertySig>>,
+    // Used to avoid duplicate property/field conflict diagnostics.
+    property_conflicts: HashSet<(String, String)>,
     type_defs: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
     halted: bool,
@@ -37,6 +55,8 @@ impl TypeChecker {
             type_map_builder: TypeMapBuilder::new(),
             func_sigs: HashMap::new(),
             method_sigs: HashMap::new(),
+            property_sigs: HashMap::new(),
+            property_conflicts: HashSet::new(),
             type_defs: HashMap::new(),
             errors: Vec::new(),
             halted: false,
@@ -182,30 +202,190 @@ impl TypeChecker {
     }
 
     fn populate_method_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
+        let mut items = Vec::new();
+
         for method_block in self.ctx.module.method_blocks() {
             let type_name = method_block.type_name.clone();
             for method_item in &method_block.method_items {
-                let (def_id, sig) = match method_item {
-                    MethodItem::Decl(method_decl) => (method_decl.def_id, &method_decl.sig),
-                    MethodItem::Def(method_def) => (method_def.def_id, &method_def.sig),
+                let (def_id, sig, attrs, span) = match method_item {
+                    MethodItem::Decl(method_decl) => (
+                        method_decl.def_id,
+                        &method_decl.sig,
+                        &method_decl.attrs,
+                        method_decl.span,
+                    ),
+                    MethodItem::Def(method_def) => (
+                        method_def.def_id,
+                        &method_def.sig,
+                        &method_def.attrs,
+                        method_def.span,
+                    ),
                 };
-                let params = self.build_param_sigs(&sig.params)?;
-                let ret_type = self.resolve_ret_type(&sig.ret_ty_expr)?;
-
-                self.method_sigs
-                    .entry(type_name.clone())
-                    .or_default()
-                    .entry(sig.name.clone())
-                    .or_default()
-                    .push(OverloadSig {
-                        def_id,
-                        params,
-                        ret_ty: ret_type,
-                    });
+                items.push((type_name.clone(), def_id, sig.clone(), attrs.clone(), span));
             }
         }
 
+        for (type_name, def_id, sig, attrs, span) in items {
+            let params = self.build_param_sigs(&sig.params)?;
+            let ret_type = self.resolve_ret_type(&sig.ret_ty_expr)?;
+
+            if let Some(kind) = Self::property_accessor_kind(&attrs) {
+                // Record property accessors so field access/assignment can be
+                // rewritten into calls later in normalization.
+                let prop_span = attrs
+                    .iter()
+                    .find(|attr| attr.name == "__property_get" || attr.name == "__property_set")
+                    .map(|attr| attr.span)
+                    .unwrap_or(span);
+                self.record_property_sig(
+                    &type_name, &sig.name, kind, def_id, &params, &ret_type, prop_span,
+                );
+            }
+
+            self.method_sigs
+                .entry(type_name)
+                .or_default()
+                .entry(sig.name)
+                .or_default()
+                .push(OverloadSig {
+                    def_id,
+                    params,
+                    ret_ty: ret_type,
+                });
+        }
+
         Ok(())
+    }
+
+    fn property_accessor_kind(attrs: &[Attribute]) -> Option<PropertyAccessorKind> {
+        attrs.iter().find_map(|attr| match attr.name.as_str() {
+            "__property_get" => Some(PropertyAccessorKind::Get),
+            "__property_set" => Some(PropertyAccessorKind::Set),
+            _ => None,
+        })
+    }
+
+    /// Register a property accessor signature and validate its shape.
+    ///
+    /// Properties are stored separately from normal methods so that `obj.x`
+    /// only resolves to explicit `prop x { ... }` definitions.
+    fn record_property_sig(
+        &mut self,
+        type_name: &str,
+        prop_name: &str,
+        kind: PropertyAccessorKind,
+        def_id: DefId,
+        params: &[ParamSig],
+        ret_type: &Type,
+        span: Span,
+    ) {
+        // Validate accessor shape and determine the property type.
+        let prop_ty = match kind {
+            PropertyAccessorKind::Get => {
+                if !params.is_empty() {
+                    self.errors.push(
+                        TypeCheckErrorKind::PropertyGetterHasParams(prop_name.to_string(), span)
+                            .into(),
+                    );
+                    return;
+                }
+                ret_type.clone()
+            }
+            PropertyAccessorKind::Set => {
+                if params.len() != 1 {
+                    self.errors.push(
+                        TypeCheckErrorKind::PropertySetterParamCount(
+                            prop_name.to_string(),
+                            params.len(),
+                            span,
+                        )
+                        .into(),
+                    );
+                    return;
+                }
+                if *ret_type != Type::Unit {
+                    self.errors.push(
+                        TypeCheckErrorKind::PropertySetterReturnType(
+                            prop_name.to_string(),
+                            ret_type.clone(),
+                            span,
+                        )
+                        .into(),
+                    );
+                    return;
+                }
+                params[0].ty.clone()
+            }
+        };
+
+        // We only want to report field conflicts once per property name.
+        let props = self.property_sigs.entry(type_name.to_string()).or_default();
+
+        if !props.contains_key(prop_name) {
+            if let Some(Type::Struct { fields, .. }) = self.type_defs.get(type_name) {
+                if let Some(field) = fields.iter().find(|field| field.name == prop_name) {
+                    if self
+                        .property_conflicts
+                        .insert((type_name.to_string(), prop_name.to_string()))
+                    {
+                        self.errors.push(
+                            TypeCheckErrorKind::PropertyConflictsWithField(
+                                prop_name.to_string(),
+                                field.name.clone(),
+                                span,
+                            )
+                            .into(),
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Merge accessors into a single property signature.
+        let entry = props
+            .entry(prop_name.to_string())
+            .or_insert_with(|| PropertySig {
+                ty: prop_ty.clone(),
+                getter: None,
+                setter: None,
+            });
+
+        if entry.ty != prop_ty {
+            self.errors.push(
+                TypeCheckErrorKind::PropertyAccessorTypeMismatch(
+                    prop_name.to_string(),
+                    entry.ty.clone(),
+                    prop_ty,
+                    span,
+                )
+                .into(),
+            );
+            return;
+        }
+
+        match kind {
+            PropertyAccessorKind::Get => {
+                if entry.getter.is_some() {
+                    self.errors.push(
+                        TypeCheckErrorKind::PropertyAccessorDuplicate(prop_name.to_string(), span)
+                            .into(),
+                    );
+                } else {
+                    entry.getter = Some(def_id);
+                }
+            }
+            PropertyAccessorKind::Set => {
+                if entry.setter.is_some() {
+                    self.errors.push(
+                        TypeCheckErrorKind::PropertyAccessorDuplicate(prop_name.to_string(), span)
+                            .into(),
+                    );
+                } else {
+                    entry.setter = Some(def_id);
+                }
+            }
+        }
     }
 
     fn insert_func_overload(
@@ -289,6 +469,42 @@ impl TypeChecker {
                 .unwrap_or_else(|| ty.clone()),
             _ => ty.clone(),
         }
+    }
+
+    fn property_owner_name(&self, ty: &Type) -> Option<String> {
+        match ty {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.clone()),
+            Type::String => Some("string".to_string()),
+            _ => None,
+        }
+    }
+
+    fn record_property_call_sig(
+        &mut self,
+        node_id: NodeId,
+        def_id: DefId,
+        receiver_ty: Type,
+        receiver_mode: ParamMode,
+        params: Vec<Type>,
+    ) {
+        let call_params = params
+            .into_iter()
+            .map(|ty| CallParam {
+                mode: ParamMode::In,
+                ty,
+            })
+            .collect();
+        self.type_map_builder.record_call_sig(
+            node_id,
+            CallSig {
+                def_id: Some(def_id),
+                receiver: Some(CallParam {
+                    mode: receiver_mode,
+                    ty: receiver_ty,
+                }),
+                params: call_params,
+            },
+        );
     }
 
     fn check_func_def(&mut self, func_def: &FuncDef) -> Result<Type, Vec<TypeCheckError>> {
@@ -829,10 +1045,41 @@ impl TypeChecker {
         Ok(struct_ty)
     }
 
-    fn check_field_access(&mut self, target: &Expr, field: &str) -> Result<Type, TypeCheckError> {
+    fn check_field_access(
+        &mut self,
+        expr_id: NodeId,
+        target: &Expr,
+        field: &str,
+    ) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.visit_expr(target, None)?;
         let peeled_ty = self.expand_shallow_type(&target_ty.peel_heap());
+
+        if let Some(type_name) = self.property_owner_name(&peeled_ty) {
+            // Property access is treated as a getter call.
+            let prop_info = self
+                .property_sigs
+                .get(&type_name)
+                .and_then(|props| props.get(field))
+                .map(|prop| (prop.getter, prop.ty.clone()));
+            if let Some((getter, prop_ty)) = prop_info {
+                let Some(getter) = getter else {
+                    return Err(TypeCheckErrorKind::PropertyNotReadable(
+                        field.to_string(),
+                        target.span,
+                    )
+                    .into());
+                };
+                self.record_property_call_sig(
+                    expr_id,
+                    getter,
+                    target_ty,
+                    ParamMode::In,
+                    Vec::new(),
+                );
+                return Ok(prop_ty);
+            }
+        }
 
         match peeled_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
@@ -1111,6 +1358,40 @@ impl TypeChecker {
             let target_ty = self.visit_expr(target, None)?;
             if target_ty == Type::String {
                 return Err(TypeCheckErrorKind::StringIndexAssign(assignee.span).into());
+            }
+        }
+
+        if let ExprKind::StructField { target, field } = &assignee.kind {
+            let receiver_ty = self.visit_expr(target, None)?;
+            let peeled_ty = self.expand_shallow_type(&receiver_ty.peel_heap());
+            if let Some(type_name) = self.property_owner_name(&peeled_ty) {
+                // Property assignment is treated as a setter call.
+                let prop_info = self
+                    .property_sigs
+                    .get(&type_name)
+                    .and_then(|props| props.get(field))
+                    .map(|prop| (prop.setter, prop.ty.clone()));
+                if let Some((setter, prop_ty)) = prop_info {
+                    let Some(setter) = setter else {
+                        return Err(TypeCheckErrorKind::PropertyNotWritable(
+                            field.clone(),
+                            assignee.span,
+                        )
+                        .into());
+                    };
+                    let rhs_type = self.visit_expr(value, Some(&prop_ty))?;
+                    self.check_assignable_to(value, &rhs_type, &prop_ty)?;
+                    self.record_property_call_sig(
+                        assignee.id,
+                        setter,
+                        receiver_ty,
+                        ParamMode::InOut,
+                        vec![prop_ty.clone()],
+                    );
+                    self.type_map_builder
+                        .record_node_type(assignee.id, Type::Unit);
+                    return Ok(Type::Unit);
+                }
             }
         }
 
@@ -1953,7 +2234,9 @@ impl TreeFolder<DefId> for TypeChecker {
 
                 ExprKind::StructLit { name, fields } => self.check_struct_lit(name, fields),
 
-                ExprKind::StructField { target, field } => self.check_field_access(target, field),
+                ExprKind::StructField { target, field } => {
+                    self.check_field_access(expr.id, target, field)
+                }
 
                 ExprKind::StructUpdate { target, fields } => {
                     self.check_struct_update(target, fields)

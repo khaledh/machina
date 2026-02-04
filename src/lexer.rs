@@ -77,6 +77,12 @@ pub enum TokenKind {
     KwMove,
     #[display("self")]
     KwSelf,
+    #[display("prop")]
+    KwProp,
+    #[display("get")]
+    KwGet,
+    #[display("set")]
+    KwSet,
 
     // Brackets
     #[display("[")]
@@ -540,6 +546,9 @@ impl<'a> Lexer<'a> {
                         "sink" => TokenKind::KwSink,
                         "move" => TokenKind::KwMove,
                         "self" => TokenKind::KwSelf,
+                        "prop" => TokenKind::KwProp,
+                        "get" => TokenKind::KwGet,
+                        "set" => TokenKind::KwSet,
                         "true" => TokenKind::BoolLit(true),
                         "false" => TokenKind::BoolLit(false),
                         _ => TokenKind::Ident(ident),
