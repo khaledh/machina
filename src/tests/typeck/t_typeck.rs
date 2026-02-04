@@ -142,7 +142,7 @@ fn test_len_intrinsic_on_array() {
     let source = r#"
         fn test() -> u64 {
             let arr = [1, 2, 3];
-            arr.len()
+            arr.len
         }
     "#;
 
@@ -154,7 +154,7 @@ fn test_len_intrinsic_on_string() {
     let source = r#"
         fn test() -> u64 {
             let s = "hello";
-            s.len()
+            s.len
         }
     "#;
 

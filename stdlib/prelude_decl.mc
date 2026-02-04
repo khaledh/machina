@@ -20,7 +20,9 @@ fn string_from_bytes(bytes: u8[]) -> string;
 
 string :: {
   @[intrinsic]
-  fn len(self) -> u64;
+  prop len: u64 {
+    get;
+  }
 
   @[runtime]
   fn append(inout self, other: string);

@@ -86,10 +86,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         let attrs = self.parse_attribute_list()?;
         if self.curr_token.kind == TK::KwProp {
-            if let Some(attr) = attrs.first() {
-                return Err(ParseError::AttributeNotAllowed(attr.span));
-            }
-            return self.parse_property_def(type_name, marker);
+            return self.parse_property_def(type_name, marker, attrs);
         }
 
         let sig = self.parse_method_sig()?;
@@ -167,6 +164,7 @@ impl<'a> Parser<'a> {
         &mut self,
         type_name: &str,
         marker: Marker,
+        attrs: Vec<Attribute>,
     ) -> Result<Vec<MethodItem>, ParseError> {
         // Parse the property header (name + type) and capture a tight span for diagnostics.
         let head_marker = self.mark();
@@ -194,17 +192,6 @@ impl<'a> Parser<'a> {
                     }
                     self.advance();
 
-                    // Use a stable closure base so any closures inside the accessor are named.
-                    let prev_base = self.closure_base.clone();
-                    let prev_index = self.closure_index;
-                    self.closure_base = Some(format!("{}${}#get", type_name, prop_name));
-                    self.closure_index = 0;
-
-                    let body = self.parse_block()?;
-
-                    self.closure_base = prev_base;
-                    self.closure_index = prev_index;
-
                     // Getter has only `self` and returns the property type.
                     let sig = MethodSig {
                         name: prop_name.clone(),
@@ -220,20 +207,42 @@ impl<'a> Parser<'a> {
                     };
 
                     // Mark the method as a property getter.
-                    let attrs = vec![Attribute {
+                    let mut accessor_attrs = attrs.clone();
+                    accessor_attrs.push(Attribute {
                         name: "__property_get".to_string(),
                         args: Vec::new(),
                         span: sig.span,
-                    }];
+                    });
+                    if self.curr_token.kind == TK::Semicolon {
+                        self.advance();
+                        getter = Some(MethodItem::Decl(MethodDecl {
+                            id: self.id_gen.new_id(),
+                            def_id: (),
+                            attrs: accessor_attrs,
+                            sig,
+                            span: self.close(accessor_marker),
+                        }));
+                    } else {
+                        // Use a stable closure base so any closures inside the accessor are named.
+                        let prev_base = self.closure_base.clone();
+                        let prev_index = self.closure_index;
+                        self.closure_base = Some(format!("{}${}#get", type_name, prop_name));
+                        self.closure_index = 0;
 
-                    getter = Some(MethodItem::Def(MethodDef {
-                        id: self.id_gen.new_id(),
-                        def_id: (),
-                        attrs,
-                        sig,
-                        body,
-                        span: self.close(accessor_marker),
-                    }));
+                        let body = self.parse_block()?;
+
+                        self.closure_base = prev_base;
+                        self.closure_index = prev_index;
+
+                        getter = Some(MethodItem::Def(MethodDef {
+                            id: self.id_gen.new_id(),
+                            def_id: (),
+                            attrs: accessor_attrs,
+                            sig,
+                            body,
+                            span: self.close(accessor_marker),
+                        }));
+                    }
                 }
                 TK::KwSet => {
                     // `set(v) { ... }` => method `prop_name(inout self, v: prop_ty) -> ()`.
@@ -247,17 +256,6 @@ impl<'a> Parser<'a> {
                     self.consume(&TK::LParen)?;
                     let param_name = self.parse_ident()?;
                     self.consume(&TK::RParen)?;
-
-                    // Use a stable closure base so any closures inside the accessor are named.
-                    let prev_base = self.closure_base.clone();
-                    let prev_index = self.closure_index;
-                    self.closure_base = Some(format!("{}${}#set", type_name, prop_name));
-                    self.closure_index = 0;
-
-                    let body = self.parse_block()?;
-
-                    self.closure_base = prev_base;
-                    self.closure_index = prev_index;
 
                     // Setter takes one param of the property type and returns unit.
                     let param = Param {
@@ -283,20 +281,42 @@ impl<'a> Parser<'a> {
                     };
 
                     // Mark the method as a property setter.
-                    let attrs = vec![Attribute {
+                    let mut accessor_attrs = attrs.clone();
+                    accessor_attrs.push(Attribute {
                         name: "__property_set".to_string(),
                         args: Vec::new(),
                         span: sig.span,
-                    }];
+                    });
+                    if self.curr_token.kind == TK::Semicolon {
+                        self.advance();
+                        setter = Some(MethodItem::Decl(MethodDecl {
+                            id: self.id_gen.new_id(),
+                            def_id: (),
+                            attrs: accessor_attrs,
+                            sig,
+                            span: self.close(accessor_marker),
+                        }));
+                    } else {
+                        // Use a stable closure base so any closures inside the accessor are named.
+                        let prev_base = self.closure_base.clone();
+                        let prev_index = self.closure_index;
+                        self.closure_base = Some(format!("{}${}#set", type_name, prop_name));
+                        self.closure_index = 0;
 
-                    setter = Some(MethodItem::Def(MethodDef {
-                        id: self.id_gen.new_id(),
-                        def_id: (),
-                        attrs,
-                        sig,
-                        body,
-                        span: self.close(accessor_marker),
-                    }));
+                        let body = self.parse_block()?;
+
+                        self.closure_base = prev_base;
+                        self.closure_index = prev_index;
+
+                        setter = Some(MethodItem::Def(MethodDef {
+                            id: self.id_gen.new_id(),
+                            def_id: (),
+                            attrs: accessor_attrs,
+                            sig,
+                            body,
+                            span: self.close(accessor_marker),
+                        }));
+                    }
                 }
                 _ => {
                     return Err(ParseError::ExpectedToken(
@@ -309,17 +329,39 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
 
         // Attribute spans should point at the `prop name: Type` header, not the accessor body.
-        if let Some(MethodItem::Def(def)) = getter.as_mut() {
-            for attr in &mut def.attrs {
-                if attr.name == "__property_get" {
-                    attr.span = prop_head_span;
+        if let Some(getter) = getter.as_mut() {
+            match getter {
+                MethodItem::Def(def) => {
+                    for attr in &mut def.attrs {
+                        if attr.name == "__property_get" {
+                            attr.span = prop_head_span;
+                        }
+                    }
+                }
+                MethodItem::Decl(decl) => {
+                    for attr in &mut decl.attrs {
+                        if attr.name == "__property_get" {
+                            attr.span = prop_head_span;
+                        }
+                    }
                 }
             }
         }
-        if let Some(MethodItem::Def(def)) = setter.as_mut() {
-            for attr in &mut def.attrs {
-                if attr.name == "__property_set" {
-                    attr.span = prop_head_span;
+        if let Some(setter) = setter.as_mut() {
+            match setter {
+                MethodItem::Def(def) => {
+                    for attr in &mut def.attrs {
+                        if attr.name == "__property_set" {
+                            attr.span = prop_head_span;
+                        }
+                    }
+                }
+                MethodItem::Decl(decl) => {
+                    for attr in &mut decl.attrs {
+                        if attr.name == "__property_set" {
+                            attr.span = prop_head_span;
+                        }
+                    }
                 }
             }
         }

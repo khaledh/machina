@@ -1081,6 +1081,26 @@ impl TypeChecker {
             }
         }
 
+        if field == "len" {
+            if !self.is_place_expr(target) {
+                return Err(TypeCheckErrorKind::LenTargetNotLvalue(target.span).into());
+            }
+            match peeled_ty {
+                Type::Array { .. } | Type::Slice { .. } | Type::String => {
+                    self.type_map_builder.record_call_sig(
+                        expr_id,
+                        CallSig {
+                            def_id: None,
+                            receiver: None,
+                            params: Vec::new(),
+                        },
+                    );
+                    return Ok(Type::uint(64));
+                }
+                _ => {}
+            }
+        }
+
         match peeled_ty {
             Type::Struct { fields, .. } => match fields.iter().find(|f| f.name == field) {
                 Some(field) => Ok(field.ty.clone()),
@@ -1392,6 +1412,16 @@ impl TypeChecker {
                         .record_node_type(assignee.id, Type::Unit);
                     return Ok(Type::Unit);
                 }
+            }
+            if field == "len"
+                && matches!(
+                    peeled_ty,
+                    Type::Array { .. } | Type::Slice { .. } | Type::String
+                )
+            {
+                return Err(
+                    TypeCheckErrorKind::PropertyNotWritable(field.clone(), assignee.span).into(),
+                );
             }
         }
 
