@@ -677,6 +677,29 @@ fn test_enum_method_block_basic() {
 }
 
 #[test]
+fn test_enum_method_call_typechecks() {
+    let source = r#"
+        type Msg = Ping(u64) | Pong(u64)
+
+        Msg :: {
+            fn is_ping(self) -> bool {
+                match self {
+                    Msg::Ping(_) => true,
+                    _ => false,
+                }
+            }
+        }
+
+        fn main() -> u64 {
+            let msg = Msg::Ping(1);
+            if msg.is_ping() { 1 } else { 0 }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_method_call_typechecks() {
     let source = r#"
         type Point = { x: u64, y: u64 }

@@ -1,5 +1,6 @@
 type Point = { x: u64, y: u64 }
 type Boxed = { p: ^Point }
+type Msg = Ping(u64) | Pong(u64)
 
 Boxed :: {
     fn sum(self) -> u64 {
@@ -16,6 +17,15 @@ Boxed :: {
     }
 }
 
+Msg :: {
+    fn is_ping(self) -> bool {
+        match self {
+            Msg::Ping(_) => true,
+            _ => false,
+        }
+    }
+}
+
 fn main() {
     var b = Boxed { p: ^Point { x: 1, y: 2 } };
     println(f"sum: {b.sum()}");
@@ -25,6 +35,13 @@ fn main() {
 
     let total = b.consume();
     println(f"consumed: {total}");
+
+    let msg = Msg::Ping(1);
+    if msg.is_ping() {
+        println("ping");
+    } else {
+        println("pong");
+    }
 
     // b.shift(10, 20);  // ERROR: use after move
 }
