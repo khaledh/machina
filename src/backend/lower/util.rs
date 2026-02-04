@@ -159,6 +159,55 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.select_block(ok_bb);
     }
 
+    /// Emits a nonzero refinement check that traps if `value == 0`.
+    pub(super) fn emit_nonzero_check(&mut self, value: ValueId, value_ty: &Type) {
+        let Type::Int { signed, bits, .. } = value_ty else {
+            panic!("backend nonzero check on non-int type {:?}", value_ty);
+        };
+
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let value_ir_ty = self.type_lowerer.lower_type(value_ty);
+        let zero = self.builder.const_int(0, *signed, *bits, value_ir_ty);
+        let cond = self.builder.cmp(CmpOp::Ne, value, zero, bool_ty);
+
+        let ok_bb = self.builder.add_block();
+        let trap_bb = self.builder.add_block();
+
+        // Split control flow on the non-zero predicate.
+        self.builder.terminate(Terminator::CondBr {
+            cond,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: trap_bb,
+            else_args: Vec::new(),
+        });
+
+        // Trap on zero values.
+        self.builder.select_block(trap_bb);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let kind = self
+            .builder
+            .const_int(if *signed { 5 } else { 4 }, false, 64, u64_ty);
+        let trap_ty = if *signed {
+            Type::sint(64)
+        } else {
+            Type::uint(64)
+        };
+        let trap_ir_ty = self.type_lowerer.lower_type(&trap_ty);
+        let trap_value = self.builder.int_extend(value, trap_ir_ty, *signed);
+        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::Trap),
+            vec![kind, trap_value, zero_u64, zero_u64],
+            unit_ty,
+        );
+        self.builder.terminate(Terminator::Unreachable);
+
+        // Continue lowering in the non-zero block.
+        self.builder.select_block(ok_bb);
+    }
+
     pub(super) fn emit_runtime_set_alloc_trace(&mut self, enabled: bool) {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let flag = self.builder.const_int(enabled as i128, false, 64, u64_ty);
@@ -223,19 +272,27 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn emit_conversion_check(&mut self, from_ty: &Type, to_ty: &Type, value: ValueId) {
-        if let TypeAssignability::IntToBounded { min, max } = type_assignable(from_ty, to_ty) {
+        if let TypeAssignability::IntToRefined { min, max, nonzero } =
+            type_assignable(from_ty, to_ty)
+        {
             let (signed, bits) = match from_ty {
                 Type::Int {
                     signed,
                     bits,
                     bounds: _,
+                    nonzero: _,
                 } => (*signed, *bits),
-                other => panic!("backend bounds check on non-int type {:?}", other),
+                other => panic!("backend refinement check on non-int type {:?}", other),
             };
-            let ir_ty = self.type_lowerer.lower_type(from_ty);
-            let min_val = self.builder.const_int(min, signed, bits, ir_ty);
-            let max_val = self.builder.const_int(max, signed, bits, ir_ty);
-            self.emit_range_check(value, min_val, max_val, signed);
+            if let (Some(min), Some(max)) = (min, max) {
+                let ir_ty = self.type_lowerer.lower_type(from_ty);
+                let min_val = self.builder.const_int(min, signed, bits, ir_ty);
+                let max_val = self.builder.const_int(max, signed, bits, ir_ty);
+                self.emit_range_check(value, min_val, max_val, signed);
+            }
+            if nonzero {
+                self.emit_nonzero_check(value, from_ty);
+            }
         }
     }
 

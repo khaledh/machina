@@ -31,6 +31,7 @@ impl<'a> Elaborator<'a> {
                 signed,
                 bits,
                 bounds,
+                nonzero,
             } => {
                 let name = match (*signed, *bits) {
                     (false, 8) => "u8",
@@ -45,20 +46,27 @@ impl<'a> Elaborator<'a> {
                         panic!("compiler bug: unsupported int type signed={signed} bits={bits}")
                     }
                 };
+                let mut refinements = Vec::new();
                 if let Some(bounds) = bounds {
+                    let min = bounds.min;
+                    let max = bounds.max_excl;
+                    refinements.push(RefinementKind::Bounds { min, max });
+                }
+                if *nonzero {
+                    refinements.push(RefinementKind::NonZero);
+                }
+                if refinements.is_empty() {
+                    self.named_type_expr(name, span)
+                } else {
                     let base_expr = sem::TypeExpr {
                         id: self.node_id_gen.new_id(),
                         kind: self.named_type_expr(name, span),
                         span,
                     };
-                    let min = bounds.min;
-                    let max = bounds.max_excl;
                     sem::TypeExprKind::Refined {
                         base_ty_expr: Box::new(base_expr),
-                        refinement: RefinementKind::Bounds { min, max },
+                        refinements,
                     }
-                } else {
-                    self.named_type_expr(name, span)
                 }
             }
             Type::Bool => self.named_type_expr("bool", span),

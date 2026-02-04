@@ -6,7 +6,7 @@ impl<'a> Parser<'a> {
         let mut typ = self.parse_type_atom()?;
 
         if self.curr_token.kind == TK::Colon {
-            typ = self.parse_bounded_type(typ)?;
+            typ = self.parse_refined_type(typ)?;
         }
 
         if self.curr_token.kind == TK::LBracket {
@@ -158,33 +158,52 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_bounded_type(&mut self, base_ty_expr: TypeExpr) -> Result<TypeExpr, ParseError> {
+    fn parse_refined_type(&mut self, base_ty_expr: TypeExpr) -> Result<TypeExpr, ParseError> {
         let marker = self.mark();
 
         self.consume(&TK::Colon)?;
-        self.consume_keyword(TK::KwBounds)?;
-        self.consume(&TK::LParen)?;
-
-        let first = self.parse_signed_int_lit()?;
-        let (min, max) = if self.curr_token.kind == TK::Comma {
+        let mut refinements = Vec::new();
+        refinements.push(self.parse_refinement()?);
+        while self.curr_token.kind == TK::Ampersand {
             self.advance();
-            let second = self.parse_signed_int_lit()?;
-            (first, second)
-        } else {
-            (0, first)
-        };
+            refinements.push(self.parse_refinement()?);
+        }
 
-        self.consume(&TK::RParen)?;
-
-        let bounds_span = self.close(marker);
-        let span = Span::merge_all(vec![base_ty_expr.span, bounds_span]);
+        let refinements_span = self.close(marker);
+        let span = Span::merge_all(vec![base_ty_expr.span, refinements_span]);
         Ok(TypeExpr {
             id: self.id_gen.new_id(),
             kind: TypeExprKind::Refined {
                 base_ty_expr: Box::new(base_ty_expr),
-                refinement: RefinementKind::Bounds { min, max },
+                refinements,
             },
             span,
         })
+    }
+
+    fn parse_refinement(&mut self) -> Result<RefinementKind, ParseError> {
+        match &self.curr_token.kind {
+            TK::KwBounds => {
+                self.advance();
+                self.consume(&TK::LParen)?;
+
+                let first = self.parse_signed_int_lit()?;
+                let (min, max) = if self.curr_token.kind == TK::Comma {
+                    self.advance();
+                    let second = self.parse_signed_int_lit()?;
+                    (first, second)
+                } else {
+                    (0, first)
+                };
+
+                self.consume(&TK::RParen)?;
+                Ok(RefinementKind::Bounds { min, max })
+            }
+            TK::KwNonzero => {
+                self.advance();
+                Ok(RefinementKind::NonZero)
+            }
+            _ => Err(ParseError::ExpectedRefinement(self.curr_token.clone())),
+        }
     }
 }

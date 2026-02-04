@@ -20,9 +20,16 @@ use crate::types::Type;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeAssignability {
     Exact,
-    IntToBounded { min: i128, max: i128 },
-    IntLitToInt { signed: bool, bits: u8 },
-    BoundedToInt,
+    IntToRefined {
+        min: Option<i128>,
+        max: Option<i128>,
+        nonzero: bool,
+    },
+    IntLitToInt {
+        signed: bool,
+        bits: u8,
+    },
+    RefinedToInt,
     Incompatible,
 }
 
@@ -30,6 +37,7 @@ pub enum TypeAssignability {
 pub enum ValueAssignability {
     Assignable(TypeAssignability),
     ValueOutOfRange { value: i128, min: i128, max: i128 },
+    ValueNotNonZero { value: i128 },
     Incompatible,
 }
 
@@ -84,8 +92,8 @@ pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> Valu
     let assignability = type_assignable(from_ty, to_ty);
     match assignability {
         TypeAssignability::Exact
-        | TypeAssignability::BoundedToInt
-        | TypeAssignability::IntToBounded { .. }
+        | TypeAssignability::RefinedToInt
+        | TypeAssignability::IntToRefined { .. }
         | TypeAssignability::IntLitToInt { .. } => ValueAssignability::Assignable(assignability),
         TypeAssignability::Incompatible => ValueAssignability::Incompatible,
     }
@@ -126,6 +134,7 @@ fn int_to_int(from: &Type, to: &Type) -> Option<TypeAssignability> {
         signed: from_signed,
         bits: from_bits,
         bounds: from_bounds,
+        nonzero: from_nonzero,
     } = from
     else {
         return None;
@@ -134,6 +143,7 @@ fn int_to_int(from: &Type, to: &Type) -> Option<TypeAssignability> {
         signed: to_signed,
         bits: to_bits,
         bounds: to_bounds,
+        nonzero: to_nonzero,
     } = to
     else {
         return None;
@@ -142,15 +152,16 @@ fn int_to_int(from: &Type, to: &Type) -> Option<TypeAssignability> {
         return None;
     }
 
-    if let Some(bounds) = to_bounds {
-        return Some(TypeAssignability::IntToBounded {
-            min: bounds.min,
-            max: bounds.max_excl,
+    if to_bounds.is_some() || *to_nonzero {
+        return Some(TypeAssignability::IntToRefined {
+            min: to_bounds.map(|bounds| bounds.min),
+            max: to_bounds.map(|bounds| bounds.max_excl),
+            nonzero: *to_nonzero,
         });
     }
 
-    if from_bounds.is_some() {
-        return Some(TypeAssignability::BoundedToInt);
+    if from_bounds.is_some() || *from_nonzero {
+        return Some(TypeAssignability::RefinedToInt);
     }
 
     Some(TypeAssignability::Exact)
@@ -181,6 +192,7 @@ fn value_int_lit_to_int(
         signed,
         bits,
         bounds,
+        nonzero,
     } = to_ty
     else {
         return None;
@@ -204,6 +216,9 @@ fn value_int_lit_to_int(
             min: bounds.min,
             max: bounds.max_excl,
         });
+    }
+    if *nonzero && value == 0 {
+        return Some(ValueAssignability::ValueNotNonZero { value });
     }
     if value < min || value >= max_excl {
         return Some(ValueAssignability::ValueOutOfRange {

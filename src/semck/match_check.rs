@@ -193,6 +193,7 @@ impl IntRule {
                             signed: self.signed,
                             bits: self.bits,
                             bounds: None,
+                            nonzero: false,
                         },
                         pattern_span(&arm.pattern),
                     ));

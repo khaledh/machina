@@ -48,6 +48,9 @@ pub enum ParseError {
     #[error("Expected array index or slice range, found: {0}")]
     ExpectedArrayIndexOrRange(Token),
 
+    #[error("Expected refinement (bounds/nonzero), found: {0}")]
+    ExpectedRefinement(Token),
+
     #[error("Unknown attribute `{0}`")]
     UnknownAttribute(String, Span),
 
@@ -84,6 +87,7 @@ impl ParseError {
             ParseError::ExpectedMatchArm(token) => token.span,
             ParseError::ExpectedMatchPattern(token) => token.span,
             ParseError::ExpectedArrayIndexOrRange(token) => token.span,
+            ParseError::ExpectedRefinement(token) => token.span,
             ParseError::UnknownAttribute(_, span) => *span,
             ParseError::AttributeNotAllowed(span) => *span,
             ParseError::UnmatchedFormatBrace(span) => *span,

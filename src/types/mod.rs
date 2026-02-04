@@ -20,6 +20,7 @@ pub enum Type {
         signed: bool,
         bits: u8,
         bounds: Option<IntBounds>,
+        nonzero: bool,
     },
     Bool,
     Char,
@@ -102,13 +103,15 @@ impl PartialEq for Type {
                     signed: lsigned,
                     bits: lbits,
                     bounds: lbounds,
+                    nonzero: lnonzero,
                 },
                 Type::Int {
                     signed: rsigned,
                     bits: rbits,
                     bounds: rbounds,
+                    nonzero: rnonzero,
                 },
-            ) => lsigned == rsigned && lbits == rbits && lbounds == rbounds,
+            ) => lsigned == rsigned && lbits == rbits && lbounds == rbounds && lnonzero == rnonzero,
             (Type::Range { elem_ty: l_elem }, Type::Range { elem_ty: r_elem }) => l_elem == r_elem,
             (
                 Type::Fn {
@@ -168,11 +171,13 @@ impl Hash for Type {
                 signed,
                 bits,
                 bounds,
+                nonzero,
             } => {
                 2u8.hash(state);
                 signed.hash(state);
                 bits.hash(state);
                 bounds.hash(state);
+                nonzero.hash(state);
             }
             Type::Bool => {
                 3u8.hash(state);
@@ -234,41 +239,49 @@ pub const BUILTIN_TYPES: &[Type] = &[
         signed: false,
         bits: 8,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: false,
         bits: 16,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: false,
         bits: 32,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: false,
         bits: 64,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: true,
         bits: 8,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: true,
         bits: 16,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: true,
         bits: 32,
         bounds: None,
+        nonzero: false,
     },
     Type::Int {
         signed: true,
         bits: 64,
         bounds: None,
+        nonzero: false,
     },
     Type::Bool,
     Type::Char,
@@ -298,6 +311,7 @@ impl Type {
             signed: false,
             bits,
             bounds: None,
+            nonzero: false,
         }
     }
 
@@ -306,6 +320,7 @@ impl Type {
             signed: true,
             bits,
             bounds: None,
+            nonzero: false,
         }
     }
 

@@ -257,6 +257,7 @@ pub struct TypeExpr<D> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RefinementKind {
     Bounds { min: i128, max: i128 },
+    NonZero,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -267,7 +268,7 @@ pub enum TypeExprKind<D> {
     },
     Refined {
         base_ty_expr: Box<TypeExpr<D>>,
-        refinement: RefinementKind,
+        refinements: Vec<RefinementKind>,
     },
     Array {
         elem_ty_expr: Box<TypeExpr<D>>,

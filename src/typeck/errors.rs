@@ -157,14 +157,20 @@ pub enum TypeCheckErrorKind {
     #[error("Invalid range bounds: {0} >= {1}")]
     InvalidRangeBounds(i128, i128, Span),
 
-    #[error("Bounds base type must be an integer, found {0}")]
-    BoundsBaseNotInt(Type, Span),
+    #[error("Refinement base type must be an integer, found {0}")]
+    RefinementBaseNotInt(Type, Span),
 
     #[error("Bounds [{0},{1}) are outside integer range [{2},{3})")]
     BoundsOutOfRange(i128, i128, i128, i128, Span),
 
     #[error("Value out of range: {0} not in range [{1},{2})")]
     ValueOutOfRange(i128, i128, i128, Span),
+
+    #[error("Value must be nonzero, found {0}")]
+    ValueNotNonZero(i128, Span),
+
+    #[error("nonzero is redundant: bounds [{0},{1}) already exclude 0")]
+    RedundantNonZero(i128, i128, Span),
 
     #[error("For iterator is not iterable: {0}")]
     ForIterNotIterable(Type, Span),
@@ -251,9 +257,11 @@ impl TypeCheckError {
             TypeCheckErrorKind::DuplicateMatchVariant(_, span) => *span,
             TypeCheckErrorKind::StringIndexAssign(span) => *span,
             TypeCheckErrorKind::InvalidRangeBounds(_, _, span) => *span,
-            TypeCheckErrorKind::BoundsBaseNotInt(_, span) => *span,
+            TypeCheckErrorKind::RefinementBaseNotInt(_, span) => *span,
             TypeCheckErrorKind::BoundsOutOfRange(_, _, _, _, span) => *span,
             TypeCheckErrorKind::ValueOutOfRange(_, _, _, span) => *span,
+            TypeCheckErrorKind::ValueNotNonZero(_, span) => *span,
+            TypeCheckErrorKind::RedundantNonZero(_, _, span) => *span,
             TypeCheckErrorKind::ForIterNotIterable(_, span) => *span,
             TypeCheckErrorKind::DivisionByZero(span) => *span,
             TypeCheckErrorKind::OverloadNoMatch(_, span) => *span,

@@ -1008,6 +1008,32 @@ fn test_range_non_literal_assignment() {
 }
 
 #[test]
+fn test_nonzero_redundant_on_unsigned_bounds() {
+    let source = r#"
+        type NonZeroSmall = u64: bounds(1, 10) & nonzero;
+
+        fn test() -> u64 {
+            let _x: NonZeroSmall = 5;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::RedundantNonZero(min, max, _) => {
+                assert_eq!(*min, 1);
+                assert_eq!(*max, 10);
+            }
+            e => panic!("Expected RedundantNonZero error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_closure_typechecks() {
     let source = r#"
         fn test() -> u64 {

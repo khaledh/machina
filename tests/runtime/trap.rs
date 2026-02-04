@@ -74,3 +74,28 @@ fn test_range_check_traps_with_message_and_exit_code() {
         "unexpected stderr: {stderr}"
     );
 }
+
+#[test]
+fn test_nonzero_check_traps_with_message_and_exit_code() {
+    let run = run_program(
+        "nonzero_check",
+        r#"
+            type NonZero = u64: nonzero;
+
+            fn make() -> u64 { 0 }
+
+            fn main() -> u64 {
+                let x = make();
+                let y: NonZero = x;
+                y
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(104));
+
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        stderr, "Runtime error: Value must be nonzero: value=0\n",
+        "unexpected stderr: {stderr}"
+    );
+}

@@ -404,10 +404,10 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
             },
             TypeExprKind::Refined {
                 base_ty_expr,
-                refinement,
+                refinements,
             } => TypeExprKind::Refined {
                 base_ty_expr: Box::new(mapper.map_type_expr(base_ty_expr, ctx)),
-                refinement: refinement.clone(),
+                refinements: refinements.clone(),
             },
             TypeExprKind::Array { elem_ty_expr, dims } => TypeExprKind::Array {
                 elem_ty_expr: Box::new(mapper.map_type_expr(elem_ty_expr, ctx)),

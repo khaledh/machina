@@ -264,12 +264,20 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
             }
             model::TypeExprKind::Refined {
                 base_ty_expr,
-                refinement,
-            } => match refinement {
-                model::RefinementKind::Bounds { min, max } => {
-                    write!(f, "Refined({}, bounds({}, {}))", base_ty_expr, min, max)?;
-                }
-            },
+                refinements,
+            } => {
+                let refinements_str = refinements
+                    .iter()
+                    .map(|refinement| match refinement {
+                        model::RefinementKind::Bounds { min, max } => {
+                            format!("bounds({}, {})", min, max)
+                        }
+                        model::RefinementKind::NonZero => "nonzero".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" & ");
+                write!(f, "Refined({}, {})", base_ty_expr, refinements_str)?;
+            }
             model::TypeExprKind::Array { elem_ty_expr, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;

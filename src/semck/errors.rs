@@ -9,6 +9,9 @@ pub enum SemCheckError {
     #[error("Value out of range: {0} not in range [{1},{2})")]
     ValueOutOfRange(i128, i128, i128, Span),
 
+    #[error("Value must be nonzero, found {0}")]
+    ValueNotNonZero(i128, Span),
+
     #[error("Invalid range bounds: {0} >= {1}")]
     InvalidRangeBounds(i128, i128, Span),
 
@@ -164,6 +167,7 @@ impl SemCheckError {
     pub fn span(&self) -> Span {
         match self {
             SemCheckError::ValueOutOfRange(_, _, _, span) => *span,
+            SemCheckError::ValueNotNonZero(_, span) => *span,
             SemCheckError::InvalidRangeBounds(_, _, span) => *span,
             SemCheckError::DivisionByZero(span) => *span,
             SemCheckError::InvalidCallee(_, span) => *span,

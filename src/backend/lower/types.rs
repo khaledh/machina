@@ -68,6 +68,7 @@ impl<'a> TypeLowerer<'a> {
                 signed,
                 bits,
                 bounds: _,
+                nonzero: _,
             } => self.ir_type_cache.add(IrTypeKind::Int {
                 signed: *signed,
                 bits: *bits,
@@ -104,12 +105,14 @@ impl<'a> TypeLowerer<'a> {
                     signed: false,
                     bits: 8,
                     bounds: None,
+                    nonzero: false,
                 });
                 let ptr = self.ir_type_cache.add(IrTypeKind::Ptr { elem: byte });
                 let u32 = self.lower_type(&Type::Int {
                     signed: false,
                     bits: 32,
                     bounds: None,
+                    nonzero: false,
                 });
                 let fields = vec![
                     IrStructField {
@@ -285,6 +288,7 @@ impl<'a> TypeLowerer<'a> {
             signed: false,
             bits: 32,
             bounds: None,
+            nonzero: false,
         });
 
         let mut max_payload_size = 0u64;

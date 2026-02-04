@@ -11,13 +11,21 @@ impl fmt::Display for Type {
                 signed,
                 bits,
                 bounds,
+                nonzero,
             } => {
                 let prefix = if *signed { "i" } else { "u" };
                 let base = format!("{}{}", prefix, bits);
+                let mut refinements = Vec::new();
                 if let Some(bounds) = bounds {
-                    write!(f, "{}: bounds({}, {})", base, bounds.min, bounds.max_excl)
-                } else {
+                    refinements.push(format!("bounds({}, {})", bounds.min, bounds.max_excl));
+                }
+                if *nonzero {
+                    refinements.push("nonzero".to_string());
+                }
+                if refinements.is_empty() {
                     write!(f, "{base}")
+                } else {
+                    write!(f, "{}: {}", base, refinements.join(" & "))
                 }
             }
             Type::Bool => write!(f, "bool"),

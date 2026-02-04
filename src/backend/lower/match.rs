@@ -372,6 +372,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                     signed: false,
                     bits: 32,
                     bounds: None,
+                    nonzero: false,
                 },
             ));
         }
@@ -462,6 +463,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                                 signed: false,
                                 bits: 32,
                                 bounds: None,
+                                nonzero: false,
                             },
                             1 => Type::uint(8),
                             _ => unreachable!(),

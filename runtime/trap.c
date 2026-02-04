@@ -68,6 +68,9 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
     const char *range_signed_msg_2 = ", min(incl)=";
     const char *range_signed_msg_3 = ", max(excl)=";
 
+    // nonzero check
+    const char *nonzero_msg = "Value must be nonzero: value=";
+
     // unknown trap
     const char *fallback_msg = "Unknown trap";
 
@@ -100,6 +103,16 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
             write_i64((int64_t)arg1);
             write_msg(range_signed_msg_3);
             write_i64((int64_t)arg2);
+            break;
+
+        case 4: // nonzero check
+            write_msg(nonzero_msg);
+            write_u64(arg0);
+            break;
+
+        case 5: // signed nonzero check
+            write_msg(nonzero_msg);
+            write_i64((int64_t)arg0);
             break;
 
         default: // unknown trap

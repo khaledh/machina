@@ -1,5 +1,6 @@
 use super::*;
 use crate::lexer::{LexError, Lexer, Token};
+use crate::tree::RefinementKind;
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
     let lexer = Lexer::new(source);
@@ -122,6 +123,35 @@ fn test_parse_multidim_array_type_3d() {
             assert_eq!(dims.as_slice(), &[2, 3, 4]);
         }
         _ => panic!("Expected array type"),
+    }
+}
+
+#[test]
+fn test_parse_refined_type_multiple_refinements() {
+    let source = r#"
+        type NonZeroSmall = u64: bounds(0, 10) & nonzero;
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let type_defs = module.type_defs();
+    assert_eq!(type_defs.len(), 1);
+
+    let type_def = type_defs[0];
+    match &type_def.kind {
+        TypeDefKind::Alias { aliased_ty } => match &aliased_ty.kind {
+            TypeExprKind::Refined { refinements, .. } => {
+                assert_eq!(refinements.len(), 2);
+                match (&refinements[0], &refinements[1]) {
+                    (RefinementKind::Bounds { min, max }, RefinementKind::NonZero) => {
+                        assert_eq!(*min, 0);
+                        assert_eq!(*max, 10);
+                    }
+                    _ => panic!("Expected bounds & nonzero refinements"),
+                }
+            }
+            _ => panic!("Expected refined type expression"),
+        },
+        _ => panic!("Expected type alias"),
     }
 }
 

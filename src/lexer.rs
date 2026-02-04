@@ -43,6 +43,8 @@ pub enum TokenKind {
     KwRange,
     #[display("bounds")]
     KwBounds,
+    #[display("nonzero")]
+    KwNonzero,
     #[display("let")]
     KwLet,
     #[display("var")]
@@ -521,6 +523,7 @@ impl<'a> Lexer<'a> {
                         "type" => TokenKind::KwType,
                         "range" => TokenKind::KwRange,
                         "bounds" => TokenKind::KwBounds,
+                        "nonzero" => TokenKind::KwNonzero,
                         "let" => TokenKind::KwLet,
                         "var" => TokenKind::KwVar,
                         "if" => TokenKind::KwIf,

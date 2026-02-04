@@ -112,6 +112,22 @@ impl<'a> ValueChecker<'a> {
         }
     }
 
+    fn check_int_refinements(&mut self, value: i128, ty: &Type, span: Span) {
+        let Type::Int {
+            bounds, nonzero, ..
+        } = ty
+        else {
+            return;
+        };
+        if let Some(bounds) = bounds {
+            self.check_int_range(value, bounds.min, bounds.max_excl, span);
+        }
+        if *nonzero && value == 0 {
+            self.errors
+                .push(SemCheckError::ValueNotNonZero(value, span));
+        }
+    }
+
     fn check_type_expr(&mut self, ty: &TypeExpr) {
         self.run_type_rules(ty);
         match &ty.kind {
@@ -170,28 +186,17 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn check_range_binding_value(&mut self, value: &Expr, ty: &Type) {
-        let Type::Int {
-            bounds: Some(bounds),
-            ..
-        } = ty
-        else {
-            return;
-        };
         if let Some(const_value) = self.const_int_value(value) {
-            self.check_int_range(const_value, bounds.min, bounds.max_excl, value.span);
+            self.check_int_refinements(const_value, ty, value.span);
         }
     }
 
     fn check_return_value_range(&mut self, expr: &Expr) {
-        let Some(Type::Int {
-            bounds: Some(bounds),
-            ..
-        }) = self.current_return_ty()
-        else {
+        let Some(return_ty) = self.current_return_ty().cloned() else {
             return;
         };
         if let Some(value) = int_lit_value(expr) {
-            self.check_int_range(value, bounds.min, bounds.max_excl, expr.span);
+            self.check_int_refinements(value, &return_ty, expr.span);
         }
     }
 
@@ -215,16 +220,16 @@ impl<'a> ValueChecker<'a> {
     }
 
     fn rule_refined_type(&mut self, ty: &TypeExpr) {
-        let TypeExprKind::Refined {
-            refinement: RefinementKind::Bounds { min, max },
-            ..
-        } = &ty.kind
-        else {
+        let TypeExprKind::Refined { refinements, .. } = &ty.kind else {
             return;
         };
-        if min >= max {
-            self.errors
-                .push(SemCheckError::InvalidRangeBounds(*min, *max, ty.span));
+        for refinement in refinements {
+            if let RefinementKind::Bounds { min, max } = refinement
+                && min >= max
+            {
+                self.errors
+                    .push(SemCheckError::InvalidRangeBounds(*min, *max, ty.span));
+            }
         }
     }
 

@@ -142,6 +142,9 @@ impl<'a> OverloadResolver<'a> {
                         TypeCheckErrorKind::ValueOutOfRange(value, min, max, arg.span).into(),
                     );
                 }
+                ValueAssignability::ValueNotNonZero { value } => {
+                    return Err(TypeCheckErrorKind::ValueNotNonZero(value, arg.span).into());
+                }
                 ValueAssignability::Incompatible => {
                     if arg.mode != CallArgMode::Move
                         && arg.mode != CallArgMode::Out

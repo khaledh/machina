@@ -154,6 +154,57 @@ fn test_range_out_of_bounds_via_const_binding() {
 }
 
 #[test]
+fn test_nonzero_literal_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let x: u64: nonzero = 0;
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::ValueNotNonZero(value, _) => {
+                assert_eq!(*value, 0);
+            }
+            e => panic!("Expected ValueNotNonZero error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
+fn test_nonzero_out_of_bounds_via_const_binding() {
+    let source = r#"
+        type NonZero = u64: nonzero;
+
+        fn take_nonzero(x: NonZero) -> u64 { x }
+
+        fn test() -> u64 {
+            let x = 0;
+            take_nonzero(x);
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|err| matches!(err, SemCheckError::ValueNotNonZero(0, _))),
+            "Expected ValueNotNonZero(0), got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
 fn test_mod_by_zero_rejected() {
     let source = r#"
         fn test() -> u64 {

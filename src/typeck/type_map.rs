@@ -1,3 +1,4 @@
+use crate::diag::Span;
 use crate::resolve::{Def, DefId, DefKind, DefTable};
 use crate::tree::normalized as norm;
 use crate::tree::resolved as res;
@@ -98,50 +99,11 @@ fn resolve_type_expr_impl(
         }
         res::TypeExprKind::Refined {
             base_ty_expr,
-            refinement: RefinementKind::Bounds { min, max },
+            refinements,
         } => {
             let base_ty =
                 resolve_type_expr_impl(def_table, module, base_ty_expr, in_progress, depth)?;
-            match base_ty {
-                Type::Int {
-                    signed,
-                    bits,
-                    bounds,
-                } => {
-                    let (min_bound, max_bound) = if let Some(bounds) = bounds {
-                        (bounds.min, bounds.max_excl)
-                    } else {
-                        let (min, max) = if signed {
-                            let max = 1i128 << (bits as u32 - 1);
-                            (-max, max)
-                        } else {
-                            (0, 1i128 << (bits as u32))
-                        };
-                        (min, max)
-                    };
-                    let min_val = *min;
-                    let max_val = *max;
-                    if min_val < min_bound || max_val > max_bound {
-                        return Err(TypeCheckErrorKind::BoundsOutOfRange(
-                            min_val,
-                            max_val,
-                            min_bound,
-                            max_bound,
-                            type_expr.span,
-                        )
-                        .into());
-                    }
-                    Ok(Type::Int {
-                        signed,
-                        bits,
-                        bounds: Some(crate::types::IntBounds {
-                            min: min_val,
-                            max_excl: max_val,
-                        }),
-                    })
-                }
-                other => Err(TypeCheckErrorKind::BoundsBaseNotInt(other, type_expr.span).into()),
-            }
+            apply_refinements(base_ty, refinements, type_expr.span)
         }
         res::TypeExprKind::Slice { elem_ty_expr } => {
             let elem_ty =
@@ -196,6 +158,86 @@ fn resolve_type_expr_impl(
             })
         }
     }
+}
+
+fn int_full_range(signed: bool, bits: u8) -> (i128, i128) {
+    if signed {
+        let max = 1i128 << (bits as u32 - 1);
+        (-max, max)
+    } else {
+        (0, 1i128 << (bits as u32))
+    }
+}
+
+fn apply_refinements(
+    base_ty: Type,
+    refinements: &[RefinementKind],
+    span: Span,
+) -> Result<Type, TypeCheckError> {
+    let mut ty = base_ty;
+    for refinement in refinements {
+        match refinement {
+            RefinementKind::Bounds { min, max } => {
+                let Type::Int {
+                    signed,
+                    bits,
+                    bounds,
+                    nonzero,
+                } = ty
+                else {
+                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty, span).into());
+                };
+                let (min_bound, max_bound) = if let Some(bounds) = bounds {
+                    (bounds.min, bounds.max_excl)
+                } else {
+                    int_full_range(signed, bits)
+                };
+                if *min < min_bound || *max > max_bound {
+                    return Err(TypeCheckErrorKind::BoundsOutOfRange(
+                        *min, *max, min_bound, max_bound, span,
+                    )
+                    .into());
+                }
+                ty = Type::Int {
+                    signed,
+                    bits,
+                    bounds: Some(crate::types::IntBounds {
+                        min: *min,
+                        max_excl: *max,
+                    }),
+                    nonzero,
+                };
+            }
+            RefinementKind::NonZero => {
+                let Type::Int {
+                    signed,
+                    bits,
+                    bounds,
+                    ..
+                } = ty
+                else {
+                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty, span).into());
+                };
+                ty = Type::Int {
+                    signed,
+                    bits,
+                    bounds,
+                    nonzero: true,
+                };
+            }
+        }
+    }
+    if let Type::Int {
+        bounds: Some(bounds),
+        nonzero: true,
+        ..
+    } = ty
+        && (bounds.min > 0 || bounds.max_excl <= 0)
+    {
+        return Err(TypeCheckErrorKind::RedundantNonZero(bounds.min, bounds.max_excl, span).into());
+    }
+
+    Ok(ty)
 }
 
 fn fn_param_mode(mode: ParamMode) -> FnParamMode {
