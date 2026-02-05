@@ -199,6 +199,36 @@ fn test_tuple_field_access_through_heap() {
 }
 
 #[test]
+fn test_generic_identity_infers_from_arg() {
+    let source = r#"
+        fn id<T>(x: T) -> T {
+            let y: T = x;
+            y
+        }
+
+        fn test() -> u64 {
+            id(3)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_overload_prefers_concrete() {
+    let source = r#"
+        fn foo(x: u64) -> u64 { x }
+        fn foo<T>(x: T) -> T { x }
+
+        fn test() -> u64 {
+            foo(1)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_array_index_through_heap() {
     let source = r#"
         fn test() -> u64 {

@@ -81,6 +81,14 @@ pub trait TreeMapper {
         walk_fn_type_param(self, param, ctx)
     }
 
+    fn map_type_param(
+        &mut self,
+        param: &TypeParam<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> TypeParam<Self::OutD> {
+        walk_type_param(self, param, ctx)
+    }
+
     fn map_func_decl(
         &mut self,
         func_decl: &FuncDecl<Self::InD>,
@@ -494,6 +502,11 @@ pub fn walk_func_sig<M: TreeMapper + ?Sized>(
 ) -> FunctionSig<M::OutD> {
     FunctionSig {
         name: func_sig.name.clone(),
+        type_params: func_sig
+            .type_params
+            .iter()
+            .map(|param| mapper.map_type_param(param, ctx))
+            .collect(),
         params: func_sig
             .params
             .iter()
@@ -501,6 +514,19 @@ pub fn walk_func_sig<M: TreeMapper + ?Sized>(
             .collect(),
         ret_ty_expr: mapper.map_type_expr(&func_sig.ret_ty_expr, ctx),
         span: func_sig.span,
+    }
+}
+
+pub fn walk_type_param<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    param: &TypeParam<M::InD>,
+    ctx: &mut M::Context,
+) -> TypeParam<M::OutD> {
+    TypeParam {
+        id: param.id,
+        ident: param.ident.clone(),
+        def_id: mapper.map_def_id(param.id, &param.def_id, ctx),
+        span: param.span,
     }
 }
 
@@ -568,6 +594,11 @@ pub fn walk_method_sig<M: TreeMapper + ?Sized>(
 ) -> MethodSig<M::OutD> {
     MethodSig {
         name: method_sig.name.clone(),
+        type_params: method_sig
+            .type_params
+            .iter()
+            .map(|param| mapper.map_type_param(param, ctx))
+            .collect(),
         self_param: mapper.map_self_param(&method_sig.self_param, ctx),
         params: method_sig
             .params

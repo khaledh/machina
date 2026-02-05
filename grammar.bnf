@@ -47,14 +47,17 @@ IntLitList         ::= IntLit ("," IntLit)* ","?
 FuncDecl           ::= FuncSig ";"
 Func               ::= FuncSig Block
 
-FuncSig            ::= "fn" Identifier "(" ParamList? ")" ( "->" TypeExpr )?
+FuncSig            ::= "fn" Identifier TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
 MethodBlock        ::= Identifier "::" "{" MethodItem* "}"
 MethodItem         ::= MethodDecl | MethodDef | PropertyDef
 MethodDecl         ::= AttributeList MethodSig ";"
 MethodDef          ::= AttributeList MethodSig Block
-MethodSig          ::= "fn" Identifier "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
+MethodSig          ::= "fn" Identifier TypeParamList? "(" SelfParam ("," ParamList)? ")" ( "->" TypeExpr )?
+
+TypeParamList      ::= "<" IdentifierList ">"
+IdentifierList     ::= Identifier ( "," Identifier )* ","?
 SelfParam          ::= ParamMode? "self"
 
 # Properties

@@ -40,6 +40,7 @@ pub enum DefKind {
     TypeDef {
         attrs: TypeAttrs,
     },
+    TypeParam,
     FuncDef {
         attrs: FuncAttrs,
     },
@@ -72,6 +73,7 @@ impl fmt::Display for DefKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DefKind::TypeDef { .. } => write!(f, "TypeDef"),
+            DefKind::TypeParam => write!(f, "TypeParam"),
             DefKind::FuncDef { .. } => write!(f, "FuncDef"),
             DefKind::FuncDecl { .. } => write!(f, "FuncDecl"),
             DefKind::LocalVar {

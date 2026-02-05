@@ -10,7 +10,7 @@ use crate::tree::semantic::Module as SemanticModule;
 use crate::tree::semantic::{DropPlanMap, LoweringPlanMap};
 use crate::tree::typed::Module as TypedModule;
 use crate::tree::{NodeId, NodeIdGen};
-use crate::typeck::type_map::{CallSigMap, TypeMap};
+use crate::typeck::type_map::{CallSigMap, GenericInstMap, TypeMap};
 
 // -----------------------------------------------------------------------------
 // Parsed Context
@@ -58,6 +58,7 @@ impl ResolvedContext {
         self,
         type_map: TypeMap,
         call_sigs: CallSigMap,
+        generic_insts: GenericInstMap,
         module: TypedModule,
     ) -> TypeCheckedContext {
         TypeCheckedContext {
@@ -65,6 +66,7 @@ impl ResolvedContext {
             def_table: self.def_table,
             type_map,
             call_sigs,
+            generic_insts,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
         }
@@ -81,6 +83,7 @@ pub struct TypeCheckedContext {
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
+    pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
@@ -95,6 +98,7 @@ pub struct NormalizedContext {
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
+    pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
@@ -112,6 +116,7 @@ impl NormalizedContext {
             def_table: self.def_table,
             type_map: self.type_map,
             call_sigs: self.call_sigs,
+            generic_insts: self.generic_insts,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
             implicit_moves,
@@ -132,6 +137,7 @@ pub struct SemanticCheckedContext {
     pub def_table: DefTable,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
+    pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub implicit_moves: HashSet<NodeId>,
@@ -153,6 +159,7 @@ pub struct SemanticContext {
     pub drop_plans: DropPlanMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub generic_insts: GenericInstMap,
 }
 
 // -----------------------------------------------------------------------------
@@ -168,6 +175,7 @@ pub struct AnalyzedContext {
     pub drop_plans: DropPlanMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub generic_insts: GenericInstMap,
 }
 
 impl AnalyzedContext {}

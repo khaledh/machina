@@ -53,6 +53,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         def_table,
         type_map,
         call_sigs,
+        generic_insts,
         symbols,
         node_id_gen,
         implicit_moves,
@@ -111,5 +112,6 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         drop_plans,
         symbols,
         node_id_gen,
+        generic_insts,
     }
 }

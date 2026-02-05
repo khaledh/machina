@@ -21,6 +21,7 @@ pub(super) struct OverloadSig {
     pub(super) def_id: DefId,
     pub(super) params: Vec<ParamSig>,
     pub(super) ret_ty: Type,
+    pub(super) type_param_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]

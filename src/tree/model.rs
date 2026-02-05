@@ -331,8 +331,17 @@ pub struct FuncDef<D, T = ()> {
 #[derive(Clone, Debug)]
 pub struct FunctionSig<D> {
     pub name: String,
+    pub type_params: Vec<TypeParam<D>>,
     pub params: Vec<Param<D>>,
     pub ret_ty_expr: TypeExpr<D>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeParam<D> {
+    pub id: NodeId,
+    pub ident: String,
+    pub def_id: D,
     pub span: Span,
 }
 
@@ -375,6 +384,7 @@ pub struct MethodDef<D, T = ()> {
 #[derive(Clone, Debug)]
 pub struct MethodSig<D> {
     pub name: String,
+    pub type_params: Vec<TypeParam<D>>,
     pub self_param: SelfParam<D>,
     pub params: Vec<Param<D>>,
     pub ret_ty_expr: TypeExpr<D>,

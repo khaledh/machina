@@ -57,6 +57,12 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_func_sig(self, func_sig)
     }
 
+    // --- Type Parameters ---
+
+    fn visit_type_param(&mut self, param: &mut TypeParam<D>) {
+        walk_type_param(self, param)
+    }
+
     // --- Method Signatures ---
 
     fn visit_method_sig(&mut self, method_sig: &mut MethodSig<D>) {
@@ -231,10 +237,15 @@ pub fn walk_func_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, func_def: &m
 // --- Function Signatures ---
 
 pub fn walk_func_sig<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, func_sig: &mut FunctionSig<D>) {
+    for param in &mut func_sig.type_params {
+        v.visit_type_param(param);
+    }
     for param in &mut func_sig.params {
         v.visit_param(param);
     }
 }
+
+pub fn walk_type_param<V: VisitorMut<D, T> + ?Sized, D, T>(_v: &mut V, _param: &mut TypeParam<D>) {}
 
 // --- Method Signatures ---
 
@@ -242,6 +253,9 @@ pub fn walk_method_sig<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
     method_sig: &mut MethodSig<D>,
 ) {
+    for param in &mut method_sig.type_params {
+        v.visit_type_param(param);
+    }
     for param in &mut method_sig.params {
         v.visit_param(param);
     }

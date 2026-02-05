@@ -19,6 +19,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         def_table,
         type_map,
         call_sigs,
+        generic_insts,
         symbols,
         node_id_gen,
     } = ctx;
@@ -32,6 +33,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         def_table,
         type_map,
         call_sigs,
+        generic_insts,
         symbols,
         node_id_gen,
     }

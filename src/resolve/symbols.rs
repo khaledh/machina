@@ -9,6 +9,9 @@ pub enum SymbolKind {
         def_id: DefId,
         is_mutable: bool,
     },
+    TypeParam {
+        def_id: DefId,
+    },
     Func {
         overloads: Vec<DefId>,
     },
@@ -30,6 +33,7 @@ impl std::fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SymbolKind::Var { .. } => write!(f, "var"),
+            SymbolKind::TypeParam { .. } => write!(f, "type_param"),
             SymbolKind::Func { overloads } => write!(f, "func[{} overloads]", overloads.len()),
             SymbolKind::TypeAlias { ty_expr, .. } => write!(f, "type_alias[{}]", ty_expr),
             SymbolKind::StructDef { fields, .. } => {
@@ -60,6 +64,7 @@ impl Symbol {
     pub fn def_id(&self) -> DefId {
         match &self.kind {
             SymbolKind::Var { def_id, .. } => *def_id,
+            SymbolKind::TypeParam { def_id } => *def_id,
             SymbolKind::Func { overloads } => overloads
                 .first()
                 .copied()

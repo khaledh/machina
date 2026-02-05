@@ -51,6 +51,7 @@ pub enum Type {
     },
 
     // Internal Types
+    Var(TyVarId),
     Slice {
         elem_ty: Box<Type>,
     },
@@ -61,6 +62,19 @@ pub enum Type {
         mutable: bool,
         elem_ty: Box<Type>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TyVarId(u32);
+
+impl TyVarId {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn index(self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -153,6 +167,7 @@ impl PartialEq for Type {
                     elem_ty: e2,
                 },
             ) => m1 == m2 && e1 == e2,
+            (Type::Var(v1), Type::Var(v2)) => v1 == v2,
             _ => false,
         }
     }
@@ -228,6 +243,10 @@ impl Hash for Type {
                 15u8.hash(state);
                 mutable.hash(state);
                 elem_ty.hash(state);
+            }
+            Type::Var(var) => {
+                16u8.hash(state);
+                var.hash(state);
             }
         }
     }
@@ -366,6 +385,7 @@ impl Type {
             }
             Type::Heap { .. } => 8,
             Type::Ref { .. } => 8,
+            Type::Var(_) => panic!("Type variable has no size"),
             Type::Unknown => panic!("Unknown type"),
         }
     }
@@ -396,6 +416,7 @@ impl Type {
             Type::Slice { .. } => 8,
             Type::Heap { .. } => 8,
             Type::Ref { .. } => 8,
+            Type::Var(_) => panic!("Type variable has no alignment"),
             Type::Unknown => panic!("Unknown type"),
         }
     }

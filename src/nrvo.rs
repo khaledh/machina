@@ -28,6 +28,7 @@ impl NrvoAnalyzer {
             drop_plans,
             symbols,
             node_id_gen,
+            generic_insts,
         } = self.ctx;
 
         let mut def_table = def_table;
@@ -44,6 +45,7 @@ impl NrvoAnalyzer {
             drop_plans,
             symbols,
             node_id_gen,
+            generic_insts,
         }
     }
 

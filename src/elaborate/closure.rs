@@ -171,6 +171,7 @@ impl<'a> Elaborator<'a> {
             attrs: Vec::new(),
             sig: sem::FunctionSig {
                 name: ident.to_string(),
+                type_params: Vec::new(),
                 params: params.to_vec(),
                 ret_ty_expr: return_ty.clone(),
                 span,
@@ -313,6 +314,7 @@ impl<'a> Elaborator<'a> {
             attrs: Vec::new(),
             sig: sem::MethodSig {
                 name: "invoke".to_string(),
+                type_params: Vec::new(),
                 self_param,
                 params: params.to_vec(),
                 ret_ty_expr: return_ty.clone(),

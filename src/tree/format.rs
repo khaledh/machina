@@ -122,6 +122,14 @@ impl FunctionSig {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         writeln!(f, "{}Name: {}", pad, self.name)?;
+        if !self.type_params.is_empty() {
+            let names = self
+                .type_params
+                .iter()
+                .map(|param| param.ident.as_str())
+                .collect::<Vec<_>>();
+            writeln!(f, "{}Type Params: {}", pad, names.join(", "))?;
+        }
         writeln!(f, "{}Return Type: {}", pad, self.ret_ty_expr)?;
         writeln!(f, "{}Params:", pad)?;
         for param in &self.params {
@@ -187,6 +195,14 @@ impl MethodSig {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         writeln!(f, "{}Name: {}", pad, self.name)?;
+        if !self.type_params.is_empty() {
+            let names = self
+                .type_params
+                .iter()
+                .map(|param| param.ident.as_str())
+                .collect::<Vec<_>>();
+            writeln!(f, "{}Type Params: {}", pad, names.join(", "))?;
+        }
         writeln!(f, "{}Self Mode: {:?}", pad, self.self_param.mode)?;
         writeln!(f, "{}Return Type: {}", pad, self.ret_ty_expr)?;
         writeln!(f, "{}Params:", pad)?;

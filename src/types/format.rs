@@ -95,6 +95,7 @@ impl fmt::Display for Type {
                     write!(f, "ref {}", elem_ty)
                 }
             }
+            Type::Var(var) => write!(f, "T{}", var.index()),
         }
     }
 }

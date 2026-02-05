@@ -1,4 +1,5 @@
 use super::*;
+use crate::tree::parsed::TypeParam;
 
 impl<'a> Parser<'a> {
     // --- Functions ---
@@ -45,6 +46,7 @@ impl<'a> Parser<'a> {
         self.consume_keyword(TK::KwFn)?;
 
         let name = self.parse_ident()?;
+        let type_params = self.parse_type_params()?;
 
         self.consume(&TK::LParen)?;
         let params = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())?;
@@ -54,10 +56,32 @@ impl<'a> Parser<'a> {
 
         Ok(FunctionSig {
             name,
+            type_params,
             params,
             ret_ty_expr,
             span: self.close(marker),
         })
+    }
+
+    fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, ParseError> {
+        if self.curr_token.kind != TK::LessThan {
+            return Ok(Vec::new());
+        }
+
+        self.consume(&TK::LessThan)?;
+        let params = self.parse_list(TK::Comma, TK::GreaterThan, |parser| {
+            let marker = parser.mark();
+            let ident = parser.parse_ident()?;
+            Ok(TypeParam {
+                id: parser.id_gen.new_id(),
+                ident,
+                def_id: (),
+                span: parser.close(marker),
+            })
+        })?;
+        self.consume(&TK::GreaterThan)?;
+
+        Ok(params)
     }
 
     // --- Methods ---
@@ -126,6 +150,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         self.consume_keyword(TK::KwFn)?;
         let name = self.parse_ident()?;
+        let type_params = self.parse_type_params()?;
         self.consume(&TK::LParen)?;
 
         let self_marker = self.mark();
@@ -153,6 +178,7 @@ impl<'a> Parser<'a> {
 
         Ok(MethodSig {
             name,
+            type_params,
             self_param,
             params,
             ret_ty_expr,
@@ -195,6 +221,7 @@ impl<'a> Parser<'a> {
                     // Getter has only `self` and returns the property type.
                     let sig = MethodSig {
                         name: prop_name.clone(),
+                        type_params: Vec::new(),
                         self_param: SelfParam {
                             id: self.id_gen.new_id(),
                             def_id: (),
@@ -269,6 +296,7 @@ impl<'a> Parser<'a> {
 
                     let sig = MethodSig {
                         name: prop_name.clone(),
+                        type_params: Vec::new(),
                         self_param: SelfParam {
                             id: self.id_gen.new_id(),
                             def_id: (),

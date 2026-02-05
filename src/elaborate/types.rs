@@ -26,6 +26,12 @@ impl<'a> Elaborator<'a> {
             Type::Unknown => {
                 panic!("compiler bug: unknown type in closure capture at {}", span)
             }
+            Type::Var(_) => {
+                panic!(
+                    "compiler bug: type variable in type expression synthesis at {}",
+                    span
+                )
+            }
             Type::Unit => self.named_type_expr("()", span),
             Type::Int {
                 signed,

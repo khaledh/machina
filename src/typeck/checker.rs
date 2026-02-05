@@ -4,19 +4,25 @@ use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::tree::fold::{TreeFolder, walk_expr, walk_if};
+use crate::tree::resolved::TypeParam;
 use crate::tree::resolved::*;
 use crate::tree::visit::{
     Visitor, walk_expr as walk_visit_expr, walk_stmt_expr as walk_visit_stmt_expr,
 };
 use crate::tree::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::types::{
-    EnumVariant, FnParam, FnParamMode, StructField, Type, array_to_slice_assignable,
+    EnumVariant, FnParam, FnParamMode, StructField, TyVarId, Type, array_to_slice_assignable,
+    value_assignable,
 };
-use crate::types::{TypeAssignability, type_assignable};
+use crate::types::{TypeAssignability, ValueAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
 use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
-use super::type_map::{CallParam, CallSig, CallSigMap, TypeMap, TypeMapBuilder, resolve_type_expr};
+use super::type_map::{
+    CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
+    resolve_type_expr, resolve_type_expr_with_params,
+};
+use super::unify::Unifier;
 
 #[derive(Debug, Clone)]
 struct PropertySig {
@@ -46,6 +52,7 @@ pub struct TypeChecker {
     halted: bool,
     return_stack: Vec<Type>,
     loop_depth_stack: Vec<usize>,
+    type_param_stack: Vec<HashMap<DefId, TyVarId>>,
 }
 
 impl TypeChecker {
@@ -62,10 +69,11 @@ impl TypeChecker {
             halted: false,
             return_stack: Vec::new(),
             loop_depth_stack: Vec::new(),
+            type_param_stack: Vec::new(),
         }
     }
 
-    pub fn check(&mut self) -> Result<(TypeMap, CallSigMap), Vec<TypeCheckError>> {
+    pub fn check(&mut self) -> Result<(TypeMap, CallSigMap, GenericInstMap), Vec<TypeCheckError>> {
         self.populate_type_symbols()?;
         self.populate_function_symbols()?;
         self.populate_method_symbols()?;
@@ -98,6 +106,42 @@ impl TypeChecker {
 
     fn loop_depth(&self) -> usize {
         self.loop_depth_stack.last().copied().unwrap_or(0)
+    }
+
+    fn type_param_map(type_params: &[TypeParam]) -> HashMap<DefId, TyVarId> {
+        type_params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
+            .collect()
+    }
+
+    fn current_type_params(&self) -> Option<&HashMap<DefId, TyVarId>> {
+        self.type_param_stack.last()
+    }
+
+    fn with_type_params<F, R>(&mut self, type_params: &[TypeParam], f: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        if type_params.is_empty() {
+            return f(self);
+        }
+
+        self.type_param_stack
+            .push(Self::type_param_map(type_params));
+        let result = f(self);
+        self.type_param_stack.pop();
+        result
+    }
+
+    fn resolve_type_expr_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        resolve_type_expr_with_params(
+            &self.ctx.def_table,
+            &self.ctx.module,
+            ty_expr,
+            self.current_type_params(),
+        )
     }
 
     fn enter_loop(&mut self) {
@@ -226,8 +270,13 @@ impl TypeChecker {
         }
 
         for (type_name, def_id, sig, attrs, span) in items {
-            let params = self.build_param_sigs(&sig.params)?;
-            let ret_type = self.resolve_ret_type(&sig.ret_ty_expr)?;
+            let type_param_map = if sig.type_params.is_empty() {
+                None
+            } else {
+                Some(Self::type_param_map(&sig.type_params))
+            };
+            let params = self.build_param_sigs(&sig.params, type_param_map.as_ref())?;
+            let ret_type = self.resolve_ret_type(&sig.ret_ty_expr, type_param_map.as_ref())?;
 
             if let Some(kind) = Self::property_accessor_kind(&attrs) {
                 // Record property accessors so field access/assignment can be
@@ -251,6 +300,7 @@ impl TypeChecker {
                     def_id,
                     params,
                     ret_ty: ret_type,
+                    type_param_count: sig.type_params.len(),
                 });
         }
 
@@ -393,8 +443,13 @@ impl TypeChecker {
         def_id: DefId,
         sig: FunctionSig,
     ) -> Result<(), Vec<TypeCheckError>> {
-        let params = self.build_param_sigs(&sig.params)?;
-        let ret_ty = self.resolve_ret_type(&sig.ret_ty_expr)?;
+        let type_param_map = if sig.type_params.is_empty() {
+            None
+        } else {
+            Some(Self::type_param_map(&sig.type_params))
+        };
+        let params = self.build_param_sigs(&sig.params, type_param_map.as_ref())?;
+        let ret_ty = self.resolve_ret_type(&sig.ret_ty_expr, type_param_map.as_ref())?;
 
         // Record the function type.
         if let Some(def) = self.ctx.def_table.lookup_def(def_id) {
@@ -423,16 +478,26 @@ impl TypeChecker {
                 def_id,
                 params,
                 ret_ty,
+                type_param_count: sig.type_params.len(),
             });
 
         Ok(())
     }
 
-    fn build_param_sigs(&self, params: &[Param]) -> Result<Vec<ParamSig>, Vec<TypeCheckError>> {
+    fn build_param_sigs(
+        &self,
+        params: &[Param],
+        type_params: Option<&HashMap<DefId, TyVarId>>,
+    ) -> Result<Vec<ParamSig>, Vec<TypeCheckError>> {
         params
             .iter()
             .map(|param| {
-                let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ)?;
+                let ty = resolve_type_expr_with_params(
+                    &self.ctx.def_table,
+                    &self.ctx.module,
+                    &param.typ,
+                    type_params,
+                )?;
                 Ok(ParamSig {
                     name: self.def_name(param.def_id).to_string(),
                     ty,
@@ -443,8 +508,13 @@ impl TypeChecker {
             .map_err(|e| vec![e])
     }
 
-    fn resolve_ret_type(&self, ret_type: &TypeExpr) -> Result<Type, Vec<TypeCheckError>> {
-        resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ret_type).map_err(|e| vec![e])
+    fn resolve_ret_type(
+        &self,
+        ret_type: &TypeExpr,
+        type_params: Option<&HashMap<DefId, TyVarId>>,
+    ) -> Result<Type, Vec<TypeCheckError>> {
+        resolve_type_expr_with_params(&self.ctx.def_table, &self.ctx.module, ret_type, type_params)
+            .map_err(|e| vec![e])
     }
 
     fn def_name(&self, def_id: DefId) -> &str {
@@ -537,57 +607,59 @@ impl TypeChecker {
             )
         };
 
-        // Record param types
-        for (param, param_ty) in func_def.sig.params.iter().zip(param_types.iter()) {
-            match self.ctx.def_table.lookup_def(param.def_id) {
-                Some(def) => {
-                    self.type_map_builder
-                        .record_def_type(def.clone(), param_ty.clone());
-                    self.type_map_builder
-                        .record_node_type(param.id, param_ty.clone());
+        self.with_type_params(&func_def.sig.type_params, |this| {
+            // Record param types
+            for (param, param_ty) in func_def.sig.params.iter().zip(param_types.iter()) {
+                match this.ctx.def_table.lookup_def(param.def_id) {
+                    Some(def) => {
+                        this.type_map_builder
+                            .record_def_type(def.clone(), param_ty.clone());
+                        this.type_map_builder
+                            .record_node_type(param.id, param_ty.clone());
+                    }
+                    None => panic!("Parameter {} not found in def_table", param.ident),
                 }
-                None => panic!("Parameter {} not found in def_table", param.ident),
             }
-        }
 
-        self.push_control_context(ret_type.clone());
-        let body_ty = match self.visit_expr(&func_def.body, Some(&ret_type)) {
-            Ok(ty) => ty,
-            Err(e) => {
-                self.errors.push(e);
-                self.pop_control_context();
-                return Err(self.errors.clone());
+            this.push_control_context(ret_type.clone());
+            let body_ty = match this.visit_expr(&func_def.body, Some(&ret_type)) {
+                Ok(ty) => ty,
+                Err(e) => {
+                    this.errors.push(e);
+                    this.pop_control_context();
+                    return Err(this.errors.clone());
+                }
+            };
+            this.pop_control_context();
+
+            let return_span = this.function_return_span(&func_def.body);
+            let has_return = this.body_has_return_stmt(&func_def.body);
+            let has_tail = matches!(func_def.body.kind, ExprKind::Block { tail: Some(_), .. });
+            if matches!(
+                type_assignable(&body_ty, &ret_type),
+                TypeAssignability::Incompatible
+            ) && (!has_return || has_tail)
+            {
+                this.errors.push(
+                    TypeCheckErrorKind::DeclTypeMismatch(
+                        ret_type.clone(),
+                        body_ty.clone(),
+                        return_span,
+                    )
+                    .into(),
+                );
+                return Err(this.errors.clone());
             }
-        };
-        self.pop_control_context();
 
-        let return_span = self.function_return_span(&func_def.body);
-        let has_return = self.body_has_return_stmt(&func_def.body);
-        let has_tail = matches!(func_def.body.kind, ExprKind::Block { tail: Some(_), .. });
-        if matches!(
-            type_assignable(&body_ty, &ret_type),
-            TypeAssignability::Incompatible
-        ) && (!has_return || has_tail)
-        {
-            self.errors.push(
-                TypeCheckErrorKind::DeclTypeMismatch(
-                    ret_type.clone(),
-                    body_ty.clone(),
-                    return_span,
-                )
-                .into(),
-            );
-            return Err(self.errors.clone());
-        }
-
-        // record return type
-        self.type_map_builder
-            .record_node_type(func_def.id, ret_type.clone());
-        if self.errors.is_empty() {
-            Ok(body_ty)
-        } else {
-            Err(self.errors.clone())
-        }
+            // record return type
+            this.type_map_builder
+                .record_node_type(func_def.id, ret_type.clone());
+            if this.errors.is_empty() {
+                Ok(body_ty)
+            } else {
+                Err(this.errors.clone())
+            }
+        })
     }
 
     fn check_method(
@@ -604,21 +676,28 @@ impl TypeChecker {
             }
         };
 
-        let ret_type = match self.resolve_ret_type(&method_def.sig.ret_ty_expr) {
-            Ok(ty) => ty,
-            Err(errs) => {
-                self.errors.extend(errs);
-                return Err(self.errors.clone());
-            }
+        let type_param_map = if method_def.sig.type_params.is_empty() {
+            None
+        } else {
+            Some(Self::type_param_map(&method_def.sig.type_params))
         };
+        let ret_type =
+            match self.resolve_ret_type(&method_def.sig.ret_ty_expr, type_param_map.as_ref()) {
+                Ok(ty) => ty,
+                Err(errs) => {
+                    self.errors.extend(errs);
+                    return Err(self.errors.clone());
+                }
+            };
 
-        let param_sigs = match self.build_param_sigs(&method_def.sig.params) {
-            Ok(params) => params,
-            Err(errs) => {
-                self.errors.extend(errs);
-                return Err(self.errors.clone());
-            }
-        };
+        let param_sigs =
+            match self.build_param_sigs(&method_def.sig.params, type_param_map.as_ref()) {
+                Ok(params) => params,
+                Err(errs) => {
+                    self.errors.extend(errs);
+                    return Err(self.errors.clone());
+                }
+            };
         let param_types = param_sigs
             .iter()
             .map(|param| param.ty.clone())
@@ -646,44 +725,46 @@ impl TypeChecker {
             }
         }
 
-        self.push_control_context(ret_type.clone());
-        let body_ty = match self.visit_expr(&method_def.body, Some(&ret_type)) {
-            Ok(ty) => ty,
-            Err(e) => {
-                self.errors.push(e);
-                self.pop_control_context();
-                return Err(self.errors.clone());
+        self.with_type_params(&method_def.sig.type_params, |this| {
+            this.push_control_context(ret_type.clone());
+            let body_ty = match this.visit_expr(&method_def.body, Some(&ret_type)) {
+                Ok(ty) => ty,
+                Err(e) => {
+                    this.errors.push(e);
+                    this.pop_control_context();
+                    return Err(this.errors.clone());
+                }
+            };
+            this.pop_control_context();
+
+            let return_span = this.function_return_span(&method_def.body);
+            let has_return = this.body_has_return_stmt(&method_def.body);
+            let has_tail = matches!(method_def.body.kind, ExprKind::Block { tail: Some(_), .. });
+            if matches!(
+                type_assignable(&body_ty, &ret_type),
+                TypeAssignability::Incompatible
+            ) && (!has_return || has_tail)
+            {
+                this.errors.push(
+                    TypeCheckErrorKind::DeclTypeMismatch(
+                        ret_type.clone(),
+                        body_ty.clone(),
+                        return_span,
+                    )
+                    .into(),
+                );
+                return Err(this.errors.clone());
             }
-        };
-        self.pop_control_context();
 
-        let return_span = self.function_return_span(&method_def.body);
-        let has_return = self.body_has_return_stmt(&method_def.body);
-        let has_tail = matches!(method_def.body.kind, ExprKind::Block { tail: Some(_), .. });
-        if matches!(
-            type_assignable(&body_ty, &ret_type),
-            TypeAssignability::Incompatible
-        ) && (!has_return || has_tail)
-        {
-            self.errors.push(
-                TypeCheckErrorKind::DeclTypeMismatch(
-                    ret_type.clone(),
-                    body_ty.clone(),
-                    return_span,
-                )
-                .into(),
-            );
-            return Err(self.errors.clone());
-        }
+            this.type_map_builder
+                .record_node_type(method_def.id, ret_type.clone());
 
-        self.type_map_builder
-            .record_node_type(method_def.id, ret_type.clone());
-
-        if self.errors.is_empty() {
-            Ok(body_ty)
-        } else {
-            Err(self.errors.clone())
-        }
+            if this.errors.is_empty() {
+                Ok(body_ty)
+            } else {
+                Err(this.errors.clone())
+            }
+        })
     }
 
     fn check_closure(
@@ -694,7 +775,7 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         let mut param_types = Vec::with_capacity(params.len());
         for param in params {
-            let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ)?;
+            let ty = self.resolve_type_expr_in_scope(&param.typ)?;
             self.type_map_builder.record_node_type(param.id, ty.clone());
             if let Some(def) = self.ctx.def_table.lookup_def(param.def_id) {
                 self.type_map_builder
@@ -706,7 +787,7 @@ impl TypeChecker {
             });
         }
 
-        let return_ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, return_ty)?;
+        let return_ty = self.resolve_type_expr_in_scope(return_ty)?;
 
         self.push_control_context(return_ty.clone());
         let body_ty = match self.visit_expr(body, Some(&return_ty)) {
@@ -772,7 +853,7 @@ impl TypeChecker {
 
         // Resolve the element type
         let elem_ty = if let Some(elem_ty_expr) = elem_ty_expr {
-            resolve_type_expr(&self.ctx.def_table, &self.ctx.module, elem_ty_expr)?
+            self.resolve_type_expr_in_scope(elem_ty_expr)?
         } else if let Some(Type::Array {
             elem_ty: expected_elem_ty,
             dims: expected_dims,
@@ -1334,7 +1415,7 @@ impl TypeChecker {
         // resolve the declaration type (if present)
         let expected_ty = decl_ty
             .as_ref()
-            .map(|ty_expr| resolve_type_expr(&self.ctx.def_table, &self.ctx.module, ty_expr))
+            .map(|ty_expr| self.resolve_type_expr_in_scope(ty_expr))
             .transpose()?;
 
         let mut value_ty = self.visit_expr(value, expected_ty.as_ref())?;
@@ -1701,24 +1782,108 @@ impl TypeChecker {
                 }
             }
 
-            let resolved = OverloadResolver::new(name, args, &arg_types, call_expr.span)
-                .resolve(overloads)
-                .map(|resolved| {
-                    let param_types = resolved
-                        .sig
-                        .params
-                        .iter()
-                        .map(|param| param.ty.clone())
-                        .collect::<Vec<_>>();
-                    let param_modes = resolved
-                        .sig
-                        .params
-                        .iter()
-                        .map(|param| param.mode.clone())
-                        .collect::<Vec<_>>();
-                    let ret_type = resolved.sig.ret_ty.clone();
-                    (resolved.def_id, param_types, param_modes, ret_type)
-                });
+            let mut generic_overloads = Vec::new();
+            let mut concrete_overloads = Vec::new();
+            for sig in overloads {
+                if Self::sig_has_type_vars(sig) {
+                    generic_overloads.push(sig);
+                } else {
+                    concrete_overloads.push(sig);
+                }
+            }
+
+            let resolved = if !concrete_overloads.is_empty() {
+                let concrete = concrete_overloads.into_iter().cloned().collect::<Vec<_>>();
+                match OverloadResolver::new(name, args, &arg_types, call_expr.span)
+                    .resolve(&concrete)
+                {
+                    Ok(resolved) => Ok((
+                        resolved.def_id,
+                        resolved
+                            .sig
+                            .params
+                            .iter()
+                            .map(|param| param.ty.clone())
+                            .collect::<Vec<_>>(),
+                        resolved
+                            .sig
+                            .params
+                            .iter()
+                            .map(|param| param.mode.clone())
+                            .collect::<Vec<_>>(),
+                        resolved.sig.ret_ty.clone(),
+                    )),
+                    Err(err) => {
+                        if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _))
+                            && !generic_overloads.is_empty()
+                        {
+                            let inst = Self::resolve_generic_overload(
+                                name,
+                                args,
+                                &arg_types,
+                                &generic_overloads,
+                                call_expr.span,
+                            )?;
+                            let sig = generic_overloads
+                                .iter()
+                                .find(|sig| sig.def_id == inst.def_id)
+                                .ok_or_else(|| {
+                                    TypeCheckError::from(TypeCheckErrorKind::OverloadNoMatch(
+                                        name.to_string(),
+                                        call_expr.span,
+                                    ))
+                                })?;
+                            let (param_types, param_modes, ret_type) =
+                                Self::apply_inst_to_sig(sig, &inst);
+                            self.type_map_builder
+                                .record_generic_inst(call_expr.id, inst);
+                            Ok((sig.def_id, param_types, param_modes, ret_type))
+                        } else {
+                            Err(err)
+                        }
+                    }
+                }
+            } else if !generic_overloads.is_empty() {
+                let inst = Self::resolve_generic_overload(
+                    name,
+                    args,
+                    &arg_types,
+                    &generic_overloads,
+                    call_expr.span,
+                )?;
+                let sig = generic_overloads
+                    .iter()
+                    .find(|sig| sig.def_id == inst.def_id)
+                    .ok_or_else(|| {
+                        TypeCheckError::from(TypeCheckErrorKind::OverloadNoMatch(
+                            name.to_string(),
+                            call_expr.span,
+                        ))
+                    })?;
+                let (param_types, param_modes, ret_type) = Self::apply_inst_to_sig(sig, &inst);
+                self.type_map_builder
+                    .record_generic_inst(call_expr.id, inst);
+                Ok((sig.def_id, param_types, param_modes, ret_type))
+            } else {
+                OverloadResolver::new(name, args, &arg_types, call_expr.span)
+                    .resolve(overloads)
+                    .map(|resolved| {
+                        let param_types = resolved
+                            .sig
+                            .params
+                            .iter()
+                            .map(|param| param.ty.clone())
+                            .collect::<Vec<_>>();
+                        let param_modes = resolved
+                            .sig
+                            .params
+                            .iter()
+                            .map(|param| param.mode.clone())
+                            .collect::<Vec<_>>();
+                        let ret_type = resolved.sig.ret_ty.clone();
+                        (resolved.def_id, param_types, param_modes, ret_type)
+                    })
+            };
             (resolved, fallback_param_types)
         };
 
@@ -1762,6 +1927,162 @@ impl TypeChecker {
         self.check_call_arg_types(args, &param_types)?;
 
         Ok(ret_type)
+    }
+
+    fn resolve_generic_overload(
+        name: &str,
+        args: &[CallArg],
+        arg_types: &[Type],
+        overloads: &[&OverloadSig],
+        call_span: Span,
+    ) -> Result<GenericInst, TypeCheckError> {
+        let mut candidates = Vec::new();
+        let mut range_err: Option<TypeCheckError> = None;
+
+        let mut unifier_for_sig = |sig: &OverloadSig| -> Result<Option<Unifier>, TypeCheckError> {
+            let mut unifier = Unifier::new();
+            for ((arg, arg_ty), param) in args.iter().zip(arg_types).zip(sig.params.iter()) {
+                let param_ty = &param.ty;
+                let mut arg_ty_for_unify = arg_ty.clone();
+
+                if arg.mode != CallArgMode::Move
+                    && arg.mode != CallArgMode::Out
+                    && matches!(param_ty, Type::Slice { .. })
+                    && let Some(item) = arg_ty.array_item_type()
+                {
+                    arg_ty_for_unify = Type::Slice {
+                        elem_ty: Box::new(item),
+                    };
+                }
+
+                if Self::type_has_vars(param_ty) {
+                    if unifier.unify(param_ty, &arg_ty_for_unify).is_err() {
+                        return Ok(None);
+                    }
+                    continue;
+                }
+
+                match value_assignable(&arg.expr, arg_ty, param_ty) {
+                    ValueAssignability::Assignable(assignability) => {
+                        if matches!(assignability, TypeAssignability::Incompatible) {
+                            return Ok(None);
+                        }
+                    }
+                    ValueAssignability::ValueOutOfRange { value, min, max } => {
+                        range_err.get_or_insert(
+                            TypeCheckErrorKind::ValueOutOfRange(value, min, max, arg.span).into(),
+                        );
+                        return Ok(None);
+                    }
+                    ValueAssignability::ValueNotNonZero { value } => {
+                        return Err(TypeCheckErrorKind::ValueNotNonZero(value, arg.span).into());
+                    }
+                    ValueAssignability::Incompatible => {
+                        if arg.mode != CallArgMode::Move
+                            && arg.mode != CallArgMode::Out
+                            && array_to_slice_assignable(arg_ty, param_ty)
+                        {
+                            continue;
+                        }
+                        return Ok(None);
+                    }
+                }
+            }
+            Ok(Some(unifier))
+        };
+
+        for sig in overloads {
+            if sig.params.len() != arg_types.len() {
+                continue;
+            }
+
+            let Some(unifier) = unifier_for_sig(sig)? else {
+                continue;
+            };
+
+            let type_args = (0..sig.type_param_count)
+                .map(|index| unifier.apply(&Type::Var(TyVarId::new(index as u32))))
+                .collect::<Vec<_>>();
+
+            if type_args.iter().any(|ty| matches!(ty, Type::Var(_))) {
+                continue;
+            }
+
+            candidates.push(GenericInst {
+                def_id: sig.def_id,
+                type_args,
+            });
+        }
+
+        if candidates.is_empty() {
+            return Err(range_err.unwrap_or_else(|| {
+                TypeCheckErrorKind::OverloadNoMatch(name.to_string(), call_span).into()
+            }));
+        }
+
+        if candidates.len() != 1 {
+            return Err(TypeCheckErrorKind::OverloadAmbiguous(name.to_string(), call_span).into());
+        }
+
+        Ok(candidates.pop().unwrap())
+    }
+
+    fn sig_has_type_vars(sig: &OverloadSig) -> bool {
+        sig.type_param_count > 0
+            || sig
+                .params
+                .iter()
+                .any(|param| Self::type_has_vars(&param.ty))
+            || Self::type_has_vars(&sig.ret_ty)
+    }
+
+    fn apply_inst_to_sig(
+        sig: &OverloadSig,
+        inst: &GenericInst,
+    ) -> (Vec<Type>, Vec<ParamMode>, Type) {
+        let mut unifier = Unifier::new();
+        for (index, ty) in inst.type_args.iter().enumerate() {
+            let var = TyVarId::new(index as u32);
+            {
+                let _ = unifier.unify(&Type::Var(var), ty);
+            }
+        }
+
+        let param_types = sig
+            .params
+            .iter()
+            .map(|param| unifier.apply(&param.ty))
+            .collect::<Vec<_>>();
+        let param_modes = sig
+            .params
+            .iter()
+            .map(|param| param.mode.clone())
+            .collect::<Vec<_>>();
+        let ret_type = unifier.apply(&sig.ret_ty);
+        (param_types, param_modes, ret_type)
+    }
+
+    fn type_has_vars(ty: &Type) -> bool {
+        match ty {
+            Type::Var(_) => true,
+            Type::Array { elem_ty, .. }
+            | Type::Slice { elem_ty }
+            | Type::Heap { elem_ty }
+            | Type::Ref { elem_ty, .. }
+            | Type::Range { elem_ty } => Self::type_has_vars(elem_ty),
+            Type::Tuple { field_tys } => field_tys.iter().any(Self::type_has_vars),
+            Type::Struct { fields, .. } => {
+                fields.iter().any(|field| Self::type_has_vars(&field.ty))
+            }
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .any(|variant| variant.payload.iter().any(Self::type_has_vars)),
+            Type::Fn { params, ret_ty } => {
+                params.iter().any(|param| Self::type_has_vars(&param.ty))
+                    || Self::type_has_vars(ret_ty)
+            }
+            _ => false,
+        }
     }
 
     fn check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
@@ -2100,7 +2421,7 @@ impl TreeFolder<DefId> for TypeChecker {
                 ident: _,
                 def_id,
             } => {
-                let ty = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, decl_ty)?;
+                let ty = self.resolve_type_expr_in_scope(decl_ty)?;
                 if let Some(def) = self.ctx.def_table.lookup_def(*def_id) {
                     self.type_map_builder.record_def_type(def.clone(), ty);
                 }

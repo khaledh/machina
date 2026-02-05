@@ -111,6 +111,7 @@ fn type_tag(ty: &Type) -> TypeTag {
         Type::Int { .. } => TypeTag::Int,
         Type::Range { .. } => TypeTag::Range,
         Type::String => TypeTag::String,
+        Type::Var(_) => TypeTag::Other,
         _ => TypeTag::Other,
     }
 }

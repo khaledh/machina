@@ -6,7 +6,9 @@ use crate::tree::semantic as sem;
 use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
 use crate::tree::{NodeId, ParamMode, RefinementKind};
 use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::{EnumVariant, FnParam, FnParamMode, StructField, Type, TypeCache, TypeId};
+use crate::types::{
+    EnumVariant, FnParam, FnParamMode, StructField, TyVarId, Type, TypeCache, TypeId,
+};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -39,11 +41,21 @@ pub(crate) fn resolve_type_expr(
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
 ) -> Result<Type, TypeCheckError> {
+    resolve_type_expr_with_params(def_table, module, type_expr, None)
+}
+
+pub(crate) fn resolve_type_expr_with_params(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &res::TypeExpr,
+    type_params: Option<&HashMap<DefId, TyVarId>>,
+) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
     resolve_type_expr_impl(
         def_table,
         module,
         type_expr,
+        type_params,
         &mut in_progress,
         ResolveDepth::Full,
     )
@@ -75,16 +87,29 @@ fn resolve_type_expr_impl(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        res::TypeExprKind::Named { def_id, .. } => {
-            resolve_named_type(def_table, module, type_expr, def_id, in_progress, depth)
-        }
+        res::TypeExprKind::Named { def_id, .. } => resolve_named_type(
+            def_table,
+            module,
+            type_expr,
+            def_id,
+            type_params,
+            in_progress,
+            depth,
+        ),
         res::TypeExprKind::Array { elem_ty_expr, dims } => {
-            let elem_ty =
-                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
+            let elem_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                elem_ty_expr,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
                 dims: dims.clone(),
@@ -93,7 +118,9 @@ fn resolve_type_expr_impl(
         res::TypeExprKind::Tuple { field_ty_exprs } => {
             let field_tys = field_ty_exprs
                 .iter()
-                .map(|f| resolve_type_expr_impl(def_table, module, f, in_progress, depth))
+                .map(|f| {
+                    resolve_type_expr_impl(def_table, module, f, type_params, in_progress, depth)
+                })
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
         }
@@ -101,20 +128,38 @@ fn resolve_type_expr_impl(
             base_ty_expr,
             refinements,
         } => {
-            let base_ty =
-                resolve_type_expr_impl(def_table, module, base_ty_expr, in_progress, depth)?;
+            let base_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                base_ty_expr,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             apply_refinements(base_ty, refinements, type_expr.span)
         }
         res::TypeExprKind::Slice { elem_ty_expr } => {
-            let elem_ty =
-                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
+            let elem_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                elem_ty_expr,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
             })
         }
         res::TypeExprKind::Heap { elem_ty_expr } => {
-            let elem_ty =
-                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
+            let elem_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                elem_ty_expr,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
             })
@@ -123,8 +168,14 @@ fn resolve_type_expr_impl(
             mutable,
             elem_ty_expr,
         } => {
-            let elem_ty =
-                resolve_type_expr_impl(def_table, module, elem_ty_expr, in_progress, depth)?;
+            let elem_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                elem_ty_expr,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             Ok(Type::Ref {
                 mutable: *mutable,
                 elem_ty: Box::new(elem_ty),
@@ -141,6 +192,7 @@ fn resolve_type_expr_impl(
                         def_table,
                         module,
                         &param.ty_expr,
+                        type_params,
                         in_progress,
                         depth,
                     )?;
@@ -150,8 +202,14 @@ fn resolve_type_expr_impl(
                     })
                 })
                 .collect::<Result<Vec<_>, TypeCheckError>>()?;
-            let ret_ty =
-                resolve_type_expr_impl(def_table, module, ret_ty_expr, in_progress, depth)?;
+            let ret_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                ret_ty_expr,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             Ok(Type::Fn {
                 params: param_tys,
                 ret_ty: Box::new(ret_ty),
@@ -254,6 +312,7 @@ fn resolve_named_type(
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
     def_id: &DefId,
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -266,20 +325,46 @@ fn resolve_named_type(
     }
 
     match &def.kind {
+        DefKind::TypeParam => {
+            if let Some(map) = type_params
+                && let Some(var) = map.get(def_id)
+            {
+                return Ok(Type::Var(*var));
+            }
+            Err(TypeCheckErrorKind::UnknownType(type_expr.span).into())
+        }
         DefKind::TypeDef { .. } => {
             let type_def = module
                 .type_def_by_id(*def_id)
                 .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
             match &type_def.kind {
-                res::TypeDefKind::Alias { aliased_ty } => {
-                    resolve_type_alias(def_table, module, def, aliased_ty, in_progress)
-                }
-                res::TypeDefKind::Struct { fields } => {
-                    resolve_struct_type(def_table, module, def, fields, in_progress, depth)
-                }
-                res::TypeDefKind::Enum { variants } => {
-                    resolve_enum_type(def_table, module, def, variants, in_progress, depth)
-                }
+                res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
+                    def_table,
+                    module,
+                    def,
+                    aliased_ty,
+                    type_params,
+                    in_progress,
+                    depth,
+                ),
+                res::TypeDefKind::Struct { fields } => resolve_struct_type(
+                    def_table,
+                    module,
+                    def,
+                    fields,
+                    type_params,
+                    in_progress,
+                    depth,
+                ),
+                res::TypeDefKind::Enum { variants } => resolve_enum_type(
+                    def_table,
+                    module,
+                    def,
+                    variants,
+                    type_params,
+                    in_progress,
+                    depth,
+                ),
             }
         }
         _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
@@ -291,13 +376,22 @@ fn resolve_type_alias(
     module: &impl TypeDefLookup,
     def: &Def,
     ty_expr: &res::TypeExpr,
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
+    _depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def.id) {
         return Ok(Type::Unknown);
     }
     in_progress.insert(def.id);
-    let ty = resolve_type_expr_impl(def_table, module, ty_expr, in_progress, ResolveDepth::Full);
+    let ty = resolve_type_expr_impl(
+        def_table,
+        module,
+        ty_expr,
+        type_params,
+        in_progress,
+        ResolveDepth::Full,
+    );
     in_progress.remove(&def.id);
     ty
 }
@@ -307,6 +401,7 @@ fn resolve_struct_type(
     module: &impl TypeDefLookup,
     def: &Def,
     fields: &[res::StructDefField],
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -316,6 +411,7 @@ fn resolve_struct_type(
                 def_table,
                 module,
                 fields,
+                type_params,
                 in_progress,
                 ResolveDepth::Shallow,
             )?,
@@ -327,7 +423,8 @@ fn resolve_struct_type(
         });
     }
     in_progress.insert(def.id);
-    let struct_fields = resolve_struct_fields(def_table, module, fields, in_progress, depth)?;
+    let struct_fields =
+        resolve_struct_fields(def_table, module, fields, type_params, in_progress, depth)?;
     in_progress.remove(&def.id);
     Ok(Type::Struct {
         name: def.name.clone(),
@@ -339,14 +436,21 @@ fn resolve_struct_fields(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     fields: &[res::StructDefField],
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
     fields
         .iter()
         .map(|field| {
-            let field_ty =
-                resolve_type_expr_impl(def_table, module, &field.ty, in_progress, depth)?;
+            let field_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                &field.ty,
+                type_params,
+                in_progress,
+                depth,
+            )?;
             Ok(StructField {
                 name: field.name.clone(),
                 ty: field_ty,
@@ -360,6 +464,7 @@ fn resolve_enum_type(
     module: &impl TypeDefLookup,
     def: &Def,
     variants: &[res::EnumDefVariant],
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -369,6 +474,7 @@ fn resolve_enum_type(
                 def_table,
                 module,
                 variants,
+                type_params,
                 in_progress,
                 ResolveDepth::Shallow,
             )?,
@@ -380,7 +486,8 @@ fn resolve_enum_type(
         });
     }
     in_progress.insert(def.id);
-    let enum_variants = resolve_enum_variants(def_table, module, variants, in_progress, depth)?;
+    let enum_variants =
+        resolve_enum_variants(def_table, module, variants, type_params, in_progress, depth)?;
     in_progress.remove(&def.id);
     Ok(Type::Enum {
         name: def.name.clone(),
@@ -392,6 +499,7 @@ fn resolve_enum_variants(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     variants: &[res::EnumDefVariant],
+    type_params: Option<&HashMap<DefId, TyVarId>>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
@@ -401,7 +509,14 @@ fn resolve_enum_variants(
             .payload
             .iter()
             .map(|payload_ty| {
-                resolve_type_expr_impl(def_table, module, payload_ty, in_progress, depth)
+                resolve_type_expr_impl(
+                    def_table,
+                    module,
+                    payload_ty,
+                    type_params,
+                    in_progress,
+                    depth,
+                )
             })
             .collect::<Result<Vec<Type>, _>>()?;
         enum_variants.push(EnumVariant {
@@ -417,6 +532,7 @@ pub struct TypeMapBuilder {
     node_type: HashMap<NodeId, TypeId>, // maps node to its type
     def_type: HashMap<Def, TypeId>,     // maps def to its type
     call_sigs: HashMap<NodeId, CallSig>,
+    generic_insts: HashMap<NodeId, GenericInst>,
 }
 
 impl Default for TypeMapBuilder {
@@ -432,6 +548,7 @@ impl TypeMapBuilder {
             node_type: HashMap::new(),
             def_type: HashMap::new(),
             call_sigs: HashMap::new(),
+            generic_insts: HashMap::new(),
         }
     }
 
@@ -449,6 +566,10 @@ impl TypeMapBuilder {
         self.call_sigs.insert(node_id, sig);
     }
 
+    pub fn record_generic_inst(&mut self, node_id: NodeId, inst: GenericInst) {
+        self.generic_insts.insert(node_id, inst);
+    }
+
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
         self.def_type
             .get(def)
@@ -459,8 +580,9 @@ impl TypeMapBuilder {
         self.def_type.get(def).copied()
     }
 
-    pub fn finish(self) -> (TypeMap, CallSigMap) {
+    pub fn finish(self) -> (TypeMap, CallSigMap, GenericInstMap) {
         let call_sigs = self.call_sigs;
+        let generic_insts = self.generic_insts;
         (
             TypeMap {
                 type_table: self.type_table,
@@ -472,6 +594,7 @@ impl TypeMapBuilder {
                 slice_plan: HashMap::new(),
             },
             call_sigs,
+            generic_insts,
         )
     }
 }
@@ -484,6 +607,14 @@ pub struct CallSig {
 }
 
 pub type CallSigMap = HashMap<NodeId, CallSig>;
+
+#[derive(Debug, Clone)]
+pub struct GenericInst {
+    pub def_id: DefId,
+    pub type_args: Vec<Type>,
+}
+
+pub type GenericInstMap = HashMap<NodeId, GenericInst>;
 
 #[derive(Debug, Clone)]
 pub struct CallParam {

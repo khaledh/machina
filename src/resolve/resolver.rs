@@ -104,6 +104,24 @@ impl SymbolResolver {
         );
     }
 
+    fn register_type_param(&mut self, param: &TypeParam) {
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: param.ident.clone(),
+            kind: DefKind::TypeParam,
+        };
+        self.def_table_builder.record_def(def, param.id);
+        self.insert_symbol(
+            &param.ident,
+            Symbol {
+                name: param.ident.clone(),
+                kind: SymbolKind::TypeParam { def_id },
+            },
+            param.span,
+        );
+    }
+
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.defs.get(name) {
@@ -121,6 +139,7 @@ impl SymbolResolver {
             SymbolKind::StructDef { .. } => DefKind::TypeDef {
                 attrs: TypeAttrs::default(),
             },
+            SymbolKind::TypeParam { .. } => DefKind::TypeParam,
             SymbolKind::Func { .. } => DefKind::FuncDef {
                 attrs: FuncAttrs::default(),
             },
@@ -682,12 +701,16 @@ impl SymbolResolver {
             ));
         }
 
-        self.visit_type_expr(&method_decl.sig.ret_ty_expr);
-        for param in &method_decl.sig.params {
-            self.visit_type_expr(&param.typ);
-        }
-
         self.with_scope(|resolver| {
+            for type_param in &method_decl.sig.type_params {
+                resolver.register_type_param(type_param);
+            }
+
+            resolver.visit_type_expr(&method_decl.sig.ret_ty_expr);
+            for param in &method_decl.sig.params {
+                resolver.visit_type_expr(&param.typ);
+            }
+
             resolver.register_param(
                 "self",
                 method_decl.sig.self_param.mode.clone(),
@@ -716,7 +739,8 @@ impl Visitor<()> for SymbolResolver {
                 Some(symbol) => match &symbol.kind {
                     SymbolKind::TypeAlias { .. }
                     | SymbolKind::StructDef { .. }
-                    | SymbolKind::EnumDef { .. } => {
+                    | SymbolKind::EnumDef { .. }
+                    | SymbolKind::TypeParam { .. } => {
                         self.def_table_builder
                             .record_use(type_expr.id, symbol.def_id());
                     }
@@ -740,13 +764,18 @@ impl Visitor<()> for SymbolResolver {
     }
 
     fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
-        self.visit_type_expr(&func_decl.sig.ret_ty_expr);
-        for param in &func_decl.sig.params {
-            self.visit_type_expr(&param.typ);
-        }
-
-        // Ensure params have DefIds even for declarations (no body/scope use).
+        // Ensure type params resolve in the signature and params have DefIds
+        // even for declarations (no body/scope use).
         self.with_scope(|resolver| {
+            for type_param in &func_decl.sig.type_params {
+                resolver.register_type_param(type_param);
+            }
+
+            resolver.visit_type_expr(&func_decl.sig.ret_ty_expr);
+            for param in &func_decl.sig.params {
+                resolver.visit_type_expr(&param.typ);
+            }
+
             for (index, param) in func_decl.sig.params.iter().enumerate() {
                 resolver.register_param(
                     &param.ident,
@@ -760,9 +789,16 @@ impl Visitor<()> for SymbolResolver {
     }
 
     fn visit_func_def(&mut self, func_def: &FuncDef) {
-        self.visit_func_sig(&func_def.sig);
-
         self.with_scope(|resolver| {
+            for type_param in &func_def.sig.type_params {
+                resolver.register_type_param(type_param);
+            }
+
+            resolver.visit_type_expr(&func_def.sig.ret_ty_expr);
+            for param in &func_def.sig.params {
+                resolver.visit_type_expr(&param.typ);
+            }
+
             for (index, param) in func_def.sig.params.iter().enumerate() {
                 resolver.register_param(
                     &param.ident,
@@ -793,13 +829,17 @@ impl Visitor<()> for SymbolResolver {
     }
 
     fn visit_method_def(&mut self, method_def: &MethodDef) {
-        self.visit_type_expr(&method_def.sig.ret_ty_expr);
-        for param in &method_def.sig.params {
-            self.visit_type_expr(&param.typ);
-        }
-
         // Enter a new scope for the method parameters and body.
         self.with_scope(|resolver| {
+            for type_param in &method_def.sig.type_params {
+                resolver.register_type_param(type_param);
+            }
+
+            resolver.visit_type_expr(&method_def.sig.ret_ty_expr);
+            for param in &method_def.sig.params {
+                resolver.visit_type_expr(&param.typ);
+            }
+
             resolver.register_param(
                 "self",
                 method_def.sig.self_param.mode.clone(),
