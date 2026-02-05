@@ -229,6 +229,35 @@ fn test_generic_overload_prefers_concrete() {
 }
 
 #[test]
+fn test_generic_infers_from_expected_type() {
+    let source = r#"
+        fn make<T>() -> T;
+
+        fn test() -> u64 {
+            let value: u64 = make();
+            value
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_expected_type_missing_is_error() {
+    let source = r#"
+        fn make<T>() -> T;
+
+        fn test() -> () {
+            let value = make();
+            ()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_array_index_through_heap() {
     let source = r#"
         fn test() -> u64 {

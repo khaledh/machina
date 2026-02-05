@@ -1577,13 +1577,14 @@ impl TypeChecker {
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
+        expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
         if let ExprKind::Var { def_id, .. } = &callee.kind
             && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
             && matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
         {
             let name = def.name.clone();
-            return self.check_named_call(&name, call_expr, callee, args);
+            return self.check_named_call(&name, call_expr, callee, args, expected);
         }
 
         self.check_expr_call(call_expr, callee, args)
@@ -1647,13 +1648,14 @@ impl TypeChecker {
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
+        expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
         // Get the function overloads
         let Some(overloads) = self.func_sigs.get(name).cloned() else {
             return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
         };
 
-        self.check_named_call_common(name, callee, call_expr, args, &overloads, false)
+        self.check_named_call_common(name, callee, call_expr, args, &overloads, false, expected)
     }
 
     fn check_method_call(
@@ -1662,6 +1664,7 @@ impl TypeChecker {
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
+        expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
         let callee_ty = self.visit_expr(callee, None)?;
         let peeled_ty = self.expand_shallow_type(&callee_ty.peel_heap());
@@ -1711,7 +1714,7 @@ impl TypeChecker {
         // Format the method name as "type::method"
         let name = format!("{}::{}", type_name, method_name);
 
-        self.check_named_call_common(&name, callee, call_expr, args, &overloads, true)
+        self.check_named_call_common(&name, callee, call_expr, args, &overloads, true, expected)
     }
 
     fn is_place_expr(&self, expr: &Expr) -> bool {
@@ -1754,6 +1757,7 @@ impl TypeChecker {
         args: &[CallArg],
         overloads: &[OverloadSig],
         is_method: bool,
+        expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
         let callee_ty = self.visit_expr(callee, None)?;
         let arg_types = self.visit_call_args(args)?;
@@ -1822,6 +1826,7 @@ impl TypeChecker {
                                 args,
                                 &arg_types,
                                 &generic_overloads,
+                                expected,
                                 call_expr.span,
                             )?;
                             let sig = generic_overloads
@@ -1849,6 +1854,7 @@ impl TypeChecker {
                     args,
                     &arg_types,
                     &generic_overloads,
+                    expected,
                     call_expr.span,
                 )?;
                 let sig = generic_overloads
@@ -1934,6 +1940,7 @@ impl TypeChecker {
         args: &[CallArg],
         arg_types: &[Type],
         overloads: &[&OverloadSig],
+        expected: Option<&Type>,
         call_span: Span,
     ) -> Result<GenericInst, TypeCheckError> {
         let mut candidates = Vec::new();
@@ -1984,6 +1991,13 @@ impl TypeChecker {
                         {
                             continue;
                         }
+                        return Ok(None);
+                    }
+                }
+            }
+            if let Some(expected_ty) = expected {
+                if Self::type_has_vars(&sig.ret_ty) {
+                    if unifier.unify(&sig.ret_ty, expected_ty).is_err() {
                         return Ok(None);
                     }
                 }
@@ -2731,13 +2745,13 @@ impl TreeFolder<DefId> for TypeChecker {
 
                 ExprKind::Var { def_id, .. } => self.check_var_ref(*def_id, expr.span),
 
-                ExprKind::Call { callee, args } => self.check_call(expr, callee, args),
+                ExprKind::Call { callee, args } => self.check_call(expr, callee, args, expected),
 
                 ExprKind::MethodCall {
                     callee,
                     method_name,
                     args,
-                } => self.check_method_call(method_name, expr, callee, args),
+                } => self.check_method_call(method_name, expr, callee, args, expected),
 
                 ExprKind::If {
                     cond,
