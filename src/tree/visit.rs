@@ -257,6 +257,7 @@ pub fn walk_func_sig<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, func_sig: &Func
     for param in &func_sig.params {
         v.visit_param(param);
     }
+    v.visit_type_expr(&func_sig.ret_ty_expr);
 }
 
 pub fn walk_type_param<V: Visitor<D, T> + ?Sized, D, T>(_v: &mut V, _param: &TypeParam<D>) {}
@@ -270,6 +271,7 @@ pub fn walk_method_sig<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, method_sig: &
     for param in &method_sig.params {
         v.visit_param(param);
     }
+    v.visit_type_expr(&method_sig.ret_ty_expr);
 }
 
 // --- Parameters (common) ---

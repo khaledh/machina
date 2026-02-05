@@ -267,6 +267,9 @@ fn main() {
                     CompileError::SemCheck(e) => {
                         println!("{}", format_error(&source, e.span(), e));
                     }
+                    CompileError::Monomorphize(e) => {
+                        println!("{}", format_error(&source, e.span(), e));
+                    }
                     CompileError::LowerToIr(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }

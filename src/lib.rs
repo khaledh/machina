@@ -6,6 +6,7 @@ pub mod diag;
 pub mod elaborate;
 pub mod ir;
 pub mod lexer;
+pub mod monomorphize;
 pub mod normalize;
 pub mod nrvo;
 pub mod parse;

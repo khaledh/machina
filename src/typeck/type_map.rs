@@ -612,6 +612,7 @@ pub type CallSigMap = HashMap<NodeId, CallSig>;
 pub struct GenericInst {
     pub def_id: DefId,
     pub type_args: Vec<Type>,
+    pub call_span: Span,
 }
 
 pub type GenericInstMap = HashMap<NodeId, GenericInst>;

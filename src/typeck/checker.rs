@@ -2011,6 +2011,7 @@ impl TypeChecker {
             candidates.push(GenericInst {
                 def_id: sig.def_id,
                 type_args,
+                call_span,
             });
         }
 

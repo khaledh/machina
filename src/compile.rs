@@ -8,6 +8,7 @@ use crate::elaborate;
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
 use crate::lexer::{LexError, Lexer, Token};
+use crate::monomorphize;
 use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
@@ -128,11 +129,23 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- Type Check (resolved -> type-checked) ---
 
-    let type_checked_context = type_check(resolved_context).map_err(|errs| {
+    let mut type_checked_context = type_check(resolved_context.clone()).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()
     })?;
+
+    // If any generic instantiations were recorded, monomorphize and re-type-check.
+    if !type_checked_context.generic_insts.is_empty() {
+        let monomorphized_context =
+            monomorphize::monomorphize(resolved_context, &type_checked_context.generic_insts)
+                .map_err(|e| vec![e.into()])?;
+        type_checked_context = type_check(monomorphized_context).map_err(|errs| {
+            errs.into_iter()
+                .map(|e| e.into())
+                .collect::<Vec<CompileError>>()
+        })?;
+    }
 
     if dump_type_map {
         println!("Type Map:");
