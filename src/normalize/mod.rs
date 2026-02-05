@@ -1,5 +1,7 @@
 use crate::context::{NormalizedContext, TypeCheckedContext};
 use crate::resolve::DefId;
+use crate::resolve::DefKind;
+use crate::resolve::def_table::DefTable;
 use crate::tree::NodeIdGen;
 use crate::tree::normalized as norm;
 use crate::tree::normalized::build_module;
@@ -26,7 +28,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
     let mut module = build_module(&module);
     let mut type_map = type_map;
     let mut node_id_gen = node_id_gen;
-    let mut normalizer = Normalizer::new(&mut type_map, &call_sigs, &mut node_id_gen);
+    let mut normalizer = Normalizer::new(&def_table, &mut type_map, &call_sigs, &mut node_id_gen);
     normalizer.visit_module(&mut module);
     NormalizedContext {
         module,
@@ -40,6 +42,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
 }
 
 struct Normalizer<'a> {
+    def_table: &'a DefTable,
     type_map: &'a mut TypeMap,
     call_sigs: &'a CallSigMap,
     node_id_gen: &'a mut NodeIdGen,
@@ -47,11 +50,13 @@ struct Normalizer<'a> {
 
 impl<'a> Normalizer<'a> {
     fn new(
+        def_table: &'a DefTable,
         type_map: &'a mut TypeMap,
         call_sigs: &'a CallSigMap,
         node_id_gen: &'a mut NodeIdGen,
     ) -> Self {
         Self {
+            def_table,
             type_map,
             call_sigs,
             node_id_gen,
@@ -163,6 +168,30 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
                 method_name: field.clone(),
                 args: Vec::new(),
             };
+        }
+
+        if let norm::ExprKind::Call { callee, args } = &expr.kind {
+            if let norm::ExprKind::Var { def_id, ident } = &callee.kind {
+                if self
+                    .def_table
+                    .lookup_def(*def_id)
+                    .is_some_and(|def| matches!(def.kind, DefKind::EnumVariantName))
+                    && let Some(Type::Enum { name, .. }) = self.type_map.lookup_node_type(expr.id)
+                {
+                    let enum_name = name
+                        .split_once('<')
+                        .map(|(base, _)| base.to_string())
+                        .unwrap_or(name);
+                    let payload = args.iter().map(|arg| arg.expr.clone()).collect();
+                    expr.kind = norm::ExprKind::EnumVariant {
+                        enum_name,
+                        type_args: Vec::new(),
+                        variant: ident.clone(),
+                        payload,
+                    };
+                    return;
+                }
+            }
         }
 
         if let norm::ExprKind::Call { args, .. } | norm::ExprKind::MethodCall { args, .. } =

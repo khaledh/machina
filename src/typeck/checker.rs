@@ -553,6 +553,78 @@ impl TypeChecker {
         }
     }
 
+    fn enum_name_matches(expected: &str, name: &str) -> bool {
+        expected == name
+            || expected
+                .split_once('<')
+                .map_or(false, |(base, _)| base == name)
+    }
+
+    fn check_unqualified_enum_variant(
+        &mut self,
+        variant_name: &str,
+        payload: &[&Expr],
+        expected: Option<&Type>,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        let Some(expected_enum) = expected else {
+            for expr in payload {
+                let _ = self.visit_expr(expr, None)?;
+            }
+            return Err(TypeCheckErrorKind::UnknownType(span).into());
+        };
+
+        let Type::Enum { name, variants } = expected_enum else {
+            for expr in payload {
+                let _ = self.visit_expr(expr, None)?;
+            }
+            return Err(TypeCheckErrorKind::UnknownType(span).into());
+        };
+
+        let Some(variant) = variants.iter().find(|v| v.name == variant_name) else {
+            for expr in payload {
+                let _ = self.visit_expr(expr, None)?;
+            }
+            return Err(TypeCheckErrorKind::UnknownEnumVariant(
+                name.clone(),
+                variant_name.to_string(),
+                span,
+            )
+            .into());
+        };
+
+        if payload.len() != variant.payload.len() {
+            for expr in payload {
+                let _ = self.visit_expr(expr, None)?;
+            }
+            return Err(TypeCheckErrorKind::EnumVariantPayloadArityMismatch(
+                variant_name.to_string(),
+                variant.payload.len(),
+                payload.len(),
+                span,
+            )
+            .into());
+        }
+
+        for (i, (payload_expr, payload_ty)) in
+            payload.iter().zip(variant.payload.iter()).enumerate()
+        {
+            let actual_ty = self.visit_expr(payload_expr, Some(payload_ty))?;
+            if actual_ty != *payload_ty {
+                return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
+                    variant_name.to_string(),
+                    i,
+                    payload_ty.clone(),
+                    actual_ty,
+                    payload_expr.span,
+                )
+                .into());
+            }
+        }
+
+        Ok(expected_enum.clone())
+    }
+
     fn resolve_named_type_expr(
         &self,
         name: &str,
@@ -1625,6 +1697,18 @@ impl TypeChecker {
         args: &[CallArg],
         expected: Option<&Type>,
     ) -> Result<Type, TypeCheckError> {
+        if let ExprKind::Var { ident, def_id } = &callee.kind
+            && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
+            && matches!(def.kind, DefKind::EnumVariantName)
+        {
+            if let Some(expected_enum @ Type::Enum { .. }) = expected {
+                self.type_map_builder
+                    .record_node_type(callee.id, expected_enum.clone());
+            }
+            let payload = args.iter().map(|arg| &arg.expr).collect::<Vec<_>>();
+            return self.check_unqualified_enum_variant(ident, &payload, expected, call_expr.span);
+        }
+
         if let ExprKind::Var { def_id, .. } = &callee.kind
             && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
             && matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
@@ -2667,8 +2751,19 @@ impl TreeFolder<DefId> for TypeChecker {
                     type_args,
                     variant,
                     payload,
-                } => self
-                    .check_enum_variant(enum_name, type_args, variant, payload, expr.id, expr.span),
+                } => {
+                    if type_args.is_empty()
+                        && let Some(Type::Enum { name, .. }) = expected
+                        && Self::enum_name_matches(name, enum_name)
+                    {
+                        let payload = payload.iter().collect::<Vec<_>>();
+                        self.check_unqualified_enum_variant(variant, &payload, expected, expr.span)
+                    } else {
+                        self.check_enum_variant(
+                            enum_name, type_args, variant, payload, expr.id, expr.span,
+                        )
+                    }
+                }
 
                 ExprKind::BinOp { left, op, right } => {
                     let (left_type, right_type) = self.visit_binary_expr(left, right)?;
@@ -2799,7 +2894,15 @@ impl TreeFolder<DefId> for TypeChecker {
                     Ok(tail_ty.unwrap_or(Type::Unit))
                 }
 
-                ExprKind::Var { def_id, .. } => self.check_var_ref(*def_id, expr.span),
+                ExprKind::Var { ident, def_id } => {
+                    if let Some(def) = self.ctx.def_table.lookup_def(*def_id)
+                        && matches!(def.kind, DefKind::EnumVariantName)
+                    {
+                        self.check_unqualified_enum_variant(ident, &[], expected, expr.span)
+                    } else {
+                        self.check_var_ref(*def_id, expr.span)
+                    }
+                }
 
                 ExprKind::Call { callee, args } => self.check_call(expr, callee, args, expected),
 

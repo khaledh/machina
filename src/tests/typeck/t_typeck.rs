@@ -581,6 +581,34 @@ fn test_enum_literal_in_let() {
 }
 
 #[test]
+fn test_enum_literal_unqualified_in_let() {
+    let source = r#"
+        type Color = Red | Green
+
+        fn main() -> Color {
+            let c: Color = Red;
+            c
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_enum_literal_unqualified_in_let() {
+    let source = r#"
+        type Option<T> = Some(T) | None
+
+        fn main() -> Option<u64> {
+            let c: Option<u64> = Some(3);
+            c
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_tuple_pattern_length_mismatch() {
     let source = r#"
         fn test() -> u64 {

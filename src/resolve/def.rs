@@ -41,6 +41,7 @@ pub enum DefKind {
         attrs: TypeAttrs,
     },
     TypeParam,
+    EnumVariantName,
     FuncDef {
         attrs: FuncAttrs,
     },
@@ -74,6 +75,7 @@ impl fmt::Display for DefKind {
         match self {
             DefKind::TypeDef { .. } => write!(f, "TypeDef"),
             DefKind::TypeParam => write!(f, "TypeParam"),
+            DefKind::EnumVariantName => write!(f, "EnumVariantName"),
             DefKind::FuncDef { .. } => write!(f, "FuncDef"),
             DefKind::FuncDecl { .. } => write!(f, "FuncDecl"),
             DefKind::LocalVar {

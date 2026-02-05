@@ -20,6 +20,7 @@ pub struct SymbolResolver {
     func_decl_names: HashSet<String>,
     intrinsic_type_defs: HashSet<DefId>,
     callable_attrs: HashMap<NodeId, FuncAttrs>,
+    variant_placeholders: HashMap<String, DefId>,
 }
 
 impl Default for SymbolResolver {
@@ -40,7 +41,19 @@ impl SymbolResolver {
             func_decl_names: HashSet::new(),
             intrinsic_type_defs: HashSet::new(),
             callable_attrs: HashMap::new(),
+            variant_placeholders: HashMap::new(),
         }
+    }
+
+    fn is_enum_variant_name(&self, name: &str) -> bool {
+        self.scopes.iter().rev().any(|scope| {
+            scope.defs.values().any(|symbol| match &symbol.kind {
+                SymbolKind::EnumDef { variants, .. } => {
+                    variants.iter().any(|variant| variant.name == name)
+                }
+                _ => false,
+            })
+        })
     }
 
     fn enter_scope(&mut self) {
@@ -1026,9 +1039,25 @@ impl Visitor<()> for SymbolResolver {
 
             ExprKind::Var { ident: name, .. } => match self.lookup_symbol(name) {
                 Some(symbol) => self.def_table_builder.record_use(expr.id, symbol.def_id()),
-                None => self
-                    .errors
-                    .push(ResolveError::VarUndefined(name.to_string(), expr.span)),
+                None => {
+                    if self.is_enum_variant_name(name) {
+                        if let Some(def_id) = self.variant_placeholders.get(name).copied() {
+                            self.def_table_builder.record_use(expr.id, def_id);
+                        } else {
+                            let def_id = self.def_id_gen.new_id();
+                            let def = Def {
+                                id: def_id,
+                                name: name.to_string(),
+                                kind: DefKind::EnumVariantName,
+                            };
+                            self.def_table_builder.record_def(def, expr.id);
+                            self.variant_placeholders.insert(name.to_string(), def_id);
+                        }
+                    } else {
+                        self.errors
+                            .push(ResolveError::VarUndefined(name.to_string(), expr.span));
+                    }
+                }
             },
 
             ExprKind::EnumVariant {
