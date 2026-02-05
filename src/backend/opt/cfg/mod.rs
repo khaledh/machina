@@ -266,6 +266,9 @@ fn prune_unused_block_params(func: &mut Function) -> bool {
     }
 
     for block in &mut func.blocks {
+        if block.id == BlockId(0) {
+            continue;
+        }
         if block.params.is_empty() {
             continue;
         }

@@ -39,6 +39,22 @@ fn find_func_def<'a>(
     })
 }
 
+fn count_method_defs(module: &res::Module, method_name: &str) -> usize {
+    module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            res::TopLevelItem::MethodBlock(block) => Some(block),
+            _ => None,
+        })
+        .flat_map(|block| block.method_items.iter())
+        .filter(|item| match item {
+            res::MethodItem::Def(def) => def.sig.name == method_name,
+            res::MethodItem::Decl(decl) => decl.sig.name == method_name,
+        })
+        .count()
+}
+
 #[test]
 fn test_monomorphize_allows_multiple_instantiations() {
     let source = r#"
@@ -95,4 +111,31 @@ fn test_monomorphize_strips_type_params_for_single_inst() {
         func_def.sig.type_params.is_empty(),
         "type params should be stripped after monomorphization"
     );
+}
+
+#[test]
+fn test_monomorphize_generic_methods_multiple_instantiations() {
+    let source = r#"
+        type Boxed = { value: u64 }
+
+        Boxed::{
+            fn cast<T>(self, x: T) -> T { x }
+        }
+
+        fn test() -> u64 {
+            let b1 = Boxed { value: 1 };
+            let b2 = Boxed { value: 2 };
+            let a = b1.cast(1);
+            let b = b2.cast(true);
+            if b { a } else { a }
+        }
+    "#;
+
+    let (resolved_context, _def_table) = resolve_context(source);
+    let type_checked = type_check(resolved_context.clone()).expect("type check failed");
+    let monomorphized =
+        monomorphize(resolved_context, &type_checked.generic_insts).expect("monomorphize failed");
+
+    let count = count_method_defs(&monomorphized.module, "cast");
+    assert_eq!(count, 2, "expected two monomorphized cast methods");
 }

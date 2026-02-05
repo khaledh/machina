@@ -229,6 +229,24 @@ fn test_generic_overload_prefers_concrete() {
 }
 
 #[test]
+fn test_generic_method_infers_from_arg() {
+    let source = r#"
+        type Boxed = { value: u64 }
+
+        Boxed::{
+            fn cast<T>(self, x: T) -> T { x }
+        }
+
+        fn test() -> u64 {
+            let b = Boxed { value: 0 };
+            b.cast(3)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_generic_infers_from_expected_type() {
     let source = r#"
         fn make<T>() -> T;

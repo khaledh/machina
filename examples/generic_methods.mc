@@ -1,0 +1,25 @@
+// Demonstrate generic methods on non-generic types.
+type Boxed = {
+    value: u64
+}
+
+Boxed::{
+    fn cast<T>(self, x: T) -> T {
+        x
+    }
+}
+
+fn main() {
+    let b1 = Boxed { value: 1 };
+    let b2 = Boxed { value: 2 };
+
+    let a = b1.cast(42);
+    println(f"a: {a}");
+
+    let ok = b2.cast(false);
+    if ok {
+      println(f"ok is true");
+    } else {
+      println(f"ok is false");
+    }
+}
