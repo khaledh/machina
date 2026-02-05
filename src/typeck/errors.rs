@@ -58,6 +58,9 @@ pub enum TypeCheckErrorKind {
     #[error("Type mismatch in arg {0}: expected {1}, found {2}")]
     ArgTypeMismatch(usize, Type, Type, Span),
 
+    #[error("Invalid type argument count for type {0}: expected {1}, found {2}")]
+    TypeArgCountMismatch(String, usize, usize, Span),
+
     #[error("Invalid callee. Expected a function name, found: {0:?}")]
     InvalidCallee(ExprKind, Span),
 
@@ -248,6 +251,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::AssignTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ArgCountMismatch(_, _, _, span) => *span,
             TypeCheckErrorKind::ArgTypeMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::TypeArgCountMismatch(_, _, _, span) => *span,
             TypeCheckErrorKind::InvalidCallee(_, span) => *span,
             TypeCheckErrorKind::EmptyArrayLiteral(span) => *span,
             TypeCheckErrorKind::TooManyIndices(_, _, span) => *span,

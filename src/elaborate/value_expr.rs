@@ -299,7 +299,7 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::TupleLit(items) => sem::ValueExprKind::TupleLit(
                 items.iter().map(|item| self.elab_value(item)).collect(),
             ),
-            norm::ExprKind::StructLit { name, fields } => sem::ValueExprKind::StructLit {
+            norm::ExprKind::StructLit { name, fields, .. } => sem::ValueExprKind::StructLit {
                 name: name.clone(),
                 fields: fields
                     .iter()
@@ -310,6 +310,7 @@ impl<'a> Elaborator<'a> {
                 enum_name,
                 variant,
                 payload,
+                ..
             } => sem::ValueExprKind::EnumVariant {
                 enum_name: enum_name.clone(),
                 variant: variant.clone(),

@@ -63,7 +63,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, ParseError> {
+    pub(super) fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, ParseError> {
         if self.curr_token.kind != TK::LessThan {
             return Ok(Vec::new());
         }
@@ -419,6 +419,7 @@ impl<'a> Parser<'a> {
             kind: TypeExprKind::Named {
                 ident: "()".to_string(),
                 def_id: (),
+                type_args: Vec::new(),
             },
             span: self.close(self.mark()),
         }
@@ -431,9 +432,17 @@ impl<'a> Parser<'a> {
     /// violate the parser's uniqueness invariant, so we clone with new IDs.
     fn clone_type_expr_with_new_ids(&mut self, ty: &TypeExpr) -> TypeExpr {
         let kind = match &ty.kind {
-            TypeExprKind::Named { ident, def_id } => TypeExprKind::Named {
+            TypeExprKind::Named {
+                ident,
+                def_id,
+                type_args,
+            } => TypeExprKind::Named {
                 ident: ident.clone(),
                 def_id: *def_id,
+                type_args: type_args
+                    .iter()
+                    .map(|arg| self.clone_type_expr_with_new_ids(arg))
+                    .collect(),
             },
             TypeExprKind::Refined {
                 base_ty_expr,
@@ -625,6 +634,7 @@ impl<'a> Parser<'a> {
                 kind: TypeExprKind::Named {
                     ident: "()".to_string(),
                     def_id: (),
+                    type_args: Vec::new(),
                 },
                 span: self.close(self.mark()),
             },

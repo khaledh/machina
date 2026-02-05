@@ -530,7 +530,11 @@ fn reseed_type_def(type_def: &mut res::TypeDef, node_id_gen: &mut NodeIdGen) {
 fn reseed_type_expr(type_expr: &mut res::TypeExpr, node_id_gen: &mut NodeIdGen) {
     type_expr.id = node_id_gen.new_id();
     match &mut type_expr.kind {
-        res::TypeExprKind::Named { .. } => {}
+        res::TypeExprKind::Named { type_args, .. } => {
+            for arg in type_args {
+                reseed_type_expr(arg, node_id_gen);
+            }
+        }
         res::TypeExprKind::Refined { base_ty_expr, .. } => {
             reseed_type_expr(base_ty_expr, node_id_gen);
         }
@@ -1078,6 +1082,7 @@ fn named_type_expr(
         kind: res::TypeExprKind::Named {
             ident: name.to_string(),
             def_id,
+            type_args: Vec::new(),
         },
         span,
     })

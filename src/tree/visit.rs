@@ -167,6 +167,9 @@ pub fn walk_module<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, module: &Module<D
 // --- Type Definitions ---
 
 pub fn walk_type_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_def: &TypeDef<D>) {
+    for param in &type_def.type_params {
+        v.visit_type_param(param);
+    }
     match &type_def.kind {
         TypeDefKind::Alias { aliased_ty } => v.visit_type_expr(aliased_ty),
         TypeDefKind::Struct { fields } => v.visit_struct_def_fields(fields),
@@ -212,7 +215,11 @@ pub fn walk_enum_def_variant<V: Visitor<D, T> + ?Sized, D, T>(
 
 pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &TypeExpr<D>) {
     match &type_expr.kind {
-        TypeExprKind::Named { .. } => {}
+        TypeExprKind::Named { type_args, .. } => {
+            for arg in type_args {
+                v.visit_type_expr(arg);
+            }
+        }
         TypeExprKind::Refined { base_ty_expr, .. } => v.visit_type_expr(base_ty_expr),
         TypeExprKind::Array { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Tuple { field_ty_exprs } => {
@@ -349,10 +356,18 @@ pub fn walk_bind_pattern<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, pattern: &B
 // --- Match Patterns ---
 
 pub fn walk_match_pattern<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, pattern: &MatchPattern<D>) {
-    if let MatchPattern::Tuple { patterns, .. } = pattern {
-        for pattern in patterns {
-            v.visit_match_pattern(pattern);
+    match pattern {
+        MatchPattern::Tuple { patterns, .. } => {
+            for pattern in patterns {
+                v.visit_match_pattern(pattern);
+            }
         }
+        MatchPattern::EnumVariant { type_args, .. } => {
+            for arg in type_args {
+                v.visit_type_expr(arg);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -464,13 +479,23 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
             }
         }
 
-        ExprKind::StructLit { fields, .. } => {
+        ExprKind::StructLit {
+            type_args, fields, ..
+        } => {
+            for arg in type_args {
+                v.visit_type_expr(arg);
+            }
             for field in fields {
                 v.visit_expr(&field.value);
             }
         }
 
-        ExprKind::EnumVariant { payload, .. } => {
+        ExprKind::EnumVariant {
+            type_args, payload, ..
+        } => {
+            for arg in type_args {
+                v.visit_type_expr(arg);
+            }
             for expr in payload {
                 v.visit_expr(expr);
             }

@@ -28,6 +28,15 @@ impl TypeDef {
         writeln!(f, "{}TypeDef [{}]", pad, self.id)?;
         let pad1 = indent(level + 1);
         writeln!(f, "{}Name: {}", pad1, self.name)?;
+        if !self.type_params.is_empty() {
+            let params = self
+                .type_params
+                .iter()
+                .map(|p| p.ident.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(f, "{}TypeParams: <{}>", pad1, params)?;
+        }
         writeln!(f, "{}Kind:", pad1)?;
         self.kind.fmt_with_indent(f, level + 2)?;
         Ok(())
@@ -275,8 +284,19 @@ impl<T> fmt::Display for model::TypeExpr<T> {
 impl<T> fmt::Display for model::TypeExprKind<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            model::TypeExprKind::Named { ident, .. } => {
-                write!(f, "Named({})", ident)?;
+            model::TypeExprKind::Named {
+                ident, type_args, ..
+            } => {
+                if type_args.is_empty() {
+                    write!(f, "Named({})", ident)?;
+                } else {
+                    let args = type_args
+                        .iter()
+                        .map(|arg| arg.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(f, "Named({}<{}>)", ident, args)?;
+                }
             }
             model::TypeExprKind::Refined {
                 base_ty_expr,
@@ -608,9 +628,19 @@ impl Expr {
                 target.fmt_with_indent(f, level + 2)?;
                 writeln!(f, "{}ArrayIndex: {}", pad1, index)?;
             }
-            ExprKind::StructLit { name, fields } => {
+            ExprKind::StructLit {
+                name,
+                type_args,
+                fields,
+            } => {
                 writeln!(f, "{}StructLit [{}]", pad, self.id)?;
                 writeln!(f, "{}Name: {}", pad, name)?;
+                if !type_args.is_empty() {
+                    writeln!(f, "{}TypeArgs:", pad)?;
+                    for arg in type_args {
+                        writeln!(f, "{}{}", indent(level + 1), arg)?;
+                    }
+                }
                 writeln!(f, "{}Fields:", pad)?;
                 for field in fields {
                     field.fmt_with_indent(f, level + 1)?;
@@ -672,12 +702,19 @@ impl Expr {
             }
             ExprKind::EnumVariant {
                 enum_name,
+                type_args,
                 variant,
                 payload,
             } => {
                 writeln!(f, "{}EnumVariant [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}Type: {}", pad1, enum_name)?;
+                if !type_args.is_empty() {
+                    writeln!(f, "{}TypeArgs:", pad1)?;
+                    for arg in type_args {
+                        writeln!(f, "{}{}", indent(level + 2), arg)?;
+                    }
+                }
                 writeln!(f, "{}Variant: {}", pad1, variant)?;
                 if !payload.is_empty() {
                     writeln!(f, "{}Payload:", pad1)?;

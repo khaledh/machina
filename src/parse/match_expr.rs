@@ -127,7 +127,7 @@ impl<'a> Parser<'a> {
 
             let is_enum_variant = matches!(
                 parser.tokens.get(parser.pos + 1).map(|tok| &tok.kind),
-                Some(TK::DoubleColon | TK::LParen)
+                Some(TK::DoubleColon | TK::LParen | TK::LessThan)
             );
 
             let ident = parser.parse_ident()?;
@@ -165,9 +165,16 @@ impl<'a> Parser<'a> {
         mut variant_name: String,
     ) -> Result<MatchPattern, ParseError> {
         let mut enum_name = None;
+        let mut type_args = Vec::new();
 
         if self.curr_token.kind == TK::DoubleColon {
             self.advance();
+            enum_name = Some(variant_name);
+            variant_name = self.parse_ident()?;
+        } else if self.curr_token.kind == TK::LessThan {
+            // Parse enum type arguments before resolving the variant.
+            type_args = self.parse_type_args()?;
+            self.consume(&TK::DoubleColon)?;
             enum_name = Some(variant_name);
             variant_name = self.parse_ident()?;
         }
@@ -201,6 +208,7 @@ impl<'a> Parser<'a> {
 
         Ok(MatchPattern::EnumVariant {
             enum_name,
+            type_args,
             variant_name,
             bindings,
             span: self.close(marker),

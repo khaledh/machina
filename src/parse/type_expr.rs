@@ -77,29 +77,50 @@ impl<'a> Parser<'a> {
     fn parse_named_type(&mut self) -> Result<TypeExpr, ParseError> {
         let marker = self.mark();
 
-        let result = match &self.curr_token.kind {
+        match &self.curr_token.kind {
             TK::LParen if self.peek().map(|t| &t.kind) == Some(&TK::RParen) => {
                 self.advance();
+                self.consume(&TK::RParen)?;
                 Ok(TypeExpr {
                     id: self.id_gen.new_id(),
                     kind: TypeExprKind::Named {
                         ident: "()".to_string(),
                         def_id: (),
+                        type_args: Vec::new(),
                     },
                     span: self.close(marker),
                 })
             }
-            TK::Ident(name) => Ok(TypeExpr {
-                id: self.id_gen.new_id(),
-                kind: TypeExprKind::Named {
-                    ident: name.clone(),
-                    def_id: (),
-                },
-                span: self.close(marker),
-            }),
+            TK::Ident(name) => {
+                let ident = name.clone();
+                self.advance();
+                let type_args = self.parse_type_args()?;
+                Ok(TypeExpr {
+                    id: self.id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident,
+                        def_id: (),
+                        type_args,
+                    },
+                    span: self.close(marker),
+                })
+            }
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
-        };
-        result.inspect(|_| self.advance())
+        }
+    }
+
+    pub(super) fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, ParseError> {
+        if self.curr_token.kind != TK::LessThan {
+            return Ok(Vec::new());
+        }
+
+        self.consume(&TK::LessThan)?;
+        let args = self.parse_list(TK::Comma, TK::GreaterThan, |parser| {
+            parser.parse_type_expr()
+        })?;
+        self.consume(&TK::GreaterThan)?;
+
+        Ok(args)
     }
 
     fn parse_tuple_type(&mut self) -> Result<TypeExpr, ParseError> {

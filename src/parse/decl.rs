@@ -23,6 +23,7 @@ impl<'a> Parser<'a> {
         self.consume_keyword(TK::KwType)?;
 
         let name = self.parse_ident()?;
+        let type_params = self.parse_type_params()?;
         self.consume(&TK::Equals)?;
 
         let kind = if self.curr_token.kind == TK::LBrace {
@@ -49,6 +50,7 @@ impl<'a> Parser<'a> {
             def_id: (),
             attrs,
             name,
+            type_params,
             kind,
             span: self.close(marker),
         })

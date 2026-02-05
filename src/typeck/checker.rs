@@ -158,6 +158,10 @@ impl TypeChecker {
 
     fn populate_type_symbols(&mut self) -> Result<(), Vec<TypeCheckError>> {
         for type_def in self.ctx.module.type_defs() {
+            if !type_def.type_params.is_empty() {
+                // Generic type defs are instantiated on demand.
+                continue;
+            }
             match &type_def.kind {
                 TypeDefKind::Alias { aliased_ty } => {
                     // Resolve the aliased type
@@ -547,6 +551,42 @@ impl TypeChecker {
             Type::String => Some("string".to_string()),
             _ => None,
         }
+    }
+
+    fn resolve_named_type_expr(
+        &self,
+        name: &str,
+        type_args: &[TypeExpr],
+        node_id: NodeId,
+        span: Span,
+    ) -> Result<Option<Type>, TypeCheckError> {
+        if type_args.is_empty()
+            && let Some(ty) = self.type_defs.get(name)
+        {
+            return Ok(Some(ty.clone()));
+        }
+
+        let Some(def_id) = self.ctx.def_table.lookup_type_def_id(name) else {
+            return Ok(None);
+        };
+
+        let type_expr = TypeExpr {
+            id: node_id,
+            kind: TypeExprKind::Named {
+                ident: name.to_string(),
+                def_id,
+                type_args: type_args.to_vec(),
+            },
+            span,
+        };
+
+        resolve_type_expr_with_params(
+            &self.ctx.def_table,
+            &self.ctx.module,
+            &type_expr,
+            self.current_type_params(),
+        )
+        .map(Some)
     }
 
     fn record_property_call_sig(
@@ -1086,10 +1126,13 @@ impl TypeChecker {
     fn check_struct_lit(
         &mut self,
         name: &String,
+        type_args: &[TypeExpr],
         fields: &[StructLitField],
+        node_id: NodeId,
+        span: Span,
     ) -> Result<Type, TypeCheckError> {
-        let struct_ty = match self.type_defs.get(name) {
-            Some(ty) => ty.clone(),
+        let struct_ty = match self.resolve_named_type_expr(name, type_args, node_id, span)? {
+            Some(ty) => ty,
             None => {
                 for field in fields {
                     let _ = self.visit_expr(&field.value, None)?;
@@ -1194,12 +1237,15 @@ impl TypeChecker {
     fn check_enum_variant(
         &mut self,
         enum_name: &String,
+        type_args: &[TypeExpr],
         variant_name: &String,
         payload: &[Expr],
+        node_id: NodeId,
+        span: Span,
     ) -> Result<Type, TypeCheckError> {
         // Lookup the type
-        let enum_ty = match self.type_defs.get(enum_name) {
-            Some(ty) => ty.clone(),
+        let enum_ty = match self.resolve_named_type_expr(enum_name, type_args, node_id, span)? {
+            Some(ty) => ty,
             None => {
                 for expr in payload {
                     let _ = self.visit_expr(expr, None)?;
@@ -2216,10 +2262,14 @@ impl TypeChecker {
                 bindings,
                 ..
             } => {
-                if let Some(pat_enum_name) = pat_enum_name
-                    && pat_enum_name != enum_name
-                {
-                    return Ok(());
+                if let Some(pat_enum_name) = pat_enum_name {
+                    let matches = pat_enum_name == enum_name
+                        || enum_name
+                            .split_once('<')
+                            .map_or(false, |(base, _)| base == pat_enum_name);
+                    if !matches {
+                        return Ok(());
+                    }
                 }
 
                 if let Some(variant) = variants.iter().find(|v| v.name == *variant_name) {
@@ -2598,7 +2648,11 @@ impl TreeFolder<DefId> for TypeChecker {
                     self.check_tuple_field_access(target, *index)
                 }
 
-                ExprKind::StructLit { name, fields } => self.check_struct_lit(name, fields),
+                ExprKind::StructLit {
+                    name,
+                    type_args,
+                    fields,
+                } => self.check_struct_lit(name, type_args, fields, expr.id, expr.span),
 
                 ExprKind::StructField { target, field } => {
                     self.check_field_access(expr.id, target, field)
@@ -2610,9 +2664,11 @@ impl TreeFolder<DefId> for TypeChecker {
 
                 ExprKind::EnumVariant {
                     enum_name,
+                    type_args,
                     variant,
                     payload,
-                } => self.check_enum_variant(enum_name, variant, payload),
+                } => self
+                    .check_enum_variant(enum_name, type_args, variant, payload, expr.id, expr.span),
 
                 ExprKind::BinOp { left, op, right } => {
                     let (left_type, right_type) = self.visit_binary_expr(left, right)?;

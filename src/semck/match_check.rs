@@ -95,12 +95,13 @@ impl<'a> EnumRule<'a> {
                 }
                 MatchPattern::EnumVariant {
                     enum_name: pat_enum_name,
+                    type_args: _,
                     variant_name,
                     bindings,
                     span,
                 } => {
                     if let Some(pat_enum_name) = pat_enum_name
-                        && pat_enum_name != self.name
+                        && !enum_name_matches(pat_enum_name, self.name)
                     {
                         errors.push(SemCheckError::MatchPatternEnumMismatch(
                             self.name.to_string(),
@@ -400,6 +401,13 @@ fn check_int_pattern_range(
     }
 }
 
+fn enum_name_matches(pat_enum_name: &str, enum_name: &str) -> bool {
+    pat_enum_name == enum_name
+        || enum_name
+            .split_once('<')
+            .map_or(false, |(base, _)| base == pat_enum_name)
+}
+
 fn check_enum_pattern(
     enum_name: &str,
     variants: &[EnumVariant],
@@ -408,6 +416,7 @@ fn check_enum_pattern(
 ) {
     let MatchPattern::EnumVariant {
         enum_name: pat_enum_name,
+        type_args: _,
         variant_name,
         bindings,
         span,
@@ -417,7 +426,7 @@ fn check_enum_pattern(
     };
 
     if let Some(pat_enum_name) = pat_enum_name
-        && pat_enum_name != enum_name
+        && !enum_name_matches(pat_enum_name, enum_name)
     {
         errors.push(SemCheckError::MatchPatternEnumMismatch(
             enum_name.to_string(),

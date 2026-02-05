@@ -276,6 +276,49 @@ fn test_generic_expected_type_missing_is_error() {
 }
 
 #[test]
+fn test_generic_struct_lit_with_type_args() {
+    let source = r#"
+        type Pair<T> = { left: T, right: T }
+
+        fn test() -> u64 {
+            let p = Pair<u64> { left: 1, right: 2 };
+            p.left + p.right
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_enum_variant_with_type_args() {
+    let source = r#"
+        type Option<T> = None | Some(T)
+
+        fn test() -> u64 {
+            let value: Option<u64> = Option<u64>::Some(3);
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_type_args_missing_is_error() {
+    let source = r#"
+        type Pair<T> = { left: T, right: T }
+
+        fn test() -> u64 {
+            let p = Pair { left: 1, right: 2 };
+            p.left
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_array_index_through_heap() {
     let source = r#"
         fn test() -> u64 {

@@ -433,6 +433,7 @@ impl SymbolResolver {
                         kind: TypeExprKind::Named {
                             ident: ty_name.clone(),
                             def_id: (),
+                            type_args: Vec::new(),
                         },
                         span: Span::default(),
                     },
@@ -590,10 +591,14 @@ impl SymbolResolver {
             }
             MatchPattern::EnumVariant {
                 enum_name,
+                type_args,
                 bindings,
                 span,
                 ..
             } => {
+                for arg in type_args {
+                    self.visit_type_expr(arg);
+                }
                 // Resolve the enum name if present
                 if let Some(enum_name) = enum_name {
                     let Some(Symbol {
@@ -733,27 +738,45 @@ impl SymbolResolver {
 }
 
 impl Visitor<()> for SymbolResolver {
+    fn visit_type_def(&mut self, type_def: &TypeDef) {
+        self.with_scope(|resolver| {
+            for type_param in &type_def.type_params {
+                resolver.register_type_param(type_param);
+            }
+            walk_type_def(resolver, type_def);
+        });
+    }
+
     fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
-            TypeExprKind::Named { ident: name, .. } => match self.lookup_symbol(name) {
-                Some(symbol) => match &symbol.kind {
-                    SymbolKind::TypeAlias { .. }
-                    | SymbolKind::StructDef { .. }
-                    | SymbolKind::EnumDef { .. }
-                    | SymbolKind::TypeParam { .. } => {
-                        self.def_table_builder
-                            .record_use(type_expr.id, symbol.def_id());
-                    }
-                    other => self.errors.push(ResolveError::ExpectedType(
-                        name.clone(),
-                        other.clone(),
-                        type_expr.span,
-                    )),
-                },
-                None => self
-                    .errors
-                    .push(ResolveError::TypeUndefined(name.clone(), type_expr.span)),
-            },
+            TypeExprKind::Named {
+                ident: name,
+                type_args,
+                ..
+            } => {
+                match self.lookup_symbol(name) {
+                    Some(symbol) => match &symbol.kind {
+                        SymbolKind::TypeAlias { .. }
+                        | SymbolKind::StructDef { .. }
+                        | SymbolKind::EnumDef { .. }
+                        | SymbolKind::TypeParam { .. } => {
+                            self.def_table_builder
+                                .record_use(type_expr.id, symbol.def_id());
+                        }
+                        other => self.errors.push(ResolveError::ExpectedType(
+                            name.clone(),
+                            other.clone(),
+                            type_expr.span,
+                        )),
+                    },
+                    None => self
+                        .errors
+                        .push(ResolveError::TypeUndefined(name.clone(), type_expr.span)),
+                }
+                for arg in type_args {
+                    self.visit_type_expr(arg);
+                }
+            }
             _ => walk_type_expr(self, type_expr),
         }
     }

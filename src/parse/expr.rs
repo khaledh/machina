@@ -1,6 +1,12 @@
 use super::*;
 use crate::types::is_builtin_type_name;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenericLitKind {
+    EnumVariant,
+    StructLit,
+}
+
 impl<'a> Parser<'a> {
     /// Expression parsing (using Pratt parsing for operator precedence)
     pub(super) fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
@@ -224,24 +230,40 @@ impl<'a> Parser<'a> {
 
             TK::KwMatch => self.parse_match_expr(),
 
-            TK::Ident(name) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
-                self.parse_enum_variant(name.clone())
-            }
-
-            TK::Ident(name)
-                if self.allow_struct_lit && self.peek().map(|t| &t.kind) == Some(&TK::LBrace) =>
-            {
-                self.parse_struct_lit(name.clone())
-            }
-
             TK::Ident(name) => {
                 let marker = self.mark();
+
+                if self.peek().map(|t| &t.kind) == Some(&TK::LessThan) {
+                    if let Some(kind) = self.peek_generic_lit_kind() {
+                        let (type_name, type_args) = self.parse_type_name_with_args()?;
+                        return match kind {
+                            GenericLitKind::EnumVariant => {
+                                self.parse_enum_variant_with_args(marker, type_name, type_args)
+                            }
+                            GenericLitKind::StructLit => {
+                                self.parse_struct_lit_with_args(marker, type_name, type_args)
+                            }
+                        };
+                    }
+                }
+
+                if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) {
+                    let name = self.parse_ident()?;
+                    return self.parse_enum_variant_with_args(marker, name, Vec::new());
+                }
+
+                if self.allow_struct_lit && self.peek().map(|t| &t.kind) == Some(&TK::LBrace) {
+                    let name = self.parse_ident()?;
+                    return self.parse_struct_lit_with_args(marker, name, Vec::new());
+                }
+
+                let name = name.clone();
                 self.advance();
 
                 Ok(Expr {
                     id: self.id_gen.new_id(),
                     kind: ExprKind::Var {
-                        ident: name.clone(),
+                        ident: name,
                         def_id: (),
                     },
                     ty: (),
@@ -506,6 +528,7 @@ impl<'a> Parser<'a> {
             kind: TypeExprKind::Named {
                 ident: type_name,
                 def_id: (),
+                type_args: Vec::new(),
             },
             span: self.close(marker),
         };
@@ -562,9 +585,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_enum_variant(&mut self, enum_name: String) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-        self.advance();
+    fn parse_enum_variant_with_args(
+        &mut self,
+        marker: Marker,
+        enum_name: String,
+        type_args: Vec<TypeExpr>,
+    ) -> Result<Expr, ParseError> {
         self.consume(&TK::DoubleColon)?;
         let variant = self.parse_ident()?;
 
@@ -581,6 +607,7 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             kind: ExprKind::EnumVariant {
                 enum_name,
+                type_args,
                 variant,
                 payload,
             },
@@ -589,11 +616,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_struct_lit(&mut self, name: String) -> Result<Expr, ParseError> {
-        let marker = self.mark();
-
-        self.advance();
-
+    fn parse_struct_lit_with_args(
+        &mut self,
+        marker: Marker,
+        name: String,
+        type_args: Vec<TypeExpr>,
+    ) -> Result<Expr, ParseError> {
         self.consume(&TK::LBrace)?;
 
         let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
@@ -616,10 +644,54 @@ impl<'a> Parser<'a> {
 
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::StructLit { name, fields },
+            kind: ExprKind::StructLit {
+                name,
+                type_args,
+                fields,
+            },
             ty: (),
             span: self.close(marker),
         })
+    }
+
+    fn parse_type_name_with_args(&mut self) -> Result<(String, Vec<TypeExpr>), ParseError> {
+        let name = self.parse_ident()?;
+        let type_args = self.parse_type_args()?;
+        Ok((name, type_args))
+    }
+
+    fn peek_generic_lit_kind(&self) -> Option<GenericLitKind> {
+        if self.peek().map(|t| &t.kind) != Some(&TK::LessThan) {
+            return None;
+        }
+
+        let mut depth = 0usize;
+        let mut index = self.pos + 1;
+        while index < self.tokens.len() {
+            match self.tokens[index].kind {
+                TK::LessThan => depth += 1,
+                TK::GreaterThan => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TK::ShiftRight => return None,
+                TK::Eof => return None,
+                _ => {}
+            }
+            index += 1;
+        }
+
+        if depth != 0 {
+            return None;
+        }
+
+        match self.tokens.get(index + 1).map(|t| &t.kind) {
+            Some(TK::DoubleColon) => Some(GenericLitKind::EnumVariant),
+            Some(TK::LBrace) => Some(GenericLitKind::StructLit),
+            _ => None,
+        }
     }
 
     fn parse_struct_update(&mut self) -> Result<Expr, ParseError> {

@@ -10,7 +10,7 @@ AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
 AttributeItem      ::= Identifier ("(" StringLit ("," StringLit)* ")")?
 
 # Type Definitions
-TypeDef            ::= "type" Identifier "=" TypeDefBody
+TypeDef            ::= "type" Identifier TypeParamList? "=" TypeDefBody
 TypeDefBody        ::= TypeAliasDef
                      | StructDef
                      | EnumDef
@@ -29,7 +29,7 @@ TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType
                      | TupleType | RangeType | HeapType | FnType
 
 UnitType           ::= "()"
-NamedType          ::= Identifier
+NamedType          ::= Identifier TypeArgList?
 ArrayType          ::= TypeExpr "[" IntLitList "]"
 SliceType          ::= TypeExpr "[" "]"
 TupleType          ::= "(" TypeExpr "," ( TypeExprList )? ")"
@@ -58,6 +58,7 @@ MethodSig          ::= "fn" Identifier TypeParamList? "(" SelfParam ("," ParamLi
 
 TypeParamList      ::= "<" IdentifierList ">"
 IdentifierList     ::= Identifier ( "," Identifier )* ","?
+TypeArgList        ::= "<" TypeExprList ">"
 SelfParam          ::= ParamMode? "self"
 
 # Properties

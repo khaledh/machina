@@ -212,6 +212,7 @@ impl<'a> Elaborator<'a> {
             def_id: type_def_id,
             attrs: Vec::new(),
             name: type_name.clone(),
+            type_params: Vec::new(),
             kind: sem::TypeDefKind::Struct { fields },
             span,
         };

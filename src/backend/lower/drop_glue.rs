@@ -37,11 +37,16 @@ impl DropGlueRegistry {
     pub(super) fn from_module(def_table: &DefTable, module: &sem::Module) -> Self {
         let mut full_tys = HashMap::new();
         for type_def in module.type_defs() {
+            if !type_def.type_params.is_empty() {
+                // Generic type defs are instantiated on demand.
+                continue;
+            }
             let type_expr = res::TypeExpr {
                 id: type_def.id,
                 kind: res::TypeExprKind::Named {
                     ident: type_def.name.clone(),
                     def_id: type_def.def_id,
+                    type_args: Vec::new(),
                 },
                 span: type_def.span,
             };

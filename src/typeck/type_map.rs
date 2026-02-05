@@ -12,6 +12,9 @@ use crate::types::{
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+type TypeParamMap = HashMap<DefId, TyVarId>;
+type TypeArgMap = HashMap<DefId, Type>;
+
 fn builtin_type(name: &str) -> Option<Type> {
     match name {
         "()" => Some(Type::Unit),
@@ -41,14 +44,24 @@ pub(crate) fn resolve_type_expr(
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
 ) -> Result<Type, TypeCheckError> {
-    resolve_type_expr_with_params(def_table, module, type_expr, None)
+    resolve_type_expr_with_params_and_args(def_table, module, type_expr, None, None)
 }
 
 pub(crate) fn resolve_type_expr_with_params(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+) -> Result<Type, TypeCheckError> {
+    resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None)
+}
+
+fn resolve_type_expr_with_params_and_args(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &res::TypeExpr,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
     resolve_type_expr_impl(
@@ -56,6 +69,7 @@ pub(crate) fn resolve_type_expr_with_params(
         module,
         type_expr,
         type_params,
+        type_args,
         &mut in_progress,
         ResolveDepth::Full,
     )
@@ -87,17 +101,24 @@ fn resolve_type_expr_impl(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        res::TypeExprKind::Named { def_id, .. } => resolve_named_type(
+        res::TypeExprKind::Named {
+            def_id,
+            type_args: type_arg_exprs,
+            ..
+        } => resolve_named_type(
             def_table,
             module,
             type_expr,
             def_id,
+            type_arg_exprs,
             type_params,
+            type_args,
             in_progress,
             depth,
         ),
@@ -107,6 +128,7 @@ fn resolve_type_expr_impl(
                 module,
                 elem_ty_expr,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -119,7 +141,15 @@ fn resolve_type_expr_impl(
             let field_tys = field_ty_exprs
                 .iter()
                 .map(|f| {
-                    resolve_type_expr_impl(def_table, module, f, type_params, in_progress, depth)
+                    resolve_type_expr_impl(
+                        def_table,
+                        module,
+                        f,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        depth,
+                    )
                 })
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
@@ -133,6 +163,7 @@ fn resolve_type_expr_impl(
                 module,
                 base_ty_expr,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -144,6 +175,7 @@ fn resolve_type_expr_impl(
                 module,
                 elem_ty_expr,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -157,6 +189,7 @@ fn resolve_type_expr_impl(
                 module,
                 elem_ty_expr,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -173,6 +206,7 @@ fn resolve_type_expr_impl(
                 module,
                 elem_ty_expr,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -193,6 +227,7 @@ fn resolve_type_expr_impl(
                         module,
                         &param.ty_expr,
                         type_params,
+                        type_args,
                         in_progress,
                         depth,
                     )?;
@@ -207,6 +242,7 @@ fn resolve_type_expr_impl(
                 module,
                 ret_ty_expr,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -307,12 +343,35 @@ fn fn_param_mode(mode: ParamMode) -> FnParamMode {
     }
 }
 
+fn type_arg_name(ty: &Type) -> String {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::Var(var) => format!("T{}", var.index()),
+        _ => ty.to_string(),
+    }
+}
+
+fn mangle_type_name(base: &str, type_args: &[Type]) -> String {
+    if type_args.is_empty() {
+        base.to_string()
+    } else {
+        let args = type_args
+            .iter()
+            .map(type_arg_name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{base}<{args}>")
+    }
+}
+
 fn resolve_named_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
     def_id: &DefId,
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_arg_exprs: &[res::TypeExpr],
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -321,11 +380,25 @@ fn resolve_named_type(
         .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
 
     if let Some(ty) = builtin_type(&def.name) {
+        if !type_arg_exprs.is_empty() {
+            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                def.name.clone(),
+                0,
+                type_arg_exprs.len(),
+                type_expr.span,
+            )
+            .into());
+        }
         return Ok(ty);
     }
 
     match &def.kind {
         DefKind::TypeParam => {
+            if let Some(map) = type_args
+                && let Some(ty) = map.get(def_id)
+            {
+                return Ok(ty.clone());
+            }
             if let Some(map) = type_params
                 && let Some(var) = map.get(def_id)
             {
@@ -337,6 +410,84 @@ fn resolve_named_type(
             let type_def = module
                 .type_def_by_id(*def_id)
                 .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
+            if type_def.type_params.is_empty() {
+                if !type_arg_exprs.is_empty() {
+                    return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                        def.name.clone(),
+                        0,
+                        type_arg_exprs.len(),
+                        type_expr.span,
+                    )
+                    .into());
+                }
+                let type_name = def.name.as_str();
+                return match &type_def.kind {
+                    res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
+                        def_table,
+                        module,
+                        def,
+                        aliased_ty,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        depth,
+                    ),
+                    res::TypeDefKind::Struct { fields } => resolve_struct_type(
+                        def_table,
+                        module,
+                        def.id,
+                        type_name,
+                        fields,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        depth,
+                    ),
+                    res::TypeDefKind::Enum { variants } => resolve_enum_type(
+                        def_table,
+                        module,
+                        def.id,
+                        type_name,
+                        variants,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        depth,
+                    ),
+                };
+            }
+
+            if type_def.type_params.len() != type_arg_exprs.len() {
+                return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                    def.name.clone(),
+                    type_def.type_params.len(),
+                    type_arg_exprs.len(),
+                    type_expr.span,
+                )
+                .into());
+            }
+
+            let resolved_args = type_arg_exprs
+                .iter()
+                .map(|arg| {
+                    resolve_type_expr_impl(
+                        def_table,
+                        module,
+                        arg,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        depth,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let mut arg_map = TypeArgMap::new();
+            for (param, arg_ty) in type_def.type_params.iter().zip(resolved_args.iter()) {
+                arg_map.insert(param.def_id, arg_ty.clone());
+            }
+
+            let type_name = mangle_type_name(&def.name, &resolved_args);
             match &type_def.kind {
                 res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
                     def_table,
@@ -344,24 +495,29 @@ fn resolve_named_type(
                     def,
                     aliased_ty,
                     type_params,
+                    Some(&arg_map),
                     in_progress,
                     depth,
                 ),
                 res::TypeDefKind::Struct { fields } => resolve_struct_type(
                     def_table,
                     module,
-                    def,
+                    def.id,
+                    &type_name,
                     fields,
                     type_params,
+                    Some(&arg_map),
                     in_progress,
                     depth,
                 ),
                 res::TypeDefKind::Enum { variants } => resolve_enum_type(
                     def_table,
                     module,
-                    def,
+                    def.id,
+                    &type_name,
                     variants,
                     type_params,
+                    Some(&arg_map),
                     in_progress,
                     depth,
                 ),
@@ -376,7 +532,8 @@ fn resolve_type_alias(
     module: &impl TypeDefLookup,
     def: &Def,
     ty_expr: &res::TypeExpr,
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     _depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
@@ -389,6 +546,7 @@ fn resolve_type_alias(
         module,
         ty_expr,
         type_params,
+        type_args,
         in_progress,
         ResolveDepth::Full,
     );
@@ -399,35 +557,45 @@ fn resolve_type_alias(
 fn resolve_struct_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    def: &Def,
+    def_id: DefId,
+    type_name: &str,
     fields: &[res::StructDefField],
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
-    if in_progress.contains(&def.id) {
+    if in_progress.contains(&def_id) {
         let struct_fields = match depth {
             ResolveDepth::Full => resolve_struct_fields(
                 def_table,
                 module,
                 fields,
                 type_params,
+                type_args,
                 in_progress,
                 ResolveDepth::Shallow,
             )?,
             ResolveDepth::Shallow => Vec::new(),
         };
         return Ok(Type::Struct {
-            name: def.name.clone(),
+            name: type_name.to_string(),
             fields: struct_fields,
         });
     }
-    in_progress.insert(def.id);
-    let struct_fields =
-        resolve_struct_fields(def_table, module, fields, type_params, in_progress, depth)?;
-    in_progress.remove(&def.id);
+    in_progress.insert(def_id);
+    let struct_fields = resolve_struct_fields(
+        def_table,
+        module,
+        fields,
+        type_params,
+        type_args,
+        in_progress,
+        depth,
+    )?;
+    in_progress.remove(&def_id);
     Ok(Type::Struct {
-        name: def.name.clone(),
+        name: type_name.to_string(),
         fields: struct_fields,
     })
 }
@@ -436,7 +604,8 @@ fn resolve_struct_fields(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     fields: &[res::StructDefField],
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<StructField>, TypeCheckError> {
@@ -448,6 +617,7 @@ fn resolve_struct_fields(
                 module,
                 &field.ty,
                 type_params,
+                type_args,
                 in_progress,
                 depth,
             )?;
@@ -462,35 +632,45 @@ fn resolve_struct_fields(
 fn resolve_enum_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    def: &Def,
+    def_id: DefId,
+    type_name: &str,
     variants: &[res::EnumDefVariant],
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Type, TypeCheckError> {
-    if in_progress.contains(&def.id) {
+    if in_progress.contains(&def_id) {
         let enum_variants = match depth {
             ResolveDepth::Full => resolve_enum_variants(
                 def_table,
                 module,
                 variants,
                 type_params,
+                type_args,
                 in_progress,
                 ResolveDepth::Shallow,
             )?,
             ResolveDepth::Shallow => Vec::new(),
         };
         return Ok(Type::Enum {
-            name: def.name.clone(),
+            name: type_name.to_string(),
             variants: enum_variants,
         });
     }
-    in_progress.insert(def.id);
-    let enum_variants =
-        resolve_enum_variants(def_table, module, variants, type_params, in_progress, depth)?;
-    in_progress.remove(&def.id);
+    in_progress.insert(def_id);
+    let enum_variants = resolve_enum_variants(
+        def_table,
+        module,
+        variants,
+        type_params,
+        type_args,
+        in_progress,
+        depth,
+    )?;
+    in_progress.remove(&def_id);
     Ok(Type::Enum {
-        name: def.name.clone(),
+        name: type_name.to_string(),
         variants: enum_variants,
     })
 }
@@ -499,7 +679,8 @@ fn resolve_enum_variants(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     variants: &[res::EnumDefVariant],
-    type_params: Option<&HashMap<DefId, TyVarId>>,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     depth: ResolveDepth,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
@@ -514,6 +695,7 @@ fn resolve_enum_variants(
                     module,
                     payload_ty,
                     type_params,
+                    type_args,
                     in_progress,
                     depth,
                 )

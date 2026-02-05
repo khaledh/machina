@@ -131,6 +131,7 @@ impl<'a> Elaborator<'a> {
         sem::TypeExprKind::Named {
             ident: name.to_string(),
             def_id,
+            type_args: Vec::new(),
         }
     }
 }

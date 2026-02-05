@@ -451,6 +451,7 @@ fn test_parse_enum_variant_expr() {
             enum_name,
             variant,
             payload,
+            ..
         } => {
             assert_eq!(enum_name, "Color");
             assert_eq!(variant, "Green");
@@ -511,6 +512,7 @@ fn test_parse_enum_variant_expr_with_payload() {
             enum_name,
             variant,
             payload,
+            ..
         } => {
             assert_eq!(enum_name, "Option");
             assert_eq!(variant, "Some");
@@ -556,6 +558,7 @@ fn test_parse_struct_update_expr() {
                     enum_name,
                     variant,
                     payload,
+                    ..
                 } => {
                     assert_eq!(enum_name, "Color");
                     assert_eq!(variant, "Green");
@@ -992,6 +995,46 @@ fn test_parse_match_expr_enum_variants() {
             assert!(matches!(arms[2].pattern, MatchPattern::Wildcard { .. }));
         }
         _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
+fn test_parse_enum_variant_pattern_with_type_args() {
+    let source = r#"
+        type Option<T> = None | Some(T)
+
+        fn test(opt: Option<u64>) -> u64 {
+            match opt {
+                Option<u64>::Some(x) => x,
+                Option<u64>::None => 0,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    let ExprKind::Match { arms, .. } = &tail.kind else {
+        panic!("Expected match expression");
+    };
+
+    let MatchPattern::EnumVariant {
+        enum_name,
+        type_args,
+        variant_name,
+        ..
+    } = &arms[0].pattern
+    else {
+        panic!("Expected enum variant pattern in arm 0");
+    };
+
+    assert_eq!(enum_name.as_deref(), Some("Option"));
+    assert_eq!(variant_name, "Some");
+    assert_eq!(type_args.len(), 1);
+    match &type_args[0].kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+        _ => panic!("Expected named type arg"),
     }
 }
 

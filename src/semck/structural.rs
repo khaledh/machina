@@ -393,7 +393,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
 
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::StructLit { name, fields } => {
+            ExprKind::StructLit { name, fields, .. } => {
                 self.check_struct_lit(name, fields, expr.span);
             }
             ExprKind::StructUpdate { target, fields } => {
@@ -419,6 +419,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                 enum_name,
                 variant,
                 payload,
+                ..
             } => {
                 self.check_enum_variant(enum_name, variant, payload.len(), expr.span);
             }

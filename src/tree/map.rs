@@ -347,6 +347,11 @@ pub fn walk_type_def<M: TreeMapper + ?Sized>(
         def_id: mapper.map_def_id(type_def.id, &type_def.def_id, ctx),
         attrs: type_def.attrs.clone(),
         name: type_def.name.clone(),
+        type_params: type_def
+            .type_params
+            .iter()
+            .map(|param| mapper.map_type_param(param, ctx))
+            .collect(),
         kind: match &type_def.kind {
             TypeDefKind::Alias { aliased_ty } => TypeDefKind::Alias {
                 aliased_ty: mapper.map_type_expr(aliased_ty, ctx),
@@ -406,9 +411,17 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
     TypeExpr {
         id: type_expr.id,
         kind: match &type_expr.kind {
-            TypeExprKind::Named { ident, def_id } => TypeExprKind::Named {
+            TypeExprKind::Named {
+                ident,
+                def_id,
+                type_args,
+            } => TypeExprKind::Named {
                 ident: ident.clone(),
                 def_id: mapper.map_def_id(type_expr.id, def_id, ctx),
+                type_args: type_args
+                    .iter()
+                    .map(|arg| mapper.map_type_expr(arg, ctx))
+                    .collect(),
             },
             TypeExprKind::Refined {
                 base_ty_expr,
@@ -778,11 +791,16 @@ pub fn walk_match_pattern<M: TreeMapper + ?Sized>(
         },
         MatchPattern::EnumVariant {
             enum_name,
+            type_args,
             variant_name,
             bindings,
             span,
         } => MatchPattern::EnumVariant {
             enum_name: enum_name.clone(),
+            type_args: type_args
+                .iter()
+                .map(|arg| mapper.map_type_expr(arg, ctx))
+                .collect(),
             variant_name: variant_name.clone(),
             bindings: bindings
                 .iter()
@@ -947,8 +965,16 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
                 .map(|item| mapper.map_expr(item, ctx))
                 .collect(),
         ),
-        ExprKind::StructLit { name, fields } => ExprKind::StructLit {
+        ExprKind::StructLit {
+            name,
+            type_args,
+            fields,
+        } => ExprKind::StructLit {
             name: name.clone(),
+            type_args: type_args
+                .iter()
+                .map(|arg| mapper.map_type_expr(arg, ctx))
+                .collect(),
             fields: fields
                 .iter()
                 .map(|field| mapper.map_struct_lit_field(field, ctx))
@@ -956,10 +982,15 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
         },
         ExprKind::EnumVariant {
             enum_name,
+            type_args,
             variant,
             payload,
         } => ExprKind::EnumVariant {
             enum_name: enum_name.clone(),
+            type_args: type_args
+                .iter()
+                .map(|arg| mapper.map_type_expr(arg, ctx))
+                .collect(),
             variant: variant.clone(),
             payload: payload
                 .iter()

@@ -218,6 +218,7 @@ pub struct TypeDef<D> {
     pub def_id: D,
     pub attrs: Vec<Attribute>,
     pub name: String,
+    pub type_params: Vec<TypeParam<D>>,
     pub kind: TypeDefKind<D>,
     pub span: Span,
 }
@@ -265,6 +266,7 @@ pub enum TypeExprKind<D> {
     Named {
         ident: String,
         def_id: D,
+        type_args: Vec<TypeExpr<D>>,
     },
     Refined {
         base_ty_expr: Box<TypeExpr<D>>,
@@ -519,6 +521,7 @@ pub enum MatchPattern<D> {
     },
     EnumVariant {
         enum_name: Option<String>,
+        type_args: Vec<TypeExpr<D>>,
         variant_name: String,
         bindings: Vec<MatchPatternBinding<D>>,
         span: Span,
@@ -637,10 +640,12 @@ pub enum ExprKind<D, T = ()> {
     TupleLit(Vec<Expr<D, T>>),
     StructLit {
         name: String,
+        type_args: Vec<TypeExpr<D>>,
         fields: Vec<StructLitField<D, T>>,
     },
     EnumVariant {
         enum_name: String,
+        type_args: Vec<TypeExpr<D>>,
         variant: String,
         payload: Vec<Expr<D, T>>,
     },
