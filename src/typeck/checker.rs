@@ -110,39 +110,6 @@ struct ControlContext {
     loop_depth: usize,
 }
 
-struct InferScopeGuard {
-    checker: *mut TypeChecker,
-    finished: bool,
-}
-
-impl InferScopeGuard {
-    fn new(checker: &mut TypeChecker) -> Self {
-        checker.begin_inference();
-        Self {
-            checker,
-            finished: false,
-        }
-    }
-
-    fn finish(mut self) -> Vec<TypeCheckError> {
-        self.finished = true;
-        // Safety: the guard is scoped to the borrow used to create it.
-        unsafe { (*self.checker).finish_inference() }
-    }
-}
-
-impl Drop for InferScopeGuard {
-    fn drop(&mut self) {
-        if self.finished {
-            return;
-        }
-        // Safety: the guard is scoped to the borrow used to create it.
-        unsafe {
-            let _ = (*self.checker).finish_inference();
-        }
-    }
-}
-
 impl TypeChecker {
     pub fn new(context: ResolvedContext) -> Self {
         Self {
@@ -235,8 +202,14 @@ impl TypeChecker {
         result
     }
 
-    fn infer_scope(&mut self) -> InferScopeGuard {
-        InferScopeGuard::new(self)
+    fn with_infer_scope<F, R>(&mut self, f: F) -> (R, Vec<TypeCheckError>)
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        self.begin_inference();
+        let result = f(self);
+        let errors = self.finish_inference();
+        (result, errors)
     }
 
     fn begin_inference(&mut self) {
@@ -915,21 +888,20 @@ impl TypeChecker {
                 }
             }
 
-            let infer_scope = this.infer_scope();
-            this.push_control_context(ret_type.clone());
-            let body_ty = match this.check_expr(&func_def.body, Expected::Exact(&ret_type)) {
+            let (body_result, infer_errors) = this.with_infer_scope(|this| {
+                this.push_control_context(ret_type.clone());
+                let body_ty = this.check_expr(&func_def.body, Expected::Exact(&ret_type));
+                this.pop_control_context();
+                body_ty.map(|ty| this.apply_infer(&ty))
+            });
+            let body_ty = match body_result {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
-                    let infer_errors = infer_scope.finish();
                     this.errors.extend(infer_errors);
-                    this.pop_control_context();
                     return Err(this.errors.clone());
                 }
             };
-            this.pop_control_context();
-            let body_ty = this.apply_infer(&body_ty);
-            let infer_errors = infer_scope.finish();
             if !infer_errors.is_empty() {
                 this.errors.extend(infer_errors);
             }
@@ -1028,21 +1000,20 @@ impl TypeChecker {
         }
 
         self.with_type_params(&method_def.sig.type_params, |this| {
-            let infer_scope = this.infer_scope();
-            this.push_control_context(ret_type.clone());
-            let body_ty = match this.check_expr(&method_def.body, Expected::Exact(&ret_type)) {
+            let (body_result, infer_errors) = this.with_infer_scope(|this| {
+                this.push_control_context(ret_type.clone());
+                let body_ty = this.check_expr(&method_def.body, Expected::Exact(&ret_type));
+                this.pop_control_context();
+                body_ty.map(|ty| this.apply_infer(&ty))
+            });
+            let body_ty = match body_result {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
-                    let infer_errors = infer_scope.finish();
                     this.errors.extend(infer_errors);
-                    this.pop_control_context();
                     return Err(this.errors.clone());
                 }
             };
-            this.pop_control_context();
-            let body_ty = this.apply_infer(&body_ty);
-            let infer_errors = infer_scope.finish();
             if !infer_errors.is_empty() {
                 this.errors.extend(infer_errors);
             }
@@ -1099,19 +1070,19 @@ impl TypeChecker {
 
         let return_ty = self.resolve_type_expr_in_scope(return_ty)?;
 
-        let infer_scope = self.infer_scope();
-        self.push_control_context(return_ty.clone());
-        let body_ty = match self.check_expr(body, Expected::Exact(&return_ty)) {
+        let (body_result, infer_errors) = self.with_infer_scope(|this| {
+            this.push_control_context(return_ty.clone());
+            let body_ty = this.check_expr(body, Expected::Exact(&return_ty));
+            this.pop_control_context();
+            body_ty.map(|ty| this.apply_infer(&ty))
+        });
+        let body_ty = match body_result {
             Ok(ty) => ty,
             Err(err) => {
-                let _ = infer_scope.finish();
-                self.pop_control_context();
+                let _ = infer_errors;
                 return Err(err);
             }
         };
-        self.pop_control_context();
-        let body_ty = self.apply_infer(&body_ty);
-        let infer_errors = infer_scope.finish();
         if let Some(err) = infer_errors.into_iter().next() {
             return Err(err);
         }
