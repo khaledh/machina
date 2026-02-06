@@ -625,4 +625,93 @@ impl Type {
     pub fn is_int_in_range(&self, value: i128) -> bool {
         value >= self.min_value() && value <= self.max_value()
     }
+
+    /// Bottom-up transform: recursively applies `f` to every child type first,
+    /// then applies `f` to the rebuilt node. The closure sees a node whose
+    /// children have already been transformed.
+    pub fn map(self, f: &impl Fn(Type) -> Type) -> Type {
+        let rebuilt = match self {
+            Type::Fn { params, ret_ty } => Type::Fn {
+                params: params
+                    .into_iter()
+                    .map(|p| FnParam {
+                        mode: p.mode,
+                        ty: p.ty.map(f),
+                    })
+                    .collect(),
+                ret_ty: Box::new((*ret_ty).map(f)),
+            },
+            Type::Range { elem_ty } => Type::Range {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::Array { elem_ty, dims } => Type::Array {
+                elem_ty: Box::new((*elem_ty).map(f)),
+                dims,
+            },
+            Type::Tuple { field_tys } => Type::Tuple {
+                field_tys: field_tys.into_iter().map(|ty| ty.map(f)).collect(),
+            },
+            Type::Struct { name, fields } => Type::Struct {
+                name,
+                fields: fields
+                    .into_iter()
+                    .map(|field| StructField {
+                        name: field.name,
+                        ty: field.ty.map(f),
+                    })
+                    .collect(),
+            },
+            Type::Enum { name, variants } => Type::Enum {
+                name,
+                variants: variants
+                    .into_iter()
+                    .map(|v| EnumVariant {
+                        name: v.name,
+                        payload: v.payload.into_iter().map(|ty| ty.map(f)).collect(),
+                    })
+                    .collect(),
+            },
+            Type::Slice { elem_ty } => Type::Slice {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::Heap { elem_ty } => Type::Heap {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::Ref { mutable, elem_ty } => Type::Ref {
+                mutable,
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            // Leaf types: no children to recurse into.
+            other => other,
+        };
+        f(rebuilt)
+    }
+
+    /// Like `map` but takes `&self` and clones.
+    pub fn map_ref(&self, f: &impl Fn(Type) -> Type) -> Type {
+        self.clone().map(f)
+    }
+
+    /// Returns `true` if `predicate` holds for this type or any nested child type.
+    pub fn any(&self, predicate: &impl Fn(&Type) -> bool) -> bool {
+        if predicate(self) {
+            return true;
+        }
+        match self {
+            Type::Fn { params, ret_ty } => {
+                params.iter().any(|p| p.ty.any(predicate)) || ret_ty.any(predicate)
+            }
+            Type::Range { elem_ty }
+            | Type::Array { elem_ty, .. }
+            | Type::Slice { elem_ty }
+            | Type::Heap { elem_ty }
+            | Type::Ref { elem_ty, .. } => elem_ty.any(predicate),
+            Type::Tuple { field_tys } => field_tys.iter().any(|ty| ty.any(predicate)),
+            Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.any(predicate)),
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .any(|v| v.payload.iter().any(|ty| ty.any(predicate))),
+            _ => false,
+        }
+    }
 }

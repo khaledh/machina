@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::resolve::DefId;
-use crate::types::{EnumVariant, FnParam, StructField, TyVarId, Type};
+use crate::types::{TyVarId, Type};
 
 pub(crate) const INFER_VAR_BASE: u32 = 1_000_000;
 pub(crate) const META_VAR_BASE: u32 = 2_000_000;
@@ -119,84 +119,32 @@ impl TypeVarStore {
     }
 
     pub(crate) fn apply(&self, ty: &Type) -> Type {
-        match ty {
-            Type::Var(var) => match self.subst.get(var) {
-                Some(bound_ty) => {
-                    if matches!(bound_ty, Type::Var(v) if v == var) {
-                        ty.clone()
-                    } else {
-                        self.apply(bound_ty)
-                    }
+        ty.map_ref(&|t| match t {
+            Type::Var(var) => match self.subst.get(&var) {
+                Some(bound_ty) if !matches!(bound_ty, Type::Var(v) if *v == var) => {
+                    self.apply(bound_ty)
                 }
-                None => ty.clone(),
+                _ => Type::Var(var),
             },
-            Type::Fn { params, ret_ty } => Type::Fn {
-                params: params
-                    .iter()
-                    .map(|param| FnParam {
-                        mode: param.mode,
-                        ty: self.apply(&param.ty),
-                    })
-                    .collect(),
-                ret_ty: Box::new(self.apply(ret_ty)),
-            },
-            Type::Range { elem_ty } => Type::Range {
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            Type::Array { elem_ty, dims } => {
-                let applied_elem = self.apply(elem_ty);
-                match applied_elem {
+            // Flatten nested arrays produced by substitution.
+            Type::Array { elem_ty, dims } => match *elem_ty {
+                Type::Array {
+                    elem_ty: inner_elem,
+                    dims: inner_dims,
+                } => {
+                    let mut merged = dims;
+                    merged.extend(inner_dims);
                     Type::Array {
                         elem_ty: inner_elem,
-                        dims: inner_dims,
-                    } => {
-                        let mut merged_dims = dims.clone();
-                        merged_dims.extend(inner_dims);
-                        Type::Array {
-                            elem_ty: inner_elem,
-                            dims: merged_dims,
-                        }
+                        dims: merged,
                     }
-                    other => Type::Array {
-                        elem_ty: Box::new(other),
-                        dims: dims.clone(),
-                    },
                 }
-            }
-            Type::Tuple { field_tys } => Type::Tuple {
-                field_tys: field_tys.iter().map(|ty| self.apply(ty)).collect(),
+                other => Type::Array {
+                    elem_ty: Box::new(other),
+                    dims,
+                },
             },
-            Type::Struct { name, fields } => Type::Struct {
-                name: name.clone(),
-                fields: fields
-                    .iter()
-                    .map(|field| StructField {
-                        name: field.name.clone(),
-                        ty: self.apply(&field.ty),
-                    })
-                    .collect(),
-            },
-            Type::Enum { name, variants } => Type::Enum {
-                name: name.clone(),
-                variants: variants
-                    .iter()
-                    .map(|variant| EnumVariant {
-                        name: variant.name.clone(),
-                        payload: variant.payload.iter().map(|ty| self.apply(ty)).collect(),
-                    })
-                    .collect(),
-            },
-            Type::Slice { elem_ty } => Type::Slice {
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            Type::Heap { elem_ty } => Type::Heap {
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            Type::Ref { mutable, elem_ty } => Type::Ref {
-                mutable: *mutable,
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            _ => ty.clone(),
-        }
+            other => other,
+        })
     }
 }

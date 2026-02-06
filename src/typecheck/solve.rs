@@ -545,67 +545,10 @@ fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> (Vec<
 }
 
 fn subst_type_vars(ty: &Type, map: &HashMap<TyVarId, Type>) -> Type {
-    match ty {
-        Type::Var(var) => map.get(var).cloned().unwrap_or(Type::Var(*var)),
-        Type::Fn { params, ret_ty } => Type::Fn {
-            params: params
-                .iter()
-                .map(|param| crate::types::FnParam {
-                    mode: param.mode,
-                    ty: subst_type_vars(&param.ty, map),
-                })
-                .collect(),
-            ret_ty: Box::new(subst_type_vars(ret_ty, map)),
-        },
-        Type::Range { elem_ty } => Type::Range {
-            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
-        },
-        Type::Array { elem_ty, dims } => Type::Array {
-            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
-            dims: dims.clone(),
-        },
-        Type::Tuple { field_tys } => Type::Tuple {
-            field_tys: field_tys
-                .iter()
-                .map(|field_ty| subst_type_vars(field_ty, map))
-                .collect(),
-        },
-        Type::Struct { name, fields } => Type::Struct {
-            name: name.clone(),
-            fields: fields
-                .iter()
-                .map(|field| crate::types::StructField {
-                    name: field.name.clone(),
-                    ty: subst_type_vars(&field.ty, map),
-                })
-                .collect(),
-        },
-        Type::Enum { name, variants } => Type::Enum {
-            name: name.clone(),
-            variants: variants
-                .iter()
-                .map(|variant| crate::types::EnumVariant {
-                    name: variant.name.clone(),
-                    payload: variant
-                        .payload
-                        .iter()
-                        .map(|payload_ty| subst_type_vars(payload_ty, map))
-                        .collect(),
-                })
-                .collect(),
-        },
-        Type::Slice { elem_ty } => Type::Slice {
-            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
-        },
-        Type::Heap { elem_ty } => Type::Heap {
-            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
-        },
-        Type::Ref { mutable, elem_ty } => Type::Ref {
-            mutable: *mutable,
-            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
-        },
-        other => other.clone(),
-    }
+    ty.map_ref(&|t| match t {
+        Type::Var(var) => map.get(&var).cloned().unwrap_or(Type::Var(var)),
+        other => other,
+    })
 }
 
 fn reason_span(constraint: &Constraint) -> Span {
@@ -1382,37 +1325,12 @@ fn collect_pattern_bind_decl_spans(
 }
 
 fn has_unresolved_infer_var(ty: &Type, vars: &crate::typecheck::typesys::TypeVarStore) -> bool {
-    match ty {
-        Type::Var(var) => matches!(
+    ty.any(&|t| {
+        matches!(t, Type::Var(var) if matches!(
             vars.kind(*var),
-            Some(crate::typecheck::typesys::TypeVarKind::InferLocal)
-                | Some(crate::typecheck::typesys::TypeVarKind::InferInt)
-        ),
-        Type::Fn { params, ret_ty } => {
-            params
-                .iter()
-                .any(|param| has_unresolved_infer_var(&param.ty, vars))
-                || has_unresolved_infer_var(ret_ty, vars)
-        }
-        Type::Range { elem_ty }
-        | Type::Array { elem_ty, .. }
-        | Type::Slice { elem_ty }
-        | Type::Heap { elem_ty }
-        | Type::Ref { elem_ty, .. } => has_unresolved_infer_var(elem_ty, vars),
-        Type::Tuple { field_tys } => field_tys
-            .iter()
-            .any(|field_ty| has_unresolved_infer_var(field_ty, vars)),
-        Type::Struct { fields, .. } => fields
-            .iter()
-            .any(|field| has_unresolved_infer_var(&field.ty, vars)),
-        Type::Enum { variants, .. } => variants.iter().any(|variant| {
-            variant
-                .payload
-                .iter()
-                .any(|payload_ty| has_unresolved_infer_var(payload_ty, vars))
-        }),
-        _ => false,
-    }
+            Some(TypeVarKind::InferLocal) | Some(TypeVarKind::InferInt)
+        ))
+    })
 }
 
 fn check_pattern_obligations(
@@ -1755,70 +1673,10 @@ fn default_infer_ints_for_diagnostics(
     ty: Type,
     vars: &crate::typecheck::typesys::TypeVarStore,
 ) -> Type {
-    match ty {
-        Type::Var(var) => match vars.kind(var) {
-            Some(TypeVarKind::InferInt) => Type::sint(32),
-            _ => Type::Var(var),
-        },
-        Type::Fn { params, ret_ty } => Type::Fn {
-            params: params
-                .into_iter()
-                .map(|param| crate::types::FnParam {
-                    mode: param.mode,
-                    ty: default_infer_ints_for_diagnostics(param.ty, vars),
-                })
-                .collect(),
-            ret_ty: Box::new(default_infer_ints_for_diagnostics(*ret_ty, vars)),
-        },
-        Type::Range { elem_ty } => Type::Range {
-            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
-        },
-        Type::Array { elem_ty, dims } => Type::Array {
-            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
-            dims,
-        },
-        Type::Tuple { field_tys } => Type::Tuple {
-            field_tys: field_tys
-                .into_iter()
-                .map(|field_ty| default_infer_ints_for_diagnostics(field_ty, vars))
-                .collect(),
-        },
-        Type::Struct { name, fields } => Type::Struct {
-            name,
-            fields: fields
-                .into_iter()
-                .map(|field| crate::types::StructField {
-                    name: field.name,
-                    ty: default_infer_ints_for_diagnostics(field.ty, vars),
-                })
-                .collect(),
-        },
-        Type::Enum { name, variants } => Type::Enum {
-            name,
-            variants: variants
-                .into_iter()
-                .map(|variant| crate::types::EnumVariant {
-                    name: variant.name,
-                    payload: variant
-                        .payload
-                        .into_iter()
-                        .map(|payload_ty| default_infer_ints_for_diagnostics(payload_ty, vars))
-                        .collect(),
-                })
-                .collect(),
-        },
-        Type::Slice { elem_ty } => Type::Slice {
-            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
-        },
-        Type::Heap { elem_ty } => Type::Heap {
-            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
-        },
-        Type::Ref { mutable, elem_ty } => Type::Ref {
-            mutable,
-            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
-        },
+    ty.map(&|t| match t {
+        Type::Var(var) if matches!(vars.kind(var), Some(TypeVarKind::InferInt)) => Type::sint(32),
         other => other,
-    }
+    })
 }
 
 fn is_int_like(ty: &Type) -> bool {
@@ -1844,23 +1702,7 @@ fn int_repr_compatible(from: &Type, to: &Type) -> bool {
 }
 
 fn is_unresolved(ty: &Type) -> bool {
-    match ty {
-        Type::Unknown | Type::Var(_) => true,
-        Type::Fn { params, ret_ty } => {
-            params.iter().any(|param| is_unresolved(&param.ty)) || is_unresolved(ret_ty)
-        }
-        Type::Range { elem_ty }
-        | Type::Array { elem_ty, .. }
-        | Type::Slice { elem_ty }
-        | Type::Heap { elem_ty }
-        | Type::Ref { elem_ty, .. } => is_unresolved(elem_ty),
-        Type::Tuple { field_tys } => field_tys.iter().any(is_unresolved),
-        Type::Struct { fields, .. } => fields.iter().any(|field| is_unresolved(&field.ty)),
-        Type::Enum { variants, .. } => variants
-            .iter()
-            .any(|variant| variant.payload.iter().any(is_unresolved)),
-        _ => false,
-    }
+    ty.any(&|t| matches!(t, Type::Unknown | Type::Var(_)))
 }
 
 fn is_iterable(ty: &Type) -> bool {
@@ -1906,137 +1748,39 @@ fn iterable_elem_type(ty: &Type) -> Option<Type> {
 }
 
 fn canonicalize_type(ty: Type) -> Type {
-    match ty {
-        Type::Fn { params, ret_ty } => Type::Fn {
-            params: params
-                .into_iter()
-                .map(|param| crate::types::FnParam {
-                    mode: param.mode,
-                    ty: canonicalize_type(param.ty),
-                })
-                .collect(),
-            ret_ty: Box::new(canonicalize_type(*ret_ty)),
-        },
-        Type::Range { elem_ty } => Type::Range {
-            elem_ty: Box::new(canonicalize_type(*elem_ty)),
-        },
-        Type::Array { elem_ty, dims } => {
-            let elem_ty = canonicalize_type(*elem_ty);
-            if let Type::Array {
+    ty.map(&|t| match t {
+        // Flatten nested arrays.
+        Type::Array { elem_ty, dims } => match *elem_ty {
+            Type::Array {
                 elem_ty: inner_elem,
                 dims: inner_dims,
-            } = elem_ty
-            {
-                let mut merged_dims = dims;
-                merged_dims.extend(inner_dims);
+            } => {
+                let mut merged = dims;
+                merged.extend(inner_dims);
                 Type::Array {
                     elem_ty: inner_elem,
-                    dims: merged_dims,
-                }
-            } else {
-                Type::Array {
-                    elem_ty: Box::new(elem_ty),
-                    dims,
+                    dims: merged,
                 }
             }
-        }
-        Type::Tuple { field_tys } => Type::Tuple {
-            field_tys: field_tys.into_iter().map(canonicalize_type).collect(),
-        },
-        Type::Struct { name, fields } => Type::Struct {
-            name,
-            fields: fields
-                .into_iter()
-                .map(|field| crate::types::StructField {
-                    name: field.name,
-                    ty: canonicalize_type(field.ty),
-                })
-                .collect(),
-        },
-        Type::Enum { name, variants } => Type::Enum {
-            name,
-            variants: variants
-                .into_iter()
-                .map(|variant| crate::types::EnumVariant {
-                    name: variant.name,
-                    payload: variant.payload.into_iter().map(canonicalize_type).collect(),
-                })
-                .collect(),
-        },
-        Type::Slice { elem_ty } => Type::Slice {
-            elem_ty: Box::new(canonicalize_type(*elem_ty)),
-        },
-        Type::Heap { elem_ty } => Type::Heap {
-            elem_ty: Box::new(canonicalize_type(*elem_ty)),
-        },
-        Type::Ref { mutable, elem_ty } => Type::Ref {
-            mutable,
-            elem_ty: Box::new(canonicalize_type(*elem_ty)),
+            other => Type::Array {
+                elem_ty: Box::new(other),
+                dims,
+            },
         },
         other => other,
-    }
+    })
 }
 
 fn erase_refinements(ty: &Type) -> Type {
-    match ty {
+    ty.map_ref(&|t| match t {
         Type::Int { signed, bits, .. } => Type::Int {
-            signed: *signed,
-            bits: *bits,
+            signed,
+            bits,
             bounds: None,
             nonzero: false,
         },
-        Type::Fn { params, ret_ty } => Type::Fn {
-            params: params
-                .iter()
-                .map(|param| crate::types::FnParam {
-                    mode: param.mode,
-                    ty: erase_refinements(&param.ty),
-                })
-                .collect(),
-            ret_ty: Box::new(erase_refinements(ret_ty)),
-        },
-        Type::Range { elem_ty } => Type::Range {
-            elem_ty: Box::new(erase_refinements(elem_ty)),
-        },
-        Type::Array { elem_ty, dims } => Type::Array {
-            elem_ty: Box::new(erase_refinements(elem_ty)),
-            dims: dims.clone(),
-        },
-        Type::Tuple { field_tys } => Type::Tuple {
-            field_tys: field_tys.iter().map(erase_refinements).collect(),
-        },
-        Type::Struct { name, fields } => Type::Struct {
-            name: name.clone(),
-            fields: fields
-                .iter()
-                .map(|field| crate::types::StructField {
-                    name: field.name.clone(),
-                    ty: erase_refinements(&field.ty),
-                })
-                .collect(),
-        },
-        Type::Enum { name, variants } => Type::Enum {
-            name: name.clone(),
-            variants: variants
-                .iter()
-                .map(|variant| crate::types::EnumVariant {
-                    name: variant.name.clone(),
-                    payload: variant.payload.iter().map(erase_refinements).collect(),
-                })
-                .collect(),
-        },
-        Type::Slice { elem_ty } => Type::Slice {
-            elem_ty: Box::new(erase_refinements(elem_ty)),
-        },
-        Type::Heap { elem_ty } => Type::Heap {
-            elem_ty: Box::new(erase_refinements(elem_ty)),
-        },
-        Type::Ref { mutable, elem_ty } => Type::Ref {
-            mutable: *mutable,
-            elem_ty: Box::new(erase_refinements(elem_ty)),
-        },
-        other => other.clone(),
-    }
+        other => other,
+    })
 }
 
 fn unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {

@@ -304,25 +304,7 @@ impl TcUnifier {
     }
 
     fn occurs_in(&self, var: TyVarId, ty: &Type) -> bool {
-        match ty {
-            Type::Var(other) => *other == var,
-            Type::Fn { params, ret_ty } => {
-                params.iter().any(|param| self.occurs_in(var, &param.ty))
-                    || self.occurs_in(var, ret_ty)
-            }
-            Type::Range { elem_ty } => self.occurs_in(var, elem_ty),
-            Type::Array { elem_ty, .. } => self.occurs_in(var, elem_ty),
-            Type::Tuple { field_tys } => field_tys.iter().any(|ty| self.occurs_in(var, ty)),
-            Type::Struct { fields, .. } => fields.iter().any(|f| self.occurs_in(var, &f.ty)),
-            Type::Enum { variants, .. } => variants
-                .iter()
-                .flat_map(|variant| variant.payload.iter())
-                .any(|ty| self.occurs_in(var, ty)),
-            Type::Slice { elem_ty } => self.occurs_in(var, elem_ty),
-            Type::Heap { elem_ty } => self.occurs_in(var, elem_ty),
-            Type::Ref { elem_ty, .. } => self.occurs_in(var, elem_ty),
-            _ => false,
-        }
+        ty.any(&|t| matches!(t, Type::Var(v) if *v == var))
     }
 }
 

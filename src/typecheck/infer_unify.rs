@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::types::{EnumVariant, FnParam, StructField, TyVarId, Type};
+use crate::types::{TyVarId, Type};
 
 /// Errors that can occur during type unification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,74 +49,15 @@ impl Subst {
     /// the substitution is applied recursively to follow the chain of bindings.
     /// Type variables without bindings are left unchanged.
     pub fn apply(&self, ty: &Type) -> Type {
-        match ty {
-            // Substitute type variables with their bindings, or keep them unchanged
-            // Recursively apply to handle chains of variable bindings
-            Type::Var(var) => match self.map.get(var) {
-                Some(bound_ty) => {
-                    // Guard against cycles: if bound to itself, just return the variable.
-                    // Longer cycles shouldn't be constructible via `Unifier::unify`.
-                    if matches!(bound_ty, Type::Var(v) if v == var) {
-                        ty.clone()
-                    } else {
-                        self.apply(bound_ty)
-                    }
+        ty.map_ref(&|t| match t {
+            Type::Var(var) => match self.map.get(&var) {
+                Some(bound_ty) if !matches!(bound_ty, Type::Var(v) if *v == var) => {
+                    self.apply(bound_ty)
                 }
-                None => ty.clone(),
+                _ => Type::Var(var),
             },
-            Type::Fn { params, ret_ty } => Type::Fn {
-                params: params
-                    .iter()
-                    .map(|param| FnParam {
-                        mode: param.mode,
-                        ty: self.apply(&param.ty),
-                    })
-                    .collect(),
-                ret_ty: Box::new(self.apply(ret_ty)),
-            },
-            Type::Range { elem_ty } => Type::Range {
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            Type::Array { elem_ty, dims } => Type::Array {
-                elem_ty: Box::new(self.apply(elem_ty)),
-                dims: dims.clone(),
-            },
-            Type::Tuple { field_tys } => Type::Tuple {
-                field_tys: field_tys.iter().map(|ty| self.apply(ty)).collect(),
-            },
-            Type::Struct { name, fields } => Type::Struct {
-                name: name.clone(),
-                fields: fields
-                    .iter()
-                    .map(|field| StructField {
-                        name: field.name.clone(),
-                        ty: self.apply(&field.ty),
-                    })
-                    .collect(),
-            },
-            Type::Enum { name, variants } => Type::Enum {
-                name: name.clone(),
-                variants: variants
-                    .iter()
-                    .map(|variant| EnumVariant {
-                        name: variant.name.clone(),
-                        payload: variant.payload.iter().map(|ty| self.apply(ty)).collect(),
-                    })
-                    .collect(),
-            },
-            Type::Slice { elem_ty } => Type::Slice {
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            Type::Heap { elem_ty } => Type::Heap {
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            Type::Ref { mutable, elem_ty } => Type::Ref {
-                mutable: *mutable,
-                elem_ty: Box::new(self.apply(elem_ty)),
-            },
-            // All other types (primitives, etc.) don't contain type variables
-            _ => ty.clone(),
-        }
+            other => other,
+        })
     }
 }
 
@@ -556,30 +497,7 @@ impl Unifier {
         Ok(())
     }
 
-    /// Checks if a type variable occurs within a type structure.
-    ///
-    /// This is the "occurs check" which prevents creating infinite types.
-    /// For example, it prevents unifying `T` with `Array<T>`, which would
-    /// create an infinitely nested type.
     fn occurs_in(&self, var: TyVarId, ty: &Type) -> bool {
-        match ty {
-            Type::Var(other) => *other == var,
-            Type::Fn { params, ret_ty } => {
-                params.iter().any(|param| self.occurs_in(var, &param.ty))
-                    || self.occurs_in(var, ret_ty)
-            }
-            Type::Range { elem_ty } => self.occurs_in(var, elem_ty),
-            Type::Array { elem_ty, .. } => self.occurs_in(var, elem_ty),
-            Type::Tuple { field_tys } => field_tys.iter().any(|ty| self.occurs_in(var, ty)),
-            Type::Struct { fields, .. } => fields.iter().any(|f| self.occurs_in(var, &f.ty)),
-            Type::Enum { variants, .. } => variants
-                .iter()
-                .flat_map(|v| v.payload.iter())
-                .any(|ty| self.occurs_in(var, ty)),
-            Type::Slice { elem_ty } => self.occurs_in(var, elem_ty),
-            Type::Heap { elem_ty } => self.occurs_in(var, elem_ty),
-            Type::Ref { elem_ty, .. } => self.occurs_in(var, elem_ty),
-            _ => false,
-        }
+        ty.any(&|t| matches!(t, Type::Var(v) if *v == var))
     }
 }
