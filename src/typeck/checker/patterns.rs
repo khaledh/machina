@@ -1,34 +1,38 @@
 use super::*;
 
-impl TypeChecker {
-    pub(super) fn check_match(
-        &mut self,
-        scrutinee: &Expr,
-        arms: &[MatchArm],
-    ) -> Result<Type, TypeCheckError> {
-        let scrutinee_ty = self.check_expr(scrutinee, Expected::Unknown)?;
-        let view = self.view_type(&scrutinee_ty);
+struct PatternChecker<'a> {
+    tc: &'a mut TypeChecker,
+}
+
+impl<'a> PatternChecker<'a> {
+    fn new(tc: &'a mut TypeChecker) -> Self {
+        Self { tc }
+    }
+
+    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<Type, TypeCheckError> {
+        let scrutinee_ty = self.tc.check_expr(scrutinee, Expected::Unknown)?;
+        let view = self.tc.view_type(&scrutinee_ty);
         let mut arm_ty: Option<Type> = None;
 
         match view.as_enum() {
             Some((name, variants)) => {
                 let enum_name = name.to_string();
-                self.visit_match_arms(arms, |this, arm| {
-                    this.check_enum_match_pattern(&enum_name, variants, &arm.pattern)?;
-                    this.check_match_arm_body(arm, &mut arm_ty)
-                })?;
+                for arm in arms {
+                    self.check_enum_match_pattern(&enum_name, variants, &arm.pattern)?;
+                    self.check_match_arm_body(arm, &mut arm_ty)?;
+                }
             }
             None => match view.as_tuple() {
                 Some(field_tys) => {
-                    self.visit_match_arms(arms, |this, arm| {
-                        this.check_tuple_match_pattern(field_tys, &arm.pattern);
-                        this.check_match_arm_body(arm, &mut arm_ty)
-                    })?;
+                    for arm in arms {
+                        self.check_tuple_match_pattern(field_tys, &arm.pattern);
+                        self.check_match_arm_body(arm, &mut arm_ty)?;
+                    }
                 }
                 None => {
-                    self.visit_match_arms(arms, |this, arm| {
-                        this.check_match_arm_body(arm, &mut arm_ty)
-                    })?;
+                    for arm in arms {
+                        self.check_match_arm_body(arm, &mut arm_ty)?;
+                    }
                 }
             },
         }
@@ -41,10 +45,10 @@ impl TypeChecker {
         arm: &MatchArm,
         arm_ty: &mut Option<Type>,
     ) -> Result<(), TypeCheckError> {
-        let body_ty = self.visit_match_arm(arm)?;
-        let body_ty = self.apply_infer(&body_ty);
+        let body_ty = self.tc.visit_match_arm(arm)?;
+        let body_ty = self.tc.apply_infer(&body_ty);
         if let Some(expected_ty) = arm_ty {
-            let (body_ty, expected_ty, _unified) = self.unify_infer_types(&body_ty, expected_ty);
+            let (body_ty, expected_ty, _unified) = self.tc.unify_infer_types(&body_ty, expected_ty);
             if body_ty != expected_ty {
                 return Err(TypeCheckErrorKind::MatchArmTypeMismatch(
                     expected_ty,
@@ -84,7 +88,8 @@ impl TypeChecker {
                 }
 
                 if let Some(variant) =
-                    self.resolve_enum_variant_in(enum_name.as_str(), variants, variant_name)
+                    self.tc
+                        .resolve_enum_variant_in(enum_name.as_str(), variants, variant_name)
                 {
                     if bindings.len() == variant.payload().len() {
                         for (binding, ty) in bindings.iter().zip(variant.payload().iter()) {
@@ -115,9 +120,10 @@ impl TypeChecker {
     }
 
     fn record_binding_def(&mut self, def_id: DefId, ty: &Type) {
-        match self.ctx.def_table.lookup_def(def_id) {
+        match self.tc.ctx.def_table.lookup_def(def_id) {
             Some(def) => {
-                self.type_map_builder
+                self.tc
+                    .type_map_builder
                     .record_def_type(def.clone(), ty.clone());
             }
             None => panic!(
@@ -177,5 +183,15 @@ impl TypeChecker {
             }
             _ => {}
         }
+    }
+}
+
+impl TypeChecker {
+    pub(super) fn check_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+    ) -> Result<Type, TypeCheckError> {
+        PatternChecker::new(self).check_match(scrutinee, arms)
     }
 }
