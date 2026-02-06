@@ -1,3 +1,12 @@
+//! Type-check engine and shared phase state.
+//!
+//! `TypecheckEngine` wires pass execution order and owns:
+//! - immutable collected environment (`TcEnv`),
+//! - mutable per-phase outputs (`TcState`),
+//! - solver-owned type-variable store.
+//!
+//! Each pass is kept as a small module and executed in fixed order by `run`.
+
 use std::collections::HashMap;
 
 use crate::context::{ResolvedContext, TypeCheckedContext};
@@ -41,7 +50,7 @@ pub(crate) struct DiagCtx {
     pub(crate) current_name: Option<String>,
 }
 
-/// Rewrite pipeline phases.
+/// Type-check pipeline phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TcPhase {
     Collect,
@@ -99,6 +108,7 @@ impl TypecheckEngine {
     }
 
     pub(crate) fn run(mut self) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+        // The pipeline is intentionally linear and phase-ordered.
         self.run_phase(TcPhase::Collect, collect::run)?;
         self.run_phase(TcPhase::Constrain, constraints::run)?;
         self.run_phase(TcPhase::Solve, solve::run)?;

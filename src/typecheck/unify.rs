@@ -1,3 +1,8 @@
+//! Core type unifier used by the checker solver.
+//!
+//! This unifier respects variable kinds from `TypeVarStore`, including rigid
+//! generic parameters and inference variables.
+
 use crate::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
@@ -10,7 +15,7 @@ pub(crate) enum TcUnifyError {
     CannotBindRigid(TyVarId, Type),
 }
 
-/// Unification engine for the new type checker.
+/// Unification engine for the type checker.
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub(crate) struct TcUnifier {

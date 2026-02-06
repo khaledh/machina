@@ -1,3 +1,8 @@
+//! Type-variable storage and substitution utilities.
+//!
+//! This module owns type-variable kinds, fresh-variable generation, and
+//! canonical substitution application used by the solver and unifier.
+
 use std::collections::HashMap;
 
 use crate::resolve::DefId;
@@ -6,7 +11,7 @@ use crate::types::{EnumVariant, FnParam, StructField, TyVarId, Type};
 pub(crate) const INFER_VAR_BASE: u32 = 1_000_000;
 pub(crate) const META_VAR_BASE: u32 = 2_000_000;
 
-/// Type variables used by the new checker.
+/// Type variables used by the checker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 pub(crate) enum TypeVarKind {

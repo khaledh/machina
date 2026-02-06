@@ -1,3 +1,8 @@
+//! Type-check diagnostics.
+//!
+//! The checker carries errors as structured `TypeCheckErrorKind` and converts
+//! them to spans/messages at reporting boundaries.
+
 use thiserror::Error;
 
 use crate::diag::Span;

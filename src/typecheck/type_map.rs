@@ -1,3 +1,9 @@
+//! Type-map construction and type-expression resolution helpers.
+//!
+//! This module is shared by type-check phases and downstream stages. It
+//! resolves type expressions, records node/def/call typing side tables, and
+//! materializes final `TypeMap` outputs.
+
 use crate::diag::Span;
 use crate::resolve::{Def, DefId, DefKind, DefTable};
 use crate::tree::normalized as norm;

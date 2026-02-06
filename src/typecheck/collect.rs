@@ -1,3 +1,15 @@
+//! Pass 1 of the type checker: collect global typing environment.
+//!
+//! This module scans the resolved module and builds:
+//! - nominal type definitions,
+//! - callable signatures (functions and methods),
+//! - property accessor signatures, and
+//! - generic type-parameter environments keyed by definition id.
+//!
+//! No local/body-level inference happens here. This is intentionally a
+//! declaration-only pass so downstream phases can reason over a stable symbol
+//! environment.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::diag::Span;
@@ -33,6 +45,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let mut property_conflicts = HashSet::new();
     let mut errors = Vec::new();
 
+    // 1) Collect nominal types and type symbols.
     collect_type_defs(
         &ctx,
         &mut type_symbols,
@@ -40,7 +53,11 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut generic_envs,
         &mut errors,
     );
+
+    // 2) Collect function overloads.
     collect_function_sigs(&ctx, &mut func_sigs, &mut generic_envs, &mut errors);
+
+    // 3) Collect method overloads and synthesized property signatures.
     collect_method_sigs(
         &ctx,
         &type_defs,
@@ -55,6 +72,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         return Err(errors);
     }
 
+    // Publish the collected environment as the shared immutable phase input.
     let env = engine.env_mut();
     env.type_symbols = type_symbols;
     env.type_defs = type_defs;

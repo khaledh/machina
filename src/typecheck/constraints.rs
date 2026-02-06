@@ -1,3 +1,14 @@
+//! Pass 2 of the type checker: constraint and obligation collection.
+//!
+//! This pass walks resolved AST bodies and emits:
+//! - structural constraints (`Eq`, `Assignable`),
+//! - expression/call/pattern obligations that require semantic interpretation,
+//! - control-flow facts (`return`, `break`, `continue`),
+//! - node/def-to-type-term anchors used by later phases.
+//!
+//! The collector is intentionally syntax-directed and mostly diagnostic-free.
+//! Solver/validator phases interpret these facts and produce user-facing errors.
+
 use std::collections::HashMap;
 
 use crate::diag::Span;
@@ -243,6 +254,8 @@ impl<'a> ConstraintCollector<'a> {
     }
 
     fn collect_module(&mut self) {
+        // Declarations first so callable defs are available when encountered by
+        // later expressions in the same module.
         for func_decl in self.ctx.module.func_decls() {
             self.collect_func_decl(func_decl);
         }
@@ -465,6 +478,10 @@ impl<'a> ConstraintCollector<'a> {
 
     fn collect_expr(&mut self, expr: &Expr, expected: Option<TyTerm>) -> TyTerm {
         let expr_ty = self.node_term(expr.id);
+
+        // Push contextual expected-type information into the expression graph
+        // for non-place expressions. Place-like forms (`var`, `block`) are
+        // handled by their own structural equalities below.
         if let Some(expected) = expected.clone()
             && !matches!(expr.kind, ExprKind::Var { .. } | ExprKind::Block { .. })
         {
@@ -508,6 +525,8 @@ impl<'a> ConstraintCollector<'a> {
                 ConstraintReason::Expr(expr.id, expr.span),
             ),
             ExprKind::StringFmt { segments } => {
+                // Collect interpolated segment expression terms so solver can
+                // validate supported formatting operand types later.
                 for segment in segments {
                     if let StringFmtSegment::Expr { expr, .. } = segment {
                         self.collect_expr(expr, None);
@@ -654,6 +673,8 @@ impl<'a> ConstraintCollector<'a> {
                 type_args,
                 fields,
             } => {
+                // Resolve nominal struct type (including generic instantiation)
+                // when possible, then type fields against known field types.
                 let known_struct = self
                     .type_defs
                     .get(name)
@@ -688,6 +709,8 @@ impl<'a> ConstraintCollector<'a> {
                 variant,
                 payload,
             } => {
+                // Resolve nominal enum type (including generic instantiation),
+                // and collect payload terms with per-position expected types.
                 let known_enum = self
                     .type_defs
                     .get(enum_name)
@@ -865,6 +888,8 @@ impl<'a> ConstraintCollector<'a> {
                 }
             }
             ExprKind::Call { callee, args } => {
+                // Calls are represented as obligations because overload/generic
+                // resolution needs solver-time type information.
                 self.collect_call(expr, callee, args);
             }
             ExprKind::MethodCall {
@@ -1152,6 +1177,9 @@ impl<'a> ConstraintCollector<'a> {
                 decl_ty,
                 value,
             } => {
+                // For explicitly typed declarations, bind pattern variables to
+                // the declared type (not the raw value type) so refinements are
+                // preserved and runtime checks can be emitted downstream.
                 let expected_decl_ty = decl_ty
                     .as_ref()
                     .and_then(|decl_ty| self.resolve_type_in_scope(decl_ty).ok())
@@ -1183,6 +1211,8 @@ impl<'a> ConstraintCollector<'a> {
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
+                // Property/field assignment has dedicated obligations so setter
+                // accessibility and field-level typing can be checked precisely.
                 if let ExprKind::StructField { target, field } = &assignee.kind {
                     let target_ty = self.collect_expr(target, None);
                     let assignee_ty = self.node_term(assignee.id);
@@ -1277,6 +1307,7 @@ impl<'a> ConstraintCollector<'a> {
     }
 
     fn collect_bind_pattern(&mut self, pattern: &BindPattern, value_ty: TyTerm) {
+        // Record a generic bind obligation for structural pattern diagnostics.
         self.out.pattern_obligations.push(PatternObligation::Bind {
             pattern_id: pattern.id,
             pattern: pattern.clone(),

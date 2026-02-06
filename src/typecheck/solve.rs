@@ -1,3 +1,15 @@
+//! Pass 3 of the type checker: solve constraints and obligations.
+//!
+//! The solver executes in stages:
+//! 1. solve hard equalities,
+//! 2. opportunistically propagate assignable constraints for inference,
+//! 3. discharge expression/call obligations,
+//! 4. re-check assignability constraints for diagnostics,
+//! 5. finalize node/def type substitutions.
+//!
+//! This split keeps inference productive while preserving precise
+//! assignability/runtime-refinement behavior.
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -32,6 +44,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let mut non_expr_errors = Vec::new();
     let mut deferred_expr_errors = Vec::new();
     let mut deferred_pattern_errors = Vec::new();
+    // Stage A: strict equalities.
     for constraint in constrain
         .constraints
         .iter()
@@ -47,6 +60,8 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         );
     }
 
+    // Stage B: best-effort assignable inference to reduce unresolved vars
+    // before semantic obligations are interpreted.
     for constraint in constrain
         .constraints
         .iter()
@@ -55,6 +70,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         apply_assignable_inference(constraint, &mut unifier);
     }
 
+    // Stage C: expression obligations.
     let (mut expr_errors, covered_exprs) = check_expr_obligations(
         &constrain.expr_obligations,
         &mut unifier,
@@ -68,6 +84,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         .map(TypeCheckError::span)
         .collect::<Vec<_>>();
 
+    // Stage D: call obligations (overload/generic resolution).
     let (mut call_errors, resolved_call_defs) = check_call_obligations(
         &constrain.call_obligations,
         &mut unifier,
@@ -75,6 +92,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &engine.env().method_sigs,
     );
 
+    // Stage E: final assignability check (diagnostics-producing).
     for constraint in constrain
         .constraints
         .iter()
@@ -109,6 +127,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         }
     }
 
+    // Stage F: pattern obligations and late unresolved-local checks.
     let (mut pattern_errors, covered_patterns) = check_pattern_obligations(
         &constrain.pattern_obligations,
         &constrain.def_terms,

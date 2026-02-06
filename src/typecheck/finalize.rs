@@ -1,3 +1,9 @@
+//! Pass 5 of the type checker: finalize side tables.
+//!
+//! This pass materializes concrete `TypeMap`/`CallSigMap`/`GenericInstMap`
+//! outputs from solver results and collected obligations, then builds the
+//! typed tree context used by downstream compiler stages.
+
 use std::collections::HashSet;
 
 use crate::context::TypeCheckedContext;
@@ -54,6 +60,8 @@ pub(crate) fn materialize(
 fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     let mut builder = TypeMapBuilder::new();
 
+    // Seed all payload nodes so every AST node has a type entry, even if a
+    // specific node was not explicitly solved.
     let all_payload_nodes = collect_payload_nodes(&engine.context().module);
     for node_id in all_payload_nodes {
         let ty = engine
@@ -97,6 +105,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
 
     let callable_types = collect_callable_def_types(engine);
 
+    // Fill definition-side types, with callable fallback for unresolved defs.
     for def in engine.context().def_table.clone() {
         let mut ty = engine
             .state()
@@ -113,6 +122,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         builder.record_def_type(def, ty);
     }
 
+    // Materialize call signatures and generic instantiations from call
+    // obligations. Prefer solver-selected overload def ids when available.
     for obligation in &engine.state().constrain.call_obligations {
         let arg_types = obligation
             .arg_terms
@@ -371,7 +382,7 @@ fn pick_overload<'a>(
     let mut matches = overloads.iter().filter(|sig| sig.params.len() == arity);
     let first = matches.next()?;
     if matches.next().is_some() {
-        // Ambiguous in the rewrite path for now; caller will fall back.
+        // Ambiguous arity-only match: let caller handle as unresolved.
         return None;
     }
     Some(first)

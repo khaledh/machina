@@ -1,3 +1,8 @@
+//! Pass 4 of the type checker: validate control-flow semantics.
+//!
+//! This pass handles semantic checks that are not pure type equalities or
+//! assignability relations (e.g. `break`/`continue` scope and return rules).
+
 use crate::typecheck::constraints::{ControlFact, TyTerm};
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
