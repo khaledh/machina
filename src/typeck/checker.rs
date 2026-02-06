@@ -26,6 +26,8 @@ use super::unify::Unifier;
 
 const INFER_VAR_BASE: u32 = 1_000_000;
 
+mod literals;
+
 #[derive(Debug, Clone)]
 struct PropertySig {
     ty: Type,
@@ -240,6 +242,35 @@ impl TypeChecker {
             .unifier
             .unify_infer(left, right, Self::is_infer_var)
             .is_ok()
+    }
+
+    fn unify_expected_actual(&mut self, expected: &Type, actual: &Type) -> (Type, Type, bool) {
+        let mut expected_ty = self.apply_infer(expected);
+        let mut actual_ty = self.apply_infer(actual);
+        let had_infer =
+            Self::type_has_infer_vars(&expected_ty) || Self::type_has_infer_vars(&actual_ty);
+        let unified = if had_infer {
+            self.try_unify_infer(&expected_ty, &actual_ty)
+        } else {
+            expected_ty == actual_ty
+        };
+        expected_ty = self.apply_infer(&expected_ty);
+        actual_ty = self.apply_infer(&actual_ty);
+        let ok = if had_infer {
+            unified
+        } else {
+            expected_ty == actual_ty
+        };
+        (expected_ty, actual_ty, ok)
+    }
+
+    fn unify_infer_types(&mut self, left: &Type, right: &Type) -> (Type, Type, bool) {
+        let mut left_ty = self.apply_infer(left);
+        let mut right_ty = self.apply_infer(right);
+        let unified = self.try_unify_infer(&left_ty, &right_ty);
+        left_ty = self.apply_infer(&left_ty);
+        right_ty = self.apply_infer(&right_ty);
+        (left_ty, right_ty, unified)
     }
 
     fn record_infer_bindings(&mut self, pattern: &BindPattern) {
@@ -1357,122 +1388,6 @@ impl TypeChecker {
         }
     }
 
-    fn check_struct_lit(
-        &mut self,
-        name: &String,
-        type_args: &[TypeExpr],
-        fields: &[StructLitField],
-        node_id: NodeId,
-        span: Span,
-    ) -> Result<Type, TypeCheckError> {
-        if type_args.is_empty() && self.infer_ctx.is_some() {
-            if let Some(def_id) = self.ctx.def_table.lookup_type_def_id(name) {
-                let (type_params, is_struct) = match self.ctx.module.type_def_by_id(def_id) {
-                    Some(type_def) => (
-                        type_def.type_params.clone(),
-                        matches!(type_def.kind, TypeDefKind::Struct { .. }),
-                    ),
-                    None => (Vec::new(), false),
-                };
-                if is_struct && !type_params.is_empty() {
-                    let type_args = self.infer_type_args(&type_params);
-                    let struct_ty = resolve_type_def_with_args(
-                        &self.ctx.def_table,
-                        &self.ctx.module,
-                        def_id,
-                        &type_args,
-                    )?;
-                    let Type::Struct {
-                        fields: struct_fields,
-                        ..
-                    } = &struct_ty
-                    else {
-                        for field in fields {
-                            let _ = self.visit_expr(&field.value, None)?;
-                        }
-                        return Ok(Type::Unknown);
-                    };
-
-                    for field in fields {
-                        let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
-                        else {
-                            let _ = self.visit_expr(&field.value, None)?;
-                            continue;
-                        };
-                        let actual_ty = self.visit_expr(&field.value, Some(&expected.ty))?;
-                        let mut expected_ty = self.apply_infer(&expected.ty);
-                        let mut actual_ty = self.apply_infer(&actual_ty);
-                        let had_infer = Self::type_has_infer_vars(&expected_ty)
-                            || Self::type_has_infer_vars(&actual_ty);
-                        let unified = self.try_unify_infer(&expected_ty, &actual_ty);
-                        expected_ty = self.apply_infer(&expected_ty);
-                        actual_ty = self.apply_infer(&actual_ty);
-
-                        if had_infer {
-                            if !unified {
-                                return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
-                                    field.name.clone(),
-                                    expected_ty,
-                                    actual_ty,
-                                    field.span,
-                                )
-                                .into());
-                            }
-                        } else if actual_ty != expected_ty {
-                            return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
-                                field.name.clone(),
-                                expected_ty,
-                                actual_ty,
-                                field.span,
-                            )
-                            .into());
-                        }
-                    }
-
-                    let struct_ty = self.apply_infer(&struct_ty);
-                    return Ok(struct_ty);
-                }
-            }
-        }
-
-        let struct_ty = match self.resolve_named_type_expr(name, type_args, node_id, span)? {
-            Some(ty) => ty,
-            None => {
-                for field in fields {
-                    let _ = self.visit_expr(&field.value, None)?;
-                }
-                return Ok(Type::Unknown);
-            }
-        };
-        let Type::Struct {
-            fields: struct_fields,
-            ..
-        } = &struct_ty
-        else {
-            for field in fields {
-                let _ = self.visit_expr(&field.value, None)?;
-            }
-            return Ok(Type::Unknown);
-        };
-
-        for field in fields {
-            let actual_ty = self.visit_expr(&field.value, None)?;
-            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
-                && actual_ty != expected.ty
-            {
-                return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
-                    field.name.clone(),
-                    expected.ty.clone(),
-                    actual_ty,
-                    field.span,
-                )
-                .into());
-            }
-        }
-
-        Ok(struct_ty)
-    }
-
     fn check_field_access(
         &mut self,
         expr_id: NodeId,
@@ -1536,149 +1451,6 @@ impl TypeChecker {
             },
             _ => Err(TypeCheckErrorKind::InvalidStructFieldTarget(target_ty, target.span).into()),
         }
-    }
-
-    fn check_enum_variant(
-        &mut self,
-        enum_name: &String,
-        type_args: &[TypeExpr],
-        variant_name: &String,
-        payload: &[Expr],
-        node_id: NodeId,
-        span: Span,
-    ) -> Result<Type, TypeCheckError> {
-        if type_args.is_empty() && self.infer_ctx.is_some() {
-            if let Some(def_id) = self.ctx.def_table.lookup_type_def_id(enum_name) {
-                let (type_params, is_enum) = match self.ctx.module.type_def_by_id(def_id) {
-                    Some(type_def) => (
-                        type_def.type_params.clone(),
-                        matches!(type_def.kind, TypeDefKind::Enum { .. }),
-                    ),
-                    None => (Vec::new(), false),
-                };
-                if is_enum && !type_params.is_empty() {
-                    let type_args = self.infer_type_args(&type_params);
-                    let enum_ty = resolve_type_def_with_args(
-                        &self.ctx.def_table,
-                        &self.ctx.module,
-                        def_id,
-                        &type_args,
-                    )?;
-                    let Type::Enum { variants, .. } = &enum_ty else {
-                        for expr in payload {
-                            let _ = self.visit_expr(expr, None)?;
-                        }
-                        return Ok(Type::Unknown);
-                    };
-
-                    let Some(variant_ty) = variants.iter().find(|v| v.name == *variant_name) else {
-                        for expr in payload {
-                            let _ = self.visit_expr(expr, None)?;
-                        }
-                        let enum_ty = self.apply_infer(&enum_ty);
-                        return Ok(enum_ty);
-                    };
-
-                    if payload.len() != variant_ty.payload.len() {
-                        for expr in payload {
-                            let _ = self.visit_expr(expr, None)?;
-                        }
-                        let enum_ty = self.apply_infer(&enum_ty);
-                        return Ok(enum_ty);
-                    }
-
-                    for (i, (payload_expr, payload_ty)) in
-                        payload.iter().zip(variant_ty.payload.iter()).enumerate()
-                    {
-                        let actual_ty = self.visit_expr(payload_expr, Some(payload_ty))?;
-                        let mut expected_ty = self.apply_infer(payload_ty);
-                        let mut actual_ty = self.apply_infer(&actual_ty);
-                        let had_infer = Self::type_has_infer_vars(&expected_ty)
-                            || Self::type_has_infer_vars(&actual_ty);
-                        let unified = self.try_unify_infer(&expected_ty, &actual_ty);
-                        expected_ty = self.apply_infer(&expected_ty);
-                        actual_ty = self.apply_infer(&actual_ty);
-
-                        if had_infer {
-                            if !unified {
-                                return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
-                                    variant_name.clone(),
-                                    i,
-                                    expected_ty,
-                                    actual_ty,
-                                    payload_expr.span,
-                                )
-                                .into());
-                            }
-                        } else if actual_ty != expected_ty {
-                            return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
-                                variant_name.clone(),
-                                i,
-                                expected_ty,
-                                actual_ty,
-                                payload_expr.span,
-                            )
-                            .into());
-                        }
-                    }
-
-                    let enum_ty = self.apply_infer(&enum_ty);
-                    return Ok(enum_ty);
-                }
-            }
-        }
-
-        // Lookup the type
-        let enum_ty = match self.resolve_named_type_expr(enum_name, type_args, node_id, span)? {
-            Some(ty) => ty,
-            None => {
-                for expr in payload {
-                    let _ = self.visit_expr(expr, None)?;
-                }
-                return Ok(Type::Unknown);
-            }
-        };
-
-        let Type::Enum { variants, .. } = &enum_ty else {
-            for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
-            }
-            return Ok(Type::Unknown);
-        };
-
-        // Get the variant
-        let Some(variant_ty) = variants.iter().find(|v| v.name == *variant_name) else {
-            for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
-            }
-            return Ok(enum_ty.clone());
-        };
-
-        if payload.len() != variant_ty.payload.len() {
-            for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
-            }
-            return Ok(enum_ty.clone());
-        }
-
-        // Type check each payload element
-        for (i, (payload_expr, payload_ty)) in
-            payload.iter().zip(variant_ty.payload.iter()).enumerate()
-        {
-            let actual_ty = self.visit_expr(payload_expr, None)?;
-            if actual_ty != *payload_ty {
-                return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
-                    variant_name.clone(),
-                    i,
-                    payload_ty.clone(),
-                    actual_ty,
-                    payload_expr.span,
-                )
-                .into());
-            }
-        }
-
-        Ok(enum_ty)
     }
 
     fn check_struct_update(
@@ -1864,8 +1636,7 @@ impl TypeChecker {
         } else {
             let infer_var = Type::Var(self.new_infer_var());
             let value_ty = self.visit_expr(value, Some(&infer_var))?;
-            let _ = self.try_unify_infer(&infer_var, &value_ty);
-            let value_ty = self.apply_infer(&value_ty);
+            let (_infer_ty, value_ty, _unified) = self.unify_infer_types(&infer_var, &value_ty);
             value_ty
         };
 
@@ -1884,12 +1655,10 @@ impl TypeChecker {
         from_ty: &Type,
         to_ty: &Type,
     ) -> Result<(), TypeCheckError> {
-        let mut from_ty = self.apply_infer(from_ty);
-        let mut to_ty = self.apply_infer(to_ty);
+        let from_ty = self.apply_infer(from_ty);
+        let to_ty = self.apply_infer(to_ty);
         let had_infer = Self::type_has_infer_vars(&from_ty) || Self::type_has_infer_vars(&to_ty);
-        let unified = self.try_unify_infer(&from_ty, &to_ty);
-        from_ty = self.apply_infer(&from_ty);
-        to_ty = self.apply_infer(&to_ty);
+        let (from_ty, to_ty, unified) = self.unify_infer_types(&from_ty, &to_ty);
 
         if had_infer {
             if !unified {
@@ -2929,10 +2698,7 @@ impl TypeChecker {
         let body_ty = self.visit_match_arm(arm)?;
         let body_ty = self.apply_infer(&body_ty);
         if let Some(expected_ty) = arm_ty {
-            let expected_ty = self.apply_infer(expected_ty);
-            let _ = self.try_unify_infer(&body_ty, &expected_ty);
-            let body_ty = self.apply_infer(&body_ty);
-            let expected_ty = self.apply_infer(&expected_ty);
+            let (body_ty, expected_ty, _unified) = self.unify_infer_types(&body_ty, expected_ty);
             if body_ty != expected_ty {
                 return Err(TypeCheckErrorKind::MatchArmTypeMismatch(
                     expected_ty,
@@ -3154,11 +2920,7 @@ impl TreeFolder<DefId> for TypeChecker {
             return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
-        let then_type = self.apply_infer(&then_type);
-        let else_type = self.apply_infer(&else_type);
-        let _ = self.try_unify_infer(&then_type, &else_type);
-        let then_type = self.apply_infer(&then_type);
-        let else_type = self.apply_infer(&else_type);
+        let (then_type, else_type, _unified) = self.unify_infer_types(&then_type, &else_type);
 
         if then_type != else_type {
             // create a span that covers both the then and else bodies so the
@@ -3239,11 +3001,8 @@ impl TreeFolder<DefId> for TypeChecker {
                         }
 
                         let value_ty = self.visit_expr(value, Some(&return_ty))?;
-                        let value_ty = self.apply_infer(&value_ty);
-                        let return_ty = self.apply_infer(&return_ty);
-                        let _ = self.try_unify_infer(&value_ty, &return_ty);
-                        let value_ty = self.apply_infer(&value_ty);
-                        let return_ty = self.apply_infer(&return_ty);
+                        let (value_ty, return_ty, _unified) =
+                            self.unify_infer_types(&value_ty, &return_ty);
                         if matches!(
                             type_assignable(&value_ty, &return_ty),
                             TypeAssignability::Incompatible
@@ -3539,9 +3298,9 @@ impl TreeFolder<DefId> for TypeChecker {
                     } else {
                         let mut ty = self.check_var_ref(*def_id, expr.span)?;
                         if let Some(expected_ty) = expected.as_ref() {
-                            let expected_ty = self.apply_infer(expected_ty);
-                            let _ = self.try_unify_infer(&ty, &expected_ty);
-                            ty = self.apply_infer(&ty);
+                            let (new_ty, _expected_ty, _unified) =
+                                self.unify_infer_types(&ty, expected_ty);
+                            ty = new_ty;
                         }
                         Ok(ty)
                     }
