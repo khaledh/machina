@@ -50,8 +50,40 @@ enum PropertyAccessorKind {
 }
 
 #[derive(Debug, Default)]
+struct ConstraintSet {
+    constraints: Vec<(Type, Type)>,
+    applied: usize,
+}
+
+impl ConstraintSet {
+    fn add(
+        &mut self,
+        left: &Type,
+        right: &Type,
+        unifier: &mut Unifier,
+        is_infer: fn(TyVarId) -> bool,
+    ) -> bool {
+        self.constraints.push((left.clone(), right.clone()));
+        self.apply_pending(unifier, is_infer)
+    }
+
+    fn apply_pending(&mut self, unifier: &mut Unifier, is_infer: fn(TyVarId) -> bool) -> bool {
+        let mut ok = true;
+        while self.applied < self.constraints.len() {
+            let (left, right) = &self.constraints[self.applied];
+            if unifier.unify_infer(left, right, is_infer).is_err() {
+                ok = false;
+            }
+            self.applied += 1;
+        }
+        ok
+    }
+}
+
+#[derive(Debug, Default)]
 struct InferCtx {
     unifier: Unifier,
+    constraints: ConstraintSet,
     bindings: HashMap<DefId, Span>,
 }
 
@@ -73,6 +105,39 @@ pub struct TypeChecker {
     type_param_stack: Vec<HashMap<DefId, TyVarId>>,
     infer_ctx: Option<InferCtx>,
     next_infer_var: u32,
+}
+
+struct InferScopeGuard {
+    checker: *mut TypeChecker,
+    finished: bool,
+}
+
+impl InferScopeGuard {
+    fn new(checker: &mut TypeChecker) -> Self {
+        checker.begin_inference();
+        Self {
+            checker,
+            finished: false,
+        }
+    }
+
+    fn finish(mut self) -> Vec<TypeCheckError> {
+        self.finished = true;
+        // Safety: the guard is scoped to the borrow used to create it.
+        unsafe { (*self.checker).finish_inference() }
+    }
+}
+
+impl Drop for InferScopeGuard {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        // Safety: the guard is scoped to the borrow used to create it.
+        unsafe {
+            let _ = (*self.checker).finish_inference();
+        }
+    }
 }
 
 impl TypeChecker {
@@ -164,6 +229,10 @@ impl TypeChecker {
         result
     }
 
+    fn infer_scope(&mut self) -> InferScopeGuard {
+        InferScopeGuard::new(self)
+    }
+
     fn begin_inference(&mut self) {
         self.infer_ctx = Some(InferCtx::default());
     }
@@ -172,6 +241,11 @@ impl TypeChecker {
         let Some(infer) = self.infer_ctx.take() else {
             return Vec::new();
         };
+
+        let mut infer = infer;
+        infer
+            .constraints
+            .apply_pending(&mut infer.unifier, Self::is_infer_var);
 
         self.type_map_builder
             .apply_inference(|ty| infer.unifier.apply(ty));
@@ -247,9 +321,8 @@ impl TypeChecker {
             (left, right)
         };
         infer
-            .unifier
-            .unify_infer(left, right, Self::is_infer_var)
-            .is_ok()
+            .constraints
+            .add(left, right, &mut infer.unifier, Self::is_infer_var)
     }
 
     fn unify_expected_actual(&mut self, expected: &Type, actual: &Type) -> (Type, Type, bool) {
@@ -807,13 +880,13 @@ impl TypeChecker {
                 }
             }
 
-            this.begin_inference();
+            let infer_scope = this.infer_scope();
             this.push_control_context(ret_type.clone());
             let body_ty = match this.check_expr(&func_def.body, Expected::Exact(&ret_type)) {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
-                    let infer_errors = this.finish_inference();
+                    let infer_errors = infer_scope.finish();
                     this.errors.extend(infer_errors);
                     this.pop_control_context();
                     return Err(this.errors.clone());
@@ -821,7 +894,7 @@ impl TypeChecker {
             };
             this.pop_control_context();
             let body_ty = this.apply_infer(&body_ty);
-            let infer_errors = this.finish_inference();
+            let infer_errors = infer_scope.finish();
             if !infer_errors.is_empty() {
                 this.errors.extend(infer_errors);
             }
@@ -920,13 +993,13 @@ impl TypeChecker {
         }
 
         self.with_type_params(&method_def.sig.type_params, |this| {
-            this.begin_inference();
+            let infer_scope = this.infer_scope();
             this.push_control_context(ret_type.clone());
             let body_ty = match this.check_expr(&method_def.body, Expected::Exact(&ret_type)) {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
-                    let infer_errors = this.finish_inference();
+                    let infer_errors = infer_scope.finish();
                     this.errors.extend(infer_errors);
                     this.pop_control_context();
                     return Err(this.errors.clone());
@@ -934,7 +1007,7 @@ impl TypeChecker {
             };
             this.pop_control_context();
             let body_ty = this.apply_infer(&body_ty);
-            let infer_errors = this.finish_inference();
+            let infer_errors = infer_scope.finish();
             if !infer_errors.is_empty() {
                 this.errors.extend(infer_errors);
             }
@@ -991,19 +1064,19 @@ impl TypeChecker {
 
         let return_ty = self.resolve_type_expr_in_scope(return_ty)?;
 
-        self.begin_inference();
+        let infer_scope = self.infer_scope();
         self.push_control_context(return_ty.clone());
         let body_ty = match self.check_expr(body, Expected::Exact(&return_ty)) {
             Ok(ty) => ty,
             Err(err) => {
-                let _ = self.finish_inference();
+                let _ = infer_scope.finish();
                 self.pop_control_context();
                 return Err(err);
             }
         };
         self.pop_control_context();
         let body_ty = self.apply_infer(&body_ty);
-        let infer_errors = self.finish_inference();
+        let infer_errors = infer_scope.finish();
         if let Some(err) = infer_errors.into_iter().next() {
             return Err(err);
         }
