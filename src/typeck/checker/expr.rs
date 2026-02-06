@@ -5,7 +5,7 @@ impl TypeChecker {
         &mut self,
         elem_ty_expr: Option<&TypeExpr>,
         init: &ArrayLitInit,
-        expected: Option<&Type>,
+        expected: Expected<'_>,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
         let len = self.array_lit_len(init, span)?;
@@ -16,7 +16,7 @@ impl TypeChecker {
         } else if let Some(Type::Array {
             elem_ty: expected_elem_ty,
             dims: expected_dims,
-        }) = expected
+        }) = expected.as_option()
         {
             // When the expected array has multiple dimensions, each element is itself
             // an array of the remaining dimensions.
@@ -30,8 +30,8 @@ impl TypeChecker {
             }
         } else {
             match init {
-                ArrayLitInit::Elems(elems) => self.visit_expr(&elems[0], None)?,
-                ArrayLitInit::Repeat(expr, _) => self.visit_expr(expr, None)?,
+                ArrayLitInit::Elems(elems) => self.check_expr(&elems[0], Expected::Unknown)?,
+                ArrayLitInit::Repeat(expr, _) => self.check_expr(expr, Expected::Unknown)?,
             }
         };
 
@@ -105,7 +105,7 @@ impl TypeChecker {
 
         // type check each index
         for index in indices {
-            let index_type = self.visit_expr(index, None)?;
+            let index_type = self.check_expr(index, Expected::Unknown)?;
             if index_type != Type::uint(64) {
                 return Err(TypeCheckErrorKind::IndexTypeNotInt(index_type, index.span).into());
             }
@@ -130,17 +130,17 @@ impl TypeChecker {
         start: &Option<Box<Expr>>,
         end: &Option<Box<Expr>>,
     ) -> Result<Type, TypeCheckError> {
-        let target_ty = self.visit_expr(target, None)?;
+        let target_ty = self.check_expr(target, Expected::Unknown)?;
 
         // Type check start and end (must be u64)
         if let Some(start) = start {
-            let ty = self.visit_expr(start, None)?;
+            let ty = self.check_expr(start, Expected::Unknown)?;
             if ty != Type::uint(64) {
                 return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, start.span).into());
             }
         }
         if let Some(end) = end {
-            let ty = self.visit_expr(end, None)?;
+            let ty = self.check_expr(end, Expected::Unknown)?;
             if ty != Type::uint(64) {
                 return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, end.span).into());
             }
@@ -181,7 +181,7 @@ impl TypeChecker {
             return Err(TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into());
         }
 
-        let index_ty = self.visit_expr(&indices[0], None)?;
+        let index_ty = self.check_expr(&indices[0], Expected::Unknown)?;
         if index_ty != Type::uint(64) {
             return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
         }
@@ -200,7 +200,7 @@ impl TypeChecker {
             return Err(TypeCheckErrorKind::TooManyIndices(1, indices.len(), span).into());
         }
 
-        let index_ty = self.visit_expr(&indices[0], None)?;
+        let index_ty = self.check_expr(&indices[0], Expected::Unknown)?;
         if index_ty != Type::uint(64) {
             return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
         }
@@ -225,7 +225,7 @@ impl TypeChecker {
         index: usize,
     ) -> Result<Type, TypeCheckError> {
         // Type check target
-        let target_ty = self.visit_expr(target, None)?;
+        let target_ty = self.check_expr(target, Expected::Unknown)?;
         let view = self.view_type(&target_ty);
 
         match view.as_tuple() {
@@ -253,7 +253,7 @@ impl TypeChecker {
         field: &str,
     ) -> Result<Type, TypeCheckError> {
         // Type check target
-        let target_ty = self.visit_expr(target, None)?;
+        let target_ty = self.check_expr(target, Expected::Unknown)?;
         let view = self.view_type(&target_ty);
 
         if let Some(type_name) = self.property_owner_name(view.ty()) {
@@ -311,7 +311,7 @@ impl TypeChecker {
         fields: &[StructUpdateField],
     ) -> Result<Type, TypeCheckError> {
         // Type check target
-        let target_ty = self.visit_expr(target, None)?;
+        let target_ty = self.check_expr(target, Expected::Unknown)?;
         let Some(struct_ty) = self.resolve_struct_type_for_update(target_ty.clone()) else {
             return Err(
                 TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty, target.span).into(),
@@ -319,7 +319,7 @@ impl TypeChecker {
         };
 
         for field in fields {
-            let actual_ty = self.visit_expr(&field.value, None)?;
+            let actual_ty = self.check_expr(&field.value, Expected::Unknown)?;
             if let Some(expected) = self.resolve_struct_field(&struct_ty, &field.name)
                 && actual_ty != expected.ty
             {

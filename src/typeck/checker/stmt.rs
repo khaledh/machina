@@ -154,7 +154,7 @@ impl TypeChecker {
         let infer_binding = expected_ty.is_none();
 
         let mut value_ty = if let Some(expected_ty) = &expected_ty {
-            let mut value_ty = self.visit_expr(value, Some(expected_ty))?;
+            let mut value_ty = self.check_expr(value, Expected::Exact(expected_ty))?;
             self.check_assignable_to(value, &value_ty, expected_ty)?;
             value_ty = expected_ty.clone();
             if matches!(&value.kind, ExprKind::ArrayLit { .. })
@@ -166,7 +166,7 @@ impl TypeChecker {
             value_ty
         } else {
             let infer_var = Type::Var(self.new_infer_var());
-            let value_ty = self.visit_expr(value, Some(&infer_var))?;
+            let value_ty = self.check_expr(value, Expected::Exact(&infer_var))?;
             let (_infer_ty, value_ty, _unified) = self.unify_infer_types(&infer_var, &value_ty);
             value_ty
         };
@@ -217,14 +217,14 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         // Reject string index assignment (for now)
         if let ExprKind::ArrayIndex { target, .. } = &assignee.kind {
-            let target_ty = self.visit_expr(target, None)?;
+            let target_ty = self.check_expr(target, Expected::Unknown)?;
             if target_ty == Type::String {
                 return Err(TypeCheckErrorKind::StringIndexAssign(assignee.span).into());
             }
         }
 
         if let ExprKind::StructField { target, field } = &assignee.kind {
-            let receiver_ty = self.visit_expr(target, None)?;
+            let receiver_ty = self.check_expr(target, Expected::Unknown)?;
             let view = self.view_type(&receiver_ty);
             if let Some(type_name) = self.property_owner_name(view.ty()) {
                 // Property assignment is treated as a setter call.
@@ -237,7 +237,7 @@ impl TypeChecker {
                     let Some(setter) = setter else {
                         return Err(self.err_property_not_writable(field.clone(), assignee.span));
                     };
-                    let rhs_type = self.visit_expr(value, Some(&prop_ty))?;
+                    let rhs_type = self.check_expr(value, Expected::Exact(&prop_ty))?;
                     self.check_assignable_to(value, &rhs_type, &prop_ty)?;
                     self.record_property_call_sig(
                         assignee.id,
@@ -258,8 +258,8 @@ impl TypeChecker {
             }
         }
 
-        let lhs_type = self.visit_expr(assignee, None)?;
-        let rhs_type = self.visit_expr(value, Some(&lhs_type))?;
+        let lhs_type = self.check_expr(assignee, Expected::Unknown)?;
+        let rhs_type = self.check_expr(value, Expected::Exact(&lhs_type))?;
 
         match self.check_assignable_to(value, &rhs_type, &lhs_type) {
             Ok(()) => Ok(Type::Unit),
@@ -273,13 +273,13 @@ impl TypeChecker {
     }
 
     pub(super) fn check_while(&mut self, cond: &Expr, body: &Expr) -> Result<Type, TypeCheckError> {
-        let cond_type = self.visit_expr(cond, None)?;
+        let cond_type = self.check_expr(cond, Expected::Unknown)?;
         if cond_type != Type::Bool {
             return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
         self.enter_loop();
-        let result = self.visit_expr(body, None);
+        let result = self.check_expr(body, Expected::Unknown);
         self.exit_loop();
         let _ = result?;
         Ok(Type::Unit)
@@ -291,7 +291,7 @@ impl TypeChecker {
         iter: &Expr,
         body: &Expr,
     ) -> Result<Type, TypeCheckError> {
-        let iter_ty = self.visit_expr(iter, None)?;
+        let iter_ty = self.check_expr(iter, Expected::Unknown)?;
         let item_ty = self.iterable_item_type(&iter_ty, iter.span)?;
 
         // Loop variable's type is the item type of the iterable
@@ -299,7 +299,7 @@ impl TypeChecker {
 
         // Type check body
         self.enter_loop();
-        let result = self.visit_expr(body, None);
+        let result = self.check_expr(body, Expected::Unknown);
         self.exit_loop();
         let _ = result?;
 

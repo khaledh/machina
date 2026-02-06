@@ -6,7 +6,7 @@ impl TypeChecker {
         scrutinee: &Expr,
         arms: &[MatchArm],
     ) -> Result<Type, TypeCheckError> {
-        let scrutinee_ty = self.visit_expr(scrutinee, None)?;
+        let scrutinee_ty = self.check_expr(scrutinee, Expected::Unknown)?;
         let view = self.view_type(&scrutinee_ty);
         let mut arm_ty: Option<Type> = None;
 

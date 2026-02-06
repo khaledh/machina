@@ -674,26 +674,26 @@ impl TypeChecker {
         &mut self,
         variant_name: &str,
         payload: &[&Expr],
-        expected: Option<&Type>,
+        expected: Expected<'_>,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
-        let Some(expected_enum) = expected else {
+        let Some(expected_enum) = expected.as_option() else {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Err(TypeCheckErrorKind::UnknownType(span).into());
         };
 
         let Type::Enum { name, variants } = expected_enum else {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Err(TypeCheckErrorKind::UnknownType(span).into());
         };
 
         let Some(variant) = self.resolve_enum_variant_in(variants, variant_name) else {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Err(TypeCheckErrorKind::UnknownEnumVariant(
                 name.clone(),
@@ -705,7 +705,7 @@ impl TypeChecker {
 
         if payload.len() != variant.payload.len() {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Err(TypeCheckErrorKind::EnumVariantPayloadArityMismatch(
                 variant_name.to_string(),
@@ -719,7 +719,7 @@ impl TypeChecker {
         for (i, (payload_expr, payload_ty)) in
             payload.iter().zip(variant.payload.iter()).enumerate()
         {
-            let actual_ty = self.visit_expr(payload_expr, Some(payload_ty))?;
+            let actual_ty = self.check_expr(payload_expr, Expected::Exact(payload_ty))?;
             if actual_ty != *payload_ty {
                 return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
                     variant_name.to_string(),
@@ -809,7 +809,7 @@ impl TypeChecker {
 
             this.begin_inference();
             this.push_control_context(ret_type.clone());
-            let body_ty = match this.visit_expr(&func_def.body, Some(&ret_type)) {
+            let body_ty = match this.check_expr(&func_def.body, Expected::Exact(&ret_type)) {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
@@ -922,7 +922,7 @@ impl TypeChecker {
         self.with_type_params(&method_def.sig.type_params, |this| {
             this.begin_inference();
             this.push_control_context(ret_type.clone());
-            let body_ty = match this.visit_expr(&method_def.body, Some(&ret_type)) {
+            let body_ty = match this.check_expr(&method_def.body, Expected::Exact(&ret_type)) {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
@@ -993,7 +993,7 @@ impl TypeChecker {
 
         self.begin_inference();
         self.push_control_context(return_ty.clone());
-        let body_ty = match self.visit_expr(body, Some(&return_ty)) {
+        let body_ty = match self.check_expr(body, Expected::Exact(&return_ty)) {
             Ok(ty) => ty,
             Err(err) => {
                 let _ = self.finish_inference();
@@ -1107,6 +1107,59 @@ impl TypeView {
 
     fn is_string(&self) -> bool {
         matches!(self.ty, Type::String)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Expected<'a> {
+    Exact(&'a Type),
+    Unknown,
+}
+
+impl<'a> Expected<'a> {
+    pub(super) fn from_option(opt: Option<&'a Type>) -> Self {
+        match opt {
+            Some(ty) => Expected::Exact(ty),
+            None => Expected::Unknown,
+        }
+    }
+
+    pub(super) fn as_option(self) -> Option<&'a Type> {
+        match self {
+            Expected::Exact(ty) => Some(ty),
+            Expected::Unknown => None,
+        }
+    }
+}
+
+enum ExpectedOwned {
+    Exact(Type),
+    Unknown,
+}
+
+impl ExpectedOwned {
+    fn as_option(&self) -> Option<&Type> {
+        match self {
+            ExpectedOwned::Exact(ty) => Some(ty),
+            ExpectedOwned::Unknown => None,
+        }
+    }
+
+    fn as_expected(&self) -> Expected<'_> {
+        match self {
+            ExpectedOwned::Exact(ty) => Expected::Exact(ty),
+            ExpectedOwned::Unknown => Expected::Unknown,
+        }
+    }
+}
+
+impl TypeChecker {
+    pub(super) fn check_expr(
+        &mut self,
+        expr: &Expr,
+        expected: Expected<'_>,
+    ) -> Result<Type, TypeCheckError> {
+        self.visit_expr(expr, expected.as_option())
     }
 }
 
@@ -1255,7 +1308,7 @@ impl TreeFolder<DefId> for TypeChecker {
             StmtExprKind::Return { value } => {
                 let Some(return_ty) = self.current_return_ty().cloned() else {
                     if let Some(value) = value {
-                        let _ = self.visit_expr(value, None)?;
+                        let _ = self.check_expr(value, Expected::Unknown)?;
                     }
                     return Err(TypeCheckErrorKind::ReturnOutsideFunction(stmt.span).into());
                 };
@@ -1263,13 +1316,13 @@ impl TreeFolder<DefId> for TypeChecker {
                 match value {
                     Some(value) => {
                         if return_ty == Type::Unit {
-                            let _ = self.visit_expr(value, None)?;
+                            let _ = self.check_expr(value, Expected::Unknown)?;
                             return Err(
                                 TypeCheckErrorKind::ReturnValueUnexpected(value.span).into()
                             );
                         }
 
-                        let value_ty = self.visit_expr(value, Some(&return_ty))?;
+                        let value_ty = self.check_expr(value, Expected::Exact(&return_ty))?;
                         let (value_ty, return_ty, _unified) =
                             self.unify_infer_types(&value_ty, &return_ty);
                         if matches!(
@@ -1301,8 +1354,11 @@ impl TreeFolder<DefId> for TypeChecker {
     }
 
     fn visit_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Result<Type, TypeCheckError> {
-        let expected = expected.map(|ty| self.apply_infer(ty));
-        let result = match (&expr.kind, expected.as_ref()) {
+        let expected = match Expected::from_option(expected) {
+            Expected::Exact(ty) => ExpectedOwned::Exact(self.apply_infer(ty)),
+            Expected::Unknown => ExpectedOwned::Unknown,
+        };
+        let result = match (&expr.kind, expected.as_option()) {
             (ExprKind::IntLit(_), Some(expected_ty)) if expected_ty.is_int() => {
                 Ok(expected_ty.clone())
             }
@@ -1314,7 +1370,7 @@ impl TreeFolder<DefId> for TypeChecker {
                 },
                 Some(expected_ty @ Type::Int { signed: true, .. }),
             ) if matches!(operand.kind, ExprKind::IntLit(_)) => {
-                let _ = self.visit_expr(operand, Some(expected_ty))?;
+                let _ = self.check_expr(operand, Expected::Exact(expected_ty))?;
                 Ok(expected_ty.clone())
             }
 
@@ -1330,11 +1386,11 @@ impl TreeFolder<DefId> for TypeChecker {
                 ExprKind::UnitLit => Ok(Type::Unit),
 
                 ExprKind::HeapAlloc { expr } => {
-                    let inner_expected = match expected.as_ref() {
+                    let inner_expected = match expected.as_option() {
                         Some(Type::Heap { elem_ty }) => Some(elem_ty.as_ref()),
                         _ => None,
                     };
-                    let elem_ty = self.visit_expr(expr, inner_expected)?;
+                    let elem_ty = self.check_expr(expr, Expected::from_option(inner_expected))?;
                     Ok(Type::Heap {
                         elem_ty: Box::new(elem_ty),
                     })
@@ -1356,11 +1412,11 @@ impl TreeFolder<DefId> for TypeChecker {
                 }
 
                 ExprKind::ArrayLit { elem_ty, init } => {
-                    self.check_array_lit(elem_ty.as_ref(), init, expected.as_ref(), expr.span)
+                    self.check_array_lit(elem_ty.as_ref(), init, expected.as_expected(), expr.span)
                 }
 
                 ExprKind::ArrayIndex { target, indices } => {
-                    let target_ty = self.visit_expr(target, None)?;
+                    let target_ty = self.check_expr(target, Expected::Unknown)?;
                     let peeled_ty = target_ty.peel_heap();
 
                     match peeled_ty {
@@ -1408,14 +1464,14 @@ impl TreeFolder<DefId> for TypeChecker {
                     payload,
                 } => {
                     if type_args.is_empty()
-                        && let Some(Type::Enum { name, .. }) = expected.as_ref()
+                        && let Some(Type::Enum { name, .. }) = expected.as_option()
                         && Self::enum_name_matches(name, enum_name)
                     {
                         let payload = payload.iter().collect::<Vec<_>>();
                         self.check_unqualified_enum_variant(
                             variant,
                             &payload,
-                            expected.as_ref(),
+                            expected.as_expected(),
                             expr.span,
                         )
                     } else {
@@ -1549,7 +1605,7 @@ impl TreeFolder<DefId> for TypeChecker {
                         let _ = self.visit_block_item(item)?;
                     }
 
-                    let tail_ty = self.visit_block_tail(tail.as_deref(), expected.as_ref())?;
+                    let tail_ty = self.visit_block_tail(tail.as_deref(), expected.as_option())?;
 
                     Ok(tail_ty.unwrap_or(Type::Unit))
                 }
@@ -1561,12 +1617,12 @@ impl TreeFolder<DefId> for TypeChecker {
                         self.check_unqualified_enum_variant(
                             ident,
                             &[],
-                            expected.as_ref(),
+                            expected.as_expected(),
                             expr.span,
                         )
                     } else {
                         let mut ty = self.check_var_ref(*def_id, expr.span)?;
-                        if let Some(expected_ty) = expected.as_ref() {
+                        if let Some(expected_ty) = expected.as_option() {
                             let (new_ty, _expected_ty, _unified) =
                                 self.unify_infer_types(&ty, expected_ty);
                             ty = new_ty;
@@ -1576,14 +1632,16 @@ impl TreeFolder<DefId> for TypeChecker {
                 }
 
                 ExprKind::Call { callee, args } => {
-                    self.check_call(expr, callee, args, expected.as_ref())
+                    self.check_call(expr, callee, args, expected.as_expected())
                 }
 
                 ExprKind::MethodCall {
                     callee,
                     method_name,
                     args,
-                } => self.check_method_call(method_name, expr, callee, args, expected.as_ref()),
+                } => {
+                    self.check_method_call(method_name, expr, callee, args, expected.as_expected())
+                }
 
                 ExprKind::If {
                     cond,
@@ -1596,13 +1654,13 @@ impl TreeFolder<DefId> for TypeChecker {
                 }
 
                 ExprKind::Range { start, end } => {
-                    let start_ty = self.visit_expr(start, None)?;
+                    let start_ty = self.check_expr(start, Expected::Unknown)?;
                     if start_ty != Type::uint(64) {
                         return Err(
                             TypeCheckErrorKind::IndexTypeNotInt(start_ty, start.span).into()
                         );
                     }
-                    let end_ty = self.visit_expr(end, None)?;
+                    let end_ty = self.check_expr(end, Expected::Unknown)?;
                     if end_ty != Type::uint(64) {
                         return Err(TypeCheckErrorKind::IndexTypeNotInt(end_ty, end.span).into());
                     }

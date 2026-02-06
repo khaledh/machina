@@ -17,7 +17,7 @@ impl TypeChecker {
     ) -> Result<(), TypeCheckError> {
         for (i, arg) in args.iter().enumerate() {
             let param_ty = &param_types[i];
-            let arg_ty = self.visit_expr(&arg.expr, Some(param_ty))?;
+            let arg_ty = self.check_expr(&arg.expr, Expected::Exact(param_ty))?;
             match self.check_assignable_to(&arg.expr, &arg_ty, param_ty) {
                 Ok(()) => continue,
                 Err(_) => {
@@ -46,15 +46,17 @@ impl TypeChecker {
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
-        expected: Option<&Type>,
+        expected: Expected<'_>,
     ) -> Result<Type, TypeCheckError> {
         if let ExprKind::Var { ident, def_id } = &callee.kind
             && let Some(def) = self.ctx.def_table.lookup_def(*def_id)
             && matches!(def.kind, DefKind::EnumVariantName)
         {
-            if let Some(expected_enum @ Type::Enum { .. }) = expected {
-                self.type_map_builder
-                    .record_node_type(callee.id, expected_enum.clone());
+            if let Expected::Exact(expected_enum) = expected {
+                if let Type::Enum { .. } = expected_enum {
+                    self.type_map_builder
+                        .record_node_type(callee.id, expected_enum.clone());
+                }
             }
             let payload = args.iter().map(|arg| &arg.expr).collect::<Vec<_>>();
             return self.check_unqualified_enum_variant(ident, &payload, expected, call_expr.span);
@@ -77,7 +79,7 @@ impl TypeChecker {
         callee: &Expr,
         args: &[CallArg],
     ) -> Result<Type, TypeCheckError> {
-        let callee_ty = self.visit_expr(callee, None)?;
+        let callee_ty = self.check_expr(callee, Expected::Unknown)?;
         let Type::Fn { params, ret_ty } = callee_ty else {
             return Err(TypeCheckErrorKind::InvalidCallee(callee.kind.clone(), callee.span).into());
         };
@@ -128,7 +130,7 @@ impl TypeChecker {
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
-        expected: Option<&Type>,
+        expected: Expected<'_>,
     ) -> Result<Type, TypeCheckError> {
         // Get the function overloads
         let Some(overloads) = self.func_sigs.get(name).cloned() else {
@@ -144,9 +146,9 @@ impl TypeChecker {
         call_expr: &Expr,
         callee: &Expr,
         args: &[CallArg],
-        expected: Option<&Type>,
+        expected: Expected<'_>,
     ) -> Result<Type, TypeCheckError> {
-        let callee_ty = self.visit_expr(callee, None)?;
+        let callee_ty = self.check_expr(callee, Expected::Unknown)?;
         let view = self.view_type(&callee_ty);
 
         if method_name == "len" {
@@ -217,9 +219,9 @@ impl TypeChecker {
         args: &[CallArg],
         overloads: &[OverloadSig],
         is_method: bool,
-        expected: Option<&Type>,
+        expected: Expected<'_>,
     ) -> Result<Type, TypeCheckError> {
-        let callee_ty = self.visit_expr(callee, None)?;
+        let callee_ty = self.check_expr(callee, Expected::Unknown)?;
         let arg_types = self.visit_call_args(args)?;
 
         let (resolved, fallback_param_types) = {
@@ -400,12 +402,14 @@ impl TypeChecker {
         args: &[CallArg],
         arg_types: &[Type],
         overloads: &[&OverloadSig],
-        expected: Option<&Type>,
+        expected: Expected<'_>,
         call_span: Span,
     ) -> Result<GenericInst, TypeCheckError> {
         let mut candidates = Vec::new();
         let mut range_err: Option<TypeCheckError> = None;
-        let allow_infer = expected.map_or(false, Self::type_has_infer_vars);
+        let allow_infer = expected
+            .as_option()
+            .map_or(false, Self::type_has_infer_vars);
 
         let mut unifier_for_sig = |sig: &OverloadSig| -> Result<Option<Unifier>, TypeCheckError> {
             let mut unifier = Unifier::new();
@@ -456,7 +460,7 @@ impl TypeChecker {
                     }
                 }
             }
-            if let Some(expected_ty) = expected {
+            if let Some(expected_ty) = expected.as_option() {
                 if Self::type_has_vars(&sig.ret_ty) {
                     if unifier.unify(&sig.ret_ty, expected_ty).is_err() {
                         return Ok(None);

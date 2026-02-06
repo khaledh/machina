@@ -28,7 +28,7 @@ impl TypeChecker {
                     )?;
                     let Type::Struct { .. } = &struct_ty else {
                         for field in fields {
-                            let _ = self.visit_expr(&field.value, None)?;
+                            let _ = self.check_expr(&field.value, Expected::Unknown)?;
                         }
                         return Ok(Type::Unknown);
                     };
@@ -36,10 +36,11 @@ impl TypeChecker {
                     for field in fields {
                         let Some(expected) = self.resolve_struct_field(&struct_ty, &field.name)
                         else {
-                            let _ = self.visit_expr(&field.value, None)?;
+                            let _ = self.check_expr(&field.value, Expected::Unknown)?;
                             continue;
                         };
-                        let actual_ty = self.visit_expr(&field.value, Some(&expected.ty))?;
+                        let actual_ty =
+                            self.check_expr(&field.value, Expected::Exact(&expected.ty))?;
                         let (expected_ty, actual_ty, ok) =
                             self.unify_expected_actual(&expected.ty, &actual_ty);
                         if !ok {
@@ -63,20 +64,20 @@ impl TypeChecker {
             Some(ty) => ty,
             None => {
                 for field in fields {
-                    let _ = self.visit_expr(&field.value, None)?;
+                    let _ = self.check_expr(&field.value, Expected::Unknown)?;
                 }
                 return Ok(Type::Unknown);
             }
         };
         let Type::Struct { .. } = &struct_ty else {
             for field in fields {
-                let _ = self.visit_expr(&field.value, None)?;
+                let _ = self.check_expr(&field.value, Expected::Unknown)?;
             }
             return Ok(Type::Unknown);
         };
 
         for field in fields {
-            let actual_ty = self.visit_expr(&field.value, None)?;
+            let actual_ty = self.check_expr(&field.value, Expected::Unknown)?;
             if let Some(expected) = self.resolve_struct_field(&struct_ty, &field.name)
                 && actual_ty != expected.ty
             {
@@ -121,14 +122,14 @@ impl TypeChecker {
                     )?;
                     let Type::Enum { .. } = &enum_ty else {
                         for expr in payload {
-                            let _ = self.visit_expr(expr, None)?;
+                            let _ = self.check_expr(expr, Expected::Unknown)?;
                         }
                         return Ok(Type::Unknown);
                     };
 
                     let Some(variant_ty) = self.resolve_enum_variant(&enum_ty, variant_name) else {
                         for expr in payload {
-                            let _ = self.visit_expr(expr, None)?;
+                            let _ = self.check_expr(expr, Expected::Unknown)?;
                         }
                         let enum_ty = self.apply_infer(&enum_ty);
                         return Ok(enum_ty);
@@ -136,7 +137,7 @@ impl TypeChecker {
 
                     if payload.len() != variant_ty.payload.len() {
                         for expr in payload {
-                            let _ = self.visit_expr(expr, None)?;
+                            let _ = self.check_expr(expr, Expected::Unknown)?;
                         }
                         let enum_ty = self.apply_infer(&enum_ty);
                         return Ok(enum_ty);
@@ -145,7 +146,8 @@ impl TypeChecker {
                     for (i, (payload_expr, payload_ty)) in
                         payload.iter().zip(variant_ty.payload.iter()).enumerate()
                     {
-                        let actual_ty = self.visit_expr(payload_expr, Some(payload_ty))?;
+                        let actual_ty =
+                            self.check_expr(payload_expr, Expected::Exact(payload_ty))?;
                         let (expected_ty, actual_ty, ok) =
                             self.unify_expected_actual(payload_ty, &actual_ty);
                         if !ok {
@@ -171,7 +173,7 @@ impl TypeChecker {
             Some(ty) => ty,
             None => {
                 for expr in payload {
-                    let _ = self.visit_expr(expr, None)?;
+                    let _ = self.check_expr(expr, Expected::Unknown)?;
                 }
                 return Ok(Type::Unknown);
             }
@@ -179,7 +181,7 @@ impl TypeChecker {
 
         let Type::Enum { .. } = &enum_ty else {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Ok(Type::Unknown);
         };
@@ -187,14 +189,14 @@ impl TypeChecker {
         // Get the variant
         let Some(variant_ty) = self.resolve_enum_variant(&enum_ty, variant_name) else {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Ok(enum_ty.clone());
         };
 
         if payload.len() != variant_ty.payload.len() {
             for expr in payload {
-                let _ = self.visit_expr(expr, None)?;
+                let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Ok(enum_ty.clone());
         }
@@ -203,7 +205,7 @@ impl TypeChecker {
         for (i, (payload_expr, payload_ty)) in
             payload.iter().zip(variant_ty.payload.iter()).enumerate()
         {
-            let actual_ty = self.visit_expr(payload_expr, None)?;
+            let actual_ty = self.check_expr(payload_expr, Expected::Unknown)?;
             if actual_ty != *payload_ty {
                 return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
                     variant_name.clone(),
