@@ -1,15 +1,7 @@
 use super::*;
+use crate::typeck::overloads;
 
 impl TypeChecker {
-    fn single_arity_param_types(overloads: &[OverloadSig], arg_count: usize) -> Option<Vec<Type>> {
-        let mut matches = overloads.iter().filter(|sig| sig.params.len() == arg_count);
-        let sig = matches.next()?;
-        if matches.next().is_some() {
-            return None;
-        }
-        Some(sig.params.iter().map(|param| param.ty.clone()).collect())
-    }
-
     fn check_call_arg_types(
         &mut self,
         args: &[CallArg],
@@ -224,147 +216,43 @@ impl TypeChecker {
         let callee_ty = self.check_expr(callee, Expected::Unknown)?;
         let arg_types = self.visit_call_args(args)?;
 
-        let (resolved, fallback_param_types) = {
-            let fallback_param_types = Self::single_arity_param_types(overloads, arg_types.len());
-            // If no overload matches the arity and all overloads share the same arity,
-            // report a count mismatch instead of a generic overload error.
-            if !overloads
-                .iter()
-                .any(|sig| sig.params.len() == arg_types.len())
-            {
-                let mut counts = HashSet::new();
-                for sig in overloads {
-                    counts.insert(sig.params.len());
-                }
-                if counts.len() == 1 {
-                    let expected = *counts.iter().next().unwrap();
-                    return Err(self.err_arg_count_mismatch(
-                        name,
-                        expected,
-                        arg_types.len(),
-                        call_expr.span,
-                    ));
-                }
-            }
+        let fallback_param_types = overloads::single_arity_param_types(overloads, arg_types.len());
+        let expected_ty = expected.as_option();
+        let allow_infer = expected_ty.map_or(false, Self::type_has_infer_vars);
+        let mut fresh_infer = || self.new_infer_var();
 
-            let mut generic_overloads = Vec::new();
-            let mut concrete_overloads = Vec::new();
-            for sig in overloads {
-                if Self::sig_has_type_vars(sig) {
-                    generic_overloads.push(sig);
-                } else {
-                    concrete_overloads.push(sig);
-                }
-            }
-
-            let resolved = if !concrete_overloads.is_empty() {
-                let concrete = concrete_overloads.into_iter().cloned().collect::<Vec<_>>();
-                match OverloadResolver::new(name, args, &arg_types, call_expr.span)
-                    .resolve(&concrete)
-                {
-                    Ok(resolved) => Ok((
-                        resolved.def_id,
-                        resolved
-                            .sig
-                            .params
-                            .iter()
-                            .map(|param| param.ty.clone())
-                            .collect::<Vec<_>>(),
-                        resolved
-                            .sig
-                            .params
-                            .iter()
-                            .map(|param| param.mode.clone())
-                            .collect::<Vec<_>>(),
-                        resolved.sig.ret_ty.clone(),
-                    )),
-                    Err(err) => {
-                        if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _))
-                            && !generic_overloads.is_empty()
-                        {
-                            let inst = self.resolve_generic_overload(
-                                name,
-                                args,
-                                &arg_types,
-                                &generic_overloads,
-                                expected,
-                                call_expr.span,
-                            )?;
-                            let sig = generic_overloads
-                                .iter()
-                                .find(|sig| sig.def_id == inst.def_id)
-                                .ok_or_else(|| {
-                                    TypeCheckError::from(TypeCheckErrorKind::OverloadNoMatch(
-                                        name.to_string(),
-                                        call_expr.span,
-                                    ))
-                                })?;
-                            let (param_types, param_modes, ret_type) =
-                                Self::apply_inst_to_sig(sig, &inst);
-                            self.type_map_builder
-                                .record_generic_inst(call_expr.id, inst);
-                            Ok((sig.def_id, param_types, param_modes, ret_type))
-                        } else {
-                            Err(err)
-                        }
-                    }
-                }
-            } else if !generic_overloads.is_empty() {
-                let inst = self.resolve_generic_overload(
-                    name,
-                    args,
-                    &arg_types,
-                    &generic_overloads,
-                    expected,
-                    call_expr.span,
-                )?;
-                let sig = generic_overloads
-                    .iter()
-                    .find(|sig| sig.def_id == inst.def_id)
-                    .ok_or_else(|| {
-                        TypeCheckError::from(TypeCheckErrorKind::OverloadNoMatch(
-                            name.to_string(),
-                            call_expr.span,
-                        ))
-                    })?;
-                let (param_types, param_modes, ret_type) = Self::apply_inst_to_sig(sig, &inst);
-                self.type_map_builder
-                    .record_generic_inst(call_expr.id, inst);
-                Ok((sig.def_id, param_types, param_modes, ret_type))
-            } else {
-                OverloadResolver::new(name, args, &arg_types, call_expr.span)
-                    .resolve(overloads)
-                    .map(|resolved| {
-                        let param_types = resolved
-                            .sig
-                            .params
-                            .iter()
-                            .map(|param| param.ty.clone())
-                            .collect::<Vec<_>>();
-                        let param_modes = resolved
-                            .sig
-                            .params
-                            .iter()
-                            .map(|param| param.mode.clone())
-                            .collect::<Vec<_>>();
-                        let ret_type = resolved.sig.ret_ty.clone();
-                        (resolved.def_id, param_types, param_modes, ret_type)
-                    })
-            };
-            (resolved, fallback_param_types)
-        };
-
-        let (def_id, param_types, param_modes, ret_type) = match resolved {
+        let resolution = match overloads::resolve_call(
+            name,
+            args,
+            &arg_types,
+            overloads,
+            expected_ty,
+            allow_infer,
+            call_expr.span,
+            &mut fresh_infer,
+        ) {
             Ok(resolved) => resolved,
             Err(err) => {
                 if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _))
-                    && let Some(param_types) = fallback_param_types
+                    && let Some(param_types) = &fallback_param_types
                 {
                     self.check_call_arg_types(args, &param_types)?
                 }
                 return Err(err);
             }
         };
+
+        let overloads::CallResolution {
+            def_id,
+            param_types,
+            param_modes,
+            ret_type,
+            inst,
+        } = resolution;
+        if let Some(inst) = inst {
+            self.type_map_builder
+                .record_generic_inst(call_expr.id, inst);
+        }
 
         let mut receiver = None;
         if is_method {
@@ -394,133 +282,5 @@ impl TypeChecker {
         self.check_call_arg_types(args, &param_types)?;
 
         Ok(ret_type)
-    }
-
-    fn resolve_generic_overload(
-        &mut self,
-        name: &str,
-        args: &[CallArg],
-        arg_types: &[Type],
-        overloads: &[&OverloadSig],
-        expected: Expected<'_>,
-        call_span: Span,
-    ) -> Result<GenericInst, TypeCheckError> {
-        let mut candidates = Vec::new();
-        let mut range_err: Option<TypeCheckError> = None;
-        let allow_infer = expected
-            .as_option()
-            .map_or(false, Self::type_has_infer_vars);
-
-        let mut unifier_for_sig = |sig: &OverloadSig| -> Result<Option<Unifier>, TypeCheckError> {
-            let mut unifier = Unifier::new();
-            for ((arg, arg_ty), param) in args.iter().zip(arg_types).zip(sig.params.iter()) {
-                let param_ty = &param.ty;
-                let mut arg_ty_for_unify = arg_ty.clone();
-
-                if arg.mode != CallArgMode::Move
-                    && arg.mode != CallArgMode::Out
-                    && matches!(param_ty, Type::Slice { .. })
-                    && let Some(item) = arg_ty.array_item_type()
-                {
-                    arg_ty_for_unify = Type::Slice {
-                        elem_ty: Box::new(item),
-                    };
-                }
-
-                if Self::type_has_vars(param_ty) {
-                    if unifier.unify(param_ty, &arg_ty_for_unify).is_err() {
-                        return Ok(None);
-                    }
-                    continue;
-                }
-
-                match value_assignable(&arg.expr, arg_ty, param_ty) {
-                    ValueAssignability::Assignable(assignability) => {
-                        if matches!(assignability, TypeAssignability::Incompatible) {
-                            return Ok(None);
-                        }
-                    }
-                    ValueAssignability::ValueOutOfRange { value, min, max } => {
-                        range_err.get_or_insert(
-                            TypeCheckErrorKind::ValueOutOfRange(value, min, max, arg.span).into(),
-                        );
-                        return Ok(None);
-                    }
-                    ValueAssignability::ValueNotNonZero { value } => {
-                        return Err(TypeCheckErrorKind::ValueNotNonZero(value, arg.span).into());
-                    }
-                    ValueAssignability::Incompatible => {
-                        if arg.mode != CallArgMode::Move
-                            && arg.mode != CallArgMode::Out
-                            && array_to_slice_assignable(arg_ty, param_ty)
-                        {
-                            continue;
-                        }
-                        return Ok(None);
-                    }
-                }
-            }
-            if let Some(expected_ty) = expected.as_option() {
-                if Self::type_has_vars(&sig.ret_ty) {
-                    if unifier.unify(&sig.ret_ty, expected_ty).is_err() {
-                        return Ok(None);
-                    }
-                }
-            }
-            Ok(Some(unifier))
-        };
-
-        for sig in overloads {
-            if sig.params.len() != arg_types.len() {
-                continue;
-            }
-
-            let Some(unifier) = unifier_for_sig(sig)? else {
-                continue;
-            };
-
-            let mut type_args = (0..sig.type_param_count)
-                .map(|index| unifier.apply(&Type::Var(TyVarId::new(index as u32))))
-                .collect::<Vec<_>>();
-
-            if allow_infer {
-                let mut replacements = HashMap::new();
-                type_args = type_args
-                    .iter()
-                    .map(|ty| {
-                        self.replace_param_vars_with_infer(
-                            ty,
-                            sig.type_param_count,
-                            &mut replacements,
-                        )
-                    })
-                    .collect();
-            }
-
-            if type_args
-                .iter()
-                .any(|ty| Self::type_contains_param_var(ty, sig.type_param_count))
-            {
-                continue;
-            }
-
-            candidates.push(GenericInst {
-                def_id: sig.def_id,
-                type_args,
-                call_span,
-            });
-        }
-
-        if candidates.is_empty() {
-            return Err(range_err.unwrap_or_else(|| {
-                TypeCheckErrorKind::OverloadNoMatch(name.to_string(), call_span).into()
-            }));
-        }
-
-        if candidates.len() != 1 {
-            return Err(TypeCheckErrorKind::OverloadAmbiguous(name.to_string(), call_span).into());
-        }
-
-        Ok(candidates.pop().unwrap())
     }
 }

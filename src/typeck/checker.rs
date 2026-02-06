@@ -12,14 +12,13 @@ use crate::tree::visit::{
 use crate::tree::{BinaryOp, CallArgMode, ParamMode, UnaryOp};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, TyVarId, Type, array_to_slice_assignable,
-    value_assignable,
 };
-use crate::types::{TypeAssignability, ValueAssignability, type_assignable};
+use crate::types::{TypeAssignability, type_assignable};
 
 use super::errors::{TypeCheckError, TypeCheckErrorKind};
-use super::overloads::{OverloadResolver, OverloadSig, ParamSig};
+use super::overloads::{OverloadSig, ParamSig};
 use super::type_map::{
-    CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
+    CallParam, CallSig, CallSigMap, GenericInstMap, TypeMap, TypeMapBuilder,
     resolve_type_def_with_args, resolve_type_expr, resolve_type_expr_with_params,
 };
 use super::unify::Unifier;
@@ -34,7 +33,6 @@ mod patterns;
 mod resolve;
 mod resolve_expr;
 mod stmt;
-mod types;
 
 #[derive(Debug, Clone)]
 struct PropertySig {
