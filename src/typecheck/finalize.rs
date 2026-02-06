@@ -7,12 +7,14 @@ use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::typed::build_module;
 use crate::typecheck::constraints::{CallCallee, TyTerm};
+use crate::typecheck::engine::CollectedCallableSig;
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
+use crate::typeck::Unifier;
 use crate::typeck::type_map::{
-    CallParam, CallSig, CallSigMap, GenericInstMap, TypeMap, TypeMapBuilder,
+    CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
 };
-use crate::types::Type;
+use crate::types::{FnParam, FnParamMode, TyVarId, Type};
 
 #[derive(Debug, Clone)]
 pub(crate) struct FinalizeOutput {
@@ -46,7 +48,7 @@ pub(crate) fn materialize(
     }
 
     // Migration fallback: should disappear once finalize is always populated.
-    crate::typeck::type_check(engine.context().clone())
+    crate::typeck::type_check_legacy(engine.context().clone())
 }
 
 fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
@@ -64,38 +66,76 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         builder.record_node_type(node_id, ty);
     }
 
+    let callable_types = collect_callable_def_types(engine);
+
     for def in engine.context().def_table.clone() {
-        let ty = engine
+        let mut ty = engine
             .state()
             .solve
             .resolved_def_types
             .get(&def.id)
             .cloned()
             .unwrap_or(Type::Unknown);
+        if ty == Type::Unknown
+            && let Some(callable_ty) = callable_types.get(&def.id)
+        {
+            ty = callable_ty.clone();
+        }
         builder.record_def_type(def, ty);
     }
 
     for obligation in &engine.state().constrain.call_obligations {
-        let def_id = match &obligation.callee {
-            CallCallee::NamedFunction { def_id, .. } => Some(*def_id),
-            CallCallee::Method { .. } | CallCallee::Dynamic { .. } => None,
-        };
-        let params = obligation
+        let arg_types = obligation
             .arg_terms
             .iter()
-            .map(|term| CallParam {
-                mode: crate::tree::ParamMode::In,
-                ty: resolve_term(term, engine),
-            })
+            .map(|term| resolve_term(term, engine))
             .collect::<Vec<_>>();
+        let resolved = match &obligation.callee {
+            CallCallee::NamedFunction { name, .. } => resolve_named_call(
+                engine,
+                name,
+                &arg_types,
+                obligation.span,
+                &resolve_term(&obligation.ret_ty, engine),
+            ),
+            CallCallee::Method { name } => resolve_method_call(
+                engine,
+                obligation.receiver.as_ref(),
+                name,
+                &arg_types,
+                obligation.span,
+                &resolve_term(&obligation.ret_ty, engine),
+            ),
+            CallCallee::Dynamic { .. } => None,
+        };
+        let (def_id, receiver, params, generic_inst) = if let Some(resolved) = resolved {
+            (
+                Some(resolved.def_id),
+                resolved.receiver,
+                resolved.params,
+                resolved.inst,
+            )
+        } else {
+            let params = arg_types
+                .into_iter()
+                .map(|ty| CallParam {
+                    mode: crate::tree::ParamMode::In,
+                    ty,
+                })
+                .collect::<Vec<_>>();
+            (None, None, params, None)
+        };
         builder.record_call_sig(
             obligation.call_node,
             CallSig {
                 def_id,
-                receiver: None,
+                receiver,
                 params,
             },
         );
+        if let Some(inst) = generic_inst {
+            builder.record_generic_inst(obligation.call_node, inst);
+        }
     }
 
     let (type_map, call_sigs, generic_insts) = builder.finish();
@@ -110,6 +150,175 @@ fn resolve_term(term: &TyTerm, engine: &TypecheckEngine) -> Type {
     match term {
         TyTerm::Concrete(ty) => ty.clone(),
         TyTerm::Var(var) => engine.type_vars().apply(&Type::Var(*var)),
+    }
+}
+
+fn collect_callable_def_types(engine: &TypecheckEngine) -> std::collections::HashMap<DefId, Type> {
+    let mut out = std::collections::HashMap::new();
+    for overloads in engine.env().func_sigs.values() {
+        for sig in overloads {
+            out.insert(sig.def_id, callable_sig_to_fn_type(sig));
+        }
+    }
+    for by_name in engine.env().method_sigs.values() {
+        for overloads in by_name.values() {
+            for sig in overloads {
+                out.insert(sig.def_id, callable_sig_to_fn_type(sig));
+            }
+        }
+    }
+    out
+}
+
+fn callable_sig_to_fn_type(sig: &CollectedCallableSig) -> Type {
+    let params = sig
+        .params
+        .iter()
+        .map(|param| FnParam {
+            mode: fn_param_mode(param.mode.clone()),
+            ty: param.ty.clone(),
+        })
+        .collect::<Vec<_>>();
+    Type::Fn {
+        params,
+        ret_ty: Box::new(sig.ret_ty.clone()),
+    }
+}
+
+fn fn_param_mode(mode: crate::tree::ParamMode) -> FnParamMode {
+    match mode {
+        crate::tree::ParamMode::In => FnParamMode::In,
+        crate::tree::ParamMode::InOut => FnParamMode::InOut,
+        crate::tree::ParamMode::Out => FnParamMode::Out,
+        crate::tree::ParamMode::Sink => FnParamMode::Sink,
+    }
+}
+
+struct ResolvedCall {
+    def_id: DefId,
+    receiver: Option<CallParam>,
+    params: Vec<CallParam>,
+    inst: Option<GenericInst>,
+}
+
+fn resolve_named_call(
+    engine: &TypecheckEngine,
+    name: &str,
+    arg_types: &[Type],
+    span: crate::diag::Span,
+    expected_ret: &Type,
+) -> Option<ResolvedCall> {
+    let overloads = engine.env().func_sigs.get(name)?;
+    let sig = pick_overload(overloads, arg_types.len())?;
+    Some(instantiate_call_sig(
+        sig,
+        arg_types,
+        None,
+        span,
+        expected_ret,
+    ))
+}
+
+fn resolve_method_call(
+    engine: &TypecheckEngine,
+    receiver: Option<&TyTerm>,
+    method_name: &str,
+    arg_types: &[Type],
+    span: crate::diag::Span,
+    expected_ret: &Type,
+) -> Option<ResolvedCall> {
+    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
+    let owner = match &receiver_ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::String => "string".to_string(),
+        _ => return None,
+    };
+    let by_name = engine.env().method_sigs.get(&owner)?;
+    let overloads = by_name.get(method_name)?;
+    let sig = pick_overload(overloads, arg_types.len())?;
+    let receiver = Some(CallParam {
+        mode: sig.self_mode.clone().unwrap_or(crate::tree::ParamMode::In),
+        ty: receiver_ty,
+    });
+    Some(instantiate_call_sig(
+        sig,
+        arg_types,
+        receiver,
+        span,
+        expected_ret,
+    ))
+}
+
+fn pick_overload<'a>(
+    overloads: &'a [CollectedCallableSig],
+    arity: usize,
+) -> Option<&'a CollectedCallableSig> {
+    let mut matches = overloads.iter().filter(|sig| sig.params.len() == arity);
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        // Ambiguous in the rewrite path for now; caller will fall back.
+        return None;
+    }
+    Some(first)
+}
+
+fn instantiate_call_sig(
+    sig: &CollectedCallableSig,
+    arg_types: &[Type],
+    receiver: Option<CallParam>,
+    span: crate::diag::Span,
+    expected_ret: &Type,
+) -> ResolvedCall {
+    if sig.type_param_count == 0 {
+        let params = sig
+            .params
+            .iter()
+            .map(|param| CallParam {
+                mode: param.mode.clone(),
+                ty: param.ty.clone(),
+            })
+            .collect::<Vec<_>>();
+        return ResolvedCall {
+            def_id: sig.def_id,
+            receiver,
+            params,
+            inst: None,
+        };
+    }
+
+    let mut unifier = Unifier::new();
+    for (param, arg_ty) in sig.params.iter().zip(arg_types.iter()) {
+        let _ = unifier.unify(&param.ty, arg_ty);
+    }
+    let _ = unifier.unify(&sig.ret_ty, expected_ret);
+
+    let type_args = (0..sig.type_param_count)
+        .map(|i| unifier.apply(&Type::Var(TyVarId::new(i as u32))))
+        .collect::<Vec<_>>();
+    let inst = if type_args.iter().any(|ty| matches!(ty, Type::Var(_))) {
+        None
+    } else {
+        Some(GenericInst {
+            def_id: sig.def_id,
+            type_args: type_args.clone(),
+            call_span: span,
+        })
+    };
+
+    let params = sig
+        .params
+        .iter()
+        .map(|param| CallParam {
+            mode: param.mode.clone(),
+            ty: unifier.apply(&param.ty),
+        })
+        .collect::<Vec<_>>();
+
+    ResolvedCall {
+        def_id: sig.def_id,
+        receiver,
+        params,
+        inst,
     }
 }
 

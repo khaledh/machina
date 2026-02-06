@@ -32,6 +32,22 @@ The target pipeline is:
 - Legacy `src/typeck` remains default checker until parity harness is green.
 - New checker may be dual-run in tests before being user-visible by default.
 
+## Runtime Toggle
+
+Production defaults to legacy `typeck`.
+
+- To opt into the rewrite path:
+  - `MACHINA_TYPECHECK_BACKEND=rewrite`
+  - or `MACHINA_TYPECHECK_REWRITE=1`
+- Any other backend value falls back to legacy.
+
+### Strict Rewrite Mode
+
+When rewrite is selected, output still defaults to legacy-compatible behavior
+while parity is under construction.
+
+- To force strict rewrite results: `MACHINA_TYPECHECK_REWRITE_STRICT=1`
+
 ## Engine Boundaries
 
 - `TcEnv`:

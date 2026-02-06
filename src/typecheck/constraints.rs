@@ -4,9 +4,9 @@ use crate::diag::Span;
 use crate::resolve::{DefId, DefKind};
 use crate::tree::NodeId;
 use crate::tree::resolved::{
-    BindPattern, BindPatternKind, BlockItem, CallArg, Expr, ExprKind, FuncDef, MatchArm,
+    BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, Expr, ExprKind, FuncDef, MatchArm,
     MatchPattern, MethodDef, MethodSig, StmtExpr, StmtExprKind, StructFieldBindPattern, TypeExpr,
-    TypeParam,
+    TypeParam, UnaryOp,
 };
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
@@ -58,6 +58,7 @@ pub(crate) struct CallObligation {
     pub(crate) call_node: NodeId,
     pub(crate) span: Span,
     pub(crate) callee: CallCallee,
+    pub(crate) receiver: Option<TyTerm>,
     pub(crate) arg_terms: Vec<TyTerm>,
     pub(crate) ret_ty: TyTerm,
 }
@@ -507,7 +508,7 @@ impl<'a> ConstraintCollector<'a> {
                 method_name,
                 args,
             } => {
-                self.collect_expr(callee, None);
+                let receiver_ty = self.collect_expr(callee, None);
                 let arg_terms = args
                     .iter()
                     .map(|arg| self.collect_expr(&arg.expr, None))
@@ -518,16 +519,39 @@ impl<'a> ConstraintCollector<'a> {
                     callee: CallCallee::Method {
                         name: method_name.clone(),
                     },
+                    receiver: Some(receiver_ty),
                     arg_terms,
                     ret_ty: expr_ty.clone(),
                 });
             }
             ExprKind::BinOp { left, right, .. } => {
-                self.collect_expr(left, None);
-                self.collect_expr(right, None);
+                let left_ty = self.collect_expr(left, None);
+                let right_ty = self.collect_expr(right, None);
+                self.collect_binop_constraints(expr, left_ty, right_ty);
             }
-            ExprKind::UnaryOp { expr: inner, .. } => {
-                self.collect_expr(inner, None);
+            ExprKind::UnaryOp { op, expr: inner } => {
+                let inner_ty = self.collect_expr(inner, None);
+                match op {
+                    UnaryOp::Neg | UnaryOp::BitNot => {
+                        self.push_eq(
+                            expr_ty.clone(),
+                            inner_ty,
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                    }
+                    UnaryOp::LogicalNot => {
+                        self.push_eq(
+                            inner_ty,
+                            TyTerm::Concrete(Type::Bool),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                        self.push_eq(
+                            expr_ty.clone(),
+                            TyTerm::Concrete(Type::Bool),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                    }
+                }
             }
             ExprKind::Closure {
                 def_id,
@@ -650,9 +674,70 @@ impl<'a> ConstraintCollector<'a> {
             call_node: call_expr.id,
             span: call_expr.span,
             callee: callee_kind,
+            receiver: None,
             arg_terms,
             ret_ty,
         });
+    }
+
+    fn collect_binop_constraints(&mut self, expr: &Expr, left_ty: TyTerm, right_ty: TyTerm) {
+        let expr_ty = self.node_term(expr.id);
+        let ExprKind::BinOp { op, .. } = &expr.kind else {
+            return;
+        };
+        match op {
+            BinaryOp::Add
+            | BinaryOp::Sub
+            | BinaryOp::Mul
+            | BinaryOp::Div
+            | BinaryOp::Mod
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::BitAnd
+            | BinaryOp::Shl
+            | BinaryOp::Shr => {
+                self.push_eq(
+                    left_ty.clone(),
+                    right_ty,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.push_eq(expr_ty, left_ty, ConstraintReason::Expr(expr.id, expr.span));
+            }
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::LtEq
+            | BinaryOp::GtEq => {
+                self.push_eq(
+                    left_ty,
+                    right_ty,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.push_eq(
+                    expr_ty,
+                    TyTerm::Concrete(Type::Bool),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+            BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                self.push_eq(
+                    left_ty,
+                    TyTerm::Concrete(Type::Bool),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.push_eq(
+                    right_ty,
+                    TyTerm::Concrete(Type::Bool),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.push_eq(
+                    expr_ty,
+                    TyTerm::Concrete(Type::Bool),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+        }
     }
 
     fn collect_block_item(&mut self, item: &BlockItem) {
