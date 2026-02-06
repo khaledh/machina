@@ -126,7 +126,7 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         // Get the function overloads
         let Some(overloads) = self.func_sigs.get(name).cloned() else {
-            return Err(TypeCheckErrorKind::UnknownType(callee.span).into());
+            return Err(self.err_unknown_type(callee.span));
         };
 
         self.check_named_call_common(name, callee, call_expr, args, &overloads, false, expected)
@@ -148,7 +148,7 @@ impl TypeChecker {
                 return Err(self.err_arg_count_mismatch("len", 0, args.len(), call_expr.span));
             }
             if !self.is_place_expr(callee) {
-                return Err(TypeCheckErrorKind::LenTargetNotLvalue(callee.span).into());
+                return Err(self.err_len_target_not_lvalue(callee.span));
             }
             if view.is_len_target() {
                 return Ok(Type::uint(64));
@@ -169,12 +169,12 @@ impl TypeChecker {
 
         // Get a map of method name to overloads
         let Some(type_methods) = self.method_sigs.get(&type_name) else {
-            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
+            return Err(self.err_unknown_type(call_expr.span));
         };
 
         // Get the overloads for the method
         let Some(overloads) = type_methods.get(method_name).cloned() else {
-            return Err(TypeCheckErrorKind::UnknownType(call_expr.span).into());
+            return Err(self.err_unknown_type(call_expr.span));
         };
 
         // Format the method name as "type::method"

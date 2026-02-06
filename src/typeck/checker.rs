@@ -238,7 +238,7 @@ impl TypeChecker {
                 continue;
             };
             if Self::type_has_infer_vars(&ty) {
-                errors.push(TypeCheckErrorKind::UnknownType(span).into());
+                errors.push(self.err_unknown_type(span));
             }
         }
 
@@ -740,14 +740,14 @@ impl TypeChecker {
             for expr in payload {
                 let _ = self.check_expr(expr, Expected::Unknown)?;
             }
-            return Err(TypeCheckErrorKind::UnknownType(span).into());
+            return Err(self.err_unknown_type(span));
         };
 
         let Type::Enum { name, variants } = expected_enum else {
             for expr in payload {
                 let _ = self.check_expr(expr, Expected::Unknown)?;
             }
-            return Err(TypeCheckErrorKind::UnknownType(span).into());
+            return Err(self.err_unknown_type(span));
         };
 
         let Some(variant) = self.resolve_enum_variant_in(name.as_str(), variants, variant_name)
@@ -944,8 +944,7 @@ impl TypeChecker {
         let self_ty = match self.type_defs.get(&method_block.type_name) {
             Some(ty) => ty.clone(),
             None => {
-                self.errors
-                    .push(TypeCheckErrorKind::UnknownType(method_block.span).into());
+                self.errors.push(self.err_unknown_type(method_block.span));
                 return Err(self.errors.clone());
             }
         };
@@ -1509,11 +1508,7 @@ impl TreeFolder<DefId> for TypeChecker {
                     } else if view.is_string() {
                         self.check_string_index(indices, target.span)
                     } else {
-                        return Err(TypeCheckErrorKind::InvalidIndexTargetType(
-                            target_ty,
-                            target.span,
-                        )
-                        .into());
+                        return Err(self.err_invalid_index_target_type(target_ty, target.span));
                     }
                 }
 
@@ -1736,13 +1731,11 @@ impl TreeFolder<DefId> for TypeChecker {
                 ExprKind::Range { start, end } => {
                     let start_ty = self.check_expr(start, Expected::Unknown)?;
                     if start_ty != Type::uint(64) {
-                        return Err(
-                            TypeCheckErrorKind::IndexTypeNotInt(start_ty, start.span).into()
-                        );
+                        return Err(self.err_index_type_not_int(start_ty, start.span));
                     }
                     let end_ty = self.check_expr(end, Expected::Unknown)?;
                     if end_ty != Type::uint(64) {
-                        return Err(TypeCheckErrorKind::IndexTypeNotInt(end_ty, end.span).into());
+                        return Err(self.err_index_type_not_int(end_ty, end.span));
                     }
                     Ok(Type::Range {
                         elem_ty: Box::new(Type::uint(64)),

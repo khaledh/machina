@@ -107,7 +107,7 @@ impl TypeChecker {
         for index in indices {
             let index_type = self.check_expr(index, Expected::Unknown)?;
             if index_type != Type::uint(64) {
-                return Err(TypeCheckErrorKind::IndexTypeNotInt(index_type, index.span).into());
+                return Err(self.err_index_type_not_int(index_type, index.span));
             }
         }
 
@@ -137,13 +137,13 @@ impl TypeChecker {
         if let Some(start) = start {
             let ty = self.check_expr(start, Expected::Unknown)?;
             if ty != Type::uint(64) {
-                return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, start.span).into());
+                return Err(self.err_index_type_not_int(ty, start.span));
             }
         }
         if let Some(end) = end {
             let ty = self.check_expr(end, Expected::Unknown)?;
             if ty != Type::uint(64) {
-                return Err(TypeCheckErrorKind::IndexTypeNotInt(ty, end.span).into());
+                return Err(self.err_index_type_not_int(ty, end.span));
             }
         }
 
@@ -192,7 +192,7 @@ impl TypeChecker {
 
         let index_ty = self.check_expr(&indices[0], Expected::Unknown)?;
         if index_ty != Type::uint(64) {
-            return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
+            return Err(self.err_index_type_not_int(index_ty, indices[0].span));
         }
 
         Ok(Type::uint(8))
@@ -211,7 +211,7 @@ impl TypeChecker {
 
         let index_ty = self.check_expr(&indices[0], Expected::Unknown)?;
         if index_ty != Type::uint(64) {
-            return Err(TypeCheckErrorKind::IndexTypeNotInt(index_ty, indices[0].span).into());
+            return Err(self.err_index_type_not_int(index_ty, indices[0].span));
         }
 
         Ok(elem_ty.clone())
@@ -277,7 +277,7 @@ impl TypeChecker {
 
         if field == "len" {
             if !self.is_place_expr(target) {
-                return Err(TypeCheckErrorKind::LenTargetNotLvalue(target.span).into());
+                return Err(self.err_len_target_not_lvalue(target.span));
             }
             if view.is_len_target() {
                 self.type_map_builder.record_call_sig(
@@ -345,7 +345,7 @@ impl TypeChecker {
             .and_then(|def| self.type_map_builder.lookup_def_type(def))
         {
             Some(def_type) => Ok(def_type.clone()),
-            None => Err(TypeCheckErrorKind::UnknownType(span).into()),
+            None => Err(self.err_unknown_type(span)),
         }
     }
 
