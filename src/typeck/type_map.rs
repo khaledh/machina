@@ -752,6 +752,36 @@ impl TypeMapBuilder {
         self.generic_insts.insert(node_id, inst);
     }
 
+    pub fn apply_inference<F>(&mut self, mut apply: F)
+    where
+        F: FnMut(&Type) -> Type,
+    {
+        for type_id in self.node_type.values_mut() {
+            let ty = self.type_table.get(*type_id).clone();
+            let new_ty = apply(&ty);
+            *type_id = self.type_table.intern(new_ty);
+        }
+
+        for type_id in self.def_type.values_mut() {
+            let ty = self.type_table.get(*type_id).clone();
+            let new_ty = apply(&ty);
+            *type_id = self.type_table.intern(new_ty);
+        }
+
+        for sig in self.call_sigs.values_mut() {
+            if let Some(receiver) = &mut sig.receiver {
+                receiver.ty = apply(&receiver.ty);
+            }
+            for param in sig.params.iter_mut() {
+                param.ty = apply(&param.ty);
+            }
+        }
+
+        for inst in self.generic_insts.values_mut() {
+            inst.type_args = inst.type_args.iter().map(|ty| apply(ty)).collect();
+        }
+    }
+
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {
         self.def_type
             .get(def)

@@ -24,6 +24,8 @@ use super::type_map::{
 };
 use super::unify::Unifier;
 
+const INFER_VAR_BASE: u32 = 1_000_000;
+
 #[derive(Debug, Clone)]
 struct PropertySig {
     ty: Type,
@@ -35,6 +37,12 @@ struct PropertySig {
 enum PropertyAccessorKind {
     Get,
     Set,
+}
+
+#[derive(Debug, Default)]
+struct InferCtx {
+    unifier: Unifier,
+    bindings: HashMap<DefId, Span>,
 }
 
 pub struct TypeChecker {
@@ -53,6 +61,8 @@ pub struct TypeChecker {
     return_stack: Vec<Type>,
     loop_depth_stack: Vec<usize>,
     type_param_stack: Vec<HashMap<DefId, TyVarId>>,
+    infer_ctx: Option<InferCtx>,
+    next_infer_var: u32,
 }
 
 impl TypeChecker {
@@ -70,6 +80,8 @@ impl TypeChecker {
             return_stack: Vec::new(),
             loop_depth_stack: Vec::new(),
             type_param_stack: Vec::new(),
+            infer_ctx: None,
+            next_infer_var: INFER_VAR_BASE,
         }
     }
 
@@ -133,6 +145,126 @@ impl TypeChecker {
         let result = f(self);
         self.type_param_stack.pop();
         result
+    }
+
+    fn begin_inference(&mut self) {
+        self.infer_ctx = Some(InferCtx::default());
+    }
+
+    fn finish_inference(&mut self) -> Vec<TypeCheckError> {
+        let Some(infer) = self.infer_ctx.take() else {
+            return Vec::new();
+        };
+
+        self.type_map_builder
+            .apply_inference(|ty| infer.unifier.apply(ty));
+
+        let mut errors = Vec::new();
+        for (def_id, span) in infer.bindings {
+            let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
+                continue;
+            };
+            let Some(ty) = self.type_map_builder.lookup_def_type(def) else {
+                continue;
+            };
+            if Self::type_has_infer_vars(&ty) {
+                errors.push(TypeCheckErrorKind::UnknownType(span).into());
+            }
+        }
+
+        errors
+    }
+
+    fn new_infer_var(&mut self) -> TyVarId {
+        let id = TyVarId::new(self.next_infer_var);
+        self.next_infer_var = self.next_infer_var.saturating_add(1);
+        id
+    }
+
+    fn is_infer_var(var: TyVarId) -> bool {
+        var.index() >= INFER_VAR_BASE
+    }
+
+    fn type_has_infer_vars(ty: &Type) -> bool {
+        match ty {
+            Type::Var(var) => Self::is_infer_var(*var),
+            Type::Array { elem_ty, .. }
+            | Type::Slice { elem_ty }
+            | Type::Heap { elem_ty }
+            | Type::Ref { elem_ty, .. }
+            | Type::Range { elem_ty } => Self::type_has_infer_vars(elem_ty),
+            Type::Tuple { field_tys } => field_tys.iter().any(Self::type_has_infer_vars),
+            Type::Struct { fields, .. } => fields.iter().any(|f| Self::type_has_infer_vars(&f.ty)),
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .any(|v| v.payload.iter().any(Self::type_has_infer_vars)),
+            Type::Fn { params, ret_ty } => {
+                params.iter().any(|p| Self::type_has_infer_vars(&p.ty))
+                    || Self::type_has_infer_vars(ret_ty)
+            }
+            _ => false,
+        }
+    }
+
+    fn apply_infer(&self, ty: &Type) -> Type {
+        match &self.infer_ctx {
+            Some(infer) => infer.unifier.apply(ty),
+            None => ty.clone(),
+        }
+    }
+
+    fn try_unify_infer(&mut self, left: &Type, right: &Type) -> bool {
+        let Some(infer) = &mut self.infer_ctx else {
+            return false;
+        };
+        let left_has = Self::type_has_infer_vars(left);
+        let right_has = Self::type_has_infer_vars(right);
+        if !left_has && !right_has {
+            return false;
+        }
+        let (left, right) = if left_has && !right_has {
+            (left, right)
+        } else if right_has && !left_has {
+            (right, left)
+        } else {
+            (left, right)
+        };
+        infer
+            .unifier
+            .unify_infer(left, right, Self::is_infer_var)
+            .is_ok()
+    }
+
+    fn record_infer_bindings(&mut self, pattern: &BindPattern) {
+        let mut bindings = Vec::new();
+        self.collect_bindings(pattern, &mut |def_id, span| {
+            bindings.push((def_id, span));
+        });
+        let Some(ctx) = &mut self.infer_ctx else {
+            return;
+        };
+        for (def_id, span) in bindings {
+            ctx.bindings.entry(def_id).or_insert(span);
+        }
+    }
+
+    fn collect_bindings<F>(&self, pattern: &BindPattern, f: &mut F)
+    where
+        F: FnMut(DefId, Span),
+    {
+        match &pattern.kind {
+            BindPatternKind::Name { def_id, .. } => f(*def_id, pattern.span),
+            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
+                for child in patterns {
+                    self.collect_bindings(child, f);
+                }
+            }
+            BindPatternKind::Struct { fields, .. } => {
+                for field in fields {
+                    self.collect_bindings(&field.pattern, f);
+                }
+            }
+        }
     }
 
     fn resolve_type_expr_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
@@ -733,16 +865,24 @@ impl TypeChecker {
                 }
             }
 
+            this.begin_inference();
             this.push_control_context(ret_type.clone());
             let body_ty = match this.visit_expr(&func_def.body, Some(&ret_type)) {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
+                    let infer_errors = this.finish_inference();
+                    this.errors.extend(infer_errors);
                     this.pop_control_context();
                     return Err(this.errors.clone());
                 }
             };
             this.pop_control_context();
+            let body_ty = this.apply_infer(&body_ty);
+            let infer_errors = this.finish_inference();
+            if !infer_errors.is_empty() {
+                this.errors.extend(infer_errors);
+            }
 
             let return_span = this.function_return_span(&func_def.body);
             let has_return = this.body_has_return_stmt(&func_def.body);
@@ -838,16 +978,24 @@ impl TypeChecker {
         }
 
         self.with_type_params(&method_def.sig.type_params, |this| {
+            this.begin_inference();
             this.push_control_context(ret_type.clone());
             let body_ty = match this.visit_expr(&method_def.body, Some(&ret_type)) {
                 Ok(ty) => ty,
                 Err(e) => {
                     this.errors.push(e);
+                    let infer_errors = this.finish_inference();
+                    this.errors.extend(infer_errors);
                     this.pop_control_context();
                     return Err(this.errors.clone());
                 }
             };
             this.pop_control_context();
+            let body_ty = this.apply_infer(&body_ty);
+            let infer_errors = this.finish_inference();
+            if !infer_errors.is_empty() {
+                this.errors.extend(infer_errors);
+            }
 
             let return_span = this.function_return_span(&method_def.body);
             let has_return = this.body_has_return_stmt(&method_def.body);
@@ -901,15 +1049,22 @@ impl TypeChecker {
 
         let return_ty = self.resolve_type_expr_in_scope(return_ty)?;
 
+        self.begin_inference();
         self.push_control_context(return_ty.clone());
         let body_ty = match self.visit_expr(body, Some(&return_ty)) {
             Ok(ty) => ty,
             Err(err) => {
+                let _ = self.finish_inference();
                 self.pop_control_context();
                 return Err(err);
             }
         };
         self.pop_control_context();
+        let body_ty = self.apply_infer(&body_ty);
+        let infer_errors = self.finish_inference();
+        if let Some(err) = infer_errors.into_iter().next() {
+            return Err(err);
+        }
 
         let return_span = self.function_return_span(body);
         let has_return = self.body_has_return_stmt(body);
@@ -1535,21 +1690,32 @@ impl TypeChecker {
             .as_ref()
             .map(|ty_expr| self.resolve_type_expr_in_scope(ty_expr))
             .transpose()?;
+        let infer_binding = expected_ty.is_none();
 
-        let mut value_ty = self.visit_expr(value, expected_ty.as_ref())?;
-
-        if let Some(decl_ty) = &expected_ty {
-            self.check_assignable_to(value, &value_ty, decl_ty)?;
-            value_ty = decl_ty.clone();
+        let mut value_ty = if let Some(expected_ty) = &expected_ty {
+            let mut value_ty = self.visit_expr(value, Some(expected_ty))?;
+            self.check_assignable_to(value, &value_ty, expected_ty)?;
+            value_ty = expected_ty.clone();
             if matches!(&value.kind, ExprKind::ArrayLit { .. })
                 && matches!(value_ty, Type::Array { .. })
             {
                 self.type_map_builder
                     .record_node_type(value.id, value_ty.clone());
             }
-        }
+            value_ty
+        } else {
+            let infer_var = Type::Var(self.new_infer_var());
+            let value_ty = self.visit_expr(value, Some(&infer_var))?;
+            let _ = self.try_unify_infer(&infer_var, &value_ty);
+            let value_ty = self.apply_infer(&value_ty);
+            value_ty
+        };
 
+        value_ty = self.apply_infer(&value_ty);
         self.check_bind_pattern(pattern, &value_ty)?;
+        if infer_binding {
+            self.record_infer_bindings(pattern);
+        }
 
         Ok(Type::Unit)
     }
@@ -1560,13 +1726,28 @@ impl TypeChecker {
         from_ty: &Type,
         to_ty: &Type,
     ) -> Result<(), TypeCheckError> {
-        match type_assignable(from_ty, to_ty) {
-            TypeAssignability::Incompatible => Err(TypeCheckErrorKind::DeclTypeMismatch(
-                to_ty.clone(),
-                from_ty.clone(),
-                from_value.span,
-            )
-            .into()),
+        let mut from_ty = self.apply_infer(from_ty);
+        let mut to_ty = self.apply_infer(to_ty);
+        let had_infer = Self::type_has_infer_vars(&from_ty) || Self::type_has_infer_vars(&to_ty);
+        let unified = self.try_unify_infer(&from_ty, &to_ty);
+        from_ty = self.apply_infer(&from_ty);
+        to_ty = self.apply_infer(&to_ty);
+
+        if had_infer {
+            if !unified {
+                return Err(
+                    TypeCheckErrorKind::DeclTypeMismatch(to_ty, from_ty, from_value.span).into(),
+                );
+            }
+            if Self::type_has_infer_vars(&from_ty) || Self::type_has_infer_vars(&to_ty) {
+                return Ok(());
+            }
+        }
+
+        match type_assignable(&from_ty, &to_ty) {
+            TypeAssignability::Incompatible => {
+                Err(TypeCheckErrorKind::DeclTypeMismatch(to_ty, from_ty, from_value.span).into())
+            }
             _ => Ok(()),
         }
     }
@@ -1951,7 +2132,7 @@ impl TypeChecker {
                         if matches!(err.kind(), TypeCheckErrorKind::OverloadNoMatch(_, _))
                             && !generic_overloads.is_empty()
                         {
-                            let inst = Self::resolve_generic_overload(
+                            let inst = self.resolve_generic_overload(
                                 name,
                                 args,
                                 &arg_types,
@@ -1979,7 +2160,7 @@ impl TypeChecker {
                     }
                 }
             } else if !generic_overloads.is_empty() {
-                let inst = Self::resolve_generic_overload(
+                let inst = self.resolve_generic_overload(
                     name,
                     args,
                     &arg_types,
@@ -2066,6 +2247,7 @@ impl TypeChecker {
     }
 
     fn resolve_generic_overload(
+        &mut self,
         name: &str,
         args: &[CallArg],
         arg_types: &[Type],
@@ -2075,6 +2257,7 @@ impl TypeChecker {
     ) -> Result<GenericInst, TypeCheckError> {
         let mut candidates = Vec::new();
         let mut range_err: Option<TypeCheckError> = None;
+        let allow_infer = expected.map_or(false, Self::type_has_infer_vars);
 
         let mut unifier_for_sig = |sig: &OverloadSig| -> Result<Option<Unifier>, TypeCheckError> {
             let mut unifier = Unifier::new();
@@ -2144,11 +2327,28 @@ impl TypeChecker {
                 continue;
             };
 
-            let type_args = (0..sig.type_param_count)
+            let mut type_args = (0..sig.type_param_count)
                 .map(|index| unifier.apply(&Type::Var(TyVarId::new(index as u32))))
                 .collect::<Vec<_>>();
 
-            if type_args.iter().any(|ty| matches!(ty, Type::Var(_))) {
+            if allow_infer {
+                let mut replacements = HashMap::new();
+                type_args = type_args
+                    .iter()
+                    .map(|ty| {
+                        self.replace_param_vars_with_infer(
+                            ty,
+                            sig.type_param_count,
+                            &mut replacements,
+                        )
+                    })
+                    .collect();
+            }
+
+            if type_args
+                .iter()
+                .any(|ty| Self::type_contains_param_var(ty, sig.type_param_count))
+            {
                 continue;
             }
 
@@ -2196,7 +2396,10 @@ impl TypeChecker {
         let param_types = sig
             .params
             .iter()
-            .map(|param| unifier.apply(&param.ty))
+            .map(|param| {
+                let ty = unifier.apply(&param.ty);
+                Self::rewrite_nominal_names(&ty, &inst.type_args)
+            })
             .collect::<Vec<_>>();
         let param_modes = sig
             .params
@@ -2204,6 +2407,7 @@ impl TypeChecker {
             .map(|param| param.mode.clone())
             .collect::<Vec<_>>();
         let ret_type = unifier.apply(&sig.ret_ty);
+        let ret_type = Self::rewrite_nominal_names(&ret_type, &inst.type_args);
         (param_types, param_modes, ret_type)
     }
 
@@ -2227,6 +2431,254 @@ impl TypeChecker {
                     || Self::type_has_vars(ret_ty)
             }
             _ => false,
+        }
+    }
+
+    fn rewrite_nominal_names(ty: &Type, type_args: &[Type]) -> Type {
+        match ty {
+            Type::Struct { name, fields } => Type::Struct {
+                name: Self::subst_type_vars_in_name(name, type_args),
+                fields: fields
+                    .iter()
+                    .map(|field| StructField {
+                        name: field.name.clone(),
+                        ty: Self::rewrite_nominal_names(&field.ty, type_args),
+                    })
+                    .collect(),
+            },
+            Type::Enum { name, variants } => Type::Enum {
+                name: Self::subst_type_vars_in_name(name, type_args),
+                variants: variants
+                    .iter()
+                    .map(|variant| EnumVariant {
+                        name: variant.name.clone(),
+                        payload: variant
+                            .payload
+                            .iter()
+                            .map(|ty| Self::rewrite_nominal_names(ty, type_args))
+                            .collect(),
+                    })
+                    .collect(),
+            },
+            Type::Array { elem_ty, dims } => Type::Array {
+                elem_ty: Box::new(Self::rewrite_nominal_names(elem_ty, type_args)),
+                dims: dims.clone(),
+            },
+            Type::Slice { elem_ty } => Type::Slice {
+                elem_ty: Box::new(Self::rewrite_nominal_names(elem_ty, type_args)),
+            },
+            Type::Heap { elem_ty } => Type::Heap {
+                elem_ty: Box::new(Self::rewrite_nominal_names(elem_ty, type_args)),
+            },
+            Type::Ref { mutable, elem_ty } => Type::Ref {
+                mutable: *mutable,
+                elem_ty: Box::new(Self::rewrite_nominal_names(elem_ty, type_args)),
+            },
+            Type::Range { elem_ty } => Type::Range {
+                elem_ty: Box::new(Self::rewrite_nominal_names(elem_ty, type_args)),
+            },
+            Type::Tuple { field_tys } => Type::Tuple {
+                field_tys: field_tys
+                    .iter()
+                    .map(|ty| Self::rewrite_nominal_names(ty, type_args))
+                    .collect(),
+            },
+            Type::Fn { params, ret_ty } => Type::Fn {
+                params: params
+                    .iter()
+                    .map(|param| FnParam {
+                        mode: param.mode,
+                        ty: Self::rewrite_nominal_names(&param.ty, type_args),
+                    })
+                    .collect(),
+                ret_ty: Box::new(Self::rewrite_nominal_names(ret_ty, type_args)),
+            },
+            _ => ty.clone(),
+        }
+    }
+
+    fn subst_type_vars_in_name(name: &str, type_args: &[Type]) -> String {
+        let mut out = String::with_capacity(name.len());
+        let mut chars = name.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == 'T' {
+                let mut digits = String::new();
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_digit() {
+                        digits.push(*next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if !digits.is_empty() {
+                    if let Ok(index) = digits.parse::<usize>() {
+                        if let Some(ty) = type_args.get(index) {
+                            out.push_str(&Self::type_arg_name(ty));
+                            continue;
+                        }
+                    }
+                    out.push('T');
+                    out.push_str(&digits);
+                    continue;
+                }
+            }
+            out.push(ch);
+        }
+        out
+    }
+
+    fn type_arg_name(ty: &Type) -> String {
+        match ty {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+            Type::Var(var) => format!("T{}", var.index()),
+            _ => ty.to_string(),
+        }
+    }
+
+    fn type_contains_param_var(ty: &Type, type_param_count: usize) -> bool {
+        let param_limit = type_param_count as u32;
+        match ty {
+            Type::Var(var) => var.index() < param_limit,
+            Type::Array { elem_ty, .. }
+            | Type::Slice { elem_ty }
+            | Type::Heap { elem_ty }
+            | Type::Ref { elem_ty, .. }
+            | Type::Range { elem_ty } => Self::type_contains_param_var(elem_ty, type_param_count),
+            Type::Tuple { field_tys } => field_tys
+                .iter()
+                .any(|ty| Self::type_contains_param_var(ty, type_param_count)),
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .any(|field| Self::type_contains_param_var(&field.ty, type_param_count)),
+            Type::Enum { variants, .. } => variants.iter().any(|variant| {
+                variant
+                    .payload
+                    .iter()
+                    .any(|ty| Self::type_contains_param_var(ty, type_param_count))
+            }),
+            Type::Fn { params, ret_ty } => {
+                params
+                    .iter()
+                    .any(|param| Self::type_contains_param_var(&param.ty, type_param_count))
+                    || Self::type_contains_param_var(ret_ty, type_param_count)
+            }
+            _ => false,
+        }
+    }
+
+    fn replace_param_vars_with_infer(
+        &mut self,
+        ty: &Type,
+        type_param_count: usize,
+        replacements: &mut HashMap<u32, TyVarId>,
+    ) -> Type {
+        let param_limit = type_param_count as u32;
+        match ty {
+            Type::Var(var) if var.index() < param_limit => {
+                let entry = replacements
+                    .entry(var.index())
+                    .or_insert_with(|| self.new_infer_var());
+                Type::Var(*entry)
+            }
+            Type::Array { elem_ty, dims } => Type::Array {
+                elem_ty: Box::new(self.replace_param_vars_with_infer(
+                    elem_ty,
+                    type_param_count,
+                    replacements,
+                )),
+                dims: dims.clone(),
+            },
+            Type::Slice { elem_ty } => Type::Slice {
+                elem_ty: Box::new(self.replace_param_vars_with_infer(
+                    elem_ty,
+                    type_param_count,
+                    replacements,
+                )),
+            },
+            Type::Heap { elem_ty } => Type::Heap {
+                elem_ty: Box::new(self.replace_param_vars_with_infer(
+                    elem_ty,
+                    type_param_count,
+                    replacements,
+                )),
+            },
+            Type::Ref { mutable, elem_ty } => Type::Ref {
+                mutable: *mutable,
+                elem_ty: Box::new(self.replace_param_vars_with_infer(
+                    elem_ty,
+                    type_param_count,
+                    replacements,
+                )),
+            },
+            Type::Range { elem_ty } => Type::Range {
+                elem_ty: Box::new(self.replace_param_vars_with_infer(
+                    elem_ty,
+                    type_param_count,
+                    replacements,
+                )),
+            },
+            Type::Tuple { field_tys } => Type::Tuple {
+                field_tys: field_tys
+                    .iter()
+                    .map(|ty| {
+                        self.replace_param_vars_with_infer(ty, type_param_count, replacements)
+                    })
+                    .collect(),
+            },
+            Type::Struct { name, fields } => Type::Struct {
+                name: name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|field| StructField {
+                        name: field.name.clone(),
+                        ty: self.replace_param_vars_with_infer(
+                            &field.ty,
+                            type_param_count,
+                            replacements,
+                        ),
+                    })
+                    .collect(),
+            },
+            Type::Enum { name, variants } => Type::Enum {
+                name: name.clone(),
+                variants: variants
+                    .iter()
+                    .map(|variant| EnumVariant {
+                        name: variant.name.clone(),
+                        payload: variant
+                            .payload
+                            .iter()
+                            .map(|ty| {
+                                self.replace_param_vars_with_infer(
+                                    ty,
+                                    type_param_count,
+                                    replacements,
+                                )
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            },
+            Type::Fn { params, ret_ty } => Type::Fn {
+                params: params
+                    .iter()
+                    .map(|param| FnParam {
+                        mode: param.mode,
+                        ty: self.replace_param_vars_with_infer(
+                            &param.ty,
+                            type_param_count,
+                            replacements,
+                        ),
+                    })
+                    .collect(),
+                ret_ty: Box::new(self.replace_param_vars_with_infer(
+                    ret_ty,
+                    type_param_count,
+                    replacements,
+                )),
+            },
+            _ => ty.clone(),
         }
     }
 
@@ -2317,10 +2769,15 @@ impl TypeChecker {
         arm_ty: &mut Option<Type>,
     ) -> Result<(), TypeCheckError> {
         let body_ty = self.visit_match_arm(arm)?;
+        let body_ty = self.apply_infer(&body_ty);
         if let Some(expected_ty) = arm_ty {
-            if body_ty != *expected_ty {
+            let expected_ty = self.apply_infer(expected_ty);
+            let _ = self.try_unify_infer(&body_ty, &expected_ty);
+            let body_ty = self.apply_infer(&body_ty);
+            let expected_ty = self.apply_infer(&expected_ty);
+            if body_ty != expected_ty {
                 return Err(TypeCheckErrorKind::MatchArmTypeMismatch(
-                    expected_ty.clone(),
+                    expected_ty,
                     body_ty,
                     arm.span,
                 )
@@ -2539,6 +2996,12 @@ impl TreeFolder<DefId> for TypeChecker {
             return Err(TypeCheckErrorKind::CondNotBoolean(cond_type, cond.span).into());
         }
 
+        let then_type = self.apply_infer(&then_type);
+        let else_type = self.apply_infer(&else_type);
+        let _ = self.try_unify_infer(&then_type, &else_type);
+        let then_type = self.apply_infer(&then_type);
+        let else_type = self.apply_infer(&else_type);
+
         if then_type != else_type {
             // create a span that covers both the then and else bodies so the
             // diagnostic highlights the whole region
@@ -2618,6 +3081,11 @@ impl TreeFolder<DefId> for TypeChecker {
                         }
 
                         let value_ty = self.visit_expr(value, Some(&return_ty))?;
+                        let value_ty = self.apply_infer(&value_ty);
+                        let return_ty = self.apply_infer(&return_ty);
+                        let _ = self.try_unify_infer(&value_ty, &return_ty);
+                        let value_ty = self.apply_infer(&value_ty);
+                        let return_ty = self.apply_infer(&return_ty);
                         if matches!(
                             type_assignable(&value_ty, &return_ty),
                             TypeAssignability::Incompatible
@@ -2647,7 +3115,8 @@ impl TreeFolder<DefId> for TypeChecker {
     }
 
     fn visit_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Result<Type, TypeCheckError> {
-        let result = match (&expr.kind, expected) {
+        let expected = expected.map(|ty| self.apply_infer(ty));
+        let result = match (&expr.kind, expected.as_ref()) {
             (ExprKind::IntLit(_), Some(expected_ty)) if expected_ty.is_int() => {
                 Ok(expected_ty.clone())
             }
@@ -2675,7 +3144,7 @@ impl TreeFolder<DefId> for TypeChecker {
                 ExprKind::UnitLit => Ok(Type::Unit),
 
                 ExprKind::HeapAlloc { expr } => {
-                    let inner_expected = match expected {
+                    let inner_expected = match expected.as_ref() {
                         Some(Type::Heap { elem_ty }) => Some(elem_ty.as_ref()),
                         _ => None,
                     };
@@ -2701,7 +3170,7 @@ impl TreeFolder<DefId> for TypeChecker {
                 }
 
                 ExprKind::ArrayLit { elem_ty, init } => {
-                    self.check_array_lit(elem_ty.as_ref(), init, expected, expr.span)
+                    self.check_array_lit(elem_ty.as_ref(), init, expected.as_ref(), expr.span)
                 }
 
                 ExprKind::ArrayIndex { target, indices } => {
@@ -2753,11 +3222,16 @@ impl TreeFolder<DefId> for TypeChecker {
                     payload,
                 } => {
                     if type_args.is_empty()
-                        && let Some(Type::Enum { name, .. }) = expected
+                        && let Some(Type::Enum { name, .. }) = expected.as_ref()
                         && Self::enum_name_matches(name, enum_name)
                     {
                         let payload = payload.iter().collect::<Vec<_>>();
-                        self.check_unqualified_enum_variant(variant, &payload, expected, expr.span)
+                        self.check_unqualified_enum_variant(
+                            variant,
+                            &payload,
+                            expected.as_ref(),
+                            expr.span,
+                        )
                     } else {
                         self.check_enum_variant(
                             enum_name, type_args, variant, payload, expr.id, expr.span,
@@ -2889,7 +3363,7 @@ impl TreeFolder<DefId> for TypeChecker {
                         let _ = self.visit_block_item(item)?;
                     }
 
-                    let tail_ty = self.visit_block_tail(tail.as_deref(), expected)?;
+                    let tail_ty = self.visit_block_tail(tail.as_deref(), expected.as_ref())?;
 
                     Ok(tail_ty.unwrap_or(Type::Unit))
                 }
@@ -2898,19 +3372,32 @@ impl TreeFolder<DefId> for TypeChecker {
                     if let Some(def) = self.ctx.def_table.lookup_def(*def_id)
                         && matches!(def.kind, DefKind::EnumVariantName)
                     {
-                        self.check_unqualified_enum_variant(ident, &[], expected, expr.span)
+                        self.check_unqualified_enum_variant(
+                            ident,
+                            &[],
+                            expected.as_ref(),
+                            expr.span,
+                        )
                     } else {
-                        self.check_var_ref(*def_id, expr.span)
+                        let mut ty = self.check_var_ref(*def_id, expr.span)?;
+                        if let Some(expected_ty) = expected.as_ref() {
+                            let expected_ty = self.apply_infer(expected_ty);
+                            let _ = self.try_unify_infer(&ty, &expected_ty);
+                            ty = self.apply_infer(&ty);
+                        }
+                        Ok(ty)
                     }
                 }
 
-                ExprKind::Call { callee, args } => self.check_call(expr, callee, args, expected),
+                ExprKind::Call { callee, args } => {
+                    self.check_call(expr, callee, args, expected.as_ref())
+                }
 
                 ExprKind::MethodCall {
                     callee,
                     method_name,
                     args,
-                } => self.check_method_call(method_name, expr, callee, args, expected),
+                } => self.check_method_call(method_name, expr, callee, args, expected.as_ref()),
 
                 ExprKind::If {
                     cond,
@@ -2952,8 +3439,9 @@ impl TreeFolder<DefId> for TypeChecker {
         };
 
         result.map(|ty| {
+            let ty = self.apply_infer(&ty);
             self.type_map_builder.record_node_type(expr.id, ty.clone());
-            ty.clone()
+            ty
         })
     }
 }

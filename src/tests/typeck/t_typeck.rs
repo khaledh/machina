@@ -247,6 +247,39 @@ fn test_generic_method_infers_from_arg() {
 }
 
 #[test]
+fn test_generic_return_infers_into_unannotated_let() {
+    let source = r#"
+        type Option<T> = None | Some(T)
+
+        fn make_some<T>(x: T) -> Option<T> { Some(x) }
+
+        fn test() -> u64 {
+            let opt = make_some(4);
+            match opt {
+                Some(x) => x,
+                None => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_return_infers_from_usage() {
+    let source = r#"
+        fn make<T>() -> T;
+
+        fn test() -> u64 {
+            let value = make();
+            value
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_generic_infers_from_expected_type() {
     let source = r#"
         fn make<T>() -> T;

@@ -163,6 +163,20 @@ impl Unifier {
         self.unify_inner(left, right)
     }
 
+    /// Unifies two types, binding only variables that pass the `is_infer` predicate.
+    ///
+    /// This is used for local inference where generic type parameters should be treated as rigid.
+    pub fn unify_infer(
+        &mut self,
+        left: &Type,
+        right: &Type,
+        is_infer: fn(TyVarId) -> bool,
+    ) -> Result<(), UnifyError> {
+        let left = self.apply(left);
+        let right = self.apply(right);
+        self.unify_infer_inner(left, right, is_infer)
+    }
+
     /// Internal unification logic that works with already-substituted types.
     ///
     /// This implements the core unification algorithm using structural recursion.
@@ -299,6 +313,220 @@ impl Unifier {
 
             // All other combinations are incompatible
             (left, right) => Err(UnifyError::Mismatch(left, right)),
+        }
+    }
+
+    fn unify_infer_inner(
+        &mut self,
+        left: Type,
+        right: Type,
+        is_infer: fn(TyVarId) -> bool,
+    ) -> Result<(), UnifyError> {
+        if left == right {
+            return Ok(());
+        }
+
+        match (left, right) {
+            (Type::Var(var), ty) if is_infer(var) => self.bind_var(var, ty),
+            (ty, Type::Var(var)) if is_infer(var) => self.bind_var(var, ty),
+            (Type::Var(l), Type::Var(r)) => Err(UnifyError::Mismatch(Type::Var(l), Type::Var(r))),
+            (Type::Var(var), ty) | (ty, Type::Var(var)) => {
+                Err(UnifyError::Mismatch(Type::Var(var), ty))
+            }
+
+            (
+                Type::Fn {
+                    params: l_params,
+                    ret_ty: l_ret,
+                },
+                Type::Fn {
+                    params: r_params,
+                    ret_ty: r_ret,
+                },
+            ) => {
+                if l_params.len() != r_params.len() {
+                    return Err(UnifyError::Mismatch(
+                        Type::Fn {
+                            params: l_params,
+                            ret_ty: l_ret,
+                        },
+                        Type::Fn {
+                            params: r_params,
+                            ret_ty: r_ret,
+                        },
+                    ));
+                }
+
+                for (l_param, r_param) in l_params.iter().zip(r_params.iter()) {
+                    if l_param.mode != r_param.mode {
+                        return Err(UnifyError::Mismatch(
+                            Type::Fn {
+                                params: l_params,
+                                ret_ty: l_ret,
+                            },
+                            Type::Fn {
+                                params: r_params,
+                                ret_ty: r_ret,
+                            },
+                        ));
+                    }
+                    self.unify_infer(&l_param.ty, &r_param.ty, is_infer)?;
+                }
+                self.unify_infer(&l_ret, &r_ret, is_infer)
+            }
+
+            (Type::Range { elem_ty: l }, Type::Range { elem_ty: r }) => {
+                self.unify_infer(&l, &r, is_infer)
+            }
+            (
+                Type::Array {
+                    elem_ty: l_elem,
+                    dims: l_dims,
+                },
+                Type::Array {
+                    elem_ty: r_elem,
+                    dims: r_dims,
+                },
+            ) => {
+                if l_dims != r_dims {
+                    return Err(UnifyError::Mismatch(
+                        Type::Array {
+                            elem_ty: l_elem,
+                            dims: l_dims,
+                        },
+                        Type::Array {
+                            elem_ty: r_elem,
+                            dims: r_dims,
+                        },
+                    ));
+                }
+                self.unify_infer(&l_elem, &r_elem, is_infer)
+            }
+            (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
+                if l.len() != r.len() {
+                    return Err(UnifyError::Mismatch(
+                        Type::Tuple { field_tys: l },
+                        Type::Tuple { field_tys: r },
+                    ));
+                }
+                for (l_ty, r_ty) in l.iter().zip(r.iter()) {
+                    self.unify_infer(l_ty, r_ty, is_infer)?;
+                }
+                Ok(())
+            }
+            (
+                Type::Struct {
+                    name: l_name,
+                    fields: l_fields,
+                },
+                Type::Struct {
+                    name: r_name,
+                    fields: r_fields,
+                },
+            ) => {
+                if l_name != r_name || l_fields.len() != r_fields.len() {
+                    return Err(UnifyError::Mismatch(
+                        Type::Struct {
+                            name: l_name,
+                            fields: l_fields,
+                        },
+                        Type::Struct {
+                            name: r_name,
+                            fields: r_fields,
+                        },
+                    ));
+                }
+                for (l_field, r_field) in l_fields.iter().zip(r_fields.iter()) {
+                    if l_field.name != r_field.name {
+                        return Err(UnifyError::Mismatch(
+                            Type::Struct {
+                                name: l_name.clone(),
+                                fields: l_fields.clone(),
+                            },
+                            Type::Struct {
+                                name: r_name.clone(),
+                                fields: r_fields.clone(),
+                            },
+                        ));
+                    }
+                    self.unify_infer(&l_field.ty, &r_field.ty, is_infer)?;
+                }
+                Ok(())
+            }
+            (
+                Type::Enum {
+                    name: l_name,
+                    variants: l_variants,
+                },
+                Type::Enum {
+                    name: r_name,
+                    variants: r_variants,
+                },
+            ) => {
+                if l_name != r_name || l_variants.len() != r_variants.len() {
+                    return Err(UnifyError::Mismatch(
+                        Type::Enum {
+                            name: l_name,
+                            variants: l_variants,
+                        },
+                        Type::Enum {
+                            name: r_name,
+                            variants: r_variants,
+                        },
+                    ));
+                }
+                for (l_variant, r_variant) in l_variants.iter().zip(r_variants.iter()) {
+                    if l_variant.name != r_variant.name
+                        || l_variant.payload.len() != r_variant.payload.len()
+                    {
+                        return Err(UnifyError::Mismatch(
+                            Type::Enum {
+                                name: l_name.clone(),
+                                variants: l_variants.clone(),
+                            },
+                            Type::Enum {
+                                name: r_name.clone(),
+                                variants: r_variants.clone(),
+                            },
+                        ));
+                    }
+                    for (l_ty, r_ty) in l_variant.payload.iter().zip(r_variant.payload.iter()) {
+                        self.unify_infer(l_ty, r_ty, is_infer)?;
+                    }
+                }
+                Ok(())
+            }
+            (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r }) => {
+                self.unify_infer(&l, &r, is_infer)
+            }
+            (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => {
+                self.unify_infer(&l, &r, is_infer)
+            }
+            (
+                Type::Ref {
+                    mutable: l_mut,
+                    elem_ty: l_elem,
+                },
+                Type::Ref {
+                    mutable: r_mut,
+                    elem_ty: r_elem,
+                },
+            ) => {
+                if l_mut != r_mut {
+                    return Err(UnifyError::Mismatch(
+                        Type::Ref {
+                            mutable: l_mut,
+                            elem_ty: l_elem,
+                        },
+                        Type::Ref {
+                            mutable: r_mut,
+                            elem_ty: r_elem,
+                        },
+                    ));
+                }
+                self.unify_infer(&l_elem, &r_elem, is_infer)
+            }
+            (l, r) => Err(UnifyError::Mismatch(l, r)),
         }
     }
 
