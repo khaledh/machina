@@ -171,10 +171,27 @@ fn drop_kind(ty: &Type) -> DropKind<'_> {
     if let Some(name) = shallow_named(ty) {
         return DropKind::Shallow(name);
     }
-    if ty.needs_drop() {
+    if has_nontrivial_drop(ty) {
         DropKind::Deep
     } else {
         DropKind::Trivial
+    }
+}
+
+fn has_nontrivial_drop(ty: &Type) -> bool {
+    if shallow_named(ty).is_some() {
+        return true;
+    }
+
+    match ty {
+        Type::String | Type::Heap { .. } => true,
+        Type::Array { elem_ty, .. } | Type::Slice { elem_ty } => has_nontrivial_drop(elem_ty),
+        Type::Tuple { field_tys } => field_tys.iter().any(has_nontrivial_drop),
+        Type::Struct { fields, .. } => fields.iter().any(|field| has_nontrivial_drop(&field.ty)),
+        Type::Enum { variants, .. } => variants
+            .iter()
+            .any(|variant| variant.payload.iter().any(has_nontrivial_drop)),
+        _ => false,
     }
 }
 

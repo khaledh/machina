@@ -280,6 +280,41 @@ fn test_generic_return_infers_from_usage() {
 }
 
 #[test]
+fn test_match_pattern_constrains_unknown_tuple_scrutinee() {
+    let source = r#"
+        fn make<T>() -> T;
+
+        fn test() -> u64 {
+            let value = make();
+            match value {
+                (x, y) => x + y,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_match_pattern_constrains_unknown_enum_scrutinee() {
+    let source = r#"
+        type Option<T> = None | Some(T)
+
+        fn make<T>() -> T;
+
+        fn test() -> u64 {
+            let value = make();
+            match value {
+                Option::Some(x) => x,
+                Option::None => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_generic_infers_from_expected_type() {
     let source = r#"
         fn make<T>() -> T;

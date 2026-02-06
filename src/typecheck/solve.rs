@@ -22,6 +22,7 @@ use crate::typecheck::constraints::{
 };
 use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
 use crate::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::types::{TyVarId, Type, TypeAssignability, array_to_slice_assignable, type_assignable};
 
@@ -132,6 +133,9 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &constrain.pattern_obligations,
         &constrain.def_terms,
         &mut unifier,
+        &engine.env().type_defs,
+        &engine.context().def_table,
+        &engine.context().module,
     );
     for (pattern_id, err, span) in deferred_pattern_errors {
         if !covered_patterns.contains(&pattern_id) {
@@ -1370,6 +1374,9 @@ fn check_pattern_obligations(
     obligations: &[crate::typecheck::constraints::PatternObligation],
     def_terms: &HashMap<DefId, TyTerm>,
     unifier: &mut TcUnifier,
+    type_defs: &HashMap<String, Type>,
+    def_table: &DefTable,
+    module: &crate::tree::resolved::Module,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
     let mut covered = HashSet::new();
@@ -1394,7 +1401,15 @@ fn check_pattern_obligations(
                 ..
             } => {
                 let scrutinee_ty = resolve_term(scrutinee_ty, unifier);
-                bind_match_pattern_types(pattern, &scrutinee_ty, def_terms, unifier);
+                bind_match_pattern_types(
+                    pattern,
+                    &scrutinee_ty,
+                    def_terms,
+                    unifier,
+                    type_defs,
+                    def_table,
+                    module,
+                );
             }
         }
     }
@@ -1407,11 +1422,22 @@ fn bind_match_pattern_types(
     scrutinee_ty: &Type,
     def_terms: &HashMap<DefId, TyTerm>,
     unifier: &mut TcUnifier,
+    type_defs: &HashMap<String, Type>,
+    def_table: &DefTable,
+    module: &crate::tree::resolved::Module,
 ) {
     match pattern {
-        MatchPattern::Wildcard { .. }
-        | MatchPattern::BoolLit { .. }
-        | MatchPattern::IntLit { .. } => {}
+        MatchPattern::Wildcard { .. } => {}
+        MatchPattern::BoolLit { .. } => {
+            if is_unresolved(scrutinee_ty) {
+                let _ = unifier.unify(scrutinee_ty, &Type::Bool);
+            }
+        }
+        MatchPattern::IntLit { .. } => {
+            if is_unresolved(scrutinee_ty) {
+                let _ = unifier.unify(scrutinee_ty, &Type::uint(64));
+            }
+        }
         MatchPattern::Binding { def_id, .. } => {
             if let Some(term) = def_terms.get(def_id) {
                 let _ = unifier.unify(&term_as_type(term), scrutinee_ty);
@@ -1420,19 +1446,52 @@ fn bind_match_pattern_types(
         MatchPattern::Tuple { patterns, .. } => {
             if let Type::Tuple { field_tys } = scrutinee_ty {
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
-                    bind_match_pattern_types(child, child_ty, def_terms, unifier);
+                    bind_match_pattern_types(
+                        child, child_ty, def_terms, unifier, type_defs, def_table, module,
+                    );
+                }
+            } else if is_unresolved(scrutinee_ty) {
+                let inferred_fields = patterns
+                    .iter()
+                    .map(|_| Type::Var(unifier.vars_mut().fresh_infer_local()))
+                    .collect::<Vec<_>>();
+                let inferred_tuple = Type::Tuple {
+                    field_tys: inferred_fields.clone(),
+                };
+                let _ = unifier.unify(scrutinee_ty, &inferred_tuple);
+                for (child, child_ty) in patterns.iter().zip(inferred_fields.iter()) {
+                    bind_match_pattern_types(
+                        child, child_ty, def_terms, unifier, type_defs, def_table, module,
+                    );
                 }
             }
         }
         MatchPattern::EnumVariant {
+            enum_name,
+            type_args,
             variant_name,
             bindings,
             ..
         } => {
             let owner_ty = peel_heap(scrutinee_ty.clone());
-            if let Type::Enum { variants, .. } = owner_ty
-                && let Some(variant) = variants.iter().find(|v| v.name == *variant_name)
-            {
+            let mut matched_variant = None;
+
+            if let Type::Enum { variants, .. } = owner_ty.clone() {
+                matched_variant = variants.iter().find(|v| v.name == *variant_name).cloned();
+            } else if is_unresolved(&owner_ty) {
+                let inferred_enum = resolve_pattern_enum_type(
+                    enum_name, type_args, type_defs, def_table, module, unifier,
+                );
+                if let Some(enum_ty) = inferred_enum {
+                    let _ = unifier.unify(&owner_ty, &enum_ty);
+                    if let Type::Enum { variants, .. } = unifier.apply(&owner_ty) {
+                        matched_variant =
+                            variants.iter().find(|v| v.name == *variant_name).cloned();
+                    }
+                }
+            }
+
+            if let Some(variant) = matched_variant {
                 for (binding, payload_ty) in bindings.iter().zip(variant.payload.iter()) {
                     if let MatchPatternBinding::Named { def_id, .. } = binding
                         && let Some(term) = def_terms.get(def_id)
@@ -1443,6 +1502,43 @@ fn bind_match_pattern_types(
             }
         }
     }
+}
+
+fn resolve_pattern_enum_type(
+    enum_name: &Option<String>,
+    type_args: &[crate::tree::resolved::TypeExpr],
+    type_defs: &HashMap<String, Type>,
+    def_table: &DefTable,
+    module: &crate::tree::resolved::Module,
+    unifier: &mut TcUnifier,
+) -> Option<Type> {
+    let enum_name = enum_name.as_ref()?;
+
+    if let Some(ty) = type_defs.get(enum_name)
+        && matches!(ty, Type::Enum { .. })
+    {
+        return Some(ty.clone());
+    }
+
+    let def_id = def_table.lookup_type_def_id(enum_name)?;
+    let type_def = module.type_def_by_id(def_id)?;
+
+    let resolved_args = if type_args.is_empty() {
+        type_def
+            .type_params
+            .iter()
+            .map(|_| Type::Var(unifier.vars_mut().fresh_infer_local()))
+            .collect::<Vec<_>>()
+    } else {
+        type_args
+            .iter()
+            .map(|arg| resolve_type_expr(def_table, module, arg))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?
+    };
+
+    let ty = resolve_type_def_with_args(def_table, module, def_id, &resolved_args).ok()?;
+    matches!(ty, Type::Enum { .. }).then_some(ty)
 }
 
 fn check_bind_pattern(
