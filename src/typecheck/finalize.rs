@@ -65,6 +65,35 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             .unwrap_or(Type::Unknown);
         builder.record_node_type(node_id, ty);
     }
+    for (node_id, ty) in &engine.state().solve.resolved_node_types {
+        builder.record_node_type(*node_id, ty.clone());
+    }
+
+    // Ensure callable definition nodes always have a return type entry.
+    for func_def in engine.context().module.func_defs() {
+        let ty = engine
+            .state()
+            .solve
+            .resolved_node_types
+            .get(&func_def.id)
+            .cloned()
+            .unwrap_or(Type::Unknown);
+        builder.record_node_type(func_def.id, ty);
+    }
+    for method_block in engine.context().module.method_blocks() {
+        for method_item in &method_block.method_items {
+            if let res::MethodItem::Def(method_def) = method_item {
+                let ty = engine
+                    .state()
+                    .solve
+                    .resolved_node_types
+                    .get(&method_def.id)
+                    .cloned()
+                    .unwrap_or(Type::Unknown);
+                builder.record_node_type(method_def.id, ty);
+            }
+        }
+    }
 
     let callable_types = collect_callable_def_types(engine);
 
@@ -76,7 +105,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             .get(&def.id)
             .cloned()
             .unwrap_or(Type::Unknown);
-        if ty == Type::Unknown
+        if is_unresolved_type(&ty)
             && let Some(callable_ty) = callable_types.get(&def.id)
         {
             ty = callable_ty.clone();
@@ -90,22 +119,50 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             .iter()
             .map(|term| resolve_term(term, engine))
             .collect::<Vec<_>>();
+        let expected_ret = resolve_term(&obligation.ret_ty, engine);
+        let selected_def_id = engine
+            .state()
+            .solve
+            .resolved_call_defs
+            .get(&obligation.call_node)
+            .copied();
         let resolved = match &obligation.callee {
-            CallCallee::NamedFunction { name, .. } => resolve_named_call(
-                engine,
-                name,
-                &arg_types,
-                obligation.span,
-                &resolve_term(&obligation.ret_ty, engine),
-            ),
-            CallCallee::Method { name } => resolve_method_call(
-                engine,
-                obligation.receiver.as_ref(),
-                name,
-                &arg_types,
-                obligation.span,
-                &resolve_term(&obligation.ret_ty, engine),
-            ),
+            CallCallee::NamedFunction { name, .. } => {
+                if let Some(def_id) = selected_def_id {
+                    resolve_named_call_by_def_id(
+                        engine,
+                        name,
+                        def_id,
+                        &arg_types,
+                        obligation.span,
+                        &expected_ret,
+                    )
+                } else {
+                    resolve_named_call(engine, name, &arg_types, obligation.span, &expected_ret)
+                }
+            }
+            CallCallee::Method { name } => {
+                if let Some(def_id) = selected_def_id {
+                    resolve_method_call_by_def_id(
+                        engine,
+                        obligation.receiver.as_ref(),
+                        name,
+                        def_id,
+                        &arg_types,
+                        obligation.span,
+                        &expected_ret,
+                    )
+                } else {
+                    resolve_method_call(
+                        engine,
+                        obligation.receiver.as_ref(),
+                        name,
+                        &arg_types,
+                        obligation.span,
+                        &expected_ret,
+                    )
+                }
+            }
             CallCallee::Dynamic { .. } => None,
         };
         let (def_id, receiver, params, generic_inst) = if let Some(resolved) = resolved {
@@ -151,6 +208,10 @@ fn resolve_term(term: &TyTerm, engine: &TypecheckEngine) -> Type {
         TyTerm::Concrete(ty) => ty.clone(),
         TyTerm::Var(var) => engine.type_vars().apply(&Type::Var(*var)),
     }
+}
+
+fn is_unresolved_type(ty: &Type) -> bool {
+    matches!(ty, Type::Unknown | Type::Var(_))
 }
 
 fn collect_callable_def_types(engine: &TypecheckEngine) -> std::collections::HashMap<DefId, Type> {
@@ -219,6 +280,27 @@ fn resolve_named_call(
     ))
 }
 
+fn resolve_named_call_by_def_id(
+    engine: &TypecheckEngine,
+    name: &str,
+    def_id: DefId,
+    arg_types: &[Type],
+    span: crate::diag::Span,
+    expected_ret: &Type,
+) -> Option<ResolvedCall> {
+    let overloads = engine.env().func_sigs.get(name)?;
+    let sig = overloads
+        .iter()
+        .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())?;
+    Some(instantiate_call_sig(
+        sig,
+        arg_types,
+        None,
+        span,
+        expected_ret,
+    ))
+}
+
 fn resolve_method_call(
     engine: &TypecheckEngine,
     receiver: Option<&TyTerm>,
@@ -236,6 +318,39 @@ fn resolve_method_call(
     let by_name = engine.env().method_sigs.get(&owner)?;
     let overloads = by_name.get(method_name)?;
     let sig = pick_overload(overloads, arg_types.len())?;
+    let receiver = Some(CallParam {
+        mode: sig.self_mode.clone().unwrap_or(crate::tree::ParamMode::In),
+        ty: receiver_ty,
+    });
+    Some(instantiate_call_sig(
+        sig,
+        arg_types,
+        receiver,
+        span,
+        expected_ret,
+    ))
+}
+
+fn resolve_method_call_by_def_id(
+    engine: &TypecheckEngine,
+    receiver: Option<&TyTerm>,
+    method_name: &str,
+    def_id: DefId,
+    arg_types: &[Type],
+    span: crate::diag::Span,
+    expected_ret: &Type,
+) -> Option<ResolvedCall> {
+    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
+    let owner = match &receiver_ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::String => "string".to_string(),
+        _ => return None,
+    };
+    let by_name = engine.env().method_sigs.get(&owner)?;
+    let overloads = by_name.get(method_name)?;
+    let sig = overloads
+        .iter()
+        .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())?;
     let receiver = Some(CallParam {
         mode: sig.self_mode.clone().unwrap_or(crate::tree::ParamMode::In),
         ty: receiver_ty,

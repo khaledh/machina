@@ -47,6 +47,22 @@ impl TcUnifier {
         }
 
         match (left, right) {
+            (Type::Var(left_var), Type::Var(right_var)) => {
+                if left_var == right_var {
+                    return Ok(());
+                }
+                let left_rigid = self.vars.is_rigid(left_var);
+                let right_rigid = self.vars.is_rigid(right_var);
+                match (left_rigid, right_rigid) {
+                    (true, false) => self.bind_var(right_var, Type::Var(left_var)),
+                    (false, true) => self.bind_var(left_var, Type::Var(right_var)),
+                    (true, true) => Err(TcUnifyError::Mismatch(
+                        Type::Var(left_var),
+                        Type::Var(right_var),
+                    )),
+                    (false, false) => self.bind_var(left_var, Type::Var(right_var)),
+                }
+            }
             (Type::Var(var), ty) | (ty, Type::Var(var)) => self.bind_var(var, ty),
             (
                 Type::Fn {

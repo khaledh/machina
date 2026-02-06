@@ -5,12 +5,12 @@ use crate::resolve::{DefId, DefKind};
 use crate::tree::NodeId;
 use crate::tree::resolved::{
     BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, Expr, ExprKind, FuncDef, MatchArm,
-    MatchPattern, MethodDef, MethodSig, StmtExpr, StmtExprKind, StructFieldBindPattern, TypeExpr,
-    TypeParam, UnaryOp,
+    MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment, StructFieldBindPattern,
+    TypeExpr, TypeParam, UnaryOp,
 };
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
-use crate::typecheck::type_map::resolve_type_expr_with_params;
+use crate::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr_with_params};
 use crate::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
@@ -107,6 +107,29 @@ pub(crate) enum ExprObligation {
         expr_id: NodeId,
         target: TyTerm,
         fields: Vec<(String, TyTerm)>,
+        result: TyTerm,
+        span: Span,
+    },
+    TupleField {
+        expr_id: NodeId,
+        target: TyTerm,
+        index: usize,
+        result: TyTerm,
+        span: Span,
+    },
+    StructField {
+        expr_id: NodeId,
+        target: TyTerm,
+        field: String,
+        result: TyTerm,
+        span: Span,
+    },
+    StructFieldAssign {
+        stmt_id: NodeId,
+        target: TyTerm,
+        field: String,
+        assignee: TyTerm,
+        value: TyTerm,
         span: Span,
     },
 }
@@ -123,6 +146,7 @@ pub(crate) struct CallObligation {
     pub(crate) call_node: NodeId,
     pub(crate) span: Span,
     pub(crate) callee: CallCallee,
+    pub(crate) callee_ty: Option<TyTerm>,
     pub(crate) receiver: Option<TyTerm>,
     pub(crate) arg_terms: Vec<TyTerm>,
     pub(crate) ret_ty: TyTerm,
@@ -219,26 +243,56 @@ impl<'a> ConstraintCollector<'a> {
     }
 
     fn collect_module(&mut self) {
+        for func_decl in self.ctx.module.func_decls() {
+            self.collect_func_decl(func_decl);
+        }
         for func_def in self.ctx.module.func_defs() {
             self.collect_func_def(func_def);
         }
         for method_block in self.ctx.module.method_blocks() {
             for method_item in &method_block.method_items {
-                let MethodDef { sig, .. } = match method_item {
-                    crate::tree::resolved::MethodItem::Decl(_) => continue,
-                    crate::tree::resolved::MethodItem::Def(method_def) => method_def,
+                let sig = match method_item {
+                    crate::tree::resolved::MethodItem::Decl(method_decl) => &method_decl.sig,
+                    crate::tree::resolved::MethodItem::Def(method_def) => &method_def.sig,
                 };
                 self.collect_method_def(&method_block.type_name, method_item, sig);
             }
         }
     }
 
+    fn collect_func_decl(&mut self, func_decl: &crate::tree::resolved::FuncDecl) {
+        self.with_type_params(&func_decl.sig.type_params, |this| {
+            if let Some(fn_ty) = this.collect_function_signature(&func_decl.sig) {
+                let def_term = this.def_term(func_decl.def_id);
+                this.push_eq(
+                    def_term,
+                    TyTerm::Concrete(fn_ty),
+                    ConstraintReason::Decl(func_decl.def_id, func_decl.span),
+                );
+            }
+        });
+    }
+
     fn collect_func_def(&mut self, func_def: &FuncDef) {
         self.with_type_params(&func_def.sig.type_params, |this| {
+            if let Some(fn_ty) = this.collect_function_signature(&func_def.sig) {
+                let def_term = this.def_term(func_def.def_id);
+                this.push_eq(
+                    def_term,
+                    TyTerm::Concrete(fn_ty),
+                    ConstraintReason::Decl(func_def.def_id, func_def.span),
+                );
+            }
             let ret_ty = this.resolve_type_in_scope(&func_def.sig.ret_ty_expr);
             let return_term = ret_ty
                 .map(TyTerm::Concrete)
                 .unwrap_or_else(|_| this.fresh_var_term());
+            let func_node_term = this.node_term(func_def.id);
+            this.push_eq(
+                func_node_term,
+                return_term.clone(),
+                ConstraintReason::Decl(func_def.def_id, func_def.span),
+            );
             this.enter_callable(func_def.def_id, return_term.clone(), func_def.span);
 
             for param in &func_def.sig.params {
@@ -284,10 +338,26 @@ impl<'a> ConstraintCollector<'a> {
         };
 
         self.with_type_params(&sig.type_params, |this| {
+            if let Some(fn_ty) = this.collect_method_signature(type_name, sig) {
+                let def_term = this.def_term(method_def_id);
+                this.push_eq(
+                    def_term,
+                    TyTerm::Concrete(fn_ty),
+                    ConstraintReason::Decl(method_def_id, method_span),
+                );
+            }
             let ret_ty = this.resolve_type_in_scope(&sig.ret_ty_expr);
             let return_term = ret_ty
                 .map(TyTerm::Concrete)
                 .unwrap_or_else(|_| this.fresh_var_term());
+            if let crate::tree::resolved::MethodItem::Def(method_def) = method_item {
+                let method_node_term = this.node_term(method_def.id);
+                this.push_eq(
+                    method_node_term,
+                    return_term.clone(),
+                    ConstraintReason::Decl(method_def.def_id, method_def.span),
+                );
+            }
             this.enter_callable(method_def_id, return_term.clone(), method_span);
 
             let self_term = this.def_term(sig.self_param.def_id);
@@ -372,10 +442,33 @@ impl<'a> ConstraintCollector<'a> {
         )
     }
 
+    fn resolve_named_type_instance(&mut self, name: &str, type_args: &[TypeExpr]) -> Option<Type> {
+        let def_id = self.ctx.def_table.lookup_type_def_id(name)?;
+        let type_def = self.ctx.module.type_def_by_id(def_id)?;
+        let args = if type_args.is_empty() && type_def.type_params.is_empty() {
+            Vec::new()
+        } else if type_args.is_empty() {
+            type_def
+                .type_params
+                .iter()
+                .map(|_| Type::Var(self.vars.fresh_infer_local()))
+                .collect::<Vec<_>>()
+        } else {
+            let mut out = Vec::with_capacity(type_args.len());
+            for arg in type_args {
+                out.push(self.resolve_type_in_scope(arg).ok()?);
+            }
+            out
+        };
+        resolve_type_def_with_args(&self.ctx.def_table, &self.ctx.module, def_id, &args).ok()
+    }
+
     fn collect_expr(&mut self, expr: &Expr, expected: Option<TyTerm>) -> TyTerm {
         let expr_ty = self.node_term(expr.id);
-        if let Some(expected) = expected.clone() {
-            self.push_eq(
+        if let Some(expected) = expected.clone()
+            && !matches!(expr.kind, ExprKind::Var { .. } | ExprKind::Block { .. })
+        {
+            self.push_assignable(
                 expr_ty.clone(),
                 expected,
                 ConstraintReason::Expr(expr.id, expr.span),
@@ -389,7 +482,9 @@ impl<'a> ConstraintCollector<'a> {
                 ConstraintReason::Expr(expr.id, expr.span),
             ),
             ExprKind::IntLit(_) => {
-                if expected.is_none() {
+                let has_int_expected =
+                    matches!(expected.as_ref(), Some(TyTerm::Concrete(Type::Int { .. })));
+                if !has_int_expected {
                     self.push_eq(
                         expr_ty.clone(),
                         TyTerm::Concrete(Type::uint(64)),
@@ -407,13 +502,34 @@ impl<'a> ConstraintCollector<'a> {
                 TyTerm::Concrete(Type::Char),
                 ConstraintReason::Expr(expr.id, expr.span),
             ),
-            ExprKind::StringLit { .. } | ExprKind::StringFmt { .. } => self.push_eq(
+            ExprKind::StringLit { .. } => self.push_eq(
                 expr_ty.clone(),
                 TyTerm::Concrete(Type::String),
                 ConstraintReason::Expr(expr.id, expr.span),
             ),
-            ExprKind::HeapAlloc { expr: inner }
-            | ExprKind::Move { expr: inner }
+            ExprKind::StringFmt { segments } => {
+                for segment in segments {
+                    if let StringFmtSegment::Expr { expr, .. } = segment {
+                        self.collect_expr(expr, None);
+                    }
+                }
+                self.push_eq(
+                    expr_ty.clone(),
+                    TyTerm::Concrete(Type::String),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+            ExprKind::HeapAlloc { expr: inner } => {
+                let inner_ty = self.collect_expr(inner, None);
+                self.push_eq(
+                    expr_ty.clone(),
+                    TyTerm::Concrete(Type::Heap {
+                        elem_ty: Box::new(term_to_type(&inner_ty)),
+                    }),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+            ExprKind::Move { expr: inner }
             | ExprKind::Coerce { expr: inner, .. }
             | ExprKind::ImplicitMove { expr: inner }
             | ExprKind::AddrOf { expr: inner }
@@ -533,30 +649,32 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
             },
-            ExprKind::StructLit { fields, .. } => {
-                if let ExprKind::StructLit { name, .. } = &expr.kind {
-                    let known_struct = self.type_defs.get(name).cloned();
-                    if let Some(Type::Struct {
-                        fields: struct_fields,
-                        ..
-                    }) = known_struct.as_ref()
-                    {
-                        self.push_eq(
-                            expr_ty.clone(),
-                            TyTerm::Concrete(known_struct.clone().expect("known struct type")),
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                        for field in fields {
-                            let expected = struct_fields
-                                .iter()
-                                .find(|f| f.name == field.name)
-                                .map(|f| TyTerm::Concrete(f.ty.clone()));
-                            self.collect_expr(&field.value, expected);
-                        }
-                    } else {
-                        for field in fields {
-                            self.collect_expr(&field.value, None);
-                        }
+            ExprKind::StructLit {
+                name,
+                type_args,
+                fields,
+            } => {
+                let known_struct = self
+                    .type_defs
+                    .get(name)
+                    .cloned()
+                    .or_else(|| self.resolve_named_type_instance(name, type_args));
+                if let Some(Type::Struct {
+                    fields: struct_fields,
+                    ..
+                }) = known_struct.as_ref()
+                {
+                    self.push_eq(
+                        expr_ty.clone(),
+                        TyTerm::Concrete(known_struct.clone().expect("known struct type")),
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                    for field in fields {
+                        let expected = struct_fields
+                            .iter()
+                            .find(|f| f.name == field.name)
+                            .map(|f| TyTerm::Concrete(f.ty.clone()));
+                        self.collect_expr(&field.value, expected);
                     }
                 } else {
                     for field in fields {
@@ -564,58 +682,56 @@ impl<'a> ConstraintCollector<'a> {
                     }
                 }
             }
-            ExprKind::EnumVariant { payload, .. } => {
-                if let ExprKind::EnumVariant {
-                    enum_name, variant, ..
-                } = &expr.kind
-                {
-                    let known_enum = self.type_defs.get(enum_name).cloned();
-                    let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum
-                    {
-                        variants
-                            .iter()
-                            .find(|v| v.name == *variant)
-                            .map(|v| v.payload.clone())
-                    } else {
-                        None
-                    };
-                    let mut payload_terms = Vec::with_capacity(payload.len());
-                    let mut payload_nodes = Vec::with_capacity(payload.len());
-                    let mut payload_spans = Vec::with_capacity(payload.len());
-                    for (index, item) in payload.iter().enumerate() {
-                        payload_nodes.push(item.id);
-                        payload_spans.push(item.span);
-                        let expected = variant_payload_tys
-                            .as_ref()
-                            .and_then(|tys| tys.get(index))
-                            .cloned()
-                            .map(TyTerm::Concrete);
-                        payload_terms.push(self.collect_expr(item, expected));
-                    }
-                    if let Some(enum_ty) = known_enum {
-                        self.push_eq(
-                            expr_ty.clone(),
-                            TyTerm::Concrete(enum_ty),
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                    }
-                    self.out
-                        .expr_obligations
-                        .push(ExprObligation::EnumVariantPayload {
-                            expr_id: expr.id,
-                            enum_name: enum_name.clone(),
-                            variant: variant.clone(),
-                            payload: payload_terms,
-                            payload_nodes,
-                            payload_spans,
-                            span: expr.span,
-                        });
+            ExprKind::EnumVariant {
+                enum_name,
+                type_args,
+                variant,
+                payload,
+            } => {
+                let known_enum = self
+                    .type_defs
+                    .get(enum_name)
+                    .cloned()
+                    .or_else(|| self.resolve_named_type_instance(enum_name, type_args));
+                let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum {
+                    variants
+                        .iter()
+                        .find(|v| v.name == *variant)
+                        .map(|v| v.payload.clone())
                 } else {
-                    let mut payload_terms = Vec::with_capacity(payload.len());
-                    for item in payload {
-                        payload_terms.push(self.collect_expr(item, None));
-                    }
+                    None
+                };
+                let mut payload_terms = Vec::with_capacity(payload.len());
+                let mut payload_nodes = Vec::with_capacity(payload.len());
+                let mut payload_spans = Vec::with_capacity(payload.len());
+                for (index, item) in payload.iter().enumerate() {
+                    payload_nodes.push(item.id);
+                    payload_spans.push(item.span);
+                    let expected = variant_payload_tys
+                        .as_ref()
+                        .and_then(|tys| tys.get(index))
+                        .cloned()
+                        .map(TyTerm::Concrete);
+                    payload_terms.push(self.collect_expr(item, expected));
                 }
+                if let Some(enum_ty) = known_enum {
+                    self.push_eq(
+                        expr_ty.clone(),
+                        TyTerm::Concrete(enum_ty),
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                }
+                self.out
+                    .expr_obligations
+                    .push(ExprObligation::EnumVariantPayload {
+                        expr_id: expr.id,
+                        enum_name: enum_name.clone(),
+                        variant: variant.clone(),
+                        payload: payload_terms,
+                        payload_nodes,
+                        payload_spans,
+                        span: expr.span,
+                    });
             }
             ExprKind::StructUpdate { target, fields } => {
                 let target_ty = self.collect_expr(target, None);
@@ -630,6 +746,7 @@ impl<'a> ConstraintCollector<'a> {
                         expr_id: expr.id,
                         target: target_ty,
                         fields: field_terms,
+                        result: expr_ty.clone(),
                         span: expr.span,
                     });
             }
@@ -654,8 +771,25 @@ impl<'a> ConstraintCollector<'a> {
                     span: expr.span,
                 });
             }
-            ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
-                self.collect_expr(target, None);
+            ExprKind::TupleField { target, index } => {
+                let target_ty = self.collect_expr(target, None);
+                self.out.expr_obligations.push(ExprObligation::TupleField {
+                    expr_id: expr.id,
+                    target: target_ty,
+                    index: *index,
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
+            }
+            ExprKind::StructField { target, field } => {
+                let target_ty = self.collect_expr(target, None);
+                self.out.expr_obligations.push(ExprObligation::StructField {
+                    expr_id: expr.id,
+                    target: target_ty,
+                    field: field.clone(),
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
             }
             ExprKind::If {
                 cond,
@@ -749,6 +883,7 @@ impl<'a> ConstraintCollector<'a> {
                     callee: CallCallee::Method {
                         name: method_name.clone(),
                     },
+                    callee_ty: None,
                     receiver: Some(receiver_ty),
                     arg_terms,
                     ret_ty: expr_ty.clone(),
@@ -760,7 +895,11 @@ impl<'a> ConstraintCollector<'a> {
                 self.collect_binop_constraints(expr, left_ty, right_ty);
             }
             ExprKind::UnaryOp { op, expr: inner } => {
-                let inner_ty = self.collect_expr(inner, None);
+                let inner_expected = match op {
+                    UnaryOp::Neg | UnaryOp::BitNot => expected.clone(),
+                    UnaryOp::LogicalNot => None,
+                };
+                let inner_ty = self.collect_expr(inner, inner_expected);
                 self.out.expr_obligations.push(ExprObligation::UnaryOp {
                     expr_id: expr.id,
                     op: *op,
@@ -805,6 +944,12 @@ impl<'a> ConstraintCollector<'a> {
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 }
+                let closure_def_ty = self.def_term(*def_id);
+                self.push_eq(
+                    closure_def_ty,
+                    expr_ty.clone(),
+                    ConstraintReason::Decl(*def_id, expr.span),
+                );
 
                 let return_term = fn_ty
                     .as_ref()
@@ -883,7 +1028,7 @@ impl<'a> ConstraintCollector<'a> {
     }
 
     fn collect_call(&mut self, call_expr: &Expr, callee: &Expr, args: &[CallArg]) {
-        self.collect_expr(callee, None);
+        let callee_ty = self.collect_expr(callee, None);
         let arg_terms = args
             .iter()
             .map(|arg| self.collect_expr(&arg.expr, None))
@@ -911,6 +1056,7 @@ impl<'a> ConstraintCollector<'a> {
             call_node: call_expr.id,
             span: call_expr.span,
             callee: callee_kind,
+            callee_ty: Some(callee_ty),
             receiver: None,
             arg_terms,
             ret_ty,
@@ -1014,11 +1160,13 @@ impl<'a> ConstraintCollector<'a> {
                 if let Some(decl_ty) = expected_decl_ty.clone() {
                     self.push_assignable(
                         value_ty.clone(),
-                        decl_ty,
+                        decl_ty.clone(),
                         ConstraintReason::Stmt(stmt.id, stmt.span),
                     );
+                    self.collect_bind_pattern(pattern, decl_ty);
+                } else {
+                    self.collect_bind_pattern(pattern, value_ty);
                 }
-                self.collect_bind_pattern(pattern, value_ty);
             }
             StmtExprKind::VarDecl {
                 def_id, decl_ty, ..
@@ -1035,9 +1183,29 @@ impl<'a> ConstraintCollector<'a> {
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
-                let lhs_ty = self.collect_expr(assignee, None);
-                let rhs_ty = self.collect_expr(value, Some(lhs_ty.clone()));
-                self.push_assignable(rhs_ty, lhs_ty, ConstraintReason::Stmt(stmt.id, stmt.span));
+                if let ExprKind::StructField { target, field } = &assignee.kind {
+                    let target_ty = self.collect_expr(target, None);
+                    let assignee_ty = self.node_term(assignee.id);
+                    let value_ty = self.collect_expr(value, None);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::StructFieldAssign {
+                            stmt_id: stmt.id,
+                            target: target_ty,
+                            field: field.clone(),
+                            assignee: assignee_ty,
+                            value: value_ty,
+                            span: stmt.span,
+                        });
+                } else {
+                    let lhs_ty = self.collect_expr(assignee, None);
+                    let rhs_ty = self.collect_expr(value, Some(lhs_ty.clone()));
+                    self.push_assignable(
+                        rhs_ty,
+                        lhs_ty,
+                        ConstraintReason::Stmt(stmt.id, stmt.span),
+                    );
+                }
             }
             StmtExprKind::While { cond, body } => {
                 self.collect_expr(cond, Some(TyTerm::Concrete(Type::Bool)));
@@ -1080,13 +1248,21 @@ impl<'a> ConstraintCollector<'a> {
             StmtExprKind::Return { value } => {
                 let expected_return = self.current_return_ty();
                 if let Some(value) = value {
-                    let value_ty = self.collect_expr(value, expected_return.clone());
+                    let value_expected =
+                        if matches!(expected_return, Some(TyTerm::Concrete(Type::Unit))) {
+                            None
+                        } else {
+                            expected_return.clone()
+                        };
+                    let value_ty = self.collect_expr(value, value_expected);
                     if let Some(expected_return) = expected_return.clone() {
-                        self.push_assignable(
-                            value_ty,
-                            expected_return,
-                            ConstraintReason::Return(stmt.id, stmt.span),
-                        );
+                        if !matches!(expected_return, TyTerm::Concrete(Type::Unit)) {
+                            self.push_assignable(
+                                value_ty,
+                                expected_return,
+                                ConstraintReason::Return(stmt.id, stmt.span),
+                            );
+                        }
                     }
                 }
                 self.out.control_facts.push(ControlFact::Return {
@@ -1112,7 +1288,7 @@ impl<'a> ConstraintCollector<'a> {
             BindPatternKind::Name { def_id, .. } => {
                 let bind_ty = self.def_term(*def_id);
                 let node_ty = self.node_term(pattern.id);
-                self.push_assignable(
+                self.push_eq(
                     value_ty,
                     bind_ty.clone(),
                     ConstraintReason::Pattern(pattern.id, pattern.span),
@@ -1176,12 +1352,13 @@ impl<'a> ConstraintCollector<'a> {
                         ..
                     } in fields
                     {
-                        let child_ty = struct_fields
+                        if let Some(field_ty) = struct_fields
                             .iter()
                             .find(|field| field.name == *name)
                             .map(|field| TyTerm::Concrete(field.ty.clone()))
-                            .unwrap_or_else(|| self.fresh_var_term());
-                        self.collect_bind_pattern(child, child_ty);
+                        {
+                            self.collect_bind_pattern(child, field_ty);
+                        }
                     }
                 } else {
                     for StructFieldBindPattern { pattern: child, .. } in fields {
@@ -1310,6 +1487,70 @@ impl<'a> ConstraintCollector<'a> {
         })
     }
 
+    fn collect_function_signature(&self, sig: &crate::tree::resolved::FunctionSig) -> Option<Type> {
+        let params = sig
+            .params
+            .iter()
+            .map(|param| {
+                resolve_type_expr_with_params(
+                    &self.ctx.def_table,
+                    &self.ctx.module,
+                    &param.typ,
+                    self.current_type_params(),
+                )
+                .map(|ty| crate::types::FnParam {
+                    mode: map_param_mode(param.mode.clone()),
+                    ty,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let ret_ty = resolve_type_expr_with_params(
+            &self.ctx.def_table,
+            &self.ctx.module,
+            &sig.ret_ty_expr,
+            self.current_type_params(),
+        )
+        .ok()?;
+        Some(Type::Fn {
+            params,
+            ret_ty: Box::new(ret_ty),
+        })
+    }
+
+    fn collect_method_signature(&self, type_name: &str, sig: &MethodSig) -> Option<Type> {
+        let self_ty = self.type_defs.get(type_name).cloned()?;
+        let mut params = Vec::with_capacity(sig.params.len() + 1);
+        params.push(crate::types::FnParam {
+            mode: map_param_mode(sig.self_param.mode.clone()),
+            ty: self_ty,
+        });
+        for param in &sig.params {
+            let ty = resolve_type_expr_with_params(
+                &self.ctx.def_table,
+                &self.ctx.module,
+                &param.typ,
+                self.current_type_params(),
+            )
+            .ok()?;
+            params.push(crate::types::FnParam {
+                mode: map_param_mode(param.mode.clone()),
+                ty,
+            });
+        }
+        let ret_ty = resolve_type_expr_with_params(
+            &self.ctx.def_table,
+            &self.ctx.module,
+            &sig.ret_ty_expr,
+            self.current_type_params(),
+        )
+        .ok()?;
+        Some(Type::Fn {
+            params,
+            ret_ty: Box::new(ret_ty),
+        })
+    }
+
     fn block_has_explicit_return(&self, items: &[BlockItem]) -> bool {
         items.iter().any(|item| match item {
             BlockItem::Stmt(stmt) => self.stmt_has_return(stmt),
@@ -1355,6 +1596,15 @@ fn term_to_type(term: &TyTerm) -> Type {
     match term {
         TyTerm::Concrete(ty) => ty.clone(),
         TyTerm::Var(var) => Type::Var(*var),
+    }
+}
+
+fn map_param_mode(mode: crate::tree::ParamMode) -> crate::types::FnParamMode {
+    match mode {
+        crate::tree::ParamMode::In => crate::types::FnParamMode::In,
+        crate::tree::ParamMode::InOut => crate::types::FnParamMode::InOut,
+        crate::tree::ParamMode::Out => crate::types::FnParamMode::Out,
+        crate::tree::ParamMode::Sink => crate::types::FnParamMode::Sink,
     }
 }
 

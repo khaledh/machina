@@ -2,20 +2,23 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::diag::Span;
-use crate::resolve::DefId;
+use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
-use crate::tree::resolved::{BindPattern, BindPatternKind};
-use crate::typecheck::constraints::{Constraint, ConstraintReason, ExprObligation, TyTerm};
-use crate::typecheck::engine::TypecheckEngine;
+use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding};
+use crate::typecheck::constraints::{
+    CallCallee, CallObligation, Constraint, ConstraintReason, ExprObligation, TyTerm,
+};
+use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::unify::{TcUnifier, TcUnifyError};
-use crate::types::{Type, TypeAssignability, type_assignable};
+use crate::types::{TyVarId, Type, TypeAssignability, array_to_slice_assignable, type_assignable};
 
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub(crate) struct SolveOutput {
     pub(crate) resolved_node_types: HashMap<NodeId, Type>,
     pub(crate) resolved_def_types: HashMap<DefId, Type>,
+    pub(crate) resolved_call_defs: HashMap<NodeId, DefId>,
     pub(crate) failed_constraints: usize,
 }
 
@@ -29,36 +32,34 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let mut non_expr_errors = Vec::new();
     let mut deferred_expr_errors = Vec::new();
     let mut deferred_pattern_errors = Vec::new();
-    for constraint in &constrain.constraints {
-        let result = match constraint {
-            Constraint::Eq { left, right, .. } => unifier.unify(
-                &canonicalize_type(term_as_type(left)),
-                &canonicalize_type(term_as_type(right)),
-            ),
-            Constraint::Assignable { from, to, .. } => {
-                solve_assignable_constraint(from, to, &mut unifier)
-            }
-        };
-        if let Err(err) = result {
-            failed_constraints += 1;
-            match reason_subject_id(constraint) {
-                ConstraintSubject::Expr(expr_id) => {
-                    deferred_expr_errors.push((expr_id, err, reason_span(constraint)));
-                }
-                ConstraintSubject::Pattern(pattern_id) => {
-                    deferred_pattern_errors.push((pattern_id, err, reason_span(constraint)));
-                }
-                ConstraintSubject::Other => {
-                    non_expr_errors.push(unify_error_to_diag(err, reason_span(constraint)));
-                }
-            }
-        }
+    for constraint in constrain
+        .constraints
+        .iter()
+        .filter(|constraint| matches!(constraint, Constraint::Eq { .. }))
+    {
+        apply_constraint(
+            constraint,
+            &mut unifier,
+            &mut failed_constraints,
+            &mut deferred_expr_errors,
+            &mut deferred_pattern_errors,
+            &mut non_expr_errors,
+        );
+    }
+
+    for constraint in constrain
+        .constraints
+        .iter()
+        .filter(|constraint| matches!(constraint, Constraint::Assignable { .. }))
+    {
+        apply_assignable_inference(constraint, &mut unifier);
     }
 
     let (mut expr_errors, covered_exprs) = check_expr_obligations(
         &constrain.expr_obligations,
-        &unifier,
+        &mut unifier,
         &engine.env().type_defs,
+        &engine.env().property_sigs,
     );
     let index_nodes = collect_index_nodes(&constrain.expr_obligations);
     let enum_payload_nodes = collect_enum_payload_nodes(&constrain.expr_obligations);
@@ -66,6 +67,29 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         .iter()
         .map(TypeCheckError::span)
         .collect::<Vec<_>>();
+
+    let (mut call_errors, resolved_call_defs) = check_call_obligations(
+        &constrain.call_obligations,
+        &mut unifier,
+        &engine.env().func_sigs,
+        &engine.env().method_sigs,
+    );
+
+    for constraint in constrain
+        .constraints
+        .iter()
+        .filter(|constraint| matches!(constraint, Constraint::Assignable { .. }))
+    {
+        apply_constraint(
+            constraint,
+            &mut unifier,
+            &mut failed_constraints,
+            &mut deferred_expr_errors,
+            &mut deferred_pattern_errors,
+            &mut non_expr_errors,
+        );
+    }
+
     for (expr_id, err, span) in deferred_expr_errors {
         if let Some(index_span) = index_nodes.get(&expr_id)
             && let Some(index_error) = remap_index_unify_error(&err, *index_span)
@@ -85,8 +109,11 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         }
     }
 
-    let (mut pattern_errors, covered_patterns) =
-        check_pattern_obligations(&constrain.pattern_obligations, &unifier);
+    let (mut pattern_errors, covered_patterns) = check_pattern_obligations(
+        &constrain.pattern_obligations,
+        &constrain.def_terms,
+        &mut unifier,
+    );
     for (pattern_id, err, span) in deferred_pattern_errors {
         if !covered_patterns.contains(&pattern_id) {
             pattern_errors.push(unify_error_to_diag(err, span));
@@ -94,6 +121,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     }
 
     let mut errors = Vec::new();
+    errors.append(&mut call_errors);
     errors.extend(expr_errors);
     errors.extend(pattern_errors);
     errors.extend(non_expr_errors);
@@ -101,6 +129,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let mut output = SolveOutput {
         resolved_node_types: HashMap::new(),
         resolved_def_types: HashMap::new(),
+        resolved_call_defs,
         failed_constraints,
     };
 
@@ -117,6 +146,14 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         );
     }
 
+    errors.extend(check_unresolved_local_infer_vars(
+        &output.resolved_def_types,
+        &constrain.constraints,
+        &constrain.pattern_obligations,
+        &engine.context().def_table,
+        unifier.vars(),
+    ));
+
     *engine.type_vars_mut() = unifier.vars().clone();
     engine.state_mut().solve = output;
 
@@ -125,6 +162,43 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     } else {
         engine.state_mut().diags.extend(errors.clone());
         Err(errors)
+    }
+}
+
+fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
+    if let Constraint::Assignable { from, to, .. } = constraint {
+        let _ = solve_assignable_constraint(from, to, unifier);
+    }
+}
+
+fn apply_constraint(
+    constraint: &Constraint,
+    unifier: &mut TcUnifier,
+    failed_constraints: &mut usize,
+    deferred_expr_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
+    deferred_pattern_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
+    non_expr_errors: &mut Vec<TypeCheckError>,
+) {
+    let result = match constraint {
+        Constraint::Eq { left, right, .. } => unifier.unify(
+            &canonicalize_type(term_as_type(left)),
+            &canonicalize_type(term_as_type(right)),
+        ),
+        Constraint::Assignable { from, to, .. } => solve_assignable_constraint(from, to, unifier),
+    };
+    if let Err(err) = result {
+        *failed_constraints += 1;
+        match reason_subject_id(constraint) {
+            ConstraintSubject::Expr(expr_id) => {
+                deferred_expr_errors.push((expr_id, err, reason_span(constraint)));
+            }
+            ConstraintSubject::Pattern(pattern_id) => {
+                deferred_pattern_errors.push((pattern_id, err, reason_span(constraint)));
+            }
+            ConstraintSubject::Other => {
+                non_expr_errors.push(unify_error_to_diag(err, reason_span(constraint)));
+            }
+        }
     }
 }
 
@@ -147,6 +221,14 @@ fn solve_assignable_constraint(
 
     if !is_unresolved(&from_applied) && !is_unresolved(&to_applied) {
         return match type_assignable(&from_applied, &to_applied) {
+            TypeAssignability::Incompatible
+                if array_to_slice_assignable(&from_applied, &to_applied) =>
+            {
+                Ok(())
+            }
+            TypeAssignability::Incompatible if int_repr_compatible(&from_applied, &to_applied) => {
+                Ok(())
+            }
             TypeAssignability::Incompatible => {
                 Err(TcUnifyError::Mismatch(to_applied, from_applied))
             }
@@ -154,7 +236,323 @@ fn solve_assignable_constraint(
         };
     }
 
-    unifier.unify(&from_raw, &to_raw)
+    unifier.unify(&erase_refinements(&from_raw), &erase_refinements(&to_raw))
+}
+
+fn solve_assignable_types(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+) -> Result<(), TcUnifyError> {
+    let from_raw = canonicalize_type(from.clone());
+    let to_raw = canonicalize_type(to.clone());
+    let from_applied = canonicalize_type(unifier.apply(&from_raw));
+    let to_applied = canonicalize_type(unifier.apply(&to_raw));
+
+    if !is_unresolved(&from_applied) && !is_unresolved(&to_applied) {
+        return match type_assignable(&from_applied, &to_applied) {
+            TypeAssignability::Incompatible
+                if array_to_slice_assignable(&from_applied, &to_applied) =>
+            {
+                Ok(())
+            }
+            TypeAssignability::Incompatible if int_repr_compatible(&from_applied, &to_applied) => {
+                Ok(())
+            }
+            TypeAssignability::Incompatible => {
+                Err(TcUnifyError::Mismatch(to_applied, from_applied))
+            }
+            _ => Ok(()),
+        };
+    }
+
+    unifier.unify(&erase_refinements(&from_raw), &erase_refinements(&to_raw))
+}
+
+fn assignability_rank(from: &Type, to: &Type) -> i32 {
+    if is_unresolved(from) || is_unresolved(to) {
+        return 0;
+    }
+    match type_assignable(from, to) {
+        TypeAssignability::Exact => 3,
+        TypeAssignability::IntLitToInt { .. } => 2,
+        TypeAssignability::RefinedToInt | TypeAssignability::IntToRefined { .. } => 1,
+        TypeAssignability::Incompatible => -1000,
+    }
+}
+
+fn check_call_obligations(
+    obligations: &[CallObligation],
+    unifier: &mut TcUnifier,
+    func_sigs: &HashMap<String, Vec<CollectedCallableSig>>,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> (Vec<TypeCheckError>, HashMap<NodeId, DefId>) {
+    let mut errors = Vec::new();
+    let mut resolved_call_defs = HashMap::new();
+    for obligation in obligations {
+        if let CallCallee::Dynamic { .. } = &obligation.callee {
+            if let Some(callee_term) = &obligation.callee_ty {
+                let callee_ty = resolve_term(callee_term, unifier);
+                if let Type::Fn { params, ret_ty } = callee_ty {
+                    if params.len() != obligation.arg_terms.len() {
+                        errors.push(
+                            TypeCheckErrorKind::ArgCountMismatch(
+                                "<fn>".to_string(),
+                                params.len(),
+                                obligation.arg_terms.len(),
+                                obligation.span,
+                            )
+                            .into(),
+                        );
+                        continue;
+                    }
+                    let mut arg_failed = false;
+                    for (index, (arg_term, param)) in
+                        obligation.arg_terms.iter().zip(params.iter()).enumerate()
+                    {
+                        let arg_ty = resolve_term(arg_term, unifier);
+                        if let Err(_) = solve_assignable_types(&arg_ty, &param.ty, unifier) {
+                            errors.push(
+                                TypeCheckErrorKind::ArgTypeMismatch(
+                                    index + 1,
+                                    canonicalize_type(unifier.apply(&param.ty)),
+                                    canonicalize_type(unifier.apply(&arg_ty)),
+                                    obligation.span,
+                                )
+                                .into(),
+                            );
+                            arg_failed = true;
+                            break;
+                        }
+                    }
+                    if arg_failed {
+                        continue;
+                    }
+                    if let Err(err) = unifier.unify(&term_as_type(&obligation.ret_ty), &ret_ty) {
+                        errors.push(unify_error_to_diag(err, obligation.span));
+                    }
+                }
+            }
+            continue;
+        }
+
+        let mut candidates: Vec<&CollectedCallableSig> = match &obligation.callee {
+            CallCallee::NamedFunction { name, .. } => {
+                named_call_candidates(name, obligation.arg_terms.len(), func_sigs)
+            }
+            CallCallee::Method { name } => {
+                let receiver_ty = obligation
+                    .receiver
+                    .as_ref()
+                    .map(|term| resolve_term(term, unifier))
+                    .map(peel_heap);
+                method_call_candidates(
+                    name,
+                    receiver_ty.as_ref(),
+                    obligation.arg_terms.len(),
+                    method_sigs,
+                )
+            }
+            CallCallee::Dynamic { .. } => Vec::new(),
+        };
+
+        if candidates.is_empty() {
+            let name = match &obligation.callee {
+                CallCallee::NamedFunction { name, .. } => name.clone(),
+                CallCallee::Method { name } => name.clone(),
+                CallCallee::Dynamic { expr_id } => format!("<dynamic:{expr_id}>"),
+            };
+            errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
+            continue;
+        }
+
+        let mut best_choice: Option<(i32, TcUnifier, DefId)> = None;
+        let mut first_error = None;
+        for sig in candidates.drain(..) {
+            let mut trial = unifier.clone();
+            let (inst_params, inst_ret) = instantiate_sig(sig, &mut trial);
+            let mut failed = false;
+            let mut score = 0i32;
+            for (index, (arg_term, param_ty)) in obligation
+                .arg_terms
+                .iter()
+                .zip(inst_params.iter())
+                .enumerate()
+            {
+                let arg_ty = resolve_term(arg_term, &trial);
+                if let Err(_) = solve_assignable_types(&arg_ty, param_ty, &mut trial) {
+                    first_error.get_or_insert_with(|| {
+                        TypeCheckErrorKind::ArgTypeMismatch(
+                            index + 1,
+                            canonicalize_type(trial.apply(param_ty)),
+                            canonicalize_type(trial.apply(&arg_ty)),
+                            obligation.span,
+                        )
+                        .into()
+                    });
+                    failed = true;
+                    break;
+                }
+                score += assignability_rank(
+                    &resolve_term(arg_term, &trial),
+                    &canonicalize_type(trial.apply(param_ty)),
+                );
+            }
+            if failed {
+                continue;
+            }
+            if let Err(err) = trial.unify(&term_as_type(&obligation.ret_ty), &inst_ret) {
+                first_error.get_or_insert_with(|| unify_error_to_diag(err, obligation.span));
+                continue;
+            }
+            match &best_choice {
+                Some((best_score, _, _)) if score <= *best_score => {}
+                _ => best_choice = Some((score, trial, sig.def_id)),
+            }
+        }
+
+        if let Some((_, next, def_id)) = best_choice {
+            *unifier = next;
+            resolved_call_defs.insert(obligation.call_node, def_id);
+        } else if let Some(err) = first_error {
+            errors.push(err);
+        } else {
+            let name = match &obligation.callee {
+                CallCallee::NamedFunction { name, .. } => name.clone(),
+                CallCallee::Method { name } => name.clone(),
+                CallCallee::Dynamic { expr_id } => format!("<dynamic:{expr_id}>"),
+            };
+            errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
+        }
+    }
+    (errors, resolved_call_defs)
+}
+
+fn named_call_candidates<'a>(
+    name: &str,
+    arity: usize,
+    func_sigs: &'a HashMap<String, Vec<CollectedCallableSig>>,
+) -> Vec<&'a CollectedCallableSig> {
+    func_sigs
+        .get(name)
+        .map(|overloads| {
+            overloads
+                .iter()
+                .filter(|sig| sig.params.len() == arity)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn method_call_candidates<'a>(
+    method_name: &str,
+    receiver_ty: Option<&Type>,
+    arity: usize,
+    method_sigs: &'a HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Vec<&'a CollectedCallableSig> {
+    let Some(receiver_ty) = receiver_ty else {
+        return Vec::new();
+    };
+    let owner = match receiver_ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::String => "string".to_string(),
+        _ => return Vec::new(),
+    };
+    let Some(by_name) = method_sigs.get(&owner) else {
+        return Vec::new();
+    };
+    let Some(overloads) = by_name.get(method_name) else {
+        return Vec::new();
+    };
+    overloads
+        .iter()
+        .filter(|sig| sig.params.len() == arity)
+        .collect::<Vec<_>>()
+}
+
+fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> (Vec<Type>, Type) {
+    if sig.type_param_count == 0 {
+        return (
+            sig.params.iter().map(|param| param.ty.clone()).collect(),
+            sig.ret_ty.clone(),
+        );
+    }
+    let mut map = HashMap::new();
+    for index in 0..sig.type_param_count {
+        let fresh = unifier.vars_mut().fresh_infer_local();
+        map.insert(TyVarId::new(index as u32), Type::Var(fresh));
+    }
+    let params = sig
+        .params
+        .iter()
+        .map(|param| subst_type_vars(&param.ty, &map))
+        .collect::<Vec<_>>();
+    let ret = subst_type_vars(&sig.ret_ty, &map);
+    (params, ret)
+}
+
+fn subst_type_vars(ty: &Type, map: &HashMap<TyVarId, Type>) -> Type {
+    match ty {
+        Type::Var(var) => map.get(var).cloned().unwrap_or(Type::Var(*var)),
+        Type::Fn { params, ret_ty } => Type::Fn {
+            params: params
+                .iter()
+                .map(|param| crate::types::FnParam {
+                    mode: param.mode,
+                    ty: subst_type_vars(&param.ty, map),
+                })
+                .collect(),
+            ret_ty: Box::new(subst_type_vars(ret_ty, map)),
+        },
+        Type::Range { elem_ty } => Type::Range {
+            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
+        },
+        Type::Array { elem_ty, dims } => Type::Array {
+            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
+            dims: dims.clone(),
+        },
+        Type::Tuple { field_tys } => Type::Tuple {
+            field_tys: field_tys
+                .iter()
+                .map(|field_ty| subst_type_vars(field_ty, map))
+                .collect(),
+        },
+        Type::Struct { name, fields } => Type::Struct {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| crate::types::StructField {
+                    name: field.name.clone(),
+                    ty: subst_type_vars(&field.ty, map),
+                })
+                .collect(),
+        },
+        Type::Enum { name, variants } => Type::Enum {
+            name: name.clone(),
+            variants: variants
+                .iter()
+                .map(|variant| crate::types::EnumVariant {
+                    name: variant.name.clone(),
+                    payload: variant
+                        .payload
+                        .iter()
+                        .map(|payload_ty| subst_type_vars(payload_ty, map))
+                        .collect(),
+                })
+                .collect(),
+        },
+        Type::Slice { elem_ty } => Type::Slice {
+            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
+        },
+        Type::Heap { elem_ty } => Type::Heap {
+            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
+        },
+        Type::Ref { mutable, elem_ty } => Type::Ref {
+            mutable: *mutable,
+            elem_ty: Box::new(subst_type_vars(elem_ty, map)),
+        },
+        other => other.clone(),
+    }
 }
 
 fn reason_span(constraint: &Constraint) -> Span {
@@ -191,8 +589,9 @@ fn reason_subject_id(constraint: &Constraint) -> ConstraintSubject {
 
 fn check_expr_obligations(
     obligations: &[ExprObligation],
-    unifier: &TcUnifier,
+    unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
+    property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
     let mut covered_exprs = HashSet::new();
@@ -288,10 +687,11 @@ fn check_expr_obligations(
                 indices,
                 index_nodes,
                 index_spans,
+                result,
                 span,
-                ..
             } => {
                 let target_ty = resolve_term(target, unifier);
+                let indexed_target_ty = peel_heap(target_ty.clone());
                 if let Some((idx_i, bad_idx_ty)) = indices
                     .iter()
                     .map(|term| resolve_term(term, unifier))
@@ -307,8 +707,8 @@ fn check_expr_obligations(
                     continue;
                 }
 
-                match &target_ty {
-                    Type::Array { dims, .. } => {
+                match &indexed_target_ty {
+                    Type::Array { elem_ty, dims } => {
                         if indices.len() > dims.len() {
                             errors.push(
                                 TypeCheckErrorKind::TooManyIndices(
@@ -319,13 +719,43 @@ fn check_expr_obligations(
                                 .into(),
                             );
                             covered_exprs.insert(*expr_id);
+                            continue;
                         }
+                        let result_ty = if indices.len() == dims.len() {
+                            (**elem_ty).clone()
+                        } else {
+                            Type::Array {
+                                elem_ty: elem_ty.clone(),
+                                dims: dims[indices.len()..].to_vec(),
+                            }
+                        };
+                        let _ = unifier.unify(&term_as_type(result), &result_ty);
                     }
-                    Type::Slice { .. } | Type::String => {}
+                    Type::Slice { elem_ty } => {
+                        if indices.len() != 1 {
+                            errors.push(
+                                TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let _ = unifier.unify(&term_as_type(result), elem_ty);
+                    }
+                    Type::String => {
+                        if indices.len() != 1 {
+                            errors.push(
+                                TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let _ = unifier.unify(&term_as_type(result), &Type::uint(8));
+                    }
                     ty if is_unresolved(ty) => {}
                     _ => {
                         errors.push(
-                            TypeCheckErrorKind::InvalidIndexTargetType(target_ty, *span).into(),
+                            TypeCheckErrorKind::InvalidIndexTargetType(indexed_target_ty, *span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                     }
@@ -336,10 +766,11 @@ fn check_expr_obligations(
                 target,
                 start,
                 end,
+                result,
                 span,
-                ..
             } => {
                 let target_ty = resolve_term(target, unifier);
+                let sliced_target_ty = peel_heap(target_ty.clone());
                 let mut bad_bound_ty = None;
                 if let Some(start_ty) = start.as_ref().map(|term| resolve_term(term, unifier))
                     && !is_int_like(&start_ty)
@@ -360,28 +791,89 @@ fn check_expr_obligations(
                     continue;
                 }
 
-                match &target_ty {
-                    Type::Array { dims, .. } => {
+                match &sliced_target_ty {
+                    Type::Array { elem_ty, dims } => {
                         if dims.is_empty() {
                             errors.push(
-                                TypeCheckErrorKind::SliceTargetZeroDimArray(target_ty, *span)
-                                    .into(),
+                                TypeCheckErrorKind::SliceTargetZeroDimArray(
+                                    sliced_target_ty,
+                                    *span,
+                                )
+                                .into(),
                             );
                             covered_exprs.insert(*expr_id);
+                            continue;
                         }
+                        let slice_elem_ty = if dims.len() == 1 {
+                            (**elem_ty).clone()
+                        } else {
+                            Type::Array {
+                                elem_ty: elem_ty.clone(),
+                                dims: dims[1..].to_vec(),
+                            }
+                        };
+                        let _ = unifier.unify(
+                            &term_as_type(result),
+                            &Type::Slice {
+                                elem_ty: Box::new(slice_elem_ty),
+                            },
+                        );
                     }
-                    Type::String => {}
+                    Type::Slice { elem_ty } => {
+                        let _ = unifier.unify(
+                            &term_as_type(result),
+                            &Type::Slice {
+                                elem_ty: elem_ty.clone(),
+                            },
+                        );
+                    }
+                    Type::String => {
+                        let _ = unifier.unify(
+                            &term_as_type(result),
+                            &Type::Slice {
+                                elem_ty: Box::new(Type::uint(8)),
+                            },
+                        );
+                    }
                     ty if is_unresolved(ty) => {}
                     _ => {
                         errors.push(
-                            TypeCheckErrorKind::SliceTargetNotArrayOrString(target_ty, *span)
-                                .into(),
+                            TypeCheckErrorKind::SliceTargetNotArrayOrString(
+                                sliced_target_ty,
+                                *span,
+                            )
+                            .into(),
                         );
                         covered_exprs.insert(*expr_id);
                     }
                 }
             }
-            ExprObligation::Range { .. } => {}
+            ExprObligation::Range {
+                expr_id,
+                start,
+                end,
+                result,
+                span,
+            } => {
+                let start_ty = resolve_term(start, unifier);
+                if !is_int_like(&start_ty) && !is_unresolved(&start_ty) {
+                    errors.push(TypeCheckErrorKind::IndexTypeNotInt(start_ty, *span).into());
+                    covered_exprs.insert(*expr_id);
+                    continue;
+                }
+                let end_ty = resolve_term(end, unifier);
+                if !is_int_like(&end_ty) && !is_unresolved(&end_ty) {
+                    errors.push(TypeCheckErrorKind::IndexTypeNotInt(end_ty, *span).into());
+                    covered_exprs.insert(*expr_id);
+                    continue;
+                }
+                let _ = unifier.unify(
+                    &term_as_type(result),
+                    &Type::Range {
+                        elem_ty: Box::new(Type::uint(64)),
+                    },
+                );
+            }
             ExprObligation::ForIter {
                 stmt_id,
                 iter,
@@ -395,19 +887,20 @@ fn check_expr_obligations(
                     continue;
                 }
 
-                let pattern_ty = resolve_term(pattern, unifier);
-                if let Some(elem_ty) = iterable_elem_type(&iter_ty)
-                    && matches!(
+                if let Some(elem_ty) = iterable_elem_type(&iter_ty) {
+                    let _ = unifier.unify(&term_as_type(pattern), &elem_ty);
+                    let pattern_ty = resolve_term(pattern, unifier);
+                    if matches!(
                         type_assignable(&pattern_ty, &elem_ty),
                         TypeAssignability::Incompatible
-                    )
-                    && !is_unresolved(&pattern_ty)
-                    && !is_unresolved(&elem_ty)
-                {
-                    errors.push(
-                        TypeCheckErrorKind::DeclTypeMismatch(pattern_ty, elem_ty, *span).into(),
-                    );
-                    covered_exprs.insert(*stmt_id);
+                    ) && !is_unresolved(&pattern_ty)
+                        && !is_unresolved(&elem_ty)
+                    {
+                        errors.push(
+                            TypeCheckErrorKind::DeclTypeMismatch(pattern_ty, elem_ty, *span).into(),
+                        );
+                        covered_exprs.insert(*stmt_id);
+                    }
                 }
             }
             ExprObligation::EnumVariantPayload {
@@ -424,6 +917,19 @@ fn check_expr_obligations(
                 let Some(expected_variant) = variants.iter().find(|v| v.name == *variant) else {
                     continue;
                 };
+                if payload.len() != expected_variant.payload.len() {
+                    errors.push(
+                        TypeCheckErrorKind::EnumVariantPayloadArityMismatch(
+                            variant.clone(),
+                            expected_variant.payload.len(),
+                            payload.len(),
+                            *span,
+                        )
+                        .into(),
+                    );
+                    covered_exprs.insert(*expr_id);
+                    continue;
+                }
                 for (idx, (expected_ty, found_term)) in expected_variant
                     .payload
                     .iter()
@@ -455,6 +961,7 @@ fn check_expr_obligations(
                 expr_id,
                 target,
                 fields,
+                result,
                 span,
             } => {
                 let target_ty = resolve_term(target, unifier);
@@ -468,15 +975,7 @@ fn check_expr_obligations(
                             let Some(expected_field) =
                                 struct_fields.iter().find(|field| field.name == *field_name)
                             else {
-                                errors.push(
-                                    TypeCheckErrorKind::UnknownStructField(
-                                        field_name.clone(),
-                                        *span,
-                                    )
-                                    .into(),
-                                );
-                                covered_exprs.insert(*expr_id);
-                                break;
+                                continue;
                             };
                             if matches!(
                                 type_assignable(&found_ty, &expected_field.ty),
@@ -496,6 +995,7 @@ fn check_expr_obligations(
                                 break;
                             }
                         }
+                        let _ = unifier.unify(&term_as_type(result), &target_ty);
                     }
                     ty if is_unresolved(ty) => {}
                     _ => {
@@ -503,6 +1003,162 @@ fn check_expr_obligations(
                             TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty, *span).into(),
                         );
                         covered_exprs.insert(*expr_id);
+                    }
+                }
+            }
+            ExprObligation::TupleField {
+                expr_id,
+                target,
+                index,
+                result,
+                span,
+            } => {
+                let target_ty = resolve_term(target, unifier);
+                let tuple_target_ty = peel_heap(target_ty.clone());
+                match &tuple_target_ty {
+                    Type::Tuple { field_tys } => {
+                        if *index >= field_tys.len() {
+                            errors.push(
+                                TypeCheckErrorKind::TupleFieldOutOfBounds(
+                                    field_tys.len(),
+                                    *index,
+                                    *span,
+                                )
+                                .into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let _ = unifier.unify(&term_as_type(result), &field_tys[*index]);
+                    }
+                    ty if is_unresolved(ty) => {}
+                    _ => {
+                        errors.push(
+                            TypeCheckErrorKind::InvalidTupleFieldTarget(tuple_target_ty, *span)
+                                .into(),
+                        );
+                        covered_exprs.insert(*expr_id);
+                    }
+                }
+            }
+            ExprObligation::StructField {
+                expr_id,
+                target,
+                field,
+                result,
+                span,
+            } => {
+                let target_ty = resolve_term(target, unifier);
+                let owner_ty = peel_heap(target_ty.clone());
+                if let Some(prop) = lookup_property(property_sigs, &owner_ty, field) {
+                    if prop.getter.is_none() {
+                        errors.push(
+                            TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into(),
+                        );
+                        covered_exprs.insert(*expr_id);
+                        continue;
+                    }
+                    let _ = unifier.unify(&term_as_type(result), &prop.ty);
+                    continue;
+                }
+                if field == "len" {
+                    if is_len_target(&owner_ty) {
+                        let _ = unifier.unify(&term_as_type(result), &Type::uint(64));
+                        continue;
+                    }
+                }
+                match &owner_ty {
+                    Type::Struct { fields, .. } => {
+                        if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
+                            let _ = unifier.unify(&term_as_type(result), &struct_field.ty);
+                        } else {
+                            let _ = unifier.unify(&term_as_type(result), &Type::Unknown);
+                        }
+                    }
+                    ty if is_unresolved(ty) => {}
+                    _ => {
+                        errors.push(
+                            TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty, *span).into(),
+                        );
+                        covered_exprs.insert(*expr_id);
+                    }
+                }
+            }
+            ExprObligation::StructFieldAssign {
+                stmt_id,
+                target,
+                field,
+                assignee,
+                value,
+                span,
+            } => {
+                let target_ty = resolve_term(target, unifier);
+                let value_ty = resolve_term(value, unifier);
+                let owner_ty = peel_heap(target_ty.clone());
+
+                if let Some(prop) = lookup_property(property_sigs, &owner_ty, field) {
+                    if prop.setter.is_none() {
+                        errors.push(
+                            TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into(),
+                        );
+                        covered_exprs.insert(*stmt_id);
+                        continue;
+                    }
+                    let _ = unifier.unify(&term_as_type(assignee), &prop.ty);
+                    if matches!(
+                        type_assignable(&value_ty, &prop.ty),
+                        TypeAssignability::Incompatible
+                    ) && !is_unresolved(&value_ty)
+                    {
+                        errors.push(
+                            TypeCheckErrorKind::AssignTypeMismatch(
+                                prop.ty.clone(),
+                                value_ty,
+                                *span,
+                            )
+                            .into(),
+                        );
+                        covered_exprs.insert(*stmt_id);
+                    }
+                    continue;
+                }
+
+                if field == "len" && is_len_target(&owner_ty) {
+                    errors
+                        .push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
+                    covered_exprs.insert(*stmt_id);
+                    continue;
+                }
+
+                match &owner_ty {
+                    Type::Struct { fields, .. } => {
+                        if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
+                            let _ = unifier.unify(&term_as_type(assignee), &struct_field.ty);
+                            if matches!(
+                                type_assignable(&value_ty, &struct_field.ty),
+                                TypeAssignability::Incompatible
+                            ) && !is_unresolved(&value_ty)
+                            {
+                                errors.push(
+                                    TypeCheckErrorKind::AssignTypeMismatch(
+                                        struct_field.ty.clone(),
+                                        value_ty,
+                                        *span,
+                                    )
+                                    .into(),
+                                );
+                                covered_exprs.insert(*stmt_id);
+                            }
+                        } else {
+                            let _ = unifier.unify(&term_as_type(assignee), &Type::Unknown);
+                        }
+                    }
+                    ty if is_unresolved(ty) => {}
+                    _ => {
+                        errors.push(
+                            TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty, *span).into(),
+                        );
+                        covered_exprs.insert(*stmt_id);
                     }
                 }
             }
@@ -594,30 +1250,180 @@ fn remap_enum_payload_unify_error(
     }
 }
 
+fn check_unresolved_local_infer_vars(
+    resolved_def_types: &HashMap<DefId, Type>,
+    constraints: &[Constraint],
+    pattern_obligations: &[crate::typecheck::constraints::PatternObligation],
+    def_table: &DefTable,
+    vars: &crate::typecheck::typesys::TypeVarStore,
+) -> Vec<TypeCheckError> {
+    let mut decl_spans = HashMap::new();
+    for constraint in constraints {
+        let reason = match constraint {
+            Constraint::Eq { reason, .. } | Constraint::Assignable { reason, .. } => reason,
+        };
+        if let ConstraintReason::Decl(def_id, span) = reason {
+            decl_spans.entry(*def_id).or_insert(*span);
+        }
+    }
+    for obligation in pattern_obligations {
+        if let crate::typecheck::constraints::PatternObligation::Bind { pattern, span, .. } =
+            obligation
+        {
+            collect_pattern_bind_decl_spans(pattern, *span, &mut decl_spans);
+        }
+    }
+
+    let mut errors = Vec::new();
+    for (def_id, span) in decl_spans {
+        let Some(def) = def_table.lookup_def(def_id) else {
+            continue;
+        };
+        if !matches!(def.kind, DefKind::LocalVar { .. }) {
+            continue;
+        }
+        let Some(ty) = resolved_def_types.get(&def_id) else {
+            continue;
+        };
+        if has_unresolved_infer_var(ty, vars) {
+            errors.push(TypeCheckErrorKind::UnknownType(span).into());
+        }
+    }
+    errors
+}
+
+fn collect_pattern_bind_decl_spans(
+    pattern: &BindPattern,
+    span: Span,
+    out: &mut HashMap<DefId, Span>,
+) {
+    match &pattern.kind {
+        BindPatternKind::Name { def_id, .. } => {
+            out.entry(*def_id).or_insert(span);
+        }
+        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
+            for child in patterns {
+                collect_pattern_bind_decl_spans(child, child.span, out);
+            }
+        }
+        BindPatternKind::Struct { fields, .. } => {
+            for field in fields {
+                collect_pattern_bind_decl_spans(&field.pattern, field.span, out);
+            }
+        }
+    }
+}
+
+fn has_unresolved_infer_var(ty: &Type, vars: &crate::typecheck::typesys::TypeVarStore) -> bool {
+    match ty {
+        Type::Var(var) => matches!(
+            vars.kind(*var),
+            Some(crate::typecheck::typesys::TypeVarKind::InferLocal)
+        ),
+        Type::Fn { params, ret_ty } => {
+            params
+                .iter()
+                .any(|param| has_unresolved_infer_var(&param.ty, vars))
+                || has_unresolved_infer_var(ret_ty, vars)
+        }
+        Type::Range { elem_ty }
+        | Type::Array { elem_ty, .. }
+        | Type::Slice { elem_ty }
+        | Type::Heap { elem_ty }
+        | Type::Ref { elem_ty, .. } => has_unresolved_infer_var(elem_ty, vars),
+        Type::Tuple { field_tys } => field_tys
+            .iter()
+            .any(|field_ty| has_unresolved_infer_var(field_ty, vars)),
+        Type::Struct { fields, .. } => fields
+            .iter()
+            .any(|field| has_unresolved_infer_var(&field.ty, vars)),
+        Type::Enum { variants, .. } => variants.iter().any(|variant| {
+            variant
+                .payload
+                .iter()
+                .any(|payload_ty| has_unresolved_infer_var(payload_ty, vars))
+        }),
+        _ => false,
+    }
+}
+
 fn check_pattern_obligations(
     obligations: &[crate::typecheck::constraints::PatternObligation],
-    unifier: &TcUnifier,
+    def_terms: &HashMap<DefId, TyTerm>,
+    unifier: &mut TcUnifier,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
     let mut covered = HashSet::new();
 
     for obligation in obligations {
-        if let crate::typecheck::constraints::PatternObligation::Bind {
-            pattern_id,
-            pattern,
-            value_ty,
-            span,
-        } = obligation
-        {
-            let value_ty = resolve_term(value_ty, unifier);
-            if let Some(error) = check_bind_pattern(pattern, &value_ty, *span) {
-                errors.push(error);
-                covered.insert(*pattern_id);
+        match obligation {
+            crate::typecheck::constraints::PatternObligation::Bind {
+                pattern_id,
+                pattern,
+                value_ty,
+                span,
+            } => {
+                let value_ty = resolve_term(value_ty, unifier);
+                if let Some(error) = check_bind_pattern(pattern, &value_ty, *span) {
+                    errors.push(error);
+                    covered.insert(*pattern_id);
+                }
+            }
+            crate::typecheck::constraints::PatternObligation::MatchArm {
+                pattern,
+                scrutinee_ty,
+                ..
+            } => {
+                let scrutinee_ty = resolve_term(scrutinee_ty, unifier);
+                bind_match_pattern_types(pattern, &scrutinee_ty, def_terms, unifier);
             }
         }
     }
 
     (errors, covered)
+}
+
+fn bind_match_pattern_types(
+    pattern: &MatchPattern,
+    scrutinee_ty: &Type,
+    def_terms: &HashMap<DefId, TyTerm>,
+    unifier: &mut TcUnifier,
+) {
+    match pattern {
+        MatchPattern::Wildcard { .. }
+        | MatchPattern::BoolLit { .. }
+        | MatchPattern::IntLit { .. } => {}
+        MatchPattern::Binding { def_id, .. } => {
+            if let Some(term) = def_terms.get(def_id) {
+                let _ = unifier.unify(&term_as_type(term), scrutinee_ty);
+            }
+        }
+        MatchPattern::Tuple { patterns, .. } => {
+            if let Type::Tuple { field_tys } = scrutinee_ty {
+                for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
+                    bind_match_pattern_types(child, child_ty, def_terms, unifier);
+                }
+            }
+        }
+        MatchPattern::EnumVariant {
+            variant_name,
+            bindings,
+            ..
+        } => {
+            let owner_ty = peel_heap(scrutinee_ty.clone());
+            if let Type::Enum { variants, .. } = owner_ty
+                && let Some(variant) = variants.iter().find(|v| v.name == *variant_name)
+            {
+                for (binding, payload_ty) in bindings.iter().zip(variant.payload.iter()) {
+                    if let MatchPatternBinding::Named { def_id, .. } = binding
+                        && let Some(term) = def_terms.get(def_id)
+                    {
+                        let _ = unifier.unify(&term_as_type(term), payload_ty);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn check_bind_pattern(
@@ -694,14 +1500,7 @@ fn check_bind_pattern(
                 for field in fields {
                     let Some(struct_field) = struct_fields.iter().find(|f| f.name == field.name)
                     else {
-                        return Some(
-                            TypeCheckErrorKind::PatternTypeMismatch(
-                                pattern.clone(),
-                                value_ty.clone(),
-                                span,
-                            )
-                            .into(),
-                        );
+                        continue;
                     };
                     if let Some(error) =
                         check_bind_pattern(&field.pattern, &struct_field.ty, field.span)
@@ -729,7 +1528,10 @@ fn op_span(obligation: &ExprObligation) -> Span {
         | ExprObligation::Range { span, .. }
         | ExprObligation::ForIter { span, .. }
         | ExprObligation::EnumVariantPayload { span, .. }
-        | ExprObligation::StructUpdate { span, .. } => *span,
+        | ExprObligation::StructUpdate { span, .. }
+        | ExprObligation::TupleField { span, .. }
+        | ExprObligation::StructField { span, .. }
+        | ExprObligation::StructFieldAssign { span, .. } => *span,
     }
 }
 
@@ -779,8 +1581,42 @@ fn is_int_like(ty: &Type) -> bool {
     matches!(ty, Type::Int { .. })
 }
 
+fn int_repr_compatible(from: &Type, to: &Type) -> bool {
+    match (from, to) {
+        (
+            Type::Int {
+                signed: from_signed,
+                bits: from_bits,
+                ..
+            },
+            Type::Int {
+                signed: to_signed,
+                bits: to_bits,
+                ..
+            },
+        ) => from_signed == to_signed && from_bits == to_bits,
+        _ => false,
+    }
+}
+
 fn is_unresolved(ty: &Type) -> bool {
-    matches!(ty, Type::Unknown | Type::Var(_))
+    match ty {
+        Type::Unknown | Type::Var(_) => true,
+        Type::Fn { params, ret_ty } => {
+            params.iter().any(|param| is_unresolved(&param.ty)) || is_unresolved(ret_ty)
+        }
+        Type::Range { elem_ty }
+        | Type::Array { elem_ty, .. }
+        | Type::Slice { elem_ty }
+        | Type::Heap { elem_ty }
+        | Type::Ref { elem_ty, .. } => is_unresolved(elem_ty),
+        Type::Tuple { field_tys } => field_tys.iter().any(is_unresolved),
+        Type::Struct { fields, .. } => fields.iter().any(|field| is_unresolved(&field.ty)),
+        Type::Enum { variants, .. } => variants
+            .iter()
+            .any(|variant| variant.payload.iter().any(is_unresolved)),
+        _ => false,
+    }
 }
 
 fn is_iterable(ty: &Type) -> bool {
@@ -788,6 +1624,31 @@ fn is_iterable(ty: &Type) -> bool {
         ty,
         Type::Range { .. } | Type::Array { .. } | Type::Slice { .. } | Type::String
     )
+}
+
+fn is_len_target(ty: &Type) -> bool {
+    matches!(ty, Type::Array { .. } | Type::Slice { .. } | Type::String)
+}
+
+fn peel_heap(ty: Type) -> Type {
+    ty.peel_heap()
+}
+
+fn property_owner_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
+        Type::String => Some("string"),
+        _ => None,
+    }
+}
+
+fn lookup_property<'a>(
+    property_sigs: &'a HashMap<String, HashMap<String, CollectedPropertySig>>,
+    owner_ty: &Type,
+    field: &str,
+) -> Option<&'a CollectedPropertySig> {
+    let owner = property_owner_name(owner_ty)?;
+    property_sigs.get(owner).and_then(|props| props.get(field))
 }
 
 fn iterable_elem_type(ty: &Type) -> Option<Type> {
@@ -869,6 +1730,68 @@ fn canonicalize_type(ty: Type) -> Type {
             elem_ty: Box::new(canonicalize_type(*elem_ty)),
         },
         other => other,
+    }
+}
+
+fn erase_refinements(ty: &Type) -> Type {
+    match ty {
+        Type::Int { signed, bits, .. } => Type::Int {
+            signed: *signed,
+            bits: *bits,
+            bounds: None,
+            nonzero: false,
+        },
+        Type::Fn { params, ret_ty } => Type::Fn {
+            params: params
+                .iter()
+                .map(|param| crate::types::FnParam {
+                    mode: param.mode,
+                    ty: erase_refinements(&param.ty),
+                })
+                .collect(),
+            ret_ty: Box::new(erase_refinements(ret_ty)),
+        },
+        Type::Range { elem_ty } => Type::Range {
+            elem_ty: Box::new(erase_refinements(elem_ty)),
+        },
+        Type::Array { elem_ty, dims } => Type::Array {
+            elem_ty: Box::new(erase_refinements(elem_ty)),
+            dims: dims.clone(),
+        },
+        Type::Tuple { field_tys } => Type::Tuple {
+            field_tys: field_tys.iter().map(erase_refinements).collect(),
+        },
+        Type::Struct { name, fields } => Type::Struct {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| crate::types::StructField {
+                    name: field.name.clone(),
+                    ty: erase_refinements(&field.ty),
+                })
+                .collect(),
+        },
+        Type::Enum { name, variants } => Type::Enum {
+            name: name.clone(),
+            variants: variants
+                .iter()
+                .map(|variant| crate::types::EnumVariant {
+                    name: variant.name.clone(),
+                    payload: variant.payload.iter().map(erase_refinements).collect(),
+                })
+                .collect(),
+        },
+        Type::Slice { elem_ty } => Type::Slice {
+            elem_ty: Box::new(erase_refinements(elem_ty)),
+        },
+        Type::Heap { elem_ty } => Type::Heap {
+            elem_ty: Box::new(erase_refinements(elem_ty)),
+        },
+        Type::Ref { mutable, elem_ty } => Type::Ref {
+            mutable: *mutable,
+            elem_ty: Box::new(erase_refinements(elem_ty)),
+        },
+        other => other.clone(),
     }
 }
 
