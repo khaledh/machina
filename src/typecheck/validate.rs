@@ -3,7 +3,7 @@
 //! This pass handles semantic checks that are not pure type equalities or
 //! assignability relations (e.g. `break`/`continue` scope and return rules).
 
-use crate::typecheck::constraints::{ControlFact, TyTerm};
+use crate::typecheck::constraints::ControlFact;
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::Type;
@@ -32,8 +32,8 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
                 None => {
                     errors.push(TypeCheckErrorKind::ReturnOutsideFunction(*span).into());
                 }
-                Some(expected_term) => {
-                    let expected_ty = resolve_term(expected_term, engine);
+                Some(expected_ty) => {
+                    let expected_ty = engine.type_vars().apply(expected_ty);
                     if *has_value && expected_ty == Type::Unit {
                         errors.push(TypeCheckErrorKind::ReturnValueUnexpected(*span).into());
                     } else if !*has_value && expected_ty != Type::Unit {
@@ -52,13 +52,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     } else {
         engine.state_mut().diags.extend(errors.clone());
         Err(errors)
-    }
-}
-
-fn resolve_term(term: &TyTerm, engine: &TypecheckEngine) -> Type {
-    match term {
-        TyTerm::Concrete(ty) => ty.clone(),
-        TyTerm::Var(var) => engine.type_vars().apply(&Type::Var(*var)),
     }
 }
 

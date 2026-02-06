@@ -18,7 +18,7 @@ use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding};
 use crate::typecheck::constraints::{
-    CallCallee, CallObligation, Constraint, ConstraintReason, ExprObligation, TyTerm,
+    CallCallee, CallObligation, Constraint, ConstraintReason, ExprObligation,
 };
 use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -162,16 +162,14 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     };
 
     for (node_id, term) in &constrain.node_terms {
-        output.resolved_node_types.insert(
-            *node_id,
-            canonicalize_type(unifier.apply(&term_as_type(term))),
-        );
+        output
+            .resolved_node_types
+            .insert(*node_id, canonicalize_type(unifier.apply(term)));
     }
     for (def_id, term) in &constrain.def_terms {
-        output.resolved_def_types.insert(
-            *def_id,
-            canonicalize_type(unifier.apply(&term_as_type(term))),
-        );
+        output
+            .resolved_def_types
+            .insert(*def_id, canonicalize_type(unifier.apply(term)));
     }
 
     errors.extend(check_unresolved_local_infer_vars(
@@ -195,7 +193,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 
 fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
     if let Constraint::Assignable { from, to, .. } = constraint {
-        let _ = solve_assignable_constraint(from, to, unifier);
+        let _ = solve_assignable(from, to, unifier);
     }
 }
 
@@ -209,10 +207,10 @@ fn apply_constraint(
 ) {
     let result = match constraint {
         Constraint::Eq { left, right, .. } => unifier.unify(
-            &canonicalize_type(term_as_type(left)),
-            &canonicalize_type(term_as_type(right)),
+            &canonicalize_type(left.clone()),
+            &canonicalize_type(right.clone()),
         ),
-        Constraint::Assignable { from, to, .. } => solve_assignable_constraint(from, to, unifier),
+        Constraint::Assignable { from, to, .. } => solve_assignable(from, to, unifier),
     };
     if let Err(err) = result {
         *failed_constraints += 1;
@@ -230,52 +228,7 @@ fn apply_constraint(
     }
 }
 
-fn term_as_type(term: &TyTerm) -> Type {
-    match term {
-        TyTerm::Concrete(ty) => ty.clone(),
-        TyTerm::Var(var) => Type::Var(*var),
-    }
-}
-
-fn solve_assignable_constraint(
-    from: &TyTerm,
-    to: &TyTerm,
-    unifier: &mut TcUnifier,
-) -> Result<(), TcUnifyError> {
-    let from_raw = canonicalize_type(term_as_type(from));
-    let to_raw = canonicalize_type(term_as_type(to));
-    let from_applied = canonicalize_type(unifier.apply(&from_raw));
-    let to_applied = canonicalize_type(unifier.apply(&to_raw));
-
-    if let Some(result) = infer_array_to_slice_assignability(&from_applied, &to_applied, unifier) {
-        return result;
-    }
-
-    if !is_unresolved(&from_applied) && !is_unresolved(&to_applied) {
-        return match type_assignable(&from_applied, &to_applied) {
-            TypeAssignability::Incompatible
-                if array_to_slice_assignable(&from_applied, &to_applied) =>
-            {
-                Ok(())
-            }
-            TypeAssignability::Incompatible if int_repr_compatible(&from_applied, &to_applied) => {
-                Ok(())
-            }
-            TypeAssignability::Incompatible => {
-                Err(TcUnifyError::Mismatch(to_applied, from_applied))
-            }
-            _ => Ok(()),
-        };
-    }
-
-    unifier.unify(&erase_refinements(&from_raw), &erase_refinements(&to_raw))
-}
-
-fn solve_assignable_types(
-    from: &Type,
-    to: &Type,
-    unifier: &mut TcUnifier,
-) -> Result<(), TcUnifyError> {
+fn solve_assignable(from: &Type, to: &Type, unifier: &mut TcUnifier) -> Result<(), TcUnifyError> {
     let from_raw = canonicalize_type(from.clone());
     let to_raw = canonicalize_type(to.clone());
     let from_applied = canonicalize_type(unifier.apply(&from_raw));
@@ -364,7 +317,7 @@ fn check_call_obligations(
                         obligation.arg_terms.iter().zip(params.iter()).enumerate()
                     {
                         let arg_ty = resolve_term(arg_term, unifier);
-                        if let Err(_) = solve_assignable_types(&arg_ty, &param.ty, unifier) {
+                        if let Err(_) = solve_assignable(&arg_ty, &param.ty, unifier) {
                             errors.push(
                                 TypeCheckErrorKind::ArgTypeMismatch(
                                     index + 1,
@@ -381,7 +334,7 @@ fn check_call_obligations(
                     if arg_failed {
                         continue;
                     }
-                    if let Err(err) = unifier.unify(&term_as_type(&obligation.ret_ty), &ret_ty) {
+                    if let Err(err) = unifier.unify(&obligation.ret_ty, &ret_ty) {
                         errors.push(unify_error_to_diag(err, obligation.span));
                     }
                 }
@@ -433,7 +386,7 @@ fn check_call_obligations(
                 .enumerate()
             {
                 let arg_ty = resolve_term(arg_term, &trial);
-                if let Err(_) = solve_assignable_types(&arg_ty, param_ty, &mut trial) {
+                if let Err(_) = solve_assignable(&arg_ty, param_ty, &mut trial) {
                     first_error.get_or_insert_with(|| {
                         TypeCheckErrorKind::ArgTypeMismatch(
                             index + 1,
@@ -454,7 +407,7 @@ fn check_call_obligations(
             if failed {
                 continue;
             }
-            if let Err(err) = trial.unify(&term_as_type(&obligation.ret_ty), &inst_ret) {
+            if let Err(err) = trial.unify(&obligation.ret_ty, &inst_ret) {
                 first_error.get_or_insert_with(|| unify_error_to_diag(err, obligation.span));
                 continue;
             }
@@ -725,7 +678,7 @@ fn check_expr_obligations(
                                 dims: dims[indices.len()..].to_vec(),
                             }
                         };
-                        let _ = unifier.unify(&term_as_type(result), &result_ty);
+                        let _ = unifier.unify(result, &result_ty);
                     }
                     Type::Slice { elem_ty } => {
                         if indices.len() != 1 {
@@ -735,7 +688,7 @@ fn check_expr_obligations(
                             covered_exprs.insert(*expr_id);
                             continue;
                         }
-                        let _ = unifier.unify(&term_as_type(result), elem_ty);
+                        let _ = unifier.unify(result, elem_ty);
                     }
                     Type::String => {
                         if indices.len() != 1 {
@@ -745,7 +698,7 @@ fn check_expr_obligations(
                             covered_exprs.insert(*expr_id);
                             continue;
                         }
-                        let _ = unifier.unify(&term_as_type(result), &Type::uint(8));
+                        let _ = unifier.unify(result, &Type::uint(8));
                     }
                     ty if is_unresolved(ty) => {}
                     _ => {
@@ -809,7 +762,7 @@ fn check_expr_obligations(
                             }
                         };
                         let _ = unifier.unify(
-                            &term_as_type(result),
+                            result,
                             &Type::Slice {
                                 elem_ty: Box::new(slice_elem_ty),
                             },
@@ -817,7 +770,7 @@ fn check_expr_obligations(
                     }
                     Type::Slice { elem_ty } => {
                         let _ = unifier.unify(
-                            &term_as_type(result),
+                            result,
                             &Type::Slice {
                                 elem_ty: elem_ty.clone(),
                             },
@@ -825,7 +778,7 @@ fn check_expr_obligations(
                     }
                     Type::String => {
                         let _ = unifier.unify(
-                            &term_as_type(result),
+                            result,
                             &Type::Slice {
                                 elem_ty: Box::new(Type::uint(8)),
                             },
@@ -864,7 +817,7 @@ fn check_expr_obligations(
                     continue;
                 }
                 let _ = unifier.unify(
-                    &term_as_type(result),
+                    result,
                     &Type::Range {
                         elem_ty: Box::new(Type::uint(64)),
                     },
@@ -888,7 +841,7 @@ fn check_expr_obligations(
                 }
 
                 if let Some(elem_ty) = iterable_elem_type(&iter_ty) {
-                    let _ = unifier.unify(&term_as_type(pattern), &elem_ty);
+                    let _ = unifier.unify(pattern, &elem_ty);
                     let pattern_ty = resolve_term(pattern, unifier);
                     if matches!(
                         type_assignable(&pattern_ty, &elem_ty),
@@ -979,8 +932,7 @@ fn check_expr_obligations(
                             else {
                                 continue;
                             };
-                            if let Err(_) =
-                                solve_assignable_types(&found_ty, &expected_field.ty, unifier)
+                            if let Err(_) = solve_assignable(&found_ty, &expected_field.ty, unifier)
                             {
                                 let found_ty = canonicalize_type(unifier.apply(&found_ty));
                                 if is_unresolved(&found_ty) {
@@ -999,7 +951,7 @@ fn check_expr_obligations(
                                 break;
                             }
                         }
-                        let _ = unifier.unify(&term_as_type(result), &target_ty);
+                        let _ = unifier.unify(result, &target_ty);
                     }
                     ty if is_unresolved(ty) => {}
                     _ => {
@@ -1037,7 +989,7 @@ fn check_expr_obligations(
                             covered_exprs.insert(*expr_id);
                             continue;
                         }
-                        let _ = unifier.unify(&term_as_type(result), &field_tys[*index]);
+                        let _ = unifier.unify(result, &field_tys[*index]);
                     }
                     ty if is_unresolved(ty) => {}
                     _ => {
@@ -1066,21 +1018,21 @@ fn check_expr_obligations(
                         covered_exprs.insert(*expr_id);
                         continue;
                     }
-                    let _ = unifier.unify(&term_as_type(result), &prop.ty);
+                    let _ = unifier.unify(result, &prop.ty);
                     continue;
                 }
                 if field == "len" {
                     if is_len_target(&owner_ty) {
-                        let _ = unifier.unify(&term_as_type(result), &Type::uint(64));
+                        let _ = unifier.unify(result, &Type::uint(64));
                         continue;
                     }
                 }
                 match &owner_ty {
                     Type::Struct { fields, .. } => {
                         if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
-                            let _ = unifier.unify(&term_as_type(result), &struct_field.ty);
+                            let _ = unifier.unify(result, &struct_field.ty);
                         } else {
-                            let _ = unifier.unify(&term_as_type(result), &Type::Unknown);
+                            let _ = unifier.unify(result, &Type::Unknown);
                         }
                     }
                     ty if is_unresolved(ty) => {}
@@ -1112,8 +1064,8 @@ fn check_expr_obligations(
                         covered_exprs.insert(*stmt_id);
                         continue;
                     }
-                    let _ = unifier.unify(&term_as_type(assignee), &prop.ty);
-                    if let Err(_) = solve_assignable_types(&value_ty, &prop.ty, unifier) {
+                    let _ = unifier.unify(assignee, &prop.ty);
+                    if let Err(_) = solve_assignable(&value_ty, &prop.ty, unifier) {
                         let value_ty = canonicalize_type(unifier.apply(&value_ty));
                         if is_unresolved(&value_ty) {
                             continue;
@@ -1141,10 +1093,8 @@ fn check_expr_obligations(
                 match &owner_ty {
                     Type::Struct { fields, .. } => {
                         if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
-                            let _ = unifier.unify(&term_as_type(assignee), &struct_field.ty);
-                            if let Err(_) =
-                                solve_assignable_types(&value_ty, &struct_field.ty, unifier)
-                            {
+                            let _ = unifier.unify(assignee, &struct_field.ty);
+                            if let Err(_) = solve_assignable(&value_ty, &struct_field.ty, unifier) {
                                 let value_ty = canonicalize_type(unifier.apply(&value_ty));
                                 if is_unresolved(&value_ty) {
                                     continue;
@@ -1160,7 +1110,7 @@ fn check_expr_obligations(
                                 covered_exprs.insert(*stmt_id);
                             }
                         } else {
-                            let _ = unifier.unify(&term_as_type(assignee), &Type::Unknown);
+                            let _ = unifier.unify(assignee, &Type::Unknown);
                         }
                     }
                     ty if is_unresolved(ty) => {}
@@ -1335,7 +1285,7 @@ fn has_unresolved_infer_var(ty: &Type, vars: &crate::typecheck::typesys::TypeVar
 
 fn check_pattern_obligations(
     obligations: &[crate::typecheck::constraints::PatternObligation],
-    def_terms: &HashMap<DefId, TyTerm>,
+    def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
@@ -1383,7 +1333,7 @@ fn check_pattern_obligations(
 fn bind_match_pattern_types(
     pattern: &MatchPattern,
     scrutinee_ty: &Type,
-    def_terms: &HashMap<DefId, TyTerm>,
+    def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
@@ -1404,7 +1354,7 @@ fn bind_match_pattern_types(
         }
         MatchPattern::Binding { def_id, .. } => {
             if let Some(term) = def_terms.get(def_id) {
-                let _ = unifier.unify(&term_as_type(term), scrutinee_ty);
+                let _ = unifier.unify(term, scrutinee_ty);
             }
         }
         MatchPattern::Tuple { patterns, .. } => {
@@ -1460,7 +1410,7 @@ fn bind_match_pattern_types(
                     if let MatchPatternBinding::Named { def_id, .. } = binding
                         && let Some(term) = def_terms.get(def_id)
                     {
-                        let _ = unifier.unify(&term_as_type(term), payload_ty);
+                        let _ = unifier.unify(term, payload_ty);
                     }
                 }
             }
@@ -1658,15 +1608,12 @@ fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeC
     None
 }
 
-fn resolve_term_for_diagnostics(term: &TyTerm, unifier: &TcUnifier) -> Type {
-    default_infer_ints_for_diagnostics(resolve_term(term, unifier), unifier.vars())
+fn resolve_term_for_diagnostics(ty: &Type, unifier: &TcUnifier) -> Type {
+    default_infer_ints_for_diagnostics(resolve_term(ty, unifier), unifier.vars())
 }
 
-fn resolve_term(term: &TyTerm, unifier: &TcUnifier) -> Type {
-    match term {
-        TyTerm::Concrete(ty) => canonicalize_type(unifier.apply(ty)),
-        TyTerm::Var(var) => canonicalize_type(unifier.apply(&Type::Var(*var))),
-    }
+fn resolve_term(ty: &Type, unifier: &TcUnifier) -> Type {
+    canonicalize_type(unifier.apply(ty))
 }
 
 fn default_infer_ints_for_diagnostics(

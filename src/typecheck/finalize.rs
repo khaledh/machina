@@ -13,7 +13,7 @@ use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::typed::build_module;
 use crate::typecheck::Unifier;
-use crate::typecheck::constraints::{CallCallee, TyTerm};
+use crate::typecheck::constraints::CallCallee;
 use crate::typecheck::engine::CollectedCallableSig;
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
@@ -214,11 +214,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     }
 }
 
-fn resolve_term(term: &TyTerm, engine: &TypecheckEngine) -> Type {
-    match term {
-        TyTerm::Concrete(ty) => ty.clone(),
-        TyTerm::Var(var) => engine.type_vars().apply(&Type::Var(*var)),
-    }
+fn resolve_term(ty: &Type, engine: &TypecheckEngine) -> Type {
+    engine.type_vars().apply(ty)
 }
 
 fn is_unresolved_type(ty: &Type) -> bool {
@@ -314,7 +311,7 @@ fn resolve_named_call_by_def_id(
 
 fn resolve_method_call(
     engine: &TypecheckEngine,
-    receiver: Option<&TyTerm>,
+    receiver: Option<&Type>,
     method_name: &str,
     arg_types: &[Type],
     span: crate::diag::Span,
@@ -344,7 +341,7 @@ fn resolve_method_call(
 
 fn resolve_method_call_by_def_id(
     engine: &TypecheckEngine,
-    receiver: Option<&TyTerm>,
+    receiver: Option<&Type>,
     method_name: &str,
     def_id: DefId,
     arg_types: &[Type],
