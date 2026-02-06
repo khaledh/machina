@@ -68,6 +68,8 @@ pub(crate) enum ExprObligation {
         expr_id: NodeId,
         target: TyTerm,
         indices: Vec<TyTerm>,
+        index_nodes: Vec<NodeId>,
+        index_spans: Vec<Span>,
         result: TyTerm,
         span: Span,
     },
@@ -90,6 +92,21 @@ pub(crate) enum ExprObligation {
         stmt_id: NodeId,
         iter: TyTerm,
         pattern: TyTerm,
+        span: Span,
+    },
+    EnumVariantPayload {
+        expr_id: NodeId,
+        enum_name: String,
+        variant: String,
+        payload: Vec<TyTerm>,
+        payload_nodes: Vec<NodeId>,
+        payload_spans: Vec<Span>,
+        span: Span,
+    },
+    StructUpdate {
+        expr_id: NodeId,
+        target: TyTerm,
+        fields: Vec<(String, TyTerm)>,
         span: Span,
     },
 }
@@ -452,40 +469,178 @@ impl<'a> ConstraintCollector<'a> {
                 }
             }
             ExprKind::TupleLit(fields) => {
+                let mut field_terms = Vec::with_capacity(fields.len());
                 for field in fields {
-                    self.collect_expr(field, None);
+                    field_terms.push(self.collect_expr(field, None));
                 }
+                self.push_eq(
+                    expr_ty.clone(),
+                    TyTerm::Concrete(Type::Tuple {
+                        field_tys: field_terms.iter().map(term_to_type).collect(),
+                    }),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
             }
             ExprKind::ArrayLit { init, .. } => match init {
                 crate::tree::resolved::ArrayLitInit::Elems(elems) => {
+                    let elem_term = if let ExprKind::ArrayLit {
+                        elem_ty: Some(explicit_elem_ty),
+                        ..
+                    } = &expr.kind
+                    {
+                        self.resolve_type_in_scope(explicit_elem_ty)
+                            .map(TyTerm::Concrete)
+                            .unwrap_or_else(|_| self.fresh_var_term())
+                    } else {
+                        self.fresh_var_term()
+                    };
                     for elem in elems {
-                        self.collect_expr(elem, None);
+                        let value_ty = self.collect_expr(elem, Some(elem_term.clone()));
+                        self.push_assignable(
+                            value_ty,
+                            elem_term.clone(),
+                            ConstraintReason::Expr(elem.id, elem.span),
+                        );
                     }
+                    self.push_eq(
+                        expr_ty.clone(),
+                        TyTerm::Concrete(array_type_from_elem(&elem_term, elems.len())),
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
                 }
-                crate::tree::resolved::ArrayLitInit::Repeat(value, _) => {
-                    self.collect_expr(value, None);
+                crate::tree::resolved::ArrayLitInit::Repeat(value, count) => {
+                    let elem_term = if let ExprKind::ArrayLit {
+                        elem_ty: Some(explicit_elem_ty),
+                        ..
+                    } = &expr.kind
+                    {
+                        self.resolve_type_in_scope(explicit_elem_ty)
+                            .map(TyTerm::Concrete)
+                            .unwrap_or_else(|_| self.fresh_var_term())
+                    } else {
+                        self.fresh_var_term()
+                    };
+                    let value_ty = self.collect_expr(value, Some(elem_term.clone()));
+                    self.push_assignable(
+                        value_ty,
+                        elem_term.clone(),
+                        ConstraintReason::Expr(value.id, value.span),
+                    );
+                    self.push_eq(
+                        expr_ty.clone(),
+                        TyTerm::Concrete(array_type_from_elem(&elem_term, *count as usize)),
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
                 }
             },
             ExprKind::StructLit { fields, .. } => {
-                for field in fields {
-                    self.collect_expr(&field.value, None);
+                if let ExprKind::StructLit { name, .. } = &expr.kind {
+                    let known_struct = self.type_defs.get(name).cloned();
+                    if let Some(Type::Struct {
+                        fields: struct_fields,
+                        ..
+                    }) = known_struct.as_ref()
+                    {
+                        self.push_eq(
+                            expr_ty.clone(),
+                            TyTerm::Concrete(known_struct.clone().expect("known struct type")),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                        for field in fields {
+                            let expected = struct_fields
+                                .iter()
+                                .find(|f| f.name == field.name)
+                                .map(|f| TyTerm::Concrete(f.ty.clone()));
+                            self.collect_expr(&field.value, expected);
+                        }
+                    } else {
+                        for field in fields {
+                            self.collect_expr(&field.value, None);
+                        }
+                    }
+                } else {
+                    for field in fields {
+                        self.collect_expr(&field.value, None);
+                    }
                 }
             }
             ExprKind::EnumVariant { payload, .. } => {
-                for item in payload {
-                    self.collect_expr(item, None);
+                if let ExprKind::EnumVariant {
+                    enum_name, variant, ..
+                } = &expr.kind
+                {
+                    let known_enum = self.type_defs.get(enum_name).cloned();
+                    let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum
+                    {
+                        variants
+                            .iter()
+                            .find(|v| v.name == *variant)
+                            .map(|v| v.payload.clone())
+                    } else {
+                        None
+                    };
+                    let mut payload_terms = Vec::with_capacity(payload.len());
+                    let mut payload_nodes = Vec::with_capacity(payload.len());
+                    let mut payload_spans = Vec::with_capacity(payload.len());
+                    for (index, item) in payload.iter().enumerate() {
+                        payload_nodes.push(item.id);
+                        payload_spans.push(item.span);
+                        let expected = variant_payload_tys
+                            .as_ref()
+                            .and_then(|tys| tys.get(index))
+                            .cloned()
+                            .map(TyTerm::Concrete);
+                        payload_terms.push(self.collect_expr(item, expected));
+                    }
+                    if let Some(enum_ty) = known_enum {
+                        self.push_eq(
+                            expr_ty.clone(),
+                            TyTerm::Concrete(enum_ty),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                    }
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::EnumVariantPayload {
+                            expr_id: expr.id,
+                            enum_name: enum_name.clone(),
+                            variant: variant.clone(),
+                            payload: payload_terms,
+                            payload_nodes,
+                            payload_spans,
+                            span: expr.span,
+                        });
+                } else {
+                    let mut payload_terms = Vec::with_capacity(payload.len());
+                    for item in payload {
+                        payload_terms.push(self.collect_expr(item, None));
+                    }
                 }
             }
             ExprKind::StructUpdate { target, fields } => {
-                self.collect_expr(target, None);
+                let target_ty = self.collect_expr(target, None);
+                let mut field_terms = Vec::with_capacity(fields.len());
                 for field in fields {
-                    self.collect_expr(&field.value, None);
+                    let value_ty = self.collect_expr(&field.value, None);
+                    field_terms.push((field.name.clone(), value_ty));
                 }
+                self.out
+                    .expr_obligations
+                    .push(ExprObligation::StructUpdate {
+                        expr_id: expr.id,
+                        target: target_ty,
+                        fields: field_terms,
+                        span: expr.span,
+                    });
             }
             ExprKind::ArrayIndex { target, indices } => {
                 let target_ty = self.collect_expr(target, None);
                 let mut index_terms = Vec::with_capacity(indices.len());
+                let mut index_nodes = Vec::with_capacity(indices.len());
+                let mut index_spans = Vec::with_capacity(indices.len());
                 for index in indices {
+                    index_nodes.push(index.id);
+                    index_spans.push(index.span);
                     index_terms
                         .push(self.collect_expr(index, Some(TyTerm::Concrete(Type::uint(64)))));
                 }
@@ -493,6 +648,8 @@ impl<'a> ConstraintCollector<'a> {
                     expr_id: expr.id,
                     target: target_ty,
                     indices: index_terms,
+                    index_nodes,
+                    index_spans,
                     result: expr_ty.clone(),
                     span: expr.span,
                 });
@@ -966,14 +1123,71 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Pattern(pattern.id, pattern.span),
                 );
             }
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for child in patterns {
-                    self.collect_bind_pattern(child, value_ty.clone());
+            BindPatternKind::Tuple { patterns } => {
+                let field_terms = patterns
+                    .iter()
+                    .map(|_| self.fresh_var_term())
+                    .collect::<Vec<_>>();
+                self.push_eq(
+                    value_ty.clone(),
+                    TyTerm::Concrete(Type::Tuple {
+                        field_tys: field_terms.iter().map(term_to_type).collect(),
+                    }),
+                    ConstraintReason::Pattern(pattern.id, pattern.span),
+                );
+                for (child, child_term) in patterns.iter().zip(field_terms.into_iter()) {
+                    self.collect_bind_pattern(child, child_term);
                 }
             }
-            BindPatternKind::Struct { fields, .. } => {
-                for StructFieldBindPattern { pattern, .. } in fields {
-                    self.collect_bind_pattern(pattern, value_ty.clone());
+            BindPatternKind::Array { patterns } => {
+                let elem_term = self.fresh_var_term();
+                self.push_eq(
+                    value_ty.clone(),
+                    TyTerm::Concrete(Type::Array {
+                        elem_ty: Box::new(term_to_type(&elem_term)),
+                        dims: vec![patterns.len()],
+                    }),
+                    ConstraintReason::Pattern(pattern.id, pattern.span),
+                );
+                for child in patterns {
+                    self.collect_bind_pattern(child, elem_term.clone());
+                }
+            }
+            BindPatternKind::Struct {
+                name: type_name,
+                fields,
+            } => {
+                if let Some(Type::Struct {
+                    fields: struct_fields,
+                    ..
+                }) = self.type_defs.get(type_name)
+                {
+                    self.push_assignable(
+                        value_ty.clone(),
+                        TyTerm::Concrete(Type::Struct {
+                            name: type_name.clone(),
+                            fields: struct_fields.clone(),
+                        }),
+                        ConstraintReason::Pattern(pattern.id, pattern.span),
+                    );
+                    for StructFieldBindPattern {
+                        name,
+                        pattern: child,
+                        ..
+                    } in fields
+                    {
+                        let child_ty = struct_fields
+                            .iter()
+                            .find(|field| field.name == *name)
+                            .map(|field| TyTerm::Concrete(field.ty.clone()))
+                            .unwrap_or_else(|| self.fresh_var_term());
+                        self.collect_bind_pattern(child, child_ty);
+                    }
+                } else {
+                    for StructFieldBindPattern { pattern: child, .. } in fields {
+                        let child_ty = self.fresh_var_term();
+                        self.collect_bind_pattern(child, child_ty);
+                    }
                 }
             }
         }
@@ -1134,6 +1348,31 @@ impl<'a> ConstraintCollector<'a> {
             ExprKind::Closure { .. } => false,
             _ => false,
         }
+    }
+}
+
+fn term_to_type(term: &TyTerm) -> Type {
+    match term {
+        TyTerm::Concrete(ty) => ty.clone(),
+        TyTerm::Var(var) => Type::Var(*var),
+    }
+}
+
+fn array_type_from_elem(elem_term: &TyTerm, len: usize) -> Type {
+    match term_to_type(elem_term) {
+        Type::Array { elem_ty, dims } => {
+            let mut merged_dims = Vec::with_capacity(dims.len() + 1);
+            merged_dims.push(len);
+            merged_dims.extend(dims);
+            Type::Array {
+                elem_ty,
+                dims: merged_dims,
+            }
+        }
+        elem_ty => Type::Array {
+            elem_ty: Box::new(elem_ty),
+            dims: vec![len],
+        },
     }
 }
 

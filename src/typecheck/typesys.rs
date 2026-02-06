@@ -113,10 +113,26 @@ impl TypeVarStore {
             Type::Range { elem_ty } => Type::Range {
                 elem_ty: Box::new(self.apply(elem_ty)),
             },
-            Type::Array { elem_ty, dims } => Type::Array {
-                elem_ty: Box::new(self.apply(elem_ty)),
-                dims: dims.clone(),
-            },
+            Type::Array { elem_ty, dims } => {
+                let applied_elem = self.apply(elem_ty);
+                match applied_elem {
+                    Type::Array {
+                        elem_ty: inner_elem,
+                        dims: inner_dims,
+                    } => {
+                        let mut merged_dims = dims.clone();
+                        merged_dims.extend(inner_dims);
+                        Type::Array {
+                            elem_ty: inner_elem,
+                            dims: merged_dims,
+                        }
+                    }
+                    other => Type::Array {
+                        elem_ty: Box::new(other),
+                        dims: dims.clone(),
+                    },
+                }
+            }
             Type::Tuple { field_tys } => Type::Tuple {
                 field_tys: field_tys.iter().map(|ty| self.apply(ty)).collect(),
             },
