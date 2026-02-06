@@ -21,3 +21,7 @@ use crate::typecheck::engine::TypecheckEngine;
 pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
     TypecheckEngine::new(context).run()
 }
+
+#[cfg(test)]
+#[path = "../tests/typecheck/t_parity.rs"]
+mod tests_parity;

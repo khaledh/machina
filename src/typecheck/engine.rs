@@ -26,6 +26,9 @@ pub(crate) struct TcEnv {
 pub(crate) struct TcState {
     pub(crate) diags: Vec<TypeCheckError>,
     pub(crate) phase: Option<TcPhase>,
+    pub(crate) constrain: constraints::ConstrainOutput,
+    pub(crate) solve: solve::SolveOutput,
+    pub(crate) finalize: Option<finalize::FinalizeOutput>,
     #[allow(dead_code)]
     pub(crate) diag_ctx: DiagCtx,
 }
@@ -125,6 +128,18 @@ impl TypecheckEngine {
 
     pub(crate) fn state(&self) -> &TcState {
         &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut TcState {
+        &mut self.state
+    }
+
+    pub(crate) fn type_vars_mut(&mut self) -> &mut typesys::TypeVarStore {
+        &mut self.type_vars
+    }
+
+    pub(crate) fn type_vars(&self) -> &typesys::TypeVarStore {
+        &self.type_vars
     }
 
     pub(crate) fn context(&self) -> &ResolvedContext {
