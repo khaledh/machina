@@ -5,7 +5,7 @@
 
 use crate::types::{TyVarId, Type};
 
-use super::typesys::TypeVarStore;
+use super::typesys::{TypeVarKind, TypeVarStore};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -65,7 +65,24 @@ impl TcUnifier {
                         Type::Var(left_var),
                         Type::Var(right_var),
                     )),
-                    (false, false) => self.bind_var(left_var, Type::Var(right_var)),
+                    (false, false) => {
+                        // Preserve integer-literal constraints by binding the
+                        // unconstrained side to the int-constrained var.
+                        let left_kind = self.vars.kind(left_var);
+                        let right_kind = self.vars.kind(right_var);
+                        match (left_kind, right_kind) {
+                            (Some(TypeVarKind::InferInt), Some(TypeVarKind::InferInt)) => {
+                                self.bind_var(left_var, Type::Var(right_var))
+                            }
+                            (Some(TypeVarKind::InferInt), _) => {
+                                self.bind_var(right_var, Type::Var(left_var))
+                            }
+                            (_, Some(TypeVarKind::InferInt)) => {
+                                self.bind_var(left_var, Type::Var(right_var))
+                            }
+                            _ => self.bind_var(left_var, Type::Var(right_var)),
+                        }
+                    }
                 }
             }
             (Type::Var(var), ty) | (ty, Type::Var(var)) => self.bind_var(var, ty),
@@ -270,6 +287,12 @@ impl TcUnifier {
 
         if self.vars.is_rigid(var) {
             return Err(TcUnifyError::CannotBindRigid(var, ty));
+        }
+
+        if matches!(self.vars.kind(var), Some(TypeVarKind::InferInt))
+            && !matches!(ty, Type::Int { .. } | Type::Var(_))
+        {
+            return Err(TcUnifyError::Mismatch(Type::Var(var), ty));
         }
 
         if self.occurs_in(var, &ty) {

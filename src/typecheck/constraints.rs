@@ -499,15 +499,14 @@ impl<'a> ConstraintCollector<'a> {
                 ConstraintReason::Expr(expr.id, expr.span),
             ),
             ExprKind::IntLit(_) => {
-                let has_int_expected =
-                    matches!(expected.as_ref(), Some(TyTerm::Concrete(Type::Int { .. })));
-                if !has_int_expected {
-                    self.push_eq(
-                        expr_ty.clone(),
-                        TyTerm::Concrete(Type::uint(64)),
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                }
+                // Keep integer literals polymorphic during solving. If they
+                // remain unconstrained, solve defaults this var to i32.
+                let lit_ty = self.fresh_int_var_term();
+                self.push_eq(
+                    expr_ty.clone(),
+                    lit_ty,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
             }
             ExprKind::BoolLit(_) => self.push_eq(
                 expr_ty.clone(),
@@ -1421,6 +1420,10 @@ impl<'a> ConstraintCollector<'a> {
 
     fn fresh_var_term(&mut self) -> TyTerm {
         TyTerm::Var(self.vars.fresh_infer_local())
+    }
+
+    fn fresh_int_var_term(&mut self) -> TyTerm {
+        TyTerm::Var(self.vars.fresh_infer_int())
     }
 
     fn push_eq(&mut self, left: TyTerm, right: TyTerm, reason: ConstraintReason) {

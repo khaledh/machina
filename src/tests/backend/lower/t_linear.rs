@@ -441,8 +441,8 @@ fn test_lower_cmp() {
     let expected = indoc! {"
         fn main() -> bool {
           bb0():
-            %v0: u64 = const 1:u64
-            %v1: u64 = const 2:u64
+            %v0: i32 = const 1
+            %v1: i32 = const 2
             %v2: bool = cmp.lt %v0, %v1
             ret %v2
         }

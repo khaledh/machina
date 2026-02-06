@@ -205,8 +205,8 @@ fn test_lower_if_cmp_return() {
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
-            %v0: u64 = const 1:u64
-            %v1: u64 = const 2:u64
+            %v0: i32 = const 1
+            %v1: i32 = const 2
             %v2: bool = cmp.lt %v0, %v1
             cbr %v2, bb1, bb2
 
@@ -424,11 +424,11 @@ fn test_lower_while_return_stmt() {
     let expected = indoc! {"
         fn main() -> u64 {
           bb0():
-            %v0: u64 = const 0:u64
+            %v0: i32 = const 0
             br bb1(%v0)
 
-          bb1(%v1: u64):
-            %v3: u64 = const 2:u64
+          bb1(%v1: i32):
+            %v3: i32 = const 2
             %v4: bool = cmp.lt %v1, %v3
             cbr %v4, bb2, bb3(%v1)
 
@@ -436,7 +436,7 @@ fn test_lower_while_return_stmt() {
             %v5: u64 = const 1:u64
             ret %v5
 
-          bb3(%v2: u64):
+          bb3(%v2: i32):
             %v6: u64 = const 2:u64
             ret %v6
         }

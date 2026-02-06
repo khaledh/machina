@@ -170,22 +170,22 @@ fn test_lower_match_tuple_decision_tree() {
     let expected = indoc! {"
         fn main() -> u64 {
           locals:
-            %l0: (bool, u64)
-            %l1: (bool, u64)
-            %l2: (bool, u64)
+            %l0: (bool, i32)
+            %l1: (bool, i32)
+            %l2: (bool, i32)
           bb0():
-            %v0: ptr<(bool, u64)> = addr_of %l0
+            %v0: ptr<(bool, i32)> = addr_of %l0
             %v1: bool = const true
             %v2: ptr<bool> = field_addr %v0, 0
             store %v2, %v1
-            %v3: u64 = const 2:u64
-            %v4: ptr<u64> = field_addr %v0, 1
+            %v3: i32 = const 2
+            %v4: ptr<i32> = field_addr %v0, 1
             store %v4, %v3
-            %v5: (bool, u64) = load %v0
-            %v6: ptr<(bool, u64)> = addr_of %l1
-            %v7: ptr<(bool, u64)> = addr_of %l2
+            %v5: (bool, i32) = load %v0
+            %v6: ptr<(bool, i32)> = addr_of %l1
+            %v7: ptr<(bool, i32)> = addr_of %l2
             store %v7, %v5
-            %v8: u64 = const 16:u64
+            %v8: u64 = const 8
             memcpy %v6, %v7, %v8
             %v17: ptr<bool> = field_addr %v6, 0
             %v18: bool = load %v17
@@ -222,16 +222,16 @@ fn test_lower_match_tuple_decision_tree() {
             br bb3
 
           bb8():
-            %v13: ptr<u64> = field_addr %v6, 1
-            %v14: u64 = load %v13
-            %v15: u64 = const 2:u64
+            %v13: ptr<i32> = field_addr %v6, 1
+            %v14: i32 = load %v13
+            %v15: i32 = const 2
             %v16: bool = cmp.eq %v14, %v15
             cbr %v16, bb6, bb7
 
           bb9():
-            %v21: ptr<u64> = field_addr %v6, 1
-            %v22: u64 = load %v21
-            %v23: u64 = const 1:u64
+            %v21: ptr<i32> = field_addr %v6, 1
+            %v22: i32 = load %v21
+            %v23: i32 = const 1
             %v24: bool = cmp.eq %v22, %v23
             cbr %v24, bb4, bb5
 

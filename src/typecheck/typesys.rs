@@ -17,6 +17,7 @@ pub(crate) const META_VAR_BASE: u32 = 2_000_000;
 pub(crate) enum TypeVarKind {
     RigidParam(DefId),
     InferLocal,
+    InferInt,
     Meta,
 }
 
@@ -59,6 +60,10 @@ impl TypeVarStore {
         self.kinds.insert(var, TypeVarKind::InferLocal);
     }
 
+    pub(crate) fn register_infer_int(&mut self, var: TyVarId) {
+        self.kinds.insert(var, TypeVarKind::InferInt);
+    }
+
     pub(crate) fn register_meta(&mut self, var: TyVarId) {
         self.kinds.insert(var, TypeVarKind::Meta);
     }
@@ -67,6 +72,13 @@ impl TypeVarStore {
         let id = TyVarId::new(self.next_infer);
         self.next_infer = self.next_infer.saturating_add(1);
         self.register_infer_local(id);
+        id
+    }
+
+    pub(crate) fn fresh_infer_int(&mut self) -> TyVarId {
+        let id = TyVarId::new(self.next_infer);
+        self.next_infer = self.next_infer.saturating_add(1);
+        self.register_infer_int(id);
         id
     }
 
@@ -91,6 +103,19 @@ impl TypeVarStore {
 
     pub(crate) fn lookup(&self, var: TyVarId) -> Option<&Type> {
         self.subst.get(&var)
+    }
+
+    pub(crate) fn unresolved_vars_by_kind(&self, kind: TypeVarKind) -> Vec<TyVarId> {
+        self.kinds
+            .iter()
+            .filter_map(|(var, current_kind)| {
+                if *current_kind == kind && !self.subst.contains_key(var) {
+                    Some(*var)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn apply(&self, ty: &Type) -> Type {

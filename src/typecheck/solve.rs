@@ -23,6 +23,7 @@ use crate::typecheck::constraints::{
 use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
+use crate::typecheck::typesys::TypeVarKind;
 use crate::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::types::{TyVarId, Type, TypeAssignability, array_to_slice_assignable, type_assignable};
 
@@ -149,6 +150,10 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     errors.extend(pattern_errors);
     errors.extend(non_expr_errors);
 
+    // Apply local numeric defaulting after all inference/obligation solving.
+    // Any still-unresolved integer-literal vars become i32.
+    default_unresolved_int_vars(&mut unifier);
+
     let mut output = SolveOutput {
         resolved_node_types: HashMap::new(),
         resolved_def_types: HashMap::new(),
@@ -242,6 +247,10 @@ fn solve_assignable_constraint(
     let from_applied = canonicalize_type(unifier.apply(&from_raw));
     let to_applied = canonicalize_type(unifier.apply(&to_raw));
 
+    if let Some(result) = infer_array_to_slice_assignability(&from_applied, &to_applied, unifier) {
+        return result;
+    }
+
     if !is_unresolved(&from_applied) && !is_unresolved(&to_applied) {
         return match type_assignable(&from_applied, &to_applied) {
             TypeAssignability::Incompatible
@@ -272,6 +281,10 @@ fn solve_assignable_types(
     let from_applied = canonicalize_type(unifier.apply(&from_raw));
     let to_applied = canonicalize_type(unifier.apply(&to_raw));
 
+    if let Some(result) = infer_array_to_slice_assignability(&from_applied, &to_applied, unifier) {
+        return result;
+    }
+
     if !is_unresolved(&from_applied) && !is_unresolved(&to_applied) {
         return match type_assignable(&from_applied, &to_applied) {
             TypeAssignability::Incompatible
@@ -290,6 +303,23 @@ fn solve_assignable_types(
     }
 
     unifier.unify(&erase_refinements(&from_raw), &erase_refinements(&to_raw))
+}
+
+fn infer_array_to_slice_assignability(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+) -> Option<Result<(), TcUnifyError>> {
+    let Type::Slice {
+        elem_ty: slice_elem_ty,
+    } = to
+    else {
+        return None;
+    };
+    let Some(array_item_ty) = from.array_item_type() else {
+        return None;
+    };
+    Some(unifier.unify(&array_item_ty, slice_elem_ty))
 }
 
 fn assignability_rank(from: &Type, to: &Type) -> i32 {
@@ -628,8 +658,8 @@ fn check_expr_obligations(
                 right,
                 ..
             } => {
-                let left_ty = resolve_term(left, unifier);
-                let right_ty = resolve_term(right, unifier);
+                let left_ty = resolve_term_for_diagnostics(left, unifier);
+                let right_ty = resolve_term_for_diagnostics(right, unifier);
                 match op {
                     crate::tree::resolved::BinaryOp::Add
                     | crate::tree::resolved::BinaryOp::Sub
@@ -682,7 +712,7 @@ fn check_expr_obligations(
                 span,
                 ..
             } => {
-                let operand_ty = resolve_term(operand, unifier);
+                let operand_ty = resolve_term_for_diagnostics(operand, unifier);
                 match op {
                     crate::tree::resolved::UnaryOp::Neg
                     | crate::tree::resolved::UnaryOp::BitNot => {
@@ -904,8 +934,12 @@ fn check_expr_obligations(
                 span,
             } => {
                 let iter_ty = resolve_term(iter, unifier);
-                if !is_iterable(&iter_ty) && !is_unresolved(&iter_ty) {
-                    errors.push(TypeCheckErrorKind::ForIterNotIterable(iter_ty, *span).into());
+                let iter_ty_for_diag =
+                    default_infer_ints_for_diagnostics(iter_ty.clone(), unifier.vars());
+                if !is_iterable(&iter_ty_for_diag) && !is_unresolved(&iter_ty_for_diag) {
+                    errors.push(
+                        TypeCheckErrorKind::ForIterNotIterable(iter_ty_for_diag, *span).into(),
+                    );
                     covered_exprs.insert(*stmt_id);
                     continue;
                 }
@@ -988,7 +1022,9 @@ fn check_expr_obligations(
                 span,
             } => {
                 let target_ty = resolve_term(target, unifier);
-                match &target_ty {
+                let target_ty_for_diag =
+                    default_infer_ints_for_diagnostics(target_ty.clone(), unifier.vars());
+                match &target_ty_for_diag {
                     Type::Struct {
                         fields: struct_fields,
                         ..
@@ -1000,11 +1036,13 @@ fn check_expr_obligations(
                             else {
                                 continue;
                             };
-                            if matches!(
-                                type_assignable(&found_ty, &expected_field.ty),
-                                TypeAssignability::Incompatible
-                            ) && !is_unresolved(&found_ty)
+                            if let Err(_) =
+                                solve_assignable_types(&found_ty, &expected_field.ty, unifier)
                             {
+                                let found_ty = canonicalize_type(unifier.apply(&found_ty));
+                                if is_unresolved(&found_ty) {
+                                    continue;
+                                }
                                 errors.push(
                                     TypeCheckErrorKind::StructFieldTypeMismatch(
                                         field_name.clone(),
@@ -1023,7 +1061,11 @@ fn check_expr_obligations(
                     ty if is_unresolved(ty) => {}
                     _ => {
                         errors.push(
-                            TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty, *span).into(),
+                            TypeCheckErrorKind::InvalidStructUpdateTarget(
+                                target_ty_for_diag,
+                                *span,
+                            )
+                            .into(),
                         );
                         covered_exprs.insert(*expr_id);
                     }
@@ -1128,11 +1170,11 @@ fn check_expr_obligations(
                         continue;
                     }
                     let _ = unifier.unify(&term_as_type(assignee), &prop.ty);
-                    if matches!(
-                        type_assignable(&value_ty, &prop.ty),
-                        TypeAssignability::Incompatible
-                    ) && !is_unresolved(&value_ty)
-                    {
+                    if let Err(_) = solve_assignable_types(&value_ty, &prop.ty, unifier) {
+                        let value_ty = canonicalize_type(unifier.apply(&value_ty));
+                        if is_unresolved(&value_ty) {
+                            continue;
+                        }
                         errors.push(
                             TypeCheckErrorKind::AssignTypeMismatch(
                                 prop.ty.clone(),
@@ -1157,11 +1199,13 @@ fn check_expr_obligations(
                     Type::Struct { fields, .. } => {
                         if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
                             let _ = unifier.unify(&term_as_type(assignee), &struct_field.ty);
-                            if matches!(
-                                type_assignable(&value_ty, &struct_field.ty),
-                                TypeAssignability::Incompatible
-                            ) && !is_unresolved(&value_ty)
+                            if let Err(_) =
+                                solve_assignable_types(&value_ty, &struct_field.ty, unifier)
                             {
+                                let value_ty = canonicalize_type(unifier.apply(&value_ty));
+                                if is_unresolved(&value_ty) {
+                                    continue;
+                                }
                                 errors.push(
                                     TypeCheckErrorKind::AssignTypeMismatch(
                                         struct_field.ty.clone(),
@@ -1342,6 +1386,7 @@ fn has_unresolved_infer_var(ty: &Type, vars: &crate::typecheck::typesys::TypeVar
         Type::Var(var) => matches!(
             vars.kind(*var),
             Some(crate::typecheck::typesys::TypeVarKind::InferLocal)
+                | Some(crate::typecheck::typesys::TypeVarKind::InferInt)
         ),
         Type::Fn { params, ret_ty } => {
             params
@@ -1389,7 +1434,7 @@ fn check_pattern_obligations(
                 value_ty,
                 span,
             } => {
-                let value_ty = resolve_term(value_ty, unifier);
+                let value_ty = resolve_term_for_diagnostics(value_ty, unifier);
                 if let Some(error) = check_bind_pattern(pattern, &value_ty, *span) {
                     errors.push(error);
                     covered.insert(*pattern_id);
@@ -1435,7 +1480,8 @@ fn bind_match_pattern_types(
         }
         MatchPattern::IntLit { .. } => {
             if is_unresolved(scrutinee_ty) {
-                let _ = unifier.unify(scrutinee_ty, &Type::uint(64));
+                let int_var = Type::Var(unifier.vars_mut().fresh_infer_int());
+                let _ = unifier.unify(scrutinee_ty, &int_var);
             }
         }
         MatchPattern::Binding { def_id, .. } => {
@@ -1539,6 +1585,15 @@ fn resolve_pattern_enum_type(
 
     let ty = resolve_type_def_with_args(def_table, module, def_id, &resolved_args).ok()?;
     matches!(ty, Type::Enum { .. }).then_some(ty)
+}
+
+fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
+    let unresolved = unifier
+        .vars()
+        .unresolved_vars_by_kind(TypeVarKind::InferInt);
+    for var in unresolved {
+        unifier.vars_mut().bind(var, Type::sint(32));
+    }
 }
 
 fn check_bind_pattern(
@@ -1685,10 +1740,84 @@ fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeC
     None
 }
 
+fn resolve_term_for_diagnostics(term: &TyTerm, unifier: &TcUnifier) -> Type {
+    default_infer_ints_for_diagnostics(resolve_term(term, unifier), unifier.vars())
+}
+
 fn resolve_term(term: &TyTerm, unifier: &TcUnifier) -> Type {
     match term {
         TyTerm::Concrete(ty) => canonicalize_type(unifier.apply(ty)),
         TyTerm::Var(var) => canonicalize_type(unifier.apply(&Type::Var(*var))),
+    }
+}
+
+fn default_infer_ints_for_diagnostics(
+    ty: Type,
+    vars: &crate::typecheck::typesys::TypeVarStore,
+) -> Type {
+    match ty {
+        Type::Var(var) => match vars.kind(var) {
+            Some(TypeVarKind::InferInt) => Type::sint(32),
+            _ => Type::Var(var),
+        },
+        Type::Fn { params, ret_ty } => Type::Fn {
+            params: params
+                .into_iter()
+                .map(|param| crate::types::FnParam {
+                    mode: param.mode,
+                    ty: default_infer_ints_for_diagnostics(param.ty, vars),
+                })
+                .collect(),
+            ret_ty: Box::new(default_infer_ints_for_diagnostics(*ret_ty, vars)),
+        },
+        Type::Range { elem_ty } => Type::Range {
+            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
+        },
+        Type::Array { elem_ty, dims } => Type::Array {
+            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
+            dims,
+        },
+        Type::Tuple { field_tys } => Type::Tuple {
+            field_tys: field_tys
+                .into_iter()
+                .map(|field_ty| default_infer_ints_for_diagnostics(field_ty, vars))
+                .collect(),
+        },
+        Type::Struct { name, fields } => Type::Struct {
+            name,
+            fields: fields
+                .into_iter()
+                .map(|field| crate::types::StructField {
+                    name: field.name,
+                    ty: default_infer_ints_for_diagnostics(field.ty, vars),
+                })
+                .collect(),
+        },
+        Type::Enum { name, variants } => Type::Enum {
+            name,
+            variants: variants
+                .into_iter()
+                .map(|variant| crate::types::EnumVariant {
+                    name: variant.name,
+                    payload: variant
+                        .payload
+                        .into_iter()
+                        .map(|payload_ty| default_infer_ints_for_diagnostics(payload_ty, vars))
+                        .collect(),
+                })
+                .collect(),
+        },
+        Type::Slice { elem_ty } => Type::Slice {
+            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
+        },
+        Type::Heap { elem_ty } => Type::Heap {
+            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
+        },
+        Type::Ref { mutable, elem_ty } => Type::Ref {
+            mutable,
+            elem_ty: Box::new(default_infer_ints_for_diagnostics(*elem_ty, vars)),
+        },
+        other => other,
     }
 }
 

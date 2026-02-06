@@ -1110,7 +1110,7 @@ fn test_for_non_iterable_rejected() {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
             TypeCheckErrorKind::ForIterNotIterable(ty, _) => {
-                assert_eq!(*ty, Type::uint(64));
+                assert_eq!(*ty, Type::sint(32));
             }
             e => panic!("Expected ForIterNotIterable error, got {:?}", e),
         }
@@ -1132,7 +1132,7 @@ fn test_logical_and_requires_bool() {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
             TypeCheckErrorKind::LogicalOperandNotBoolean(ty, _) => {
-                assert_eq!(*ty, Type::uint(64));
+                assert_eq!(*ty, Type::sint(32));
             }
             e => panic!("Expected LogicalOperandNotBoolean error, got {:?}", e),
         }
@@ -1155,11 +1155,38 @@ fn test_logical_not_requires_bool() {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
             TypeCheckErrorKind::LogicalOperandNotBoolean(ty, _) => {
-                assert_eq!(*ty, Type::uint(64));
+                assert_eq!(*ty, Type::sint(32));
             }
             e => panic!("Expected LogicalOperandNotBoolean error, got {:?}", e),
         }
     }
+}
+
+#[test]
+fn test_default_int_literal_is_i32_when_unconstrained() {
+    let source = r#"
+        fn takes_i32(x: i32) -> i32 { x }
+
+        fn test() -> i32 {
+            let x = 1;
+            takes_i32(x)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_int_literal_still_coerces_from_context() {
+    let source = r#"
+        fn takes_u64(x: u64) -> u64 { x }
+
+        fn test() -> u64 {
+            takes_u64(1)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
 }
 
 #[test]
