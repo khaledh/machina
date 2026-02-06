@@ -98,11 +98,16 @@ pub struct TypeChecker {
     type_defs: HashMap<String, Type>,
     errors: Vec<TypeCheckError>,
     halted: bool,
-    return_stack: Vec<Type>,
-    loop_depth_stack: Vec<usize>,
+    control_stack: Vec<ControlContext>,
     type_param_stack: Vec<HashMap<DefId, TyVarId>>,
     infer_ctx: Option<InferCtx>,
     next_infer_var: u32,
+}
+
+#[derive(Clone)]
+struct ControlContext {
+    return_ty: Type,
+    loop_depth: usize,
 }
 
 struct InferScopeGuard {
@@ -150,8 +155,7 @@ impl TypeChecker {
             type_defs: HashMap::new(),
             errors: Vec::new(),
             halted: false,
-            return_stack: Vec::new(),
-            loop_depth_stack: Vec::new(),
+            control_stack: Vec::new(),
             type_param_stack: Vec::new(),
             infer_ctx: None,
             next_infer_var: INFER_VAR_BASE,
@@ -176,21 +180,25 @@ impl TypeChecker {
     }
 
     fn push_control_context(&mut self, return_ty: Type) {
-        self.return_stack.push(return_ty);
-        self.loop_depth_stack.push(0);
+        self.control_stack.push(ControlContext {
+            return_ty,
+            loop_depth: 0,
+        });
     }
 
     fn pop_control_context(&mut self) {
-        self.return_stack.pop();
-        self.loop_depth_stack.pop();
+        self.control_stack.pop();
     }
 
     fn current_return_ty(&self) -> Option<&Type> {
-        self.return_stack.last()
+        self.control_stack.last().map(|ctx| &ctx.return_ty)
     }
 
     fn loop_depth(&self) -> usize {
-        self.loop_depth_stack.last().copied().unwrap_or(0)
+        self.control_stack
+            .last()
+            .map(|ctx| ctx.loop_depth)
+            .unwrap_or(0)
     }
 
     fn type_param_map(type_params: &[TypeParam]) -> HashMap<DefId, TyVarId> {
@@ -353,14 +361,14 @@ impl TypeChecker {
     }
 
     fn enter_loop(&mut self) {
-        if let Some(depth) = self.loop_depth_stack.last_mut() {
-            *depth += 1;
+        if let Some(ctx) = self.control_stack.last_mut() {
+            ctx.loop_depth += 1;
         }
     }
 
     fn exit_loop(&mut self) {
-        if let Some(depth) = self.loop_depth_stack.last_mut() {
-            *depth = depth.saturating_sub(1);
+        if let Some(ctx) = self.control_stack.last_mut() {
+            ctx.loop_depth = ctx.loop_depth.saturating_sub(1);
         }
     }
 
