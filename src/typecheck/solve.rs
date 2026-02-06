@@ -498,7 +498,7 @@ fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> (Vec<
 }
 
 fn subst_type_vars(ty: &Type, map: &HashMap<TyVarId, Type>) -> Type {
-    ty.map_ref(&|t| match t {
+    ty.map_cloned(&|t| match t {
         Type::Var(var) => map.get(&var).cloned().unwrap_or(Type::Var(var)),
         other => other,
     })
@@ -1719,7 +1719,7 @@ fn canonicalize_type(ty: Type) -> Type {
 }
 
 fn erase_refinements(ty: &Type) -> Type {
-    ty.map_ref(&|t| match t {
+    ty.map_cloned(&|t| match t {
         Type::Int { signed, bits, .. } => Type::Int {
             signed,
             bits,

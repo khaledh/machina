@@ -49,15 +49,16 @@ impl Subst {
     /// the substitution is applied recursively to follow the chain of bindings.
     /// Type variables without bindings are left unchanged.
     pub fn apply(&self, ty: &Type) -> Type {
-        ty.map_ref(&|t| match t {
-            Type::Var(var) => match self.map.get(&var) {
-                Some(bound_ty) if !matches!(bound_ty, Type::Var(v) if *v == var) => {
-                    self.apply(bound_ty)
+        ty.map_cow(&|t| match t {
+            Type::Var(var) => match self.map.get(var) {
+                Some(bound_ty) if !matches!(bound_ty, Type::Var(v) if *v == *var) => {
+                    Some(self.apply(bound_ty))
                 }
-                _ => Type::Var(var),
+                _ => None,
             },
-            other => other,
+            _ => None,
         })
+        .into_owned()
     }
 }
 

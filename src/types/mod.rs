@@ -8,6 +8,7 @@ pub use relations::{
 };
 pub use type_cache::{TypeCache, TypeId};
 
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, Eq)]
@@ -688,8 +689,165 @@ impl Type {
     }
 
     /// Like `map` but takes `&self` and clones.
-    pub fn map_ref(&self, f: &impl Fn(Type) -> Type) -> Type {
+    pub fn map_cloned(&self, f: &impl Fn(Type) -> Type) -> Type {
         self.clone().map(f)
+    }
+
+    /// Bottom-up transform over a borrowed type with clone-on-write behavior.
+    ///
+    /// Child nodes are transformed first. If no child changes and `f` returns
+    /// `None` for the rebuilt node, this returns `Cow::Borrowed(self)`.
+    /// Returning `Some(new_ty)` from `f` replaces the rebuilt node.
+    pub fn map_cow<'a>(&'a self, f: &impl Fn(&Type) -> Option<Type>) -> Cow<'a, Type> {
+        let rebuilt = match self {
+            Type::Fn { params, ret_ty } => {
+                let mapped_params = params
+                    .iter()
+                    .map(|param| (param.mode, param.ty.map_cow(f)))
+                    .collect::<Vec<_>>();
+                let mapped_ret = ret_ty.map_cow(f);
+                let changed = matches!(mapped_ret, Cow::Owned(_))
+                    || mapped_params
+                        .iter()
+                        .any(|(_, ty)| matches!(ty, Cow::Owned(_)));
+                if changed {
+                    Cow::Owned(Type::Fn {
+                        params: mapped_params
+                            .into_iter()
+                            .map(|(mode, ty)| FnParam {
+                                mode,
+                                ty: ty.into_owned(),
+                            })
+                            .collect(),
+                        ret_ty: Box::new(mapped_ret.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Range { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::Range {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Array { elem_ty, dims } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::Array {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                        dims: dims.clone(),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Tuple { field_tys } => {
+                let mapped_fields = field_tys.iter().map(|ty| ty.map_cow(f)).collect::<Vec<_>>();
+                if mapped_fields.iter().any(|ty| matches!(ty, Cow::Owned(_))) {
+                    Cow::Owned(Type::Tuple {
+                        field_tys: mapped_fields.into_iter().map(Cow::into_owned).collect(),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Struct { name, fields } => {
+                let mapped_fields = fields
+                    .iter()
+                    .map(|field| (&field.name, field.ty.map_cow(f)))
+                    .collect::<Vec<_>>();
+                let changed = mapped_fields
+                    .iter()
+                    .any(|(_, ty)| matches!(ty, Cow::Owned(_)));
+                if changed {
+                    Cow::Owned(Type::Struct {
+                        name: name.clone(),
+                        fields: mapped_fields
+                            .into_iter()
+                            .map(|(field_name, ty)| StructField {
+                                name: field_name.clone(),
+                                ty: ty.into_owned(),
+                            })
+                            .collect(),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Enum { name, variants } => {
+                let mapped_variants = variants
+                    .iter()
+                    .map(|variant| {
+                        let payload = variant
+                            .payload
+                            .iter()
+                            .map(|ty| ty.map_cow(f))
+                            .collect::<Vec<_>>();
+                        (&variant.name, payload)
+                    })
+                    .collect::<Vec<_>>();
+                let changed = mapped_variants
+                    .iter()
+                    .any(|(_, payload)| payload.iter().any(|ty| matches!(ty, Cow::Owned(_))));
+                if changed {
+                    Cow::Owned(Type::Enum {
+                        name: name.clone(),
+                        variants: mapped_variants
+                            .into_iter()
+                            .map(|(variant_name, payload)| EnumVariant {
+                                name: variant_name.clone(),
+                                payload: payload.into_iter().map(Cow::into_owned).collect(),
+                            })
+                            .collect(),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Slice { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::Slice {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Heap { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::Heap {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Ref { mutable, elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::Ref {
+                        mutable: *mutable,
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            _ => Cow::Borrowed(self),
+        };
+
+        if let Some(mapped) = f(rebuilt.as_ref()) {
+            Cow::Owned(mapped)
+        } else {
+            rebuilt
+        }
     }
 
     /// Returns `true` if `predicate` holds for this type or any nested child type.
@@ -713,5 +871,41 @@ impl Type {
                 .any(|v| v.payload.iter().any(|ty| ty.any(predicate))),
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    #[test]
+    fn test_map_cow_borrows_when_unchanged() {
+        let ty = Type::Array {
+            elem_ty: Box::new(Type::uint(64)),
+            dims: vec![4],
+        };
+
+        let mapped = ty.map_cow(&|_| None);
+        assert!(matches!(mapped, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_map_cow_rewrites_only_when_needed() {
+        let ty = Type::Tuple {
+            field_tys: vec![Type::Var(TyVarId::new(1)), Type::Bool],
+        };
+
+        let mapped = ty.map_cow(&|t| match t {
+            Type::Var(var) if *var == TyVarId::new(1) => Some(Type::uint(64)),
+            _ => None,
+        });
+        assert!(matches!(mapped, Cow::Owned(_)));
+        assert_eq!(
+            mapped.into_owned(),
+            Type::Tuple {
+                field_tys: vec![Type::uint(64), Type::Bool]
+            }
+        );
     }
 }

@@ -119,32 +119,30 @@ impl TypeVarStore {
     }
 
     pub(crate) fn apply(&self, ty: &Type) -> Type {
-        ty.map_ref(&|t| match t {
-            Type::Var(var) => match self.subst.get(&var) {
-                Some(bound_ty) if !matches!(bound_ty, Type::Var(v) if *v == var) => {
-                    self.apply(bound_ty)
+        ty.map_cow(&|t| match t {
+            Type::Var(var) => match self.subst.get(var) {
+                Some(bound_ty) if !matches!(bound_ty, Type::Var(v) if *v == *var) => {
+                    Some(self.apply(bound_ty))
                 }
-                _ => Type::Var(var),
+                _ => None,
             },
             // Flatten nested arrays produced by substitution.
-            Type::Array { elem_ty, dims } => match *elem_ty {
+            Type::Array { elem_ty, dims } => match elem_ty.as_ref() {
                 Type::Array {
                     elem_ty: inner_elem,
                     dims: inner_dims,
                 } => {
-                    let mut merged = dims;
-                    merged.extend(inner_dims);
-                    Type::Array {
-                        elem_ty: inner_elem,
+                    let mut merged = dims.clone();
+                    merged.extend(inner_dims.iter().copied());
+                    Some(Type::Array {
+                        elem_ty: inner_elem.clone(),
                         dims: merged,
-                    }
+                    })
                 }
-                other => Type::Array {
-                    elem_ty: Box::new(other),
-                    dims,
-                },
+                _ => None,
             },
-            other => other,
+            _ => None,
         })
+        .into_owned()
     }
 }
