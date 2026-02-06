@@ -764,7 +764,8 @@ impl TypeChecker {
             return Err(TypeCheckErrorKind::UnknownType(span).into());
         };
 
-        let Some(variant) = self.resolve_enum_variant_in(variants, variant_name) else {
+        let Some(variant) = self.resolve_enum_variant_in(name.as_str(), variants, variant_name)
+        else {
             for expr in payload {
                 let _ = self.check_expr(expr, Expected::Unknown)?;
             }
@@ -776,13 +777,13 @@ impl TypeChecker {
             .into());
         };
 
-        if payload.len() != variant.payload.len() {
+        if payload.len() != variant.payload().len() {
             for expr in payload {
                 let _ = self.check_expr(expr, Expected::Unknown)?;
             }
             return Err(TypeCheckErrorKind::EnumVariantPayloadArityMismatch(
                 variant_name.to_string(),
-                variant.payload.len(),
+                variant.payload().len(),
                 payload.len(),
                 span,
             )
@@ -790,7 +791,7 @@ impl TypeChecker {
         }
 
         for (i, (payload_expr, payload_ty)) in
-            payload.iter().zip(variant.payload.iter()).enumerate()
+            payload.iter().zip(variant.payload().iter()).enumerate()
         {
             let actual_ty = self.check_expr(payload_expr, Expected::Exact(payload_ty))?;
             if actual_ty != *payload_ty {
