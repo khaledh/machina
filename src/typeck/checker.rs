@@ -782,13 +782,33 @@ impl TypeChecker {
             .into());
         };
 
-        if payload.len() != variant.payload().len() {
+        let default_expected = Expected::Unknown;
+        self.check_enum_variant_payload(
+            variant_name,
+            variant.payload(),
+            payload,
+            span,
+            default_expected,
+        )?;
+
+        Ok(expected_enum.clone())
+    }
+
+    fn check_enum_variant_payload(
+        &mut self,
+        variant_name: &str,
+        expected_payload: &[Type],
+        payload: &[&Expr],
+        span: Span,
+        default_expected: Expected<'_>,
+    ) -> Result<(), TypeCheckError> {
+        if payload.len() != expected_payload.len() {
             for expr in payload {
-                let _ = self.check_expr(expr, Expected::Unknown)?;
+                let _ = self.check_expr(expr, default_expected)?;
             }
             return Err(TypeCheckErrorKind::EnumVariantPayloadArityMismatch(
                 variant_name.to_string(),
-                variant.payload().len(),
+                expected_payload.len(),
                 payload.len(),
                 span,
             )
@@ -796,14 +816,15 @@ impl TypeChecker {
         }
 
         for (i, (payload_expr, payload_ty)) in
-            payload.iter().zip(variant.payload().iter()).enumerate()
+            payload.iter().zip(expected_payload.iter()).enumerate()
         {
             let actual_ty = self.check_expr(payload_expr, Expected::Exact(payload_ty))?;
-            if actual_ty != *payload_ty {
+            let (expected_ty, actual_ty, ok) = self.unify_expected_actual(payload_ty, &actual_ty);
+            if !ok {
                 return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
                     variant_name.to_string(),
                     i,
-                    payload_ty.clone(),
+                    expected_ty,
                     actual_ty,
                     payload_expr.span,
                 )
@@ -811,7 +832,7 @@ impl TypeChecker {
             }
         }
 
-        Ok(expected_enum.clone())
+        Ok(())
     }
 
     fn record_property_call_sig(

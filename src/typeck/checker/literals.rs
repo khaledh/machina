@@ -143,32 +143,13 @@ impl TypeChecker {
                         return Ok(enum_ty);
                     };
 
-                    if payload.len() != variant_ty.payload().len() {
-                        for expr in payload {
-                            let _ = self.check_expr(expr, Expected::Unknown)?;
-                        }
-                        let enum_ty = self.apply_infer(&enum_ty);
-                        return Ok(enum_ty);
-                    }
-
-                    for (i, (payload_expr, payload_ty)) in
-                        payload.iter().zip(variant_ty.payload().iter()).enumerate()
-                    {
-                        let actual_ty =
-                            self.check_expr(payload_expr, Expected::Exact(payload_ty))?;
-                        let (expected_ty, actual_ty, ok) =
-                            self.unify_expected_actual(payload_ty, &actual_ty);
-                        if !ok {
-                            return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
-                                variant_name.clone(),
-                                i,
-                                expected_ty,
-                                actual_ty,
-                                payload_expr.span,
-                            )
-                            .into());
-                        }
-                    }
+                    self.check_enum_variant_payload(
+                        variant_name,
+                        variant_ty.payload(),
+                        &payload.iter().collect::<Vec<_>>(),
+                        span,
+                        Expected::Unknown,
+                    )?;
 
                     let enum_ty = self.apply_infer(&enum_ty);
                     return Ok(enum_ty);
@@ -205,29 +186,13 @@ impl TypeChecker {
             return Ok(enum_ty.clone());
         };
 
-        if payload.len() != variant_ty.payload().len() {
-            for expr in payload {
-                let _ = self.check_expr(expr, Expected::Unknown)?;
-            }
-            return Ok(enum_ty.clone());
-        }
-
-        // Type check each payload element
-        for (i, (payload_expr, payload_ty)) in
-            payload.iter().zip(variant_ty.payload().iter()).enumerate()
-        {
-            let actual_ty = self.check_expr(payload_expr, Expected::Unknown)?;
-            if actual_ty != *payload_ty {
-                return Err(TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
-                    variant_name.clone(),
-                    i,
-                    payload_ty.clone(),
-                    actual_ty,
-                    payload_expr.span,
-                )
-                .into());
-            }
-        }
+        self.check_enum_variant_payload(
+            variant_name,
+            variant_ty.payload(),
+            &payload.iter().collect::<Vec<_>>(),
+            span,
+            Expected::Unknown,
+        )?;
 
         Ok(enum_ty.clone())
     }
