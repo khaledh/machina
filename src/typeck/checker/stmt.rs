@@ -105,11 +105,7 @@ impl TypeChecker {
                 .into()),
             },
             BindPatternKind::Struct { name, fields } => {
-                let Type::Struct {
-                    name: ty_name,
-                    fields: struct_fields,
-                } = value_ty
-                else {
+                let Type::Struct { name: ty_name, .. } = value_ty else {
                     return Err(TypeCheckErrorKind::PatternTypeMismatch(
                         pattern.clone(),
                         value_ty.clone(),
@@ -131,9 +127,8 @@ impl TypeChecker {
                 // Check each field pattern
                 for field in fields {
                     // Type check the field
-                    if let Some(expected_ty) = struct_fields
-                        .iter()
-                        .find(|f| f.name == field.name)
+                    if let Some(expected_ty) = self
+                        .resolve_struct_field(value_ty, &field.name)
                         .map(|f| &f.ty)
                     {
                         self.check_bind_pattern(&field.pattern, expected_ty)?;

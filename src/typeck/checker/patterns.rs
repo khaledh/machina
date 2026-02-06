@@ -83,7 +83,7 @@ impl TypeChecker {
                     }
                 }
 
-                if let Some(variant) = variants.iter().find(|v| v.name == *variant_name) {
+                if let Some(variant) = self.resolve_enum_variant_in(variants, variant_name) {
                     if bindings.len() == variant.payload.len() {
                         for (binding, ty) in bindings.iter().zip(variant.payload.iter()) {
                             self.record_match_binding(binding, ty);

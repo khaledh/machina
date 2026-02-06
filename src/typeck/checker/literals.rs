@@ -26,11 +26,7 @@ impl TypeChecker {
                         def_id,
                         &type_args,
                     )?;
-                    let Type::Struct {
-                        fields: struct_fields,
-                        ..
-                    } = &struct_ty
-                    else {
+                    let Type::Struct { .. } = &struct_ty else {
                         for field in fields {
                             let _ = self.visit_expr(&field.value, None)?;
                         }
@@ -38,7 +34,7 @@ impl TypeChecker {
                     };
 
                     for field in fields {
-                        let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
+                        let Some(expected) = self.resolve_struct_field(&struct_ty, &field.name)
                         else {
                             let _ = self.visit_expr(&field.value, None)?;
                             continue;
@@ -72,11 +68,7 @@ impl TypeChecker {
                 return Ok(Type::Unknown);
             }
         };
-        let Type::Struct {
-            fields: struct_fields,
-            ..
-        } = &struct_ty
-        else {
+        let Type::Struct { .. } = &struct_ty else {
             for field in fields {
                 let _ = self.visit_expr(&field.value, None)?;
             }
@@ -85,7 +77,7 @@ impl TypeChecker {
 
         for field in fields {
             let actual_ty = self.visit_expr(&field.value, None)?;
-            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
+            if let Some(expected) = self.resolve_struct_field(&struct_ty, &field.name)
                 && actual_ty != expected.ty
             {
                 return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
@@ -127,14 +119,14 @@ impl TypeChecker {
                         def_id,
                         &type_args,
                     )?;
-                    let Type::Enum { variants, .. } = &enum_ty else {
+                    let Type::Enum { .. } = &enum_ty else {
                         for expr in payload {
                             let _ = self.visit_expr(expr, None)?;
                         }
                         return Ok(Type::Unknown);
                     };
 
-                    let Some(variant_ty) = variants.iter().find(|v| v.name == *variant_name) else {
+                    let Some(variant_ty) = self.resolve_enum_variant(&enum_ty, variant_name) else {
                         for expr in payload {
                             let _ = self.visit_expr(expr, None)?;
                         }
@@ -185,7 +177,7 @@ impl TypeChecker {
             }
         };
 
-        let Type::Enum { variants, .. } = &enum_ty else {
+        let Type::Enum { .. } = &enum_ty else {
             for expr in payload {
                 let _ = self.visit_expr(expr, None)?;
             }
@@ -193,7 +185,7 @@ impl TypeChecker {
         };
 
         // Get the variant
-        let Some(variant_ty) = variants.iter().find(|v| v.name == *variant_name) else {
+        let Some(variant_ty) = self.resolve_enum_variant(&enum_ty, variant_name) else {
             for expr in payload {
                 let _ = self.visit_expr(expr, None)?;
             }

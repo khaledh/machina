@@ -295,13 +295,14 @@ impl TypeChecker {
             }
         }
 
-        match view.as_struct() {
-            Some((_name, fields)) => match fields.iter().find(|f| f.name == field) {
+        if view.as_struct().is_some() {
+            return match self.resolve_struct_field(view.ty(), field) {
                 Some(field) => Ok(field.ty.clone()),
                 None => Ok(Type::Unknown),
-            },
-            _ => Err(self.err_invalid_struct_field_target(target_ty, target.span)),
+            };
         }
+
+        Err(self.err_invalid_struct_field_target(target_ty, target.span))
     }
 
     pub(super) fn check_struct_update(
@@ -311,26 +312,15 @@ impl TypeChecker {
     ) -> Result<Type, TypeCheckError> {
         // Type check target
         let target_ty = self.visit_expr(target, None)?;
-        let struct_ty = match &target_ty {
-            Type::Struct { .. } => target_ty.clone(),
-            _ => {
-                return Err(
-                    TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty, target.span).into(),
-                );
-            }
-        };
-
-        let Type::Struct {
-            fields: struct_fields,
-            ..
-        } = &struct_ty
-        else {
-            return Ok(Type::Unknown);
+        let Some(struct_ty) = self.resolve_struct_type_for_update(target_ty.clone()) else {
+            return Err(
+                TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty, target.span).into(),
+            );
         };
 
         for field in fields {
             let actual_ty = self.visit_expr(&field.value, None)?;
-            if let Some(expected) = struct_fields.iter().find(|f| f.name == field.name)
+            if let Some(expected) = self.resolve_struct_field(&struct_ty, &field.name)
                 && actual_ty != expected.ty
             {
                 return Err(TypeCheckErrorKind::StructFieldTypeMismatch(
