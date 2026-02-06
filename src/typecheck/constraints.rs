@@ -1466,98 +1466,50 @@ impl<'a> ConstraintCollector<'a> {
         params: &[crate::tree::resolved::Param],
         return_ty: &TypeExpr,
     ) -> Option<Type> {
-        let params = params
-            .iter()
-            .map(|param| {
-                resolve_type_expr_with_params(
-                    &self.ctx.def_table,
-                    &self.ctx.module,
-                    &param.typ,
-                    self.current_type_params(),
-                )
-                .map(|ty| crate::types::FnParam {
-                    mode: match param.mode {
-                        crate::tree::ParamMode::In => crate::types::FnParamMode::In,
-                        crate::tree::ParamMode::InOut => crate::types::FnParamMode::InOut,
-                        crate::tree::ParamMode::Out => crate::types::FnParamMode::Out,
-                        crate::tree::ParamMode::Sink => crate::types::FnParamMode::Sink,
-                    },
-                    ty,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        let ret_ty = resolve_type_expr_with_params(
-            &self.ctx.def_table,
-            &self.ctx.module,
-            return_ty,
-            self.current_type_params(),
-        )
-        .ok()?;
-        Some(Type::Fn {
-            params,
-            ret_ty: Box::new(ret_ty),
-        })
+        let params = self.resolve_fn_params(params)?;
+        self.resolve_fn_type(params, return_ty)
     }
 
     fn collect_function_signature(&self, sig: &crate::tree::resolved::FunctionSig) -> Option<Type> {
-        let params = sig
-            .params
-            .iter()
-            .map(|param| {
-                resolve_type_expr_with_params(
-                    &self.ctx.def_table,
-                    &self.ctx.module,
-                    &param.typ,
-                    self.current_type_params(),
-                )
-                .map(|ty| crate::types::FnParam {
-                    mode: map_param_mode(param.mode.clone()),
-                    ty,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        let ret_ty = resolve_type_expr_with_params(
-            &self.ctx.def_table,
-            &self.ctx.module,
-            &sig.ret_ty_expr,
-            self.current_type_params(),
-        )
-        .ok()?;
-        Some(Type::Fn {
-            params,
-            ret_ty: Box::new(ret_ty),
-        })
+        let params = self.resolve_fn_params(&sig.params)?;
+        self.resolve_fn_type(params, &sig.ret_ty_expr)
     }
 
     fn collect_method_signature(&self, type_name: &str, sig: &MethodSig) -> Option<Type> {
         let self_ty = self.type_defs.get(type_name).cloned()?;
+        let tail_params = self.resolve_fn_params(&sig.params)?;
         let mut params = Vec::with_capacity(sig.params.len() + 1);
         params.push(crate::types::FnParam {
             mode: map_param_mode(sig.self_param.mode.clone()),
             ty: self_ty,
         });
-        for param in &sig.params {
-            let ty = resolve_type_expr_with_params(
-                &self.ctx.def_table,
-                &self.ctx.module,
-                &param.typ,
-                self.current_type_params(),
-            )
-            .ok()?;
-            params.push(crate::types::FnParam {
-                mode: map_param_mode(param.mode.clone()),
-                ty,
-            });
-        }
-        let ret_ty = resolve_type_expr_with_params(
-            &self.ctx.def_table,
-            &self.ctx.module,
-            &sig.ret_ty_expr,
-            self.current_type_params(),
-        )
-        .ok()?;
+        params.extend(tail_params);
+        self.resolve_fn_type(params, &sig.ret_ty_expr)
+    }
+
+    fn resolve_fn_params(
+        &self,
+        params: &[crate::tree::resolved::Param],
+    ) -> Option<Vec<crate::types::FnParam>> {
+        params
+            .iter()
+            .map(|param| {
+                self.resolve_type_in_scope(&param.typ)
+                    .ok()
+                    .map(|ty| crate::types::FnParam {
+                        mode: map_param_mode(param.mode.clone()),
+                        ty,
+                    })
+            })
+            .collect::<Option<Vec<_>>>()
+    }
+
+    fn resolve_fn_type(
+        &self,
+        params: Vec<crate::types::FnParam>,
+        return_ty: &TypeExpr,
+    ) -> Option<Type> {
+        let ret_ty = self.resolve_type_in_scope(return_ty).ok()?;
         Some(Type::Fn {
             params,
             ret_ty: Box::new(ret_ty),
