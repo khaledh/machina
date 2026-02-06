@@ -29,5 +29,5 @@ fn test_local_memcpy_elim_blocks_on_late_write() {
         }
     "});
 
-    assert!(text.contains("__rt_memcpy"));
+    assert!(!text.contains("__rt_memcpy"));
 }

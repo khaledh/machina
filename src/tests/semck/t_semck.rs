@@ -4,6 +4,7 @@ use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::{SemCheckError, sem_check};
+use crate::typeck::TypeCheckErrorKind;
 use crate::typeck::type_check;
 use crate::types::Type;
 
@@ -753,13 +754,25 @@ fn test_enum_variant_payload_arity_mismatch() {
         }
     "#;
 
-    let result = sem_check_source(source);
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
+
+    let ast_context = ParsedContext::new(module, id_gen);
+    let resolved_context = resolve(ast_context).expect("Failed to resolve");
+    let result = type_check(resolved_context);
     assert!(result.is_err());
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::EnumVariantPayloadArityMismatch(name, expected, got, _) => {
+        match errors[0].kind() {
+            TypeCheckErrorKind::EnumVariantPayloadArityMismatch(name, expected, got, _) => {
                 assert_eq!(name, "A");
                 assert_eq!(*expected, 1);
                 assert_eq!(*got, 2);

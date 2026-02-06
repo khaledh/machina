@@ -14,10 +14,10 @@ fn make_some<T>(x: T) -> Option<T> {
 }
 
 fn main() -> () {
-    let p = Pair<u64> { left: 1, right: 2 };
+    let p = Pair { left: 1, right: 2 };
     println(f"sum = {p.left + p.right}");
 
-    let opt_int: Option<u64> = Some(3);
+    let opt_int = Option::Some(3);
     match opt_int {
         Some(x) => println(f"opt = Some({x})"),
         None => println("opt = None"),
@@ -29,7 +29,7 @@ fn main() -> () {
         None => println("opt2 = None"),
     };
 
-    let opt_bool: Option<bool> = Some(true);
+    let opt_bool = Option::Some(true);
     match opt_bool {
         Some(b) => if b {
           println("opt = Some(true)")

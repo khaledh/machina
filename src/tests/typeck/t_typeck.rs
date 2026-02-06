@@ -337,13 +337,44 @@ fn test_generic_enum_variant_with_type_args() {
 }
 
 #[test]
-fn test_generic_type_args_missing_is_error() {
+fn test_generic_struct_lit_infers_from_fields() {
     let source = r#"
         type Pair<T> = { left: T, right: T }
 
         fn test() -> u64 {
             let p = Pair { left: 1, right: 2 };
-            p.left
+            p.left + p.right
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_enum_variant_infers_from_payload() {
+    let source = r#"
+        type Option<T> = None | Some(T)
+
+        fn test() -> u64 {
+            let value = Option::Some(3);
+            match value {
+                Some(x) => x,
+                None => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_generic_type_args_missing_is_error_without_constraints() {
+    let source = r#"
+        type Option<T> = Some(T) | None
+
+        fn test() -> () {
+            let value = Option::None;
+            ()
         }
     "#;
 

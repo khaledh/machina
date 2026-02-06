@@ -511,7 +511,6 @@ fn test_lower_tuple_bind() {
           locals:
             %l0: (u64, u64)
             %l1: (u64, u64)
-            %l2: (u64, u64)
           bb0():
             %v0: ptr<(u64, u64)> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -522,16 +521,13 @@ fn test_lower_tuple_bind() {
             store %v4, %v3
             %v5: (u64, u64) = load %v0
             %v6: ptr<(u64, u64)> = addr_of %l1
-            %v7: ptr<(u64, u64)> = addr_of %l2
-            store %v7, %v5
-            %v8: u64 = const 16:u64
-            memcpy %v6, %v7, %v8
-            %v9: ptr<u64> = field_addr %v6, 0
+            store %v6, %v5
+            %v7: ptr<u64> = field_addr %v6, 0
+            %v8: u64 = load %v7
+            %v9: ptr<u64> = field_addr %v6, 1
             %v10: u64 = load %v9
-            %v11: ptr<u64> = field_addr %v6, 1
-            %v12: u64 = load %v11
-            %v13: u64 = add %v10, %v12
-            ret %v13
+            %v11: u64 = add %v8, %v10
+            ret %v11
         }
     "};
     assert_ir_eq(&text, expected);
@@ -602,7 +598,6 @@ fn test_lower_struct_bind() {
           locals:
             %l0: Pair
             %l1: Pair
-            %l2: Pair
           bb0():
             %v0: ptr<Pair> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -613,16 +608,13 @@ fn test_lower_struct_bind() {
             store %v4, %v3
             %v5: Pair = load %v0
             %v6: ptr<Pair> = addr_of %l1
-            %v7: ptr<Pair> = addr_of %l2
-            store %v7, %v5
-            %v8: u64 = const 16:u64
-            memcpy %v6, %v7, %v8
-            %v9: ptr<u64> = field_addr %v6, 0
+            store %v6, %v5
+            %v7: ptr<u64> = field_addr %v6, 0
+            %v8: u64 = load %v7
+            %v9: ptr<u64> = field_addr %v6, 1
             %v10: u64 = load %v9
-            %v11: ptr<u64> = field_addr %v6, 1
-            %v12: u64 = load %v11
-            %v13: u64 = add %v10, %v12
-            ret %v13
+            %v11: u64 = add %v8, %v10
+            ret %v11
         }
     "};
     assert_ir_eq(&text, expected);
@@ -652,7 +644,6 @@ fn test_lower_array_bind() {
           locals:
             %l0: u64[2]
             %l1: u64[2]
-            %l2: u64[2]
           bb0():
             %v0: ptr<u64[2]> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -665,18 +656,15 @@ fn test_lower_array_bind() {
             store %v6, %v4
             %v7: u64[2] = load %v0
             %v8: ptr<u64[2]> = addr_of %l1
-            %v9: ptr<u64[2]> = addr_of %l2
-            store %v9, %v7
-            %v10: u64 = const 16:u64
-            memcpy %v8, %v9, %v10
-            %v11: u64 = const 0:u64
-            %v12: ptr<u64> = index_addr %v8, %v11
-            %v13: u64 = load %v12
-            %v14: u64 = const 1:u64
-            %v15: ptr<u64> = index_addr %v8, %v14
-            %v16: u64 = load %v15
-            %v17: u64 = add %v13, %v16
-            ret %v17
+            store %v8, %v7
+            %v9: u64 = const 0:u64
+            %v10: ptr<u64> = index_addr %v8, %v9
+            %v11: u64 = load %v10
+            %v12: u64 = const 1:u64
+            %v13: ptr<u64> = index_addr %v8, %v12
+            %v14: u64 = load %v13
+            %v15: u64 = add %v11, %v14
+            ret %v15
         }
     "};
     assert_ir_eq(&text, expected);
@@ -710,7 +698,6 @@ fn test_lower_struct_update() {
             %l1: Pair
             %l2: Pair
             %l3: Pair
-            %l4: Pair
           bb0():
             %v0: ptr<Pair> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -721,21 +708,18 @@ fn test_lower_struct_update() {
             store %v4, %v3
             %v5: Pair = load %v0
             %v6: ptr<Pair> = addr_of %l1
+            store %v6, %v5
             %v7: ptr<Pair> = addr_of %l2
-            store %v7, %v5
-            %v8: u64 = const 16:u64
-            memcpy %v6, %v7, %v8
+            %v8: Pair = load %v6
             %v9: ptr<Pair> = addr_of %l3
-            %v10: Pair = load %v6
-            %v11: ptr<Pair> = addr_of %l4
-            store %v11, %v10
-            %v12: u64 = const 16:u64
-            memcpy %v9, %v11, %v12
-            %v13: u64 = const 5:u64
-            %v14: ptr<u64> = field_addr %v9, 1
-            store %v14, %v13
-            %v15: Pair = load %v9
-            ret %v15
+            store %v9, %v8
+            %v10: u64 = const 16:u64
+            memcpy %v7, %v9, %v10
+            %v11: u64 = const 5:u64
+            %v12: ptr<u64> = field_addr %v7, 1
+            store %v12, %v11
+            %v13: Pair = load %v7
+            ret %v13
         }
     "};
     assert_ir_eq(&text, expected);
@@ -769,7 +753,6 @@ fn test_lower_struct_update_multi_field() {
             %l1: Pair
             %l2: Pair
             %l3: Pair
-            %l4: Pair
           bb0():
             %v0: ptr<Pair> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -780,24 +763,21 @@ fn test_lower_struct_update_multi_field() {
             store %v4, %v3
             %v5: Pair = load %v0
             %v6: ptr<Pair> = addr_of %l1
+            store %v6, %v5
             %v7: ptr<Pair> = addr_of %l2
-            store %v7, %v5
-            %v8: u64 = const 16:u64
-            memcpy %v6, %v7, %v8
+            %v8: Pair = load %v6
             %v9: ptr<Pair> = addr_of %l3
-            %v10: Pair = load %v6
-            %v11: ptr<Pair> = addr_of %l4
-            store %v11, %v10
-            %v12: u64 = const 16:u64
-            memcpy %v9, %v11, %v12
-            %v13: u64 = const 5:u64
-            %v14: ptr<u64> = field_addr %v9, 1
+            store %v9, %v8
+            %v10: u64 = const 16:u64
+            memcpy %v7, %v9, %v10
+            %v11: u64 = const 5:u64
+            %v12: ptr<u64> = field_addr %v7, 1
+            store %v12, %v11
+            %v13: u64 = const 3:u64
+            %v14: ptr<u64> = field_addr %v7, 0
             store %v14, %v13
-            %v15: u64 = const 3:u64
-            %v16: ptr<u64> = field_addr %v9, 0
-            store %v16, %v15
-            %v17: Pair = load %v9
-            ret %v17
+            %v15: Pair = load %v7
+            ret %v15
         }
     "};
     assert_ir_eq(&text, expected);
@@ -1071,10 +1051,8 @@ fn test_lower_slice_expr_array() {
           locals:
             %l0: u64[3]
             %l1: u64[3]
-            %l2: u64[3]
+            %l2: struct { ptr: ptr<u64>, len: u64 }
             %l3: struct { ptr: ptr<u64>, len: u64 }
-            %l4: struct { ptr: ptr<u64>, len: u64 }
-            %l5: struct { ptr: ptr<u64>, len: u64 }
           bb0():
             %v0: ptr<u64[3]> = addr_of %l0
             %v1: u64 = const 1:u64
@@ -1091,45 +1069,39 @@ fn test_lower_slice_expr_array() {
             store %v9, %v7
             %v10: u64[3] = load %v0
             %v11: ptr<u64[3]> = addr_of %l1
-            %v12: ptr<u64[3]> = addr_of %l2
-            store %v12, %v10
-            %v13: u64 = const 24:u64
-            memcpy %v11, %v12, %v13
-            %v14: u64 = const 0:u64
-            %v15: ptr<u64> = index_addr %v11, %v14
-            %v16: u64 = const 3:u64
+            store %v11, %v10
+            %v12: u64 = const 0:u64
+            %v13: ptr<u64> = index_addr %v11, %v12
+            %v14: u64 = const 3:u64
+            %v15: u64 = const 1:u64
+            %v16: u64 = const 0:u64
             %v17: u64 = const 1:u64
-            %v18: u64 = const 0:u64
-            %v19: u64 = const 1:u64
-            %v20: u64 = add %v16, %v19
-            %v21: bool = cmp.ge %v17, %v18
-            %v22: bool = cmp.lt %v17, %v20
-            %v23: bool = and %v21, %v22
-            cbr %v23, bb1, bb2
+            %v18: u64 = add %v14, %v17
+            %v19: bool = cmp.ge %v15, %v16
+            %v20: bool = cmp.lt %v15, %v18
+            %v21: bool = and %v19, %v20
+            cbr %v21, bb1, bb2
 
           bb1():
-            %v29: ptr<u64> = index_addr %v15, %v17
-            %v30: u64 = sub %v16, %v17
-            %v31: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l3
-            %v32: ptr<ptr<u64>> = field_addr %v31, 0
-            store %v32, %v29
-            %v33: ptr<u64> = field_addr %v31, 1
-            store %v33, %v30
-            %v34: struct { ptr: ptr<u64>, len: u64 } = load %v31
-            %v35: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l4
-            %v36: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l5
-            store %v36, %v34
-            %v37: u64 = const 16:u64
-            memcpy %v35, %v36, %v37
-            %v38: u64 = const 0:u64
-            ret %v38
+            %v27: ptr<u64> = index_addr %v13, %v15
+            %v28: u64 = sub %v14, %v15
+            %v29: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l2
+            %v30: ptr<ptr<u64>> = field_addr %v29, 0
+            store %v30, %v27
+            %v31: ptr<u64> = field_addr %v29, 1
+            store %v31, %v28
+            %v32: struct { ptr: ptr<u64>, len: u64 } = load %v29
+            %v33: ptr<struct { ptr: ptr<u64>, len: u64 }> = addr_of %l3
+            store %v33, %v32
+            %v34: u64 = const 0:u64
+            ret %v34
 
           bb2():
-            %v24: u64 = const 2:u64
-            %v25: u64 = zext %v17 to u64
-            %v26: u64 = zext %v18 to u64
-            %v27: u64 = zext %v20 to u64
-            %v28: () = call @__rt_trap(%v24, %v25, %v26, %v27)
+            %v22: u64 = const 2:u64
+            %v23: u64 = zext %v15 to u64
+            %v24: u64 = zext %v16 to u64
+            %v25: u64 = zext %v18 to u64
+            %v26: () = call @__rt_trap(%v22, %v23, %v24, %v25)
             unreachable
         }
     "};
@@ -1161,7 +1133,6 @@ fn test_lower_slice_expr_string() {
             %l0: string
             %l1: struct { ptr: ptr<u8>, len: u64 }
             %l2: struct { ptr: ptr<u8>, len: u64 }
-            %l3: struct { ptr: ptr<u8>, len: u64 }
           bb0(%v0: ptr<string>):
             %v1: ptr<string> = addr_of %l0
             %v2: u64 = const 16:u64
@@ -1190,12 +1161,9 @@ fn test_lower_slice_expr_string() {
             store %v24, %v21
             %v25: struct { ptr: ptr<u8>, len: u64 } = load %v22
             %v26: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l2
-            %v27: ptr<struct { ptr: ptr<u8>, len: u64 }> = addr_of %l3
-            store %v27, %v25
-            %v28: u64 = const 16:u64
-            memcpy %v26, %v27, %v28
-            %v29: u64 = const 0:u64
-            ret %v29
+            store %v26, %v25
+            %v27: u64 = const 0:u64
+            ret %v27
 
           bb2():
             %v15: u64 = const 2:u64

@@ -56,6 +56,72 @@ pub(crate) fn resolve_type_expr_with_params(
     resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None)
 }
 
+pub(crate) fn resolve_type_def_with_args(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    def_id: DefId,
+    type_args: &[Type],
+) -> Result<Type, TypeCheckError> {
+    let def = def_table
+        .lookup_def(def_id)
+        .ok_or(TypeCheckErrorKind::UnknownType(Span::default()))?;
+    let type_def = module
+        .type_def_by_id(def_id)
+        .ok_or(TypeCheckErrorKind::UnknownType(Span::default()))?;
+
+    if type_def.type_params.len() != type_args.len() {
+        return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+            def.name.clone(),
+            type_def.type_params.len(),
+            type_args.len(),
+            type_def.span,
+        )
+        .into());
+    }
+
+    let mut arg_map = TypeArgMap::new();
+    for (param, arg_ty) in type_def.type_params.iter().zip(type_args.iter()) {
+        arg_map.insert(param.def_id, arg_ty.clone());
+    }
+
+    let type_name = mangle_type_name(&def.name, type_args);
+    let mut in_progress = HashSet::new();
+    match &type_def.kind {
+        res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
+            def_table,
+            module,
+            def,
+            aliased_ty,
+            None,
+            Some(&arg_map),
+            &mut in_progress,
+            ResolveDepth::Full,
+        ),
+        res::TypeDefKind::Struct { fields } => resolve_struct_type(
+            def_table,
+            module,
+            def.id,
+            &type_name,
+            fields,
+            None,
+            Some(&arg_map),
+            &mut in_progress,
+            ResolveDepth::Full,
+        ),
+        res::TypeDefKind::Enum { variants } => resolve_enum_type(
+            def_table,
+            module,
+            def.id,
+            &type_name,
+            variants,
+            None,
+            Some(&arg_map),
+            &mut in_progress,
+            ResolveDepth::Full,
+        ),
+    }
+}
+
 fn resolve_type_expr_with_params_and_args(
     def_table: &DefTable,
     module: &impl TypeDefLookup,

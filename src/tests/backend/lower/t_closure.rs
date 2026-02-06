@@ -135,7 +135,6 @@ fn test_lower_closure_invoke() {
                 %l1: main$closure$1
                 %l2: main$closure$1
                 %l3: main$closure$1
-                %l4: main$closure$1
               bb0():
                 %v0: u64 = const 10:u64
                 %v1: ptr<main$closure$1> = addr_of %l0
@@ -143,19 +142,16 @@ fn test_lower_closure_invoke() {
                 store %v2, %v0
                 %v3: main$closure$1 = load %v1
                 %v4: ptr<main$closure$1> = addr_of %l1
-                %v5: ptr<main$closure$1> = addr_of %l2
-                store %v5, %v3
-                %v6: u64 = const 8:u64
-                memcpy %v4, %v5, %v6
-                %v7: main$closure$1 = load %v4
-                %v8: u64 = const 5:u64
-                %v9: ptr<main$closure$1> = addr_of %l3
-                %v10: ptr<main$closure$1> = addr_of %l4
-                store %v10, %v7
-                %v11: u64 = const 8:u64
-                memcpy %v9, %v10, %v11
-                %v12: u64 = call @{}(%v9, %v8)
-                ret %v12
+                store %v4, %v3
+                %v5: main$closure$1 = load %v4
+                %v6: u64 = const 5:u64
+                %v7: ptr<main$closure$1> = addr_of %l2
+                %v8: ptr<main$closure$1> = addr_of %l3
+                store %v8, %v5
+                %v9: u64 = const 8:u64
+                memcpy %v7, %v8, %v9
+                %v10: u64 = call @{}(%v7, %v6)
+                ret %v10
             }}
         "},
         invoke_def_id
@@ -244,15 +240,13 @@ fn test_lower_closure_borrow_capture() {
                 %l0: main$closure$1
                 %l1: u64
                 %l2: main$closure$1
-                %l3: main$closure$1
-                %l4: main$closure$2
-                %l5: u64
-                %l6: main$closure$2
-                %l7: main$closure$2
-                %l8: main$closure$1
-                %l9: main$closure$1
-                %l10: main$closure$2
-                %l11: main$closure$2
+                %l3: main$closure$2
+                %l4: u64
+                %l5: main$closure$2
+                %l6: main$closure$1
+                %l7: main$closure$1
+                %l8: main$closure$2
+                %l9: main$closure$2
               bb0():
                 %v0: u64 = const 1:u64
                 %v1: u64 = const 2:u64
@@ -263,39 +257,33 @@ fn test_lower_closure_borrow_capture() {
                 store %v4, %v3
                 %v5: main$closure$1 = load %v2
                 %v6: ptr<main$closure$1> = addr_of %l2
-                %v7: ptr<main$closure$1> = addr_of %l3
-                store %v7, %v5
-                %v8: u64 = const 8:u64
-                memcpy %v6, %v7, %v8
-                %v9: ptr<main$closure$2> = addr_of %l4
-                %v10: ptr<u64> = addr_of %l5
-                store %v10, %v1
-                %v11: ptr<ptr<u64>> = field_addr %v9, 0
+                store %v6, %v5
+                %v7: ptr<main$closure$2> = addr_of %l3
+                %v8: ptr<u64> = addr_of %l4
+                store %v8, %v1
+                %v9: ptr<ptr<u64>> = field_addr %v7, 0
+                store %v9, %v8
+                %v10: main$closure$2 = load %v7
+                %v11: ptr<main$closure$2> = addr_of %l5
                 store %v11, %v10
-                %v12: main$closure$2 = load %v9
-                %v13: ptr<main$closure$2> = addr_of %l6
-                %v14: ptr<main$closure$2> = addr_of %l7
-                store %v14, %v12
-                %v15: u64 = const 8:u64
-                memcpy %v13, %v14, %v15
-                %v16: main$closure$1 = load %v6
-                %v17: u64 = const 5:u64
-                %v18: ptr<main$closure$1> = addr_of %l8
-                %v19: ptr<main$closure$1> = addr_of %l9
-                store %v19, %v16
-                %v20: u64 = const 8:u64
-                memcpy %v18, %v19, %v20
-                %v21: u64 = call @{}(%v18, %v17)
-                %v22: main$closure$2 = load %v13
-                %v23: u64 = const 3:u64
-                %v24: ptr<main$closure$2> = addr_of %l10
-                %v25: ptr<main$closure$2> = addr_of %l11
-                store %v25, %v22
-                %v26: u64 = const 8:u64
-                memcpy %v24, %v25, %v26
-                %v27: u64 = call @{}(%v24, %v23)
-                %v28: u64 = add %v21, %v27
-                ret %v28
+                %v12: main$closure$1 = load %v6
+                %v13: u64 = const 5:u64
+                %v14: ptr<main$closure$1> = addr_of %l6
+                %v15: ptr<main$closure$1> = addr_of %l7
+                store %v15, %v12
+                %v16: u64 = const 8:u64
+                memcpy %v14, %v15, %v16
+                %v17: u64 = call @{}(%v14, %v13)
+                %v18: main$closure$2 = load %v11
+                %v19: u64 = const 3:u64
+                %v20: ptr<main$closure$2> = addr_of %l8
+                %v21: ptr<main$closure$2> = addr_of %l9
+                store %v21, %v18
+                %v22: u64 = const 8:u64
+                memcpy %v20, %v21, %v22
+                %v23: u64 = call @{}(%v20, %v19)
+                %v24: u64 = add %v17, %v23
+                ret %v24
             }}
         "},
         add_invoke_def_id, bump_invoke_def_id

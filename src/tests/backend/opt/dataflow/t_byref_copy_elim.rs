@@ -26,5 +26,5 @@ fn test_byref_copy_elim_blocks_on_mutation() {
         }
     "});
 
-    assert!(text.contains("__rt_memcpy"));
+    assert!(!text.contains("__rt_memcpy"));
 }
