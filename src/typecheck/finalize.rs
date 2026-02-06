@@ -6,12 +6,12 @@ use crate::tree::NodeId;
 use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::typed::build_module;
+use crate::typecheck::Unifier;
 use crate::typecheck::constraints::{CallCallee, TyTerm};
 use crate::typecheck::engine::CollectedCallableSig;
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
-use crate::typeck::Unifier;
-use crate::typeck::type_map::{
+use crate::typecheck::type_map::{
     CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
 };
 use crate::types::{FnParam, FnParamMode, TyVarId, Type};
@@ -37,18 +37,18 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 pub(crate) fn materialize(
     engine: TypecheckEngine,
 ) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
-    if let Some(finalized) = engine.state().finalize.clone() {
-        let typed_module = build_module(&finalized.type_map, &engine.context().module);
-        return Ok(engine.context().clone().with_type_map(
-            finalized.type_map,
-            finalized.call_sigs,
-            finalized.generic_insts,
-            typed_module,
-        ));
-    }
-
-    // Migration fallback: should disappear once finalize is always populated.
-    crate::typeck::type_check_legacy(engine.context().clone())
+    let finalized = engine
+        .state()
+        .finalize
+        .clone()
+        .expect("finalize output must be populated before materialize");
+    let typed_module = build_module(&finalized.type_map, &engine.context().module);
+    Ok(engine.context().clone().with_type_map(
+        finalized.type_map,
+        finalized.call_sigs,
+        finalized.generic_insts,
+        typed_module,
+    ))
 }
 
 fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {

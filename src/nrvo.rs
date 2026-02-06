@@ -4,7 +4,7 @@ use crate::tree::semantic::{
     ArrayLitInit, BlockItem, CallArg, FuncDef, MethodReceiver, PlaceExpr, PlaceExprKind as PEK,
     SegmentKind, StmtExpr, StmtExprKind as SEK, ValueExpr, ValueExprKind as VEK,
 };
-use crate::typeck::type_map::TypeMap;
+use crate::typecheck::type_map::TypeMap;
 
 /// NRVO (Named Return Value Optimization) analyzer.
 ///

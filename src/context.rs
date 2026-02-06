@@ -10,7 +10,7 @@ use crate::tree::semantic::Module as SemanticModule;
 use crate::tree::semantic::{DropPlanMap, LoweringPlanMap};
 use crate::tree::typed::Module as TypedModule;
 use crate::tree::{NodeId, NodeIdGen};
-use crate::typeck::type_map::{CallSigMap, GenericInstMap, TypeMap};
+use crate::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
 
 // -----------------------------------------------------------------------------
 // Parsed Context

@@ -4,8 +4,8 @@ use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::{SemCheckError, sem_check};
-use crate::typeck::TypeCheckErrorKind;
-use crate::typeck::type_check;
+use crate::typecheck::TypeCheckErrorKind;
+use crate::typecheck::type_check;
 use crate::types::Type;
 
 fn sem_check_source(source: &str) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {

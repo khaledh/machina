@@ -7,7 +7,7 @@ use crate::tree::normalized as norm;
 use crate::tree::normalized::build_module;
 use crate::tree::visit_mut;
 use crate::tree::visit_mut::VisitorMut;
-use crate::typeck::type_map::{CallParam, CallSigMap, TypeMap};
+use crate::typecheck::type_map::{CallParam, CallSigMap, TypeMap};
 use crate::types::array_to_slice_assignable;
 use crate::types::{Type, TypeId};
 

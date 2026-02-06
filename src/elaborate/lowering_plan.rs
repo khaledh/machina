@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::tree::semantic as sem;
 use crate::tree::{BinaryOp, NodeId};
-use crate::typeck::type_map::TypeMap;
+use crate::typecheck::type_map::TypeMap;
 
 pub fn build_lowering_plans(module: &sem::Module, type_map: &TypeMap) -> sem::LoweringPlanMap {
     let mut builder = LoweringPlanBuilder {

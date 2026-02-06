@@ -18,7 +18,7 @@ use crate::elaborate::elaborator::Elaborator;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{CoerceKind, ParamMode};
-use crate::typeck::type_map::{CallParam, CallSig};
+use crate::typecheck::type_map::{CallParam, CallSig};
 
 impl<'a> Elaborator<'a> {
     /// Main entry point for elaborating a value expression.

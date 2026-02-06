@@ -1,1 +1,1 @@
-mod typeck;
+mod typecheck;

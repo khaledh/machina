@@ -10,7 +10,7 @@ use crate::tree::resolved::{
 };
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
-use crate::typeck::type_map::resolve_type_expr_with_params;
+use crate::typecheck::type_map::resolve_type_expr_with_params;
 use crate::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
@@ -44,6 +44,54 @@ pub(crate) enum ConstraintReason {
     Pattern(NodeId, Span),
     Decl(DefId, Span),
     Return(NodeId, Span),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum ExprObligation {
+    BinOp {
+        expr_id: NodeId,
+        op: BinaryOp,
+        left: TyTerm,
+        right: TyTerm,
+        result: TyTerm,
+        span: Span,
+    },
+    UnaryOp {
+        expr_id: NodeId,
+        op: UnaryOp,
+        operand: TyTerm,
+        result: TyTerm,
+        span: Span,
+    },
+    ArrayIndex {
+        expr_id: NodeId,
+        target: TyTerm,
+        indices: Vec<TyTerm>,
+        result: TyTerm,
+        span: Span,
+    },
+    Slice {
+        expr_id: NodeId,
+        target: TyTerm,
+        start: Option<TyTerm>,
+        end: Option<TyTerm>,
+        result: TyTerm,
+        span: Span,
+    },
+    Range {
+        expr_id: NodeId,
+        start: TyTerm,
+        end: TyTerm,
+        result: TyTerm,
+        span: Span,
+    },
+    ForIter {
+        stmt_id: NodeId,
+        iter: TyTerm,
+        pattern: TyTerm,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +161,7 @@ pub(crate) enum ControlFact {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConstrainOutput {
     pub(crate) constraints: Vec<Constraint>,
+    pub(crate) expr_obligations: Vec<ExprObligation>,
     pub(crate) call_obligations: Vec<CallObligation>,
     pub(crate) pattern_obligations: Vec<PatternObligation>,
     pub(crate) control_facts: Vec<ControlFact>,
@@ -434,10 +483,19 @@ impl<'a> ConstraintCollector<'a> {
                 }
             }
             ExprKind::ArrayIndex { target, indices } => {
-                self.collect_expr(target, None);
+                let target_ty = self.collect_expr(target, None);
+                let mut index_terms = Vec::with_capacity(indices.len());
                 for index in indices {
-                    self.collect_expr(index, Some(TyTerm::Concrete(Type::uint(64))));
+                    index_terms
+                        .push(self.collect_expr(index, Some(TyTerm::Concrete(Type::uint(64)))));
                 }
+                self.out.expr_obligations.push(ExprObligation::ArrayIndex {
+                    expr_id: expr.id,
+                    target: target_ty,
+                    indices: index_terms,
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
             }
             ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
                 self.collect_expr(target, None);
@@ -462,8 +520,8 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
             ExprKind::Range { start, end } => {
-                self.collect_expr(start, Some(TyTerm::Concrete(Type::uint(64))));
-                self.collect_expr(end, Some(TyTerm::Concrete(Type::uint(64))));
+                let start_ty = self.collect_expr(start, Some(TyTerm::Concrete(Type::uint(64))));
+                let end_ty = self.collect_expr(end, Some(TyTerm::Concrete(Type::uint(64))));
                 self.push_eq(
                     expr_ty.clone(),
                     TyTerm::Concrete(Type::Range {
@@ -471,15 +529,30 @@ impl<'a> ConstraintCollector<'a> {
                     }),
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
+                self.out.expr_obligations.push(ExprObligation::Range {
+                    expr_id: expr.id,
+                    start: start_ty,
+                    end: end_ty,
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
             }
             ExprKind::Slice { target, start, end } => {
-                self.collect_expr(target, None);
-                if let Some(start) = start {
-                    self.collect_expr(start, Some(TyTerm::Concrete(Type::uint(64))));
-                }
-                if let Some(end) = end {
-                    self.collect_expr(end, Some(TyTerm::Concrete(Type::uint(64))));
-                }
+                let target_ty = self.collect_expr(target, None);
+                let start_ty = start
+                    .as_ref()
+                    .map(|start| self.collect_expr(start, Some(TyTerm::Concrete(Type::uint(64)))));
+                let end_ty = end
+                    .as_ref()
+                    .map(|end| self.collect_expr(end, Some(TyTerm::Concrete(Type::uint(64)))));
+                self.out.expr_obligations.push(ExprObligation::Slice {
+                    expr_id: expr.id,
+                    target: target_ty,
+                    start: start_ty,
+                    end: end_ty,
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
             }
             ExprKind::Match { scrutinee, arms } => {
                 let scrutinee_ty = self.collect_expr(scrutinee, None);
@@ -531,6 +604,13 @@ impl<'a> ConstraintCollector<'a> {
             }
             ExprKind::UnaryOp { op, expr: inner } => {
                 let inner_ty = self.collect_expr(inner, None);
+                self.out.expr_obligations.push(ExprObligation::UnaryOp {
+                    expr_id: expr.id,
+                    op: *op,
+                    operand: inner_ty.clone(),
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
                 match op {
                     UnaryOp::Neg | UnaryOp::BitNot => {
                         self.push_eq(
@@ -685,6 +765,14 @@ impl<'a> ConstraintCollector<'a> {
         let ExprKind::BinOp { op, .. } = &expr.kind else {
             return;
         };
+        self.out.expr_obligations.push(ExprObligation::BinOp {
+            expr_id: expr.id,
+            op: *op,
+            left: left_ty.clone(),
+            right: right_ty.clone(),
+            result: expr_ty.clone(),
+            span: expr.span,
+        });
         match op {
             BinaryOp::Add
             | BinaryOp::Sub
@@ -805,9 +893,15 @@ impl<'a> ConstraintCollector<'a> {
                 iter,
                 body,
             } => {
-                self.collect_expr(iter, None);
+                let iter_ty = self.collect_expr(iter, None);
                 let pattern_ty = self.fresh_var_term();
-                self.collect_bind_pattern(pattern, pattern_ty);
+                self.collect_bind_pattern(pattern, pattern_ty.clone());
+                self.out.expr_obligations.push(ExprObligation::ForIter {
+                    stmt_id: stmt.id,
+                    iter: iter_ty,
+                    pattern: pattern_ty,
+                    span: stmt.span,
+                });
                 self.enter_loop();
                 self.collect_expr(body, Some(TyTerm::Concrete(Type::Unit)));
                 self.exit_loop();
@@ -1146,6 +1240,39 @@ mod tests {
             out.control_facts
                 .iter()
                 .any(|fact| matches!(fact, ControlFact::Break { loop_depth: d, .. } if *d > 0))
+        );
+    }
+
+    #[test]
+    fn test_collect_expr_obligations() {
+        let source = r#"
+            fn test() -> u64 {
+                let arr = [1, 2, 3];
+                let x = (arr[0] + 1) * 2;
+                for item in arr {
+                    if item > 0 {
+                        break;
+                    }
+                }
+                x
+            }
+        "#;
+
+        let out = collect_constraints(source);
+        assert!(
+            out.expr_obligations
+                .iter()
+                .any(|ob| matches!(ob, ExprObligation::ArrayIndex { .. }))
+        );
+        assert!(
+            out.expr_obligations
+                .iter()
+                .any(|ob| matches!(ob, ExprObligation::BinOp { .. }))
+        );
+        assert!(
+            out.expr_obligations
+                .iter()
+                .any(|ob| matches!(ob, ExprObligation::ForIter { .. }))
         );
     }
 }

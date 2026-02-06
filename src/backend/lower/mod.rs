@@ -30,7 +30,7 @@ use crate::ir::IrTypeCache;
 use crate::ir::{Function, GlobalData, Terminator};
 use crate::resolve::DefTable;
 use crate::tree::semantic as sem;
-use crate::typeck::type_map::TypeMap;
+use crate::typecheck::type_map::TypeMap;
 use crate::types::Type;
 use lowerer::FuncLowerer;
 

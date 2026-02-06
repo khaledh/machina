@@ -11,7 +11,7 @@ use crate::typecheck::engine::{
     CollectedCallableSig, CollectedParamSig, CollectedPropertySig, TypecheckEngine,
 };
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typeck::type_map::{resolve_type_expr, resolve_type_expr_with_params};
+use crate::typecheck::type_map::{resolve_type_expr, resolve_type_expr_with_params};
 use crate::types::{EnumVariant, StructField, TyVarId, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,4 +1,4 @@
-use crate::typeck::{Unifier, UnifyError};
+use crate::typecheck::{Unifier, UnifyError};
 use crate::types::{FnParam, FnParamMode, Type};
 
 #[test]

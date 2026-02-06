@@ -15,7 +15,7 @@
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{CallArgMode, NodeId, ParamMode};
-use crate::typeck::type_map::{CallParam, CallSig};
+use crate::typecheck::type_map::{CallParam, CallSig};
 use crate::types::Type;
 
 use super::elaborator::Elaborator;

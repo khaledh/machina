@@ -9,7 +9,7 @@ use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
-use crate::typeck::type_check;
+use crate::typecheck::type_check;
 
 fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);

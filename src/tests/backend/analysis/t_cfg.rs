@@ -7,7 +7,7 @@ use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
-use crate::typeck::type_check;
+use crate::typecheck::type_check;
 use indoc::indoc;
 
 fn analyze(source: &str) -> SemanticContext {

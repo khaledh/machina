@@ -4,7 +4,7 @@ use crate::normalize::normalize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::{SemCheckError, move_check};
-use crate::typeck::type_check;
+use crate::typecheck::type_check;
 
 fn move_check_source(source: &str) -> move_check::MoveCheckResult {
     let lexer = Lexer::new(source);

@@ -4,9 +4,9 @@ use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::tree::resolved::CallArg;
 use crate::tree::{CallArgMode, ParamMode};
-use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typeck::type_map::GenericInst;
-use crate::typeck::unify::Unifier;
+use crate::typecheck::legacy::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::typecheck::legacy::type_map::GenericInst;
+use crate::typecheck::legacy::unify::Unifier;
 use crate::types::{
     EnumVariant, FnParam, StructField, TyVarId, Type, TypeAssignability, ValueAssignability,
     array_to_slice_assignable, value_assignable,

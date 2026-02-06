@@ -7,7 +7,7 @@ use crate::monomorphize::MonomorphizeError;
 use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 use crate::semck::SemCheckError;
-use crate::typeck::TypeCheckError;
+use crate::typecheck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;
 

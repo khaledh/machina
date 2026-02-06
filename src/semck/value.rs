@@ -8,7 +8,7 @@ use crate::tree::normalized::{
     TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
 };
 use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::typeck::type_map::resolve_type_expr;
+use crate::typecheck::type_map::resolve_type_expr;
 use crate::types::{Type, TypeId};
 use std::collections::HashMap;
 

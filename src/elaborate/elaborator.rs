@@ -16,7 +16,7 @@ use crate::semck::closure::capture::ClosureCapture;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
-use crate::typeck::type_map::{CallSigMap, TypeMap};
+use crate::typecheck::type_map::{CallSigMap, TypeMap};
 use crate::types::{Type, TypeId};
 
 /// Information about a single captured variable in a closure's environment.

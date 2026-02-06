@@ -5,7 +5,7 @@ use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
 use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
 use crate::tree::{NodeId, ParamMode, RefinementKind};
-use crate::typeck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, TyVarId, Type, TypeCache, TypeId,
 };
@@ -56,6 +56,7 @@ pub(crate) fn resolve_type_expr_with_params(
     resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None)
 }
 
+#[allow(dead_code)]
 pub(crate) fn resolve_type_def_with_args(
     def_table: &DefTable,
     module: &impl TypeDefLookup,

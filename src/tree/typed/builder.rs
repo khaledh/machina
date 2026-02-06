@@ -7,7 +7,7 @@ use crate::tree::NodeId;
 use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::typed as typ;
-use crate::typeck::type_map::TypeMap;
+use crate::typecheck::type_map::TypeMap;
 use crate::types::TypeId;
 
 struct TypedTreeMapper<'a> {

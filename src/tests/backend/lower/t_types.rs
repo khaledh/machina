@@ -8,8 +8,8 @@ use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::tree::semantic as sem;
-use crate::typeck::type_check;
-use crate::typeck::type_map::resolve_type_expr;
+use crate::typecheck::type_check;
+use crate::typecheck::type_map::resolve_type_expr;
 use crate::types::{EnumVariant, FnParam, FnParamMode, Type, TypeId};
 use indoc::indoc;
 

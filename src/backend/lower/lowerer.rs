@@ -17,7 +17,7 @@ use crate::tree::format_compact::{
     format_semantic_stmt_compact, format_semantic_value_expr_compact,
 };
 use crate::tree::semantic as sem;
-use crate::typeck::type_map::TypeMap;
+use crate::typecheck::type_map::TypeMap;
 use crate::types::Type;
 
 /// An SSA value produced by linear (single-block) expression lowering.

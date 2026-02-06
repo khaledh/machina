@@ -16,7 +16,7 @@ use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
-use crate::typeck::type_check;
+use crate::typecheck::type_check;
 
 #[derive(Debug)]
 pub struct CompileOptions {

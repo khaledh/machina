@@ -7,7 +7,7 @@ use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::visit_mut::{VisitorMut, walk_expr, walk_type_expr};
 use crate::tree::{NodeId, NodeIdGen, ParamMode, RefinementKind};
-use crate::typeck::type_map::{GenericInst, GenericInstMap};
+use crate::typecheck::type_map::{GenericInst, GenericInstMap};
 use crate::types::{FnParamMode, Type};
 use thiserror::Error;
 

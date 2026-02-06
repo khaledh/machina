@@ -1,5 +1,5 @@
 use super::*;
-use crate::typeck::overloads;
+use crate::typecheck::legacy::overloads;
 
 impl TypeChecker {
     fn check_call_arg_types(

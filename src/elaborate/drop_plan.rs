@@ -7,7 +7,7 @@ use crate::resolve::{DefId, DefTable};
 use crate::tree::semantic as sem;
 use crate::tree::semantic::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
 use crate::tree::{NodeId, ParamMode};
-use crate::typeck::type_map::TypeMap;
+use crate::typecheck::type_map::TypeMap;
 
 pub fn build_drop_plans(
     module: &sem::Module,

@@ -3,7 +3,7 @@ use crate::monomorphize::monomorphize;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::tree::resolved as res;
-use crate::typeck::type_check;
+use crate::typecheck::type_check;
 use crate::{lexer::Lexer, resolve::DefTable};
 
 fn resolve_context(source: &str) -> (crate::context::ResolvedContext, DefTable) {

@@ -15,5 +15,4 @@ pub mod semck;
 pub mod symtab;
 pub mod tree;
 pub mod typecheck;
-pub mod typeck;
 pub mod types;

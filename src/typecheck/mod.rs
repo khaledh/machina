@@ -1,19 +1,20 @@
-//! New type checker pipeline scaffold.
-//!
-//! This module is a parallel implementation path for a clean-slate type checker.
-//! It is intentionally non-default for now and mirrors the legacy public API.
+//! New type checker pipeline.
 
 mod collect;
 mod constraints;
 mod engine;
 mod errors;
 mod finalize;
+mod infer_unify;
+mod legacy;
 mod solve;
+pub mod type_map;
 mod typesys;
 mod unify;
 mod validate;
 
 pub use errors::{TypeCheckError, TypeCheckErrorKind};
+pub use infer_unify::{Unifier, UnifyError};
 
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::typecheck::engine::TypecheckEngine;
@@ -24,11 +25,11 @@ pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<Ty
         return rewrite_result;
     }
 
-    let legacy_result = crate::typeck::type_check_legacy(context);
+    let legacy_result = legacy::type_check_legacy(context);
     match (rewrite_result, legacy_result) {
-        // In compatibility mode, legacy diagnostics are canonical.
+        // In compatibility mode, legacy diagnostics remain canonical.
         (_, Err(legacy_errs)) => Err(legacy_errs),
-        // Legacy succeeded, so return legacy context while rewrite is under development.
+        // Legacy succeeded, so return legacy context while rewrite parity closes.
         (_, Ok(legacy_ctx)) => Ok(legacy_ctx),
     }
 }
@@ -49,3 +50,11 @@ fn parse_bool_like(value: &str) -> bool {
 #[cfg(test)]
 #[path = "../tests/typecheck/t_parity.rs"]
 mod tests_parity;
+
+#[cfg(test)]
+#[path = "../tests/typecheck/t_typeck.rs"]
+mod tests_typecheck;
+
+#[cfg(test)]
+#[path = "../tests/typecheck/t_unify.rs"]
+mod tests_unify;

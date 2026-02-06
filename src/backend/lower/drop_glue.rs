@@ -8,7 +8,7 @@ use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
-use crate::typeck::type_map::{TypeMap, resolve_type_expr};
+use crate::typecheck::type_map::{TypeMap, resolve_type_expr};
 use crate::types::Type;
 
 /// Tracks drop-glue functions needed for recursive heap elements.
