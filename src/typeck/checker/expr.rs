@@ -210,7 +210,7 @@ impl TypeChecker {
 
     pub(super) fn check_tuple_lit(&mut self, fields: &[Expr]) -> Result<Type, TypeCheckError> {
         if fields.is_empty() {
-            return Err(TypeCheckErrorKind::EmptyTupleLiteral(fields[0].span).into());
+            return Err(TypeCheckErrorKind::EmptyTupleLiteral(Span::default()).into());
         }
 
         // Type check each field
