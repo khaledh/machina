@@ -226,30 +226,24 @@ impl TypeChecker {
         if let ExprKind::StructField { target, field } = &assignee.kind {
             let receiver_ty = self.check_expr(target, Expected::Unknown)?;
             let view = self.view_type(&receiver_ty);
-            if let Some(type_name) = self.property_owner_name(view.ty()) {
-                // Property assignment is treated as a setter call.
-                let prop_info = self
-                    .property_sigs
-                    .get(&type_name)
-                    .and_then(|props| props.get(field))
-                    .map(|prop| (prop.setter, prop.ty.clone()));
-                if let Some((setter, prop_ty)) = prop_info {
-                    let Some(setter) = setter else {
-                        return Err(self.err_property_not_writable(field.clone(), assignee.span));
-                    };
-                    let rhs_type = self.check_expr(value, Expected::Exact(&prop_ty))?;
-                    self.check_assignable_to(value, &rhs_type, &prop_ty)?;
-                    self.record_property_call_sig(
-                        assignee.id,
-                        setter,
-                        receiver_ty,
-                        ParamMode::InOut,
-                        vec![prop_ty.clone()],
-                    );
-                    self.type_map_builder
-                        .record_node_type(assignee.id, Type::Unit);
-                    return Ok(Type::Unit);
-                }
+            if let Some(prop) = self.lookup_property_sig(view.ty(), field) {
+                let setter = prop.setter;
+                let prop_ty = prop.ty.clone();
+                let Some(setter) = setter else {
+                    return Err(self.err_property_not_writable(field.clone(), assignee.span));
+                };
+                let rhs_type = self.check_expr(value, Expected::Exact(&prop_ty))?;
+                self.check_assignable_to(value, &rhs_type, &prop_ty)?;
+                self.record_property_call_sig(
+                    assignee.id,
+                    setter,
+                    receiver_ty,
+                    ParamMode::InOut,
+                    vec![prop_ty],
+                );
+                self.type_map_builder
+                    .record_node_type(assignee.id, Type::Unit);
+                return Ok(Type::Unit);
             }
             if field == "len"
                 && (view.as_array().is_some() || view.as_slice().is_some() || view.is_string())

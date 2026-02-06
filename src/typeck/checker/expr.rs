@@ -256,26 +256,14 @@ impl TypeChecker {
         let target_ty = self.check_expr(target, Expected::Unknown)?;
         let view = self.view_type(&target_ty);
 
-        if let Some(type_name) = self.property_owner_name(view.ty()) {
-            // Property access is treated as a getter call.
-            let prop_info = self
-                .property_sigs
-                .get(&type_name)
-                .and_then(|props| props.get(field))
-                .map(|prop| (prop.getter, prop.ty.clone()));
-            if let Some((getter, prop_ty)) = prop_info {
-                let Some(getter) = getter else {
-                    return Err(self.err_property_not_readable(field, target.span));
-                };
-                self.record_property_call_sig(
-                    expr_id,
-                    getter,
-                    target_ty,
-                    ParamMode::In,
-                    Vec::new(),
-                );
-                return Ok(prop_ty);
-            }
+        if let Some(prop) = self.lookup_property_sig(view.ty(), field) {
+            let getter = prop.getter;
+            let prop_ty = prop.ty.clone();
+            let Some(getter) = getter else {
+                return Err(self.err_property_not_readable(field, target.span));
+            };
+            self.record_property_call_sig(expr_id, getter, target_ty, ParamMode::In, Vec::new());
+            return Ok(prop_ty);
         }
 
         if field == "len" {

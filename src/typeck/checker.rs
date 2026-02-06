@@ -734,6 +734,13 @@ impl TypeChecker {
         }
     }
 
+    fn lookup_property_sig<'a>(&'a self, owner_ty: &Type, field: &str) -> Option<&'a PropertySig> {
+        let type_name = self.property_owner_name(owner_ty)?;
+        self.property_sigs
+            .get(&type_name)
+            .and_then(|props| props.get(field))
+    }
+
     fn enum_name_matches(expected: &str, name: &str) -> bool {
         expected == name
             || expected
