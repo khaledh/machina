@@ -131,6 +131,7 @@ impl TypeChecker {
         end: &Option<Box<Expr>>,
     ) -> Result<Type, TypeCheckError> {
         let target_ty = self.check_expr(target, Expected::Unknown)?;
+        let view = self.view_type(&target_ty);
 
         // Type check start and end (must be u64)
         if let Some(start) = start {
@@ -147,28 +148,36 @@ impl TypeChecker {
         }
 
         // Slices are allowed only for arrays and strings.
-        match target_ty {
-            Type::Array { .. } => {
-                let Some(slice_elem_ty) = target_ty.array_item_type() else {
-                    return Err(TypeCheckErrorKind::SliceTargetZeroDimArray(
-                        target_ty,
-                        target.span,
-                    )
-                    .into());
-                };
-
-                Ok(Type::Slice {
-                    elem_ty: Box::new(slice_elem_ty),
-                })
+        if let Some((elem_ty, dims)) = view.as_array() {
+            if dims.is_empty() {
+                return Err(
+                    TypeCheckErrorKind::SliceTargetZeroDimArray(target_ty, target.span).into(),
+                );
             }
-            Type::Slice { elem_ty } => Ok(Type::Slice { elem_ty }),
-            Type::String => Ok(Type::Slice {
-                elem_ty: Box::new(Type::uint(8)),
-            }),
-            other => {
-                Err(TypeCheckErrorKind::SliceTargetNotArrayOrString(other, target.span).into())
-            }
+            let slice_elem_ty = if dims.len() == 1 {
+                elem_ty.clone()
+            } else {
+                Type::Array {
+                    elem_ty: Box::new(elem_ty.clone()),
+                    dims: dims[1..].to_vec(),
+                }
+            };
+            return Ok(Type::Slice {
+                elem_ty: Box::new(slice_elem_ty),
+            });
         }
+        if let Some(elem_ty) = view.as_slice() {
+            return Ok(Type::Slice {
+                elem_ty: Box::new(elem_ty.clone()),
+            });
+        }
+        if view.is_string() {
+            return Ok(Type::Slice {
+                elem_ty: Box::new(Type::uint(8)),
+            });
+        }
+
+        Err(TypeCheckErrorKind::SliceTargetNotArrayOrString(target_ty, target.span).into())
     }
 
     pub(super) fn check_string_index(
@@ -270,7 +279,7 @@ impl TypeChecker {
             if !self.is_place_expr(target) {
                 return Err(TypeCheckErrorKind::LenTargetNotLvalue(target.span).into());
             }
-            if view.as_array().is_some() || view.as_slice().is_some() || view.is_string() {
+            if view.is_len_target() {
                 self.type_map_builder.record_call_sig(
                     expr_id,
                     CallSig {

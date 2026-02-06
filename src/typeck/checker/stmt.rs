@@ -245,9 +245,7 @@ impl TypeChecker {
                     .record_node_type(assignee.id, Type::Unit);
                 return Ok(Type::Unit);
             }
-            if field == "len"
-                && (view.as_array().is_some() || view.as_slice().is_some() || view.is_string())
-            {
+            if field == "len" && view.is_len_target() {
                 return Err(self.err_property_not_writable(field.clone(), assignee.span));
             }
         }

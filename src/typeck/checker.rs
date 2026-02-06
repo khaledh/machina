@@ -1187,6 +1187,10 @@ impl TypeView {
     fn is_string(&self) -> bool {
         matches!(self.ty, Type::String)
     }
+
+    fn is_len_target(&self) -> bool {
+        self.as_array().is_some() || self.as_slice().is_some() || self.is_string()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1496,23 +1500,20 @@ impl TreeFolder<DefId> for TypeChecker {
 
                 ExprKind::ArrayIndex { target, indices } => {
                     let target_ty = self.check_expr(target, Expected::Unknown)?;
-                    let peeled_ty = target_ty.peel_heap();
+                    let view = self.view_type(&target_ty);
 
-                    match peeled_ty {
-                        Type::Array { elem_ty, dims } => {
-                            self.check_array_index(elem_ty.as_ref(), &dims, indices, target.span)
-                        }
-                        Type::Slice { elem_ty } => {
-                            self.check_slice_index(elem_ty.as_ref(), indices, target.span)
-                        }
-                        Type::String => self.check_string_index(indices, target.span),
-                        _ => {
-                            return Err(TypeCheckErrorKind::InvalidIndexTargetType(
-                                target_ty,
-                                target.span,
-                            )
-                            .into());
-                        }
+                    if let Some((elem_ty, dims)) = view.as_array() {
+                        self.check_array_index(elem_ty, dims, indices, target.span)
+                    } else if let Some(elem_ty) = view.as_slice() {
+                        self.check_slice_index(elem_ty, indices, target.span)
+                    } else if view.is_string() {
+                        self.check_string_index(indices, target.span)
+                    } else {
+                        return Err(TypeCheckErrorKind::InvalidIndexTargetType(
+                            target_ty,
+                            target.span,
+                        )
+                        .into());
                     }
                 }
 

@@ -150,7 +150,7 @@ impl TypeChecker {
             if !self.is_place_expr(callee) {
                 return Err(TypeCheckErrorKind::LenTargetNotLvalue(callee.span).into());
             }
-            if view.as_array().is_some() || view.as_slice().is_some() || view.is_string() {
+            if view.is_len_target() {
                 return Ok(Type::uint(64));
             }
             return Err(self.err_invalid_struct_field_target(callee_ty, callee.span));
