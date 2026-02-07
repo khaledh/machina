@@ -810,6 +810,60 @@ fn test_match_non_exhaustive() {
 }
 
 #[test]
+fn test_match_error_union_non_exhaustive_reports_all_missing_variants() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn io() -> u64 | IoError { IoError { code: 1 } }
+        fn parse() -> u64 | ParseError { ParseError { line: 2 } }
+
+        fn read(mode: u64) -> u64 | IoError | ParseError {
+            if mode == 0 {
+                let n = io()?;
+                n
+            } else {
+                let n = parse()?;
+                n
+            }
+        }
+
+        fn test(mode: u64) -> u64 {
+            let result = read(mode);
+            match result {
+                n: u64 => n,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        let err = errors
+            .iter()
+            .find(|e| matches!(e, SemCheckError::NonExhaustiveUnionMatch(_, _)))
+            .expect("Expected NonExhaustiveUnionMatch error");
+        match err {
+            SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
+                assert_eq!(missing.len(), 2);
+                assert!(
+                    missing
+                        .iter()
+                        .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "IoError"))
+                );
+                assert!(
+                    missing
+                        .iter()
+                        .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "ParseError"))
+                );
+            }
+            other => panic!("Expected NonExhaustiveUnionMatch error, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn test_match_exhaustive_without_wildcard() {
     let source = r#"
         type Color = Red | Green
@@ -898,8 +952,14 @@ fn test_match_error_union_non_exhaustive() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match &errors[0] {
-            SemCheckError::NonExhaustiveMatch(_) => {}
-            e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
+            SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
+                assert_eq!(missing.len(), 1);
+                assert!(matches!(
+                    &missing[0],
+                    Type::Struct { name, .. } if name == "IoError"
+                ));
+            }
+            e => panic!("Expected NonExhaustiveUnionMatch error, got {:?}", e),
         }
     }
 }

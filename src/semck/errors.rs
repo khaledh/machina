@@ -51,6 +51,9 @@ pub enum SemCheckError {
     #[error("Match is not exhaustive: {0}")]
     NonExhaustiveMatch(Span),
 
+    #[error("Match on error union is not exhaustive; missing variants: {0:?}")]
+    NonExhaustiveUnionMatch(Vec<Type>, Span),
+
     #[error("Duplicate match arm variant: {0}")]
     DuplicateMatchVariant(String, Span),
 
@@ -181,6 +184,7 @@ impl SemCheckError {
             SemCheckError::MatchTargetNotEnum(_, span) => *span,
             SemCheckError::MatchPatternEnumMismatch(_, _, span) => *span,
             SemCheckError::NonExhaustiveMatch(span) => *span,
+            SemCheckError::NonExhaustiveUnionMatch(_, span) => *span,
             SemCheckError::DuplicateMatchVariant(_, span) => *span,
             SemCheckError::InvalidMatchPattern(_, span) => *span,
             SemCheckError::WildcardArmNotLast(span) => *span,

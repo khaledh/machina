@@ -213,7 +213,16 @@ impl<'a> UnionRule<'a> {
 
         let variant_count = 1 + self.err_tys.len();
         if !has_wildcard && seen_variant_indices.len() != variant_count {
-            errors.push(SemCheckError::NonExhaustiveMatch(span));
+            let mut missing = Vec::new();
+            if !seen_variant_indices.contains(&0) {
+                missing.push(self.ok_ty.clone());
+            }
+            for (idx, err_ty) in self.err_tys.iter().enumerate() {
+                if !seen_variant_indices.contains(&(idx + 1)) {
+                    missing.push(err_ty.clone());
+                }
+            }
+            errors.push(SemCheckError::NonExhaustiveUnionMatch(missing, span));
         }
     }
 
