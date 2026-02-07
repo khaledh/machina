@@ -181,11 +181,17 @@ In `src/backend/lower/*` and `src/backend/codegen/*`:
 
 Add/extend diagnostics in `src/typecheck/errors.rs`:
 
-- `TryOnNonFallible`
-- `PropagatedErrorNotDeclared`
+- `TryOperandNotErrorUnion`
+- `TryOutsideFunction`
+- `TryReturnTypeNotErrorUnion`
+- `TryErrorNotInReturn`
+- `ReturnNotInErrorUnion`
+- `JoinArmNotInErrorUnion`
 - `UnionNotAllowedHere`
+
+Add/extend diagnostics in `src/semck/errors.rs`:
+
 - `NonExhaustiveUnionMatch`
-- `DuplicateUnionArmType`
 
 ## Testing Plan
 

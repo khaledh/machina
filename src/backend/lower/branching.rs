@@ -289,7 +289,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 value: Some(union_value),
             });
         } else {
-            self.lower_try_error_return_cases(union_slot.addr, blob_ty, tag, err_tys, &err_variants)?;
+            self.lower_try_error_return_cases(
+                union_slot.addr,
+                blob_ty,
+                tag,
+                err_tys,
+                &err_variants,
+            )?;
         }
 
         let join_value = join.join_value();

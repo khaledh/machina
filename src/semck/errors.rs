@@ -51,7 +51,10 @@ pub enum SemCheckError {
     #[error("Match is not exhaustive: {0}")]
     NonExhaustiveMatch(Span),
 
-    #[error("Match on error union is not exhaustive; missing variants: {0:?}")]
+    #[error(
+        "Match on error union is not exhaustive; missing variants: {missing}",
+        missing = .0.join(" | ")
+    )]
     NonExhaustiveUnionMatch(Vec<String>, Span),
 
     #[error("Duplicate match arm variant: {0}")]

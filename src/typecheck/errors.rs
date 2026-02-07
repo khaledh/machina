@@ -40,12 +40,20 @@ pub enum TypeCheckErrorKind {
     TryReturnTypeNotErrorUnion(Type, Span),
 
     #[error(
-        "`?` cannot propagate errors {0:?} into return type {1}; add them to the return union or handle them with match"
+        "`?` cannot propagate errors {missing} into return union {ret}; add them to the return union or handle them with match",
+        missing = .0.join(" | "),
+        ret = .1.join(" | ")
     )]
-    TryErrorNotInReturn(Vec<Type>, Type, Span),
+    TryErrorNotInReturn(Vec<String>, Vec<String>, Span),
 
     #[error("Join arm type mismatch: expected join type {0}, found arm type {1}")]
     JoinArmTypeMismatch(Type, Type, Span),
+
+    #[error(
+        "Join arm type mismatch: expected one of {expected}, found arm type {1}",
+        expected = .0.join(" | ")
+    )]
+    JoinArmNotInErrorUnion(Vec<String>, Type, Span),
 
     #[error("Condition must be a boolean, found {0}")]
     CondNotBoolean(Type, Span),
@@ -67,6 +75,12 @@ pub enum TypeCheckErrorKind {
 
     #[error("return type mismatch: expected {0}, found {1}")]
     ReturnTypeMismatch(Type, Type, Span),
+
+    #[error(
+        "return value must be one of {expected}, found {1}",
+        expected = .0.join(" | ")
+    )]
+    ReturnNotInErrorUnion(Vec<String>, Type, Span),
 
     #[error("Then and else branches have different types: {0} != {1}")]
     ThenElseTypeMismatch(Type, Type, Span),
@@ -315,6 +329,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_, span) => *span,
             TypeCheckErrorKind::TryErrorNotInReturn(_, _, span) => *span,
             TypeCheckErrorKind::JoinArmTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::JoinArmNotInErrorUnion(_, _, span) => *span,
             TypeCheckErrorKind::CondNotBoolean(_, span) => *span,
             TypeCheckErrorKind::BreakOutsideLoop(span) => *span,
             TypeCheckErrorKind::ContinueOutsideLoop(span) => *span,
@@ -322,6 +337,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::ReturnValueMissing(_, span) => *span,
             TypeCheckErrorKind::ReturnValueUnexpected(span) => *span,
             TypeCheckErrorKind::ReturnTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::ReturnNotInErrorUnion(_, _, span) => *span,
             TypeCheckErrorKind::ThenElseTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::AssignTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::ArgCountMismatch(_, _, _, span) => *span,

@@ -264,7 +264,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let src_slot = self.materialize_value_slot(value, src_ir_ty);
         let dst_ir_ty = self.type_lowerer.lower_type(dst_ty);
         let dst_ptr_ty = self.type_lowerer.ptr_to(dst_ir_ty);
-        let dst_addr = self.builder.cast(CastKind::PtrToPtr, src_slot.addr, dst_ptr_ty);
+        let dst_addr = self
+            .builder
+            .cast(CastKind::PtrToPtr, src_slot.addr, dst_ptr_ty);
         self.builder.load(dst_addr, dst_ir_ty)
     }
 

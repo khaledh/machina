@@ -1535,10 +1535,7 @@ fn test_try_operator_rejects_error_not_in_return_set() {
             })
             .expect("expected TryErrorNotInReturn");
         assert_eq!(mismatch.len(), 1);
-        assert!(matches!(
-            &mismatch[0],
-            Type::Struct { name, .. } if name == "IoError"
-        ));
+        assert!(mismatch.iter().any(|name| name == "IoError"));
     }
 }
 
@@ -1570,12 +1567,8 @@ fn test_try_operator_reports_all_missing_error_variants() {
         match err.kind() {
             TypeCheckErrorKind::TryErrorNotInReturn(missing, _, _) => {
                 assert_eq!(missing.len(), 2);
-                assert!(missing
-                    .iter()
-                    .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "IoError")));
-                assert!(missing
-                    .iter()
-                    .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "ParseError")));
+                assert!(missing.iter().any(|name| name == "IoError"));
+                assert!(missing.iter().any(|name| name == "ParseError"));
             }
             other => panic!("expected TryErrorNotInReturn, got {other:?}"),
         }
@@ -1586,6 +1579,39 @@ fn test_try_operator_reports_all_missing_error_variants() {
                 && rendered.contains("handle them with match"),
             "expected fix-oriented text in diagnostic, got: {rendered}"
         );
+        assert!(
+            !rendered.contains("[") && !rendered.contains("\""),
+            "expected compact variant names, got: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn test_return_union_mismatch_reports_union_variants() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn run() -> u64 | IoError {
+            return true;
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        let err = errors
+            .iter()
+            .find(|e| matches!(e.kind(), TypeCheckErrorKind::ReturnNotInErrorUnion(_, _, _)))
+            .expect("expected ReturnNotInErrorUnion");
+        match err.kind() {
+            TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, _) => {
+                assert!(variants.iter().any(|name| name == "u64"));
+                assert!(variants.iter().any(|name| name == "IoError"));
+                assert_eq!(*found, Type::Bool);
+            }
+            other => panic!("expected ReturnNotInErrorUnion, got {other:?}"),
+        }
     }
 }
 
@@ -2334,10 +2360,11 @@ fn test_join_arm_mismatch_reports_join_diagnostic() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e.kind(),
-            TypeCheckErrorKind::JoinArmTypeMismatch(_, _, _)
-        )));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::JoinArmTypeMismatch(_, _, _)))
+        );
     }
 }
 
@@ -2361,6 +2388,54 @@ fn test_error_union_not_allowed_in_param_type() {
 
         fn bad(x: u64 | IoError) -> u64 {
             0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere(_)))
+        );
+    }
+}
+
+#[test]
+fn test_error_union_not_allowed_in_struct_field_type() {
+    let source = r#"
+        type Bad = {
+            value: u64 | bool,
+        }
+
+        fn use_bad(x: Bad) -> u64 {
+            x.value
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere(_)))
+        );
+    }
+}
+
+#[test]
+fn test_error_union_not_allowed_in_generic_argument_type() {
+    let source = r#"
+        type Box<T> = {
+            value: T,
+        }
+
+        fn bad(x: Box<u64 | bool>) -> u64 {
+            x.value
         }
     "#;
 

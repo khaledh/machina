@@ -852,6 +852,11 @@ fn test_match_error_union_non_exhaustive_reports_all_missing_variants() {
             }
             other => panic!("Expected NonExhaustiveUnionMatch error, got {other:?}"),
         }
+        let rendered = format!("{err}");
+        assert!(
+            !rendered.contains("[") && !rendered.contains("\""),
+            "expected compact variant names, got: {rendered}"
+        );
     }
 }
 

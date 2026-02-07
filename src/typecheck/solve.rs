@@ -274,6 +274,7 @@ fn apply_constraint(
     deferred_pattern_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
     non_expr_errors: &mut Vec<TypeCheckError>,
 ) {
+    let reason = constraint_reason(constraint);
     let result = match constraint {
         Constraint::Eq { left, right, .. } => unifier.unify(
             &canonicalize_type(left.clone()),
@@ -291,7 +292,7 @@ fn apply_constraint(
                 deferred_pattern_errors.push((pattern_id, err, reason_span(constraint)));
             }
             ConstraintSubject::Other => {
-                non_expr_errors.push(unify_error_to_diag(err, reason_span(constraint)));
+                non_expr_errors.push(unify_error_to_diag_with_reason(err, reason, constraint));
             }
         }
     }
@@ -811,16 +812,20 @@ fn subst_type_vars(ty: &Type, map: &HashMap<TyVarId, Type>) -> Type {
 }
 
 fn reason_span(constraint: &Constraint) -> Span {
-    let reason = match constraint {
-        Constraint::Eq { reason, .. } => reason,
-        Constraint::Assignable { reason, .. } => reason,
-    };
+    let reason = constraint_reason(constraint);
     match reason {
         ConstraintReason::Expr(_, span)
         | ConstraintReason::Stmt(_, span)
         | ConstraintReason::Pattern(_, span)
         | ConstraintReason::Decl(_, span)
         | ConstraintReason::Return(_, span) => *span,
+    }
+}
+
+fn constraint_reason(constraint: &Constraint) -> &ConstraintReason {
+    match constraint {
+        Constraint::Eq { reason, .. } => reason,
+        Constraint::Assignable { reason, .. } => reason,
     }
 }
 
@@ -831,10 +836,7 @@ enum ConstraintSubject {
 }
 
 fn reason_subject_id(constraint: &Constraint) -> ConstraintSubject {
-    let reason = match constraint {
-        Constraint::Eq { reason, .. } => reason,
-        Constraint::Assignable { reason, .. } => reason,
-    };
+    let reason = constraint_reason(constraint);
     match reason {
         ConstraintReason::Expr(expr_id, _) => ConstraintSubject::Expr(*expr_id),
         ConstraintReason::Pattern(pattern_id, _) => ConstraintSubject::Pattern(*pattern_id),
@@ -981,14 +983,25 @@ fn check_expr_obligations(
                         type_assignable(&arm_ty_diag, &result_ty_diag),
                         TypeAssignability::Incompatible
                     ) {
-                        errors.push(
-                            TypeCheckErrorKind::JoinArmTypeMismatch(
-                                result_ty_diag.clone(),
-                                arm_ty_diag,
-                                *span,
-                            )
-                            .into(),
-                        );
+                        if let Some(variants) = error_union_variant_names(&result_ty_diag) {
+                            errors.push(
+                                TypeCheckErrorKind::JoinArmNotInErrorUnion(
+                                    variants,
+                                    arm_ty_diag,
+                                    *span,
+                                )
+                                .into(),
+                            );
+                        } else {
+                            errors.push(
+                                TypeCheckErrorKind::JoinArmTypeMismatch(
+                                    result_ty_diag.clone(),
+                                    arm_ty_diag,
+                                    *span,
+                                )
+                                .into(),
+                            );
+                        }
                         covered_exprs.insert(*expr_id);
                         break;
                     }
@@ -1070,10 +1083,20 @@ fn check_expr_obligations(
                             }
                         }
                         if !missing.is_empty() {
+                            let mut missing_names =
+                                missing.iter().map(compact_type_name).collect::<Vec<_>>();
+                            missing_names.sort();
+                            missing_names.dedup();
+                            let mut return_variant_names = std::iter::once(ok_ty.as_ref())
+                                .chain(return_err_tys.iter())
+                                .map(compact_type_name)
+                                .collect::<Vec<_>>();
+                            return_variant_names.sort();
+                            return_variant_names.dedup();
                             errors.push(
                                 TypeCheckErrorKind::TryErrorNotInReturn(
-                                    missing,
-                                    return_ty.clone(),
+                                    missing_names,
+                                    return_variant_names,
                                     *span,
                                 )
                                 .into(),
@@ -1959,10 +1982,8 @@ fn bind_match_pattern_types(
                             let _ = unifier.unify(term, &pat_ty);
                         }
                     } else if !is_unresolved(&pat_ty) {
-                        let variant_names = variants
-                            .iter()
-                            .map(compact_type_name)
-                            .collect::<Vec<_>>();
+                        let variant_names =
+                            variants.iter().map(compact_type_name).collect::<Vec<_>>();
                         errors.push(
                             TypeCheckErrorKind::MatchTypedBindingTypeMismatch(
                                 variant_names,
@@ -1987,16 +2008,8 @@ fn bind_match_pattern_types(
             if let Type::Tuple { field_tys } = scrutinee_ty {
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
                     bind_match_pattern_types(
-                        child,
-                        child_ty,
-                        def_terms,
-                        unifier,
-                        type_defs,
-                        def_table,
-                        module,
-                        errors,
-                        covered,
-                        pattern_id,
+                        child, child_ty, def_terms, unifier, type_defs, def_table, module, errors,
+                        covered, pattern_id,
                     );
                 }
             } else if is_unresolved(scrutinee_ty) {
@@ -2010,16 +2023,8 @@ fn bind_match_pattern_types(
                 let _ = unifier.unify(scrutinee_ty, &inferred_tuple);
                 for (child, child_ty) in patterns.iter().zip(inferred_fields.iter()) {
                     bind_match_pattern_types(
-                        child,
-                        child_ty,
-                        def_terms,
-                        unifier,
-                        type_defs,
-                        def_table,
-                        module,
-                        errors,
-                        covered,
-                        pattern_id,
+                        child, child_ty, def_terms, unifier, type_defs, def_table, module, errors,
+                        covered, pattern_id,
                     );
                 }
             }
@@ -2073,6 +2078,19 @@ fn compact_type_name(ty: &Type) -> String {
         Type::Unit => "()".to_string(),
         _ => ty.to_string(),
     }
+}
+
+fn error_union_variant_names(ty: &Type) -> Option<Vec<String>> {
+    let Type::ErrorUnion { ok_ty, err_tys } = ty else {
+        return None;
+    };
+    let mut names = std::iter::once(ok_ty.as_ref())
+        .chain(err_tys.iter())
+        .map(compact_type_name)
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    Some(names)
 }
 
 fn resolve_pattern_enum_type(
@@ -2458,6 +2476,38 @@ fn unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
         }
         TcUnifyError::CannotBindRigid(var, found) => {
             TypeCheckErrorKind::DeclTypeMismatch(Type::Var(var), found, span).into()
+        }
+        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
+    }
+}
+
+fn unify_error_to_diag_with_reason(
+    err: TcUnifyError,
+    reason: &ConstraintReason,
+    constraint: &Constraint,
+) -> TypeCheckError {
+    match reason {
+        ConstraintReason::Return(_, span) => return_unify_error_to_diag(err, *span),
+        _ => unify_error_to_diag(err, reason_span(constraint)),
+    }
+}
+
+fn return_unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
+    match err {
+        TcUnifyError::Mismatch(expected, found) => {
+            if let Type::ErrorUnion { ok_ty, err_tys } = &expected {
+                let mut variants = std::iter::once(ok_ty.as_ref())
+                    .chain(err_tys.iter())
+                    .map(compact_type_name)
+                    .collect::<Vec<_>>();
+                variants.sort();
+                variants.dedup();
+                return TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, span).into();
+            }
+            TypeCheckErrorKind::ReturnTypeMismatch(expected, found, span).into()
+        }
+        TcUnifyError::CannotBindRigid(var, found) => {
+            TypeCheckErrorKind::ReturnTypeMismatch(Type::Var(var), found, span).into()
         }
         TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
     }
