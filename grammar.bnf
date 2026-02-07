@@ -3,7 +3,7 @@
 # Top-level
 Module             ::= TopLevelItem*
 
-TopLevelItem       ::= (AttributeList (TypeDef | FuncDecl | FuncDef)) | MethodBlock
+TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef)) | MethodBlock
 
 # Attributes
 AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
@@ -23,6 +23,10 @@ StructField        ::= Identifier ":" TypeExpr
 
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
+
+# Traits
+TraitDef           ::= "trait" Identifier "{" TraitMethodDecl* "}"
+TraitMethodDecl    ::= MethodSig ";"
 
 # Type Expressions
 TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType
@@ -50,7 +54,7 @@ Func               ::= FuncSig Block
 FuncSig            ::= "fn" Identifier TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
-MethodBlock        ::= Identifier "::" "{" MethodItem* "}"
+MethodBlock        ::= Identifier "::" Identifier? "{" MethodItem* "}"
 MethodItem         ::= MethodDecl | MethodDef | PropertyDef
 MethodDecl         ::= AttributeList MethodSig ";"
 MethodDef          ::= AttributeList MethodSig Block

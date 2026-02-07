@@ -176,6 +176,7 @@ impl<'a> Elaborator<'a> {
 
     fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> sem::TopLevelItem {
         match item {
+            norm::TopLevelItem::TraitDef(def) => sem::TopLevelItem::TraitDef(def.clone()),
             norm::TopLevelItem::TypeDef(def) => sem::TopLevelItem::TypeDef(def.clone()),
             norm::TopLevelItem::FuncDecl(decl) => sem::TopLevelItem::FuncDecl(sem::FuncDecl {
                 id: decl.id,
@@ -196,6 +197,7 @@ impl<'a> Elaborator<'a> {
                 sem::TopLevelItem::MethodBlock(sem::MethodBlock {
                     id: block.id,
                     type_name: block.type_name.clone(),
+                    trait_name: block.trait_name.clone(),
                     method_items: block
                         .method_items
                         .iter()

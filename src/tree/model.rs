@@ -25,6 +25,16 @@ pub struct Module<D, T = ()> {
 }
 
 impl<D, T> Module<D, T> {
+    pub fn trait_defs(&self) -> Vec<&TraitDef<D>> {
+        self.top_level_items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::TraitDef(trait_def) => Some(trait_def),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn type_defs(&self) -> Vec<&TypeDef<D>> {
         self.top_level_items
             .iter()
@@ -113,7 +123,7 @@ impl<D, T> Module<D, T> {
                 TopLevelItem::ClosureDef(closure_decl) => {
                     vec![CallableRef::ClosureDef(closure_decl)]
                 }
-                TopLevelItem::TypeDef(_) => vec![],
+                TopLevelItem::TypeDef(_) | TopLevelItem::TraitDef(_) => vec![],
             })
             .collect()
     }
@@ -123,11 +133,29 @@ impl<D, T> Module<D, T> {
 
 #[derive(Clone, Debug)]
 pub enum TopLevelItem<D, T = ()> {
+    TraitDef(TraitDef<D>),
     TypeDef(TypeDef<D>),
     FuncDecl(FuncDecl<D>),          // function declaration
     FuncDef(FuncDef<D, T>),         // function definition
     MethodBlock(MethodBlock<D, T>), // method declarations/definitions
     ClosureDef(ClosureDef<D, T>),   // closure definition (generated)
+}
+
+#[derive(Clone, Debug)]
+pub struct TraitDef<D> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub attrs: Vec<Attribute>,
+    pub name: String,
+    pub methods: Vec<TraitMethod<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TraitMethod<D> {
+    pub id: NodeId,
+    pub sig: MethodSig<D>,
+    pub span: Span,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -354,6 +382,7 @@ pub struct TypeParam<D> {
 pub struct MethodBlock<D, T = ()> {
     pub id: NodeId,
     pub type_name: String,
+    pub trait_name: Option<String>,
     pub method_items: Vec<MethodItem<D, T>>,
     pub span: Span,
 }

@@ -433,13 +433,15 @@ fn check_call_obligations(
             continue;
         }
 
-        let mut best_choice: Option<(i32, TcUnifier, DefId)> = None;
+        let mut best_choice: Option<(i32, i32, TcUnifier, DefId)> = None;
+        let mut ambiguous_best = false;
         let mut first_error = None;
         for sig in candidates.drain(..) {
             let mut trial = unifier.clone();
             let (inst_params, inst_ret) = instantiate_sig(sig, &mut trial);
             let mut failed = false;
             let mut score = 0i32;
+            let method_priority = if sig.impl_trait.is_none() { 1 } else { 0 };
             for (index, (arg_term, param_ty)) in obligation
                 .arg_terms
                 .iter()
@@ -473,12 +475,31 @@ fn check_call_obligations(
                 continue;
             }
             match &best_choice {
-                Some((best_score, _, _)) if score <= *best_score => {}
-                _ => best_choice = Some((score, trial, sig.def_id)),
+                Some((best_score, best_priority, _, _))
+                    if score < *best_score
+                        || (score == *best_score && method_priority < *best_priority) => {}
+                Some((best_score, best_priority, _, _))
+                    if score == *best_score && method_priority == *best_priority =>
+                {
+                    ambiguous_best = true;
+                }
+                _ => {
+                    ambiguous_best = false;
+                    best_choice = Some((score, method_priority, trial, sig.def_id));
+                }
             }
         }
 
-        if let Some((_, next, def_id)) = best_choice {
+        if let Some((_, _, next, def_id)) = best_choice {
+            if ambiguous_best {
+                let name = match &obligation.callee {
+                    CallCallee::NamedFunction { name, .. } => name.clone(),
+                    CallCallee::Method { name } => name.clone(),
+                    CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
+                };
+                errors.push(TypeCheckErrorKind::OverloadAmbiguous(name, obligation.span).into());
+                continue;
+            }
             *unifier = next;
             resolved_call_defs.insert(obligation.call_node, def_id);
         } else if let Some(err) = first_error {

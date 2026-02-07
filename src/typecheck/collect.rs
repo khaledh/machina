@@ -20,7 +20,8 @@ use crate::tree::resolved::{
     TypeDefKind, TypeParam,
 };
 use crate::typecheck::engine::{
-    CollectedCallableSig, CollectedParamSig, CollectedPropertySig, TypecheckEngine,
+    CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitMethodSig,
+    CollectedTraitSig, TypecheckEngine,
 };
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::type_map::{resolve_type_expr, resolve_type_expr_with_params};
@@ -38,6 +39,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 
     let mut type_symbols = HashMap::new();
     let mut type_defs = HashMap::new();
+    let mut trait_sigs = HashMap::new();
     let mut func_sigs = HashMap::new();
     let mut method_sigs = HashMap::new();
     let mut property_sigs = HashMap::new();
@@ -54,13 +56,17 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut errors,
     );
 
-    // 2) Collect function overloads.
+    // 2) Collect trait method contracts.
+    collect_trait_sigs(&ctx, &mut trait_sigs, &mut errors);
+
+    // 3) Collect function overloads.
     collect_function_sigs(&ctx, &mut func_sigs, &mut generic_envs, &mut errors);
 
-    // 3) Collect method overloads and synthesized property signatures.
+    // 4) Collect method overloads and synthesized property signatures.
     collect_method_sigs(
         &ctx,
         &type_defs,
+        &trait_sigs,
         &mut method_sigs,
         &mut property_sigs,
         &mut property_conflicts,
@@ -76,6 +82,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let env = engine.env_mut();
     env.type_symbols = type_symbols;
     env.type_defs = type_defs;
+    env.trait_sigs = trait_sigs;
     env.func_sigs = func_sigs;
     env.method_sigs = method_sigs;
     env.property_sigs = property_sigs;
@@ -161,6 +168,42 @@ fn resolve_enum_type(
     Ok(out)
 }
 
+fn collect_trait_sigs(
+    ctx: &crate::context::ResolvedContext,
+    trait_sigs: &mut HashMap<String, CollectedTraitSig>,
+    errors: &mut Vec<TypeCheckError>,
+) {
+    for trait_def in ctx.module.trait_defs() {
+        let mut methods = HashMap::new();
+
+        for method in &trait_def.methods {
+            let Some(collected) = collect_trait_method_sig(ctx, &method.sig, errors) else {
+                continue;
+            };
+
+            if methods.insert(method.sig.name.clone(), collected).is_some() {
+                errors.push(
+                    TypeCheckErrorKind::TraitMethodDuplicate(
+                        trait_def.name.clone(),
+                        method.sig.name.clone(),
+                        method.span,
+                    )
+                    .into(),
+                );
+            }
+        }
+
+        trait_sigs.insert(
+            trait_def.name.clone(),
+            CollectedTraitSig {
+                def_id: trait_def.def_id,
+                methods,
+                span: trait_def.span,
+            },
+        );
+    }
+}
+
 fn collect_function_sigs(
     ctx: &crate::context::ResolvedContext,
     func_sigs: &mut HashMap<String, Vec<CollectedCallableSig>>,
@@ -181,6 +224,7 @@ fn collect_function_sigs(
             def_id,
             &sig,
             None,
+            None,
             func_sigs.entry(sig.name.clone()).or_default(),
             generic_envs,
             errors,
@@ -191,14 +235,36 @@ fn collect_function_sigs(
 fn collect_method_sigs(
     ctx: &crate::context::ResolvedContext,
     type_defs: &HashMap<String, Type>,
+    trait_sigs: &HashMap<String, CollectedTraitSig>,
     method_sigs: &mut HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
     property_sigs: &mut HashMap<String, HashMap<String, CollectedPropertySig>>,
     property_conflicts: &mut HashSet<(String, String)>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
 ) {
-    let mut items = Vec::new();
+    let mut seen_trait_impls = HashSet::new();
+
     for method_block in ctx.module.method_blocks() {
+        let mut implemented_trait_methods = HashSet::new();
+        let trait_contract = method_block
+            .trait_name
+            .as_ref()
+            .and_then(|trait_name| trait_sigs.get(trait_name));
+
+        if let Some(trait_name) = &method_block.trait_name {
+            let impl_key = (method_block.type_name.clone(), trait_name.clone());
+            if !seen_trait_impls.insert(impl_key) {
+                errors.push(
+                    TypeCheckErrorKind::TraitImplDuplicate(
+                        method_block.type_name.clone(),
+                        trait_name.clone(),
+                        method_block.span,
+                    )
+                    .into(),
+                );
+            }
+        }
+
         for method_item in &method_block.method_items {
             let (def_id, sig, attrs, span) = match method_item {
                 MethodItem::Decl(method_decl) => (
@@ -214,46 +280,77 @@ fn collect_method_sigs(
                     method_def.span,
                 ),
             };
-            items.push((method_block.type_name.clone(), def_id, sig, attrs, span));
-        }
-    }
 
-    for (type_name, def_id, sig, attrs, span) in items {
-        let mut collected = Vec::new();
-        collect_callable_sig(
-            ctx,
-            def_id,
-            &function_sig_from_method(&sig),
-            Some(sig.self_param.mode.clone()),
-            &mut collected,
-            generic_envs,
-            errors,
-        );
-        let Some(collected) = collected.pop() else {
-            continue;
-        };
-
-        method_sigs
-            .entry(type_name.clone())
-            .or_default()
-            .entry(sig.name.clone())
-            .or_default()
-            .push(collected.clone());
-
-        if let Some(kind) = property_accessor_kind(&attrs) {
-            record_property_sig(
-                type_defs,
-                property_sigs,
-                property_conflicts,
-                &type_name,
-                &sig.name,
-                kind,
+            let mut collected = Vec::new();
+            collect_callable_sig(
+                ctx,
                 def_id,
-                &collected.params,
-                &collected.ret_ty,
-                span,
+                &function_sig_from_method(&sig),
+                Some(sig.self_param.mode.clone()),
+                method_block.trait_name.clone(),
+                &mut collected,
+                generic_envs,
                 errors,
             );
+            let Some(collected) = collected.pop() else {
+                continue;
+            };
+
+            if let (Some(trait_name), Some(contract)) =
+                (method_block.trait_name.as_ref(), trait_contract)
+            {
+                validate_trait_method_impl(
+                    &method_block.type_name,
+                    trait_name,
+                    contract,
+                    &sig.name,
+                    &collected,
+                    span,
+                    &mut implemented_trait_methods,
+                    errors,
+                );
+            }
+
+            method_sigs
+                .entry(method_block.type_name.clone())
+                .or_default()
+                .entry(sig.name.clone())
+                .or_default()
+                .push(collected.clone());
+
+            if let Some(kind) = property_accessor_kind(&attrs) {
+                record_property_sig(
+                    type_defs,
+                    property_sigs,
+                    property_conflicts,
+                    &method_block.type_name,
+                    &sig.name,
+                    kind,
+                    def_id,
+                    &collected.params,
+                    &collected.ret_ty,
+                    span,
+                    errors,
+                );
+            }
+        }
+
+        if let (Some(trait_name), Some(contract)) =
+            (method_block.trait_name.as_ref(), trait_contract)
+        {
+            for required in contract.methods.keys() {
+                if !implemented_trait_methods.contains(required) {
+                    errors.push(
+                        TypeCheckErrorKind::TraitMethodMissingImpl(
+                            method_block.type_name.clone(),
+                            trait_name.clone(),
+                            required.clone(),
+                            method_block.span,
+                        )
+                        .into(),
+                    );
+                }
+            }
         }
     }
 }
@@ -263,6 +360,7 @@ fn collect_callable_sig(
     def_id: DefId,
     sig: &FunctionSig,
     self_mode: Option<ParamMode>,
+    impl_trait: Option<String>,
     out: &mut Vec<CollectedCallableSig>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
@@ -302,7 +400,109 @@ fn collect_callable_sig(
         ret_ty,
         type_param_count: sig.type_params.len(),
         self_mode,
+        impl_trait,
     });
+}
+
+fn collect_trait_method_sig(
+    ctx: &crate::context::ResolvedContext,
+    sig: &MethodSig,
+    errors: &mut Vec<TypeCheckError>,
+) -> Option<CollectedTraitMethodSig> {
+    let type_param_map = if sig.type_params.is_empty() {
+        None
+    } else {
+        Some(type_param_map(&sig.type_params))
+    };
+
+    let params = match build_param_sigs(ctx, &sig.params, type_param_map.as_ref()) {
+        Ok(params) => params,
+        Err(err) => {
+            errors.push(err);
+            return None;
+        }
+    };
+
+    let ret_ty = match resolve_type_expr_with_params(
+        &ctx.def_table,
+        &ctx.module,
+        &sig.ret_ty_expr,
+        type_param_map.as_ref(),
+    ) {
+        Ok(ret_ty) => ret_ty,
+        Err(err) => {
+            errors.push(err);
+            return None;
+        }
+    };
+
+    Some(CollectedTraitMethodSig {
+        name: sig.name.clone(),
+        params,
+        ret_ty,
+        type_param_count: sig.type_params.len(),
+        self_mode: sig.self_param.mode.clone(),
+        span: sig.span,
+    })
+}
+
+fn validate_trait_method_impl(
+    type_name: &str,
+    trait_name: &str,
+    contract: &CollectedTraitSig,
+    method_name: &str,
+    method: &CollectedCallableSig,
+    span: Span,
+    seen_methods: &mut HashSet<String>,
+    errors: &mut Vec<TypeCheckError>,
+) {
+    let Some(expected) = contract.methods.get(method_name) else {
+        errors.push(
+            TypeCheckErrorKind::TraitMethodNotInTrait(
+                type_name.to_string(),
+                trait_name.to_string(),
+                method_name.to_string(),
+                span,
+            )
+            .into(),
+        );
+        return;
+    };
+
+    if !seen_methods.insert(method_name.to_string()) {
+        errors.push(
+            TypeCheckErrorKind::TraitMethodImplDuplicate(
+                type_name.to_string(),
+                trait_name.to_string(),
+                method_name.to_string(),
+                span,
+            )
+            .into(),
+        );
+        return;
+    }
+
+    let matches = method.self_mode == Some(expected.self_mode.clone())
+        && method.type_param_count == expected.type_param_count
+        && method.params.len() == expected.params.len()
+        && method.ret_ty == expected.ret_ty
+        && method
+            .params
+            .iter()
+            .zip(expected.params.iter())
+            .all(|(actual, expected)| actual.mode == expected.mode && actual.ty == expected.ty);
+
+    if !matches {
+        errors.push(
+            TypeCheckErrorKind::TraitMethodSignatureMismatch(
+                type_name.to_string(),
+                trait_name.to_string(),
+                method_name.to_string(),
+                span,
+            )
+            .into(),
+        );
+    }
 }
 
 fn build_param_sigs(
@@ -567,5 +767,41 @@ mod tests {
         assert_eq!(y_val.ty, Type::uint(64));
         assert!(y_val.getter.is_some());
         assert!(y_val.setter.is_some());
+    }
+
+    #[test]
+    fn test_collect_trait_contract_and_trait_impl_methods() {
+        let source = r#"
+            trait Runnable {
+                fn run(self) -> u64;
+            }
+
+            type Process = { name: string }
+
+            Process :: Runnable {
+                fn run(self) -> u64 {
+                    1
+                }
+            }
+        "#;
+
+        let resolved = resolve_source(source);
+        let mut engine = TypecheckEngine::new(resolved);
+        run(&mut engine).expect("collect pass failed");
+
+        let env = engine.env();
+        let runnable = env
+            .trait_sigs
+            .get("Runnable")
+            .expect("missing Runnable trait");
+        assert!(runnable.methods.contains_key("run"));
+
+        let process_methods = env
+            .method_sigs
+            .get("Process")
+            .expect("missing Process methods");
+        let run_methods = process_methods.get("run").expect("missing run overloads");
+        assert_eq!(run_methods.len(), 1);
+        assert_eq!(run_methods[0].impl_trait.as_deref(), Some("Runnable"));
     }
 }

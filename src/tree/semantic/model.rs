@@ -17,6 +17,8 @@ pub type TypeDef = ast_model::TypeDef<DefId>;
 pub type TypeDefKind = ast_model::TypeDefKind<DefId>;
 pub type StructDefField = ast_model::StructDefField<DefId>;
 pub type EnumDefVariant = ast_model::EnumDefVariant<DefId>;
+pub type TraitDef = ast_model::TraitDef<DefId>;
+pub type TraitMethod = ast_model::TraitMethod<DefId>;
 
 pub type FunctionSig = ast_model::FunctionSig<DefId>;
 pub type MethodSig = ast_model::MethodSig<DefId>;
@@ -77,6 +79,16 @@ pub struct Module {
 }
 
 impl Module {
+    pub fn trait_defs(&self) -> Vec<&TraitDef> {
+        self.top_level_items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::TraitDef(trait_def) => Some(trait_def),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn type_defs(&self) -> Vec<&TypeDef> {
         self.top_level_items
             .iter()
@@ -144,7 +156,7 @@ impl Module {
                         },
                     })
                     .collect(),
-                TopLevelItem::TypeDef(_) => vec![],
+                TopLevelItem::TypeDef(_) | TopLevelItem::TraitDef(_) => vec![],
             })
             .collect()
     }
@@ -154,6 +166,7 @@ impl Module {
 
 #[derive(Clone, Debug)]
 pub enum TopLevelItem {
+    TraitDef(TraitDef),
     TypeDef(TypeDef),
     FuncDecl(FuncDecl),
     FuncDef(FuncDef),
@@ -201,6 +214,7 @@ pub struct FuncDef {
 pub struct MethodBlock {
     pub id: NodeId,
     pub type_name: String,
+    pub trait_name: Option<String>,
     pub method_items: Vec<MethodItem>,
     pub span: Span,
 }

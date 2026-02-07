@@ -90,6 +90,11 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         let type_name = self.parse_ident()?;
         self.consume(&TK::DoubleColon)?;
+        let trait_name = if self.curr_token.kind == TK::LBrace {
+            None
+        } else {
+            Some(self.parse_ident()?)
+        };
         self.consume(&TK::LBrace)?;
 
         let mut method_items = Vec::new();
@@ -101,6 +106,7 @@ impl<'a> Parser<'a> {
         Ok(TopLevelItem::MethodBlock(MethodBlock {
             id: self.id_gen.new_id(),
             type_name,
+            trait_name,
             method_items,
             span: self.close(marker),
         }))
@@ -146,7 +152,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_method_sig(&mut self) -> Result<MethodSig, ParseError> {
+    pub(super) fn parse_method_sig(&mut self) -> Result<MethodSig, ParseError> {
         let marker = self.mark();
         self.consume_keyword(TK::KwFn)?;
         let name = self.parse_ident()?;

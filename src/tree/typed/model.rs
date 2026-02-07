@@ -23,6 +23,8 @@ pub type TypeDef = model::TypeDef<DefId>;
 pub type TypeDefKind = model::TypeDefKind<DefId>;
 pub type StructDefField = model::StructDefField<DefId>;
 pub type EnumDefVariant = model::EnumDefVariant<DefId>;
+pub type TraitDef = model::TraitDef<DefId>;
+pub type TraitMethod = model::TraitMethod<DefId>;
 
 pub type FuncDecl = model::FuncDecl<DefId>;
 pub type FuncDef = model::FuncDef<DefId, TypeId>;

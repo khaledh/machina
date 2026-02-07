@@ -1622,3 +1622,32 @@ fn test_parse_attr_on_method_block_rejected() {
 
     assert!(matches!(result, Err(ParseError::AttributeNotAllowed(_))));
 }
+
+#[test]
+fn test_parse_trait_def_and_trait_method_block() {
+    let source = r#"
+        trait Runnable {
+            fn run(self);
+        }
+
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let trait_defs = module.trait_defs();
+    assert_eq!(trait_defs.len(), 1);
+    assert_eq!(trait_defs[0].name, "Runnable");
+    assert_eq!(trait_defs[0].methods.len(), 1);
+    assert_eq!(trait_defs[0].methods[0].sig.name, "run");
+
+    let method_blocks = module.method_blocks();
+    assert_eq!(method_blocks.len(), 1);
+    assert_eq!(method_blocks[0].type_name, "Process");
+    assert_eq!(method_blocks[0].trait_name.as_deref(), Some("Runnable"));
+}

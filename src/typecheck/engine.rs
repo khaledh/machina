@@ -24,6 +24,7 @@ pub(crate) struct TcEnv {
     pub(crate) context: ResolvedContext,
     pub(crate) type_symbols: HashMap<String, DefId>,
     pub(crate) type_defs: HashMap<String, Type>,
+    pub(crate) trait_sigs: HashMap<String, CollectedTraitSig>,
     pub(crate) func_sigs: HashMap<String, Vec<CollectedCallableSig>>,
     pub(crate) method_sigs: HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
     pub(crate) property_sigs: HashMap<String, HashMap<String, CollectedPropertySig>>,
@@ -74,6 +75,24 @@ pub(crate) struct CollectedCallableSig {
     pub(crate) ret_ty: Type,
     pub(crate) type_param_count: usize,
     pub(crate) self_mode: Option<ParamMode>,
+    pub(crate) impl_trait: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CollectedTraitMethodSig {
+    pub(crate) name: String,
+    pub(crate) params: Vec<CollectedParamSig>,
+    pub(crate) ret_ty: Type,
+    pub(crate) type_param_count: usize,
+    pub(crate) self_mode: ParamMode,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CollectedTraitSig {
+    pub(crate) def_id: DefId,
+    pub(crate) methods: HashMap<String, CollectedTraitMethodSig>,
+    pub(crate) span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +116,7 @@ impl TypecheckEngine {
                 context,
                 type_symbols: HashMap::new(),
                 type_defs: HashMap::new(),
+                trait_sigs: HashMap::new(),
                 func_sigs: HashMap::new(),
                 method_sigs: HashMap::new(),
                 property_sigs: HashMap::new(),

@@ -36,7 +36,9 @@ impl<'a> LoweringPlanBuilder<'a> {
                         }
                     }
                 }
-                sem::TopLevelItem::TypeDef(_) | sem::TopLevelItem::FuncDecl(_) => {}
+                sem::TopLevelItem::TypeDef(_)
+                | sem::TopLevelItem::TraitDef(_)
+                | sem::TopLevelItem::FuncDecl(_) => {}
             }
         }
     }

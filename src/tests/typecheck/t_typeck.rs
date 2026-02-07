@@ -1014,6 +1014,153 @@ fn test_method_call_arg_type_mismatch() {
 }
 
 #[test]
+fn test_trait_method_impl_and_call_typechecks() {
+    let source = r#"
+        trait Runnable {
+            fn run(self) -> u64;
+        }
+
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) -> u64 {
+                1
+            }
+        }
+
+        fn main() -> u64 {
+            let p = Process { name: "demo" };
+            p.run()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_trait_method_missing_impl_errors() {
+    let source = r#"
+        trait Runnable {
+            fn run(self);
+            fn stop(self);
+        }
+
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TraitMethodMissingImpl(type_name, trait_name, method, _)
+                if type_name == "Process" && trait_name == "Runnable" && method == "stop"
+        )));
+    }
+}
+
+#[test]
+fn test_trait_method_not_in_trait_errors() {
+    let source = r#"
+        trait Runnable {
+            fn run(self);
+        }
+
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+
+            fn stop(self) {
+                ()
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TraitMethodNotInTrait(type_name, trait_name, method, _)
+                if type_name == "Process" && trait_name == "Runnable" && method == "stop"
+        )));
+    }
+}
+
+#[test]
+fn test_trait_method_signature_mismatch_errors() {
+    let source = r#"
+        trait Runnable {
+            fn run(self, n: u64) -> u64;
+        }
+
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self, n: bool) -> u64 {
+                if n { 1 } else { 0 }
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TraitMethodSignatureMismatch(type_name, trait_name, method, _)
+                if type_name == "Process" && trait_name == "Runnable" && method == "run"
+        )));
+    }
+}
+
+#[test]
+fn test_duplicate_trait_impl_block_errors() {
+    let source = r#"
+        trait Runnable {
+            fn run(self);
+        }
+
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TraitImplDuplicate(type_name, trait_name, _)
+                if type_name == "Process" && trait_name == "Runnable"
+        )));
+    }
+}
+
+#[test]
 fn test_closure_infers_param_and_return_types_from_call_site() {
     let source = r#"
         fn test() -> u64 {

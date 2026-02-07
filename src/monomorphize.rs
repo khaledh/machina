@@ -279,7 +279,7 @@ fn rewrite_calls_in_item(item: &mut res::TopLevelItem, call_inst_map: &HashMap<N
         res::TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
         res::TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
         res::TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        res::TopLevelItem::TypeDef(_) => {}
+        res::TopLevelItem::TypeDef(_) | res::TopLevelItem::TraitDef(_) => {}
     }
 }
 
@@ -391,7 +391,7 @@ fn remap_local_defs_in_item(
                 collector.visit_method_block(method_block)
             }
             res::TopLevelItem::ClosureDef(closure_def) => collector.visit_closure_def(closure_def),
-            res::TopLevelItem::TypeDef(_) => {}
+            res::TopLevelItem::TypeDef(_) | res::TopLevelItem::TraitDef(_) => {}
         }
     }
     let mut remapper = LocalDefRemapper::new(def_table, closure_defs);
@@ -421,10 +421,19 @@ fn reseed_ids_in_item(item: &mut res::TopLevelItem, node_id_gen: &mut NodeIdGen)
             reseed_method_block(method_block, node_id_gen)
         }
         res::TopLevelItem::ClosureDef(closure_def) => reseed_closure_def(closure_def, node_id_gen),
+        res::TopLevelItem::TraitDef(trait_def) => reseed_trait_def(trait_def, node_id_gen),
         res::TopLevelItem::TypeDef(type_def) => {
             type_def.id = node_id_gen.new_id();
             reseed_type_def(type_def, node_id_gen);
         }
+    }
+}
+
+fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) {
+    trait_def.id = node_id_gen.new_id();
+    for method in &mut trait_def.methods {
+        method.id = node_id_gen.new_id();
+        reseed_method_sig(&mut method.sig, node_id_gen);
     }
 }
 

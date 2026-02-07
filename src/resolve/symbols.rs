@@ -27,6 +27,9 @@ pub enum SymbolKind {
         def_id: DefId,
         variants: Vec<EnumDefVariant<()>>,
     },
+    TraitDef {
+        def_id: DefId,
+    },
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -50,6 +53,7 @@ impl std::fmt::Display for SymbolKind {
                     .collect::<Vec<_>>();
                 write!(f, "enum_def[{}]", variant_names.join(", "))
             }
+            SymbolKind::TraitDef { .. } => write!(f, "trait_def"),
         }
     }
 }
@@ -72,6 +76,7 @@ impl Symbol {
             SymbolKind::TypeAlias { def_id, .. } => *def_id,
             SymbolKind::StructDef { def_id, .. } => *def_id,
             SymbolKind::EnumDef { def_id, .. } => *def_id,
+            SymbolKind::TraitDef { def_id } => *def_id,
         }
     }
 

@@ -19,6 +19,8 @@ pub type TypeDef = model::TypeDef<()>;
 pub type TypeDefKind = model::TypeDefKind<()>;
 pub type StructDefField = model::StructDefField<()>;
 pub type EnumDefVariant = model::EnumDefVariant<()>;
+pub type TraitDef = model::TraitDef<()>;
+pub type TraitMethod = model::TraitMethod<()>;
 
 pub type FuncDecl = model::FuncDecl<()>;
 pub type FuncDef = model::FuncDef<()>;

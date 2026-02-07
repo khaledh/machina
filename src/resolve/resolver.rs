@@ -146,6 +146,7 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
+            SymbolKind::TraitDef { .. } => DefKind::TraitDef,
             SymbolKind::TypeAlias { .. } => DefKind::TypeDef {
                 attrs: TypeAttrs::default(),
             },
@@ -296,11 +297,34 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
+        // Populate trait definitions
+        self.populate_trait_defs(&module.trait_defs());
+
         // Populate type definitions
         self.populate_type_defs(&module.type_defs());
 
         // Populate callable declarations
         self.populate_callables(&module.callables());
+    }
+
+    fn populate_trait_defs(&mut self, trait_defs: &[&TraitDef]) {
+        for &trait_def in trait_defs {
+            let def_id = self.def_id_gen.new_id();
+            let def = Def {
+                id: def_id,
+                name: trait_def.name.clone(),
+                kind: DefKind::TraitDef,
+            };
+            self.def_table_builder.record_def(def, trait_def.id);
+            self.insert_symbol(
+                &trait_def.name,
+                Symbol {
+                    name: trait_def.name.clone(),
+                    kind: SymbolKind::TraitDef { def_id },
+                },
+                trait_def.span,
+            );
+        }
     }
 
     fn populate_type_defs(&mut self, type_defs: &[&TypeDef]) {
@@ -695,6 +719,26 @@ impl SymbolResolver {
         }
     }
 
+    fn check_method_block_trait(&mut self, method_block: &MethodBlock) {
+        let Some(trait_name) = &method_block.trait_name else {
+            return;
+        };
+        match self.lookup_symbol(trait_name) {
+            Some(symbol) => match &symbol.kind {
+                SymbolKind::TraitDef { .. } => {}
+                other => self.errors.push(ResolveError::ExpectedTrait(
+                    trait_name.clone(),
+                    other.clone(),
+                    method_block.span,
+                )),
+            },
+            None => self.errors.push(ResolveError::TraitUndefined(
+                trait_name.clone(),
+                method_block.span,
+            )),
+        }
+    }
+
     fn visit_method_decl_in_block(
         &mut self,
         method_block: &MethodBlock,
@@ -855,6 +899,7 @@ impl Visitor<()> for SymbolResolver {
         let type_def_id = self.check_method_block_type(method_block);
         let is_intrinsic_type =
             type_def_id.map(|def_id| self.intrinsic_type_defs.contains(&def_id));
+        self.check_method_block_trait(method_block);
 
         for method_item in &method_block.method_items {
             match method_item {
@@ -863,6 +908,39 @@ impl Visitor<()> for SymbolResolver {
                 }
                 MethodItem::Def(method_def) => self.visit_method_def(method_def),
             }
+        }
+    }
+
+    fn visit_trait_def(&mut self, trait_def: &TraitDef) {
+        for method in &trait_def.methods {
+            self.with_scope(|resolver| {
+                for type_param in &method.sig.type_params {
+                    resolver.register_type_param(type_param);
+                }
+
+                resolver.visit_type_expr(&method.sig.ret_ty_expr);
+                for param in &method.sig.params {
+                    resolver.visit_type_expr(&param.typ);
+                }
+
+                resolver.register_param(
+                    "self",
+                    method.sig.self_param.mode.clone(),
+                    method.sig.self_param.id,
+                    method.sig.self_param.span,
+                    0,
+                );
+
+                for (index, param) in method.sig.params.iter().enumerate() {
+                    resolver.register_param(
+                        &param.ident,
+                        param.mode.clone(),
+                        param.id,
+                        param.span,
+                        index as u32 + 1,
+                    );
+                }
+            });
         }
     }
 

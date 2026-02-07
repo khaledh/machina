@@ -329,6 +329,7 @@ impl<'a> Elaborator<'a> {
         self.closure_methods.push(sem::MethodBlock {
             id: self.node_id_gen.new_id(),
             type_name: info.type_name.clone(),
+            trait_name: None,
             method_items: vec![sem::MethodItem::Def(method_def)],
             span,
         });

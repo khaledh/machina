@@ -49,6 +49,22 @@ pub trait TreeMapper {
         walk_type_def(self, type_def, ctx)
     }
 
+    fn map_trait_def(
+        &mut self,
+        trait_def: &TraitDef<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> TraitDef<Self::OutD> {
+        walk_trait_def(self, trait_def, ctx)
+    }
+
+    fn map_trait_method(
+        &mut self,
+        method: &TraitMethod<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> TraitMethod<Self::OutD> {
+        walk_trait_method(self, method, ctx)
+    }
+
     fn map_struct_def_field(
         &mut self,
         field: &StructDefField<Self::InD>,
@@ -319,6 +335,9 @@ pub fn walk_top_level_item<M: TreeMapper + ?Sized>(
     ctx: &mut M::Context,
 ) -> TopLevelItem<M::OutD, M::OutT> {
     match item {
+        TopLevelItem::TraitDef(trait_def) => {
+            TopLevelItem::TraitDef(mapper.map_trait_def(trait_def, ctx))
+        }
         TopLevelItem::TypeDef(type_def) => {
             TopLevelItem::TypeDef(mapper.map_type_def(type_def, ctx))
         }
@@ -334,6 +353,37 @@ pub fn walk_top_level_item<M: TreeMapper + ?Sized>(
         TopLevelItem::ClosureDef(closure_def) => {
             TopLevelItem::ClosureDef(mapper.map_closure_def(closure_def, ctx))
         }
+    }
+}
+
+pub fn walk_trait_def<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    trait_def: &TraitDef<M::InD>,
+    ctx: &mut M::Context,
+) -> TraitDef<M::OutD> {
+    TraitDef {
+        id: trait_def.id,
+        def_id: mapper.map_def_id(trait_def.id, &trait_def.def_id, ctx),
+        attrs: trait_def.attrs.clone(),
+        name: trait_def.name.clone(),
+        methods: trait_def
+            .methods
+            .iter()
+            .map(|method| mapper.map_trait_method(method, ctx))
+            .collect(),
+        span: trait_def.span,
+    }
+}
+
+pub fn walk_trait_method<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    method: &TraitMethod<M::InD>,
+    ctx: &mut M::Context,
+) -> TraitMethod<M::OutD> {
+    TraitMethod {
+        id: method.id,
+        sig: mapper.map_method_sig(&method.sig, ctx),
+        span: method.span,
     }
 }
 
@@ -552,6 +602,7 @@ pub fn walk_method_block<M: TreeMapper + ?Sized>(
     MethodBlock {
         id: method_block.id,
         type_name: method_block.type_name.clone(),
+        trait_name: method_block.trait_name.clone(),
         method_items: method_block
             .method_items
             .iter()

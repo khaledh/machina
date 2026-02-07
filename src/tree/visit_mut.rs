@@ -17,6 +17,14 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_type_def(self, type_def)
     }
 
+    fn visit_trait_def(&mut self, trait_def: &mut TraitDef<D>) {
+        walk_trait_def(self, trait_def)
+    }
+
+    fn visit_trait_method(&mut self, method: &mut TraitMethod<D>) {
+        walk_trait_method(self, method)
+    }
+
     fn visit_struct_def_fields(&mut self, fields: &mut [StructDefField<D>]) {
         walk_struct_def_fields(self, fields)
     }
@@ -141,6 +149,7 @@ pub trait VisitorMut<D = String, T = ()> {
 pub fn walk_module<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, module: &mut Module<D, T>) {
     for item in &mut module.top_level_items {
         match item {
+            TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
@@ -151,6 +160,19 @@ pub fn walk_module<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, module: &mut M
 }
 
 // --- Type Definitions ---
+
+pub fn walk_trait_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, trait_def: &mut TraitDef<D>) {
+    for method in &mut trait_def.methods {
+        v.visit_trait_method(method);
+    }
+}
+
+pub fn walk_trait_method<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    method: &mut TraitMethod<D>,
+) {
+    v.visit_method_sig(&mut method.sig);
+}
 
 pub fn walk_type_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_def: &mut TypeDef<D>) {
     for param in &mut type_def.type_params {

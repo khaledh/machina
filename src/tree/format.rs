@@ -8,6 +8,7 @@ impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, item) in self.top_level_items.iter().enumerate() {
             match item {
+                TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
@@ -19,6 +20,28 @@ impl fmt::Display for Module {
             }
         }
         Ok(())
+    }
+}
+
+impl TraitDef {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}TraitDef [{}]", pad, self.id)?;
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Name: {}", pad1, self.name)?;
+        writeln!(f, "{}Methods:", pad1)?;
+        for method in &self.methods {
+            method.fmt_with_indent(f, level + 2)?;
+        }
+        Ok(())
+    }
+}
+
+impl TraitMethod {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}TraitMethod [{}]", pad, self.id)?;
+        self.sig.fmt_with_indent(f, level + 1)
     }
 }
 
@@ -172,6 +195,9 @@ impl MethodBlock {
         writeln!(f, "{}MethodBlock [{}]", pad, self.id)?;
         let pad1 = indent(level + 1);
         writeln!(f, "{}Type: {}", pad1, self.type_name)?;
+        if let Some(trait_name) = &self.trait_name {
+            writeln!(f, "{}Trait: {}", pad1, trait_name)?;
+        }
         writeln!(f, "{}Methods:", pad1)?;
         for method_item in &self.method_items {
             match method_item {

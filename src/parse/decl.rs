@@ -5,6 +5,7 @@ impl<'a> Parser<'a> {
         let attrs = self.parse_attribute_list()?;
         match &self.curr_token.kind {
             TK::KwType => self.parse_type_def(attrs).map(TopLevelItem::TypeDef),
+            TK::KwTrait => self.parse_trait_def(attrs).map(TopLevelItem::TraitDef),
             TK::KwFn => self.parse_func(attrs),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 if attrs.is_empty() {
@@ -52,6 +53,35 @@ impl<'a> Parser<'a> {
             name,
             type_params,
             kind,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_trait_def(&mut self, attrs: Vec<Attribute>) -> Result<TraitDef, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwTrait)?;
+        let name = self.parse_ident()?;
+        self.consume(&TK::LBrace)?;
+
+        let mut methods = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            let method_marker = self.mark();
+            let sig = self.parse_method_sig()?;
+            self.consume(&TK::Semicolon)?;
+            methods.push(TraitMethod {
+                id: self.id_gen.new_id(),
+                sig,
+                span: self.close(method_marker),
+            });
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(TraitDef {
+            id: self.id_gen.new_id(),
+            def_id: (),
+            attrs,
+            name,
+            methods,
             span: self.close(marker),
         })
     }

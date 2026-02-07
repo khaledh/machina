@@ -161,3 +161,50 @@ fn test_resolve_attr_duplicate() {
         )));
     }
 }
+
+#[test]
+fn test_resolve_trait_undefined_in_method_block() {
+    let source = r#"
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TraitUndefined(name, _) if name == "Runnable"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_expected_trait_in_method_block() {
+    let source = r#"
+        type Runnable = {}
+        type Process = { name: string }
+
+        Process :: Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::ExpectedTrait(name, _, _) if name == "Runnable"
+        )));
+    }
+}

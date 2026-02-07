@@ -153,6 +153,24 @@ pub enum TypeCheckErrorKind {
     #[error("Property {0} conflicts with struct field {1}")]
     PropertyConflictsWithField(String, String, Span),
 
+    #[error("Duplicate trait implementation block: {0} :: {1}")]
+    TraitImplDuplicate(String, String, Span),
+
+    #[error("Duplicate method {1} in trait {0}")]
+    TraitMethodDuplicate(String, String, Span),
+
+    #[error("Method {2} in {0} :: {1} is not declared in trait")]
+    TraitMethodNotInTrait(String, String, String, Span),
+
+    #[error("Duplicate method implementation {2} in {0} :: {1}")]
+    TraitMethodImplDuplicate(String, String, String, Span),
+
+    #[error("Missing trait method implementation {2} in {0} :: {1}")]
+    TraitMethodMissingImpl(String, String, String, Span),
+
+    #[error("Trait method signature mismatch for {0} :: {1}::{2}")]
+    TraitMethodSignatureMismatch(String, String, String, Span),
+
     #[error("Unknown enum type: {0}")]
     UnknownEnumType(String, Span),
 
@@ -286,6 +304,12 @@ impl TypeCheckError {
             TypeCheckErrorKind::PropertyAccessorTypeMismatch(_, _, _, span) => *span,
             TypeCheckErrorKind::PropertyAccessorDuplicate(_, span) => *span,
             TypeCheckErrorKind::PropertyConflictsWithField(_, _, span) => *span,
+            TypeCheckErrorKind::TraitImplDuplicate(_, _, span) => *span,
+            TypeCheckErrorKind::TraitMethodDuplicate(_, _, span) => *span,
+            TypeCheckErrorKind::TraitMethodNotInTrait(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitMethodImplDuplicate(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitMethodMissingImpl(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitMethodSignatureMismatch(_, _, _, span) => *span,
             TypeCheckErrorKind::UnknownEnumType(_, span) => *span,
             TypeCheckErrorKind::UnknownEnumVariant(_, _, span) => *span,
             TypeCheckErrorKind::InvalidStructUpdateTarget(_, span) => *span,

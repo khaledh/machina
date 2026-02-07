@@ -37,6 +37,7 @@ impl DefIdGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
+    TraitDef,
     TypeDef {
         attrs: TypeAttrs,
     },
@@ -73,6 +74,7 @@ pub struct FuncAttrs {
 impl fmt::Display for DefKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            DefKind::TraitDef => write!(f, "TraitDef"),
             DefKind::TypeDef { .. } => write!(f, "TypeDef"),
             DefKind::TypeParam => write!(f, "TypeParam"),
             DefKind::EnumVariantName => write!(f, "EnumVariantName"),

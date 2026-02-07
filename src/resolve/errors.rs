@@ -27,8 +27,14 @@ pub enum ResolveError {
     #[error("Expected '{0}' to be a type, found {1}")]
     ExpectedType(String, SymbolKind, Span),
 
+    #[error("Expected '{0}' to be a trait, found {1}")]
+    ExpectedTrait(String, SymbolKind, Span),
+
     #[error("Undefined type: {0}")]
     TypeUndefined(String, Span),
+
+    #[error("Undefined trait: {0}")]
+    TraitUndefined(String, Span),
 
     #[error("Undefined struct: {0}")]
     StructUndefined(String, Span),
@@ -71,7 +77,9 @@ impl ResolveError {
             ResolveError::InvalidAssignmentTarget(_, span) => *span,
             ResolveError::InvalidCallee(_, span) => *span,
             ResolveError::ExpectedType(_, _, span) => *span,
+            ResolveError::ExpectedTrait(_, _, span) => *span,
             ResolveError::TypeUndefined(_, span) => *span,
+            ResolveError::TraitUndefined(_, span) => *span,
             ResolveError::StructUndefined(_, span) => *span,
             ResolveError::EnumUndefined(_, span) => *span,
             ResolveError::EnumVariantUndefined(_, _, span) => *span,
