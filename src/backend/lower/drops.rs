@@ -191,6 +191,9 @@ fn has_nontrivial_drop(ty: &Type) -> bool {
         Type::Enum { variants, .. } => variants
             .iter()
             .any(|variant| variant.payload.iter().any(has_nontrivial_drop)),
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            has_nontrivial_drop(ok_ty) || err_tys.iter().any(has_nontrivial_drop)
+        }
         _ => false,
     }
 }
@@ -457,10 +460,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             DropKind::Deep => {}
         }
 
-        if !ty.needs_drop() {
-            return Ok(());
-        }
-
         match ty {
             Type::String => self.drop_string(addr),
             Type::Heap { elem_ty } => self.drop_heap(addr, elem_ty),
@@ -468,6 +467,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Type::Tuple { field_tys } => self.drop_tuple(addr, field_tys),
             Type::Array { dims, .. } => self.drop_array(addr, ty, dims),
             Type::Enum { variants, .. } => self.drop_enum(addr, ty, variants),
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                let variants = std::iter::once(EnumVariant {
+                    name: "Ok".to_string(),
+                    payload: vec![(*ok_ty.clone())],
+                })
+                .chain(
+                    err_tys
+                        .iter()
+                        .enumerate()
+                        .map(|(index, err_ty)| EnumVariant {
+                            name: format!("Err{}", index),
+                            payload: vec![err_ty.clone()],
+                        }),
+                )
+                .collect::<Vec<_>>();
+                self.drop_enum(addr, ty, &variants)
+            }
             other => panic!("backend drop not implemented for {:?}", other),
         }
     }
@@ -691,6 +707,10 @@ fn is_shallow_named(ty: &Type) -> bool {
     match ty {
         Type::Struct { fields, .. } => fields.is_empty(),
         Type::Enum { variants, .. } => variants.is_empty(),
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            matches!(ok_ty.as_ref(), Type::Unit)
+                && err_tys.iter().all(|err_ty| err_ty == &Type::Unit)
+        }
         _ => false,
     }
 }

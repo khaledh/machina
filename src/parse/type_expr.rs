@@ -3,6 +3,46 @@ use crate::tree::RefinementKind;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+        let first = self.parse_type_term()?;
+
+        if self.curr_token.kind != TK::Pipe || !self.pipe_starts_type_union() {
+            return Ok(first);
+        }
+
+        let mut variants = vec![first];
+        while self.curr_token.kind == TK::Pipe && self.pipe_starts_type_union() {
+            self.advance();
+            variants.push(self.parse_type_term()?);
+        }
+
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Union { variants },
+            span: self.close(marker),
+        })
+    }
+
+    fn pipe_starts_type_union(&self) -> bool {
+        self.peek()
+            .is_some_and(|tok| Self::token_can_start_type(&tok.kind, self.tokens, self.pos + 1))
+    }
+
+    fn token_can_start_type(kind: &TK, tokens: &[Token], pos: usize) -> bool {
+        match kind {
+            TK::Caret | TK::KwFn | TK::Ident(_) => true,
+            TK::LParen => true,
+            TK::LBracket => false,
+            _ => {
+                // Keep this conservative for now. We only need to prevent
+                // consuming closure `| ... |` delimiters as union operators.
+                let _ = (tokens, pos);
+                false
+            }
+        }
+    }
+
+    fn parse_type_term(&mut self) -> Result<TypeExpr, ParseError> {
         let mut typ = self.parse_type_atom()?;
 
         if self.curr_token.kind == TK::Colon {

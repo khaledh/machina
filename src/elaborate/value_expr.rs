@@ -362,11 +362,15 @@ impl<'a> Elaborator<'a> {
                 }
             }
             norm::ExprKind::Match { scrutinee, arms } => {
+                // Elaborate the scrutinee first so match planning can use the
+                // semantically-correct scrutinee type (including place-based deref behavior).
+                let sem_scrutinee = self.elab_value(scrutinee);
                 // Pre-compute match tests + bindings so lowering only emits the plan.
-                let plan = self.build_match_plan(expr.id, scrutinee, arms);
+                let scrutinee_ty = self.type_map.type_table().get(sem_scrutinee.ty).clone();
+                let plan = self.build_match_plan(expr.id, scrutinee_ty, arms);
                 self.type_map.insert_match_plan(expr.id, plan);
                 sem::ValueExprKind::Match {
-                    scrutinee: Box::new(self.elab_value(scrutinee)),
+                    scrutinee: Box::new(sem_scrutinee),
                     arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
                 }
             }

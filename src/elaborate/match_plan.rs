@@ -34,10 +34,9 @@ impl<'a> Elaborator<'a> {
     pub(super) fn build_match_plan(
         &mut self,
         _match_id: NodeId,
-        scrutinee: &norm::Expr,
+        scrutinee_ty: Type,
         arms: &[norm::MatchArm],
     ) -> sem::MatchPlan {
-        let scrutinee_ty = self.type_map.type_table().get(scrutinee.ty).clone();
         let (peeled_ty, deref_count) = scrutinee_ty.peel_heap_with_count();
         let scrutinee_place = self.scrutinee_place(&peeled_ty, deref_count);
 
@@ -100,6 +99,48 @@ impl<'a> Elaborator<'a> {
                     cases.push(sem::MatchSwitchCase {
                         value: *value,
                         arm_index: index,
+                    });
+                }
+                norm::MatchPattern::TypedBinding {
+                    id,
+                    def_id,
+                    ty_expr,
+                    ..
+                } => {
+                    let Type::ErrorUnion { ok_ty, err_tys } = scrutinee_ty else {
+                        panic!(
+                            "compiler bug: typed binding pattern in switch plan requires error-union scrutinee"
+                        );
+                    };
+                    let payload_ty = self
+                        .type_map
+                        .lookup_node_type(ty_expr.id)
+                        .or_else(|| {
+                            self.error_union_variant_from_type_expr(ok_ty, err_tys, ty_expr)
+                                .cloned()
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "compiler bug: missing typed-binding type for match pattern {}",
+                                ty_expr.id
+                            )
+                        });
+                    let tag = self
+                        .error_union_variant_index(ok_ty, err_tys, &payload_ty)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "compiler bug: typed-binding pattern type {} is not a union variant",
+                                payload_ty
+                            )
+                        });
+                    cases.push(sem::MatchSwitchCase {
+                        value: tag,
+                        arm_index: index,
+                    });
+                    bindings.push(sem::MatchBinding {
+                        def_id: *def_id,
+                        node_id: *id,
+                        source: self.error_union_payload_place(scrutinee_place, payload_ty),
                     });
                 }
                 norm::MatchPattern::Binding { .. } | norm::MatchPattern::Tuple { .. } => {
@@ -218,9 +259,60 @@ impl<'a> Elaborator<'a> {
                     )
                 }
             }
+            Type::ErrorUnion { .. } => self.project_place(
+                scrutinee_place,
+                sem::MatchProjection::Field { index: 0 },
+                Type::uint(64),
+            ),
             Type::Bool | Type::Int { .. } => scrutinee_place.clone(),
             _ => panic!("compiler bug: unexpected scrutinee type for match switch"),
         }
+    }
+
+    fn error_union_variant_index(
+        &self,
+        ok_ty: &Type,
+        err_tys: &[Type],
+        pattern_ty: &Type,
+    ) -> Option<u64> {
+        if pattern_ty == ok_ty {
+            return Some(0);
+        }
+        err_tys
+            .iter()
+            .position(|err_ty| err_ty == pattern_ty)
+            .map(|idx| (idx + 1) as u64)
+    }
+
+    fn error_union_payload_place(
+        &self,
+        scrutinee_place: &sem::MatchPlace,
+        payload_ty: Type,
+    ) -> sem::MatchPlace {
+        let mut place = self.project_place(
+            scrutinee_place,
+            sem::MatchProjection::Field { index: 1 },
+            Type::uint(8),
+        );
+        place
+            .projections
+            .push(sem::MatchProjection::ByteOffset { offset: 0 });
+        place.ty = payload_ty;
+        place
+    }
+
+    fn error_union_variant_from_type_expr<'b>(
+        &self,
+        ok_ty: &'b Type,
+        err_tys: &'b [Type],
+        ty_expr: &norm::TypeExpr,
+    ) -> Option<&'b Type> {
+        let norm::TypeExprKind::Named { ident, .. } = &ty_expr.kind else {
+            return None;
+        };
+        std::iter::once(ok_ty)
+            .chain(err_tys.iter())
+            .find(|variant_ty| type_name_matches(ident, variant_ty))
     }
 
     /// Create the base match place for the scrutinee, applying any needed derefs
@@ -309,7 +401,9 @@ impl<'a> Elaborator<'a> {
         tests: &mut Vec<sem::MatchTest>,
     ) {
         match pattern {
-            norm::MatchPattern::Binding { .. } | norm::MatchPattern::Wildcard { .. } => {}
+            norm::MatchPattern::Binding { .. }
+            | norm::MatchPattern::TypedBinding { .. }
+            | norm::MatchPattern::Wildcard { .. } => {}
             norm::MatchPattern::BoolLit { value, .. } => {
                 let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
                 if !matches!(peeled_ty, Type::Bool) {
@@ -385,6 +479,13 @@ impl<'a> Elaborator<'a> {
             );
             match pattern {
                 norm::MatchPattern::Binding { id, def_id, .. } => {
+                    bindings.push(sem::MatchBinding {
+                        def_id: *def_id,
+                        node_id: *id,
+                        source: field_place,
+                    });
+                }
+                norm::MatchPattern::TypedBinding { id, def_id, .. } => {
                     bindings.push(sem::MatchBinding {
                         def_id: *def_id,
                         node_id: *id,
@@ -471,5 +572,29 @@ impl<'a> Elaborator<'a> {
                 },
             });
         }
+    }
+}
+
+fn type_name_matches(name: &str, ty: &Type) -> bool {
+    match ty {
+        Type::Unit => name == "()",
+        Type::Int {
+            signed: false,
+            bits,
+            ..
+        } => name == format!("u{bits}"),
+        Type::Int {
+            signed: true, bits, ..
+        } => name == format!("i{bits}"),
+        Type::Bool => name == "bool",
+        Type::Char => name == "char",
+        Type::String => name == "string",
+        Type::Struct { name: ty_name, .. } | Type::Enum { name: ty_name, .. } => {
+            ty_name == name
+                || ty_name
+                    .split_once('<')
+                    .is_some_and(|(base, _)| base == name)
+        }
+        _ => false,
     }
 }

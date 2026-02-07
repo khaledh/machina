@@ -174,7 +174,9 @@ impl TcUnifier {
                     fields: r_fields,
                 },
             ) => {
-                if l_name != r_name || l_fields.len() != r_fields.len() {
+                if canonical_nominal_name(&l_name) != canonical_nominal_name(&r_name)
+                    || l_fields.len() != r_fields.len()
+                {
                     return Err(TcUnifyError::Mismatch(
                         Type::Struct {
                             name: l_name,
@@ -213,7 +215,9 @@ impl TcUnifier {
                     variants: r_variants,
                 },
             ) => {
-                if l_name != r_name || l_variants.len() != r_variants.len() {
+                if canonical_nominal_name(&l_name) != canonical_nominal_name(&r_name)
+                    || l_variants.len() != r_variants.len()
+                {
                     return Err(TcUnifyError::Mismatch(
                         Type::Enum {
                             name: l_name,
@@ -306,6 +310,10 @@ impl TcUnifier {
     fn occurs_in(&self, var: TyVarId, ty: &Type) -> bool {
         ty.any(&|t| matches!(t, Type::Var(v) if *v == var))
     }
+}
+
+fn canonical_nominal_name(name: &str) -> &str {
+    name.split('<').next().unwrap_or(name)
 }
 
 #[cfg(test)]

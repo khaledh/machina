@@ -14,10 +14,10 @@ use crate::tree::resolved as res;
 use crate::tree::typed::build_module;
 use crate::typecheck::Unifier;
 use crate::typecheck::constraints::{CallCallee, ExprObligation};
+use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitPropertySig, CollectedTraitSig,
 };
-use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
 use crate::typecheck::nominal::NominalKey;
 use crate::typecheck::type_map::{

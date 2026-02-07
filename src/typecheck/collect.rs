@@ -24,7 +24,9 @@ use crate::typecheck::engine::{
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
 };
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::type_map::{resolve_type_expr, resolve_type_expr_with_params};
+use crate::typecheck::type_map::{
+    resolve_return_type_expr_with_params, resolve_type_expr, resolve_type_expr_with_params,
+};
 use crate::types::{EnumVariant, StructField, TyVarId, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -503,7 +505,7 @@ fn collect_callable_sig(
         }
     };
 
-    let ret_ty = match resolve_type_expr_with_params(
+    let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
         &ctx.module,
         &sig.ret_ty_expr,
@@ -546,7 +548,7 @@ fn collect_trait_method_sig(
         }
     };
 
-    let ret_ty = match resolve_type_expr_with_params(
+    let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
         &ctx.module,
         &sig.ret_ty_expr,

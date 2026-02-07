@@ -74,6 +74,18 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         apply_assignable_inference(constraint, &mut unifier);
     }
 
+    // Pre-pass: apply pattern-driven unifications before expression/call
+    // obligations so match-arm bindings have concrete types when arm bodies
+    // are checked (e.g. field access and formatting on typed bindings).
+    let _ = check_pattern_obligations(
+        &constrain.pattern_obligations,
+        &constrain.def_terms,
+        &mut unifier,
+        &engine.env().type_defs,
+        &engine.context().def_table,
+        &engine.context().module,
+    );
+
     // Stage C: expression obligations.
     let (mut expr_errors, mut covered_exprs) = check_expr_obligations(
         &constrain.expr_obligations,
@@ -398,7 +410,10 @@ fn check_call_obligations(
                     if arg_failed {
                         continue;
                     }
-                    if let Err(err) = unifier.unify(&obligation.ret_ty, &ret_ty) {
+                    if let Err(err) = unifier.unify(
+                        &canonicalize_type(obligation.ret_ty.clone()),
+                        &canonicalize_type((*ret_ty).clone()),
+                    ) {
                         errors.push(unify_error_to_diag(err, obligation.span));
                     }
                 } else if is_unresolved(&callee_ty) {
@@ -487,7 +502,10 @@ fn check_call_obligations(
             if failed {
                 continue;
             }
-            if let Err(err) = trial.unify(&obligation.ret_ty, &instantiated.ret_ty) {
+            if let Err(err) = trial.unify(
+                &canonicalize_type(obligation.ret_ty.clone()),
+                &canonicalize_type(instantiated.ret_ty.clone()),
+            ) {
                 first_error.get_or_insert_with(|| unify_error_to_diag(err, obligation.span));
                 continue;
             }
@@ -1245,7 +1263,8 @@ fn check_expr_obligations(
                     Ok(prop) => {
                         if !prop.readable {
                             errors.push(
-                                TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into(),
+                                TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span)
+                                    .into(),
                             );
                             covered_exprs.insert(*expr_id);
                             continue;
@@ -1308,7 +1327,8 @@ fn check_expr_obligations(
                     Ok(prop) => {
                         if !prop.writable {
                             errors.push(
-                                TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into(),
+                                TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span)
+                                    .into(),
                             );
                             covered_exprs.insert(*stmt_id);
                             continue;
@@ -1671,6 +1691,27 @@ fn bind_match_pattern_types(
         }
         MatchPattern::Binding { def_id, .. } => {
             if let Some(term) = def_terms.get(def_id) {
+                let _ = unifier.unify(term, scrutinee_ty);
+            }
+        }
+        MatchPattern::TypedBinding {
+            def_id, ty_expr, ..
+        } => {
+            if let Ok(pat_ty) = resolve_type_expr(def_table, module, ty_expr) {
+                let scrutinee_applied = unifier.apply(scrutinee_ty);
+                if let Type::ErrorUnion { ok_ty, err_tys } = &scrutinee_applied {
+                    let matches_union_variant = std::iter::once(ok_ty.as_ref())
+                        .chain(err_tys.iter())
+                        .any(|variant_ty| variant_ty == &pat_ty);
+                    if matches_union_variant && let Some(term) = def_terms.get(def_id) {
+                        let _ = unifier.unify(term, &pat_ty);
+                    }
+                } else {
+                    if let Some(term) = def_terms.get(def_id) {
+                        let _ = unifier.unify(term, &pat_ty);
+                    }
+                }
+            } else if let Some(term) = def_terms.get(def_id) {
                 let _ = unifier.unify(term, scrutinee_ty);
             }
         }

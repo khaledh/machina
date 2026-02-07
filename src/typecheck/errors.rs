@@ -87,6 +87,9 @@ pub enum TypeCheckErrorKind {
     #[error("Type cannot be inferred")]
     UnknownType(Span),
 
+    #[error("Error union types are only allowed in return type position")]
+    UnionNotAllowedHere(Span),
+
     #[error("Pattern type mismatch: expected {0}, found {1}")]
     PatternTypeMismatch(BindPattern, Type, Span),
 
@@ -306,6 +309,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::IndexTypeNotInt(_, span) => *span,
             TypeCheckErrorKind::InvalidIndexTargetType(_, span) => *span,
             TypeCheckErrorKind::UnknownType(span) => *span,
+            TypeCheckErrorKind::UnionNotAllowedHere(span) => *span,
             TypeCheckErrorKind::PatternTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::DeclTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::DeclTypeMismatchMulti(_, _, span) => *span,

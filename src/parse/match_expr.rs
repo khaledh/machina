@@ -83,6 +83,23 @@ impl<'a> Parser<'a> {
         if !matches!(self.curr_token.kind, TK::Ident(_)) {
             return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
         }
+        let is_typed_binding = matches!(
+            self.tokens.get(self.pos + 1).map(|tok| &tok.kind),
+            Some(TK::Colon)
+        );
+        if is_typed_binding {
+            let ident = self.parse_ident()?;
+            self.consume(&TK::Colon)?;
+            let ty_expr = self.parse_type_expr()?;
+            return Ok(MatchPattern::TypedBinding {
+                id: self.id_gen.new_id(),
+                ident,
+                def_id: (),
+                ty_expr,
+                span: self.close(marker),
+            });
+        }
+
         let variant_name = self.parse_ident()?;
         self.parse_enum_variant_pattern(marker, variant_name)
     }
@@ -131,6 +148,17 @@ impl<'a> Parser<'a> {
             );
 
             let ident = parser.parse_ident()?;
+            if parser.curr_token.kind == TK::Colon {
+                parser.advance();
+                let ty_expr = parser.parse_type_expr()?;
+                return Ok(MatchPattern::TypedBinding {
+                    id: parser.id_gen.new_id(),
+                    ident,
+                    def_id: (),
+                    ty_expr,
+                    span: parser.close(marker),
+                });
+            }
             if is_enum_variant {
                 return parser.parse_enum_variant_pattern(marker, ident);
             }

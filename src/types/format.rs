@@ -47,6 +47,12 @@ impl fmt::Display for Type {
                     .join(", ");
                 write!(f, "fn({}) -> {}", params_str, ret_ty)
             }
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                let mut variants = Vec::with_capacity(err_tys.len() + 1);
+                variants.push(ok_ty.to_string());
+                variants.extend(err_tys.iter().map(|ty| ty.to_string()));
+                write!(f, "{}", variants.join(" | "))
+            }
             Type::String => write!(f, "string"),
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();

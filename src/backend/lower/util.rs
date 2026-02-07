@@ -23,6 +23,213 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| panic!("backend break/continue outside of loop"))
     }
 
+    /// Coerces a value into the function's declared return type.
+    ///
+    /// This currently materializes `ErrorUnion` returns from plain payload
+    /// expressions and supports widening a prefix-compatible error union.
+    pub(super) fn coerce_return_value(&mut self, value: ValueId, value_ty: &Type) -> ValueId {
+        let ret_ty = self.ret_ty.clone();
+        self.coerce_value_to_type(value, value_ty, &ret_ty)
+    }
+
+    fn coerce_value_to_type(&mut self, value: ValueId, from_ty: &Type, to_ty: &Type) -> ValueId {
+        if from_ty == to_ty {
+            return value;
+        }
+
+        match to_ty {
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                self.coerce_to_error_union(value, from_ty, to_ty, ok_ty, err_tys)
+            }
+            _ => value,
+        }
+    }
+
+    fn coerce_to_error_union(
+        &mut self,
+        value: ValueId,
+        from_ty: &Type,
+        union_ty: &Type,
+        ok_ty: &Type,
+        err_tys: &[Type],
+    ) -> ValueId {
+        if from_ty == union_ty {
+            return value;
+        }
+
+        if let Type::ErrorUnion {
+            ok_ty: src_ok_ty,
+            err_tys: src_err_tys,
+        } = from_ty
+        {
+            return self.widen_error_union_prefix(
+                src_ok_ty,
+                src_err_tys,
+                ok_ty,
+                err_tys,
+                from_ty,
+                union_ty,
+                value,
+            );
+        }
+
+        let variant_index = self
+            .error_union_variant_index(from_ty, ok_ty, err_tys)
+            .unwrap_or_else(|| {
+                panic!(
+                    "backend cannot coerce return value {:?} into error union {:?}",
+                    from_ty, union_ty
+                )
+            });
+
+        self.build_error_union_value(union_ty, variant_index, value)
+    }
+
+    fn error_union_variant_index(
+        &self,
+        from_ty: &Type,
+        ok_ty: &Type,
+        err_tys: &[Type],
+    ) -> Option<usize> {
+        if type_assignable(from_ty, ok_ty) != TypeAssignability::Incompatible {
+            return Some(0);
+        }
+
+        for (idx, err_ty) in err_tys.iter().enumerate() {
+            if type_assignable(from_ty, err_ty) != TypeAssignability::Incompatible {
+                return Some(idx + 1);
+            }
+        }
+
+        None
+    }
+
+    fn build_error_union_value(
+        &mut self,
+        union_ty: &Type,
+        variant_index: usize,
+        payload_value: ValueId,
+    ) -> ValueId {
+        let union_ty_id = self
+            .type_map
+            .type_table()
+            .lookup_id(union_ty)
+            .unwrap_or_else(|| panic!("backend missing type id for error union {:?}", union_ty));
+        let (tag_ty, blob_ty, variant_tag, payload_offset, payload_ty) = {
+            let layout = self.type_lowerer.enum_layout(union_ty_id);
+            let variant = layout.variants.get(variant_index).unwrap_or_else(|| {
+                panic!(
+                    "backend error union variant index out of range: {} of {}",
+                    variant_index,
+                    layout.variants.len()
+                )
+            });
+            if variant.field_offsets.len() > 1 || variant.field_tys.len() > 1 {
+                panic!(
+                    "backend error union variant must carry at most one payload field, found {}",
+                    variant.field_tys.len()
+                );
+            }
+            (
+                layout.tag_ty,
+                layout.blob_ty,
+                variant.tag,
+                variant.field_offsets.first().copied(),
+                variant.field_tys.first().copied(),
+            )
+        };
+
+        let union_ir_ty = self.type_lowerer.lower_type(union_ty);
+        let slot = self.alloc_value_slot(union_ir_ty);
+
+        let tag_val = self
+            .builder
+            .const_int(variant_tag as i128, false, 32, tag_ty);
+        self.store_field(slot.addr, 0, tag_ty, tag_val);
+
+        if let (Some(offset), Some(payload_ty)) = (payload_offset, payload_ty) {
+            let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
+            self.store_into_blob(payload_ptr, offset, payload_value, payload_ty);
+        }
+
+        self.load_slot(&slot)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn widen_error_union_prefix(
+        &mut self,
+        src_ok_ty: &Type,
+        src_err_tys: &[Type],
+        dst_ok_ty: &Type,
+        dst_err_tys: &[Type],
+        src_union_ty: &Type,
+        dst_union_ty: &Type,
+        src_value: ValueId,
+    ) -> ValueId {
+        if src_ok_ty != dst_ok_ty
+            || src_err_tys.len() > dst_err_tys.len()
+            || !src_err_tys
+                .iter()
+                .zip(dst_err_tys.iter())
+                .all(|(src, dst)| src == dst)
+        {
+            panic!(
+                "backend unsupported error union widening: {:?} -> {:?}",
+                src_union_ty, dst_union_ty
+            );
+        }
+
+        let src_ir_ty = self.type_lowerer.lower_type(src_union_ty);
+        let src_slot = self.materialize_value_slot(src_value, src_ir_ty);
+        let dst_ir_ty = self.type_lowerer.lower_type(dst_union_ty);
+        let dst_slot = self.alloc_value_slot(dst_ir_ty);
+
+        let src_ty_id = self
+            .type_map
+            .type_table()
+            .lookup_id(src_union_ty)
+            .unwrap_or_else(|| panic!("backend missing source type id for {:?}", src_union_ty));
+        let dst_ty_id = self
+            .type_map
+            .type_table()
+            .lookup_id(dst_union_ty)
+            .unwrap_or_else(|| panic!("backend missing target type id for {:?}", dst_union_ty));
+
+        let (src_tag_ty, src_blob_ty, src_blob_size) = {
+            let (tag_ty, blob_ty) = {
+                let layout = self.type_lowerer.enum_layout(src_ty_id);
+                (layout.tag_ty, layout.blob_ty)
+            };
+            let blob_size = self.type_lowerer.ir_type_cache.layout(blob_ty).size();
+            (tag_ty, blob_ty, blob_size)
+        };
+        let (dst_tag_ty, dst_blob_ty) = {
+            let layout = self.type_lowerer.enum_layout(dst_ty_id);
+            (layout.tag_ty, layout.blob_ty)
+        };
+
+        if src_tag_ty != dst_tag_ty {
+            panic!(
+                "backend error union widening tag mismatch: {:?} vs {:?}",
+                src_union_ty, dst_union_ty
+            );
+        }
+
+        let src_tag_addr = self.field_addr_typed(src_slot.addr, 0, src_tag_ty);
+        let src_tag = self.builder.load(src_tag_addr, src_tag_ty);
+        self.store_field(dst_slot.addr, 0, dst_tag_ty, src_tag);
+
+        let src_payload_ptr = self.field_addr_typed(src_slot.addr, 1, src_blob_ty);
+        let dst_payload_ptr = self.field_addr_typed(dst_slot.addr, 1, dst_blob_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self
+            .builder
+            .const_int(src_blob_size as i128, false, 64, u64_ty);
+        self.builder.memcopy(dst_payload_ptr, src_payload_ptr, len);
+
+        self.load_slot(&dst_slot)
+    }
+
     /// Returns the IR type used to thread a local through control flow.
     ///
     /// Value locals use their value type; address locals use a pointer type.
@@ -450,14 +657,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         dst: ValueId,
         value: ValueId,
-        ty: &Type,
+        _ty: &Type,
         ir_ty: IrTypeId,
     ) {
-        if ty.needs_drop() || !self.is_aggregate(ir_ty) {
+        if !self.is_aggregate(ir_ty) {
             self.builder.store(dst, value);
             return;
         }
 
+        // Aggregate values (struct/tuple/array/blob) are materialized into a slot
+        // and copied byte-for-byte. Using scalar `store` here is incorrect for
+        // multi-field values.
         let src_slot = self.materialize_value_slot(value, ir_ty);
         let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));

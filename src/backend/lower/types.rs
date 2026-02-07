@@ -220,6 +220,28 @@ impl<'a> TypeLowerer<'a> {
                     .update_kind(placeholder, IrTypeKind::Struct { fields });
                 placeholder
             }
+            Type::ErrorUnion { .. } => {
+                let ty_id = self.type_map.type_table().lookup_id(ty).unwrap_or_else(|| {
+                    panic!("backend type lowering: missing type id for {:?}", ty)
+                });
+                let name = format!("error_union${}", ty_id.index());
+                let placeholder = self.ir_type_cache.add_placeholder_named(name);
+                self.by_type.insert(ty.clone(), placeholder);
+                let layout = self.enum_layout(ty_id);
+                let fields = vec![
+                    IrStructField {
+                        name: "tag".to_string(),
+                        ty: layout.tag_ty,
+                    },
+                    IrStructField {
+                        name: "payload".to_string(),
+                        ty: layout.blob_ty,
+                    },
+                ];
+                self.ir_type_cache
+                    .update_kind(placeholder, IrTypeKind::Struct { fields });
+                placeholder
+            }
 
             // Pointer-like types (heap allocations, references) become SSA pointers.
             Type::Heap { elem_ty }
@@ -294,18 +316,31 @@ impl<'a> TypeLowerer<'a> {
         }
 
         let enum_ty = self.type_map.type_table().get(ty_id).clone();
-        let Type::Enum { name: _, variants } = &enum_ty else {
-            panic!(
-                "backend type lowering: expected enum type, found {:?}",
-                enum_ty
-            );
+        let variants = match &enum_ty {
+            Type::Enum { variants, .. } => self
+                .enum_variants_from_view(&enum_ty)
+                .unwrap_or_else(|| variants.clone()),
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                let mut variants = Vec::with_capacity(err_tys.len() + 1);
+                variants.push(EnumVariant {
+                    name: "Ok".to_string(),
+                    payload: vec![(*ok_ty.clone())],
+                });
+                for (index, err_ty) in err_tys.iter().enumerate() {
+                    variants.push(EnumVariant {
+                        name: format!("Err{}", index),
+                        payload: vec![err_ty.clone()],
+                    });
+                }
+                variants
+            }
+            _ => {
+                panic!(
+                    "backend type lowering: expected enum/error-union type, found {:?}",
+                    enum_ty
+                );
+            }
         };
-
-        // Resolve variants from canonical type-def views when available, then
-        // fall back to the enum payload embedded in the semantic type.
-        let variants = self
-            .enum_variants_from_view(&enum_ty)
-            .unwrap_or_else(|| variants.clone());
 
         let tag_ty = self.lower_type(&Type::Int {
             signed: false,

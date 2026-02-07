@@ -5,6 +5,7 @@ use crate::diag::Span;
 use crate::semck::SemCheckError;
 use crate::tree::normalized::{Expr, MatchArm};
 use crate::tree::resolved::MatchPattern;
+use crate::typecheck::type_map::resolve_type_expr;
 use crate::types::{EnumVariant, Type};
 
 pub(super) fn check_match(
@@ -34,6 +35,7 @@ pub(super) fn check_match(
 
 enum MatchRuleKind<'a> {
     Enum(EnumRule<'a>),
+    Union(UnionRule<'a>),
     Bool,
     Int(IntRule),
     Tuple(TupleRule<'a>),
@@ -44,6 +46,7 @@ impl<'a> MatchRuleKind<'a> {
     fn for_type(ty: &'a Type) -> Self {
         match ty {
             Type::Enum { name, variants } => Self::Enum(EnumRule { name, variants }),
+            Type::ErrorUnion { ok_ty, err_tys } => Self::Union(UnionRule { ok_ty, err_tys }),
             Type::Bool => Self::Bool,
             Type::Int { signed, bits, .. } => Self::Int(IntRule {
                 signed: *signed,
@@ -65,6 +68,7 @@ impl<'a> MatchRuleKind<'a> {
     ) {
         match self {
             MatchRuleKind::Enum(rule) => rule.check(arms, span, errors),
+            MatchRuleKind::Union(rule) => rule.check(_ctx, arms, span, errors),
             MatchRuleKind::Bool => check_bool_match(arms, span, errors),
             MatchRuleKind::Int(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Tuple(rule) => rule.check(arms, span, errors),
@@ -151,6 +155,82 @@ impl<'a> EnumRule<'a> {
 
         if !has_wildcard && seen_variants.len() != self.variants.len() {
             errors.push(SemCheckError::NonExhaustiveMatch(span));
+        }
+    }
+}
+
+struct UnionRule<'a> {
+    ok_ty: &'a Type,
+    err_tys: &'a [Type],
+}
+
+impl<'a> UnionRule<'a> {
+    fn check(
+        &self,
+        ctx: &NormalizedContext,
+        arms: &[MatchArm],
+        span: Span,
+        errors: &mut Vec<SemCheckError>,
+    ) {
+        let mut seen_variant_indices = HashSet::new();
+        let mut has_wildcard = false;
+        let union_ty = self.full_type();
+
+        for arm in arms {
+            match &arm.pattern {
+                MatchPattern::Wildcard { .. } => {
+                    has_wildcard = true;
+                }
+                MatchPattern::TypedBinding { ty_expr, span, .. } => {
+                    let arm_ty = ctx
+                        .type_map
+                        .lookup_node_type(ty_expr.id)
+                        .or_else(|| resolve_type_expr(&ctx.def_table, &ctx.module, ty_expr).ok());
+                    let Some(arm_ty) = arm_ty else {
+                        continue;
+                    };
+
+                    let Some(index) = self.variant_index(&arm_ty) else {
+                        errors.push(SemCheckError::InvalidMatchPattern(union_ty.clone(), *span));
+                        continue;
+                    };
+
+                    if !seen_variant_indices.insert(index) {
+                        errors.push(SemCheckError::DuplicateMatchVariant(
+                            arm_ty.to_string(),
+                            *span,
+                        ));
+                    }
+                }
+                _ => {
+                    errors.push(SemCheckError::InvalidMatchPattern(
+                        union_ty.clone(),
+                        pattern_span(&arm.pattern),
+                    ));
+                }
+            }
+        }
+
+        let variant_count = 1 + self.err_tys.len();
+        if !has_wildcard && seen_variant_indices.len() != variant_count {
+            errors.push(SemCheckError::NonExhaustiveMatch(span));
+        }
+    }
+
+    fn variant_index(&self, ty: &Type) -> Option<usize> {
+        if ty == self.ok_ty {
+            return Some(0);
+        }
+        self.err_tys
+            .iter()
+            .position(|err_ty| err_ty == ty)
+            .map(|idx| idx + 1)
+    }
+
+    fn full_type(&self) -> Type {
+        Type::ErrorUnion {
+            ok_ty: Box::new(self.ok_ty.clone()),
+            err_tys: self.err_tys.to_vec(),
         }
     }
 }
@@ -278,7 +358,9 @@ impl<'a> TupleRule<'a> {
         for (field_ty, pattern) in field_tys.iter().zip(patterns.iter()) {
             let peeled_ty = field_ty.peel_heap();
             match pattern {
-                MatchPattern::Binding { .. } | MatchPattern::Wildcard { .. } => {}
+                MatchPattern::Binding { .. }
+                | MatchPattern::TypedBinding { .. }
+                | MatchPattern::Wildcard { .. } => {}
                 MatchPattern::BoolLit { span, .. } => {
                     if !matches!(peeled_ty, Type::Bool) {
                         errors.push(SemCheckError::InvalidMatchPattern(peeled_ty, *span));
@@ -360,6 +442,7 @@ fn pattern_span(pattern: &MatchPattern) -> Span {
         | MatchPattern::BoolLit { span, .. }
         | MatchPattern::IntLit { span, .. }
         | MatchPattern::Binding { span, .. }
+        | MatchPattern::TypedBinding { span, .. }
         | MatchPattern::Tuple { span, .. }
         | MatchPattern::EnumVariant { span, .. } => *span,
     }
@@ -367,7 +450,9 @@ fn pattern_span(pattern: &MatchPattern) -> Span {
 
 fn pattern_is_irrefutable(pattern: &MatchPattern) -> bool {
     match pattern {
-        MatchPattern::Wildcard { .. } | MatchPattern::Binding { .. } => true,
+        MatchPattern::Wildcard { .. }
+        | MatchPattern::Binding { .. }
+        | MatchPattern::TypedBinding { .. } => true,
         MatchPattern::Tuple { patterns, .. } => patterns.iter().all(pattern_is_irrefutable),
         _ => false,
     }

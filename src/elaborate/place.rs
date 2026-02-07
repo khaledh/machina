@@ -14,6 +14,16 @@ use crate::tree::semantic as sem;
 use super::elaborator::Elaborator;
 
 impl<'a> Elaborator<'a> {
+    fn peel_place_base_type(&self, ty: &crate::types::Type) -> crate::types::Type {
+        let mut curr = ty.clone();
+        while let crate::types::Type::Heap { elem_ty } | crate::types::Type::Ref { elem_ty, .. } =
+            curr
+        {
+            curr = (*elem_ty).clone();
+        }
+        curr
+    }
+
     /// Elaborate a normalized expression into a place expression.
     ///
     /// When inside a closure body, captured variable references are
@@ -65,6 +75,40 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::Var { def_id, .. } => {
                 // If this var is a closure binding, its type is the generated closure struct.
                 self.closure_type_id_for_def(*def_id).unwrap_or(expr.ty)
+            }
+            norm::ExprKind::Deref { expr: inner } => {
+                let inner_ty = self.type_map.type_table().get(inner.ty).clone();
+                match inner_ty {
+                    crate::types::Type::Heap { elem_ty }
+                    | crate::types::Type::Ref { elem_ty, .. } => {
+                        self.type_map.insert_node_type(expr.id, (*elem_ty).clone())
+                    }
+                    _ => expr.ty,
+                }
+            }
+            norm::ExprKind::TupleField { target, index } => {
+                let target_ty =
+                    self.peel_place_base_type(self.type_map.type_table().get(target.ty));
+                match target_ty {
+                    crate::types::Type::Tuple { field_tys } => field_tys
+                        .get(*index)
+                        .cloned()
+                        .map(|ty| self.type_map.insert_node_type(expr.id, ty))
+                        .unwrap_or(expr.ty),
+                    _ => expr.ty,
+                }
+            }
+            norm::ExprKind::StructField { target, field } => {
+                let target_ty =
+                    self.peel_place_base_type(self.type_map.type_table().get(target.ty));
+                match target_ty {
+                    crate::types::Type::Struct { fields, .. } => fields
+                        .iter()
+                        .find(|f| f.name == *field)
+                        .map(|f| self.type_map.insert_node_type(expr.id, f.ty.clone()))
+                        .unwrap_or(expr.ty),
+                    _ => expr.ty,
+                }
             }
             _ => expr.ty,
         };

@@ -547,6 +547,11 @@ fn reseed_type_expr(type_expr: &mut res::TypeExpr, node_id_gen: &mut NodeIdGen) 
     type_expr.id = node_id_gen.new_id();
     match &mut type_expr.kind {
         res::TypeExprKind::Infer => {}
+        res::TypeExprKind::Union { variants } => {
+            for variant in variants {
+                reseed_type_expr(variant, node_id_gen);
+            }
+        }
         res::TypeExprKind::Named { type_args, .. } => {
             for arg in type_args {
                 reseed_type_expr(arg, node_id_gen);
@@ -660,6 +665,10 @@ fn reseed_match_arm(arm: &mut res::MatchArm, node_id_gen: &mut NodeIdGen) {
 fn reseed_match_pattern(pattern: &mut res::MatchPattern, node_id_gen: &mut NodeIdGen) {
     match pattern {
         res::MatchPattern::Binding { id, .. } => *id = node_id_gen.new_id(),
+        res::MatchPattern::TypedBinding { id, ty_expr, .. } => {
+            *id = node_id_gen.new_id();
+            reseed_type_expr(ty_expr, node_id_gen);
+        }
         res::MatchPattern::Tuple { patterns, .. } => {
             for pattern in patterns {
                 reseed_match_pattern(pattern, node_id_gen);
@@ -1071,6 +1080,12 @@ fn type_expr_from_type(
                 ret_ty_expr: Box::new(type_expr_from_type(ret_ty, def_table, node_id_gen, span)?),
             }
         }
+        Type::ErrorUnion { ok_ty, err_tys } => res::TypeExprKind::Union {
+            variants: std::iter::once(ok_ty.as_ref())
+                .chain(err_tys.iter())
+                .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
         Type::Struct { name, .. } | Type::Enum { name, .. } => {
             return named_type_expr(name, def_table, node_id_gen, span);
         }

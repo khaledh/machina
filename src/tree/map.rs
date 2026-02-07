@@ -490,6 +490,12 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
         id: type_expr.id,
         kind: match &type_expr.kind {
             TypeExprKind::Infer => TypeExprKind::Infer,
+            TypeExprKind::Union { variants } => TypeExprKind::Union {
+                variants: variants
+                    .iter()
+                    .map(|variant| mapper.map_type_expr(variant, ctx))
+                    .collect(),
+            },
             TypeExprKind::Named {
                 ident,
                 def_id,
@@ -866,6 +872,19 @@ pub fn walk_match_pattern<M: TreeMapper + ?Sized>(
             id: *id,
             ident: ident.clone(),
             def_id: mapper.map_def_id(*id, def_id, ctx),
+            span: *span,
+        },
+        MatchPattern::TypedBinding {
+            id,
+            ident,
+            def_id,
+            ty_expr,
+            span,
+        } => MatchPattern::TypedBinding {
+            id: *id,
+            ident: ident.clone(),
+            def_id: mapper.map_def_id(*id, def_id, ctx),
+            ty_expr: mapper.map_type_expr(ty_expr, ctx),
             span: *span,
         },
         MatchPattern::Tuple { patterns, span } => MatchPattern::Tuple {

@@ -137,6 +137,11 @@ struct MatchPatternDefCollector<'a> {
 
 impl Visitor<DefId, TypeId> for MatchPatternDefCollector<'_> {
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
+        if let MatchPattern::Binding { def_id, .. } | MatchPattern::TypedBinding { def_id, .. } =
+            pattern
+        {
+            self.defs.insert(*def_id);
+        }
         if let MatchPattern::EnumVariant { bindings, .. } = pattern {
             for binding in bindings {
                 self.visit_match_pattern_binding(binding);

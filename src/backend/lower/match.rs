@@ -352,8 +352,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     ) -> Result<(ValueId, Type), LowerToIrError> {
         let (addr, ty) = self.lower_place_addr(discr)?;
 
-        // Enums are lowered as tagged structs in SSA, so extract field 0.
-        if let Type::Enum { .. } = ty {
+        // Enums and error unions are lowered as tagged structs in SSA, so
+        // extract field 0 for the discriminant.
+        if matches!(ty, Type::Enum { .. } | Type::ErrorUnion { .. }) {
             let enum_ty_id = self
                 .lowerer
                 .type_map
@@ -439,7 +440,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                         addr = self.lowerer.field_addr_typed(addr, *index, field_ir_ty);
                         curr_ty = field_ty;
                     }
-                    Type::Enum { .. } => {
+                    Type::Enum { .. } | Type::ErrorUnion { .. } => {
                         let enum_ty_id = self
                             .lowerer
                             .type_map

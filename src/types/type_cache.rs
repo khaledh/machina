@@ -60,15 +60,11 @@ impl TypeCache {
 }
 
 fn should_upgrade_interned_type(existing: Type, incoming: &Type) -> bool {
-    match (&existing, incoming) {
-        (Type::Struct { name: lhs, .. }, Type::Struct { name: rhs, .. }) if lhs == rhs => {
-            type_info_score(incoming) > type_info_score(&existing)
-        }
-        (Type::Enum { name: lhs, .. }, Type::Enum { name: rhs, .. }) if lhs == rhs => {
-            type_info_score(incoming) > type_info_score(&existing)
-        }
-        _ => false,
-    }
+    // `Type` equality is nominal for structs/enums, so wrappers like `Heap<Node>`
+    // can compare equal even when the inner nominal shape gets richer later.
+    // Prefer the structurally richer representative whenever an equivalent type
+    // is interned again.
+    type_info_score(incoming) > type_info_score(&existing)
 }
 
 fn type_info_score(ty: &Type) -> usize {
@@ -81,6 +77,9 @@ fn type_info_score(ty: &Type) -> usize {
                 .map(|param| type_info_score(&param.ty))
                 .sum::<usize>()
                 + type_info_score(ret_ty)
+        }
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            1 + type_info_score(ok_ty) + err_tys.iter().map(type_info_score).sum::<usize>()
         }
         Type::Range { elem_ty }
         | Type::Slice { elem_ty }

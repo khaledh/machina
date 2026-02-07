@@ -1982,3 +1982,55 @@ fn test_function_value_assign_typechecks() {
 
     let _ctx = type_check_source(source).expect("Failed to type check");
 }
+
+#[test]
+fn test_error_union_return_type_typechecks() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(v: u64) -> u64 | IoError {
+            v
+        }
+
+        fn err() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_tuple_typed_binding_pattern_typechecks() {
+    let source = r#"
+        fn test(t: (u64, bool)) -> u64 {
+            match t {
+                (x: u64, _) => x,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_error_union_not_allowed_in_param_type() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn bad(x: u64 | IoError) -> u64 {
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere(_)))
+        );
+    }
+}

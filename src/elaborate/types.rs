@@ -78,6 +78,12 @@ impl<'a> Elaborator<'a> {
             Type::Bool => self.named_type_expr("bool", span),
             Type::Char => self.named_type_expr("char", span),
             Type::String => self.named_type_expr("string", span),
+            Type::ErrorUnion { ok_ty, err_tys } => sem::TypeExprKind::Union {
+                variants: std::iter::once(ok_ty.as_ref())
+                    .chain(err_tys.iter())
+                    .map(|ty| self.type_expr_from_type(ty, span))
+                    .collect(),
+            },
             Type::Range { .. } => {
                 panic!("compiler bug: range value type not representable in type expressions");
             }

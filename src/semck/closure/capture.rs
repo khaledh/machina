@@ -315,7 +315,9 @@ impl<'a> Visitor<DefId, TypeId> for LocalCollector<'a> {
     }
 
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
-        if let MatchPattern::Binding { def_id, .. } = pattern {
+        if let MatchPattern::Binding { def_id, .. } | MatchPattern::TypedBinding { def_id, .. } =
+            pattern
+        {
             self.locals.insert(*def_id);
         }
         walk_match_pattern(self, pattern);

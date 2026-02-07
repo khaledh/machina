@@ -45,7 +45,7 @@ pub(crate) fn resolve_type_expr(
     module: &impl TypeDefLookup,
     type_expr: &res::TypeExpr,
 ) -> Result<Type, TypeCheckError> {
-    resolve_type_expr_with_params_and_args(def_table, module, type_expr, None, None)
+    resolve_type_expr_with_params_and_args(def_table, module, type_expr, None, None, false)
 }
 
 pub(crate) fn resolve_type_expr_with_params(
@@ -54,7 +54,16 @@ pub(crate) fn resolve_type_expr_with_params(
     type_expr: &res::TypeExpr,
     type_params: Option<&TypeParamMap>,
 ) -> Result<Type, TypeCheckError> {
-    resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None)
+    resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None, false)
+}
+
+pub(crate) fn resolve_return_type_expr_with_params(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &res::TypeExpr,
+    type_params: Option<&TypeParamMap>,
+) -> Result<Type, TypeCheckError> {
+    resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None, true)
 }
 
 #[allow(dead_code)]
@@ -97,6 +106,7 @@ pub(crate) fn resolve_type_def_with_args(
             None,
             Some(&arg_map),
             &mut in_progress,
+            false,
         ),
         res::TypeDefKind::Struct { fields } => resolve_struct_type(
             def_table,
@@ -107,6 +117,7 @@ pub(crate) fn resolve_type_def_with_args(
             None,
             Some(&arg_map),
             &mut in_progress,
+            false,
         ),
         res::TypeDefKind::Enum { variants } => resolve_enum_type(
             def_table,
@@ -117,6 +128,7 @@ pub(crate) fn resolve_type_def_with_args(
             None,
             Some(&arg_map),
             &mut in_progress,
+            false,
         ),
     }
 }
@@ -127,6 +139,7 @@ fn resolve_type_expr_with_params_and_args(
     type_expr: &res::TypeExpr,
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
+    allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
     resolve_type_expr_impl(
@@ -136,6 +149,7 @@ fn resolve_type_expr_with_params_and_args(
         type_params,
         type_args,
         &mut in_progress,
+        allow_error_union,
     )
 }
 
@@ -168,9 +182,37 @@ fn resolve_type_expr_impl(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
         res::TypeExprKind::Infer => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
+        res::TypeExprKind::Union { variants } => {
+            if !allow_error_union {
+                return Err(TypeCheckErrorKind::UnionNotAllowedHere(type_expr.span).into());
+            }
+            let resolved = variants
+                .iter()
+                .map(|variant| {
+                    resolve_type_expr_impl(
+                        def_table,
+                        module,
+                        variant,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        false,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let (ok_ty, err_tys) = resolved
+                .split_first()
+                .expect("parser guarantees at least one union variant");
+            Ok(Type::ErrorUnion {
+                ok_ty: Box::new(ok_ty.clone()),
+                err_tys: err_tys.to_vec(),
+            })
+        }
         res::TypeExprKind::Named {
             def_id,
             type_args: type_arg_exprs,
@@ -184,6 +226,7 @@ fn resolve_type_expr_impl(
             type_params,
             type_args,
             in_progress,
+            allow_error_union,
         ),
         res::TypeExprKind::Array { elem_ty_expr, dims } => {
             let elem_ty = resolve_type_expr_impl(
@@ -193,6 +236,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
@@ -210,6 +254,7 @@ fn resolve_type_expr_impl(
                         type_params,
                         type_args,
                         in_progress,
+                        allow_error_union,
                     )
                 })
                 .collect::<Result<Vec<Type>, _>>()?;
@@ -226,6 +271,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             apply_refinements(base_ty, refinements, type_expr.span)
         }
@@ -237,6 +283,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
@@ -250,6 +297,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
@@ -266,6 +314,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             Ok(Type::Ref {
                 mutable: *mutable,
@@ -286,6 +335,7 @@ fn resolve_type_expr_impl(
                         type_params,
                         type_args,
                         in_progress,
+                        allow_error_union,
                     )?;
                     Ok(FnParam {
                         mode: fn_param_mode(param.mode.clone()),
@@ -300,6 +350,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             Ok(Type::Fn {
                 params: param_tys,
@@ -428,6 +479,7 @@ fn resolve_named_type(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     let def = def_table
         .lookup_def(*def_id)
@@ -484,6 +536,7 @@ fn resolve_named_type(
                         type_params,
                         type_args,
                         in_progress,
+                        allow_error_union,
                     ),
                     res::TypeDefKind::Struct { fields } => resolve_struct_type(
                         def_table,
@@ -494,6 +547,7 @@ fn resolve_named_type(
                         type_params,
                         type_args,
                         in_progress,
+                        allow_error_union,
                     ),
                     res::TypeDefKind::Enum { variants } => resolve_enum_type(
                         def_table,
@@ -504,6 +558,7 @@ fn resolve_named_type(
                         type_params,
                         type_args,
                         in_progress,
+                        allow_error_union,
                     ),
                 };
             }
@@ -528,6 +583,7 @@ fn resolve_named_type(
                         type_params,
                         type_args,
                         in_progress,
+                        allow_error_union,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -547,6 +603,7 @@ fn resolve_named_type(
                     type_params,
                     Some(&arg_map),
                     in_progress,
+                    allow_error_union,
                 ),
                 res::TypeDefKind::Struct { fields } => resolve_struct_type(
                     def_table,
@@ -557,6 +614,7 @@ fn resolve_named_type(
                     type_params,
                     Some(&arg_map),
                     in_progress,
+                    allow_error_union,
                 ),
                 res::TypeDefKind::Enum { variants } => resolve_enum_type(
                     def_table,
@@ -567,6 +625,7 @@ fn resolve_named_type(
                     type_params,
                     Some(&arg_map),
                     in_progress,
+                    allow_error_union,
                 ),
             }
         }
@@ -582,6 +641,7 @@ fn resolve_type_alias(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def.id) {
         return Ok(Type::Unknown);
@@ -594,6 +654,7 @@ fn resolve_type_alias(
         type_params,
         type_args,
         in_progress,
+        allow_error_union,
     );
     in_progress.remove(&def.id);
     ty
@@ -608,6 +669,7 @@ fn resolve_struct_type(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def_id) {
         return Ok(Type::Struct {
@@ -626,6 +688,7 @@ fn resolve_struct_type(
         type_params,
         type_args,
         in_progress,
+        allow_error_union,
     )?;
     in_progress.remove(&def_id);
     Ok(Type::Struct {
@@ -641,6 +704,7 @@ fn resolve_struct_fields(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Vec<StructField>, TypeCheckError> {
     fields
         .iter()
@@ -652,6 +716,7 @@ fn resolve_struct_fields(
                 type_params,
                 type_args,
                 in_progress,
+                allow_error_union,
             )?;
             Ok(StructField {
                 name: field.name.clone(),
@@ -670,6 +735,7 @@ fn resolve_enum_type(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     if in_progress.contains(&def_id) {
         return Ok(Type::Enum {
@@ -688,6 +754,7 @@ fn resolve_enum_type(
         type_params,
         type_args,
         in_progress,
+        allow_error_union,
     )?;
     in_progress.remove(&def_id);
     Ok(Type::Enum {
@@ -703,6 +770,7 @@ fn resolve_enum_variants(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
+    allow_error_union: bool,
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
     let mut enum_variants = Vec::new();
     for variant in variants {
@@ -717,6 +785,7 @@ fn resolve_enum_variants(
                     type_params,
                     type_args,
                     in_progress,
+                    allow_error_union,
                 )
             })
             .collect::<Result<Vec<Type>, _>>()?;

@@ -810,7 +810,7 @@ fn test_lower_aggregate_assign_memcpy() {
 }
 
 #[test]
-fn test_lower_aggregate_assign_needs_drop_no_memcpy() {
+fn test_lower_aggregate_assign_needs_drop_uses_memcpy() {
     let ctx = analyze(indoc! {"
         type Wrap = { s: string }
         type Outer = { w: Wrap }
@@ -832,7 +832,7 @@ fn test_lower_aggregate_assign_needs_drop_no_memcpy() {
     .expect("failed to lower");
     let text = format_func(&lowered.func, &lowered.types);
 
-    assert!(!text.contains("memcpy"));
+    assert!(text.contains("memcpy"));
 }
 
 #[test]
@@ -915,6 +915,35 @@ fn test_lower_enum_variant_payload() {
         }
     "};
     assert_ir_eq(&text, expected);
+}
+
+#[test]
+fn test_lower_error_union_return_wraps_payload_value() {
+    let ctx = analyze(indoc! {"
+        type IoError = {
+            code: u64,
+        }
+
+        fn ok(v: u64) -> u64 | IoError {
+            v
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("-> error_union$"));
+    assert!(text.contains("ptr<error_union$"));
+    assert!(text.contains("field_addr %v1, 0"));
+    assert!(text.contains("field_addr %v1, 1"));
+    assert!(text.contains("memcpy"));
 }
 
 #[test]

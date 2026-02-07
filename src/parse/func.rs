@@ -453,6 +453,12 @@ impl<'a> Parser<'a> {
     fn clone_type_expr_with_new_ids(&mut self, ty: &TypeExpr) -> TypeExpr {
         let kind = match &ty.kind {
             TypeExprKind::Infer => TypeExprKind::Infer,
+            TypeExprKind::Union { variants } => TypeExprKind::Union {
+                variants: variants
+                    .iter()
+                    .map(|variant| self.clone_type_expr_with_new_ids(variant))
+                    .collect(),
+            },
             TypeExprKind::Named {
                 ident,
                 def_id,

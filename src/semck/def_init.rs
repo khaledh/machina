@@ -399,7 +399,7 @@ impl<'a> DefCollector<'a> {
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding { def_id, .. } => {
+            MatchPattern::Binding { def_id, .. } | MatchPattern::TypedBinding { def_id, .. } => {
                 self.defs.insert(*def_id);
             }
             MatchPattern::Tuple { patterns, .. } => {
@@ -527,7 +527,8 @@ impl<'a> DefSpanCollector<'a> {
 
     fn collect_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding { def_id, span, .. } => {
+            MatchPattern::Binding { def_id, span, .. }
+            | MatchPattern::TypedBinding { def_id, span, .. } => {
                 self.spans.entry(*def_id).or_insert(*span);
             }
             MatchPattern::Tuple { patterns, .. } => {
@@ -1152,7 +1153,7 @@ impl<'a> DefInitChecker<'a> {
 
     fn mark_match_pattern_initialized(&mut self, init: &mut InitState, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding { def_id, .. } => {
+            MatchPattern::Binding { def_id, .. } | MatchPattern::TypedBinding { def_id, .. } => {
                 init.mark_full(*def_id);
             }
             MatchPattern::Tuple { patterns, .. } => {

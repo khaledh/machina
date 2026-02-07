@@ -132,6 +132,11 @@ impl<'a> ValueChecker<'a> {
         self.run_type_rules(ty);
         match &ty.kind {
             TypeExprKind::Infer => {}
+            TypeExprKind::Union { variants } => {
+                for variant in variants {
+                    self.check_type_expr(variant);
+                }
+            }
             TypeExprKind::Refined { base_ty_expr, .. } => {
                 self.check_type_expr(base_ty_expr);
             }

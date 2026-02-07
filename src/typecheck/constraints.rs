@@ -21,7 +21,9 @@ use crate::tree::resolved::{
 };
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
-use crate::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr_with_params};
+use crate::typecheck::type_map::{
+    resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
+};
 use crate::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
@@ -298,7 +300,7 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Decl(func_def.def_id, func_def.span),
                 );
             }
-            let ret_ty = this.resolve_type_in_scope(&func_def.sig.ret_ty_expr);
+            let ret_ty = this.resolve_return_type_in_scope(&func_def.sig.ret_ty_expr);
             let return_term = ret_ty.unwrap_or_else(|_| this.fresh_var_term());
             let func_node_term = this.node_term(func_def.id);
             this.push_eq(
@@ -359,7 +361,7 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Decl(method_def_id, method_span),
                 );
             }
-            let ret_ty = this.resolve_type_in_scope(&sig.ret_ty_expr);
+            let ret_ty = this.resolve_return_type_in_scope(&sig.ret_ty_expr);
             let return_term = ret_ty.unwrap_or_else(|_| this.fresh_var_term());
             if let crate::tree::resolved::MethodItem::Def(method_def) = method_item {
                 let method_node_term = this.node_term(method_def.id);
@@ -460,6 +462,15 @@ impl<'a> ConstraintCollector<'a> {
         )
     }
 
+    fn resolve_return_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        resolve_return_type_expr_with_params(
+            &self.ctx.def_table,
+            &self.ctx.module,
+            ty_expr,
+            self.current_type_params(),
+        )
+    }
+
     fn resolve_type_instance_with_args(
         &mut self,
         def_id: DefId,
@@ -501,6 +512,22 @@ impl<'a> ConstraintCollector<'a> {
         expected: Option<&Type>,
     ) -> Option<Type> {
         let def_id = self.ctx.def_table.lookup_node_def_id(expr.id)?;
+        self.resolve_type_instance_with_args(def_id, type_args, expected)
+    }
+
+    fn resolve_type_instance_for_name(
+        &mut self,
+        type_name: &str,
+        type_args: &[TypeExpr],
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let def_id = self
+            .ctx
+            .module
+            .type_defs()
+            .into_iter()
+            .find(|type_def| type_def.name == type_name)
+            .map(|type_def| type_def.def_id)?;
         self.resolve_type_instance_with_args(def_id, type_args, expected)
     }
 
@@ -700,9 +727,12 @@ impl<'a> ConstraintCollector<'a> {
             } => {
                 // Resolve nominal struct type (including generic instantiation)
                 // when possible, then type fields against known field types.
-                let known_struct = self.type_defs.get(name).cloned().or_else(|| {
-                    self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
-                });
+                let known_struct = self
+                    .resolve_type_instance_for_name(name, type_args, expected.as_ref())
+                    .or_else(|| {
+                        self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
+                    })
+                    .or_else(|| self.type_defs.get(name).cloned());
                 if let Some(Type::Struct {
                     fields: struct_fields,
                     ..
@@ -734,9 +764,12 @@ impl<'a> ConstraintCollector<'a> {
             } => {
                 // Resolve nominal enum type (including generic instantiation),
                 // and collect payload terms with per-position expected types.
-                let known_enum = self.type_defs.get(enum_name).cloned().or_else(|| {
-                    self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
-                });
+                let known_enum = self
+                    .resolve_type_instance_for_name(enum_name, type_args, expected.as_ref())
+                    .or_else(|| {
+                        self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
+                    })
+                    .or_else(|| self.type_defs.get(enum_name).cloned());
                 let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum {
                     variants
                         .iter()
@@ -1048,6 +1081,13 @@ impl<'a> ConstraintCollector<'a> {
     fn collect_match_pattern_bindings(&mut self, pattern: &MatchPattern) {
         match pattern {
             MatchPattern::Binding {
+                def_id, id, span, ..
+            } => {
+                let bind_term = self.def_term(*def_id);
+                let node_term = self.node_term(*id);
+                self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
+            }
+            MatchPattern::TypedBinding {
                 def_id, id, span, ..
             } => {
                 let bind_term = self.def_term(*def_id);
@@ -1527,7 +1567,7 @@ impl<'a> ConstraintCollector<'a> {
         let ret_ty = if is_infer_type_expr(return_ty) {
             self.fresh_var_term()
         } else {
-            self.resolve_type_in_scope(return_ty).ok()?
+            self.resolve_return_type_in_scope(return_ty).ok()?
         };
         let fn_ty = Type::Fn {
             params: fn_params,
@@ -1579,7 +1619,7 @@ impl<'a> ConstraintCollector<'a> {
         params: Vec<crate::types::FnParam>,
         return_ty: &TypeExpr,
     ) -> Option<Type> {
-        let ret_ty = self.resolve_type_in_scope(return_ty).ok()?;
+        let ret_ty = self.resolve_return_type_in_scope(return_ty).ok()?;
         Some(Type::Fn {
             params,
             ret_ty: Box::new(ret_ty),

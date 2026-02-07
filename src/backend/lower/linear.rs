@@ -758,7 +758,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             if matches!(ty, Type::Unit) {
                                 None
                             } else {
-                                Some(value)
+                                Some(self.coerce_return_value(value, ty))
                             }
                         }
                         BranchResult::Return => return Ok(StmtOutcome::Return),

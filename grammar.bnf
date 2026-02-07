@@ -29,7 +29,8 @@ TraitDef           ::= "trait" Identifier "{" TraitMethodDecl* "}"
 TraitMethodDecl    ::= MethodSig ";"
 
 # Type Expressions
-TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType
+TypeExpr           ::= TypeExprTerm ( "|" TypeExprTerm )*
+TypeExprTerm       ::= UnitType | NamedType | ArrayType | SliceType
                      | TupleType | RangeType | HeapType | FnType
 
 UnitType           ::= "()"
@@ -126,7 +127,9 @@ IfTail             ::= "else" (Block | If)
 
 Match              ::= "match" Expr "{" MatchArm ("," MatchArm )* ","? "}"
 MatchArm           ::= MatchPattern "=>" Expr
-MatchPattern       ::= "_" | BoolLit | IntLit | TuplePattern | EnumVariantPattern
+MatchPattern       ::= "_" | BoolLit | IntLit | TypedMatchBinding
+                     | TuplePattern | EnumVariantPattern
+TypedMatchBinding  ::= Identifier ":" TypeExpr
 
 EnumVariantPattern ::= Identifier ("::" Identifier)? ( "(" MatchBindingList? ")" )?
 MatchBindingList   ::= MatchBinding ("," MatchBinding)* ","?

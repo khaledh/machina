@@ -854,6 +854,57 @@ fn test_match_duplicate_variant() {
 }
 
 #[test]
+fn test_match_error_union_exhaustive_with_typed_bindings() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(v: u64) -> u64 | IoError { v }
+        fn fail() -> u64 | IoError { IoError { code: 1 } }
+
+        fn choose(flag: bool, v: u64) -> u64 | IoError {
+            if flag { ok(v) } else { fail() }
+        }
+
+        fn test() -> u64 {
+            let result = choose(false, 42);
+            match result {
+                n: u64 => n,
+                err: IoError => err.code,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected error-union match to be exhaustive");
+}
+
+#[test]
+fn test_match_error_union_non_exhaustive() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(v: u64) -> u64 | IoError { v }
+
+        fn test() -> u64 {
+            let result = ok(42);
+            match result {
+                n: u64 => n,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match &errors[0] {
+            SemCheckError::NonExhaustiveMatch(_) => {}
+            e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_match_bool_exhaustive() {
     let source = r#"
         fn test(b: bool) -> u64 {

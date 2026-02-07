@@ -1243,6 +1243,80 @@ fn test_parse_match_expr_tuple_patterns_literals() {
 }
 
 #[test]
+fn test_parse_match_expr_typed_binding_pattern() {
+    let source = r#"
+        fn test(t: (u64, bool)) -> u64 {
+            match t {
+                (x: u64, _) => x,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern {
+                MatchPattern::Tuple { patterns, .. } => {
+                    assert_eq!(patterns.len(), 2);
+                    match &patterns[0] {
+                        MatchPattern::TypedBinding { ident, ty_expr, .. } => {
+                            assert_eq!(ident, "x");
+                            assert!(matches!(
+                                &ty_expr.kind,
+                                TypeExprKind::Named { ident, .. } if ident == "u64"
+                            ));
+                        }
+                        _ => panic!("Expected typed binding pattern"),
+                    }
+                    assert!(matches!(&patterns[1], MatchPattern::Wildcard { .. }));
+                }
+                _ => panic!("Expected tuple pattern"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
+fn test_parse_return_error_union_type() {
+    let source = r#"
+        type Config = { host: string }
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn load() -> Config | IoError | ParseError {
+            Config { host: "localhost" }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Union { variants } => {
+            assert_eq!(variants.len(), 3);
+            assert!(matches!(
+                &variants[0].kind,
+                TypeExprKind::Named { ident, .. } if ident == "Config"
+            ));
+            assert!(matches!(
+                &variants[1].kind,
+                TypeExprKind::Named { ident, .. } if ident == "IoError"
+            ));
+            assert!(matches!(
+                &variants[2].kind,
+                TypeExprKind::Named { ident, .. } if ident == "ParseError"
+            ));
+        }
+        other => panic!("Expected union return type, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_parse_char_literal() {
     let source = r#"
         fn test() -> char {

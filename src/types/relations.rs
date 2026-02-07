@@ -15,7 +15,7 @@
 
 use crate::tree::UnaryOp;
 use crate::tree::resolved::{Expr, ExprKind};
-use crate::types::Type;
+use crate::types::{EnumVariant, StructField, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeAssignability {
@@ -66,6 +66,36 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
         return TypeAssignability::Exact;
     }
 
+    if let Some(assignability) = nominal_instance_assignable(from, to) {
+        return assignability;
+    }
+
+    if let Type::ErrorUnion { ok_ty, err_tys } = to {
+        let any_match = std::iter::once(ok_ty.as_ref())
+            .chain(err_tys.iter())
+            .any(|variant_ty| type_assignable(from, variant_ty) != TypeAssignability::Incompatible);
+        return if any_match {
+            TypeAssignability::Exact
+        } else {
+            TypeAssignability::Incompatible
+        };
+    }
+
+    if let Type::ErrorUnion {
+        ok_ty: from_ok,
+        err_tys: from_errs,
+    } = from
+    {
+        let all_match = std::iter::once(from_ok.as_ref())
+            .chain(from_errs.iter())
+            .all(|variant_ty| type_assignable(variant_ty, to) != TypeAssignability::Incompatible);
+        return if all_match {
+            TypeAssignability::Exact
+        } else {
+            TypeAssignability::Incompatible
+        };
+    }
+
     let from_tag = type_tag(from);
     let to_tag = type_tag(to);
     for rule in type_rules_for(from_tag) {
@@ -76,6 +106,79 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
         }
     }
     TypeAssignability::Incompatible
+}
+
+fn nominal_instance_assignable(from: &Type, to: &Type) -> Option<TypeAssignability> {
+    match (from, to) {
+        (
+            Type::Struct {
+                name: from_name,
+                fields: from_fields,
+            },
+            Type::Struct {
+                name: to_name,
+                fields: to_fields,
+            },
+        ) if nominal_base_name(from_name) == nominal_base_name(to_name) => {
+            Some(if struct_fields_assignable(from_fields, to_fields) {
+                TypeAssignability::Exact
+            } else {
+                TypeAssignability::Incompatible
+            })
+        }
+        (
+            Type::Enum {
+                name: from_name,
+                variants: from_variants,
+            },
+            Type::Enum {
+                name: to_name,
+                variants: to_variants,
+            },
+        ) if nominal_base_name(from_name) == nominal_base_name(to_name) => {
+            Some(if enum_variants_assignable(from_variants, to_variants) {
+                TypeAssignability::Exact
+            } else {
+                TypeAssignability::Incompatible
+            })
+        }
+        _ => None,
+    }
+}
+
+fn struct_fields_assignable(from_fields: &[StructField], to_fields: &[StructField]) -> bool {
+    if from_fields.len() != to_fields.len() {
+        return false;
+    }
+
+    from_fields.iter().zip(to_fields.iter()).all(|(from, to)| {
+        from.name == to.name && type_assignable(&from.ty, &to.ty) != TypeAssignability::Incompatible
+    })
+}
+
+fn enum_variants_assignable(from_variants: &[EnumVariant], to_variants: &[EnumVariant]) -> bool {
+    if from_variants.len() != to_variants.len() {
+        return false;
+    }
+
+    from_variants
+        .iter()
+        .zip(to_variants.iter())
+        .all(|(from_variant, to_variant)| {
+            from_variant.name == to_variant.name
+                && from_variant.payload.len() == to_variant.payload.len()
+                && from_variant
+                    .payload
+                    .iter()
+                    .zip(to_variant.payload.iter())
+                    .all(|(from_payload, to_payload)| {
+                        type_assignable(from_payload, to_payload) != TypeAssignability::Incompatible
+                    })
+        })
+}
+
+fn nominal_base_name(name: &str) -> &str {
+    name.split('<').next().unwrap_or(name)
 }
 
 pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> ValueAssignability {

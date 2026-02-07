@@ -347,6 +347,13 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
             model::TypeExprKind::Infer => {
                 write!(f, "Infer")?;
             }
+            model::TypeExprKind::Union { variants } => {
+                let variants_str = variants
+                    .iter()
+                    .map(|variant| variant.to_string())
+                    .collect::<Vec<_>>();
+                write!(f, "Union([{}])", variants_str.join(" | "))?;
+            }
             model::TypeExprKind::Named {
                 ident, type_args, ..
             } => {
@@ -493,6 +500,11 @@ impl MatchPattern {
             }
             MatchPattern::Binding { id, ident, .. } => {
                 writeln!(f, "{}Binding {} [{}]", pad, ident, id)?;
+            }
+            MatchPattern::TypedBinding {
+                id, ident, ty_expr, ..
+            } => {
+                writeln!(f, "{}TypedBinding {}: {} [{}]", pad, ident, ty_expr, id)?;
             }
             MatchPattern::Tuple { patterns, .. } => {
                 writeln!(f, "{}Tuple", pad)?;

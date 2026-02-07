@@ -639,6 +639,16 @@ impl SymbolResolver {
             } => {
                 self.bind_match_binding(*id, ident, *span);
             }
+            MatchPattern::TypedBinding {
+                id,
+                ident,
+                ty_expr,
+                span,
+                ..
+            } => {
+                self.visit_type_expr(ty_expr);
+                self.bind_match_binding(*id, ident, *span);
+            }
             MatchPattern::Tuple { patterns, .. } => {
                 for pattern in patterns {
                     self.check_match_pattern(pattern);

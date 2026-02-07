@@ -32,6 +32,10 @@ pub enum Type {
         params: Vec<FnParam>,
         ret_ty: Box<Type>,
     },
+    ErrorUnion {
+        ok_ty: Box<Type>,
+        err_tys: Vec<Type>,
+    },
 
     // Compound Types
     String,
@@ -138,6 +142,16 @@ impl PartialEq for Type {
                     ret_ty: r2,
                 },
             ) => p1 == p2 && r1 == r2,
+            (
+                Type::ErrorUnion {
+                    ok_ty: lok,
+                    err_tys: lerrs,
+                },
+                Type::ErrorUnion {
+                    ok_ty: rok,
+                    err_tys: rerrs,
+                },
+            ) => lok == rok && lerrs == rerrs,
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
             (Type::Bool, Type::Bool) => true,
@@ -206,47 +220,52 @@ impl Hash for Type {
                 params.hash(state);
                 ret_ty.hash(state);
             }
-            Type::Range { elem_ty } => {
+            Type::ErrorUnion { ok_ty, err_tys } => {
                 7u8.hash(state);
+                ok_ty.hash(state);
+                err_tys.hash(state);
+            }
+            Type::Range { elem_ty } => {
+                8u8.hash(state);
                 elem_ty.hash(state);
             }
             Type::String => {
-                8u8.hash(state);
+                9u8.hash(state);
             }
             Type::Array { elem_ty, dims } => {
-                9u8.hash(state);
+                10u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
             }
             Type::Tuple { field_tys } => {
-                10u8.hash(state);
+                11u8.hash(state);
                 field_tys.hash(state);
             }
             Type::Struct { name, .. } => {
                 // Nominal type: only hash the name
-                11u8.hash(state);
+                12u8.hash(state);
                 name.hash(state);
             }
             Type::Enum { name, .. } => {
                 // Nominal type: only hash the name
-                12u8.hash(state);
+                13u8.hash(state);
                 name.hash(state);
             }
             Type::Slice { elem_ty } => {
-                13u8.hash(state);
-                elem_ty.hash(state);
-            }
-            Type::Heap { elem_ty } => {
                 14u8.hash(state);
                 elem_ty.hash(state);
             }
-            Type::Ref { mutable, elem_ty } => {
+            Type::Heap { elem_ty } => {
                 15u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::Ref { mutable, elem_ty } => {
+                16u8.hash(state);
                 mutable.hash(state);
                 elem_ty.hash(state);
             }
             Type::Var(var) => {
-                16u8.hash(state);
+                17u8.hash(state);
                 var.hash(state);
             }
         }
@@ -363,6 +382,10 @@ impl Type {
             Type::Char => 4,
             Type::Range { elem_ty } => elem_ty.size_of(),
             Type::Fn { .. } => 8,
+            Type::ErrorUnion { .. } => {
+                // Tag + max payload to model a compact tagged-sum layout.
+                8 + self.error_union_max_payload_size()
+            }
             Type::String => 16,
             Type::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
@@ -399,6 +422,7 @@ impl Type {
             Type::Char => 4,
             Type::Range { elem_ty } => elem_ty.align_of(),
             Type::Fn { .. } => 8,
+            Type::ErrorUnion { .. } => self.error_union_max_payload_align().max(8),
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::Tuple { field_tys } => field_tys.iter().map(|t| t.align_of()).max().unwrap_or(1),
@@ -430,6 +454,7 @@ impl Type {
                 | Type::Struct { .. }
                 | Type::String
                 | Type::Slice { .. }
+                | Type::ErrorUnion { .. }
         );
 
         // if it's an enum, check if it has a payload
@@ -478,6 +503,9 @@ impl Type {
             Type::Enum { variants, .. } => variants
                 .iter()
                 .any(|v| v.payload.iter().any(Type::needs_drop)),
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                ok_ty.needs_drop() || err_tys.iter().any(Type::needs_drop)
+            }
             _ => false,
         }
     }
@@ -582,6 +610,30 @@ impl Type {
             .unwrap_or(0)
     }
 
+    fn error_union_max_payload_size(&self) -> usize {
+        let Type::ErrorUnion { ok_ty, err_tys } = self else {
+            panic!("Expected error-union type");
+        };
+
+        std::iter::once(ok_ty.as_ref())
+            .chain(err_tys.iter())
+            .map(Type::size_of)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn error_union_max_payload_align(&self) -> usize {
+        let Type::ErrorUnion { ok_ty, err_tys } = self else {
+            panic!("Expected error-union type");
+        };
+
+        std::iter::once(ok_ty.as_ref())
+            .chain(err_tys.iter())
+            .map(Type::align_of)
+            .max()
+            .unwrap_or(1)
+    }
+
     pub fn enum_variant_payload_offsets(&self, variant: &str) -> Vec<usize> {
         let Type::Enum { variants, .. } = self else {
             panic!("Expected enum type");
@@ -641,6 +693,10 @@ impl Type {
                     })
                     .collect(),
                 ret_ty: Box::new((*ret_ty).map(f)),
+            },
+            Type::ErrorUnion { ok_ty, err_tys } => Type::ErrorUnion {
+                ok_ty: Box::new((*ok_ty).map(f)),
+                err_tys: err_tys.into_iter().map(|ty| ty.map(f)).collect(),
             },
             Type::Range { elem_ty } => Type::Range {
                 elem_ty: Box::new((*elem_ty).map(f)),
@@ -720,6 +776,20 @@ impl Type {
                             })
                             .collect(),
                         ret_ty: Box::new(mapped_ret.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                let mapped_ok = ok_ty.map_cow(f);
+                let mapped_errs = err_tys.iter().map(|ty| ty.map_cow(f)).collect::<Vec<_>>();
+                let changed = matches!(mapped_ok, Cow::Owned(_))
+                    || mapped_errs.iter().any(|ty| matches!(ty, Cow::Owned(_)));
+                if changed {
+                    Cow::Owned(Type::ErrorUnion {
+                        ok_ty: Box::new(mapped_ok.into_owned()),
+                        err_tys: mapped_errs.into_iter().map(Cow::into_owned).collect(),
                     })
                 } else {
                     Cow::Borrowed(self)
@@ -858,6 +928,9 @@ impl Type {
         match self {
             Type::Fn { params, ret_ty } => {
                 params.iter().any(|p| p.ty.any(predicate)) || ret_ty.any(predicate)
+            }
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                ok_ty.any(predicate) || err_tys.iter().any(|ty| ty.any(predicate))
             }
             Type::Range { elem_ty }
             | Type::Array { elem_ty, .. }

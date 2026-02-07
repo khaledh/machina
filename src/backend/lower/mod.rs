@@ -243,6 +243,8 @@ fn lower_func_with_globals(
 
     // If the body produces a value (not an early return), emit the final return.
     if let BranchResult::Value(value) = result {
+        let body_ty = type_map.type_table().get(func.body.ty).clone();
+        let value = lowerer.coerce_return_value(value, &body_ty);
         lowerer.emit_drops_to_depth(0)?;
         lowerer.builder.terminate(Terminator::Return {
             value: if ret_is_unit { None } else { Some(value) },
@@ -315,6 +317,8 @@ fn lower_method_def_with_globals(
     // Lower the method body and emit the final return if it yields a value.
     let result = lowerer.lower_branching_value_expr(&method_def.body)?;
     if let BranchResult::Value(value) = result {
+        let body_ty = type_map.type_table().get(method_def.body.ty).clone();
+        let value = lowerer.coerce_return_value(value, &body_ty);
         lowerer.emit_drops_to_depth(0)?;
         lowerer.builder.terminate(Terminator::Return {
             value: if ret_is_unit { None } else { Some(value) },

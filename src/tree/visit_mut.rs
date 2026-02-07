@@ -238,6 +238,11 @@ pub fn walk_enum_def_variant<V: VisitorMut<D, T> + ?Sized, D, T>(
 pub fn walk_type_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &mut TypeExpr<D>) {
     match &mut type_expr.kind {
         TypeExprKind::Infer => {}
+        TypeExprKind::Union { variants } => {
+            for variant in variants {
+                v.visit_type_expr(variant);
+            }
+        }
         TypeExprKind::Named { type_args, .. } => {
             for arg in type_args {
                 v.visit_type_expr(arg);
@@ -395,6 +400,9 @@ pub fn walk_match_pattern<V: VisitorMut<D, T> + ?Sized, D, T>(
     pattern: &mut MatchPattern<D>,
 ) {
     match pattern {
+        MatchPattern::TypedBinding { ty_expr, .. } => {
+            v.visit_type_expr(ty_expr);
+        }
         MatchPattern::Tuple { patterns, .. } => {
             for pattern in patterns {
                 v.visit_match_pattern(pattern);

@@ -303,6 +303,9 @@ pub enum RefinementKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExprKind<D> {
     Infer,
+    Union {
+        variants: Vec<TypeExpr<D>>,
+    },
     Named {
         ident: String,
         def_id: D,
@@ -563,6 +566,13 @@ pub enum MatchPattern<D> {
         id: NodeId,
         ident: String,
         def_id: D,
+        span: Span,
+    },
+    TypedBinding {
+        id: NodeId,
+        ident: String,
+        def_id: D,
+        ty_expr: TypeExpr<D>,
         span: Span,
     },
     Tuple {
