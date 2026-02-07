@@ -2218,6 +2218,33 @@ fn test_if_join_canonical_order_keeps_try_success_path_stable() {
 }
 
 #[test]
+fn test_join_arm_mismatch_reports_join_diagnostic() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn demo(flag: bool) -> u64 {
+            let joined = if flag {
+                1
+            } else {
+                IoError { code: 19 }
+            };
+            let bad: bool = joined;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::JoinArmTypeMismatch(_, _, _)
+        )));
+    }
+}
+
+#[test]
 fn test_tuple_typed_binding_pattern_typechecks() {
     let source = r#"
         fn test(t: (u64, bool)) -> u64 {

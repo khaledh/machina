@@ -42,6 +42,9 @@ pub enum TypeCheckErrorKind {
     #[error("`?` cannot propagate error {0} into return type {1}")]
     TryErrorNotInReturn(Type, Type, Span),
 
+    #[error("Join arm type mismatch: expected join type {0}, found arm type {1}")]
+    JoinArmTypeMismatch(Type, Type, Span),
+
     #[error("Condition must be a boolean, found {0}")]
     CondNotBoolean(Type, Span),
 
@@ -306,6 +309,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::TryOutsideFunction(span) => *span,
             TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_, span) => *span,
             TypeCheckErrorKind::TryErrorNotInReturn(_, _, span) => *span,
+            TypeCheckErrorKind::JoinArmTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::CondNotBoolean(_, span) => *span,
             TypeCheckErrorKind::BreakOutsideLoop(span) => *span,
             TypeCheckErrorKind::ContinueOutsideLoop(span) => *span,

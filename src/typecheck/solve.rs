@@ -976,7 +976,7 @@ fn check_expr_obligations(
                         TypeAssignability::Incompatible
                     ) {
                         errors.push(
-                            TypeCheckErrorKind::DeclTypeMismatch(
+                            TypeCheckErrorKind::JoinArmTypeMismatch(
                                 result_ty_diag.clone(),
                                 arm_ty_diag,
                                 *span,
