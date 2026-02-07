@@ -265,6 +265,81 @@ fn test_lower_logical_and() {
 }
 
 #[test]
+fn test_error_union_join_widen_avoids_memcpy_when_layout_matches() {
+    let ctx = analyze(indoc! {"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn choose(flag: bool, inner: bool, x: u64) -> u64 | IoError | ParseError {
+            if flag {
+                if inner {
+                    x
+                } else {
+                    IoError { code: 7 }
+                }
+            } else {
+                ParseError { line: 9 }
+            }
+        }
+    "});
+    let funcs = ctx.module.func_defs();
+    let func_def = funcs
+        .iter()
+        .copied()
+        .find(|f| f.sig.name == "choose")
+        .expect("missing choose function");
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+    assert!(
+        !text.contains("memcpy "),
+        "expected no memcpy in join widening fast-path, got:\n{text}"
+    );
+}
+
+#[test]
+fn test_error_union_return_widen_avoids_memcpy_when_layout_matches() {
+    let ctx = analyze(indoc! {"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn run(flag: bool, x: u64) -> u64 | IoError | ParseError {
+            let narrowed: u64 | IoError = if flag {
+                x
+            } else {
+                IoError { code: 7 }
+            };
+            narrowed
+        }
+    "});
+    let funcs = ctx.module.func_defs();
+    let func_def = funcs
+        .iter()
+        .copied()
+        .find(|f| f.sig.name == "run")
+        .expect("missing run function");
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+    assert!(
+        !text.contains("memcpy "),
+        "expected no memcpy in return widening fast-path, got:\n{text}"
+    );
+}
+
+#[test]
 fn test_lower_logical_or() {
     let ctx = analyze(indoc! {"
         fn main() -> bool {

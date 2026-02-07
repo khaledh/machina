@@ -191,8 +191,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let src_ir_ty = self.type_lowerer.lower_type(src_union_ty);
         let src_slot = self.materialize_value_slot(src_value, src_ir_ty);
-        let dst_ir_ty = self.type_lowerer.lower_type(dst_union_ty);
-        let dst_slot = self.alloc_value_slot(dst_ir_ty);
 
         let src_ty_id = self
             .type_map
@@ -205,17 +203,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .lookup_id(dst_union_ty)
             .unwrap_or_else(|| panic!("backend missing target type id for {:?}", dst_union_ty));
 
-        let (src_tag_ty, src_blob_ty, src_blob_size) = {
+        let (src_tag_ty, src_blob_ty, src_blob_size, src_blob_align) = {
             let (tag_ty, blob_ty) = {
                 let layout = self.type_lowerer.enum_layout(src_ty_id);
                 (layout.tag_ty, layout.blob_ty)
             };
-            let blob_size = self.type_lowerer.ir_type_cache.layout(blob_ty).size();
-            (tag_ty, blob_ty, blob_size)
+            let blob_layout = self.type_lowerer.ir_type_cache.layout(blob_ty);
+            (tag_ty, blob_ty, blob_layout.size(), blob_layout.align())
         };
-        let (dst_tag_ty, dst_blob_ty) = {
-            let layout = self.type_lowerer.enum_layout(dst_ty_id);
-            (layout.tag_ty, layout.blob_ty)
+        let (dst_tag_ty, dst_blob_ty, dst_blob_size, dst_blob_align) = {
+            let (tag_ty, blob_ty) = {
+                let layout = self.type_lowerer.enum_layout(dst_ty_id);
+                (layout.tag_ty, layout.blob_ty)
+            };
+            let blob_layout = self.type_lowerer.ir_type_cache.layout(blob_ty);
+            (tag_ty, blob_ty, blob_layout.size(), blob_layout.align())
         };
 
         if src_tag_ty != dst_tag_ty {
@@ -224,6 +226,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 src_union_ty, dst_union_ty
             );
         }
+
+        // Fast path: if both unions have identical physical ABI (same tag and payload blob
+        // shape), reinterpret the value directly instead of copying tag/payload bytes.
+        if src_blob_size == dst_blob_size && src_blob_align == dst_blob_align {
+            return self.reinterpret_value_between_types(src_value, src_union_ty, dst_union_ty);
+        }
+
+        let dst_ir_ty = self.type_lowerer.lower_type(dst_union_ty);
+        let dst_slot = self.alloc_value_slot(dst_ir_ty);
 
         let src_tag_addr = self.field_addr_typed(src_slot.addr, 0, src_tag_ty);
         let src_tag = self.builder.load(src_tag_addr, src_tag_ty);
@@ -238,6 +249,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.memcopy(dst_payload_ptr, src_payload_ptr, len);
 
         self.load_slot(&dst_slot)
+    }
+
+    /// Reinterprets a value from one aggregate type to another via pointer cast.
+    ///
+    /// Caller must ensure both source and destination have identical ABI layout.
+    fn reinterpret_value_between_types(
+        &mut self,
+        value: ValueId,
+        src_ty: &Type,
+        dst_ty: &Type,
+    ) -> ValueId {
+        let src_ir_ty = self.type_lowerer.lower_type(src_ty);
+        let src_slot = self.materialize_value_slot(value, src_ir_ty);
+        let dst_ir_ty = self.type_lowerer.lower_type(dst_ty);
+        let dst_ptr_ty = self.type_lowerer.ptr_to(dst_ir_ty);
+        let dst_addr = self.builder.cast(CastKind::PtrToPtr, src_slot.addr, dst_ptr_ty);
+        self.builder.load(dst_addr, dst_ir_ty)
     }
 
     /// Returns the IR type used to thread a local through control flow.
