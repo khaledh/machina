@@ -1527,10 +1527,64 @@ fn test_try_operator_rejects_error_not_in_return_set() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
+        let mismatch = errors
+            .iter()
+            .find_map(|e| match e.kind() {
+                TypeCheckErrorKind::TryErrorNotInReturn(missing, _, _) => Some(missing),
+                _ => None,
+            })
+            .expect("expected TryErrorNotInReturn");
+        assert_eq!(mismatch.len(), 1);
+        assert!(matches!(
+            &mismatch[0],
+            Type::Struct { name, .. } if name == "IoError"
+        ));
+    }
+}
+
+#[test]
+fn test_try_operator_reports_all_missing_error_variants() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+        type ValidationError = { field: string }
+
+        fn read() -> u64 | IoError | ParseError {
+            IoError { code: 1 }
+        }
+
+        fn run() -> u64 | ValidationError {
+            let value = read()?;
+            value
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        let err = errors
+            .iter()
+            .find(|e| matches!(e.kind(), TypeCheckErrorKind::TryErrorNotInReturn(_, _, _)))
+            .expect("expected TryErrorNotInReturn");
+        match err.kind() {
+            TypeCheckErrorKind::TryErrorNotInReturn(missing, _, _) => {
+                assert_eq!(missing.len(), 2);
+                assert!(missing
+                    .iter()
+                    .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "IoError")));
+                assert!(missing
+                    .iter()
+                    .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "ParseError")));
+            }
+            other => panic!("expected TryErrorNotInReturn, got {other:?}"),
+        }
+
+        let rendered = format!("{}", err.kind());
         assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TryErrorNotInReturn(_, _, _)))
+            rendered.contains("add them to the return union")
+                && rendered.contains("handle them with match"),
+            "expected fix-oriented text in diagnostic, got: {rendered}"
         );
     }
 }

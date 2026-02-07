@@ -1048,7 +1048,7 @@ fn check_expr_obligations(
                         err_tys: return_err_tys,
                         ..
                     } => {
-                        let mut missing = None;
+                        let mut missing = Vec::new();
                         for err_ty in err_tys {
                             let present = return_err_tys.iter().any(|return_err_ty| {
                                 !matches!(
@@ -1056,15 +1056,17 @@ fn check_expr_obligations(
                                     TypeAssignability::Incompatible
                                 )
                             });
-                            if !present && !is_unresolved(err_ty) {
-                                missing = Some(err_ty.clone());
-                                break;
+                            if !present
+                                && !is_unresolved(err_ty)
+                                && !missing.iter().any(|seen| seen == err_ty)
+                            {
+                                missing.push(err_ty.clone());
                             }
                         }
-                        if let Some(missing_err) = missing {
+                        if !missing.is_empty() {
                             errors.push(
                                 TypeCheckErrorKind::TryErrorNotInReturn(
-                                    missing_err,
+                                    missing,
                                     return_ty.clone(),
                                     *span,
                                 )

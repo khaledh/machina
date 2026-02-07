@@ -39,8 +39,10 @@ pub enum TypeCheckErrorKind {
     #[error("`?` requires an error-union return type, found {0}")]
     TryReturnTypeNotErrorUnion(Type, Span),
 
-    #[error("`?` cannot propagate error {0} into return type {1}")]
-    TryErrorNotInReturn(Type, Type, Span),
+    #[error(
+        "`?` cannot propagate errors {0:?} into return type {1}; add them to the return union or handle them with match"
+    )]
+    TryErrorNotInReturn(Vec<Type>, Type, Span),
 
     #[error("Join arm type mismatch: expected join type {0}, found arm type {1}")]
     JoinArmTypeMismatch(Type, Type, Span),
