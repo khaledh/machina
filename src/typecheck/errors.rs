@@ -234,6 +234,9 @@ pub enum TypeCheckErrorKind {
     #[error("Function overload is ambiguous: {0}")]
     OverloadAmbiguous(String, Span),
 
+    #[error("Type {1} does not satisfy trait bound {0}")]
+    TraitBoundNotSatisfied(String, Type, Span),
+
     #[error("Slice target is not an array or string: {0}")]
     SliceTargetNotArrayOrString(Type, Span),
 
@@ -331,6 +334,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::DivisionByZero(span) => *span,
             TypeCheckErrorKind::OverloadNoMatch(_, span) => *span,
             TypeCheckErrorKind::OverloadAmbiguous(_, span) => *span,
+            TypeCheckErrorKind::TraitBoundNotSatisfied(_, _, span) => *span,
             TypeCheckErrorKind::SliceTargetNotArrayOrString(_, span) => *span,
             TypeCheckErrorKind::SliceTargetZeroDimArray(_, span) => *span,
             TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,

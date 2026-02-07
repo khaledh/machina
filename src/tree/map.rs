@@ -589,6 +589,12 @@ pub fn walk_type_param<M: TreeMapper + ?Sized>(
     TypeParam {
         id: param.id,
         ident: param.ident.clone(),
+        bound: param.bound.as_ref().map(|bound| TypeParamBound {
+            id: bound.id,
+            name: bound.name.clone(),
+            def_id: mapper.map_def_id(bound.id, &bound.def_id, ctx),
+            span: bound.span,
+        }),
         def_id: mapper.map_def_id(param.id, &param.def_id, ctx),
         span: param.span,
     }

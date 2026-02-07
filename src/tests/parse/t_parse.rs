@@ -1651,3 +1651,28 @@ fn test_parse_trait_def_and_trait_method_block() {
     assert_eq!(method_blocks[0].type_name, "Process");
     assert_eq!(method_blocks[0].trait_name.as_deref(), Some("Runnable"));
 }
+
+#[test]
+fn test_parse_type_param_with_trait_bound() {
+    let source = r#"
+        trait Runnable {
+            fn run(self);
+        }
+
+        fn execute<T: Runnable>(value: T) {
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let execute = funcs
+        .iter()
+        .find(|func| func.sig.name == "execute")
+        .expect("missing execute");
+    assert_eq!(execute.sig.type_params.len(), 1);
+    let bound = execute.sig.type_params[0]
+        .bound
+        .as_ref()
+        .expect("missing trait bound");
+    assert_eq!(bound.name, "Runnable");
+}

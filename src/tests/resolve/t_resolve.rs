@@ -208,3 +208,43 @@ fn test_resolve_expected_trait_in_method_block() {
         )));
     }
 }
+
+#[test]
+fn test_resolve_trait_bound_undefined() {
+    let source = r#"
+        fn execute<T: Runnable>(value: T) -> u64 {
+            0
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TraitUndefined(name, _) if name == "Runnable"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_trait_bound_expected_trait() {
+    let source = r#"
+        type Runnable = {}
+
+        fn execute<T: Runnable>(value: T) -> u64 {
+            0
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::ExpectedTrait(name, _, _) if name == "Runnable"
+        )));
+    }
+}

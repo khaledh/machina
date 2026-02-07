@@ -8,6 +8,7 @@
 //! Each pass is kept as a small module and executed in fixed order by `run`.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diag::Span;
@@ -25,6 +26,7 @@ pub(crate) struct TcEnv {
     pub(crate) type_symbols: HashMap<String, DefId>,
     pub(crate) type_defs: HashMap<String, Type>,
     pub(crate) trait_sigs: HashMap<String, CollectedTraitSig>,
+    pub(crate) trait_impls: HashMap<String, HashSet<String>>,
     pub(crate) func_sigs: HashMap<String, Vec<CollectedCallableSig>>,
     pub(crate) method_sigs: HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
     pub(crate) property_sigs: HashMap<String, HashMap<String, CollectedPropertySig>>,
@@ -74,6 +76,7 @@ pub(crate) struct CollectedCallableSig {
     pub(crate) params: Vec<CollectedParamSig>,
     pub(crate) ret_ty: Type,
     pub(crate) type_param_count: usize,
+    pub(crate) type_param_bounds: Vec<Option<String>>,
     pub(crate) self_mode: Option<ParamMode>,
     pub(crate) impl_trait: Option<String>,
 }
@@ -84,6 +87,7 @@ pub(crate) struct CollectedTraitMethodSig {
     pub(crate) params: Vec<CollectedParamSig>,
     pub(crate) ret_ty: Type,
     pub(crate) type_param_count: usize,
+    pub(crate) type_param_bounds: Vec<Option<String>>,
     pub(crate) self_mode: ParamMode,
     pub(crate) span: Span,
 }
@@ -117,6 +121,7 @@ impl TypecheckEngine {
                 type_symbols: HashMap::new(),
                 type_defs: HashMap::new(),
                 trait_sigs: HashMap::new(),
+                trait_impls: HashMap::new(),
                 func_sigs: HashMap::new(),
                 method_sigs: HashMap::new(),
                 property_sigs: HashMap::new(),

@@ -372,6 +372,15 @@ pub struct FunctionSig<D> {
 pub struct TypeParam<D> {
     pub id: NodeId,
     pub ident: String,
+    pub bound: Option<TypeParamBound<D>>,
+    pub def_id: D,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeParamBound<D> {
+    pub id: NodeId,
+    pub name: String,
     pub def_id: D,
     pub span: Span,
 }

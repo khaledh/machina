@@ -26,6 +26,8 @@ pub type TraitMethod = model::TraitMethod<DefId>;
 pub type TypeExpr = model::TypeExpr<DefId>;
 pub type TypeExprKind = model::TypeExprKind<DefId>;
 pub type FnTypeParam = model::FnTypeParam<DefId>;
+pub type TypeParam = model::TypeParam<DefId>;
+pub type TypeParamBound = model::TypeParamBound<DefId>;
 
 pub type StringFmtSegment = model::StringFmtSegment<DefId, TypeId>;
 

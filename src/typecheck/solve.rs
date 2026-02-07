@@ -95,6 +95,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &mut unifier,
             &engine.env().func_sigs,
             &engine.env().method_sigs,
+            &engine.env().trait_impls,
         );
         call_errors.append(&mut round_errors);
         resolved_call_defs.extend(round_resolved);
@@ -336,6 +337,7 @@ fn check_call_obligations(
     unifier: &mut TcUnifier,
     func_sigs: &HashMap<String, Vec<CollectedCallableSig>>,
     method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+    trait_impls: &HashMap<String, HashSet<String>>,
 ) -> (
     Vec<TypeCheckError>,
     HashMap<NodeId, DefId>,
@@ -438,14 +440,14 @@ fn check_call_obligations(
         let mut first_error = None;
         for sig in candidates.drain(..) {
             let mut trial = unifier.clone();
-            let (inst_params, inst_ret) = instantiate_sig(sig, &mut trial);
+            let instantiated = instantiate_sig(sig, &mut trial);
             let mut failed = false;
             let mut score = 0i32;
             let method_priority = if sig.impl_trait.is_none() { 1 } else { 0 };
             for (index, (arg_term, param_ty)) in obligation
                 .arg_terms
                 .iter()
-                .zip(inst_params.iter())
+                .zip(instantiated.params.iter())
                 .enumerate()
             {
                 let arg_ty = resolve_term(arg_term, &trial);
@@ -470,8 +472,18 @@ fn check_call_obligations(
             if failed {
                 continue;
             }
-            if let Err(err) = trial.unify(&obligation.ret_ty, &inst_ret) {
+            if let Err(err) = trial.unify(&obligation.ret_ty, &instantiated.ret_ty) {
                 first_error.get_or_insert_with(|| unify_error_to_diag(err, obligation.span));
+                continue;
+            }
+
+            if let Some((trait_name, ty)) =
+                unsatisfied_trait_bound(&instantiated.bound_terms, &trial, trait_impls)
+            {
+                first_error.get_or_insert_with(|| {
+                    TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, obligation.span)
+                        .into()
+                });
                 continue;
             }
             match &best_choice {
@@ -558,25 +570,69 @@ fn method_call_candidates<'a>(
         .collect::<Vec<_>>()
 }
 
-fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> (Vec<Type>, Type) {
+struct InstantiatedSig {
+    params: Vec<Type>,
+    ret_ty: Type,
+    bound_terms: Vec<(String, Type)>,
+}
+
+fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> InstantiatedSig {
     if sig.type_param_count == 0 {
-        return (
-            sig.params.iter().map(|param| param.ty.clone()).collect(),
-            sig.ret_ty.clone(),
-        );
+        return InstantiatedSig {
+            params: sig.params.iter().map(|param| param.ty.clone()).collect(),
+            ret_ty: sig.ret_ty.clone(),
+            bound_terms: Vec::new(),
+        };
     }
     let mut map = HashMap::new();
+    let mut bound_terms = Vec::new();
     for index in 0..sig.type_param_count {
         let fresh = unifier.vars_mut().fresh_infer_local();
         map.insert(TyVarId::new(index as u32), Type::Var(fresh));
+        if let Some(Some(trait_name)) = sig.type_param_bounds.get(index) {
+            bound_terms.push((trait_name.clone(), Type::Var(fresh)));
+        }
     }
     let params = sig
         .params
         .iter()
         .map(|param| subst_type_vars(&param.ty, &map))
         .collect::<Vec<_>>();
-    let ret = subst_type_vars(&sig.ret_ty, &map);
-    (params, ret)
+    let ret_ty = subst_type_vars(&sig.ret_ty, &map);
+    InstantiatedSig {
+        params,
+        ret_ty,
+        bound_terms,
+    }
+}
+
+fn unsatisfied_trait_bound(
+    bound_terms: &[(String, Type)],
+    unifier: &TcUnifier,
+    trait_impls: &HashMap<String, HashSet<String>>,
+) -> Option<(String, Type)> {
+    for (trait_name, term) in bound_terms {
+        let resolved = canonicalize_type(unifier.apply(term));
+        let ty_name = match &resolved {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
+            _ if is_unresolved(&resolved) => None,
+            _ => Some(""),
+        };
+
+        match ty_name {
+            None => continue,
+            Some(name) if !name.is_empty() => {
+                let satisfied = trait_impls
+                    .get(name)
+                    .is_some_and(|traits| traits.contains(trait_name));
+                if !satisfied {
+                    return Some((trait_name.clone(), resolved));
+                }
+            }
+            _ => return Some((trait_name.clone(), resolved)),
+        }
+    }
+    None
 }
 
 fn subst_type_vars(ty: &Type, map: &HashMap<TyVarId, Type>) -> Type {

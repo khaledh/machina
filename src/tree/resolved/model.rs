@@ -18,6 +18,7 @@ pub type TypeExpr = model::TypeExpr<DefId>;
 pub type TypeExprKind = model::TypeExprKind<DefId>;
 pub type FnTypeParam = model::FnTypeParam<DefId>;
 pub type TypeParam = model::TypeParam<DefId>;
+pub type TypeParamBound = model::TypeParamBound<DefId>;
 
 pub type TypeDef = model::TypeDef<DefId>;
 pub type TypeDefKind = model::TypeDefKind<DefId>;

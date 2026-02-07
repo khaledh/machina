@@ -40,6 +40,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let mut type_symbols = HashMap::new();
     let mut type_defs = HashMap::new();
     let mut trait_sigs = HashMap::new();
+    let mut trait_impls = HashMap::new();
     let mut func_sigs = HashMap::new();
     let mut method_sigs = HashMap::new();
     let mut property_sigs = HashMap::new();
@@ -67,6 +68,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &ctx,
         &type_defs,
         &trait_sigs,
+        &mut trait_impls,
         &mut method_sigs,
         &mut property_sigs,
         &mut property_conflicts,
@@ -83,6 +85,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     env.type_symbols = type_symbols;
     env.type_defs = type_defs;
     env.trait_sigs = trait_sigs;
+    env.trait_impls = trait_impls;
     env.func_sigs = func_sigs;
     env.method_sigs = method_sigs;
     env.property_sigs = property_sigs;
@@ -236,6 +239,7 @@ fn collect_method_sigs(
     ctx: &crate::context::ResolvedContext,
     type_defs: &HashMap<String, Type>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
+    trait_impls: &mut HashMap<String, HashSet<String>>,
     method_sigs: &mut HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
     property_sigs: &mut HashMap<String, HashMap<String, CollectedPropertySig>>,
     property_conflicts: &mut HashSet<(String, String)>,
@@ -263,6 +267,10 @@ fn collect_method_sigs(
                     .into(),
                 );
             }
+            trait_impls
+                .entry(method_block.type_name.clone())
+                .or_default()
+                .insert(trait_name.clone());
         }
 
         for method_item in &method_block.method_items {
@@ -399,6 +407,7 @@ fn collect_callable_sig(
         params,
         ret_ty,
         type_param_count: sig.type_params.len(),
+        type_param_bounds: type_param_bounds(&sig.type_params),
         self_mode,
         impl_trait,
     });
@@ -441,6 +450,7 @@ fn collect_trait_method_sig(
         params,
         ret_ty,
         type_param_count: sig.type_params.len(),
+        type_param_bounds: type_param_bounds(&sig.type_params),
         self_mode: sig.self_param.mode.clone(),
         span: sig.span,
     })
@@ -484,6 +494,7 @@ fn validate_trait_method_impl(
 
     let matches = method.self_mode == Some(expected.self_mode.clone())
         && method.type_param_count == expected.type_param_count
+        && method.type_param_bounds == expected.type_param_bounds
         && method.params.len() == expected.params.len()
         && method.ret_ty == expected.ret_ty
         && method
@@ -544,6 +555,13 @@ fn type_param_map(type_params: &[TypeParam]) -> HashMap<DefId, TyVarId> {
         .iter()
         .enumerate()
         .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
+        .collect()
+}
+
+fn type_param_bounds(type_params: &[TypeParam]) -> Vec<Option<String>> {
+    type_params
+        .iter()
+        .map(|param| param.bound.as_ref().map(|bound| bound.name.clone()))
         .collect()
 }
 

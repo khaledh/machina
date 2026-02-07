@@ -1,5 +1,5 @@
 use super::*;
-use crate::tree::parsed::TypeParam;
+use crate::tree::parsed::{TypeParam, TypeParamBound};
 
 impl<'a> Parser<'a> {
     // --- Functions ---
@@ -72,9 +72,23 @@ impl<'a> Parser<'a> {
         let params = self.parse_list(TK::Comma, TK::GreaterThan, |parser| {
             let marker = parser.mark();
             let ident = parser.parse_ident()?;
+            let bound = if parser.curr_token.kind == TK::Colon {
+                parser.advance();
+                let bound_marker = parser.mark();
+                let name = parser.parse_ident()?;
+                Some(TypeParamBound {
+                    id: parser.id_gen.new_id(),
+                    name,
+                    def_id: (),
+                    span: parser.close(bound_marker),
+                })
+            } else {
+                None
+            };
             Ok(TypeParam {
                 id: parser.id_gen.new_id(),
                 ident,
+                bound,
                 def_id: (),
                 span: parser.close(marker),
             })

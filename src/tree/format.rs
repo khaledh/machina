@@ -4,6 +4,14 @@ use crate::tree::{BinaryOp, CallArgMode, CoerceKind, ParamMode, UnaryOp};
 
 use std::fmt;
 
+fn format_type_param(param: &TypeParam) -> String {
+    if let Some(bound) = &param.bound {
+        format!("{}: {}", param.ident, bound.name)
+    } else {
+        param.ident.clone()
+    }
+}
+
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, item) in self.top_level_items.iter().enumerate() {
@@ -55,7 +63,7 @@ impl TypeDef {
             let params = self
                 .type_params
                 .iter()
-                .map(|p| p.ident.as_str())
+                .map(format_type_param)
                 .collect::<Vec<_>>()
                 .join(", ");
             writeln!(f, "{}TypeParams: <{}>", pad1, params)?;
@@ -158,7 +166,7 @@ impl FunctionSig {
             let names = self
                 .type_params
                 .iter()
-                .map(|param| param.ident.as_str())
+                .map(format_type_param)
                 .collect::<Vec<_>>();
             writeln!(f, "{}Type Params: {}", pad, names.join(", "))?;
         }
@@ -234,7 +242,7 @@ impl MethodSig {
             let names = self
                 .type_params
                 .iter()
-                .map(|param| param.ident.as_str())
+                .map(format_type_param)
                 .collect::<Vec<_>>();
             writeln!(f, "{}Type Params: {}", pad, names.join(", "))?;
         }

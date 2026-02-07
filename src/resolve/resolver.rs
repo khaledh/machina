@@ -133,6 +133,24 @@ impl SymbolResolver {
             },
             param.span,
         );
+
+        if let Some(bound) = &param.bound {
+            match self.lookup_symbol(&bound.name) {
+                Some(symbol) => match &symbol.kind {
+                    SymbolKind::TraitDef { .. } => {
+                        self.def_table_builder.record_use(bound.id, symbol.def_id());
+                    }
+                    other => self.errors.push(ResolveError::ExpectedTrait(
+                        bound.name.clone(),
+                        other.clone(),
+                        bound.span,
+                    )),
+                },
+                None => self
+                    .errors
+                    .push(ResolveError::TraitUndefined(bound.name.clone(), bound.span)),
+            }
+        }
     }
 
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {

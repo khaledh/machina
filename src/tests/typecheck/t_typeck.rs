@@ -1161,6 +1161,71 @@ fn test_duplicate_trait_impl_block_errors() {
 }
 
 #[test]
+fn test_trait_bound_allows_implementing_argument() {
+    let source = r#"
+        trait Runnable {
+            fn run(self) -> u64;
+        }
+
+        type Process = { ticks: u64 }
+
+        Process :: Runnable {
+            fn run(self) -> u64 {
+                self.ticks + 1
+            }
+        }
+
+        fn execute<T: Runnable>(value: T) -> u64 {
+            1
+        }
+
+        fn main() -> u64 {
+            execute(Process { ticks: 41 })
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_trait_bound_rejects_non_implementing_argument() {
+    let source = r#"
+        trait Runnable {
+            fn run(self) -> u64;
+        }
+
+        type Process = { ticks: u64 }
+        type Task = { id: u64 }
+
+        Process :: Runnable {
+            fn run(self) -> u64 {
+                self.ticks + 1
+            }
+        }
+
+        fn execute<T: Runnable>(value: T) -> u64 {
+            1
+        }
+
+        fn main() -> u64 {
+            execute(Task { id: 1 })
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, _)
+                if trait_name == "Runnable"
+                    && matches!(ty, Type::Struct { name, .. } if name == "Task")
+        )));
+    }
+}
+
+#[test]
 fn test_closure_infers_param_and_return_types_from_call_site() {
     let source = r#"
         fn test() -> u64 {
