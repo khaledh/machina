@@ -448,16 +448,26 @@ impl<'a> ConstraintCollector<'a> {
         &mut self,
         def_id: DefId,
         type_args: &[TypeExpr],
+        expected: Option<&Type>,
     ) -> Option<Type> {
         let type_def = self.ctx.module.type_def_by_id(def_id)?;
-        let args = if type_args.is_empty() && type_def.type_params.is_empty() {
-            Vec::new()
-        } else if type_args.is_empty() {
-            type_def
-                .type_params
-                .iter()
-                .map(|_| Type::Var(self.vars.fresh_infer_local()))
-                .collect::<Vec<_>>()
+        if type_args.is_empty()
+            && let Some(expected_ty) = expected
+            && nominal_base_name(expected_ty).is_some_and(|name| name == type_def.name.as_str())
+        {
+            return Some(expected_ty.clone());
+        }
+
+        let args = if type_args.is_empty() {
+            if type_def.type_params.is_empty() {
+                Vec::new()
+            } else {
+                type_def
+                    .type_params
+                    .iter()
+                    .map(|_| Type::Var(self.vars.fresh_infer_local()))
+                    .collect::<Vec<_>>()
+            }
         } else {
             let mut out = Vec::with_capacity(type_args.len());
             for arg in type_args {
@@ -472,9 +482,10 @@ impl<'a> ConstraintCollector<'a> {
         &mut self,
         expr: &Expr,
         type_args: &[TypeExpr],
+        expected: Option<&Type>,
     ) -> Option<Type> {
         let def_id = self.ctx.def_table.lookup_node_def_id(expr.id)?;
-        self.resolve_type_instance_with_args(def_id, type_args)
+        self.resolve_type_instance_with_args(def_id, type_args, expected)
     }
 
     fn collect_expr(&mut self, expr: &Expr, expected: Option<Type>) -> Type {
@@ -673,11 +684,9 @@ impl<'a> ConstraintCollector<'a> {
             } => {
                 // Resolve nominal struct type (including generic instantiation)
                 // when possible, then type fields against known field types.
-                let known_struct = self
-                    .type_defs
-                    .get(name)
-                    .cloned()
-                    .or_else(|| self.resolve_type_instance_for_expr(expr, type_args));
+                let known_struct = self.type_defs.get(name).cloned().or_else(|| {
+                    self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
+                });
                 if let Some(Type::Struct {
                     fields: struct_fields,
                     ..
@@ -709,11 +718,9 @@ impl<'a> ConstraintCollector<'a> {
             } => {
                 // Resolve nominal enum type (including generic instantiation),
                 // and collect payload terms with per-position expected types.
-                let known_enum = self
-                    .type_defs
-                    .get(enum_name)
-                    .cloned()
-                    .or_else(|| self.resolve_type_instance_for_expr(expr, type_args));
+                let known_enum = self.type_defs.get(enum_name).cloned().or_else(|| {
+                    self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
+                });
                 let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum {
                     variants
                         .iter()
@@ -1594,6 +1601,14 @@ fn array_type_from_elem(elem_ty: &Type, len: usize) -> Type {
             dims: vec![len],
         },
     }
+}
+
+fn nominal_base_name(ty: &Type) -> Option<&str> {
+    let name = match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.as_str(),
+        _ => return None,
+    };
+    Some(name.split('<').next().unwrap_or(name).trim())
 }
 
 /// Pass 2: collect typing constraints from AST traversal.

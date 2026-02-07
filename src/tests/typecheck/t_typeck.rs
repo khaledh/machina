@@ -386,6 +386,24 @@ fn test_generic_struct_lit_infers_from_fields() {
 }
 
 #[test]
+fn test_generic_struct_lit_omitted_args_in_generic_fn_body() {
+    let source = r#"
+        type Pair<L, R> = { left: L, right: R }
+
+        fn pair<L, R>(left: L, right: R) -> Pair<L, R> {
+            Pair { left: left, right: right }
+        }
+
+        fn test() -> u64 {
+            let p = pair(1, 2);
+            p.right
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_generic_enum_variant_infers_from_payload() {
     let source = r#"
         type Option<T> = None | Some(T)
