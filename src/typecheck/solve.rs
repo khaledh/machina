@@ -953,7 +953,13 @@ fn check_expr_obligations(
                 let mut result_ty = resolve_term(result, unifier);
 
                 if is_unresolved(&result_ty)
-                    && let Some(inferred_join) = infer_join_type_from_arms(&resolved_arms)
+                    && let Some(inferred_join) = infer_join_type_from_arms(
+                        &resolved_arms
+                            .iter()
+                            .cloned()
+                            .map(|ty| default_infer_ints_for_diagnostics(ty, unifier.vars()))
+                            .collect::<Vec<_>>(),
+                    )
                 {
                     let _ = unifier.unify(result, &inferred_join);
                     result_ty = resolve_term(result, unifier);

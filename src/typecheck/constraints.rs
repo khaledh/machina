@@ -897,26 +897,46 @@ impl<'a> ConstraintCollector<'a> {
                 else_body,
             } => {
                 self.collect_expr(cond, Some(Type::Bool));
-                let then_ty = self.collect_expr(then_body, expected.clone());
-                let else_ty = self.collect_expr(else_body, expected.clone());
-                if expected.is_some() {
+                if is_synthesized_missing_else(then_body, else_body) {
+                    let then_ty = self.collect_expr(then_body, Some(Type::Unit));
+                    let else_ty = self.collect_expr(else_body, Some(Type::Unit));
                     self.push_assignable(
-                        then_ty.clone(),
-                        expr_ty.clone(),
+                        then_ty,
+                        Type::Unit,
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                     self.push_assignable(
                         else_ty,
+                        Type::Unit,
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                    self.push_eq(
                         expr_ty.clone(),
+                        Type::Unit,
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 } else {
-                    self.out.expr_obligations.push(ExprObligation::Join {
-                        expr_id: expr.id,
-                        arms: vec![then_ty, else_ty],
-                        result: expr_ty.clone(),
-                        span: expr.span,
-                    });
+                    let then_ty = self.collect_expr(then_body, expected.clone());
+                    let else_ty = self.collect_expr(else_body, expected.clone());
+                    if expected.is_some() {
+                        self.push_assignable(
+                            then_ty.clone(),
+                            expr_ty.clone(),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                        self.push_assignable(
+                            else_ty,
+                            expr_ty.clone(),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                    } else {
+                        self.out.expr_obligations.push(ExprObligation::Join {
+                            expr_id: expr.id,
+                            arms: vec![then_ty, else_ty],
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
+                    }
                 }
             }
             ExprKind::Range { start, end } => {
@@ -1776,6 +1796,17 @@ fn fn_type_return(ty: &Type) -> Option<Type> {
         return None;
     };
     Some((**ret_ty).clone())
+}
+
+fn is_synthesized_missing_else(then_body: &Expr, else_body: &Expr) -> bool {
+    then_body.span == else_body.span
+        && matches!(
+            else_body.kind,
+            ExprKind::Block {
+                items: ref block_items,
+                tail: None
+            } if block_items.is_empty()
+        )
 }
 
 fn is_infer_type_expr(type_expr: &TypeExpr) -> bool {
