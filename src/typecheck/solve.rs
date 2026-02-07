@@ -95,7 +95,9 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &mut unifier,
             &engine.env().func_sigs,
             &engine.env().method_sigs,
+            &engine.env().trait_sigs,
             &engine.env().trait_impls,
+            &constrain.var_trait_bounds,
         );
         call_errors.append(&mut round_errors);
         resolved_call_defs.extend(round_resolved);
@@ -223,6 +225,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &constrain.pattern_obligations,
         &engine.context().def_table,
         unifier.vars(),
+        &errors,
     ));
 
     *engine.type_vars_mut() = unifier.vars().clone();
@@ -337,7 +340,9 @@ fn check_call_obligations(
     unifier: &mut TcUnifier,
     func_sigs: &HashMap<String, Vec<CollectedCallableSig>>,
     method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+    trait_sigs: &HashMap<String, crate::typecheck::engine::CollectedTraitSig>,
     trait_impls: &HashMap<String, HashSet<String>>,
+    var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
 ) -> (
     Vec<TypeCheckError>,
     HashMap<NodeId, DefId>,
@@ -405,7 +410,7 @@ fn check_call_obligations(
             continue;
         }
 
-        let mut candidates: Vec<&CollectedCallableSig> = match &obligation.callee {
+        let mut candidates: Vec<CollectedCallableSig> = match &obligation.callee {
             CallCallee::NamedFunction { name, .. } => {
                 named_call_candidates(name, obligation.arg_terms.len(), func_sigs)
             }
@@ -420,6 +425,8 @@ fn check_call_obligations(
                     receiver_ty.as_ref(),
                     obligation.arg_terms.len(),
                     method_sigs,
+                    trait_sigs,
+                    var_trait_bounds,
                 )
             }
             CallCallee::Dynamic { .. } => Vec::new(),
@@ -440,7 +447,7 @@ fn check_call_obligations(
         let mut first_error = None;
         for sig in candidates.drain(..) {
             let mut trial = unifier.clone();
-            let instantiated = instantiate_sig(sig, &mut trial);
+            let instantiated = instantiate_sig(&sig, &mut trial);
             let mut failed = false;
             let mut score = 0i32;
             let method_priority = if sig.impl_trait.is_none() { 1 } else { 0 };
@@ -532,42 +539,79 @@ fn named_call_candidates<'a>(
     name: &str,
     arity: usize,
     func_sigs: &'a HashMap<String, Vec<CollectedCallableSig>>,
-) -> Vec<&'a CollectedCallableSig> {
+) -> Vec<CollectedCallableSig> {
     func_sigs
         .get(name)
         .map(|overloads| {
             overloads
                 .iter()
                 .filter(|sig| sig.params.len() == arity)
+                .cloned()
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
 }
 
-fn method_call_candidates<'a>(
+fn method_call_candidates(
     method_name: &str,
     receiver_ty: Option<&Type>,
     arity: usize,
-    method_sigs: &'a HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
-) -> Vec<&'a CollectedCallableSig> {
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+    trait_sigs: &HashMap<String, crate::typecheck::engine::CollectedTraitSig>,
+    var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
+) -> Vec<CollectedCallableSig> {
     let Some(receiver_ty) = receiver_ty else {
         return Vec::new();
     };
-    let owner = match receiver_ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
-        Type::String => "string".to_string(),
-        _ => return Vec::new(),
-    };
-    let Some(by_name) = method_sigs.get(&owner) else {
-        return Vec::new();
-    };
-    let Some(overloads) = by_name.get(method_name) else {
-        return Vec::new();
-    };
-    overloads
-        .iter()
-        .filter(|sig| sig.params.len() == arity)
-        .collect::<Vec<_>>()
+    match receiver_ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => method_sigs
+            .get(name)
+            .and_then(|by_name| by_name.get(method_name))
+            .map(|overloads| {
+                overloads
+                    .iter()
+                    .filter(|sig| sig.params.len() == arity)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        Type::String => method_sigs
+            .get("string")
+            .and_then(|by_name| by_name.get(method_name))
+            .map(|overloads| {
+                overloads
+                    .iter()
+                    .filter(|sig| sig.params.len() == arity)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        Type::Var(var) => {
+            let mut candidates = Vec::new();
+            for trait_name in var_trait_bounds.get(var).into_iter().flat_map(|v| v.iter()) {
+                let Some(trait_sig) = trait_sigs.get(trait_name) else {
+                    continue;
+                };
+                let Some(method) = trait_sig.methods.get(method_name) else {
+                    continue;
+                };
+                if method.params.len() != arity {
+                    continue;
+                }
+                candidates.push(CollectedCallableSig {
+                    def_id: trait_sig.def_id,
+                    params: method.params.clone(),
+                    ret_ty: method.ret_ty.clone(),
+                    type_param_count: method.type_param_count,
+                    type_param_bounds: method.type_param_bounds.clone(),
+                    self_mode: Some(method.self_mode.clone()),
+                    impl_trait: Some(trait_name.clone()),
+                });
+            }
+            candidates
+        }
+        _ => Vec::new(),
+    }
 }
 
 struct InstantiatedSig {
@@ -1384,6 +1428,7 @@ fn check_unresolved_local_infer_vars(
     pattern_obligations: &[crate::typecheck::constraints::PatternObligation],
     def_table: &DefTable,
     vars: &crate::typecheck::typesys::TypeVarStore,
+    existing_errors: &[TypeCheckError],
 ) -> Vec<TypeCheckError> {
     let mut decl_spans = HashMap::new();
     for constraint in constraints {
@@ -1403,6 +1448,11 @@ fn check_unresolved_local_infer_vars(
     }
 
     let mut errors = Vec::new();
+    let blocking_spans = existing_errors
+        .iter()
+        .filter(|err| !matches!(err.kind(), TypeCheckErrorKind::UnknownType(_)))
+        .map(TypeCheckError::span)
+        .collect::<Vec<_>>();
     for (def_id, span) in decl_spans {
         let Some(def) = def_table.lookup_def(def_id) else {
             continue;
@@ -1413,11 +1463,38 @@ fn check_unresolved_local_infer_vars(
         let Some(ty) = resolved_def_types.get(&def_id) else {
             continue;
         };
+        // Avoid cascaded "cannot infer" diagnostics when we already emitted a
+        // concrete root-cause error touching this declaration site.
+        if blocking_spans
+            .iter()
+            .any(|blocking| spans_overlap(*blocking, span) || spans_share_context(*blocking, span))
+        {
+            continue;
+        }
         if has_unresolved_infer_var(ty, vars) {
             errors.push(TypeCheckErrorKind::UnknownType(span).into());
         }
     }
     errors
+}
+
+fn spans_overlap(a: Span, b: Span) -> bool {
+    if a.start.offset > 0 && a.end.offset > 0 && b.start.offset > 0 && b.end.offset > 0 {
+        return a.start.offset < b.end.offset && b.start.offset < a.end.offset;
+    }
+
+    // Fallback for synthesized/default spans where offsets may be zero.
+    let a_starts_after_b = (a.start.line, a.start.column) >= (b.end.line, b.end.column);
+    let b_starts_after_a = (b.start.line, b.start.column) >= (a.end.line, a.end.column);
+    !(a_starts_after_b || b_starts_after_a)
+}
+
+fn spans_share_context(a: Span, b: Span) -> bool {
+    // A frequent cascade pattern is: root-cause error under the RHS of a
+    // declaration, followed by "cannot infer" on the LHS binding. They are
+    // usually on the same source line but may not strictly overlap.
+    (a.start.line <= b.start.line && b.start.line <= a.end.line)
+        || (b.start.line <= a.start.line && a.start.line <= b.end.line)
 }
 
 fn collect_pattern_bind_decl_spans(

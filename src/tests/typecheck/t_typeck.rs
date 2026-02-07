@@ -1176,7 +1176,7 @@ fn test_trait_bound_allows_implementing_argument() {
         }
 
         fn execute<T: Runnable>(value: T) -> u64 {
-            1
+            value.run()
         }
 
         fn main() -> u64 {
@@ -1204,7 +1204,7 @@ fn test_trait_bound_rejects_non_implementing_argument() {
         }
 
         fn execute<T: Runnable>(value: T) -> u64 {
-            1
+            value.run()
         }
 
         fn main() -> u64 {
@@ -1222,6 +1222,12 @@ fn test_trait_bound_rejects_non_implementing_argument() {
                 if trait_name == "Runnable"
                     && matches!(ty, Type::Struct { name, .. } if name == "Task")
         )));
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnknownType(_))),
+            "unexpected cascaded UnknownType diagnostic: {errors:?}"
+        );
     }
 }
 

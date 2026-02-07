@@ -89,6 +89,13 @@ impl TypeVarStore {
         id
     }
 
+    pub(crate) fn fresh_rigid_param(&mut self, def_id: DefId) -> TyVarId {
+        let id = TyVarId::new(self.next_meta);
+        self.next_meta = self.next_meta.saturating_add(1);
+        self.register_rigid_param(id, def_id);
+        id
+    }
+
     pub(crate) fn kind(&self, var: TyVarId) -> Option<TypeVarKind> {
         self.kinds.get(&var).copied()
     }

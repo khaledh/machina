@@ -17,9 +17,7 @@ Process :: Runnable {
 }
 
 fn accept_runnable<T: Runnable>(value: T) -> u64 {
-    let consumed = value;
-    consumed;
-    1
+    value.run()
 }
 
 fn main() {
@@ -27,10 +25,10 @@ fn main() {
     let ran = p.run();
     println(f"ran = {ran}");
 
-    let ok = accept_runnable(p);
+    let ok = accept_runnable(Process { ticks: 0 });
     println(f"ok = {ok}");
 
     // Uncommenting this line should fail type checking because Task does not
     // implement Runnable:
-    // let bad = accept_runnable(Task { id: 1 });
+    let bad = accept_runnable(Task { id: 1 });
 }

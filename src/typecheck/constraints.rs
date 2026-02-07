@@ -212,6 +212,7 @@ pub(crate) struct ConstrainOutput {
     pub(crate) control_facts: Vec<ControlFact>,
     pub(crate) node_terms: HashMap<NodeId, Type>,
     pub(crate) def_terms: HashMap<DefId, Type>,
+    pub(crate) var_trait_bounds: HashMap<TyVarId, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -425,12 +426,19 @@ impl<'a> ConstraintCollector<'a> {
 
         let mapping = type_params
             .iter()
-            .enumerate()
-            .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
+            .map(|param| (param.def_id, self.vars.fresh_rigid_param(param.def_id)))
             .collect::<HashMap<_, _>>();
 
-        for (def_id, var) in &mapping {
-            self.vars.register_rigid_param(*var, *def_id);
+        for param in type_params {
+            if let Some(bound) = &param.bound
+                && let Some(var) = mapping.get(&param.def_id)
+            {
+                self.out
+                    .var_trait_bounds
+                    .entry(*var)
+                    .or_default()
+                    .push(bound.name.clone());
+            }
         }
 
         self.type_param_stack.push(mapping);
