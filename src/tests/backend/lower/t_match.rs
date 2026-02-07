@@ -94,9 +94,8 @@ fn test_lower_match_enum_payload_binding() {
         fn main() -> u64 {
           locals:
             %l0: Option
-            %l1: u64
+            %l1: Option
             %l2: Option
-            %l3: Option
           bb0():
             %v0: ptr<Option> = addr_of %l0
             %v1: u32 = const 1:u32
@@ -104,42 +103,40 @@ fn test_lower_match_enum_payload_binding() {
             store %v2, %v1
             %v3: ptr<blob<8, align=8>> = field_addr %v0, 1
             %v4: u64 = const 42:u64
-            %v5: ptr<u64> = addr_of %l1
-            store %v5, %v4
-            %v6: u64 = const 0:u64
-            %v7: ptr<u8> = index_addr %v3, %v6
-            %v8: u64 = const 8:u64
-            memcpy %v7, %v5, %v8
-            %v9: Option = load %v0
+            %v5: u64 = const 0:u64
+            %v6: ptr<u8> = index_addr %v3, %v5
+            %v7: ptr<u64> = cast.ptr %v6 to ptr<u64>
+            store %v7, %v4
+            %v8: Option = load %v0
+            %v9: ptr<Option> = addr_of %l1
             %v10: ptr<Option> = addr_of %l2
-            %v11: ptr<Option> = addr_of %l3
-            store %v11, %v9
-            %v12: u64 = const 16:u64
-            memcpy %v10, %v11, %v12
-            %v13: ptr<u32> = field_addr %v10, 0
-            %v14: u32 = load %v13
-            switch %v14 {
+            store %v10, %v8
+            %v11: u64 = const 16:u64
+            memcpy %v9, %v10, %v11
+            %v12: ptr<u32> = field_addr %v9, 0
+            %v13: u32 = load %v12
+            switch %v13 {
               case 0:u32 -> bb1
               case 1:u32 -> bb2
               default -> bb3
             }
 
           bb1():
-            %v16: u64 = const 0:u64
-            br bb4(%v16)
+            %v15: u64 = const 0:u64
+            br bb4(%v15)
 
           bb2():
-            %v17: ptr<blob<8, align=8>> = field_addr %v10, 1
-            %v18: u64 = const 0:u64
-            %v19: ptr<u8> = index_addr %v17, %v18
-            %v20: u64 = load %v19
-            br bb4(%v20)
+            %v16: ptr<blob<8, align=8>> = field_addr %v9, 1
+            %v17: u64 = const 0:u64
+            %v18: ptr<u8> = index_addr %v16, %v17
+            %v19: u64 = load %v18
+            br bb4(%v19)
 
           bb3():
             unreachable
 
-          bb4(%v15: u64):
-            ret %v15
+          bb4(%v14: u64):
+            ret %v14
         }
     "};
     assert_ir_eq(&text, expected);

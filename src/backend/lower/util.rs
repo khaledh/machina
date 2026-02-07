@@ -4,7 +4,9 @@ use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::backend::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
 use crate::diag::Span;
-use crate::ir::{BinOp, Callee, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId};
+use crate::ir::{
+    BinOp, Callee, CastKind, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
+};
 use crate::resolve::DefId;
 use crate::tree::semantic as sem;
 use crate::types::{Type, TypeAssignability, type_assignable};
@@ -743,6 +745,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         value: ValueId,
         value_ty: IrTypeId,
     ) {
+        // Scalar payloads can be stored directly into the blob slot.
+        if !self.is_aggregate(value_ty) {
+            let dst_bytes = self.byte_offset_addr(blob_ptr, offset);
+            let dst_ty = self.type_lowerer.ptr_to(value_ty);
+            let dst = self.builder.cast(CastKind::PtrToPtr, dst_bytes, dst_ty);
+            self.builder.store(dst, value);
+            return;
+        }
+
         // Store the value into a temporary local
         let temp_ptr = self.alloc_local_addr(value_ty);
         self.builder.store(temp_ptr, value);

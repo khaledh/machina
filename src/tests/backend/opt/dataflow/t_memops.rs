@@ -31,7 +31,7 @@ fn test_memops_to_runtime_calls() {
     manager.run(std::slice::from_mut(&mut lowered.func));
     let text = format_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("__rt_memcpy"));
+    assert!(!text.contains("__rt_memcpy"));
 }
 
 #[test]

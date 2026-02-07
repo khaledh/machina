@@ -27,18 +27,38 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     ) -> Result<BranchResult, LowerToIrError> {
         let plan = lowerer.match_plan(expr.id);
 
-        // Evaluate the scrutinee once and store it for address-based projections.
-        let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;
         let scrutinee_ty_id = scrutinee.ty;
-        let scrutinee_ir_ty = lowerer.type_lowerer.lower_type_id(scrutinee_ty_id);
-        let scrutinee_addr = lowerer.alloc_local_addr(scrutinee_ir_ty);
-        let scrutinee_ty = lowerer.type_map.type_table().get(scrutinee.ty);
-        lowerer.store_value_into_addr(
-            scrutinee_addr,
-            scrutinee_value,
-            scrutinee_ty,
-            scrutinee_ir_ty,
-        );
+        let scrutinee_ty = lowerer.type_map.type_table().get(scrutinee.ty).clone();
+        let scrutinee_addr = if let sem::ValueExprKind::Load { place } = &scrutinee.kind {
+            // If the scrutinee is already an addressable place of aggregate type,
+            // reuse that address and avoid copy materialization before matching.
+            if !scrutinee_ty.is_scalar() {
+                lowerer.lower_place_addr(place)?.addr
+            } else {
+                let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;
+                let scrutinee_ir_ty = lowerer.type_lowerer.lower_type_id(scrutinee_ty_id);
+                let scrutinee_addr = lowerer.alloc_local_addr(scrutinee_ir_ty);
+                lowerer.store_value_into_addr(
+                    scrutinee_addr,
+                    scrutinee_value,
+                    &scrutinee_ty,
+                    scrutinee_ir_ty,
+                );
+                scrutinee_addr
+            }
+        } else {
+            // Evaluate the scrutinee once and store it for address-based projections.
+            let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;
+            let scrutinee_ir_ty = lowerer.type_lowerer.lower_type_id(scrutinee_ty_id);
+            let scrutinee_addr = lowerer.alloc_local_addr(scrutinee_ir_ty);
+            lowerer.store_value_into_addr(
+                scrutinee_addr,
+                scrutinee_value,
+                &scrutinee_ty,
+                scrutinee_ir_ty,
+            );
+            scrutinee_addr
+        };
 
         let mut helper = MatchLowerer {
             lowerer,

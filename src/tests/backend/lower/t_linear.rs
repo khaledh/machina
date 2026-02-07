@@ -896,7 +896,6 @@ fn test_lower_enum_variant_payload() {
         fn main() -> Option {
           locals:
             %l0: Option
-            %l1: u64
           bb0():
             %v0: ptr<Option> = addr_of %l0
             %v1: u32 = const 1:u32
@@ -904,14 +903,12 @@ fn test_lower_enum_variant_payload() {
             store %v2, %v1
             %v3: ptr<blob<8, align=8>> = field_addr %v0, 1
             %v4: u64 = const 42:u64
-            %v5: ptr<u64> = addr_of %l1
-            store %v5, %v4
-            %v6: u64 = const 0:u64
-            %v7: ptr<u8> = index_addr %v3, %v6
-            %v8: u64 = const 8:u64
-            memcpy %v7, %v5, %v8
-            %v9: Option = load %v0
-            ret %v9
+            %v5: u64 = const 0:u64
+            %v6: ptr<u8> = index_addr %v3, %v5
+            %v7: ptr<u64> = cast.ptr %v6 to ptr<u64>
+            store %v7, %v4
+            %v8: Option = load %v0
+            ret %v8
         }
     "};
     assert_ir_eq(&text, expected);
@@ -943,7 +940,7 @@ fn test_lower_error_union_return_wraps_payload_value() {
     assert!(text.contains("ptr<error_union$"));
     assert!(text.contains("field_addr %v1, 0"));
     assert!(text.contains("field_addr %v1, 1"));
-    assert!(text.contains("memcpy"));
+    assert!(!text.contains("memcpy"));
 }
 
 #[test]
