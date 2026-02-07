@@ -38,8 +38,8 @@ fn main() {
 
     // Generic struct instantiation is inferred from arguments.
     let summary = pair("score", from_match);
-    // println(f"summary.left = {summary.left}");
-    // println(f"summary.right = {summary.right}");
+    println(f"summary.left = {summary.left}");
+    println(f"summary.right = {summary.right}");
 
     // Unconstrained integer literals default locally.
     let defaulted = id(123);

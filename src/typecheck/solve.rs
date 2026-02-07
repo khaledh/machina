@@ -73,7 +73,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     }
 
     // Stage C: expression obligations.
-    let (mut expr_errors, covered_exprs) = check_expr_obligations(
+    let (mut expr_errors, mut covered_exprs) = check_expr_obligations(
         &constrain.expr_obligations,
         &mut unifier,
         &engine.env().type_defs,
@@ -81,10 +81,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     );
     let index_nodes = collect_index_nodes(&constrain.expr_obligations);
     let enum_payload_nodes = collect_enum_payload_nodes(&constrain.expr_obligations);
-    let covered_expr_spans = expr_errors
-        .iter()
-        .map(TypeCheckError::span)
-        .collect::<Vec<_>>();
 
     // Stage D: call obligations (overload/generic resolution).
     let (mut call_errors, resolved_call_defs) = check_call_obligations(
@@ -109,6 +105,31 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &mut non_expr_errors,
         );
     }
+
+    // Stage E.5: Retry unresolved expression obligations that depend on
+    // post-call type information (e.g. field projections over generic call
+    // results). The first pass may see unresolved owner types and skip them.
+    let retry_expr_obligations = constrain
+        .expr_obligations
+        .iter()
+        .filter(|obligation| should_retry_post_call_expr_obligation(obligation, &unifier))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !retry_expr_obligations.is_empty() {
+        let (mut retry_errors, retry_covered) = check_expr_obligations(
+            &retry_expr_obligations,
+            &mut unifier,
+            &engine.env().type_defs,
+            &engine.env().property_sigs,
+        );
+        expr_errors.append(&mut retry_errors);
+        covered_exprs.extend(retry_covered);
+    }
+
+    let covered_expr_spans = expr_errors
+        .iter()
+        .map(TypeCheckError::span)
+        .collect::<Vec<_>>();
 
     for (expr_id, err, span) in deferred_expr_errors {
         if let Some(index_span) = index_nodes.get(&expr_id)
@@ -1165,6 +1186,36 @@ fn collect_enum_payload_nodes(
         }
     }
     out
+}
+
+fn should_retry_post_call_expr_obligation(
+    obligation: &ExprObligation,
+    unifier: &TcUnifier,
+) -> bool {
+    match obligation {
+        ExprObligation::StructField { target, result, .. } => {
+            let owner_ty = peel_heap(resolve_term(target, unifier));
+            let result_ty = resolve_term(result, unifier);
+            is_unresolved(&owner_ty) || is_unresolved(&result_ty)
+        }
+        ExprObligation::TupleField { target, result, .. } => {
+            let owner_ty = peel_heap(resolve_term(target, unifier));
+            let result_ty = resolve_term(result, unifier);
+            is_unresolved(&owner_ty) || is_unresolved(&result_ty)
+        }
+        ExprObligation::StructFieldAssign {
+            target,
+            assignee,
+            value,
+            ..
+        } => {
+            let owner_ty = peel_heap(resolve_term(target, unifier));
+            let assignee_ty = resolve_term(assignee, unifier);
+            let value_ty = resolve_term(value, unifier);
+            is_unresolved(&owner_ty) || is_unresolved(&assignee_ty) || is_unresolved(&value_ty)
+        }
+        _ => false,
+    }
 }
 
 fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<TypeCheckError> {
