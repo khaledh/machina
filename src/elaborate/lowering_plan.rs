@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::tree::semantic as sem;
-use crate::tree::{BinaryOp, NodeId};
+use crate::tree::{BinaryOp, NodeId, UnaryOp};
 use crate::typecheck::type_map::TypeMap;
 
 pub fn build_lowering_plans(module: &sem::Module, type_map: &TypeMap) -> sem::LoweringPlanMap {
@@ -285,9 +285,11 @@ impl<'a> LoweringPlanBuilder<'a> {
                 payload.iter().all(|value| self.is_linear_value_expr(value))
             }
 
-            sem::ValueExprKind::UnaryOp { expr, .. } | sem::ValueExprKind::HeapAlloc { expr } => {
-                self.is_linear_value_expr(expr)
-            }
+            sem::ValueExprKind::UnaryOp { op, expr } => match op {
+                UnaryOp::Try => false,
+                _ => self.is_linear_value_expr(expr),
+            },
+            sem::ValueExprKind::HeapAlloc { expr } => self.is_linear_value_expr(expr),
 
             sem::ValueExprKind::BinOp { left, op, right } => match op {
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr => false,

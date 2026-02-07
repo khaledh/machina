@@ -70,6 +70,14 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    Try {
+        expr_id: NodeId,
+        operand: Type,
+        result: Type,
+        expected_return_ty: Option<Type>,
+        callable_def_id: Option<DefId>,
+        span: Span,
+    },
     ArrayIndex {
         expr_id: NodeId,
         target: Type,
@@ -220,6 +228,7 @@ pub(crate) struct ConstrainOutput {
 
 #[derive(Debug, Clone)]
 struct ControlContext {
+    def_id: DefId,
     return_ty: Type,
     loop_depth: usize,
 }
@@ -292,7 +301,9 @@ impl<'a> ConstraintCollector<'a> {
 
     fn collect_func_def(&mut self, func_def: &FuncDef) {
         self.with_type_params(&func_def.sig.type_params, |this| {
+            let mut declared_ret_ty = None;
             if let Some(fn_ty) = this.collect_function_signature(&func_def.sig) {
+                declared_ret_ty = fn_type_return(&fn_ty);
                 let def_term = this.def_term(func_def.def_id);
                 this.push_eq(
                     def_term,
@@ -301,7 +312,10 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
             let ret_ty = this.resolve_return_type_in_scope(&func_def.sig.ret_ty_expr);
-            let return_term = ret_ty.unwrap_or_else(|_| this.fresh_var_term());
+            let return_term = ret_ty
+                .ok()
+                .or(declared_ret_ty)
+                .unwrap_or_else(|| this.fresh_var_term());
             let func_node_term = this.node_term(func_def.id);
             this.push_eq(
                 func_node_term,
@@ -353,7 +367,9 @@ impl<'a> ConstraintCollector<'a> {
         };
 
         self.with_type_params(&sig.type_params, |this| {
+            let mut declared_ret_ty = None;
             if let Some(fn_ty) = this.collect_method_signature(type_name, sig) {
+                declared_ret_ty = fn_type_return(&fn_ty);
                 let def_term = this.def_term(method_def_id);
                 this.push_eq(
                     def_term,
@@ -362,7 +378,10 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
             let ret_ty = this.resolve_return_type_in_scope(&sig.ret_ty_expr);
-            let return_term = ret_ty.unwrap_or_else(|_| this.fresh_var_term());
+            let return_term = ret_ty
+                .ok()
+                .or(declared_ret_ty)
+                .unwrap_or_else(|| this.fresh_var_term());
             if let crate::tree::resolved::MethodItem::Def(method_def) = method_item {
                 let method_node_term = this.node_term(method_def.id);
                 this.push_eq(
@@ -975,17 +994,18 @@ impl<'a> ConstraintCollector<'a> {
                 let inner_expected = match op {
                     UnaryOp::Neg | UnaryOp::BitNot => expected.clone(),
                     UnaryOp::LogicalNot => None,
+                    UnaryOp::Try => None,
                 };
                 let inner_ty = self.collect_expr(inner, inner_expected);
-                self.out.expr_obligations.push(ExprObligation::UnaryOp {
-                    expr_id: expr.id,
-                    op: *op,
-                    operand: inner_ty.clone(),
-                    result: expr_ty.clone(),
-                    span: expr.span,
-                });
                 match op {
                     UnaryOp::Neg | UnaryOp::BitNot => {
+                        self.out.expr_obligations.push(ExprObligation::UnaryOp {
+                            expr_id: expr.id,
+                            op: *op,
+                            operand: inner_ty.clone(),
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
                         self.push_eq(
                             expr_ty.clone(),
                             inner_ty,
@@ -993,6 +1013,13 @@ impl<'a> ConstraintCollector<'a> {
                         );
                     }
                     UnaryOp::LogicalNot => {
+                        self.out.expr_obligations.push(ExprObligation::UnaryOp {
+                            expr_id: expr.id,
+                            op: *op,
+                            operand: inner_ty.clone(),
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
                         self.push_eq(
                             inner_ty,
                             Type::Bool,
@@ -1003,6 +1030,16 @@ impl<'a> ConstraintCollector<'a> {
                             Type::Bool,
                             ConstraintReason::Expr(expr.id, expr.span),
                         );
+                    }
+                    UnaryOp::Try => {
+                        self.out.expr_obligations.push(ExprObligation::Try {
+                            expr_id: expr.id,
+                            operand: inner_ty,
+                            result: expr_ty.clone(),
+                            expected_return_ty: self.current_return_ty(),
+                            callable_def_id: self.current_callable_def_id(),
+                            span: expr.span,
+                        });
                     }
                 }
             }
@@ -1509,6 +1546,7 @@ impl<'a> ConstraintCollector<'a> {
             span,
         });
         self.control_stack.push(ControlContext {
+            def_id,
             return_ty,
             loop_depth: 0,
         });
@@ -1523,6 +1561,10 @@ impl<'a> ConstraintCollector<'a> {
 
     fn current_return_ty(&self) -> Option<Type> {
         self.control_stack.last().map(|ctx| ctx.return_ty.clone())
+    }
+
+    fn current_callable_def_id(&self) -> Option<DefId> {
+        self.control_stack.last().map(|ctx| ctx.def_id)
     }
 
     fn current_loop_depth(&self) -> usize {
@@ -1700,6 +1742,13 @@ fn nominal_base_name(ty: &Type) -> Option<&str> {
         _ => return None,
     };
     Some(name.split('<').next().unwrap_or(name).trim())
+}
+
+fn fn_type_return(ty: &Type) -> Option<Type> {
+    let Type::Fn { ret_ty, .. } = ty else {
+        return None;
+    };
+    Some((**ret_ty).clone())
 }
 
 fn is_infer_type_expr(type_expr: &TypeExpr) -> bool {

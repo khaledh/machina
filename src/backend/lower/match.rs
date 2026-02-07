@@ -7,7 +7,9 @@ use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::locals::LocalValue;
 use crate::backend::lower::lowerer::{BranchResult, FuncLowerer};
 use crate::ir::IrTypeId;
-use crate::ir::{BlockId, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
+use crate::ir::{
+    BlockId, CastKind, CmpOp, ConstValue, IrTypeKind, SwitchCase, Terminator, ValueId,
+};
 use crate::tree::semantic as sem;
 use crate::types::{Type, TypeId};
 
@@ -405,12 +407,32 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn lower_bindings(&mut self, bindings: &[sem::MatchBinding]) -> Result<(), LowerToIrError> {
         for binding in bindings {
-            let (value, value_ty) = self.lower_place_value(&binding.source)?;
-            self.lowerer
-                .locals
-                .insert(binding.def_id, LocalValue::value(value, value_ty));
+            let (addr, ty) = self.lower_place_addr(&binding.source)?;
+            let value_ty = self.lowerer.type_lowerer.lower_type(&ty);
+            if self.is_aggregate_ir(value_ty) {
+                let ptr_ty = self.lowerer.type_lowerer.ptr_to(value_ty);
+                let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
+                self.lowerer
+                    .locals
+                    .insert(binding.def_id, LocalValue::addr(typed_addr, value_ty));
+            } else {
+                let value = self.lowerer.builder.load(addr, value_ty);
+                self.lowerer
+                    .locals
+                    .insert(binding.def_id, LocalValue::value(value, value_ty));
+            }
         }
         Ok(())
+    }
+
+    fn is_aggregate_ir(&self, ty: IrTypeId) -> bool {
+        matches!(
+            self.lowerer.type_lowerer.ir_type_cache.kind(ty),
+            IrTypeKind::Array { .. }
+                | IrTypeKind::Tuple { .. }
+                | IrTypeKind::Struct { .. }
+                | IrTypeKind::Blob { .. }
+        )
     }
 
     fn lower_place_value(

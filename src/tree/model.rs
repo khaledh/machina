@@ -911,4 +911,5 @@ pub enum UnaryOp {
     Neg,
     LogicalNot,
     BitNot,
+    Try,
 }

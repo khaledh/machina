@@ -157,6 +157,7 @@ impl<'a> Parser<'a> {
                 TK::LParen => self.parse_call_postfix(expr, marker)?,
                 TK::LBracket => self.parse_index_or_slice_postfix(expr, marker)?,
                 TK::Dot => self.parse_dot_postfix(expr, marker)?,
+                TK::Question => self.parse_try_postfix(expr, marker)?,
                 _ => break,
             };
             expr = next;
@@ -457,6 +458,19 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::ExpectedStructField(self.curr_token.clone())),
         }
+    }
+
+    fn parse_try_postfix(&mut self, expr: Expr, marker: Marker) -> Result<Expr, ParseError> {
+        self.consume(&TK::Question)?;
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::UnaryOp {
+                op: UnaryOp::Try,
+                expr: Box::new(expr),
+            },
+            ty: (),
+            span: self.close(marker),
+        })
     }
 
     pub(super) fn parse_if(&mut self) -> Result<Expr, ParseError> {

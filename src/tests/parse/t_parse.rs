@@ -1317,6 +1317,36 @@ fn test_parse_return_error_union_type() {
 }
 
 #[test]
+fn test_parse_postfix_try_operator() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn read() -> u64 | IoError {
+            1
+        }
+
+        fn test() -> u64 | IoError {
+            read()?
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let test_fn = funcs
+        .iter()
+        .find(|func| func.sig.name == "test")
+        .expect("Missing test function");
+
+    let tail = block_tail(&test_fn.body);
+    match &tail.kind {
+        ExprKind::UnaryOp { op, expr } => {
+            assert!(matches!(op, UnaryOp::Try));
+            assert!(matches!(&expr.kind, ExprKind::Call { .. }));
+        }
+        other => panic!("Expected unary try expression, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_parse_char_literal() {
     let source = r#"
         fn test() -> char {

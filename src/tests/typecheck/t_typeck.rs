@@ -1413,6 +1413,129 @@ fn test_enum_variant_payload_ok() {
 }
 
 #[test]
+fn test_try_operator_propagates_error_union() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn fail() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn run() -> u64 | IoError {
+            fail()?;
+            fail()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_try_operator_allows_direct_success_return_expression() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(value: u64) -> u64 | IoError {
+            value
+        }
+
+        fn fail() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn choose(flag: bool, value: u64) -> u64 | IoError {
+            if flag {
+                ok(value)
+            } else {
+                fail()
+            }
+        }
+
+        fn add_one(flag: bool, value: u64) -> u64 | IoError {
+            let base = choose(flag, value)?;
+            base + 1
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_try_operator_rejects_non_union_operand() {
+    let source = r#"
+        fn run() -> u64 {
+            let value = 7?;
+            value
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TryOperandNotErrorUnion(_, _)))
+        );
+    }
+}
+
+#[test]
+fn test_try_operator_rejects_non_union_return_type() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn read() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn run() -> u64 {
+            let value = read()?;
+            value
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_, _)
+        )));
+    }
+}
+
+#[test]
+fn test_try_operator_rejects_error_not_in_return_set() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn read() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn run() -> u64 | ParseError {
+            let value = read()?;
+            value
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TryErrorNotInReturn(_, _, _)))
+        );
+    }
+}
+
+#[test]
 fn test_enum_variant_payload_type_mismatch() {
     let source = r#"
         type Pair = A(u64) | B(u64)

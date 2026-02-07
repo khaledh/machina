@@ -18,9 +18,14 @@ fn choose(flag: bool, value: u64) -> u64 | IoError {
     }
 }
 
+fn add_one(flag: bool, value: u64) -> u64 | IoError {
+    let base = choose(flag, value)?;
+    base + 1
+}
+
 fn main() -> u64 {
-    let ok_case = choose(true, 42);
-    let err_case = choose(false, 42);
+    let ok_case = add_one(true, 42);
+    let err_case = add_one(false, 42);
 
     let left = match ok_case {
         value: u64 => value,

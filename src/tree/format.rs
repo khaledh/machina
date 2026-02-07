@@ -1024,6 +1024,7 @@ impl fmt::Display for UnaryOp {
             UnaryOp::Neg => write!(f, "-")?,
             UnaryOp::LogicalNot => write!(f, "!")?,
             UnaryOp::BitNot => write!(f, "~")?,
+            UnaryOp::Try => write!(f, "?")?,
         }
         Ok(())
     }

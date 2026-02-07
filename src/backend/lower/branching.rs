@@ -4,9 +4,10 @@ use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::backend::lower::r#match::MatchLowerer;
 use crate::ir::IrTypeId;
-use crate::ir::{Terminator, ValueId};
+use crate::ir::{CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
 use crate::resolve::DefId;
-use crate::tree::{BinaryOp, semantic as sem};
+use crate::tree::{BinaryOp, UnaryOp, semantic as sem};
+use crate::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a branching expression, potentially creating multiple basic blocks.
@@ -169,6 +170,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(BranchResult::Value(join_value))
             }
 
+            sem::ValueExprKind::UnaryOp {
+                op: UnaryOp::Try,
+                expr: inner,
+            } => self.lower_try_propagate(expr, inner),
+
             // Match expression: switch on enum tags (decision tree not yet supported).
             sem::ValueExprKind::Match { scrutinee, arms } => {
                 MatchLowerer::lower(self, expr, scrutinee, arms)
@@ -181,6 +187,166 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             },
         }
+    }
+
+    pub(super) fn lower_try_propagate(
+        &mut self,
+        expr: &sem::ValueExpr,
+        inner: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let union_value = match self.lower_value_expr(inner)? {
+            BranchResult::Value(value) => value,
+            BranchResult::Return => return Ok(BranchResult::Return),
+        };
+
+        let union_ty = self.type_map.type_table().get(inner.ty).clone();
+        let Type::ErrorUnion { err_tys, .. } = &union_ty else {
+            panic!(
+                "backend try operator expects error union operand, found {:?}",
+                union_ty
+            );
+        };
+
+        let union_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+        let union_slot = self.materialize_value_slot(union_value, union_ir_ty);
+        let (tag_ty, blob_ty, ok_payload_ty, ok_payload_offset, err_variants) = {
+            let layout = self.type_lowerer.enum_layout(inner.ty);
+            let ok_variant = layout
+                .variants
+                .first()
+                .unwrap_or_else(|| panic!("backend try missing ok variant in {:?}", union_ty));
+            if ok_variant.field_tys.len() != 1 || ok_variant.field_offsets.len() != 1 {
+                panic!(
+                    "backend try expects single-payload ok variant, found {:?}",
+                    ok_variant.field_tys
+                );
+            }
+            (
+                layout.tag_ty,
+                layout.blob_ty,
+                ok_variant.field_tys[0],
+                ok_variant.field_offsets[0],
+                layout
+                    .variants
+                    .iter()
+                    .skip(1)
+                    .map(|variant| {
+                        if variant.field_tys.len() != 1 || variant.field_offsets.len() != 1 {
+                            panic!(
+                                "backend try expects single-payload error variant, found {:?}",
+                                variant.field_tys
+                            );
+                        }
+                        (variant.tag, variant.field_tys[0], variant.field_offsets[0])
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        if err_variants.len() != err_tys.len() {
+            panic!(
+                "backend try mismatch between error variants ({}) and source error types ({})",
+                err_variants.len(),
+                err_tys.len()
+            );
+        }
+
+        let tag = self.load_field(union_slot.addr, 0, tag_ty);
+        let tag_zero = self.builder.const_int(0, false, 32, tag_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let is_ok = self.builder.cmp(CmpOp::Eq, tag, tag_zero, bool_ty);
+
+        let ok_bb = self.builder.add_block();
+        let err_dispatch_bb = self.builder.add_block();
+        let join = self.begin_join(expr);
+
+        self.builder.terminate(Terminator::CondBr {
+            cond: is_ok,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: err_dispatch_bb,
+            else_args: Vec::new(),
+        });
+
+        self.builder.select_block(ok_bb);
+        let ok_value =
+            self.load_union_payload(union_slot.addr, blob_ty, ok_payload_ty, ok_payload_offset);
+        join.emit_branch(self, ok_value, expr.span)?;
+
+        join.restore_locals(self);
+        self.builder.select_block(err_dispatch_bb);
+        self.lower_try_error_return_cases(union_slot.addr, blob_ty, tag, err_tys, &err_variants)?;
+
+        let join_value = join.join_value();
+        join.finalize(self);
+        Ok(BranchResult::Value(join_value))
+    }
+
+    fn lower_try_error_return_cases(
+        &mut self,
+        union_addr: ValueId,
+        blob_ty: IrTypeId,
+        tag: ValueId,
+        err_tys: &[Type],
+        err_variants: &[(u32, IrTypeId, u64)],
+    ) -> Result<(), LowerToIrError> {
+        let mut cases = Vec::with_capacity(err_variants.len());
+        let mut case_blocks = Vec::with_capacity(err_variants.len());
+        for (tag_value, _, _) in err_variants {
+            let bb = self.builder.add_block();
+            case_blocks.push(bb);
+            cases.push(SwitchCase {
+                value: ConstValue::Int {
+                    value: *tag_value as i128,
+                    signed: false,
+                    bits: 32,
+                },
+                target: bb,
+                args: Vec::new(),
+            });
+        }
+        let default_bb = self.builder.add_block();
+        self.builder.terminate(Terminator::Switch {
+            value: tag,
+            cases,
+            default: default_bb,
+            default_args: Vec::new(),
+        });
+
+        for (((_, payload_ty, payload_offset), err_ty), case_bb) in err_variants
+            .iter()
+            .zip(err_tys.iter())
+            .zip(case_blocks.iter())
+        {
+            self.builder.select_block(*case_bb);
+            let payload_value =
+                self.load_union_payload(union_addr, blob_ty, *payload_ty, *payload_offset);
+            let coerced = self.coerce_return_value(payload_value, err_ty);
+            self.emit_drops_to_depth(0)?;
+            self.builder.terminate(Terminator::Return {
+                value: Some(coerced),
+            });
+        }
+
+        self.builder.select_block(default_bb);
+        self.builder.terminate(Terminator::Unreachable);
+        Ok(())
+    }
+
+    fn load_union_payload(
+        &mut self,
+        union_addr: ValueId,
+        blob_ty: IrTypeId,
+        payload_ty: IrTypeId,
+        payload_offset: u64,
+    ) -> ValueId {
+        let blob_ptr = self.field_addr_typed(union_addr, 1, blob_ty);
+        let payload_bytes = self.byte_offset_addr(blob_ptr, payload_offset);
+        let payload_ptr_ty = self.type_lowerer.ptr_to(payload_ty);
+        let payload_ptr = self
+            .builder
+            .cast(CastKind::PtrToPtr, payload_bytes, payload_ptr_ty);
+        self.builder.load(payload_ptr, payload_ty)
     }
 
     /// Lowers a statement inside a branching block.

@@ -30,6 +30,18 @@ pub enum TypeCheckErrorKind {
     #[error("Logical operand must be a boolean, found {0}")]
     LogicalOperandNotBoolean(Type, Span),
 
+    #[error("`?` operand must be an error union, found {0}")]
+    TryOperandNotErrorUnion(Type, Span),
+
+    #[error("`?` used outside of a function or closure")]
+    TryOutsideFunction(Span),
+
+    #[error("`?` requires an error-union return type, found {0}")]
+    TryReturnTypeNotErrorUnion(Type, Span),
+
+    #[error("`?` cannot propagate error {0} into return type {1}")]
+    TryErrorNotInReturn(Type, Type, Span),
+
     #[error("Condition must be a boolean, found {0}")]
     CondNotBoolean(Type, Span),
 
@@ -290,6 +302,10 @@ impl TypeCheckError {
             TypeCheckErrorKind::CmpOperandNotInt(_, span) => *span,
             TypeCheckErrorKind::NegationOperandNotInt(_, span) => *span,
             TypeCheckErrorKind::LogicalOperandNotBoolean(_, span) => *span,
+            TypeCheckErrorKind::TryOperandNotErrorUnion(_, span) => *span,
+            TypeCheckErrorKind::TryOutsideFunction(span) => *span,
+            TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_, span) => *span,
+            TypeCheckErrorKind::TryErrorNotInReturn(_, _, span) => *span,
             TypeCheckErrorKind::CondNotBoolean(_, span) => *span,
             TypeCheckErrorKind::BreakOutsideLoop(span) => *span,
             TypeCheckErrorKind::ContinueOutsideLoop(span) => *span,

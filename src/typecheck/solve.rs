@@ -89,6 +89,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     // Stage C: expression obligations.
     let (mut expr_errors, mut covered_exprs) = check_expr_obligations(
         &constrain.expr_obligations,
+        &constrain.def_terms,
         &mut unifier,
         &engine.env().type_defs,
         &engine.env().property_sigs,
@@ -133,7 +134,30 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         pending_calls = deferred;
     }
 
-    // Stage E: final assignability check (diagnostics-producing).
+    // Stage E: retry unresolved expression obligations that depend on
+    // post-call type information (e.g. field projections over generic call
+    // results). The first pass may see unresolved owner types and skip them.
+    let retry_expr_obligations = constrain
+        .expr_obligations
+        .iter()
+        .filter(|obligation| should_retry_post_call_expr_obligation(obligation, &unifier))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !retry_expr_obligations.is_empty() {
+        let (mut retry_errors, retry_covered) = check_expr_obligations(
+            &retry_expr_obligations,
+            &constrain.def_terms,
+            &mut unifier,
+            &engine.env().type_defs,
+            &engine.env().property_sigs,
+            &engine.env().trait_sigs,
+            &constrain.var_trait_bounds,
+        );
+        expr_errors.append(&mut retry_errors);
+        covered_exprs.extend(retry_covered);
+    }
+
+    // Stage F: final assignability check (diagnostics-producing).
     for constraint in constrain
         .constraints
         .iter()
@@ -147,28 +171,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &mut deferred_pattern_errors,
             &mut non_expr_errors,
         );
-    }
-
-    // Stage E.5: Retry unresolved expression obligations that depend on
-    // post-call type information (e.g. field projections over generic call
-    // results). The first pass may see unresolved owner types and skip them.
-    let retry_expr_obligations = constrain
-        .expr_obligations
-        .iter()
-        .filter(|obligation| should_retry_post_call_expr_obligation(obligation, &unifier))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !retry_expr_obligations.is_empty() {
-        let (mut retry_errors, retry_covered) = check_expr_obligations(
-            &retry_expr_obligations,
-            &mut unifier,
-            &engine.env().type_defs,
-            &engine.env().property_sigs,
-            &engine.env().trait_sigs,
-            &constrain.var_trait_bounds,
-        );
-        expr_errors.append(&mut retry_errors);
-        covered_exprs.extend(retry_covered);
     }
 
     let covered_expr_spans = expr_errors
@@ -195,7 +197,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         }
     }
 
-    // Stage F: pattern obligations and late unresolved-local checks.
+    // Stage G: pattern obligations and late unresolved-local checks.
     let (mut pattern_errors, covered_patterns) = check_pattern_obligations(
         &constrain.pattern_obligations,
         &constrain.def_terms,
@@ -779,6 +781,7 @@ fn reason_subject_id(constraint: &Constraint) -> ConstraintSubject {
 
 fn check_expr_obligations(
     obligations: &[ExprObligation],
+    def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
@@ -870,6 +873,105 @@ fn check_expr_obligations(
                             );
                             covered_exprs.insert(*expr_id);
                         }
+                    }
+                    crate::tree::resolved::UnaryOp::Try => {}
+                }
+            }
+            ExprObligation::Try {
+                expr_id,
+                operand,
+                result,
+                expected_return_ty,
+                callable_def_id,
+                span,
+            } => {
+                let operand_ty = resolve_term(operand, unifier);
+                let operand_ty_for_diag =
+                    default_infer_ints_for_diagnostics(operand_ty.clone(), unifier.vars());
+                let Type::ErrorUnion { ok_ty, err_tys } = &operand_ty else {
+                    if !is_unresolved(&operand_ty_for_diag) {
+                        errors.push(
+                            TypeCheckErrorKind::TryOperandNotErrorUnion(operand_ty_for_diag, *span)
+                                .into(),
+                        );
+                        covered_exprs.insert(*expr_id);
+                    }
+                    continue;
+                };
+
+                let _ = unifier.unify(result, ok_ty);
+
+                let mut return_ty = expected_return_ty
+                    .as_ref()
+                    .map(|term| resolve_term(term, unifier))
+                    .unwrap_or(Type::Unknown);
+
+                if is_unresolved(&return_ty)
+                    && let Some(def_id) = callable_def_id
+                    && let Some(callable_term) = def_terms.get(def_id)
+                    && let Type::Fn { ret_ty, .. } = resolve_term(callable_term, unifier)
+                {
+                    return_ty = *ret_ty;
+                }
+
+                if is_unresolved(&return_ty)
+                    && let Some(return_ty_term) = expected_return_ty
+                {
+                    let fresh_ok = Type::Var(unifier.vars_mut().fresh_infer_local());
+                    let expected_union = Type::ErrorUnion {
+                        ok_ty: Box::new(fresh_ok),
+                        err_tys: err_tys.clone(),
+                    };
+                    let _ = unifier.unify(return_ty_term, &expected_union);
+                    return_ty = resolve_term(return_ty_term, unifier);
+                }
+
+                if expected_return_ty.is_none() && callable_def_id.is_none() {
+                    errors.push(TypeCheckErrorKind::TryOutsideFunction(*span).into());
+                    covered_exprs.insert(*expr_id);
+                    continue;
+                }
+
+                match &return_ty {
+                    Type::ErrorUnion {
+                        err_tys: return_err_tys,
+                        ..
+                    } => {
+                        let mut missing = None;
+                        for err_ty in err_tys {
+                            let present = return_err_tys.iter().any(|return_err_ty| {
+                                !matches!(
+                                    type_assignable(err_ty, return_err_ty),
+                                    TypeAssignability::Incompatible
+                                )
+                            });
+                            if !present && !is_unresolved(err_ty) {
+                                missing = Some(err_ty.clone());
+                                break;
+                            }
+                        }
+                        if let Some(missing_err) = missing {
+                            errors.push(
+                                TypeCheckErrorKind::TryErrorNotInReturn(
+                                    missing_err,
+                                    return_ty.clone(),
+                                    *span,
+                                )
+                                .into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                        }
+                    }
+                    ty if is_unresolved(ty) => {}
+                    _ => {
+                        errors.push(
+                            TypeCheckErrorKind::TryReturnTypeNotErrorUnion(
+                                return_ty.clone(),
+                                *span,
+                            )
+                            .into(),
+                        );
+                        covered_exprs.insert(*expr_id);
                     }
                 }
             }
@@ -1467,6 +1569,9 @@ fn should_retry_post_call_expr_obligation(
             let value_ty = resolve_term(value, unifier);
             is_unresolved(&owner_ty) || is_unresolved(&assignee_ty) || is_unresolved(&value_ty)
         }
+        ExprObligation::Try {
+            callable_def_id: _, ..
+        } => true,
         _ => false,
     }
 }
@@ -1924,6 +2029,7 @@ fn op_span(obligation: &ExprObligation) -> Span {
     match obligation {
         ExprObligation::BinOp { span, .. }
         | ExprObligation::UnaryOp { span, .. }
+        | ExprObligation::Try { span, .. }
         | ExprObligation::ArrayIndex { span, .. }
         | ExprObligation::Slice { span, .. }
         | ExprObligation::Range { span, .. }
