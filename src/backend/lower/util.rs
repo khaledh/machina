@@ -754,6 +754,26 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return;
         }
 
+        // For POD-like tuple/struct payloads with scalar fields, store fields
+        // directly into the blob instead of issuing a bulk memcpy call.
+        if let Some(field_tys) = self.pod_blob_field_tys(value_ty) {
+            let temp_ptr = self.alloc_local_addr(value_ty);
+            self.builder.store(temp_ptr, value);
+
+            let layout = self.type_lowerer.ir_type_cache.layout(value_ty);
+            let offsets = layout.field_offsets().to_vec();
+            for (index, field_ty) in field_tys.iter().copied().enumerate() {
+                let src_field_ptr = self.field_addr_typed(temp_ptr, index, field_ty);
+                let field_value = self.builder.load(src_field_ptr, field_ty);
+
+                let dst_bytes = self.byte_offset_addr(blob_ptr, offset + offsets[index]);
+                let dst_ty = self.type_lowerer.ptr_to(field_ty);
+                let dst_ptr = self.builder.cast(CastKind::PtrToPtr, dst_bytes, dst_ty);
+                self.builder.store(dst_ptr, field_value);
+            }
+            return;
+        }
+
         // Store the value into a temporary local
         let temp_ptr = self.alloc_local_addr(value_ty);
         self.builder.store(temp_ptr, value);
@@ -768,5 +788,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .const_int(layout.size() as i128, false, 64, u64_ty);
 
         self.builder.memcopy(dst, temp_ptr, len);
+    }
+
+    fn pod_blob_field_tys(&self, ty: IrTypeId) -> Option<Vec<IrTypeId>> {
+        let field_tys = match self.type_lowerer.ir_type_cache.kind(ty) {
+            IrTypeKind::Tuple { fields } => fields.clone(),
+            IrTypeKind::Struct { fields } => fields.iter().map(|field| field.ty).collect(),
+            _ => return None,
+        };
+        if field_tys
+            .iter()
+            .any(|field_ty| self.is_aggregate(*field_ty))
+        {
+            return None;
+        }
+        Some(field_tys)
     }
 }
