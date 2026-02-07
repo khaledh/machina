@@ -2199,6 +2199,25 @@ fn test_match_join_infers_union_without_expected_type() {
 }
 
 #[test]
+fn test_if_join_canonical_order_keeps_try_success_path_stable() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn demo(flag: bool, value: u64) -> u64 | IoError {
+            let joined = if flag {
+                IoError { code: 17 }
+            } else {
+                value
+            };
+            let n = joined?;
+            n
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_tuple_typed_binding_pattern_typechecks() {
     let source = r#"
         fn test(t: (u64, bool)) -> u64 {
