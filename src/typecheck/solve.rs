@@ -20,7 +20,9 @@ use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPat
 use crate::typecheck::constraints::{
     CallCallee, CallObligation, Constraint, ConstraintReason, ExprObligation,
 };
-use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, TypecheckEngine};
+use crate::typecheck::engine::{
+    CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, TypecheckEngine,
+};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
 use crate::typecheck::typesys::TypeVarKind;
@@ -78,6 +80,8 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut unifier,
         &engine.env().type_defs,
         &engine.env().property_sigs,
+        &engine.env().trait_sigs,
+        &constrain.var_trait_bounds,
     );
     let index_nodes = collect_index_nodes(&constrain.expr_obligations);
     let enum_payload_nodes = collect_enum_payload_nodes(&constrain.expr_obligations);
@@ -148,6 +152,8 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &mut unifier,
             &engine.env().type_defs,
             &engine.env().property_sigs,
+            &engine.env().trait_sigs,
+            &constrain.var_trait_bounds,
         );
         expr_errors.append(&mut retry_errors);
         covered_exprs.extend(retry_covered);
@@ -758,6 +764,8 @@ fn check_expr_obligations(
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
+    trait_sigs: &HashMap<String, CollectedTraitSig>,
+    var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
     let mut covered_exprs = HashSet::new();
@@ -1227,16 +1235,32 @@ fn check_expr_obligations(
             } => {
                 let target_ty = resolve_term(target, unifier);
                 let owner_ty = peel_heap(target_ty.clone());
-                if let Some(prop) = lookup_property(property_sigs, &owner_ty, field) {
-                    if prop.getter.is_none() {
+                match resolve_property_access(
+                    &owner_ty,
+                    field,
+                    property_sigs,
+                    trait_sigs,
+                    var_trait_bounds,
+                ) {
+                    Ok(prop) => {
+                        if !prop.readable {
+                            errors.push(
+                                TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let _ = unifier.unify(result, &prop.ty);
+                        continue;
+                    }
+                    Err(PropertyResolution::Ambiguous) => {
                         errors.push(
-                            TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into(),
+                            TypeCheckErrorKind::OverloadAmbiguous(field.clone(), *span).into(),
                         );
                         covered_exprs.insert(*expr_id);
                         continue;
                     }
-                    let _ = unifier.unify(result, &prop.ty);
-                    continue;
+                    Err(PropertyResolution::Missing) => {}
                 }
                 if field == "len" {
                     if is_len_target(&owner_ty) {
@@ -1263,6 +1287,7 @@ fn check_expr_obligations(
             }
             ExprObligation::StructFieldAssign {
                 stmt_id,
+                assignee_expr_id: _,
                 target,
                 field,
                 assignee,
@@ -1273,31 +1298,43 @@ fn check_expr_obligations(
                 let value_ty = resolve_term(value, unifier);
                 let owner_ty = peel_heap(target_ty.clone());
 
-                if let Some(prop) = lookup_property(property_sigs, &owner_ty, field) {
-                    if prop.setter.is_none() {
+                match resolve_property_access(
+                    &owner_ty,
+                    field,
+                    property_sigs,
+                    trait_sigs,
+                    var_trait_bounds,
+                ) {
+                    Ok(prop) => {
+                        if !prop.writable {
+                            errors.push(
+                                TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into(),
+                            );
+                            covered_exprs.insert(*stmt_id);
+                            continue;
+                        }
+                        let _ = unifier.unify(assignee, &prop.ty);
+                        if let Err(_) = solve_assignable(&value_ty, &prop.ty, unifier) {
+                            let value_ty = canonicalize_type(unifier.apply(&value_ty));
+                            if is_unresolved(&value_ty) {
+                                continue;
+                            }
+                            errors.push(
+                                TypeCheckErrorKind::AssignTypeMismatch(prop.ty, value_ty, *span)
+                                    .into(),
+                            );
+                            covered_exprs.insert(*stmt_id);
+                        }
+                        continue;
+                    }
+                    Err(PropertyResolution::Ambiguous) => {
                         errors.push(
-                            TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into(),
+                            TypeCheckErrorKind::OverloadAmbiguous(field.clone(), *span).into(),
                         );
                         covered_exprs.insert(*stmt_id);
                         continue;
                     }
-                    let _ = unifier.unify(assignee, &prop.ty);
-                    if let Err(_) = solve_assignable(&value_ty, &prop.ty, unifier) {
-                        let value_ty = canonicalize_type(unifier.apply(&value_ty));
-                        if is_unresolved(&value_ty) {
-                            continue;
-                        }
-                        errors.push(
-                            TypeCheckErrorKind::AssignTypeMismatch(
-                                prop.ty.clone(),
-                                value_ty,
-                                *span,
-                            )
-                            .into(),
-                        );
-                        covered_exprs.insert(*stmt_id);
-                    }
-                    continue;
+                    Err(PropertyResolution::Missing) => {}
                 }
 
                 if field == "len" && is_len_target(&owner_ty) {
@@ -1952,6 +1989,19 @@ fn peel_heap(ty: Type) -> Type {
     ty.peel_heap()
 }
 
+#[derive(Debug, Clone)]
+struct ResolvedPropertyAccess {
+    ty: Type,
+    readable: bool,
+    writable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PropertyResolution {
+    Missing,
+    Ambiguous,
+}
+
 fn property_owner_name(ty: &Type) -> Option<&str> {
     match ty {
         Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
@@ -1967,6 +2017,51 @@ fn lookup_property<'a>(
 ) -> Option<&'a CollectedPropertySig> {
     let owner = property_owner_name(owner_ty)?;
     property_sigs.get(owner).and_then(|props| props.get(field))
+}
+
+fn resolve_property_access(
+    owner_ty: &Type,
+    field: &str,
+    property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
+    trait_sigs: &HashMap<String, CollectedTraitSig>,
+    var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
+) -> Result<ResolvedPropertyAccess, PropertyResolution> {
+    if let Some(prop) = lookup_property(property_sigs, owner_ty, field) {
+        return Ok(ResolvedPropertyAccess {
+            ty: prop.ty.clone(),
+            readable: prop.getter.is_some(),
+            writable: prop.setter.is_some(),
+        });
+    }
+
+    let Type::Var(var) = owner_ty else {
+        return Err(PropertyResolution::Missing);
+    };
+
+    let mut matched = None;
+    for trait_name in var_trait_bounds
+        .get(var)
+        .into_iter()
+        .flat_map(|names| names.iter())
+    {
+        let Some(trait_sig) = trait_sigs.get(trait_name) else {
+            continue;
+        };
+        let Some(prop) = trait_sig.properties.get(field) else {
+            continue;
+        };
+
+        if matched.is_some() {
+            return Err(PropertyResolution::Ambiguous);
+        }
+        matched = Some(ResolvedPropertyAccess {
+            ty: prop.ty.clone(),
+            readable: prop.has_get,
+            writable: prop.has_set,
+        });
+    }
+
+    matched.ok_or(PropertyResolution::Missing)
 }
 
 fn iterable_elem_type(ty: &Type) -> Option<Type> {

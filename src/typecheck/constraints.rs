@@ -130,6 +130,7 @@ pub(crate) enum ExprObligation {
     },
     StructFieldAssign {
         stmt_id: NodeId,
+        assignee_expr_id: NodeId,
         target: Type,
         field: String,
         assignee: Type,
@@ -1241,6 +1242,7 @@ impl<'a> ConstraintCollector<'a> {
                         .expr_obligations
                         .push(ExprObligation::StructFieldAssign {
                             stmt_id: stmt.id,
+                            assignee_expr_id: assignee.id,
                             target: target_ty,
                             field: field.clone(),
                             assignee: assignee_ty,

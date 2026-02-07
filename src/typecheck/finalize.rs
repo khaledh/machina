@@ -13,8 +13,10 @@ use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::typed::build_module;
 use crate::typecheck::Unifier;
-use crate::typecheck::constraints::CallCallee;
-use crate::typecheck::engine::CollectedCallableSig;
+use crate::typecheck::constraints::{CallCallee, ExprObligation};
+use crate::typecheck::engine::{
+    CollectedCallableSig, CollectedPropertySig, CollectedTraitPropertySig, CollectedTraitSig,
+};
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::errors::TypeCheckError;
 use crate::typecheck::nominal::NominalKey;
@@ -192,6 +194,11 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         }
     }
 
+    // Property dot-syntax (`obj.prop`, `obj.prop = v`) is represented as
+    // struct-field obligations and rewritten by normalize when a call signature
+    // entry exists for the field node id. Materialize those entries here.
+    record_property_access_call_sigs(engine, &mut builder);
+
     let (mut type_map, call_sigs, generic_insts) = builder.finish();
     nominal_keys.hydrate(&mut type_map);
     FinalizeOutput {
@@ -219,6 +226,154 @@ fn record_node_type_with_nominal(
 ) {
     let nominal = nominal_keys.infer(&ty);
     builder.record_node_type_with_nominal(node_id, ty, nominal);
+}
+
+fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
+    for obligation in &engine.state().constrain.expr_obligations {
+        match obligation {
+            ExprObligation::StructField {
+                expr_id,
+                target,
+                field,
+                ..
+            } => {
+                let target_ty = resolve_term(target, engine);
+                let owner_ty = target_ty.clone().peel_heap();
+                let Some(prop) = resolve_property_access_for_finalize(
+                    &owner_ty,
+                    field,
+                    &engine.env().property_sigs,
+                    &engine.env().trait_sigs,
+                    &engine.state().constrain.var_trait_bounds,
+                ) else {
+                    continue;
+                };
+                if !prop.readable {
+                    continue;
+                }
+                builder.record_call_sig(
+                    *expr_id,
+                    CallSig {
+                        def_id: prop.getter_def,
+                        receiver: Some(CallParam {
+                            mode: crate::tree::ParamMode::In,
+                            ty: target_ty,
+                        }),
+                        params: Vec::new(),
+                    },
+                );
+            }
+            ExprObligation::StructFieldAssign {
+                assignee_expr_id,
+                target,
+                field,
+                value,
+                ..
+            } => {
+                let target_ty = resolve_term(target, engine);
+                let owner_ty = target_ty.clone().peel_heap();
+                let Some(prop) = resolve_property_access_for_finalize(
+                    &owner_ty,
+                    field,
+                    &engine.env().property_sigs,
+                    &engine.env().trait_sigs,
+                    &engine.state().constrain.var_trait_bounds,
+                ) else {
+                    continue;
+                };
+                if !prop.writable {
+                    continue;
+                }
+                builder.record_call_sig(
+                    *assignee_expr_id,
+                    CallSig {
+                        def_id: prop.setter_def,
+                        receiver: Some(CallParam {
+                            mode: crate::tree::ParamMode::InOut,
+                            ty: target_ty,
+                        }),
+                        params: vec![CallParam {
+                            mode: crate::tree::ParamMode::In,
+                            ty: resolve_term(value, engine),
+                        }],
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPropertyAccess {
+    readable: bool,
+    writable: bool,
+    getter_def: Option<DefId>,
+    setter_def: Option<DefId>,
+}
+
+fn resolve_property_access_for_finalize(
+    owner_ty: &Type,
+    field: &str,
+    property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
+    trait_sigs: &HashMap<String, CollectedTraitSig>,
+    var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
+) -> Option<ResolvedPropertyAccess> {
+    if let Some(prop) = lookup_property(property_sigs, owner_ty, field) {
+        return Some(ResolvedPropertyAccess {
+            readable: prop.getter.is_some(),
+            writable: prop.setter.is_some(),
+            getter_def: prop.getter,
+            setter_def: prop.setter,
+        });
+    }
+
+    let Type::Var(var) = owner_ty else {
+        return None;
+    };
+
+    let mut found: Option<&CollectedTraitPropertySig> = None;
+    for trait_name in var_trait_bounds
+        .get(var)
+        .into_iter()
+        .flat_map(|names| names.iter())
+    {
+        let Some(trait_sig) = trait_sigs.get(trait_name) else {
+            continue;
+        };
+        let Some(prop) = trait_sig.properties.get(field) else {
+            continue;
+        };
+        if found.is_some() {
+            return None;
+        }
+        found = Some(prop);
+    }
+
+    let prop = found?;
+    Some(ResolvedPropertyAccess {
+        readable: prop.has_get,
+        writable: prop.has_set,
+        getter_def: None,
+        setter_def: None,
+    })
+}
+
+fn property_owner_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
+        Type::String => Some("string"),
+        _ => None,
+    }
+}
+
+fn lookup_property<'a>(
+    property_sigs: &'a HashMap<String, HashMap<String, CollectedPropertySig>>,
+    owner_ty: &Type,
+    field: &str,
+) -> Option<&'a CollectedPropertySig> {
+    let owner = property_owner_name(owner_ty)?;
+    property_sigs.get(owner).and_then(|props| props.get(field))
 }
 
 fn resolve_term(ty: &Type, engine: &TypecheckEngine) -> Type {

@@ -42,9 +42,8 @@ fn accept_runnable<T: Runnable>(value: T) -> u64 {
     value.run()
 }
 
-fn add_ticks(inout p: Process, delta: u64) -> u64 {
-    p.ticks = p.ticks + delta;
-    p.ticks
+fn add_ticks<T: HasTickCount>(inout p: T, delta: u64) {
+    p.tick_count = p.tick_count + delta;
 }
 
 fn main() {
@@ -72,8 +71,9 @@ fn main() {
         name: "worker-4",
         ticks: 5,
     };
-    let after = add_ticks(inout tracked, 7);
-    println(f"after = {after}");
+    println(f"before = {tracked.ticks}");
+    add_ticks(inout tracked, 7);
+    println(f"after = {tracked.ticks}");
 
     // Uncommenting this line should fail type checking because Task does not
     // implement Runnable:
