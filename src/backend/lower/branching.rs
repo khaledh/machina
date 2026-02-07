@@ -206,6 +206,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 union_ty
             );
         };
+        // Fast path: when operand and function return unions are identical,
+        // propagation can return the original union value directly.
+        let return_union_matches_operand = union_ty == self.ret_ty;
 
         let union_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
         let union_slot = self.materialize_value_slot(union_value, union_ir_ty);
@@ -275,7 +278,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         join.restore_locals(self);
         self.builder.select_block(err_dispatch_bb);
-        self.lower_try_error_return_cases(union_slot.addr, blob_ty, tag, err_tys, &err_variants)?;
+        if return_union_matches_operand {
+            self.emit_drops_to_depth(0)?;
+            self.builder.terminate(Terminator::Return {
+                value: Some(union_value),
+            });
+        } else {
+            self.lower_try_error_return_cases(union_slot.addr, blob_ty, tag, err_tys, &err_variants)?;
+        }
 
         let join_value = join.join_value();
         join.finalize(self);

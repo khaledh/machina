@@ -23,7 +23,7 @@ fn add_one(flag: bool, value: u64) -> u64 | IoError {
     base + 1
 }
 
-fn main() -> u64 {
+fn main() {
     let ok_case = add_one(true, 42);
     let err_case = add_one(false, 42);
 
@@ -31,11 +31,11 @@ fn main() -> u64 {
         value: u64 => value,
         err: IoError => err.code,
     };
+    println(f"left: {left}");
 
     let right = match err_case {
         value: u64 => value,
         err: IoError => err.code,
     };
-
-    left + right
+    println(f"right: {right}");
 }
