@@ -1590,6 +1590,55 @@ fn test_try_operator_reports_all_missing_error_variants() {
 }
 
 #[test]
+fn test_match_typed_binding_rejects_non_union_variant_type() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn read(v: u64) -> u64 | IoError {
+            v
+        }
+
+        fn run(v: u64) -> u64 {
+            let result = read(v);
+            match result {
+                s: string => 0,
+                _ => 1,
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        let err = errors
+            .iter()
+            .find(|e| {
+                matches!(
+                    e.kind(),
+                    TypeCheckErrorKind::MatchTypedBindingTypeMismatch(_, _, _)
+                )
+            })
+            .expect("expected MatchTypedBindingTypeMismatch");
+        match err.kind() {
+            TypeCheckErrorKind::MatchTypedBindingTypeMismatch(expected, found, _) => {
+                assert!(matches!(found, Type::String));
+                assert_eq!(expected.len(), 2);
+                assert!(
+                    expected
+                        .iter()
+                        .any(|ty| matches!(ty, Type::Int { signed: false, bits: 64, .. }))
+                );
+                assert!(expected
+                    .iter()
+                    .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "IoError")));
+            }
+            other => panic!("expected MatchTypedBindingTypeMismatch, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn test_enum_variant_payload_type_mismatch() {
     let source = r#"
         type Pair = A(u64) | B(u64)

@@ -1873,6 +1873,7 @@ fn check_pattern_obligations(
                 }
             }
             crate::typecheck::constraints::PatternObligation::MatchArm {
+                arm_id,
                 pattern,
                 scrutinee_ty,
                 ..
@@ -1886,6 +1887,9 @@ fn check_pattern_obligations(
                     type_defs,
                     def_table,
                     module,
+                    &mut errors,
+                    &mut covered,
+                    *arm_id,
                 );
             }
         }
@@ -1902,6 +1906,9 @@ fn bind_match_pattern_types(
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
     module: &crate::tree::resolved::Module,
+    errors: &mut Vec<TypeCheckError>,
+    covered: &mut HashSet<NodeId>,
+    pattern_id: NodeId,
 ) {
     match pattern {
         MatchPattern::Wildcard { .. } => {}
@@ -1922,16 +1929,40 @@ fn bind_match_pattern_types(
             }
         }
         MatchPattern::TypedBinding {
-            def_id, ty_expr, ..
+            id,
+            def_id,
+            ty_expr,
+            span,
+            ..
         } => {
             if let Ok(pat_ty) = resolve_type_expr(def_table, module, ty_expr) {
                 let scrutinee_applied = unifier.apply(scrutinee_ty);
                 if let Type::ErrorUnion { ok_ty, err_tys } = &scrutinee_applied {
-                    let matches_union_variant = std::iter::once(ok_ty.as_ref())
+                    let variants = std::iter::once(ok_ty.as_ref())
                         .chain(err_tys.iter())
-                        .any(|variant_ty| variant_ty == &pat_ty);
-                    if matches_union_variant && let Some(term) = def_terms.get(def_id) {
-                        let _ = unifier.unify(term, &pat_ty);
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let matches_union_variant = variants.iter().any(|variant_ty| {
+                        !matches!(
+                            type_assignable(variant_ty, &pat_ty),
+                            TypeAssignability::Incompatible
+                        )
+                    });
+                    if matches_union_variant {
+                        if let Some(term) = def_terms.get(def_id) {
+                            let _ = unifier.unify(term, &pat_ty);
+                        }
+                    } else if !is_unresolved(&pat_ty) {
+                        errors.push(
+                            TypeCheckErrorKind::MatchTypedBindingTypeMismatch(
+                                variants,
+                                pat_ty.clone(),
+                                *span,
+                            )
+                            .into(),
+                        );
+                        covered.insert(*id);
+                        covered.insert(pattern_id);
                     }
                 } else {
                     if let Some(term) = def_terms.get(def_id) {
@@ -1946,7 +1977,16 @@ fn bind_match_pattern_types(
             if let Type::Tuple { field_tys } = scrutinee_ty {
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
                     bind_match_pattern_types(
-                        child, child_ty, def_terms, unifier, type_defs, def_table, module,
+                        child,
+                        child_ty,
+                        def_terms,
+                        unifier,
+                        type_defs,
+                        def_table,
+                        module,
+                        errors,
+                        covered,
+                        pattern_id,
                     );
                 }
             } else if is_unresolved(scrutinee_ty) {
@@ -1960,7 +2000,16 @@ fn bind_match_pattern_types(
                 let _ = unifier.unify(scrutinee_ty, &inferred_tuple);
                 for (child, child_ty) in patterns.iter().zip(inferred_fields.iter()) {
                     bind_match_pattern_types(
-                        child, child_ty, def_terms, unifier, type_defs, def_table, module,
+                        child,
+                        child_ty,
+                        def_terms,
+                        unifier,
+                        type_defs,
+                        def_table,
+                        module,
+                        errors,
+                        covered,
+                        pattern_id,
                     );
                 }
             }

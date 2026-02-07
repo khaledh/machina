@@ -236,6 +236,9 @@ pub enum TypeCheckErrorKind {
     #[error("Match pattern enum mismatch: expected {0}, found {1}")]
     MatchPatternEnumMismatch(String, String, Span),
 
+    #[error("Match typed binding expects one of {0:?}, found {1}")]
+    MatchTypedBindingTypeMismatch(Vec<Type>, Type, Span),
+
     #[error("Match is not exhaustive: {0}")]
     NonExhaustiveMatch(Span),
 
@@ -375,6 +378,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::MatchTargetNotEnum(_, span) => *span,
             TypeCheckErrorKind::MatchArmTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::MatchPatternEnumMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::MatchTypedBindingTypeMismatch(_, _, span) => *span,
             TypeCheckErrorKind::NonExhaustiveMatch(span) => *span,
             TypeCheckErrorKind::DuplicateMatchVariant(_, span) => *span,
             TypeCheckErrorKind::StringIndexAssign(span) => *span,
