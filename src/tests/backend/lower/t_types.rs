@@ -305,6 +305,82 @@ fn test_enum_layout_multi_payload() {
 }
 
 #[test]
+fn test_lower_shallow_enum_uses_nominal_view_when_available() {
+    let ctx = analyze(indoc! {"
+        type Option = None | Some(u64)
+
+        fn main() -> Option {
+            Option::Some(1)
+        }
+    "});
+
+    let mut type_lowerer =
+        TypeLowerer::new_with_type_defs(&ctx.type_map, Some(&ctx.def_table), Some(&ctx.module));
+    let shallow = Type::Enum {
+        name: "Option".to_string(),
+        variants: Vec::new(),
+    };
+
+    let ir_ty = type_lowerer.lower_type(&shallow);
+    let IrTypeKind::Struct { fields } = type_lowerer.ir_type_cache.kind(ir_ty) else {
+        panic!("expected enum to lower to tagged struct");
+    };
+    assert_eq!(fields.len(), 2);
+
+    match type_lowerer.ir_type_cache.kind(fields[1].ty) {
+        IrTypeKind::Blob { size, align } => {
+            assert_eq!(*size, 8);
+            assert_eq!(*align, 8);
+        }
+        other => panic!("expected payload blob field, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_lower_shallow_generic_enum_uses_nominal_key_side_table() {
+    let ctx = analyze(indoc! {"
+        type Option<T> = None | Some(T)
+
+        fn make_some() -> Option<u64> {
+            Option<u64>::Some(1)
+        }
+
+        fn main() -> u64 {
+            let x = make_some();
+            match x {
+                Option::Some(v) => v,
+                Option::None => 0,
+            }
+        }
+    "});
+
+    let shallow = Type::Enum {
+        name: "Option<u64>".to_string(),
+        variants: Vec::new(),
+    };
+    assert!(
+        ctx.type_map.type_table().lookup_id(&shallow).is_some(),
+        "expected Option<u64> type to be interned",
+    );
+
+    let mut type_lowerer =
+        TypeLowerer::new_with_type_defs(&ctx.type_map, Some(&ctx.def_table), Some(&ctx.module));
+    let ir_ty = type_lowerer.lower_type(&shallow);
+    let IrTypeKind::Struct { fields } = type_lowerer.ir_type_cache.kind(ir_ty) else {
+        panic!("expected enum to lower to tagged struct");
+    };
+    assert_eq!(fields.len(), 2);
+
+    match type_lowerer.ir_type_cache.kind(fields[1].ty) {
+        IrTypeKind::Blob { size, align } => {
+            assert_eq!(*size, 8);
+            assert_eq!(*align, 8);
+        }
+        other => panic!("expected payload blob field, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_enum_ir_type_is_tagged_struct() {
     let ctx = analyze(indoc! {"
         type Flag = Off | On

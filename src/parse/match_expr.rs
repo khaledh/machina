@@ -207,6 +207,7 @@ impl<'a> Parser<'a> {
         };
 
         Ok(MatchPattern::EnumVariant {
+            id: self.id_gen.new_id(),
             enum_name,
             type_args,
             variant_name,

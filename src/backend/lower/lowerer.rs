@@ -151,13 +151,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn new(
         func: &sem::FuncDef,
         def_table: &'a DefTable,
+        module: Option<&'a sem::Module>,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
     ) -> Self {
-        let mut type_lowerer = TypeLowerer::new(type_map);
+        let mut type_lowerer = TypeLowerer::new_with_type_defs(type_map, Some(def_table), module);
 
         // Look up the function's type to extract parameter and return types.
         let def = def_table
@@ -235,13 +236,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         type_name: &str,
         method_def: &sem::MethodDef,
         def_table: &'a DefTable,
+        module: &'a sem::Module,
         type_map: &'a TypeMap,
         lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
     ) -> Self {
-        let mut type_lowerer = TypeLowerer::new(type_map);
+        let mut type_lowerer =
+            TypeLowerer::new_with_type_defs(type_map, Some(def_table), Some(module));
 
         let ret_ty = type_map.lookup_node_type(method_def.id).unwrap_or_else(|| {
             panic!(

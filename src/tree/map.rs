@@ -790,12 +790,14 @@ pub fn walk_match_pattern<M: TreeMapper + ?Sized>(
             span: *span,
         },
         MatchPattern::EnumVariant {
+            id,
             enum_name,
             type_args,
             variant_name,
             bindings,
             span,
         } => MatchPattern::EnumVariant {
+            id: *id,
             enum_name: enum_name.clone(),
             type_args: type_args
                 .iter()

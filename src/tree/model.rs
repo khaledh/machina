@@ -520,6 +520,7 @@ pub enum MatchPattern<D> {
         span: Span,
     },
     EnumVariant {
+        id: NodeId,
         enum_name: Option<String>,
         type_args: Vec<TypeExpr<D>>,
         variant_name: String,

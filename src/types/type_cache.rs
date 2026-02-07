@@ -50,6 +50,13 @@ impl TypeCache {
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
     }
+
+    pub fn entries(&self) -> impl Iterator<Item = (TypeId, &Type)> {
+        self.types
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| (TypeId(index as u32), ty))
+    }
 }
 
 fn should_upgrade_interned_type(existing: Type, incoming: &Type) -> bool {

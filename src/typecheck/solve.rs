@@ -1381,6 +1381,7 @@ fn bind_match_pattern_types(
             }
         }
         MatchPattern::EnumVariant {
+            id,
             enum_name,
             type_args,
             variant_name,
@@ -1394,7 +1395,7 @@ fn bind_match_pattern_types(
                 matched_variant = variants.iter().find(|v| v.name == *variant_name).cloned();
             } else if is_unresolved(&owner_ty) {
                 let inferred_enum = resolve_pattern_enum_type(
-                    enum_name, type_args, type_defs, def_table, module, unifier,
+                    *id, enum_name, type_args, type_defs, def_table, module, unifier,
                 );
                 if let Some(enum_ty) = inferred_enum {
                     let _ = unifier.unify(&owner_ty, &enum_ty);
@@ -1419,6 +1420,7 @@ fn bind_match_pattern_types(
 }
 
 fn resolve_pattern_enum_type(
+    pattern_id: NodeId,
     enum_name: &Option<String>,
     type_args: &[crate::tree::resolved::TypeExpr],
     type_defs: &HashMap<String, Type>,
@@ -1426,33 +1428,36 @@ fn resolve_pattern_enum_type(
     module: &crate::tree::resolved::Module,
     unifier: &mut TcUnifier,
 ) -> Option<Type> {
-    let enum_name = enum_name.as_ref()?;
+    if let Some(def_id) = def_table.lookup_node_def_id(pattern_id) {
+        let type_def = module.type_def_by_id(def_id)?;
+        let resolved_args = if type_args.is_empty() {
+            type_def
+                .type_params
+                .iter()
+                .map(|_| Type::Var(unifier.vars_mut().fresh_infer_local()))
+                .collect::<Vec<_>>()
+        } else {
+            type_args
+                .iter()
+                .map(|arg| resolve_type_expr(def_table, module, arg))
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?
+        };
 
+        let ty = resolve_type_def_with_args(def_table, module, def_id, &resolved_args).ok()?;
+        return matches!(ty, Type::Enum { .. }).then_some(ty);
+    }
+
+    let enum_name = enum_name.as_ref()?;
     if let Some(ty) = type_defs.get(enum_name)
         && matches!(ty, Type::Enum { .. })
     {
         return Some(ty.clone());
     }
 
-    let def_id = def_table.lookup_type_def_id(enum_name)?;
-    let type_def = module.type_def_by_id(def_id)?;
-
-    let resolved_args = if type_args.is_empty() {
-        type_def
-            .type_params
-            .iter()
-            .map(|_| Type::Var(unifier.vars_mut().fresh_infer_local()))
-            .collect::<Vec<_>>()
-    } else {
-        type_args
-            .iter()
-            .map(|arg| resolve_type_expr(def_table, module, arg))
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?
-    };
-
-    let ty = resolve_type_def_with_args(def_table, module, def_id, &resolved_args).ok()?;
-    matches!(ty, Type::Enum { .. }).then_some(ty)
+    // If resolver failed to attach a def id on the enum pattern, do not guess
+    // via name lookup; leave this unresolved for later diagnostics.
+    None
 }
 
 fn default_unresolved_int_vars(unifier: &mut TcUnifier) {

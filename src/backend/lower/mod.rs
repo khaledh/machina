@@ -88,6 +88,7 @@ pub fn lower_func_with_opts(
     lower_func_with_globals(
         func,
         def_table,
+        None,
         type_map,
         lowering_plans,
         drop_plans,
@@ -134,6 +135,7 @@ pub fn lower_module_with_opts(
         let lowered = lower_func_with_globals(
             func_def,
             def_table,
+            Some(module),
             type_map,
             lowering_plans,
             drop_plans,
@@ -151,6 +153,7 @@ pub fn lower_module_with_opts(
                 continue;
             };
             let lowered = lower_method_def_with_globals(
+                module,
                 method_block,
                 method_def,
                 def_table,
@@ -180,6 +183,7 @@ pub fn lower_module_with_opts(
 fn lower_func_with_globals(
     func: &sem::FuncDef,
     def_table: &DefTable,
+    module: Option<&sem::Module>,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
@@ -208,6 +212,7 @@ fn lower_func_with_globals(
     let mut lowerer = FuncLowerer::new(
         func,
         def_table,
+        module,
         type_map,
         lowering_plans,
         drop_glue,
@@ -256,6 +261,7 @@ fn lower_func_with_globals(
 
 #[allow(clippy::too_many_arguments)]
 fn lower_method_def_with_globals(
+    module: &sem::Module,
     method_block: &sem::MethodBlock,
     method_def: &sem::MethodDef,
     def_table: &DefTable,
@@ -282,6 +288,7 @@ fn lower_method_def_with_globals(
         &method_block.type_name,
         method_def,
         def_table,
+        module,
         type_map,
         lowering_plans,
         drop_glue,

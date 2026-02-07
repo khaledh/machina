@@ -444,8 +444,11 @@ impl<'a> ConstraintCollector<'a> {
         )
     }
 
-    fn resolve_named_type_instance(&mut self, name: &str, type_args: &[TypeExpr]) -> Option<Type> {
-        let def_id = self.ctx.def_table.lookup_type_def_id(name)?;
+    fn resolve_type_instance_with_args(
+        &mut self,
+        def_id: DefId,
+        type_args: &[TypeExpr],
+    ) -> Option<Type> {
         let type_def = self.ctx.module.type_def_by_id(def_id)?;
         let args = if type_args.is_empty() && type_def.type_params.is_empty() {
             Vec::new()
@@ -463,6 +466,15 @@ impl<'a> ConstraintCollector<'a> {
             out
         };
         resolve_type_def_with_args(&self.ctx.def_table, &self.ctx.module, def_id, &args).ok()
+    }
+
+    fn resolve_type_instance_for_expr(
+        &mut self,
+        expr: &Expr,
+        type_args: &[TypeExpr],
+    ) -> Option<Type> {
+        let def_id = self.ctx.def_table.lookup_node_def_id(expr.id)?;
+        self.resolve_type_instance_with_args(def_id, type_args)
     }
 
     fn collect_expr(&mut self, expr: &Expr, expected: Option<Type>) -> Type {
@@ -665,7 +677,7 @@ impl<'a> ConstraintCollector<'a> {
                     .type_defs
                     .get(name)
                     .cloned()
-                    .or_else(|| self.resolve_named_type_instance(name, type_args));
+                    .or_else(|| self.resolve_type_instance_for_expr(expr, type_args));
                 if let Some(Type::Struct {
                     fields: struct_fields,
                     ..
@@ -701,7 +713,7 @@ impl<'a> ConstraintCollector<'a> {
                     .type_defs
                     .get(enum_name)
                     .cloned()
-                    .or_else(|| self.resolve_named_type_instance(enum_name, type_args));
+                    .or_else(|| self.resolve_type_instance_for_expr(expr, type_args));
                 let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum {
                     variants
                         .iter()

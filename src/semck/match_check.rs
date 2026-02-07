@@ -99,6 +99,7 @@ impl<'a> EnumRule<'a> {
                     variant_name,
                     bindings,
                     span,
+                    ..
                 } => {
                     if let Some(pat_enum_name) = pat_enum_name
                         && !enum_name_matches(pat_enum_name, self.name)
@@ -420,6 +421,7 @@ fn check_enum_pattern(
         variant_name,
         bindings,
         span,
+        ..
     } = pattern
     else {
         return;

@@ -161,15 +161,15 @@ impl<'a> DropTracker<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DropKind<'a> {
+enum DropKind {
     Trivial,
-    Shallow(&'a str),
+    Shallow,
     Deep,
 }
 
-fn drop_kind(ty: &Type) -> DropKind<'_> {
-    if let Some(name) = shallow_named(ty) {
-        return DropKind::Shallow(name);
+fn drop_kind(ty: &Type) -> DropKind {
+    if is_shallow_named(ty) {
+        return DropKind::Shallow;
     }
     if has_nontrivial_drop(ty) {
         DropKind::Deep
@@ -179,7 +179,7 @@ fn drop_kind(ty: &Type) -> DropKind<'_> {
 }
 
 fn has_nontrivial_drop(ty: &Type) -> bool {
-    if shallow_named(ty).is_some() {
+    if is_shallow_named(ty) {
         return true;
     }
 
@@ -411,8 +411,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             match drop_kind(elem_ty) {
                 DropKind::Trivial => {}
-                DropKind::Shallow(name) => {
-                    let def_id = self.drop_glue.def_id_for(name, elem_ty, self.def_table);
+                DropKind::Shallow => {
+                    let def_id = self.drop_glue.def_id_for(elem_ty, self.type_map);
                     let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                     let _ = self
                         .builder
@@ -446,8 +446,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<(), LowerToIrError> {
         match drop_kind(ty) {
             DropKind::Trivial => return Ok(()),
-            DropKind::Shallow(name) => {
-                let def_id = self.drop_glue.def_id_for(name, ty, self.def_table);
+            DropKind::Shallow => {
+                let def_id = self.drop_glue.def_id_for(ty, self.type_map);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ = self
                     .builder
@@ -488,8 +488,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         match drop_kind(elem_ty) {
             DropKind::Trivial => {}
-            DropKind::Shallow(name) => {
-                let def_id = self.drop_glue.def_id_for(name, elem_ty, self.def_table);
+            DropKind::Shallow => {
+                let def_id = self.drop_glue.def_id_for(elem_ty, self.type_map);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ = self
                     .builder
@@ -687,10 +687,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 }
 
-fn shallow_named(ty: &Type) -> Option<&str> {
+fn is_shallow_named(ty: &Type) -> bool {
     match ty {
-        Type::Struct { name, fields } if fields.is_empty() => Some(name.as_str()),
-        Type::Enum { name, variants } if variants.is_empty() => Some(name.as_str()),
-        _ => None,
+        Type::Struct { fields, .. } => fields.is_empty(),
+        Type::Enum { variants, .. } => variants.is_empty(),
+        _ => false,
     }
 }

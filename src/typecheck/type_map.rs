@@ -12,6 +12,7 @@ use crate::tree::semantic as sem;
 use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
 use crate::tree::{NodeId, ParamMode, RefinementKind};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::typecheck::nominal::NominalKey;
 use crate::types::{
     EnumVariant, FnParam, FnParamMode, StructField, TyVarId, Type, TypeCache, TypeId,
 };
@@ -730,6 +731,7 @@ pub struct TypeMapBuilder {
     type_table: TypeCache,
     node_type: HashMap<NodeId, TypeId>, // maps node to its type
     def_type: HashMap<Def, TypeId>,     // maps def to its type
+    nominal_keys: HashMap<TypeId, NominalKey>,
     call_sigs: HashMap<NodeId, CallSig>,
     generic_insts: HashMap<NodeId, GenericInst>,
 }
@@ -746,19 +748,40 @@ impl TypeMapBuilder {
             type_table: TypeCache::new(),
             node_type: HashMap::new(),
             def_type: HashMap::new(),
+            nominal_keys: HashMap::new(),
             call_sigs: HashMap::new(),
             generic_insts: HashMap::new(),
         }
     }
 
     pub fn record_def_type(&mut self, def: Def, typ: Type) {
+        self.record_def_type_with_nominal(def, typ, None);
+    }
+
+    pub(crate) fn record_def_type_with_nominal(
+        &mut self,
+        def: Def,
+        typ: Type,
+        nominal_key: Option<NominalKey>,
+    ) {
         let id = self.type_table.intern(typ);
         self.def_type.insert(def, id);
+        self.record_nominal_key(id, nominal_key);
     }
 
     pub fn record_node_type(&mut self, node_id: NodeId, typ: Type) {
+        self.record_node_type_with_nominal(node_id, typ, None);
+    }
+
+    pub(crate) fn record_node_type_with_nominal(
+        &mut self,
+        node_id: NodeId,
+        typ: Type,
+        nominal_key: Option<NominalKey>,
+    ) {
         let id = self.type_table.intern(typ);
         self.node_type.insert(node_id, id);
+        self.record_nominal_key(id, nominal_key);
     }
 
     pub fn record_call_sig(&mut self, node_id: NodeId, sig: CallSig) {
@@ -817,6 +840,7 @@ impl TypeMapBuilder {
                 type_table: self.type_table,
                 def_type: self.def_type,
                 node_type: self.node_type,
+                nominal_keys: self.nominal_keys,
                 call_plan: HashMap::new(),
                 index_plan: HashMap::new(),
                 match_plan: HashMap::new(),
@@ -825,6 +849,19 @@ impl TypeMapBuilder {
             call_sigs,
             generic_insts,
         )
+    }
+
+    fn record_nominal_key(&mut self, type_id: TypeId, nominal_key: Option<NominalKey>) {
+        let Some(key) = nominal_key else {
+            return;
+        };
+        if let Some(existing) = self.nominal_keys.get_mut(&type_id) {
+            if let Some(selected) = select_more_concrete_nominal_key(existing, &key) {
+                *existing = selected;
+            }
+            return;
+        }
+        self.nominal_keys.insert(type_id, key);
     }
 }
 
@@ -857,6 +894,7 @@ pub struct TypeMap {
     type_table: TypeCache,
     def_type: HashMap<Def, TypeId>,
     node_type: HashMap<NodeId, TypeId>,
+    nominal_keys: HashMap<TypeId, NominalKey>,
     call_plan: HashMap<NodeId, CallPlan>,
     index_plan: HashMap<NodeId, IndexPlan>,
     match_plan: HashMap<NodeId, MatchPlan>,
@@ -882,6 +920,20 @@ impl TypeMap {
 
     pub fn lookup_def_type_id(&self, def: &Def) -> Option<TypeId> {
         self.def_type.get(def).copied()
+    }
+
+    pub(crate) fn lookup_nominal_key_for_type_id(&self, type_id: TypeId) -> Option<&NominalKey> {
+        self.nominal_keys.get(&type_id)
+    }
+
+    pub(crate) fn record_nominal_key_for_type_id(&mut self, type_id: TypeId, key: NominalKey) {
+        if let Some(existing) = self.nominal_keys.get_mut(&type_id) {
+            if let Some(selected) = select_more_concrete_nominal_key(existing, &key) {
+                *existing = selected;
+            }
+            return;
+        }
+        self.nominal_keys.insert(type_id, key);
     }
 
     pub fn lookup_call_plan(&self, node: NodeId) -> Option<CallPlan> {
@@ -959,4 +1011,29 @@ impl fmt::Display for TypeMap {
         }
         Ok(())
     }
+}
+
+fn select_more_concrete_nominal_key(
+    existing: &NominalKey,
+    candidate: &NominalKey,
+) -> Option<NominalKey> {
+    if existing == candidate {
+        return None;
+    }
+    if existing.def_id != candidate.def_id || existing.type_args.len() != candidate.type_args.len()
+    {
+        // Conflicting identities should be rare; keep first-wins to preserve
+        // deterministic behavior.
+        return None;
+    }
+    let existing_score = nominal_key_concreteness(existing);
+    let candidate_score = nominal_key_concreteness(candidate);
+    (candidate_score > existing_score).then(|| candidate.clone())
+}
+
+fn nominal_key_concreteness(key: &NominalKey) -> usize {
+    key.type_args
+        .iter()
+        .filter(|arg| !matches!(arg, Type::Var(_)))
+        .count()
 }

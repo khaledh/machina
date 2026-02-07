@@ -33,11 +33,13 @@ impl DefTableBuilder {
     }
 
     pub fn finish(self) -> (DefTable, NodeDefLookup) {
+        let node_def = self.node_def;
         (
-            DefTable { defs: self.defs },
-            NodeDefLookup {
-                node_def: self.node_def,
+            DefTable {
+                defs: self.defs,
+                node_def: node_def.clone(),
             },
+            NodeDefLookup { node_def },
         )
     }
 }
@@ -47,15 +49,23 @@ impl DefTableBuilder {
 #[derive(Debug, Clone)]
 pub struct DefTable {
     defs: Vec<Def>,
+    node_def: HashMap<NodeId, DefId>,
 }
 
 impl DefTable {
     pub fn new(defs: Vec<Def>) -> Self {
-        Self { defs }
+        Self {
+            defs,
+            node_def: HashMap::new(),
+        }
     }
 
     pub fn lookup_def(&self, def_id: DefId) -> Option<&Def> {
         self.defs.get(def_id.0 as usize)
+    }
+
+    pub fn lookup_node_def_id(&self, node_id: NodeId) -> Option<DefId> {
+        self.node_def.get(&node_id).copied()
     }
 
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {

@@ -8,8 +8,12 @@ use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
+use crate::typecheck::nominal::NominalKey;
+use crate::typecheck::nominal::TypeView;
 use crate::typecheck::type_map::{TypeMap, resolve_type_expr};
+use crate::typecheck::type_view::TypeViewResolver;
 use crate::types::Type;
+use crate::types::{EnumVariant, StructField};
 
 /// Tracks drop-glue functions needed for recursive heap elements.
 ///
@@ -19,9 +23,9 @@ use crate::types::Type;
 /// inlining infinitely.
 pub(super) struct DropGlueRegistry {
     next_def: u32,
-    defs: HashMap<DefId, DefId>,
-    tys: HashMap<DefId, Type>,
-    full_tys: HashMap<DefId, Type>,
+    defs: HashMap<NominalKey, DefId>,
+    tys: HashMap<NominalKey, Type>,
+    full_tys: HashMap<NominalKey, Type>,
 }
 
 impl DropGlueRegistry {
@@ -36,24 +40,31 @@ impl DropGlueRegistry {
 
     pub(super) fn from_module(def_table: &DefTable, module: &sem::Module) -> Self {
         let mut full_tys = HashMap::new();
+        let mut view_resolver = TypeViewResolver::new(def_table, module);
         for type_def in module.type_defs() {
             if !type_def.type_params.is_empty() {
                 // Generic type defs are instantiated on demand.
                 continue;
             }
-            let type_expr = res::TypeExpr {
-                id: type_def.id,
-                kind: res::TypeExprKind::Named {
-                    ident: type_def.name.clone(),
-                    def_id: type_def.def_id,
-                    type_args: Vec::new(),
-                },
-                span: type_def.span,
-            };
-            let ty = resolve_type_expr(def_table, module, &type_expr).unwrap_or_else(|err| {
-                panic!("backend drop glue type def {}: {:?}", type_def.name, err)
-            });
-            full_tys.insert(type_def.def_id, ty);
+            let key = NominalKey::new(type_def.def_id, Vec::new());
+            let ty = view_resolver
+                .view_of_key(&key)
+                .map(type_from_view)
+                .or_else(|| {
+                    // Keep fallback behavior for non-nominal aliases.
+                    let type_expr = res::TypeExpr {
+                        id: type_def.id,
+                        kind: res::TypeExprKind::Named {
+                            ident: type_def.name.clone(),
+                            def_id: type_def.def_id,
+                            type_args: Vec::new(),
+                        },
+                        span: type_def.span,
+                    };
+                    resolve_type_expr(def_table, module, &type_expr).ok()
+                })
+                .unwrap_or_else(|| panic!("backend drop glue type def {}", type_def.name));
+            full_tys.insert(key, ty);
         }
         Self {
             next_def: def_table.next_def_id().0,
@@ -63,25 +74,23 @@ impl DropGlueRegistry {
         }
     }
 
-    pub(super) fn def_id_for(&mut self, name: &str, ty: &Type, def_table: &DefTable) -> DefId {
-        let type_def_id = def_table
-            .lookup_type_def_id(name)
-            .unwrap_or_else(|| panic!("backend drop glue missing type def for {}", name));
+    pub(super) fn def_id_for(&mut self, ty: &Type, type_map: &TypeMap) -> DefId {
+        let nominal_key = nominal_key_for_type(ty, type_map);
 
-        if let Some(def_id) = self.defs.get(&type_def_id).copied() {
+        if let Some(def_id) = self.defs.get(&nominal_key).copied() {
             return def_id;
         }
 
         let def_id = DefId(self.next_def);
         self.next_def += 1;
-        self.defs.insert(type_def_id, def_id);
+        self.defs.insert(nominal_key.clone(), def_id);
 
         let full_ty = self
             .full_tys
-            .get(&type_def_id)
+            .get(&nominal_key)
             .cloned()
             .unwrap_or_else(|| ty.clone());
-        self.tys.insert(type_def_id, full_ty);
+        self.tys.insert(nominal_key, full_ty);
 
         def_id
     }
@@ -95,16 +104,23 @@ impl DropGlueRegistry {
     ) -> Result<Vec<LoweredFunction>, LowerToIrError> {
         let mut funcs = Vec::new();
         let empty_plans: HashMap<NodeId, sem::LoweringPlan> = HashMap::new();
-        let mut pending: Vec<(DefId, Type)> = self.tys.drain().collect();
-        while let Some((type_def_id, ty)) = pending.pop() {
+        let mut pending: Vec<(NominalKey, Type)> = self.tys.drain().collect();
+        while let Some((nominal_key, ty)) = pending.pop() {
             let def_id =
-                self.defs.get(&type_def_id).copied().unwrap_or_else(|| {
-                    panic!("backend drop glue missing def for {:?}", type_def_id)
+                self.defs.get(&nominal_key).copied().unwrap_or_else(|| {
+                    panic!("backend drop glue missing def for {:?}", nominal_key)
                 });
-            let type_def = def_table
-                .lookup_def(type_def_id)
-                .unwrap_or_else(|| panic!("backend drop glue missing type def {:?}", type_def_id));
-            let func_name = format!("__drop_{}", type_def.name);
+            let type_def = def_table.lookup_def(nominal_key.def_id).unwrap_or_else(|| {
+                panic!(
+                    "backend drop glue missing type def {:?}",
+                    nominal_key.def_id
+                )
+            });
+            let func_name = if nominal_key.type_args.is_empty() {
+                format!("__drop_{}", type_def.name)
+            } else {
+                format!("__drop_{}${}", type_def.name, def_id.0)
+            };
             let mut lowerer = FuncLowerer::new_drop_glue(
                 def_id,
                 func_name,
@@ -139,4 +155,42 @@ impl DropGlueRegistry {
 
         Ok(funcs)
     }
+}
+
+fn type_from_view(view: TypeView) -> Type {
+    match view {
+        TypeView::Struct(struct_view) => Type::Struct {
+            name: struct_view.name,
+            fields: struct_view
+                .fields
+                .into_iter()
+                .map(|field| StructField {
+                    name: field.name,
+                    ty: field.ty,
+                })
+                .collect(),
+        },
+        TypeView::Enum(enum_view) => Type::Enum {
+            name: enum_view.name,
+            variants: enum_view
+                .variants
+                .into_iter()
+                .map(|variant| EnumVariant {
+                    name: variant.name,
+                    payload: variant.payload,
+                })
+                .collect(),
+        },
+    }
+}
+
+fn nominal_key_for_type(ty: &Type, type_map: &TypeMap) -> NominalKey {
+    let type_id = type_map
+        .type_table()
+        .lookup_id(ty)
+        .unwrap_or_else(|| panic!("backend drop glue missing type id for {:?}", ty));
+    type_map
+        .lookup_nominal_key_for_type_id(type_id)
+        .cloned()
+        .unwrap_or_else(|| panic!("backend drop glue missing nominal key for {:?}", ty))
 }

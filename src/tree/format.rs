@@ -440,12 +440,13 @@ impl MatchPattern {
                 }
             }
             MatchPattern::EnumVariant {
+                id,
                 enum_name,
                 variant_name,
                 bindings,
                 ..
             } => {
-                writeln!(f, "{}EnumVariant", pad)?;
+                writeln!(f, "{}EnumVariant [{}]", pad, id)?;
                 let pad1 = indent(level + 1);
                 if let Some(enum_name) = enum_name {
                     writeln!(f, "{}Enum Name: {}", pad1, enum_name)?;

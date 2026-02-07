@@ -587,7 +587,7 @@ impl SymbolResolver {
         }
     }
 
-    fn check_match_pattern(&mut self, pattern: &MatchPattern, arm_id: NodeId) {
+    fn check_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
             MatchPattern::Wildcard { .. } => {}
             MatchPattern::BoolLit { .. } => {}
@@ -599,10 +599,11 @@ impl SymbolResolver {
             }
             MatchPattern::Tuple { patterns, .. } => {
                 for pattern in patterns {
-                    self.check_match_pattern(pattern, arm_id);
+                    self.check_match_pattern(pattern);
                 }
             }
             MatchPattern::EnumVariant {
+                id,
                 enum_name,
                 type_args,
                 bindings,
@@ -623,7 +624,7 @@ impl SymbolResolver {
                             .push(ResolveError::EnumUndefined(enum_name.clone(), *span));
                         return;
                     };
-                    self.def_table_builder.record_use(arm_id, *def_id);
+                    self.def_table_builder.record_use(*id, *def_id);
                 }
 
                 // Note: We delegate to the type checker to validate the variant.
@@ -1094,7 +1095,7 @@ impl Visitor<()> for SymbolResolver {
                 for arm in arms {
                     // enter a new scope for the arm body
                     self.with_scope(|resolver| {
-                        resolver.check_match_pattern(&arm.pattern, arm.id);
+                        resolver.check_match_pattern(&arm.pattern);
                         resolver.visit_expr(&arm.body);
                     });
                 }

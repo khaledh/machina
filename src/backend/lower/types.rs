@@ -1,8 +1,12 @@
 //! Type lowering from semantic types to SSA IR types.
 
 use crate::ir::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
+use crate::resolve::DefTable;
+use crate::tree::semantic as sem;
+use crate::typecheck::nominal::{NominalKey, TypeView};
 use crate::typecheck::type_map::TypeMap;
-use crate::types::{FnParamMode, Type, TypeId};
+use crate::typecheck::type_view::TypeViewResolver;
+use crate::types::{EnumVariant, FnParamMode, StructField, Type, TypeId};
 use std::collections::HashMap;
 
 /// Lowers type-checker types to SSA IR types with caching.
@@ -13,6 +17,7 @@ use std::collections::HashMap;
 /// - `type_cache_by_kind`: Maps type structures to SSA type IDs (for structural dedup)
 pub(super) struct TypeLowerer<'a> {
     type_map: &'a TypeMap,
+    type_view_resolver: Option<TypeViewResolver<'a, sem::Module>>,
     pub(super) ir_type_cache: IrTypeCache,
     by_type_id: HashMap<TypeId, IrTypeId>,
     by_type: HashMap<Type, IrTypeId>,
@@ -23,8 +28,21 @@ pub(super) struct TypeLowerer<'a> {
 
 impl<'a> TypeLowerer<'a> {
     pub(super) fn new(type_map: &'a TypeMap) -> Self {
+        Self::new_with_type_defs(type_map, None, None)
+    }
+
+    pub(super) fn new_with_type_defs(
+        type_map: &'a TypeMap,
+        def_table: Option<&'a DefTable>,
+        module: Option<&'a sem::Module>,
+    ) -> Self {
         Self {
             type_map,
+            type_view_resolver: module.map(|module| {
+                let def_table = def_table
+                    .expect("backend type lowering: def table is required when module is provided");
+                TypeViewResolver::new(def_table, module)
+            }),
             ir_type_cache: IrTypeCache::new(),
             by_type_id: HashMap::new(),
             by_type: HashMap::new(),
@@ -167,7 +185,9 @@ impl<'a> TypeLowerer<'a> {
                 let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
                 self.by_type.insert(ty.clone(), placeholder);
 
-                let fields = fields
+                let fields = self
+                    .struct_fields_from_view(ty)
+                    .unwrap_or_else(|| fields.clone())
                     .iter()
                     .map(|field| IrStructField {
                         name: field.name.clone(),
@@ -273,16 +293,19 @@ impl<'a> TypeLowerer<'a> {
             return self.enum_layouts.get(&ty_id).unwrap();
         }
 
-        let enum_ty = self.type_map.type_table().get(ty_id);
-        let Type::Enum { name: _, variants } = enum_ty else {
+        let enum_ty = self.type_map.type_table().get(ty_id).clone();
+        let Type::Enum { name: _, variants } = &enum_ty else {
             panic!(
                 "backend type lowering: expected enum type, found {:?}",
                 enum_ty
             );
         };
 
-        // Clone variants to avoid holding a borrow while we mutate self
-        let variants = variants.clone();
+        // Resolve variants from canonical type-def views when available, then
+        // fall back to the enum payload embedded in the semantic type.
+        let variants = self
+            .enum_variants_from_view(&enum_ty)
+            .unwrap_or_else(|| variants.clone());
 
         let tag_ty = self.lower_type(&Type::Int {
             signed: false,
@@ -366,6 +389,55 @@ impl<'a> TypeLowerer<'a> {
         };
         self.enum_layouts.insert(ty_id, layout);
         self.enum_layouts.get(&ty_id).unwrap()
+    }
+
+    fn struct_fields_from_view(&mut self, ty: &Type) -> Option<Vec<StructField>> {
+        let key = self.nominal_key_for_type(ty)?;
+        let view = self.type_view_resolver.as_mut()?.view_of_key(&key)?;
+        let TypeView::Struct(struct_view) = view else {
+            return None;
+        };
+        if struct_view.fields.is_empty() {
+            return None;
+        }
+        Some(
+            struct_view
+                .fields
+                .into_iter()
+                .map(|field| StructField {
+                    name: field.name,
+                    ty: field.ty,
+                })
+                .collect(),
+        )
+    }
+
+    fn enum_variants_from_view(&mut self, enum_ty: &Type) -> Option<Vec<EnumVariant>> {
+        let key = self.nominal_key_for_type(enum_ty)?;
+        let view = self.type_view_resolver.as_mut()?.view_of_key(&key)?;
+        let TypeView::Enum(enum_view) = view else {
+            return None;
+        };
+        if enum_view.variants.is_empty() {
+            return None;
+        }
+        Some(
+            enum_view
+                .variants
+                .into_iter()
+                .map(|variant| EnumVariant {
+                    name: variant.name,
+                    payload: variant.payload,
+                })
+                .collect(),
+        )
+    }
+
+    fn nominal_key_for_type(&self, ty: &Type) -> Option<NominalKey> {
+        let type_id = self.type_map.type_table().lookup_id(ty)?;
+        self.type_map
+            .lookup_nominal_key_for_type_id(type_id)
+            .cloned()
     }
 }
 
