@@ -411,6 +411,7 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
     TypeExpr {
         id: type_expr.id,
         kind: match &type_expr.kind {
+            TypeExprKind::Infer => TypeExprKind::Infer,
             TypeExprKind::Named {
                 ident,
                 def_id,

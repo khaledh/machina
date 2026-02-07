@@ -170,6 +170,7 @@ fn resolve_type_expr_impl(
     in_progress: &mut HashSet<DefId>,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
+        res::TypeExprKind::Infer => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
         res::TypeExprKind::Named {
             def_id,
             type_args: type_arg_exprs,

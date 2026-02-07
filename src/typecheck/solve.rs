@@ -82,13 +82,36 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let index_nodes = collect_index_nodes(&constrain.expr_obligations);
     let enum_payload_nodes = collect_enum_payload_nodes(&constrain.expr_obligations);
 
-    // Stage D: call obligations (overload/generic resolution).
-    let (mut call_errors, resolved_call_defs) = check_call_obligations(
-        &constrain.call_obligations,
-        &mut unifier,
-        &engine.env().func_sigs,
-        &engine.env().method_sigs,
-    );
+    // Stage D: call obligations (overload/generic resolution). Dynamic calls
+    // may need a second pass when callee function types become known only
+    // after other call constraints are solved.
+    let mut call_errors = Vec::new();
+    let mut resolved_call_defs = HashMap::new();
+    let mut pending_calls = constrain.call_obligations.clone();
+    while !pending_calls.is_empty() {
+        let prior_pending = pending_calls.len();
+        let (mut round_errors, round_resolved, deferred) = check_call_obligations(
+            &pending_calls,
+            &mut unifier,
+            &engine.env().func_sigs,
+            &engine.env().method_sigs,
+        );
+        call_errors.append(&mut round_errors);
+        resolved_call_defs.extend(round_resolved);
+
+        if deferred.is_empty() {
+            break;
+        }
+
+        if deferred.len() == prior_pending {
+            // No progress this round: keep legacy behavior for remaining
+            // unresolved dynamic calls and let other obligations/late checks
+            // decide whether diagnostics are needed.
+            break;
+        }
+
+        pending_calls = deferred;
+    }
 
     // Stage E: final assignability check (diagnostics-producing).
     for constraint in constrain
@@ -313,11 +336,16 @@ fn check_call_obligations(
     unifier: &mut TcUnifier,
     func_sigs: &HashMap<String, Vec<CollectedCallableSig>>,
     method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
-) -> (Vec<TypeCheckError>, HashMap<NodeId, DefId>) {
+) -> (
+    Vec<TypeCheckError>,
+    HashMap<NodeId, DefId>,
+    Vec<CallObligation>,
+) {
     let mut errors = Vec::new();
     let mut resolved_call_defs = HashMap::new();
+    let mut deferred = Vec::new();
     for obligation in obligations {
-        if let CallCallee::Dynamic { .. } = &obligation.callee {
+        if let CallCallee::Dynamic { expr_id } = &obligation.callee {
             if let Some(callee_term) = &obligation.callee_ty {
                 let callee_ty = resolve_term(callee_term, unifier);
                 if let Type::Fn { params, ret_ty } = callee_ty {
@@ -358,7 +386,19 @@ fn check_call_obligations(
                     if let Err(err) = unifier.unify(&obligation.ret_ty, &ret_ty) {
                         errors.push(unify_error_to_diag(err, obligation.span));
                     }
+                } else if is_unresolved(&callee_ty) {
+                    deferred.push(obligation.clone());
+                } else {
+                    errors.push(
+                        TypeCheckErrorKind::OverloadNoMatch(
+                            format!("<dynamic:{expr_id}>"),
+                            obligation.span,
+                        )
+                        .into(),
+                    );
                 }
+            } else {
+                deferred.push(obligation.clone());
             }
             continue;
         }
@@ -387,7 +427,7 @@ fn check_call_obligations(
             let name = match &obligation.callee {
                 CallCallee::NamedFunction { name, .. } => name.clone(),
                 CallCallee::Method { name } => name.clone(),
-                CallCallee::Dynamic { expr_id } => format!("<dynamic:{expr_id}>"),
+                CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
             errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
             continue;
@@ -447,12 +487,12 @@ fn check_call_obligations(
             let name = match &obligation.callee {
                 CallCallee::NamedFunction { name, .. } => name.clone(),
                 CallCallee::Method { name } => name.clone(),
-                CallCallee::Dynamic { expr_id } => format!("<dynamic:{expr_id}>"),
+                CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
             errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
         }
     }
-    (errors, resolved_call_defs)
+    (errors, resolved_call_defs, deferred)
 }
 
 fn named_call_candidates<'a>(

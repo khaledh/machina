@@ -131,6 +131,7 @@ impl<'a> ValueChecker<'a> {
     fn check_type_expr(&mut self, ty: &TypeExpr) {
         self.run_type_rules(ty);
         match &ty.kind {
+            TypeExprKind::Infer => {}
             TypeExprKind::Refined { base_ty_expr, .. } => {
                 self.check_type_expr(base_ty_expr);
             }

@@ -215,6 +215,7 @@ pub fn walk_enum_def_variant<V: Visitor<D, T> + ?Sized, D, T>(
 
 pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &TypeExpr<D>) {
     match &type_expr.kind {
+        TypeExprKind::Infer => {}
         TypeExprKind::Named { type_args, .. } => {
             for arg in type_args {
                 v.visit_type_expr(arg);

@@ -220,6 +220,13 @@ struct ControlContext {
     loop_depth: usize,
 }
 
+#[derive(Debug, Clone)]
+struct ClosureSigInfo {
+    fn_ty: Type,
+    param_tys: Vec<Type>,
+    ret_ty: Type,
+}
+
 struct ConstraintCollector<'a> {
     ctx: &'a crate::context::ResolvedContext,
     type_defs: &'a HashMap<String, Type>,
@@ -964,11 +971,11 @@ impl<'a> ConstraintCollector<'a> {
                 body,
                 ..
             } => {
-                let fn_ty = self.collect_closure_signature(params, return_ty);
-                if let Some(fn_ty) = fn_ty.clone() {
+                let closure_sig = self.collect_closure_signature(params, return_ty);
+                if let Some(sig) = closure_sig.as_ref() {
                     self.push_eq(
                         expr_ty.clone(),
-                        fn_ty,
+                        sig.fn_ty.clone(),
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 }
@@ -979,18 +986,25 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Decl(*def_id, expr.span),
                 );
 
-                let return_term = fn_ty
+                let return_term = closure_sig
                     .as_ref()
-                    .and_then(|ty| match ty {
-                        Type::Fn { ret_ty, .. } => Some((**ret_ty).clone()),
-                        _ => None,
-                    })
+                    .map(|sig| sig.ret_ty.clone())
                     .unwrap_or_else(|| self.fresh_var_term());
 
                 self.enter_callable(*def_id, return_term.clone(), expr.span);
-                for param in params {
+                for (index, param) in params.iter().enumerate() {
                     let param_term = self.def_term(param.def_id);
-                    if let Ok(param_ty) = self.resolve_type_in_scope(&param.typ) {
+                    let sig_param_ty = closure_sig
+                        .as_ref()
+                        .and_then(|sig| sig.param_tys.get(index))
+                        .cloned();
+                    if let Some(param_ty) = sig_param_ty {
+                        self.push_eq(
+                            param_term.clone(),
+                            param_ty,
+                            ConstraintReason::Decl(param.def_id, param.span),
+                        );
+                    } else if let Ok(param_ty) = self.resolve_type_in_scope(&param.typ) {
                         self.push_eq(
                             param_term.clone(),
                             param_ty,
@@ -1481,12 +1495,39 @@ impl<'a> ConstraintCollector<'a> {
     }
 
     fn collect_closure_signature(
-        &self,
+        &mut self,
         params: &[crate::tree::resolved::Param],
         return_ty: &TypeExpr,
-    ) -> Option<Type> {
-        let params = self.resolve_fn_params(params)?;
-        self.resolve_fn_type(params, return_ty)
+    ) -> Option<ClosureSigInfo> {
+        let mut fn_params = Vec::with_capacity(params.len());
+        let mut param_tys = Vec::with_capacity(params.len());
+        for param in params {
+            let param_ty = if is_infer_type_expr(&param.typ) {
+                self.fresh_var_term()
+            } else {
+                self.resolve_type_in_scope(&param.typ).ok()?
+            };
+            fn_params.push(crate::types::FnParam {
+                mode: map_param_mode(param.mode.clone()),
+                ty: param_ty.clone(),
+            });
+            param_tys.push(param_ty);
+        }
+
+        let ret_ty = if is_infer_type_expr(return_ty) {
+            self.fresh_var_term()
+        } else {
+            self.resolve_type_in_scope(return_ty).ok()?
+        };
+        let fn_ty = Type::Fn {
+            params: fn_params,
+            ret_ty: Box::new(ret_ty.clone()),
+        };
+        Some(ClosureSigInfo {
+            fn_ty,
+            param_tys,
+            ret_ty,
+        })
     }
 
     fn collect_function_signature(&self, sig: &crate::tree::resolved::FunctionSig) -> Option<Type> {
@@ -1609,6 +1650,10 @@ fn nominal_base_name(ty: &Type) -> Option<&str> {
         _ => return None,
     };
     Some(name.split('<').next().unwrap_or(name).trim())
+}
+
+fn is_infer_type_expr(type_expr: &TypeExpr) -> bool {
+    matches!(type_expr.kind, crate::tree::resolved::TypeExprKind::Infer)
 }
 
 /// Pass 2: collect typing constraints from AST traversal.

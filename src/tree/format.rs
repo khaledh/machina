@@ -284,6 +284,9 @@ impl<T> fmt::Display for model::TypeExpr<T> {
 impl<T> fmt::Display for model::TypeExprKind<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            model::TypeExprKind::Infer => {
+                write!(f, "Infer")?;
+            }
             model::TypeExprKind::Named {
                 ident, type_args, ..
             } => {

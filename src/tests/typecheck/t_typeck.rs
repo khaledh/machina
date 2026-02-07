@@ -1014,6 +1014,64 @@ fn test_method_call_arg_type_mismatch() {
 }
 
 #[test]
+fn test_closure_infers_param_and_return_types_from_call_site() {
+    let source = r#"
+        fn test() -> u64 {
+            let add = |x| x + 1;
+            add(41)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_closure_infers_return_type_without_annotation() {
+    let source = r#"
+        fn test() -> u64 {
+            let forty_two = || 42;
+            forty_two()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_higher_order_typeless_closure_infers_through_call() {
+    let source = r#"
+        fn test() -> u64 {
+            let apply = |f, x| f(x);
+            apply(|n| n + 1, 41)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_higher_order_typeless_closure_propagates_return_mismatch() {
+    let source = r#"
+        fn test() -> u64 {
+            let apply = |f, x| f(x);
+            let y: bool = apply(|n| n + 1, 41);
+            if y { 1 } else { 0 }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(!errors.is_empty(), "Expected at least one error");
+        match errors[0].kind() {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {}
+            e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
+        }
+    }
+}
+
+#[test]
 fn test_enum_variant_payload_ok() {
     let source = r#"
         type Pair = A(u64) | B(u64)

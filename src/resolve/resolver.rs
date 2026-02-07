@@ -763,6 +763,7 @@ impl Visitor<()> for SymbolResolver {
 
     fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
+            TypeExprKind::Infer => {}
             TypeExprKind::Named {
                 ident: name,
                 type_args,

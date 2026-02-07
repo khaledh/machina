@@ -1513,8 +1513,8 @@ fn test_parse_closure_expr_empty_params() {
             assert!(captures.is_empty());
             assert!(params.is_empty());
             match &return_ty.kind {
-                TypeExprKind::Named { ident: ty, .. } => assert_eq!(ty, "()"),
-                _ => panic!("Expected named return type"),
+                TypeExprKind::Infer => {}
+                _ => panic!("Expected inferred return type"),
             }
             assert!(matches!(body.kind, ExprKind::Block { .. }));
         }

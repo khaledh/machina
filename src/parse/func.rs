@@ -432,6 +432,7 @@ impl<'a> Parser<'a> {
     /// violate the parser's uniqueness invariant, so we clone with new IDs.
     fn clone_type_expr_with_new_ids(&mut self, ty: &TypeExpr) -> TypeExpr {
         let kind = match &ty.kind {
+            TypeExprKind::Infer => TypeExprKind::Infer,
             TypeExprKind::Named {
                 ident,
                 def_id,
@@ -516,13 +517,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Vec::new()
             } else {
-                let params = self.parse_list(TK::Comma, TK::Pipe, |parser| parser.parse_param())?;
+                let params =
+                    self.parse_list(TK::Comma, TK::Pipe, |parser| parser.parse_closure_param())?;
                 self.consume(&TK::Pipe)?;
                 params
             }
         };
 
-        let return_ty = self.parse_ret_type()?;
+        let return_ty = self.parse_closure_ret_type()?;
 
         let mut body = self.parse_expr(0)?;
         if !matches!(body.kind, ExprKind::Block { .. }) {
@@ -605,6 +607,27 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_closure_param(&mut self) -> Result<Param, ParseError> {
+        let marker = self.mark();
+        let mode = self.parse_param_mode();
+        let name = self.parse_ident()?;
+        let typ = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            self.parse_type_expr()?
+        } else {
+            self.infer_type_expr(self.close(self.mark()))
+        };
+
+        Ok(Param {
+            id: self.id_gen.new_id(),
+            ident: name,
+            def_id: (),
+            typ,
+            mode,
+            span: self.close(marker),
+        })
+    }
+
     pub(super) fn parse_param_mode(&mut self) -> ParamMode {
         match &self.curr_token.kind {
             TK::KwInOut => {
@@ -639,5 +662,23 @@ impl<'a> Parser<'a> {
                 span: self.close(self.mark()),
             },
         })
+    }
+
+    fn parse_closure_ret_type(&mut self) -> Result<TypeExpr, ParseError> {
+        Ok(match self.curr_token.kind {
+            TK::Arrow => {
+                self.advance();
+                self.parse_type_expr()?
+            }
+            _ => self.infer_type_expr(self.close(self.mark())),
+        })
+    }
+
+    fn infer_type_expr(&mut self, span: Span) -> TypeExpr {
+        TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Infer,
+            span,
+        }
     }
 }

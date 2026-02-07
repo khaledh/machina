@@ -530,6 +530,7 @@ fn reseed_type_def(type_def: &mut res::TypeDef, node_id_gen: &mut NodeIdGen) {
 fn reseed_type_expr(type_expr: &mut res::TypeExpr, node_id_gen: &mut NodeIdGen) {
     type_expr.id = node_id_gen.new_id();
     match &mut type_expr.kind {
+        res::TypeExprKind::Infer => {}
         res::TypeExprKind::Named { type_args, .. } => {
             for arg in type_args {
                 reseed_type_expr(arg, node_id_gen);

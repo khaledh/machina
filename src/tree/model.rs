@@ -263,6 +263,7 @@ pub enum RefinementKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExprKind<D> {
+    Infer,
     Named {
         ident: String,
         def_id: D,
