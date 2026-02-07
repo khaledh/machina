@@ -34,6 +34,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.coerce_value_to_type(value, value_ty, &ret_ty)
     }
 
+    /// Coerces a value from one semantic type into another when assignable.
+    ///
+    /// This is primarily used at control-flow joins where arm/body values may
+    /// be narrower than the join expression type (for example, `T` into `T | E`).
+    pub(super) fn coerce_value(&mut self, value: ValueId, from_ty: &Type, to_ty: &Type) -> ValueId {
+        self.coerce_value_to_type(value, from_ty, to_ty)
+    }
+
     fn coerce_value_to_type(&mut self, value: ValueId, from_ty: &Type, to_ty: &Type) -> ValueId {
         if from_ty == to_ty {
             return value;

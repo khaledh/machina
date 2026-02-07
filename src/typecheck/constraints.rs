@@ -893,14 +893,14 @@ impl<'a> ConstraintCollector<'a> {
                 self.collect_expr(cond, Some(Type::Bool));
                 let then_ty = self.collect_expr(then_body, expected.clone());
                 let else_ty = self.collect_expr(else_body, expected.clone());
-                self.push_eq(
+                self.push_assignable(
                     then_ty.clone(),
-                    else_ty,
+                    expr_ty.clone(),
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
-                self.push_eq(
+                self.push_assignable(
+                    else_ty,
                     expr_ty.clone(),
-                    then_ty,
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
             }
@@ -949,11 +949,11 @@ impl<'a> ConstraintCollector<'a> {
                             pattern: arm.pattern.clone(),
                             scrutinee_ty: scrutinee_ty.clone(),
                             span: arm.span,
-                        });
+                    });
                     let arm_ty = self.collect_match_arm(arm, expected.clone());
-                    self.push_eq(
-                        expr_ty.clone(),
+                    self.push_assignable(
                         arm_ty,
+                        expr_ty.clone(),
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 }

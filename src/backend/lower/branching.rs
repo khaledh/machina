@@ -61,6 +61,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 then_body,
                 else_body,
             } => {
+                let join_sem_ty = self.type_map.type_table().get(expr.ty).clone();
                 // Lower the condition in the current block.
                 let cond_value = self.lower_linear_expr_value(cond)?;
 
@@ -83,8 +84,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let mut then_returned = false;
                 match self.lower_branching_value_expr(then_body)? {
                     BranchResult::Value(value) => {
+                        let then_sem_ty = self.type_map.type_table().get(then_body.ty).clone();
+                        let coerced = self.coerce_value(value, &then_sem_ty, &join_sem_ty);
                         // Cursor is at end of then branch; emit branch to join.
-                        join.emit_branch(self, value, expr.span)?;
+                        join.emit_branch(self, coerced, expr.span)?;
                     }
                     BranchResult::Return => {
                         then_returned = true;
@@ -97,8 +100,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let mut else_returned = false;
                 match self.lower_branching_value_expr(else_body)? {
                     BranchResult::Value(value) => {
+                        let else_sem_ty = self.type_map.type_table().get(else_body.ty).clone();
+                        let coerced = self.coerce_value(value, &else_sem_ty, &join_sem_ty);
                         // Cursor is at end of else branch; emit branch to join.
-                        join.emit_branch(self, value, expr.span)?;
+                        join.emit_branch(self, coerced, expr.span)?;
                     }
                     BranchResult::Return => {
                         else_returned = true;

@@ -2124,6 +2124,40 @@ fn test_error_union_return_type_typechecks() {
 }
 
 #[test]
+fn test_if_join_lifts_success_into_error_union() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn choose(flag: bool, value: u64) -> u64 | IoError {
+            if flag {
+                value
+            } else {
+                IoError { code: 7 }
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_match_join_lifts_success_into_error_union() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type Tag = A | B
+
+        fn choose(tag: Tag, value: u64) -> u64 | IoError {
+            match tag {
+                Tag::A => value,
+                Tag::B => IoError { code: 9 },
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_tuple_typed_binding_pattern_typechecks() {
     let source = r#"
         fn test(t: (u64, bool)) -> u64 {

@@ -107,6 +107,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         self.emit_decision_node(tree, entry_bb, &arm_blocks)?;
 
         let join = self.lowerer.begin_join(self.expr);
+        let join_sem_ty = self.lowerer.type_map.type_table().get(self.expr.ty).clone();
 
         // Lower each reachable arm and branch into the join.
         let mut returned = vec![false; arms.len()];
@@ -122,7 +123,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
             match self.lowerer.lower_branching_value_expr(&arm.body)? {
                 BranchResult::Value(value) => {
-                    join.emit_branch(self.lowerer, value, arm.body.span)?;
+                    let arm_sem_ty = self.lowerer.type_map.type_table().get(arm.body.ty).clone();
+                    let coerced = self.lowerer.coerce_value(value, &arm_sem_ty, &join_sem_ty);
+                    join.emit_branch(self.lowerer, coerced, arm.body.span)?;
                 }
                 BranchResult::Return => {
                     returned[arm_index] = true;
@@ -204,6 +207,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         }
 
         let join = self.lowerer.begin_join(self.expr);
+        let join_sem_ty = self.lowerer.type_map.type_table().get(self.expr.ty).clone();
 
         // Lower each reachable arm and branch into the join.
         let mut returned = vec![false; arms.len()];
@@ -219,7 +223,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
             match self.lowerer.lower_branching_value_expr(&arm.body)? {
                 BranchResult::Value(value) => {
-                    join.emit_branch(self.lowerer, value, arm.body.span)?;
+                    let arm_sem_ty = self.lowerer.type_map.type_table().get(arm.body.ty).clone();
+                    let coerced = self.lowerer.coerce_value(value, &arm_sem_ty, &join_sem_ty);
+                    join.emit_branch(self.lowerer, coerced, arm.body.span)?;
                 }
                 BranchResult::Return => {
                     returned[arm_index] = true;
