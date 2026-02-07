@@ -150,6 +150,9 @@ pub enum TypeCheckErrorKind {
     #[error("Property {0} accessor already defined")]
     PropertyAccessorDuplicate(String, Span),
 
+    #[error("Property {0} cannot be called as a method")]
+    PropertyCalledAsMethod(String, Span),
+
     #[error("Property {0} conflicts with struct field {1}")]
     PropertyConflictsWithField(String, String, Span),
 
@@ -170,6 +173,24 @@ pub enum TypeCheckErrorKind {
 
     #[error("Trait method signature mismatch for {0} :: {1}::{2}")]
     TraitMethodSignatureMismatch(String, String, String, Span),
+
+    #[error("Duplicate trait property {1} in trait {0}")]
+    TraitPropertyDuplicate(String, String, Span),
+
+    #[error("Property {2} in {0} :: {1} is not declared in trait")]
+    TraitPropertyNotInTrait(String, String, String, Span),
+
+    #[error("Missing trait property implementation {2} in {0} :: {1}")]
+    TraitPropertyMissingImpl(String, String, String, Span),
+
+    #[error("Trait property type mismatch for {0} :: {1}.{2}: expected {3}, found {4}")]
+    TraitPropertyTypeMismatch(String, String, String, Type, Type, Span),
+
+    #[error("Missing required getter for trait property {2} in {0} :: {1}")]
+    TraitPropertyMissingGetter(String, String, String, Span),
+
+    #[error("Missing required setter for trait property {2} in {0} :: {1}")]
+    TraitPropertyMissingSetter(String, String, String, Span),
 
     #[error("Unknown enum type: {0}")]
     UnknownEnumType(String, Span),
@@ -306,6 +327,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::PropertySetterReturnType(_, _, span) => *span,
             TypeCheckErrorKind::PropertyAccessorTypeMismatch(_, _, _, span) => *span,
             TypeCheckErrorKind::PropertyAccessorDuplicate(_, span) => *span,
+            TypeCheckErrorKind::PropertyCalledAsMethod(_, span) => *span,
             TypeCheckErrorKind::PropertyConflictsWithField(_, _, span) => *span,
             TypeCheckErrorKind::TraitImplDuplicate(_, _, span) => *span,
             TypeCheckErrorKind::TraitMethodDuplicate(_, _, span) => *span,
@@ -313,6 +335,12 @@ impl TypeCheckError {
             TypeCheckErrorKind::TraitMethodImplDuplicate(_, _, _, span) => *span,
             TypeCheckErrorKind::TraitMethodMissingImpl(_, _, _, span) => *span,
             TypeCheckErrorKind::TraitMethodSignatureMismatch(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitPropertyDuplicate(_, _, span) => *span,
+            TypeCheckErrorKind::TraitPropertyNotInTrait(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitPropertyMissingImpl(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitPropertyTypeMismatch(_, _, _, _, _, span) => *span,
+            TypeCheckErrorKind::TraitPropertyMissingGetter(_, _, _, span) => *span,
+            TypeCheckErrorKind::TraitPropertyMissingSetter(_, _, _, span) => *span,
             TypeCheckErrorKind::UnknownEnumType(_, span) => *span,
             TypeCheckErrorKind::UnknownEnumVariant(_, _, span) => *span,
             TypeCheckErrorKind::InvalidStructUpdateTarget(_, span) => *span,

@@ -25,6 +25,10 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_trait_method(self, method)
     }
 
+    fn visit_trait_property(&mut self, property: &mut TraitProperty<D>) {
+        walk_trait_property(self, property)
+    }
+
     fn visit_struct_def_fields(&mut self, fields: &mut [StructDefField<D>]) {
         walk_struct_def_fields(self, fields)
     }
@@ -165,6 +169,9 @@ pub fn walk_trait_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, trait_def: 
     for method in &mut trait_def.methods {
         v.visit_trait_method(method);
     }
+    for property in &mut trait_def.properties {
+        v.visit_trait_property(property);
+    }
 }
 
 pub fn walk_trait_method<V: VisitorMut<D, T> + ?Sized, D, T>(
@@ -172,6 +179,13 @@ pub fn walk_trait_method<V: VisitorMut<D, T> + ?Sized, D, T>(
     method: &mut TraitMethod<D>,
 ) {
     v.visit_method_sig(&mut method.sig);
+}
+
+pub fn walk_trait_property<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    property: &mut TraitProperty<D>,
+) {
+    v.visit_type_expr(&mut property.ty);
 }
 
 pub fn walk_type_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_def: &mut TypeDef<D>) {

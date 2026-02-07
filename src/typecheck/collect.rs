@@ -21,7 +21,7 @@ use crate::tree::resolved::{
 };
 use crate::typecheck::engine::{
     CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitMethodSig,
-    CollectedTraitSig, TypecheckEngine,
+    CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
 };
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::type_map::{resolve_type_expr, resolve_type_expr_with_params};
@@ -178,6 +178,7 @@ fn collect_trait_sigs(
 ) {
     for trait_def in ctx.module.trait_defs() {
         let mut methods = HashMap::new();
+        let mut properties = HashMap::new();
 
         for method in &trait_def.methods {
             let Some(collected) = collect_trait_method_sig(ctx, &method.sig, errors) else {
@@ -196,11 +197,45 @@ fn collect_trait_sigs(
             }
         }
 
+        for property in &trait_def.properties {
+            let ty = match resolve_type_expr(&ctx.def_table, &ctx.module, &property.ty) {
+                Ok(ty) => ty,
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            };
+
+            if properties
+                .insert(
+                    property.name.clone(),
+                    CollectedTraitPropertySig {
+                        name: property.name.clone(),
+                        ty,
+                        has_get: property.has_get,
+                        has_set: property.has_set,
+                        span: property.span,
+                    },
+                )
+                .is_some()
+            {
+                errors.push(
+                    TypeCheckErrorKind::TraitPropertyDuplicate(
+                        trait_def.name.clone(),
+                        property.name.clone(),
+                        property.span,
+                    )
+                    .into(),
+                );
+            }
+        }
+
         trait_sigs.insert(
             trait_def.name.clone(),
             CollectedTraitSig {
                 def_id: trait_def.def_id,
                 methods,
+                properties,
                 span: trait_def.span,
             },
         );
@@ -250,6 +285,7 @@ fn collect_method_sigs(
 
     for method_block in ctx.module.method_blocks() {
         let mut implemented_trait_methods = HashSet::new();
+        let mut implemented_trait_properties = HashSet::new();
         let trait_contract = method_block
             .trait_name
             .as_ref()
@@ -288,6 +324,7 @@ fn collect_method_sigs(
                     method_def.span,
                 ),
             };
+            let accessor_kind = property_accessor_kind(&attrs);
 
             let mut collected = Vec::new();
             collect_callable_sig(
@@ -307,16 +344,20 @@ fn collect_method_sigs(
             if let (Some(trait_name), Some(contract)) =
                 (method_block.trait_name.as_ref(), trait_contract)
             {
-                validate_trait_method_impl(
-                    &method_block.type_name,
-                    trait_name,
-                    contract,
-                    &sig.name,
-                    &collected,
-                    span,
-                    &mut implemented_trait_methods,
-                    errors,
-                );
+                // Trait `prop` items are synthesized into getter/setter methods.
+                // Validate those against the trait property contract, not the method contract.
+                if accessor_kind.is_none() {
+                    validate_trait_method_impl(
+                        &method_block.type_name,
+                        trait_name,
+                        contract,
+                        &sig.name,
+                        &collected,
+                        span,
+                        &mut implemented_trait_methods,
+                        errors,
+                    );
+                }
             }
 
             method_sigs
@@ -326,7 +367,10 @@ fn collect_method_sigs(
                 .or_default()
                 .push(collected.clone());
 
-            if let Some(kind) = property_accessor_kind(&attrs) {
+            if let Some(kind) = accessor_kind {
+                if method_block.trait_name.is_some() {
+                    implemented_trait_properties.insert(sig.name.clone());
+                }
                 record_property_sig(
                     type_defs,
                     property_sigs,
@@ -338,6 +382,7 @@ fn collect_method_sigs(
                     &collected.params,
                     &collected.ret_ty,
                     span,
+                    method_block.trait_name.is_some(),
                     errors,
                 );
             }
@@ -346,6 +391,20 @@ fn collect_method_sigs(
         if let (Some(trait_name), Some(contract)) =
             (method_block.trait_name.as_ref(), trait_contract)
         {
+            for prop_name in &implemented_trait_properties {
+                if !contract.properties.contains_key(prop_name) {
+                    errors.push(
+                        TypeCheckErrorKind::TraitPropertyNotInTrait(
+                            method_block.type_name.clone(),
+                            trait_name.clone(),
+                            prop_name.clone(),
+                            method_block.span,
+                        )
+                        .into(),
+                    );
+                }
+            }
+
             for required in contract.methods.keys() {
                 if !implemented_trait_methods.contains(required) {
                     errors.push(
@@ -353,6 +412,61 @@ fn collect_method_sigs(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             required.clone(),
+                            method_block.span,
+                        )
+                        .into(),
+                    );
+                }
+            }
+
+            for (prop_name, required) in &contract.properties {
+                let impl_prop = property_sigs
+                    .get(&method_block.type_name)
+                    .and_then(|by_name| by_name.get(prop_name));
+
+                let Some(impl_prop) = impl_prop else {
+                    errors.push(
+                        TypeCheckErrorKind::TraitPropertyMissingImpl(
+                            method_block.type_name.clone(),
+                            trait_name.clone(),
+                            prop_name.clone(),
+                            method_block.span,
+                        )
+                        .into(),
+                    );
+                    continue;
+                };
+
+                if impl_prop.ty != required.ty {
+                    errors.push(
+                        TypeCheckErrorKind::TraitPropertyTypeMismatch(
+                            method_block.type_name.clone(),
+                            trait_name.clone(),
+                            prop_name.clone(),
+                            required.ty.clone(),
+                            impl_prop.ty.clone(),
+                            method_block.span,
+                        )
+                        .into(),
+                    );
+                }
+                if required.has_get && impl_prop.getter.is_none() {
+                    errors.push(
+                        TypeCheckErrorKind::TraitPropertyMissingGetter(
+                            method_block.type_name.clone(),
+                            trait_name.clone(),
+                            prop_name.clone(),
+                            method_block.span,
+                        )
+                        .into(),
+                    );
+                }
+                if required.has_set && impl_prop.setter.is_none() {
+                    errors.push(
+                        TypeCheckErrorKind::TraitPropertyMissingSetter(
+                            method_block.type_name.clone(),
+                            trait_name.clone(),
+                            prop_name.clone(),
                             method_block.span,
                         )
                         .into(),
@@ -584,6 +698,7 @@ fn record_property_sig(
     params: &[CollectedParamSig],
     ret_ty: &Type,
     span: Span,
+    allow_field_overlap: bool,
     errors: &mut Vec<TypeCheckError>,
 ) {
     let prop_ty = match kind {
@@ -623,9 +738,10 @@ fn record_property_sig(
         }
     };
 
-    if !property_sigs
-        .get(type_name)
-        .is_some_and(|props| props.contains_key(prop_name))
+    if !allow_field_overlap
+        && !property_sigs
+            .get(type_name)
+            .is_some_and(|props| props.contains_key(prop_name))
     {
         if let Some(Type::Struct { fields, .. }) = type_defs.get(type_name) {
             if let Some(field) = fields.iter().find(|field| field.name == prop_name) {

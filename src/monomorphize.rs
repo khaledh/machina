@@ -435,6 +435,10 @@ fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) 
         method.id = node_id_gen.new_id();
         reseed_method_sig(&mut method.sig, node_id_gen);
     }
+    for property in &mut trait_def.properties {
+        property.id = node_id_gen.new_id();
+        reseed_type_expr(&mut property.ty, node_id_gen);
+    }
 }
 
 fn reseed_ids_in_method_item(item: &mut res::MethodItem, node_id_gen: &mut NodeIdGen) {
@@ -514,6 +518,9 @@ fn reseed_param(param: &mut res::Param, node_id_gen: &mut NodeIdGen) {
 
 fn reseed_type_param(param: &mut res::TypeParam, node_id_gen: &mut NodeIdGen) {
     param.id = node_id_gen.new_id();
+    if let Some(bound) = &mut param.bound {
+        bound.id = node_id_gen.new_id();
+    }
 }
 
 fn reseed_type_def(type_def: &mut res::TypeDef, node_id_gen: &mut NodeIdGen) {

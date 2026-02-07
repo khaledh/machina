@@ -1161,6 +1161,116 @@ fn test_duplicate_trait_impl_block_errors() {
 }
 
 #[test]
+fn test_trait_property_contract_getter_setter_ok() {
+    let source = r#"
+        trait HasLength {
+            prop len: u64 { get; }
+            prop value: u64 { get; set; }
+        }
+
+        type Buffer = { len: u64, value: u64 }
+
+        Buffer :: HasLength {
+            prop len: u64 {
+                get { self.len }
+            }
+
+            prop value: u64 {
+                get { self.value }
+                set(v) { self.value = v; }
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_trait_property_contract_missing_setter_errors() {
+    let source = r#"
+        trait HasValue {
+            prop value: u64 { get; set; }
+        }
+
+        type Buffer = { value: u64 }
+
+        Buffer :: HasValue {
+            prop value: u64 {
+                get { self.value }
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TraitPropertyMissingSetter(type_name, trait_name, prop, _)
+                if type_name == "Buffer" && trait_name == "HasValue" && prop == "value"
+        )));
+    }
+}
+
+#[test]
+fn test_property_getter_call_syntax_errors() {
+    let source = r#"
+        type Buffer = { value: u64 }
+
+        Buffer :: {
+            prop value_prop: u64 {
+                get { self.value }
+            }
+        }
+
+        fn main() -> u64 {
+            let b = Buffer { value: 7 };
+            b.value_prop()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::PropertyCalledAsMethod(prop, _) if prop == "value_prop"
+        )));
+    }
+}
+
+#[test]
+fn test_property_setter_call_syntax_errors() {
+    let source = r#"
+        type Buffer = { value: u64 }
+
+        Buffer :: {
+            prop value_prop: u64 {
+                get { self.value }
+                set(v) { self.value = v; }
+            }
+        }
+
+        fn main() {
+            var b = Buffer { value: 7 };
+            b.value_prop(9);
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::PropertyCalledAsMethod(prop, _) if prop == "value_prop"
+        )));
+    }
+}
+
+#[test]
 fn test_trait_bound_allows_implementing_argument() {
     let source = r#"
         trait Runnable {

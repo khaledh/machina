@@ -95,6 +95,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &mut unifier,
             &engine.env().func_sigs,
             &engine.env().method_sigs,
+            &engine.env().property_sigs,
             &engine.env().trait_sigs,
             &engine.env().trait_impls,
             &constrain.var_trait_bounds,
@@ -340,6 +341,7 @@ fn check_call_obligations(
     unifier: &mut TcUnifier,
     func_sigs: &HashMap<String, Vec<CollectedCallableSig>>,
     method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+    property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
     trait_sigs: &HashMap<String, crate::typecheck::engine::CollectedTraitSig>,
     trait_impls: &HashMap<String, HashSet<String>>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
@@ -519,6 +521,16 @@ fn check_call_obligations(
                 errors.push(TypeCheckErrorKind::OverloadAmbiguous(name, obligation.span).into());
                 continue;
             }
+            if let Some(prop_name) = called_property_name(obligation, def_id, property_sigs, &next)
+            {
+                // Preserve substitutions to reduce follow-on inference noise, but
+                // reject property accessor call syntax in source.
+                *unifier = next;
+                errors.push(
+                    TypeCheckErrorKind::PropertyCalledAsMethod(prop_name, obligation.span).into(),
+                );
+                continue;
+            }
             *unifier = next;
             resolved_call_defs.insert(obligation.call_node, def_id);
         } else if let Some(err) = first_error {
@@ -611,6 +623,29 @@ fn method_call_candidates(
             candidates
         }
         _ => Vec::new(),
+    }
+}
+
+fn called_property_name(
+    obligation: &CallObligation,
+    selected_def_id: DefId,
+    property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
+    unifier: &TcUnifier,
+) -> Option<String> {
+    let CallCallee::Method { name } = &obligation.callee else {
+        return None;
+    };
+
+    let owner_ty = obligation
+        .receiver
+        .as_ref()
+        .map(|term| resolve_term(term, unifier))
+        .map(peel_heap)?;
+    let prop = lookup_property(property_sigs, &owner_ty, name)?;
+    if prop.getter == Some(selected_def_id) || prop.setter == Some(selected_def_id) {
+        Some(name.clone())
+    } else {
+        None
     }
 }
 

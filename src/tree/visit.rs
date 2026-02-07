@@ -39,6 +39,10 @@ pub trait Visitor<D = String, T = ()> {
         walk_trait_method(self, method)
     }
 
+    fn visit_trait_property(&mut self, property: &TraitProperty<D>) {
+        walk_trait_property(self, property)
+    }
+
     fn visit_struct_def_fields(&mut self, fields: &[StructDefField<D>]) {
         walk_struct_def_fields(self, fields)
     }
@@ -179,10 +183,20 @@ pub fn walk_trait_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, trait_def: &Tr
     for method in &trait_def.methods {
         v.visit_trait_method(method);
     }
+    for property in &trait_def.properties {
+        v.visit_trait_property(property);
+    }
 }
 
 pub fn walk_trait_method<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, method: &TraitMethod<D>) {
     v.visit_method_sig(&method.sig);
+}
+
+pub fn walk_trait_property<V: Visitor<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    property: &TraitProperty<D>,
+) {
+    v.visit_type_expr(&property.ty);
 }
 
 pub fn walk_type_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_def: &TypeDef<D>) {

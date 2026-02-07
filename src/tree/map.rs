@@ -65,6 +65,14 @@ pub trait TreeMapper {
         walk_trait_method(self, method, ctx)
     }
 
+    fn map_trait_property(
+        &mut self,
+        property: &TraitProperty<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> TraitProperty<Self::OutD> {
+        walk_trait_property(self, property, ctx)
+    }
+
     fn map_struct_def_field(
         &mut self,
         field: &StructDefField<Self::InD>,
@@ -371,6 +379,11 @@ pub fn walk_trait_def<M: TreeMapper + ?Sized>(
             .iter()
             .map(|method| mapper.map_trait_method(method, ctx))
             .collect(),
+        properties: trait_def
+            .properties
+            .iter()
+            .map(|property| mapper.map_trait_property(property, ctx))
+            .collect(),
         span: trait_def.span,
     }
 }
@@ -384,6 +397,21 @@ pub fn walk_trait_method<M: TreeMapper + ?Sized>(
         id: method.id,
         sig: mapper.map_method_sig(&method.sig, ctx),
         span: method.span,
+    }
+}
+
+pub fn walk_trait_property<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    property: &TraitProperty<M::InD>,
+    ctx: &mut M::Context,
+) -> TraitProperty<M::OutD> {
+    TraitProperty {
+        id: property.id,
+        name: property.name.clone(),
+        ty: mapper.map_type_expr(&property.ty, ctx),
+        has_get: property.has_get,
+        has_set: property.has_set,
+        span: property.span,
     }
 }
 

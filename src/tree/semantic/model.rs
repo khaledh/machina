@@ -19,6 +19,7 @@ pub type StructDefField = ast_model::StructDefField<DefId>;
 pub type EnumDefVariant = ast_model::EnumDefVariant<DefId>;
 pub type TraitDef = ast_model::TraitDef<DefId>;
 pub type TraitMethod = ast_model::TraitMethod<DefId>;
+pub type TraitProperty = ast_model::TraitProperty<DefId>;
 
 pub type FunctionSig = ast_model::FunctionSig<DefId>;
 pub type MethodSig = ast_model::MethodSig<DefId>;

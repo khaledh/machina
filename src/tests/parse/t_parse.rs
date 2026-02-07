@@ -1676,3 +1676,44 @@ fn test_parse_type_param_with_trait_bound() {
         .expect("missing trait bound");
     assert_eq!(bound.name, "Runnable");
 }
+
+#[test]
+fn test_parse_trait_property_contracts() {
+    let source = r#"
+        trait HasLength {
+            prop len: u64 { get; }
+            prop value: u64 { set; }
+            prop count: u64 { get; set; }
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let trait_defs = module.trait_defs();
+    assert_eq!(trait_defs.len(), 1);
+    let trait_def = trait_defs[0];
+    assert_eq!(trait_def.properties.len(), 3);
+
+    let len = trait_def
+        .properties
+        .iter()
+        .find(|p| p.name == "len")
+        .expect("missing len property");
+    assert!(len.has_get);
+    assert!(!len.has_set);
+
+    let value = trait_def
+        .properties
+        .iter()
+        .find(|p| p.name == "value")
+        .expect("missing value property");
+    assert!(!value.has_get);
+    assert!(value.has_set);
+
+    let count = trait_def
+        .properties
+        .iter()
+        .find(|p| p.name == "count")
+        .expect("missing count property");
+    assert!(count.has_get);
+    assert!(count.has_set);
+}

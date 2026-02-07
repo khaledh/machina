@@ -960,6 +960,10 @@ impl Visitor<()> for SymbolResolver {
                 }
             });
         }
+
+        for property in &trait_def.properties {
+            self.visit_type_expr(&property.ty);
+        }
     }
 
     fn visit_method_def(&mut self, method_def: &MethodDef) {

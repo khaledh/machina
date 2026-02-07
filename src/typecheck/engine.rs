@@ -93,9 +93,19 @@ pub(crate) struct CollectedTraitMethodSig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CollectedTraitPropertySig {
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) has_get: bool,
+    pub(crate) has_set: bool,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CollectedTraitSig {
     pub(crate) def_id: DefId,
     pub(crate) methods: HashMap<String, CollectedTraitMethodSig>,
+    pub(crate) properties: HashMap<String, CollectedTraitPropertySig>,
     pub(crate) span: Span,
 }
 

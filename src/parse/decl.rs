@@ -64,15 +64,67 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LBrace)?;
 
         let mut methods = Vec::new();
+        let mut properties = Vec::new();
         while self.curr_token.kind != TK::RBrace {
-            let method_marker = self.mark();
-            let sig = self.parse_method_sig()?;
-            self.consume(&TK::Semicolon)?;
-            methods.push(TraitMethod {
-                id: self.id_gen.new_id(),
-                sig,
-                span: self.close(method_marker),
-            });
+            match self.curr_token.kind {
+                TK::KwFn => {
+                    let method_marker = self.mark();
+                    let sig = self.parse_method_sig()?;
+                    self.consume(&TK::Semicolon)?;
+                    methods.push(TraitMethod {
+                        id: self.id_gen.new_id(),
+                        sig,
+                        span: self.close(method_marker),
+                    });
+                }
+                TK::KwProp => {
+                    let prop_marker = self.mark();
+                    self.consume_keyword(TK::KwProp)?;
+                    let prop_name = self.parse_ident()?;
+                    self.consume(&TK::Colon)?;
+                    let prop_ty = self.parse_type_expr()?;
+                    self.consume(&TK::LBrace)?;
+
+                    let mut has_get = false;
+                    let mut has_set = false;
+                    while self.curr_token.kind != TK::RBrace {
+                        match self.curr_token.kind {
+                            TK::KwGet => {
+                                has_get = true;
+                                self.advance();
+                                self.consume(&TK::Semicolon)?;
+                            }
+                            TK::KwSet => {
+                                has_set = true;
+                                self.advance();
+                                self.consume(&TK::Semicolon)?;
+                            }
+                            _ => {
+                                return Err(ParseError::ExpectedToken(
+                                    TK::RBrace,
+                                    self.curr_token.clone(),
+                                ));
+                            }
+                        }
+                    }
+                    self.consume(&TK::RBrace)?;
+
+                    properties.push(TraitProperty {
+                        id: self.id_gen.new_id(),
+                        name: prop_name,
+                        ty: prop_ty,
+                        has_get,
+                        has_set,
+                        span: self.close(prop_marker),
+                    });
+                }
+                _ => {
+                    return Err(ParseError::ExpectedToken(
+                        TK::RBrace,
+                        self.curr_token.clone(),
+                    ));
+                }
+            }
         }
 
         self.consume(&TK::RBrace)?;
@@ -82,6 +134,7 @@ impl<'a> Parser<'a> {
             attrs,
             name,
             methods,
+            properties,
             span: self.close(marker),
         })
     }

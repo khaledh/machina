@@ -41,6 +41,10 @@ impl TraitDef {
         for method in &self.methods {
             method.fmt_with_indent(f, level + 2)?;
         }
+        writeln!(f, "{}Properties:", pad1)?;
+        for property in &self.properties {
+            property.fmt_with_indent(f, level + 2)?;
+        }
         Ok(())
     }
 }
@@ -50,6 +54,28 @@ impl TraitMethod {
         let pad = indent(level);
         writeln!(f, "{}TraitMethod [{}]", pad, self.id)?;
         self.sig.fmt_with_indent(f, level + 1)
+    }
+}
+
+impl TraitProperty {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        let mut accessors = Vec::new();
+        if self.has_get {
+            accessors.push("get");
+        }
+        if self.has_set {
+            accessors.push("set");
+        }
+        writeln!(
+            f,
+            "{}TraitProperty [{}] {}: {} {{{}}}",
+            pad,
+            self.id,
+            self.name,
+            self.ty,
+            accessors.join(", ")
+        )
     }
 }
 

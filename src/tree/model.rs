@@ -148,6 +148,7 @@ pub struct TraitDef<D> {
     pub attrs: Vec<Attribute>,
     pub name: String,
     pub methods: Vec<TraitMethod<D>>,
+    pub properties: Vec<TraitProperty<D>>,
     pub span: Span,
 }
 
@@ -155,6 +156,16 @@ pub struct TraitDef<D> {
 pub struct TraitMethod<D> {
     pub id: NodeId,
     pub sig: MethodSig<D>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TraitProperty<D> {
+    pub id: NodeId,
+    pub name: String,
+    pub ty: TypeExpr<D>,
+    pub has_get: bool,
+    pub has_set: bool,
     pub span: Span,
 }
 
