@@ -215,11 +215,11 @@ impl<'a> UnionRule<'a> {
         if !has_wildcard && seen_variant_indices.len() != variant_count {
             let mut missing = Vec::new();
             if !seen_variant_indices.contains(&0) {
-                missing.push(self.ok_ty.clone());
+                missing.push(compact_type_name(self.ok_ty));
             }
             for (idx, err_ty) in self.err_tys.iter().enumerate() {
                 if !seen_variant_indices.contains(&(idx + 1)) {
-                    missing.push(err_ty.clone());
+                    missing.push(compact_type_name(err_ty));
                 }
             }
             errors.push(SemCheckError::NonExhaustiveUnionMatch(missing, span));
@@ -493,6 +493,18 @@ fn check_int_pattern_range(
             (max_value as i128) + 1,
             span,
         ));
+    }
+}
+
+fn compact_type_name(ty: &Type) -> String {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::Int { signed, bits, .. } => format!("{}{}", if *signed { "i" } else { "u" }, bits),
+        Type::Bool => "bool".to_string(),
+        Type::Char => "char".to_string(),
+        Type::String => "string".to_string(),
+        Type::Unit => "()".to_string(),
+        _ => ty.to_string(),
     }
 }
 

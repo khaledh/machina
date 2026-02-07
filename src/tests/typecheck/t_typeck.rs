@@ -1624,14 +1624,8 @@ fn test_match_typed_binding_rejects_non_union_variant_type() {
             TypeCheckErrorKind::MatchTypedBindingTypeMismatch(expected, found, _) => {
                 assert!(matches!(found, Type::String));
                 assert_eq!(expected.len(), 2);
-                assert!(
-                    expected
-                        .iter()
-                        .any(|ty| matches!(ty, Type::Int { signed: false, bits: 64, .. }))
-                );
-                assert!(expected
-                    .iter()
-                    .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "IoError")));
+                assert!(expected.iter().any(|name| name == "u64"));
+                assert!(expected.iter().any(|name| name == "IoError"));
             }
             other => panic!("expected MatchTypedBindingTypeMismatch, got {other:?}"),
         }

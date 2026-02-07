@@ -237,7 +237,7 @@ pub enum TypeCheckErrorKind {
     MatchPatternEnumMismatch(String, String, Span),
 
     #[error("Match typed binding expects one of {0:?}, found {1}")]
-    MatchTypedBindingTypeMismatch(Vec<Type>, Type, Span),
+    MatchTypedBindingTypeMismatch(Vec<String>, Type, Span),
 
     #[error("Match is not exhaustive: {0}")]
     NonExhaustiveMatch(Span),

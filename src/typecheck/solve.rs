@@ -1953,9 +1953,13 @@ fn bind_match_pattern_types(
                             let _ = unifier.unify(term, &pat_ty);
                         }
                     } else if !is_unresolved(&pat_ty) {
+                        let variant_names = variants
+                            .iter()
+                            .map(compact_type_name)
+                            .collect::<Vec<_>>();
                         errors.push(
                             TypeCheckErrorKind::MatchTypedBindingTypeMismatch(
-                                variants,
+                                variant_names,
                                 pat_ty.clone(),
                                 *span,
                             )
@@ -2050,6 +2054,18 @@ fn bind_match_pattern_types(
                 }
             }
         }
+    }
+}
+
+fn compact_type_name(ty: &Type) -> String {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::Int { signed, bits, .. } => format!("{}{}", if *signed { "i" } else { "u" }, bits),
+        Type::Bool => "bool".to_string(),
+        Type::Char => "char".to_string(),
+        Type::String => "string".to_string(),
+        Type::Unit => "()".to_string(),
+        _ => ty.to_string(),
     }
 }
 

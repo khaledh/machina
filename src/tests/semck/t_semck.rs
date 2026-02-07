@@ -847,16 +847,8 @@ fn test_match_error_union_non_exhaustive_reports_all_missing_variants() {
         match err {
             SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
                 assert_eq!(missing.len(), 2);
-                assert!(
-                    missing
-                        .iter()
-                        .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "IoError"))
-                );
-                assert!(
-                    missing
-                        .iter()
-                        .any(|ty| matches!(ty, Type::Struct { name, .. } if name == "ParseError"))
-                );
+                assert!(missing.iter().any(|name| name == "IoError"));
+                assert!(missing.iter().any(|name| name == "ParseError"));
             }
             other => panic!("Expected NonExhaustiveUnionMatch error, got {other:?}"),
         }
@@ -954,10 +946,7 @@ fn test_match_error_union_non_exhaustive() {
         match &errors[0] {
             SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
                 assert_eq!(missing.len(), 1);
-                assert!(matches!(
-                    &missing[0],
-                    Type::Struct { name, .. } if name == "IoError"
-                ));
+                assert_eq!(missing[0], "IoError");
             }
             e => panic!("Expected NonExhaustiveUnionMatch error, got {:?}", e),
         }

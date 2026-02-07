@@ -52,7 +52,7 @@ pub enum SemCheckError {
     NonExhaustiveMatch(Span),
 
     #[error("Match on error union is not exhaustive; missing variants: {0:?}")]
-    NonExhaustiveUnionMatch(Vec<Type>, Span),
+    NonExhaustiveUnionMatch(Vec<String>, Span),
 
     #[error("Duplicate match arm variant: {0}")]
     DuplicateMatchVariant(String, Span),
