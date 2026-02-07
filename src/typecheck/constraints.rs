@@ -78,6 +78,12 @@ pub(crate) enum ExprObligation {
         callable_def_id: Option<DefId>,
         span: Span,
     },
+    Join {
+        expr_id: NodeId,
+        arms: Vec<Type>,
+        result: Type,
+        span: Span,
+    },
     ArrayIndex {
         expr_id: NodeId,
         target: Type,
@@ -893,16 +899,25 @@ impl<'a> ConstraintCollector<'a> {
                 self.collect_expr(cond, Some(Type::Bool));
                 let then_ty = self.collect_expr(then_body, expected.clone());
                 let else_ty = self.collect_expr(else_body, expected.clone());
-                self.push_assignable(
-                    then_ty.clone(),
-                    expr_ty.clone(),
-                    ConstraintReason::Expr(expr.id, expr.span),
-                );
-                self.push_assignable(
-                    else_ty,
-                    expr_ty.clone(),
-                    ConstraintReason::Expr(expr.id, expr.span),
-                );
+                if expected.is_some() {
+                    self.push_assignable(
+                        then_ty.clone(),
+                        expr_ty.clone(),
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                    self.push_assignable(
+                        else_ty,
+                        expr_ty.clone(),
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                } else {
+                    self.out.expr_obligations.push(ExprObligation::Join {
+                        expr_id: expr.id,
+                        arms: vec![then_ty, else_ty],
+                        result: expr_ty.clone(),
+                        span: expr.span,
+                    });
+                }
             }
             ExprKind::Range { start, end } => {
                 let start_ty = self.collect_expr(start, Some(Type::uint(64)));
@@ -941,6 +956,7 @@ impl<'a> ConstraintCollector<'a> {
             }
             ExprKind::Match { scrutinee, arms } => {
                 let scrutinee_ty = self.collect_expr(scrutinee, None);
+                let mut arm_terms = Vec::with_capacity(arms.len());
                 for arm in arms {
                     self.out
                         .pattern_obligations
@@ -949,13 +965,24 @@ impl<'a> ConstraintCollector<'a> {
                             pattern: arm.pattern.clone(),
                             scrutinee_ty: scrutinee_ty.clone(),
                             span: arm.span,
-                    });
+                        });
                     let arm_ty = self.collect_match_arm(arm, expected.clone());
-                    self.push_assignable(
-                        arm_ty,
-                        expr_ty.clone(),
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
+                    if expected.is_some() {
+                        self.push_assignable(
+                            arm_ty.clone(),
+                            expr_ty.clone(),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
+                    }
+                    arm_terms.push(arm_ty);
+                }
+                if expected.is_none() {
+                    self.out.expr_obligations.push(ExprObligation::Join {
+                        expr_id: expr.id,
+                        arms: arm_terms,
+                        result: expr_ty.clone(),
+                        span: expr.span,
+                    });
                 }
             }
             ExprKind::Call { callee, args } => {

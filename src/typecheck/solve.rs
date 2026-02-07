@@ -356,6 +356,46 @@ fn assignability_rank(from: &Type, to: &Type) -> i32 {
     }
 }
 
+fn push_unique_join_variant(variants: &mut Vec<Type>, candidate: Type) {
+    if !variants.iter().any(|existing| existing == &candidate) {
+        variants.push(candidate);
+    }
+}
+
+fn collect_join_variants(ty: &Type, out: &mut Vec<Type>) {
+    match ty {
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            collect_join_variants(ok_ty, out);
+            for err_ty in err_tys {
+                collect_join_variants(err_ty, out);
+            }
+        }
+        _ => push_unique_join_variant(out, ty.clone()),
+    }
+}
+
+fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
+    let mut variants = Vec::new();
+    for arm_ty in arms {
+        if is_unresolved(arm_ty) {
+            continue;
+        }
+        collect_join_variants(arm_ty, &mut variants);
+    }
+    if variants.is_empty() {
+        return None;
+    }
+    if variants.len() == 1 {
+        return variants.into_iter().next();
+    }
+    let ok_ty = variants[0].clone();
+    let err_tys = variants.into_iter().skip(1).collect::<Vec<_>>();
+    Some(Type::ErrorUnion {
+        ok_ty: Box::new(ok_ty),
+        err_tys,
+    })
+}
+
 fn check_call_obligations(
     obligations: &[CallObligation],
     unifier: &mut TcUnifier,
@@ -875,6 +915,54 @@ fn check_expr_obligations(
                         }
                     }
                     crate::tree::resolved::UnaryOp::Try => {}
+                }
+            }
+            ExprObligation::Join {
+                expr_id,
+                arms,
+                result,
+                span,
+            } => {
+                let resolved_arms = arms
+                    .iter()
+                    .map(|arm| resolve_term(arm, unifier))
+                    .collect::<Vec<_>>();
+                let mut result_ty = resolve_term(result, unifier);
+
+                if is_unresolved(&result_ty)
+                    && let Some(inferred_join) = infer_join_type_from_arms(&resolved_arms)
+                {
+                    let _ = unifier.unify(result, &inferred_join);
+                    result_ty = resolve_term(result, unifier);
+                }
+
+                let result_ty_diag =
+                    default_infer_ints_for_diagnostics(result_ty.clone(), unifier.vars());
+                if is_unresolved(&result_ty_diag) {
+                    continue;
+                }
+
+                for (arm_term, arm_ty) in arms.iter().zip(resolved_arms.into_iter()) {
+                    if is_unresolved(&arm_ty) {
+                        let _ = unifier.unify(arm_term, &result_ty_diag);
+                        continue;
+                    }
+                    let arm_ty_diag = default_infer_ints_for_diagnostics(arm_ty, unifier.vars());
+                    if matches!(
+                        type_assignable(&arm_ty_diag, &result_ty_diag),
+                        TypeAssignability::Incompatible
+                    ) {
+                        errors.push(
+                            TypeCheckErrorKind::DeclTypeMismatch(
+                                result_ty_diag.clone(),
+                                arm_ty_diag,
+                                *span,
+                            )
+                            .into(),
+                        );
+                        covered_exprs.insert(*expr_id);
+                        break;
+                    }
                 }
             }
             ExprObligation::Try {
@@ -1548,6 +1636,15 @@ fn should_retry_post_call_expr_obligation(
     unifier: &TcUnifier,
 ) -> bool {
     match obligation {
+        ExprObligation::Join { arms, result, .. } => {
+            let result_ty = resolve_term(result, unifier);
+            if is_unresolved(&result_ty) {
+                return true;
+            }
+            arms.iter()
+                .map(|arm| resolve_term(arm, unifier))
+                .any(|arm_ty| is_unresolved(&arm_ty))
+        }
         ExprObligation::StructField { target, result, .. } => {
             let owner_ty = peel_heap(resolve_term(target, unifier));
             let result_ty = resolve_term(result, unifier);
@@ -2029,6 +2126,7 @@ fn op_span(obligation: &ExprObligation) -> Span {
     match obligation {
         ExprObligation::BinOp { span, .. }
         | ExprObligation::UnaryOp { span, .. }
+        | ExprObligation::Join { span, .. }
         | ExprObligation::Try { span, .. }
         | ExprObligation::ArrayIndex { span, .. }
         | ExprObligation::Slice { span, .. }

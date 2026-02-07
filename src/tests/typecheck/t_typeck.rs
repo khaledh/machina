@@ -2158,6 +2158,47 @@ fn test_match_join_lifts_success_into_error_union() {
 }
 
 #[test]
+fn test_if_join_infers_union_without_expected_type() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn demo(flag: bool, value: u64) -> u64 {
+            let joined = if flag {
+                value
+            } else {
+                IoError { code: 13 }
+            };
+            match joined {
+                value: u64 => value,
+                err: IoError => err.code,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_match_join_infers_union_without_expected_type() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn demo(flag: bool, value: u64) -> u64 {
+            let joined = match flag {
+                true => value,
+                false => IoError { code: 14 },
+            };
+            match joined {
+                value: u64 => value,
+                err: IoError => err.code,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_tuple_typed_binding_pattern_typechecks() {
     let source = r#"
         fn test(t: (u64, bool)) -> u64 {
