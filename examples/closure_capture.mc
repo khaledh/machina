@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Point = { x: u64, y: u64 }
 type AddFn = fn(u64) -> u64;
 
@@ -24,7 +28,7 @@ fn move_primitive() {
     let a = add(5);
     let b = add(7);
 
-    println(f"a={a}, b={b}");
+    io.println(f"a={a}, b={b}");
 }
 
 fn move_aggregate() {
@@ -34,7 +38,7 @@ fn move_aggregate() {
         p.x + p.y
     };
     let s = sum();
-    println(f"sum={s}");
+    io.println(f"sum={s}");
 }
 
 fn move_heap() {
@@ -44,7 +48,7 @@ fn move_heap() {
         hp.x + hp.y
     };
     let hs = hsum();
-    println(f"(heap) sum={hs}");
+    io.println(f"(heap) sum={hs}");
 }
 
 fn borrow_mut() {
@@ -58,7 +62,7 @@ fn borrow_mut() {
     let c2 = bump();
     counter = counter + 1;
 
-    println(f"c1={c1}, c2={c2}, counter={counter}");
+    io.println(f"c1={c1}, c2={c2}, counter={counter}");
 }
 
 fn borrow_after_last_call() {
@@ -67,7 +71,7 @@ fn borrow_after_last_call() {
     let get = || -> u64 n;
     let v = get();
     n = n + 1;
-    println(f"v={v}, n={n}");
+    io.println(f"v={v}, n={n}");
 }
 
 // Rejected: move-captured base used after closure creation.

@@ -117,9 +117,9 @@ pub fn compile_with_path(
     };
 
     let (module, id_gen) = if opts.inject_prelude {
-        // load stdlib/prelude_decl.mc
+        // load std/prelude_decl.mc
         let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("stdlib")
+            .join("std")
             .join("prelude_decl.mc");
         let prelude_src = std::fs::read_to_string(&prelude_path)
             .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
@@ -305,7 +305,7 @@ pub fn compile_with_path(
     Ok(CompileOutput { asm, ir })
 }
 
-// --- stdlib parsed-tree injection ---
+// --- std parsed-tree injection ---
 
 fn parse_with_id_gen(
     source: &str,

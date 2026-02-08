@@ -5,9 +5,13 @@ fn test_print_outputs_string() {
     let run = run_program(
         "print_str",
         r#"
+            requires {
+                std.io as io
+            }
+
             fn main() -> u64 {
-                print("hello");
-                println();
+                io.print("hello");
+                io.println();
                 0
             }
         "#,
@@ -23,11 +27,15 @@ fn test_print_outputs_u64() {
     let run = run_program(
         "print_u64",
         r#"
+            requires {
+                std.io as io
+            }
+
             fn main() -> u64 {
                 let x = 42;
-                print("x=");
-                print(x);
-                println();
+                io.print("x=");
+                io.print(x);
+                io.println();
                 0
             }
         "#,

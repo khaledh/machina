@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Flag = On | Off
 type Wrap = Wrap(u64) | Empty
 
@@ -24,5 +28,5 @@ fn main() {
     let b = describe((5, Flag::On, false));
     let c = nested((3, (true, Wrap::Wrap(4))));
     let d = nested((7, (false, Wrap::Empty)));
-    println(f"a={a}, b={b}, c={c}, d={d}");
+    io.println(f"a={a}, b={b}, c={c}, d={d}");
 }

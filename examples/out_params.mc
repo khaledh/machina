@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Pair = { x: u64, y: u64 }
 type Point = { x: u64, y: u64 }
 type Boxed = { p: ^Point }
@@ -19,9 +23,9 @@ fn main() {
     var p: Pair;
     make_pair(out p);
     let sum = p.x + p.y;
-    println(f"sum = {sum}");
+    io.println(f"sum = {sum}");
 
     var b: Boxed;
     make_boxed(out b);
-    println(f"boxed: b.p.x = {b.p.x}, b.p.y = {b.p.y}");
+    io.println(f"boxed: b.p.x = {b.p.x}, b.p.y = {b.p.y}");
 }

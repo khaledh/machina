@@ -1,4 +1,5 @@
 requires {
+    std.io as io
     examples.modules_visibility.config as cfg
     examples.modules_visibility.runtime as rt
 }
@@ -15,12 +16,12 @@ fn main() {
     // Both modules export `answer`; alias-qualified calls disambiguate.
     let total = cfg.answer() + rt.answer();
 
-    println(f"name = {c.name}");
-    println(f"tick_count = {c.tick_count}");
-    println(f"ran = {ran}");
-    println(f"total = {total}");
+    io.println(f"name = {c.name}");
+    io.println(f"tick_count = {c.tick_count}");
+    io.println(f"ran = {ran}");
+    io.println(f"total = {total}");
 
     // These should fail if uncommented:
     // let bad = Config { _name: "x", _ticks: 0 };      // opaque construction
-    // println(f"ticks raw = {c._ticks}");              // opaque field access
+    // io.println(f"ticks raw = {c._ticks}");              // opaque field access
 }

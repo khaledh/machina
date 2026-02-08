@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // Linked list using heap nodes and enum end marker.
 type Link = None | Some(^Node)
 type Node = { value: u64, next: Link }
@@ -16,5 +20,5 @@ fn main() {
     let list = Link::Some(a);
 
     let total = sum(list);
-    println(total);
+    io.println(total);
 }

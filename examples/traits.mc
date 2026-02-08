@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 trait Runnable {
     fn run(self) -> u64;
 }
@@ -52,28 +56,28 @@ fn main() {
         ticks: 41,
     };
     let result = execute(p);
-    println(f"result = {result}");
+    io.println(f"result = {result}");
 
     let ran = Process {
         name: "worker-2",
         ticks: 10,
     }
     .run();
-    println(f"ran = {ran}");
+    io.println(f"ran = {ran}");
 
     let ok = accept_runnable(Process {
         name: "worker-3",
         ticks: 0,
     });
-    println(f"ok = {ok}");
+    io.println(f"ok = {ok}");
 
     var tracked = Process {
         name: "worker-4",
         ticks: 5,
     };
-    println(f"before = {tracked.ticks}");
+    io.println(f"before = {tracked.ticks}");
     add_ticks(inout tracked, 7);
-    println(f"after = {tracked.ticks}");
+    io.println(f"after = {tracked.ticks}");
 
     // Uncommenting this line should fail type checking because Task does not
     // implement Runnable:

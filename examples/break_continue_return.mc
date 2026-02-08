@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // Break, continue, and return
 
 fn last_even_below(limit: u64) -> u64 {
@@ -32,6 +36,6 @@ fn sum_until(limit: u64) -> u64 {
 fn main() {
     let a = last_even_below(9);
     let b = sum_until(10);
-    println(a);
-    println(b);
+    io.println(a);
+    io.println(b);
 }

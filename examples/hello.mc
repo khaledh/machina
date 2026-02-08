@@ -1,4 +1,8 @@
+requires {
+    std.io as io
+}
+
 fn main() {
-    println("Hello, Machina!");
+    io.println("Hello, Machina!");
 }
 

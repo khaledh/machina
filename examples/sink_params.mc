@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Point = { x: u64, y: u64 }
 
 fn sum_point(sink p: ^Point, q: ^Point) -> u64 {
@@ -14,8 +18,8 @@ fn main() {
 
     let total = forward_sum(move p, q);
 
-    println(f"total: {total}");
+    io.println(f"total: {total}");
 
-    println(f"q.x: {q.x}"); // OK: non-sink param is a borrow
-    // println(p.x); // ERROR: use after move into sink param
+    io.println(f"q.x: {q.x}"); // OK: non-sink param is a borrow
+    // io.println(p.x); // ERROR: use after move into sink param
 }

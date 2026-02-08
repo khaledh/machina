@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Point = { x: u64, y: u64 }
 type Boxed = { p: ^Point }
 type Pair = { a: Boxed, b: Boxed }
@@ -14,5 +18,5 @@ fn main() {
     var p: Pair;
     fill_a(out p.a);
     fill_b(out p.b);
-    println(p.a.p.x + p.b.p.x);
+    io.println(p.a.p.x + p.b.p.x);
 }

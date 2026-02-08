@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // String literals
 
 fn main() {
@@ -16,5 +20,5 @@ fn greeting() -> string {
 }
 
 fn consume(s: string) {
-  println(s);
+  io.println(s);
 }

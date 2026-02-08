@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // For-loop over a range
 
 fn main() {
@@ -5,5 +9,5 @@ fn main() {
     for i in 0..10 {
         acc = acc + i;
     }
-    println(acc);
+    io.println(acc);
 }

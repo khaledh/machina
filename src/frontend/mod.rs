@@ -200,7 +200,7 @@ pub struct FsModuleLoader {
 
 impl FsModuleLoader {
     pub fn new(project_root: PathBuf) -> Self {
-        let std_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib");
+        let std_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("std");
         Self {
             project_root,
             std_root,

@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Flag = On | Off
 
 fn describe_flag(f: Flag) -> u64 {
@@ -27,5 +31,5 @@ fn main() {
     let b = pick(3);
     let c = bool_to_u64(true);
     let d = describe_flag(Flag::Off);
-    println(f"a={a}, b={b}, c={c}, d={d}");
+    io.println(f"a={a}, b={b}, c={c}, d={d}");
 }

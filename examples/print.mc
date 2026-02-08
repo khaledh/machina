@@ -1,8 +1,12 @@
+requires {
+    std.io as io
+}
+
 // Print strings
 
 fn main() {
     let s = greeting();
-    print(s);
+    io.print(s);
     output("Machina!");
 }
 
@@ -11,5 +15,5 @@ fn greeting() -> string {
 }
 
 fn output(s: string) {
-    println(s);
+    io.println(s);
 }

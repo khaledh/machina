@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // Slice expressions with optional bounds
 fn consume_slice(_s: u64[]) -> u64 {
     0
@@ -24,5 +28,5 @@ fn main() {
     let row = s_rows[0];       // type: u64[3]   (array of u64 elements)
     let s_elems = row[0..3];   // type: u64[]    (slice of u64 elements)
     let s_elem = s_elems[0];   // type: u64      (element)
-    println(f"s_elem={s_elem}");
+    io.println(f"s_elem={s_elem}");
 }

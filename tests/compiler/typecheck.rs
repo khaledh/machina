@@ -13,6 +13,10 @@ fn test_overloaded_functions() {
     let run = run_program(
         "overloads",
         r#"
+            requires {
+                std.io as io
+            }
+
             type Small = u64: bounds(0, 10);
 
             fn id(x: u64) -> u64 {
@@ -27,8 +31,8 @@ fn test_overloaded_functions() {
             fn main() -> u64 {
                 let a: Small = 5;
                 let b = 20;
-                println(id(a));
-                println(id(b));
+                io.println(id(a));
+                io.println(id(b));
                 0
             }
         "#,

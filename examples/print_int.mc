@@ -1,7 +1,11 @@
+requires {
+    std.io as io
+}
+
 // Print integers
 
 fn main() {
     let x = 42;
-    print("x = ");
-    println(x);
+    io.print("x = ");
+    io.println(x);
 }

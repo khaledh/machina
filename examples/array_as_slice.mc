@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 fn sum(xs: u64[]) -> u64 {
     var acc = 0;
     for x in xs {
@@ -9,5 +13,5 @@ fn sum(xs: u64[]) -> u64 {
 fn main() {
     let arr = [1, 2, 3];
     let total = sum(arr);
-    println(total);
+    io.println(total);
 }

@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Point = { x: u64, y: u64 }
 type Msg = Ping(u64) | Pong(u64)
 
@@ -27,10 +31,10 @@ fn main() {
     var p = Point { x: 1, y: 2 };
 
     p.y_val = 5;
-    println(f"y: {p.y_val}");
+    io.println(f"y: {p.y_val}");
 
-    println(f"sum: {p.sum}");
+    io.println(f"sum: {p.sum}");
 
     let msg = Msg::Pong(9);
-    println(f"id: {msg.id}");
+    io.println(f"id: {msg.id}");
 }

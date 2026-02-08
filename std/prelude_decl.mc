@@ -11,13 +11,6 @@ fn __rt_memset(inout buf: u8[], value: u8);
 @[runtime]
 fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
-fn __rt_alloc(size: u64, align: u64) -> u64;
-fn __rt_realloc(ptr: u64, size: u64, align: u64) -> u64;
-fn __rt_free(ptr: u64);
-
-// String helpers
-fn string_from_bytes(bytes: u8[]) -> string;
-
 string :: {
   @[intrinsic]
   prop len: u64 {
@@ -30,12 +23,3 @@ string :: {
   @[runtime]
   fn append_bytes(inout self, bytes: u8[]);
 }
-
-// Stdlib wrappers
-fn print(s: string);
-fn println(s: string);
-fn println();
-
-// Stdlib wrappers for u64
-fn print(value: u64);
-fn println(value: u64);

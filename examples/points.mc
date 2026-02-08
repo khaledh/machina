@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // Custom types (type aliases, enums, and structs)
 
 // Type Alias
@@ -29,9 +33,9 @@ fn main() {
     let (dx, dy) = delta(c, d);
 
     if is_blue(d) {
-        println(42);
+        io.println(42);
     } else {
-        println(21);
+        io.println(21);
     }
 }
 

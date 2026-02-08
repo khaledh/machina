@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use machina::compile::{CompileOptions, compile};
+use machina::compile::{CompileOptions, compile_with_path};
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -91,11 +91,11 @@ fn compile_source_with_opts(
     opts: &CompileOptions,
 ) -> machina::compile::CompileOutput {
     let source = std::fs::read_to_string(source_path).expect("failed to read temp source");
-    compile(&source, opts).expect("compile failed")
+    compile_with_path(&source, Some(source_path), opts).expect("compile failed")
 }
 
 fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
-    let prelude_path = repo_root.join("stdlib").join("prelude_impl.mc");
+    let prelude_path = repo_root.join("std").join("prelude_impl.mc");
     let source = std::fs::read_to_string(&prelude_path).expect("failed to read prelude_impl");
     let opts = CompileOptions {
         dump: None,
@@ -103,9 +103,9 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
         verify_ir: false,
         trace_alloc: false,
         trace_drops: false,
-        inject_prelude: false,
+        inject_prelude: true,
     };
-    let prelude = compile(&source, &opts).expect("compile failed");
+    let prelude = compile_with_path(&source, Some(&prelude_path), &opts).expect("compile failed");
 
     let asm_path = temp_dir.join("prelude_impl.s");
     let obj_path = temp_dir.join("prelude_impl.o");

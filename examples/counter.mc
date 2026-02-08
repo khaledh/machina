@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 type Counter = { total: u64, last: u64 }
 type Event = Add(u64) | Reset
 
@@ -35,5 +39,5 @@ fn main() {
     }
 
     let (total, last) = counter.snapshot();
-    println(f"total={total}, last={last}");
+    io.println(f"total={total}, last={last}");
 }

@@ -365,7 +365,7 @@ fn compile_prelude_impl_object(
     ir_dir: &Path,
 ) -> Result<(PathBuf, PathBuf), String> {
     let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("stdlib")
+        .join("std")
         .join("prelude_impl.mc");
     let prelude_src = std::fs::read_to_string(&prelude_path)
         .map_err(|e| format!("failed to read {}: {e}", prelude_path.display()))?;
@@ -376,7 +376,7 @@ fn compile_prelude_impl_object(
         verify_ir: opts.verify_ir,
         trace_alloc: opts.trace_alloc,
         trace_drops: opts.trace_drops,
-        inject_prelude: false,
+        inject_prelude: true,
     };
 
     let output =

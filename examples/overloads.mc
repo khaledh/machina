@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // Demonstrate function overload resolution.
 type Small = u64: bounds(0, 10);
 
@@ -14,6 +18,6 @@ fn main() {
     let a: Small = 5;
     let b = 20;
 
-    println(id(a));
-    println(id(b));
+    io.println(id(a));
+    io.println(id(b));
 }

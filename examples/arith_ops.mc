@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 // Arithmetic operators
 
 fn main() {
@@ -10,14 +14,14 @@ fn main() {
     let div = a / b;
     let rem = a % b;
 
-    print("add = ");
-    println(add);
-    print("sub = ");
-    println(sub);
-    print("mul = ");
-    println(mul);
-    print("div = ");
-    println(div);
-    print("rem = ");
-    println(rem);
+    io.print("add = ");
+    io.println(add);
+    io.print("sub = ");
+    io.println(sub);
+    io.print("mul = ");
+    io.println(mul);
+    io.print("div = ");
+    io.println(div);
+    io.print("rem = ");
+    io.println(rem);
 }

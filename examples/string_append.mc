@@ -1,3 +1,7 @@
+requires {
+    std.io as io
+}
+
 fn main() {
     var s = "hello";
     s.append(" world");
@@ -5,6 +9,6 @@ fn main() {
     let bytes = u8[33];
     s.append_bytes(bytes);
 
-    println(s);
-    println(f"owned = {s}");
+    io.println(s);
+    io.println(f"owned = {s}");
 }
