@@ -189,6 +189,27 @@ impl<'a> TypeLowerer<'a> {
                 ];
                 self.ir_type_cache.add(IrTypeKind::Struct { fields })
             }
+            // Set is lowered as { ptr, len, cap } like dyn-array storage.
+            Type::Set { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u32 = self.lower_type(&Type::uint(32));
+                let fields = vec![
+                    IrStructField {
+                        name: "ptr".to_string(),
+                        ty: ptr,
+                    },
+                    IrStructField {
+                        name: "len".to_string(),
+                        ty: u32,
+                    },
+                    IrStructField {
+                        name: "cap".to_string(),
+                        ty: u32,
+                    },
+                ];
+                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+            }
 
             // Compound types: recursively convert element/field types.
             Type::Tuple { field_tys } => {

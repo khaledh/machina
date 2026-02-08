@@ -133,6 +133,14 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
                 format!("[{}; {}]", format_semantic_value_expr_compact(expr), count)
             }
         },
+        sem::ValueExprKind::SetLit { elems, .. } => {
+            let elems = elems
+                .iter()
+                .map(format_semantic_value_expr_compact)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{{}}}", elems)
+        }
         sem::ValueExprKind::TupleLit(items) => {
             let items = items
                 .iter()

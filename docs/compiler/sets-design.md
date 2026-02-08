@@ -67,7 +67,7 @@ ambiguity for singleton sets by requiring `{e,}`.
 - Duplicate elements are allowed syntactically; dedup is runtime behavior.
 - Empty set literal is `set<T>{}`; bare `{}` never denotes a set.
 - Keys allowed in V1:
-  - integer types, `bool`, `char`, `string`
+  - integer types, `bool`, `char`
 - Other element types produce a clear type error:
   - `set<T> is not supported for element type T yet`
 
@@ -107,26 +107,47 @@ Notes:
 
 ## Runtime Representation
 
-Primary representation is an open-addressing hash table.
+Current V1 representation is a unique-element linear container built on top of
+`mc_dyn_array_t` storage (`ptr`, `len`, `cap` with owned-bit in `cap`).
 
-Suggested header:
+Current behavior:
 
-- `ptr: u64` (table storage)
-- `len: u32`
-- `cap: u32` (high bit reserved for owned flag, same style as `string`/dyn-array)
+- `insert`: linear scan for equality; append only if not present.
+- `contains`: linear scan.
+- `remove`: linear scan + swap-remove.
+- `clear`: set `len = 0` and keep capacity.
 
-Table internals:
+This keeps implementation simple while `Hash`/`Eq` infrastructure is still
+absent from the language.
 
-- Control bytes for empty/tombstone/occupied.
-- Probing strategy: linear probing in V1.
+## Future Runtime Direction
 
-## Optional Optimization: Bitmap Backend
+Target representation after hash/equality support is ready:
 
-For eligible tiny domains (`bool`, small enums, bounded small integers), backend can use a compact bitmap representation.
+- Open-addressing hash table (Swiss-table style or similar), still using
+  `ptr/len/cap` header shape for consistency with other runtime containers.
 
-- This is an internal optimization only.
-- The language-level type remains `set<T>`.
-- No API or semantic differences.
+## Future Optimizations
+
+1. Tiny-set fast path
+- Keep linear scan for very small sets and optimize tight loops/unrolled compare
+  paths.
+
+2. Domain-specialized bitsets
+- Add optional bitmap backend for eligible key domains (`bool`, small enums,
+  bounded small integer ranges).
+
+3. Primitive-key hash backend
+- Introduce hashed storage first for primitive key families (`u*`, `i*`,
+  `bool`, `char`), while retaining linear fallback for unsupported key kinds.
+
+4. Full generic hashing/equality
+- Add trait-based `Hash`/`Eq` support and move all set operations to hashed
+  lookup for types that implement those traits.
+
+5. Drop-aware element management
+- Add full element-drop semantics for non-trivial element types once generic
+  key support expands beyond scalar keys.
 
 ## Compiler Pipeline Integration
 
@@ -144,7 +165,6 @@ For eligible tiny domains (`bool`, small enums, bounded small integers), backend
    - Emit runtime calls for insert/remove/contains/clear.
    - Emit intrinsic property loads for `len/capacity/is_empty`.
 5. Drops
-   - Drop elements when needed.
    - Free backing storage when owned.
 
 ## Diagnostics

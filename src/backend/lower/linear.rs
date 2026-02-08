@@ -206,6 +206,58 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(self.builder.load(addr, array_ty).into())
             }
 
+            sem::ValueExprKind::SetLit { elems, .. } => {
+                let set_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+                let Type::Set { elem_ty } = set_sem_ty else {
+                    panic!("backend set literal has non-set type");
+                };
+
+                let set_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let slot = self.alloc_value_slot(set_ir_ty);
+
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+                let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, elem_ptr_ty);
+                let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+
+                // Start with an empty, non-owned set; runtime insert promotes to owned.
+                self.store_field(slot.addr, 0, elem_ptr_ty, zero_ptr);
+                self.store_field(slot.addr, 1, u32_ty, zero_u32);
+                self.store_field(slot.addr, 2, u32_ty, zero_u32);
+
+                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+                let elem_size = self
+                    .builder
+                    .const_int(layout.size() as i128, false, 64, u64_ty);
+                let elem_align = self
+                    .builder
+                    .const_int(layout.align() as i128, false, 64, u64_ty);
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+
+                for elem_expr in elems.iter() {
+                    let value = eval_value!(elem_expr);
+                    let elem_value_ty = self.type_map.type_table().get(elem_expr.ty).clone();
+                    let elem_addr = if elem_value_ty.is_scalar() {
+                        self.materialize_value_addr(value, &elem_value_ty)
+                    } else {
+                        panic!(
+                            "backend set literal element must be scalar in v1, got {:?}",
+                            elem_value_ty
+                        );
+                    };
+                    let _ = self.builder.call(
+                        Callee::Runtime(RuntimeFn::SetInsertElem),
+                        vec![slot.addr, elem_addr, elem_size, elem_align],
+                        bool_ty,
+                    );
+                }
+
+                Ok(self.load_slot(&slot).into())
+            }
+
             sem::ValueExprKind::TupleLit(items) => {
                 // Allocate a local for the tuple and get its address
                 let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);

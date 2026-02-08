@@ -417,6 +417,10 @@ pub enum ValueExprKind {
         elem_ty: Option<TypeExpr>,
         init: ArrayLitInit,
     },
+    SetLit {
+        elem_ty: Option<TypeExpr>,
+        elems: Vec<ValueExpr>,
+    },
     TupleLit(Vec<ValueExpr>),
     StructLit {
         name: String,

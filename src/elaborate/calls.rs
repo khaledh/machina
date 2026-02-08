@@ -51,6 +51,24 @@ impl<'a> Elaborator<'a> {
                 _ => target,
             };
         }
+        if def_id.is_none()
+            && let Some(method_name) = method_name
+            && matches!(
+                call_sig
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| receiver.ty.peel_heap()),
+                Some(Type::Set { .. })
+            )
+        {
+            target = match method_name {
+                "insert" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetInsert),
+                "contains" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetContains),
+                "remove" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetRemove),
+                "clear" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetClear),
+                _ => target,
+            };
+        }
 
         if let Some(def_id) = def_id {
             let def = self
@@ -277,6 +295,35 @@ impl<'a> Elaborator<'a> {
                     sem::ArgLowering::Direct(sem::CallInput::Receiver),
                     sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
                 ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetInsert)
+            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetContains)
+            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetRemove) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic set method missing receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic set method expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetClear) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic set clear missing receiver");
+                }
+                if !call_sig.params.is_empty() {
+                    panic!(
+                        "compiler bug: intrinsic set clear expects 0 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
             }
             _ => {
                 // Default lowering passes inputs straight through in ABI order.

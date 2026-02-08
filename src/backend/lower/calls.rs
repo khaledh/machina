@@ -254,6 +254,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 sem::IntrinsicCall::DynArrayAppend => {
                     panic!("backend call expr cannot lower dyn-array intrinsic without a receiver");
                 }
+                sem::IntrinsicCall::SetInsert
+                | sem::IntrinsicCall::SetContains
+                | sem::IntrinsicCall::SetRemove
+                | sem::IntrinsicCall::SetClear => {
+                    panic!("backend call expr cannot lower set intrinsic without a receiver");
+                }
             },
             sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
         };
@@ -426,6 +432,114 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.mark_out_init_flags(args, &arg_values);
                 Ok(Some(result))
             }
+            sem::IntrinsicCall::SetInsert => {
+                let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend set insert expects exactly one arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (set_addr, set_ty) = self.resolve_set_receiver(receiver_value);
+                let Type::Set { elem_ty } = set_ty else {
+                    panic!("backend set insert expects set receiver");
+                };
+                let arg = &mut arg_values[0];
+                let elem_addr = if arg.is_addr {
+                    arg.value
+                } else {
+                    let addr = self.materialize_value_addr(arg.value, &arg.ty);
+                    arg.value = addr;
+                    arg.is_addr = true;
+                    addr
+                };
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let size_val = self
+                    .builder
+                    .const_int(layout.size() as i128, false, 64, u64_ty);
+                let align_val = self
+                    .builder
+                    .const_int(layout.align() as i128, false, 64, u64_ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let result = self.builder.call(
+                    Callee::Runtime(RuntimeFn::SetInsertElem),
+                    vec![set_addr, elem_addr, size_val, align_val],
+                    ret_ty,
+                );
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
+            sem::IntrinsicCall::SetContains | sem::IntrinsicCall::SetRemove => {
+                let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend set method expects exactly one arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (set_addr, set_ty) = self.resolve_set_receiver(receiver_value);
+                let Type::Set { elem_ty } = set_ty else {
+                    panic!("backend set method expects set receiver");
+                };
+                let arg = &mut arg_values[0];
+                let elem_addr = if arg.is_addr {
+                    arg.value
+                } else {
+                    let addr = self.materialize_value_addr(arg.value, &arg.ty);
+                    arg.value = addr;
+                    arg.is_addr = true;
+                    addr
+                };
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let size_val = self
+                    .builder
+                    .const_int(layout.size() as i128, false, 64, u64_ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let runtime = match intrinsic {
+                    sem::IntrinsicCall::SetContains => RuntimeFn::SetContainsElem,
+                    sem::IntrinsicCall::SetRemove => RuntimeFn::SetRemoveElem,
+                    _ => unreachable!(),
+                };
+                let result = self.builder.call(
+                    Callee::Runtime(runtime),
+                    vec![set_addr, elem_addr, size_val],
+                    ret_ty,
+                );
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
+            sem::IntrinsicCall::SetClear => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if !arg_values.is_empty() {
+                    panic!(
+                        "backend set clear expects zero args, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (set_addr, _set_ty) = self.resolve_set_receiver(receiver_value);
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let result =
+                    self.builder
+                        .call(Callee::Runtime(RuntimeFn::SetClear), vec![set_addr], ret_ty);
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
         }
     }
 
@@ -465,6 +579,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         // Value receivers of plain dyn-array type need a temporary slot so
         // field loads/indexing can treat the base as an address.
+        if !receiver_value.is_addr && deref_count == 0 {
+            addr = self.materialize_value_addr(addr, &ty);
+        }
+
+        (addr, ty)
+    }
+
+    fn resolve_set_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
+        let (_base_ty, deref_count) = receiver_value.ty.peel_heap_with_count();
+        let (mut addr, ty) = if receiver_value.is_addr {
+            let mut addr = receiver_value.value;
+            let mut curr_ty = receiver_value.ty.clone();
+            for _ in 0..deref_count {
+                let elem_ty = match curr_ty {
+                    Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                    other => panic!("backend set receiver expects heap/ref, got {:?}", other),
+                };
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                addr = self.builder.load(addr, ptr_ir_ty);
+                curr_ty = (*elem_ty).clone();
+            }
+            (addr, curr_ty)
+        } else {
+            self.resolve_deref_base_value(
+                receiver_value.value,
+                receiver_value.ty.clone(),
+                deref_count,
+            )
+        };
+
+        let Type::Set { .. } = ty else {
+            panic!(
+                "backend set receiver resolved to non-set {:?}",
+                receiver_value.ty
+            );
+        };
+
+        // Value receivers of plain set type need a temporary slot so field
+        // loads/mutations can treat the base as an address.
         if !receiver_value.is_addr && deref_count == 0 {
             addr = self.materialize_value_addr(addr, &ty);
         }

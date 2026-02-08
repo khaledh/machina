@@ -185,8 +185,11 @@ fn has_nontrivial_drop(ty: &Type) -> bool {
 
     match ty {
         Type::String | Type::Heap { .. } => true,
-        Type::Array { elem_ty, .. } | Type::Slice { elem_ty } | Type::DynArray { elem_ty } => {
-            has_nontrivial_drop(elem_ty) || matches!(ty, Type::DynArray { .. })
+        Type::Array { elem_ty, .. }
+        | Type::Slice { elem_ty }
+        | Type::DynArray { elem_ty }
+        | Type::Set { elem_ty } => {
+            has_nontrivial_drop(elem_ty) || matches!(ty, Type::DynArray { .. } | Type::Set { .. })
         }
         Type::Tuple { field_tys } => field_tys.iter().any(has_nontrivial_drop),
         Type::Struct { fields, .. } => fields.iter().any(|field| has_nontrivial_drop(&field.ty)),
@@ -469,6 +472,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Type::Tuple { field_tys } => self.drop_tuple(addr, field_tys),
             Type::Array { dims, .. } => self.drop_array(addr, ty, dims),
             Type::DynArray { elem_ty } => self.drop_dyn_array(addr, elem_ty),
+            Type::Set { elem_ty } => self.drop_set(addr, elem_ty),
             Type::Enum { variants, .. } => self.drop_enum(addr, ty, variants),
             Type::ErrorUnion { ok_ty, err_tys } => {
                 let variants = std::iter::once(EnumVariant {
@@ -573,6 +577,47 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             self.builder.select_block(loop_done);
         }
 
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::Free), vec![ptr_val], unit_ty);
+        self.builder.terminate(Terminator::Br {
+            target: ret_bb,
+            args: Vec::new(),
+        });
+
+        self.builder.select_block(ret_bb);
+        Ok(())
+    }
+
+    fn drop_set(&mut self, addr: ValueId, elem_ty: &Type) -> Result<(), LowerToIrError> {
+        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+
+        let cap_val = self.load_field(addr, 2, u32_ty);
+        let owned_mask = self.builder.const_int(0x8000_0000, false, 32, u32_ty);
+        let owned_bits = self
+            .builder
+            .binop(crate::ir::BinOp::And, cap_val, owned_mask, u32_ty);
+        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+        let is_owned = self
+            .builder
+            .cmp(crate::ir::CmpOp::Ne, owned_bits, zero_u32, bool_ty);
+
+        let owned_bb = self.builder.add_block();
+        let ret_bb = self.builder.add_block();
+        self.builder.terminate(Terminator::CondBr {
+            cond: is_owned,
+            then_bb: owned_bb,
+            then_args: Vec::new(),
+            else_bb: ret_bb,
+            else_args: Vec::new(),
+        });
+
+        self.builder.select_block(owned_bb);
+        let elem_ir_ty = self.type_lowerer.lower_type(elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let ptr_val = self.load_field(addr, 0, elem_ptr_ty);
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
         let _ = self
             .builder

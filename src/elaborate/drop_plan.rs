@@ -296,6 +296,11 @@ impl<'a> DropPlanBuilder<'a> {
                     self.visit_value_expr(expr);
                 }
             },
+            sem::ValueExprKind::SetLit { elems, .. } => {
+                for elem in elems {
+                    self.visit_value_expr(elem);
+                }
+            }
             sem::ValueExprKind::TupleLit(items) => {
                 for item in items {
                     self.visit_value_expr(item);

@@ -167,6 +167,9 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         let builtin = match &obligation.callee {
             CallCallee::Method { name } => {
                 resolve_builtin_dyn_array_method_call(engine, obligation.receiver.as_ref(), name)
+                    .or_else(|| {
+                        resolve_builtin_set_method_call(engine, obligation.receiver.as_ref(), name)
+                    })
             }
             _ => None,
         };
@@ -986,6 +989,39 @@ fn resolve_builtin_dyn_array_method_call(
             },
             ty: elem_ty,
         }],
+        _ => return None,
+    };
+
+    Some((receiver_param, params))
+}
+
+fn resolve_builtin_set_method_call(
+    engine: &TypecheckEngine,
+    receiver: Option<&Type>,
+    method_name: &str,
+) -> Option<(CallParam, Vec<CallParam>)> {
+    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
+    let Type::Set { elem_ty } = receiver_ty.peel_heap() else {
+        return None;
+    };
+    let elem_ty = (*elem_ty).clone();
+
+    let receiver_mode = match method_name {
+        "contains" => crate::tree::ParamMode::In,
+        "insert" | "remove" | "clear" => crate::tree::ParamMode::InOut,
+        _ => return None,
+    };
+    let receiver_param = CallParam {
+        mode: receiver_mode,
+        ty: receiver_ty.clone(),
+    };
+
+    let params = match method_name {
+        "insert" | "remove" | "contains" => vec![CallParam {
+            mode: crate::tree::ParamMode::In,
+            ty: elem_ty,
+        }],
+        "clear" => Vec::new(),
         _ => return None,
     };
 

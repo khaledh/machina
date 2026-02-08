@@ -2897,10 +2897,7 @@ fn is_len_target(ty: &Type) -> bool {
 }
 
 fn is_supported_set_elem_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Int { .. } | Type::Bool | Type::Char | Type::String
-    )
+    matches!(ty, Type::Int { .. } | Type::Bool | Type::Char)
 }
 
 fn peel_heap(ty: Type) -> Type {

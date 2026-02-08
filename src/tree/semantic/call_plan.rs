@@ -7,6 +7,10 @@ use crate::tree::ParamMode;
 pub enum IntrinsicCall {
     StringLen,
     DynArrayAppend,
+    SetInsert,
+    SetContains,
+    SetRemove,
+    SetClear,
 }
 
 #[derive(Clone, Debug)]

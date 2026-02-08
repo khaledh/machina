@@ -199,6 +199,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let raw = self.load_field(base_addr, 1, src_ty);
                     self.cast_int_if_needed(raw, src_ty, target_ir_ty)
                 }
+                Type::Set { .. } => {
+                    let src_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let raw = self.load_field(base_addr, 1, src_ty);
+                    self.cast_int_if_needed(raw, src_ty, target_ir_ty)
+                }
                 Type::String => {
                     let src_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let raw = self.load_field(base_addr, 1, src_ty);
@@ -216,10 +221,26 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         .binop(crate::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
                     self.cast_int_if_needed(cap, u32_ty, target_ir_ty)
                 }
+                Type::Set { .. } => {
+                    let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let cap_raw = self.load_field(base_addr, 2, u32_ty);
+                    let cap_mask = self.builder.const_int(0x7fff_ffff, false, 32, u32_ty);
+                    let cap = self
+                        .builder
+                        .binop(crate::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
+                    self.cast_int_if_needed(cap, u32_ty, target_ir_ty)
+                }
                 _ => return None,
             },
             "is_empty" => match base_ty {
                 Type::DynArray { .. } => {
+                    let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let len = self.load_field(base_addr, 1, u32_ty);
+                    let zero = self.builder.const_int(0, false, 32, u32_ty);
+                    self.builder
+                        .cmp(crate::ir::CmpOp::Eq, len, zero, target_ir_ty)
+                }
+                Type::Set { .. } => {
                     let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let len = self.load_field(base_addr, 1, u32_ty);
                     let zero = self.builder.const_int(0, false, 32, u32_ty);
