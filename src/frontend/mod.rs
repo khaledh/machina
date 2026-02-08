@@ -146,6 +146,18 @@ pub enum FrontendError {
         span: Span,
     },
 
+    #[error("unknown requires alias `{alias}`")]
+    UnknownRequireAlias { alias: String, span: Span },
+
+    #[error("module `{module}` imported as `{alias}` does not export {expected_kind} `{member}`")]
+    RequireMemberUndefined {
+        alias: String,
+        module: ModulePath,
+        member: String,
+        expected_kind: &'static str,
+        span: Span,
+    },
+
     #[error("module dependency cycle detected: {0}")]
     ModuleDependencyCycle(String),
 

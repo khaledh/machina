@@ -100,7 +100,11 @@ pub fn compile_with_path(
 
     let (user_module, id_gen) = if let Some(program) = &program_context {
         (
-            flatten_program_module(program),
+            flatten_program_module(program).map_err(|errs| {
+                errs.into_iter()
+                    .map(CompileError::from)
+                    .collect::<Vec<CompileError>>()
+            })?,
             program.next_node_id_gen().clone(),
         )
     } else {

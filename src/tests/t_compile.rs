@@ -129,7 +129,8 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program));
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
 
@@ -165,7 +166,8 @@ fn flatten_program_rewrites_alias_member_access_to_var() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program));
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
 
@@ -200,7 +202,8 @@ fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program));
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
 
@@ -235,7 +238,8 @@ fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program));
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
 
@@ -274,10 +278,78 @@ fn flatten_program_rewrites_alias_trait_name_in_method_block() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program));
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
 
     assert!(stats.saw_rewritten_trait_impl_name);
     assert!(!stats.saw_alias_trait_impl_name);
+}
+
+#[test]
+fn flatten_program_reports_unknown_alias_in_type_reference() {
+    let entry_src = r#"
+        fn use_config(c: cfg.Config) -> cfg.Config {
+            c
+        }
+    "#;
+    let loader = MockLoader {
+        modules: HashMap::new(),
+    };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let errors = result.expect_err("flatten should fail");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, FrontendError::UnknownRequireAlias { alias, .. } if alias == "cfg"))
+    );
+}
+
+#[test]
+fn flatten_program_reports_missing_trait_member_on_alias() {
+    let entry_src = r#"
+        requires {
+            app.runnable as rt
+        }
+
+        fn execute<T: rt.Missing>(value: T) {
+            ()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.runnable".to_string(),
+        "trait Runnable { fn run(self); }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let errors = result.expect_err("flatten should fail");
+    assert!(
+        errors.iter().any(|e| {
+            matches!(
+                e,
+                FrontendError::RequireMemberUndefined { alias, member, expected_kind, .. }
+                    if alias == "rt" && member == "Missing" && *expected_kind == "trait"
+            )
+        })
+    );
 }
