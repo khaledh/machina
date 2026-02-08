@@ -421,6 +421,7 @@ const RUNTIME_SOURCE_FILES: &[&str] = &[
     "alloc.c",
     "conv.c",
     "dyn_array.c",
+    "hash_table.c",
     "mem.c",
     "print.c",
     "set.c",
