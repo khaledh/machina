@@ -114,29 +114,31 @@ fn test_lower_match_enum_payload_binding() {
             %v11: u64 = const 16:u64
             memcpy %v9, %v10, %v11
             %v12: ptr<u32> = field_addr %v9, 0
-            %v13: u32 = load %v12
-            switch %v13 {
+            %v13: ptr<u32> = cast.ptr %v12 to ptr<u32>
+            %v14: u32 = load %v13
+            switch %v14 {
               case 0:u32 -> bb1
               case 1:u32 -> bb2
               default -> bb3
             }
 
           bb1():
-            %v15: u64 = const 0:u64
-            br bb4(%v15)
+            %v16: u64 = const 0:u64
+            br bb4(%v16)
 
           bb2():
-            %v16: ptr<blob<8, align=8>> = field_addr %v9, 1
-            %v17: u64 = const 0:u64
-            %v18: ptr<u8> = index_addr %v16, %v17
-            %v19: u64 = load %v18
-            br bb4(%v19)
+            %v17: ptr<blob<8, align=8>> = field_addr %v9, 1
+            %v18: u64 = const 0:u64
+            %v19: ptr<u8> = index_addr %v17, %v18
+            %v20: ptr<u64> = cast.ptr %v19 to ptr<u64>
+            %v21: u64 = load %v20
+            br bb4(%v21)
 
           bb3():
             unreachable
 
-          bb4(%v14: u64):
-            ret %v14
+          bb4(%v15: u64):
+            ret %v15
         }
     "};
     assert_ir_eq(&text, expected);
@@ -184,33 +186,35 @@ fn test_lower_match_tuple_decision_tree() {
             store %v7, %v5
             %v8: u64 = const 8
             memcpy %v6, %v7, %v8
-            %v17: ptr<bool> = field_addr %v6, 0
-            %v18: bool = load %v17
-            %v19: bool = const true
-            %v20: bool = cmp.eq %v18, %v19
-            cbr %v20, bb9, bb5
+            %v19: ptr<bool> = field_addr %v6, 0
+            %v20: ptr<bool> = cast.ptr %v19 to ptr<bool>
+            %v21: bool = load %v20
+            %v22: bool = const true
+            %v23: bool = cmp.eq %v21, %v22
+            cbr %v23, bb9, bb5
 
           bb1():
-            %v26: u64 = const 10:u64
-            br bb10(%v26)
+            %v30: u64 = const 10:u64
+            br bb10(%v30)
 
           bb2():
-            %v27: u64 = const 20:u64
-            br bb10(%v27)
+            %v31: u64 = const 20:u64
+            br bb10(%v31)
 
           bb3():
-            %v28: u64 = const 0:u64
-            br bb10(%v28)
+            %v32: u64 = const 0:u64
+            br bb10(%v32)
 
           bb4():
             br bb1
 
           bb5():
             %v9: ptr<bool> = field_addr %v6, 0
-            %v10: bool = load %v9
-            %v11: bool = const true
-            %v12: bool = cmp.eq %v10, %v11
-            cbr %v12, bb8, bb7
+            %v10: ptr<bool> = cast.ptr %v9 to ptr<bool>
+            %v11: bool = load %v10
+            %v12: bool = const true
+            %v13: bool = cmp.eq %v11, %v12
+            cbr %v13, bb8, bb7
 
           bb6():
             br bb2
@@ -219,21 +223,23 @@ fn test_lower_match_tuple_decision_tree() {
             br bb3
 
           bb8():
-            %v13: ptr<i32> = field_addr %v6, 1
-            %v14: i32 = load %v13
-            %v15: i32 = const 2
-            %v16: bool = cmp.eq %v14, %v15
-            cbr %v16, bb6, bb7
+            %v14: ptr<i32> = field_addr %v6, 1
+            %v15: ptr<i32> = cast.ptr %v14 to ptr<i32>
+            %v16: i32 = load %v15
+            %v17: i32 = const 2
+            %v18: bool = cmp.eq %v16, %v17
+            cbr %v18, bb6, bb7
 
           bb9():
-            %v21: ptr<i32> = field_addr %v6, 1
-            %v22: i32 = load %v21
-            %v23: i32 = const 1
-            %v24: bool = cmp.eq %v22, %v23
-            cbr %v24, bb4, bb5
+            %v24: ptr<i32> = field_addr %v6, 1
+            %v25: ptr<i32> = cast.ptr %v24 to ptr<i32>
+            %v26: i32 = load %v25
+            %v27: i32 = const 1
+            %v28: bool = cmp.eq %v26, %v27
+            cbr %v28, bb4, bb5
 
-          bb10(%v25: u64):
-            ret %v25
+          bb10(%v29: u64):
+            ret %v29
         }
     "};
     assert_ir_eq(&text, expected);

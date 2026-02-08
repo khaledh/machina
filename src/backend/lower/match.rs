@@ -407,7 +407,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         }
 
         let ir_ty = self.lowerer.type_lowerer.lower_type(&ty);
-        let value = self.lowerer.builder.load(addr, ir_ty);
+        let ptr_ty = self.lowerer.type_lowerer.ptr_to(ir_ty);
+        let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
+        let value = self.lowerer.builder.load(typed_addr, ir_ty);
         Ok((value, ty))
     }
 
@@ -422,7 +424,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                     .locals
                     .insert(binding.def_id, LocalValue::addr(typed_addr, value_ty));
             } else {
-                let value = self.lowerer.builder.load(addr, value_ty);
+                let ptr_ty = self.lowerer.type_lowerer.ptr_to(value_ty);
+                let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
+                let value = self.lowerer.builder.load(typed_addr, value_ty);
                 self.lowerer
                     .locals
                     .insert(binding.def_id, LocalValue::value(value, value_ty));
@@ -447,7 +451,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     ) -> Result<(ValueId, IrTypeId), LowerToIrError> {
         let (addr, ty) = self.lower_place_addr(place)?;
         let ir_ty = self.lowerer.type_lowerer.lower_type(&ty);
-        let value = self.lowerer.builder.load(addr, ir_ty);
+        // Match place projections can compute byte-addresses (ptr<u8>) before
+        // recovering the payload semantic type. Cast to the precise pointer
+        // type expected by `load` so typed IR stays consistent.
+        let ptr_ty = self.lowerer.type_lowerer.ptr_to(ir_ty);
+        let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
+        let value = self.lowerer.builder.load(typed_addr, ir_ty);
         Ok((value, ir_ty))
     }
 

@@ -49,8 +49,17 @@ impl Pass for LocalLoadForward {
             return false;
         }
 
+        let replacement_map: HashMap<ValueId, ValueId> = replacements
+            .iter()
+            .map(|(_, _, from, to)| (*from, *to))
+            .collect();
+
         for (block_idx, inst_idx, from, to) in &replacements {
-            replace_value_in_func(func, *from, *to, Some((*block_idx, *inst_idx)));
+            let resolved = resolve_replacement_target(*to, &replacement_map);
+            if resolved == *from {
+                continue;
+            }
+            replace_value_in_func(func, *from, resolved, Some((*block_idx, *inst_idx)));
         }
 
         for (block_idx, block) in func.blocks.iter_mut().enumerate() {
@@ -68,6 +77,21 @@ impl Pass for LocalLoadForward {
 
         true
     }
+}
+
+fn resolve_replacement_target(
+    start: ValueId,
+    replacement_map: &HashMap<ValueId, ValueId>,
+) -> ValueId {
+    let mut curr = start;
+    let mut seen = HashSet::new();
+    while let Some(next) = replacement_map.get(&curr).copied() {
+        if !seen.insert(curr) {
+            break;
+        }
+        curr = next;
+    }
+    curr
 }
 
 fn collect_safe_addr_of_locals(func: &Function) -> HashSet<ValueId> {

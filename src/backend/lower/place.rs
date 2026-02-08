@@ -1,7 +1,7 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
 use crate::backend::lower::LowerToIrError;
-use crate::ir::{IrTypeId, ValueId};
+use crate::ir::{IrTypeId, IrTypeKind, ValueId};
 use crate::tree::semantic as sem;
 use crate::types::Type;
 
@@ -41,6 +41,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
             sem::PlaceExprKind::StructField { target, field } => {
                 let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
+                if field == "len"
+                    && let Some(place_addr) =
+                        self.lower_builtin_len_place(base_addr, &base_ty, place.ty)
+                {
+                    return Ok(place_addr);
+                }
                 let (field_index, _field_ty, field_ir_ty) =
                     self.struct_field_from_type(&base_ty, field);
                 let addr = self.field_addr_typed(base_addr, field_index, field_ir_ty);
@@ -145,5 +151,85 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         Ok((base.addr, curr_ty))
+    }
+
+    fn lower_builtin_len_place(
+        &mut self,
+        base_addr: ValueId,
+        base_ty: &Type,
+        place_ty: crate::types::TypeId,
+    ) -> Option<PlaceAddr> {
+        let target_ir_ty = self.type_lowerer.lower_type_id(place_ty);
+        let len_value = match base_ty {
+            Type::Array { dims, .. } => {
+                let len = dims.first().copied().unwrap_or(0) as i128;
+                self.build_int_const_for_ty(len, target_ir_ty)
+            }
+            Type::Slice { .. } => {
+                let src_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let raw = self.load_field(base_addr, 1, src_ty);
+                self.cast_int_if_needed(raw, src_ty, target_ir_ty)
+            }
+            Type::String => {
+                let src_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                let raw = self.load_field(base_addr, 1, src_ty);
+                self.cast_int_if_needed(raw, src_ty, target_ir_ty)
+            }
+            _ => return None,
+        };
+
+        let addr = self.alloc_local_addr(target_ir_ty);
+        self.builder.store(addr, len_value);
+        Some(PlaceAddr {
+            addr,
+            value_ty: target_ir_ty,
+        })
+    }
+
+    fn build_int_const_for_ty(&mut self, value: i128, ty: IrTypeId) -> ValueId {
+        match self.type_lowerer.ir_type_cache.kind(ty) {
+            IrTypeKind::Int { signed, bits } => self.builder.const_int(value, *signed, *bits, ty),
+            other => panic!(
+                "backend len constant requires integer type, found {:?}",
+                other
+            ),
+        }
+    }
+
+    fn cast_int_if_needed(
+        &mut self,
+        value: ValueId,
+        from_ty: IrTypeId,
+        to_ty: IrTypeId,
+    ) -> ValueId {
+        if from_ty == to_ty {
+            return value;
+        }
+
+        let (from_bits, to_bits) = match (
+            self.type_lowerer.ir_type_cache.kind(from_ty),
+            self.type_lowerer.ir_type_cache.kind(to_ty),
+        ) {
+            (
+                IrTypeKind::Int {
+                    bits: from_bits, ..
+                },
+                IrTypeKind::Int { bits: to_bits, .. },
+            ) => (*from_bits, *to_bits),
+            (from_kind, to_kind) => {
+                panic!(
+                    "backend len cast expects integer types, got {:?} -> {:?}",
+                    from_kind, to_kind
+                )
+            }
+        };
+
+        if to_bits > from_bits {
+            self.builder.int_extend(value, to_ty, false)
+        } else if to_bits < from_bits {
+            self.builder.int_trunc(value, to_ty)
+        } else {
+            value
+        }
     }
 }

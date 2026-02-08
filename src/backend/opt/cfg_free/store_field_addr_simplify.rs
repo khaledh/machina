@@ -4,7 +4,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::backend::opt::Pass;
 use crate::ir::IrTypeId;
-use crate::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+use crate::ir::{
+    Function, InstKind, Terminator, ValueId, for_each_inst_use, replace_value_in_func,
+};
 
 type ValueDefUseMaps = (
     HashMap<ValueId, IrTypeId>,
@@ -22,6 +24,7 @@ impl Pass for StoreFieldAddrSimplify {
 
     fn run(&mut self, func: &mut Function) -> bool {
         let (value_types, def_inst, uses) = build_maps(func);
+        let term_uses = collect_term_uses(func);
         let mut candidates = Vec::new();
 
         for (block_idx, block) in func.blocks.iter().enumerate() {
@@ -57,7 +60,7 @@ impl Pass for StoreFieldAddrSimplify {
                 }
 
                 let ignore = Some((block_idx, inst_idx));
-                if !is_read_only_ptr(*ptr, func, &uses, ignore, &mut HashSet::new()) {
+                if !is_read_only_ptr(*ptr, func, &uses, &term_uses, ignore, &mut HashSet::new()) {
                     continue;
                 }
 
@@ -123,11 +126,16 @@ fn is_read_only_ptr(
     value: ValueId,
     func: &Function,
     uses: &HashMap<ValueId, Vec<(usize, usize)>>,
+    term_uses: &HashSet<ValueId>,
     ignore: Option<(usize, usize)>,
     visiting: &mut HashSet<ValueId>,
 ) -> bool {
     if !visiting.insert(value) {
         return true;
+    }
+
+    if term_uses.contains(&value) {
+        return false;
     }
 
     let Some(users) = uses.get(&value) else {
@@ -146,7 +154,7 @@ fn is_read_only_ptr(
                 let Some(result) = &inst.result else {
                     return false;
                 };
-                if !is_read_only_ptr(result.id, func, uses, ignore, visiting) {
+                if !is_read_only_ptr(result.id, func, uses, term_uses, ignore, visiting) {
                     return false;
                 }
             }
@@ -155,4 +163,44 @@ fn is_read_only_ptr(
     }
 
     true
+}
+
+fn collect_term_uses(func: &Function) -> HashSet<ValueId> {
+    let mut uses = HashSet::new();
+    for block in &func.blocks {
+        match &block.term {
+            Terminator::Br { args, .. } => {
+                uses.extend(args.iter().copied());
+            }
+            Terminator::CondBr {
+                cond,
+                then_args,
+                else_args,
+                ..
+            } => {
+                uses.insert(*cond);
+                uses.extend(then_args.iter().copied());
+                uses.extend(else_args.iter().copied());
+            }
+            Terminator::Switch {
+                value,
+                cases,
+                default_args,
+                ..
+            } => {
+                uses.insert(*value);
+                for case in cases {
+                    uses.extend(case.args.iter().copied());
+                }
+                uses.extend(default_args.iter().copied());
+            }
+            Terminator::Return { value } => {
+                if let Some(value) = value {
+                    uses.insert(*value);
+                }
+            }
+            Terminator::Unreachable => {}
+        }
+    }
+    uses
 }

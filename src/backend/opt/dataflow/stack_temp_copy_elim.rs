@@ -144,8 +144,13 @@ impl Pass for StackTempCopyElim {
         }
         // For replace-value cases, substitute dst with src and remove the memcpy.
         // The temp store may still be needed to materialize the source value (e.g. call results).
+        let candidate_map: HashMap<ValueId, ValueId> = candidates
+            .iter()
+            .map(|(_, _, dst, src, _, _)| (*dst, *src))
+            .collect();
         for (block_idx, inst_idx, dst, src, _store_block, _store_idx) in &candidates {
-            replace_value_in_func(func, *dst, *src, Some((*block_idx, *inst_idx)));
+            let resolved_src = resolve_replacement_target(*src, &candidate_map);
+            replace_value_in_func(func, *dst, resolved_src, Some((*block_idx, *inst_idx)));
             remove.insert((*block_idx, *inst_idx));
         }
 
@@ -193,6 +198,21 @@ impl Pass for StackTempCopyElim {
 
         true
     }
+}
+
+fn resolve_replacement_target(
+    start: ValueId,
+    replacement_map: &HashMap<ValueId, ValueId>,
+) -> ValueId {
+    let mut curr = start;
+    let mut seen = HashSet::new();
+    while let Some(next) = replacement_map.get(&curr).copied() {
+        if !seen.insert(curr) {
+            break;
+        }
+        curr = next;
+    }
+    curr
 }
 
 fn build_maps(func: &Function) -> DefUseMaps {

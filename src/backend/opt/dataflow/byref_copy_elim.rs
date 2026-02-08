@@ -65,8 +65,13 @@ impl Pass for ByRefCopyElim {
             .map(|(block_idx, inst_idx, _, _)| (*block_idx, *inst_idx))
             .collect();
 
+        let replacement_map: HashMap<ValueId, ValueId> = candidates
+            .iter()
+            .map(|(_, _, dst, src)| (*dst, *src))
+            .collect();
         for (block_idx, inst_idx, dst, src) in &candidates {
-            replace_value_in_func(func, *dst, *src, Some((*block_idx, *inst_idx)));
+            let resolved_src = resolve_replacement_target(*src, &replacement_map);
+            replace_value_in_func(func, *dst, resolved_src, Some((*block_idx, *inst_idx)));
         }
 
         for (block_idx, block) in func.blocks.iter_mut().enumerate() {
@@ -96,6 +101,21 @@ impl Pass for ByRefCopyElim {
 
         true
     }
+}
+
+fn resolve_replacement_target(
+    start: ValueId,
+    replacement_map: &HashMap<ValueId, ValueId>,
+) -> ValueId {
+    let mut curr = start;
+    let mut seen = HashSet::new();
+    while let Some(next) = replacement_map.get(&curr).copied() {
+        if !seen.insert(curr) {
+            break;
+        }
+        curr = next;
+    }
+    curr
 }
 
 fn build_use_maps(func: &Function) -> DefUseMaps {

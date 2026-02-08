@@ -217,8 +217,13 @@ impl Pass for LocalAddrCopyElim {
         }
 
         let mut remove = HashSet::new();
+        let replacement_map: HashMap<ValueId, ValueId> = candidates
+            .iter()
+            .map(|(_, _, dst, src, _)| (*dst, *src))
+            .collect();
         for (block_idx, inst_idx, dst, src, _) in &candidates {
-            replace_value_in_func(func, *dst, *src, Some((*block_idx, *inst_idx)));
+            let resolved_src = resolve_replacement_target(*src, &replacement_map);
+            replace_value_in_func(func, *dst, resolved_src, Some((*block_idx, *inst_idx)));
             remove.insert((*block_idx, *inst_idx));
         }
 
@@ -237,6 +242,21 @@ impl Pass for LocalAddrCopyElim {
 
         true
     }
+}
+
+fn resolve_replacement_target(
+    start: ValueId,
+    replacement_map: &HashMap<ValueId, ValueId>,
+) -> ValueId {
+    let mut curr = start;
+    let mut seen = HashSet::new();
+    while let Some(next) = replacement_map.get(&curr).copied() {
+        if !seen.insert(curr) {
+            break;
+        }
+        curr = next;
+    }
+    curr
 }
 
 fn build_maps(func: &Function) -> DefUseMaps {
