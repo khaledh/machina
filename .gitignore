@@ -13,3 +13,4 @@
 !/examples/*.mc
 !/examples/**/*.mc
 !/examples/*.md
+!/examples/run_all.sh
