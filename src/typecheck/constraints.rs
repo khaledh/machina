@@ -757,6 +757,29 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
             },
+            ExprKind::SetLit { elem_ty, elems } => {
+                let elem_term = if let Some(explicit_elem_ty) = elem_ty {
+                    self.resolve_type_in_scope(explicit_elem_ty)
+                        .unwrap_or_else(|_| self.fresh_var_term())
+                } else {
+                    self.fresh_var_term()
+                };
+                for elem in elems {
+                    let value_ty = self.collect_expr(elem, Some(elem_term.clone()));
+                    self.push_assignable(
+                        value_ty,
+                        elem_term.clone(),
+                        ConstraintReason::Expr(elem.id, elem.span),
+                    );
+                }
+                self.push_eq(
+                    expr_ty.clone(),
+                    Type::Set {
+                        elem_ty: Box::new(elem_term),
+                    },
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
             ExprKind::StructLit {
                 name,
                 type_args,

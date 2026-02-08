@@ -84,6 +84,7 @@ fn type_info_score(ty: &Type) -> usize {
         Type::Range { elem_ty }
         | Type::Slice { elem_ty }
         | Type::DynArray { elem_ty }
+        | Type::Set { elem_ty }
         | Type::Heap { elem_ty }
         | Type::Ref { elem_ty, .. } => 1 + type_info_score(elem_ty),
         Type::Array { elem_ty, dims } => 1 + dims.len() + type_info_score(elem_ty),

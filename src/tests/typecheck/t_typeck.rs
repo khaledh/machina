@@ -119,6 +119,30 @@ fn test_typed_array_repeat_literal_type_mismatch() {
 }
 
 #[test]
+fn test_set_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = {1, 2, 3};
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_typed_empty_set_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = set<u64>{};
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_multidim_array_type_inference() {
     let source = r#"
         fn test() -> u64[2, 2] {

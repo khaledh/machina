@@ -36,6 +36,9 @@ pub enum ParseError {
     #[error("Single field tuple missing trailing comma: {0}")]
     SingleFieldTupleMissingComma(Token),
 
+    #[error("Single element set missing trailing comma: {0}")]
+    SingleElementSetMissingComma(Token),
+
     #[error("Expected struct field, found: {0}")]
     ExpectedStructField(Token),
 
@@ -83,6 +86,7 @@ impl ParseError {
             ParseError::ExpectedStringLit(token) => token.span,
             ParseError::ExpectedPattern(token) => token.span,
             ParseError::SingleFieldTupleMissingComma(token) => token.span,
+            ParseError::SingleElementSetMissingComma(token) => token.span,
             ParseError::ExpectedStructField(token) => token.span,
             ParseError::ExpectedMatchArm(token) => token.span,
             ParseError::ExpectedMatchPattern(token) => token.span,

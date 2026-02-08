@@ -698,6 +698,17 @@ impl Expr {
                 writeln!(f, "{}Length: {}", pad1, init.length())?;
                 init.fmt_with_indent(f, level + 1)?;
             }
+            ExprKind::SetLit { elem_ty, elems } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}SetLit [{}]", pad, self.id)?;
+                if let Some(elem_ty) = elem_ty {
+                    writeln!(f, "{}Elem Type: {}", pad1, elem_ty)?;
+                }
+                writeln!(f, "{}Length: {}", pad1, elems.len())?;
+                for elem in elems {
+                    elem.fmt_with_indent(f, level + 1)?;
+                }
+            }
             ExprKind::ArrayIndex { target, indices } => {
                 writeln!(f, "{}ArrayIndex [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);

@@ -516,6 +516,15 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
             }
         },
 
+        ExprKind::SetLit { elem_ty, elems } => {
+            if let Some(elem_ty) = elem_ty {
+                v.visit_type_expr(elem_ty);
+            }
+            for elem in elems {
+                v.visit_expr(elem);
+            }
+        }
+
         ExprKind::TupleLit(fields) => {
             for field in fields {
                 v.visit_expr(field);

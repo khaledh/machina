@@ -296,6 +296,9 @@ impl<'a> Elaborator<'a> {
                 elem_ty: elem_ty.clone(),
                 init: self.elab_array_lit_init(init),
             },
+            norm::ExprKind::SetLit { .. } => {
+                panic!("set literals are not lowered yet");
+            }
             norm::ExprKind::TupleLit(items) => sem::ValueExprKind::TupleLit(
                 items.iter().map(|item| self.elab_value(item)).collect(),
             ),

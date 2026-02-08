@@ -566,6 +566,7 @@ fn match_template_type(
         (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
         | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
         | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
+        | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
         | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => {
             match_template_type(l, r, bindings)
         }

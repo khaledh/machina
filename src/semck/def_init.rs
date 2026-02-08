@@ -1075,6 +1075,11 @@ impl<'a> DefInitChecker<'a> {
                 }
                 ArrayLitInit::Repeat(expr, _) => self.check_expr(expr),
             },
+            ExprKind::SetLit { elems, .. } => {
+                for elem in elems {
+                    self.check_expr(elem);
+                }
+            }
             ExprKind::TupleLit(fields) => {
                 for field in fields {
                     self.check_expr(field);

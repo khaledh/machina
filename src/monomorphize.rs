@@ -747,6 +747,14 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 res::ArrayLitInit::Repeat(expr, _) => reseed_expr(expr, node_id_gen),
             }
         }
+        res::ExprKind::SetLit { elem_ty, elems } => {
+            if let Some(elem_ty) = elem_ty {
+                reseed_type_expr(elem_ty, node_id_gen);
+            }
+            for elem in elems {
+                reseed_expr(elem, node_id_gen);
+            }
+        }
         res::ExprKind::TupleLit(fields) => {
             for field in fields {
                 reseed_expr(field, node_id_gen);
@@ -1048,6 +1056,13 @@ fn type_expr_from_type(
         },
         Type::DynArray { elem_ty } => res::TypeExprKind::DynArray {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
+        },
+        Type::Set { elem_ty } => res::TypeExprKind::Named {
+            ident: "set".to_string(),
+            def_id: def_table
+                .lookup_type_def_id("set")
+                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+            type_args: vec![type_expr_from_type(elem_ty, def_table, node_id_gen, span)?],
         },
         Type::Tuple { field_tys } => res::TypeExprKind::Tuple {
             field_ty_exprs: field_tys

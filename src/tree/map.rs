@@ -1070,6 +1070,13 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
             elem_ty: elem_ty.as_ref().map(|ty| mapper.map_type_expr(ty, ctx)),
             init: mapper.map_array_lit_init(init, ctx),
         },
+        ExprKind::SetLit { elem_ty, elems } => ExprKind::SetLit {
+            elem_ty: elem_ty.as_ref().map(|ty| mapper.map_type_expr(ty, ctx)),
+            elems: elems
+                .iter()
+                .map(|elem| mapper.map_expr(elem, ctx))
+                .collect(),
+        },
         ExprKind::TupleLit(items) => ExprKind::TupleLit(
             items
                 .iter()

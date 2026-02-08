@@ -194,11 +194,12 @@ Primary            ::= Literal
 ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr
 
 Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
-                     | ArrayLit | TupleLit | StructLit
+                     | ArrayLit | SetLit | TupleLit | StructLit
 
 ArrayLit           ::= TypeExpr? "[" ExprList "]"
                      | TypeExpr? "[" Expr ";" IntLit "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
+SetLit             ::= "{" Expr "," ExprList? "}"
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?

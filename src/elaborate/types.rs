@@ -94,6 +94,13 @@ impl<'a> Elaborator<'a> {
             Type::DynArray { elem_ty } => sem::TypeExprKind::DynArray {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
+            Type::Set { elem_ty } => sem::TypeExprKind::Named {
+                ident: "set".to_string(),
+                def_id: self.def_table.lookup_type_def_id("set").unwrap_or_else(|| {
+                    panic!("compiler bug: missing def id for type set at {}", span)
+                }),
+                type_args: vec![self.type_expr_from_type(elem_ty, span)],
+            },
             Type::Tuple { field_tys } => sem::TypeExprKind::Tuple {
                 field_ty_exprs: field_tys
                     .iter()

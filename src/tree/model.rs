@@ -710,6 +710,10 @@ pub enum ExprKind<D, T = ()> {
         elem_ty: Option<TypeExpr<D>>,
         init: ArrayLitInit<D, T>,
     },
+    SetLit {
+        elem_ty: Option<TypeExpr<D>>,
+        elems: Vec<Expr<D, T>>,
+    },
     TupleLit(Vec<Expr<D, T>>),
     StructLit {
         name: String,

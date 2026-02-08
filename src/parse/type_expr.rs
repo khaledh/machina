@@ -152,6 +152,19 @@ impl<'a> Parser<'a> {
                     span: self.close(marker),
                 })
             }
+            TK::KwSet => {
+                self.advance();
+                let type_args = self.parse_type_args()?;
+                Ok(TypeExpr {
+                    id: self.id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: "set".to_string(),
+                        def_id: (),
+                        type_args,
+                    },
+                    span: self.close(marker),
+                })
+            }
             _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
         }
     }

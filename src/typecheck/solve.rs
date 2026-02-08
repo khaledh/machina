@@ -427,7 +427,7 @@ fn join_variant_rank(ty: &Type) -> u8 {
     match ty {
         Type::Unit => 0,
         Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Range { .. } => 1,
-        Type::Tuple { .. } | Type::Array { .. } | Type::DynArray { .. } => 2,
+        Type::Tuple { .. } | Type::Array { .. } | Type::DynArray { .. } | Type::Set { .. } => 2,
         Type::Struct { .. } | Type::Enum { .. } => 3,
         Type::Fn { .. } => 4,
         Type::Slice { .. } | Type::Ref { .. } | Type::Heap { .. } => 5,

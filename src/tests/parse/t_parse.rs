@@ -404,6 +404,127 @@ fn test_parse_array_repeat_literal() {
 }
 
 #[test]
+fn test_parse_set_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = {1, 2, 3};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::SetLit { elem_ty, elems } = &value.kind {
+            assert!(elem_ty.is_none());
+            assert_eq!(elems.len(), 3);
+            for elem in elems {
+                assert!(matches!(elem.kind, ExprKind::IntLit(_)));
+            }
+        } else {
+            panic!("Expected SetLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
+fn test_parse_typed_empty_set_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = set<u64>{};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::SetLit {
+            elem_ty: Some(elem_ty),
+            elems,
+        } = &value.kind
+        {
+            assert!(elems.is_empty());
+            match &elem_ty.kind {
+                TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+                _ => panic!("Expected named u64 element type"),
+            }
+        } else {
+            panic!("Expected typed SetLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
+fn test_parse_singleton_bare_braces_remains_block_expr() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = {1};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        assert!(matches!(value.kind, ExprKind::Block { .. }));
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
+fn test_parse_typed_singleton_set_allows_no_trailing_comma() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = set<u64>{1};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::SetLit {
+            elem_ty: Some(elem_ty),
+            elems,
+        } = &value.kind
+        {
+            assert_eq!(elems.len(), 1);
+            assert!(matches!(elems[0].kind, ExprKind::IntLit(1)));
+            match &elem_ty.kind {
+                TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+                _ => panic!("Expected named u64 element type"),
+            }
+        } else {
+            panic!("Expected typed SetLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
 fn test_parse_tuple_type() {
     let source = r#"
         fn test() -> (u64, bool) {
