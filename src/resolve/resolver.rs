@@ -14,6 +14,12 @@ use crate::tree::resolved::builder::build_module;
 use crate::tree::visit::*;
 use crate::types::{BUILTIN_TYPES, Type};
 
+#[derive(Clone, Debug)]
+pub struct ImportedModule {
+    pub path: String,
+    pub members: HashSet<String>,
+}
+
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
@@ -24,6 +30,7 @@ pub struct SymbolResolver {
     callable_attrs: HashMap<NodeId, FuncAttrs>,
     variant_placeholders: HashMap<String, DefId>,
     require_aliases: HashSet<String>,
+    imported_modules: HashMap<String, ImportedModule>,
 }
 
 impl Default for SymbolResolver {
@@ -46,6 +53,7 @@ impl SymbolResolver {
             callable_attrs: HashMap::new(),
             variant_placeholders: HashMap::new(),
             require_aliases: HashSet::new(),
+            imported_modules: HashMap::new(),
         }
     }
 
@@ -332,6 +340,22 @@ impl SymbolResolver {
             } else {
                 self.require_aliases.insert(alias);
             }
+        }
+    }
+
+    fn validate_module_alias_member(&mut self, alias: &str, member: &str, span: Span) -> bool {
+        let Some(imported) = self.imported_modules.get(alias) else {
+            return true;
+        };
+        if imported.members.contains(member) {
+            true
+        } else {
+            self.errors.push(ResolveError::ModuleMemberUndefined(
+                imported.path.clone(),
+                member.to_string(),
+                span,
+            ));
+            false
         }
     }
 
@@ -1249,12 +1273,14 @@ impl Visitor<()> for SymbolResolver {
                 if let ExprKind::Var { ident: alias, .. } = &callee.kind
                     && self.require_aliases.contains(alias)
                 {
-                    self.errors
-                        .push(ResolveError::ModuleQualifiedAccessUnsupported(
-                            alias.clone(),
-                            method_name.clone(),
-                            expr.span,
-                        ));
+                    if self.validate_module_alias_member(alias, method_name, expr.span) {
+                        self.errors
+                            .push(ResolveError::ModuleQualifiedAccessUnsupported(
+                                alias.clone(),
+                                method_name.clone(),
+                                expr.span,
+                            ));
+                    }
                     for arg in args {
                         self.visit_expr(&arg.expr);
                     }
@@ -1271,12 +1297,14 @@ impl Visitor<()> for SymbolResolver {
                 if let ExprKind::Var { ident: alias, .. } = &target.kind
                     && self.require_aliases.contains(alias)
                 {
-                    self.errors
-                        .push(ResolveError::ModuleQualifiedAccessUnsupported(
-                            alias.clone(),
-                            field.clone(),
-                            expr.span,
-                        ));
+                    if self.validate_module_alias_member(alias, field, expr.span) {
+                        self.errors
+                            .push(ResolveError::ModuleQualifiedAccessUnsupported(
+                                alias.clone(),
+                                field.clone(),
+                                expr.span,
+                            ));
+                    }
                     return;
                 }
                 walk_expr(self, expr);
@@ -1349,7 +1377,15 @@ impl Visitor<()> for SymbolResolver {
 }
 
 pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<ResolveError>> {
+    resolve_with_imports(ast_context, HashMap::new())
+}
+
+pub fn resolve_with_imports(
+    ast_context: ParsedContext,
+    imported_modules: HashMap<String, ImportedModule>,
+) -> Result<ResolvedContext, Vec<ResolveError>> {
     let mut resolver = SymbolResolver::new();
+    resolver.imported_modules = imported_modules;
     let (def_table, node_def_lookup) = resolver.resolve(&ast_context.module)?;
 
     // Build resolved tree from parsed tree + NodeDefLookup
@@ -1370,11 +1406,27 @@ pub fn resolve_program(
         let Some(parsed_module) = program.module(module_id) else {
             continue;
         };
+        let mut imported_modules = HashMap::new();
+        for req in &parsed_module.requires {
+            let alias = req.alias.clone();
+            if let Some(dep_id) = program.program.by_path.get(&req.path)
+                && let Some(dep_module) = program.module(*dep_id)
+            {
+                imported_modules.insert(
+                    alias,
+                    ImportedModule {
+                        path: req.path.to_string(),
+                        members: module_exported_members(&dep_module.module),
+                    },
+                );
+            }
+        }
+
         let parsed_context = ParsedContext::new(
             parsed_module.module.clone(),
             program.next_node_id_gen().clone(),
         );
-        match resolve(parsed_context) {
+        match resolve_with_imports(parsed_context, imported_modules) {
             Ok(resolved_context) => {
                 modules.insert(module_id, resolved_context);
             }
@@ -1394,4 +1446,26 @@ pub fn resolve_program(
         by_path: program.program.by_path.clone(),
         edges: program.program.edges.clone(),
     })
+}
+
+fn module_exported_members(module: &Module) -> HashSet<String> {
+    let mut members = HashSet::new();
+    for item in &module.top_level_items {
+        match item {
+            TopLevelItem::TraitDef(trait_def) => {
+                members.insert(trait_def.name.clone());
+            }
+            TopLevelItem::TypeDef(type_def) => {
+                members.insert(type_def.name.clone());
+            }
+            TopLevelItem::FuncDecl(func_decl) => {
+                members.insert(func_decl.sig.name.clone());
+            }
+            TopLevelItem::FuncDef(func_def) => {
+                members.insert(func_def.sig.name.clone());
+            }
+            TopLevelItem::MethodBlock(_) | TopLevelItem::ClosureDef(_) => {}
+        }
+    }
+    members
 }

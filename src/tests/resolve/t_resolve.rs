@@ -373,3 +373,43 @@ fn test_resolve_module_qualified_access_reports_specific_error() {
         )));
     }
 }
+
+#[test]
+fn test_resolve_program_module_member_undefined() {
+    let entry_src = r#"
+        requires {
+            app.util
+        }
+
+        fn main() -> u64 {
+            util.missing();
+            0
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "fn present() -> u64 { 7 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let resolved = resolve_program(ProgramParsedContext::new(program));
+    assert!(resolved.is_err());
+
+    if let Err(errors) = resolved {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::ModuleMemberUndefined(module, member, _)
+                if module == "app.util" && member == "missing"
+        )));
+    }
+}

@@ -71,6 +71,9 @@ pub enum ResolveError {
 
     #[error("Module-qualified access is not implemented yet: {0}.{1}")]
     ModuleQualifiedAccessUnsupported(String, String, Span),
+
+    #[error("Module `{0}` has no member `{1}`")]
+    ModuleMemberUndefined(String, String, Span),
 }
 
 impl ResolveError {
@@ -98,6 +101,7 @@ impl ResolveError {
             ResolveError::AttrNotAllowed(_, _, span) => *span,
             ResolveError::DuplicateRequireAlias(_, span) => *span,
             ResolveError::ModuleQualifiedAccessUnsupported(_, _, span) => *span,
+            ResolveError::ModuleMemberUndefined(_, _, span) => *span,
         }
     }
 }
