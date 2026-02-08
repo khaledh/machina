@@ -4,9 +4,9 @@ requires {
 }
 
 type Point = { x: u64, y: u64 }
-type Box = { p1: ^Point, p2: ^Point }
+type Box = { p1: Point^, p2: Point^ }
 
-fn update(inout p1: ^Point, inout p2: ^Point) {
+fn update(inout p1: Point^, inout p2: Point^) {
   p1.x = 10;
   p1.y = 20;
 

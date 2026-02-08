@@ -4,7 +4,7 @@ requires {
 }
 
 type Point = { x: u64, y: u64 }
-type Boxed = { p: ^Point }
+type Boxed = { p: Point^ }
 type Pair = { a: Boxed, b: Boxed }
 
 fn fill_a(out a: Boxed) {

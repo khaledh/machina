@@ -161,12 +161,12 @@ and pattern matching.
 
 ## Heap Types
 
-The `^T` type represents an owned heap allocation of type `T`:
+The `T^` type represents an owned heap allocation of type `T`:
 
 ```
 type Point = { x: u64, y: u64 }
 
-let p: ^Point = ^Point { x: 1, y: 2 };
+let p: Point^ = ^Point { x: 1, y: 2 };
 ```
 
 Heap values are automatically dropped when they go out of scope. See

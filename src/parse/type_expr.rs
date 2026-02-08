@@ -30,7 +30,7 @@ impl<'a> Parser<'a> {
 
     fn token_can_start_type(kind: &TK, tokens: &[Token], pos: usize) -> bool {
         match kind {
-            TK::Caret | TK::KwFn | TK::Ident(_) => true,
+            TK::KwFn | TK::Ident(_) => true,
             TK::LParen => true,
             TK::LBracket => false,
             _ => {
@@ -49,28 +49,27 @@ impl<'a> Parser<'a> {
             typ = self.parse_refined_type(typ)?;
         }
 
-        if self.curr_token.kind == TK::LBracket {
-            typ = self.parse_array_type(typ)?;
+        // Postfix type operators compose left-to-right.
+        // Examples:
+        // - u64^      => heap of u64
+        // - u64^[4]   => array of heap u64
+        // - u64[4]^   => heap of array u64[4]
+        loop {
+            if self.curr_token.kind == TK::LBracket {
+                typ = self.parse_array_type(typ)?;
+                continue;
+            }
+            if self.curr_token.kind == TK::Caret {
+                typ = self.parse_heap_type_postfix(typ);
+                continue;
+            }
+            break;
         }
 
         Ok(typ)
     }
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, ParseError> {
-        let marker = self.mark();
-
-        if self.curr_token.kind == TK::Caret {
-            self.advance();
-            let elem_ty_expr = self.parse_type_atom()?;
-            return Ok(TypeExpr {
-                id: self.id_gen.new_id(),
-                kind: TypeExprKind::Heap {
-                    elem_ty_expr: Box::new(elem_ty_expr),
-                },
-                span: self.close(marker),
-            });
-        }
-
         if self.curr_token.kind == TK::KwFn {
             return self.parse_fn_type();
         }
@@ -225,6 +224,18 @@ impl<'a> Parser<'a> {
             },
             span: self.close(marker),
         })
+    }
+
+    fn parse_heap_type_postfix(&mut self, elem_ty_expr: TypeExpr) -> TypeExpr {
+        let marker = self.mark();
+        self.advance();
+        TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Heap {
+                elem_ty_expr: Box::new(elem_ty_expr),
+            },
+            span: self.close(marker),
+        }
     }
 
     fn parse_refined_type(&mut self, base_ty_expr: TypeExpr) -> Result<TypeExpr, ParseError> {

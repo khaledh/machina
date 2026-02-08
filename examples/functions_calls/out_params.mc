@@ -5,7 +5,7 @@ requires {
 
 type Pair = { x: u64, y: u64 }
 type Point = { x: u64, y: u64 }
-type Boxed = { p: ^Point }
+type Boxed = { p: Point^ }
 
 fn make_pair(out p: Pair) {
     p = Pair { x: 1, y: 2 };

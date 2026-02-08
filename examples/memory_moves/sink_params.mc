@@ -5,11 +5,11 @@ requires {
 
 type Point = { x: u64, y: u64 }
 
-fn sum_point(sink p: ^Point, q: ^Point) -> u64 {
+fn sum_point(sink p: Point^, q: Point^) -> u64 {
     p.x + p.y + q.x + q.y
 }
 
-fn forward_sum(sink p: ^Point, q: ^Point) -> u64 {
+fn forward_sum(sink p: Point^, q: Point^) -> u64 {
     sum_point(move p, q)
 }
 

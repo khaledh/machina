@@ -242,7 +242,7 @@ fn test_parse_nested_array_literal() {
 #[test]
 fn test_parse_heap_type_and_alloc_expr() {
     let source = r#"
-        fn test() -> ^u64 {
+        fn test() -> u64^ {
             ^1
         }
     "#;
@@ -265,6 +265,49 @@ fn test_parse_heap_type_and_alloc_expr() {
             _ => panic!("Expected int literal"),
         },
         _ => panic!("Expected heap alloc expression"),
+    }
+}
+
+#[test]
+fn test_parse_heap_type_postfix_with_array_precedence() {
+    let source = r#"
+        fn a(x: u64^[3]) -> u64 { 0 }
+        fn b(x: u64[3]^ ) -> u64 { 0 }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    assert_eq!(funcs.len(), 2);
+
+    // u64^[3] => Array(Heap(u64), [3])
+    let a_param = &funcs[0].sig.params[0];
+    match &a_param.typ.kind {
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            assert_eq!(dims, &[3]);
+            match &elem_ty_expr.kind {
+                TypeExprKind::Heap { elem_ty_expr } => match &elem_ty_expr.kind {
+                    TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+                    _ => panic!("Expected named u64 inside heap"),
+                },
+                _ => panic!("Expected heap element type"),
+            }
+        }
+        _ => panic!("Expected array of heap element type"),
+    }
+
+    // u64[3]^ => Heap(Array(u64, [3]))
+    let b_param = &funcs[1].sig.params[0];
+    match &b_param.typ.kind {
+        TypeExprKind::Heap { elem_ty_expr } => match &elem_ty_expr.kind {
+            TypeExprKind::Array { elem_ty_expr, dims } => {
+                assert_eq!(dims, &[3]);
+                match &elem_ty_expr.kind {
+                    TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+                    _ => panic!("Expected named u64 inside array"),
+                }
+            }
+            _ => panic!("Expected array type inside heap"),
+        },
+        _ => panic!("Expected heap type"),
     }
 }
 

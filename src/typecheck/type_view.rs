@@ -148,7 +148,7 @@ mod tests {
     fn test_view_resolver_is_deterministic_for_recursive_nominals() {
         let ctx = resolve_source(
             r#"
-            type Link = None | Some(^Node)
+            type Link = None | Some(Node^)
             type Node = { value: u64, next: Link }
             fn main() { () }
             "#,

@@ -425,7 +425,7 @@ fn test_resolve_visibility_and_opacity_attrs_on_types() {
         type Config = { host: string }
 
         @[opaque]
-        type Buffer = { data: ^u8[] }
+        type Buffer = { data: u8^[] }
     "#;
 
     let resolved = resolve_source(source).expect("resolve should succeed");

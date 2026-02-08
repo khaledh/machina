@@ -118,7 +118,7 @@ The callee must initialize the parameter before returning. Restrictions:
 The `sink` mode transfers ownership to the function:
 
 ```
-fn consume(sink p: ^Point) {
+fn consume(sink p: Point^) {
     // p is owned here and will be dropped at function exit
 }
 
@@ -144,7 +144,7 @@ Restrictions:
 
 ```
 fn bad(inout x: u64) { }      // error: inout requires aggregate or heap
-fn bad(out p: ^Point) { }     // error: out requires aggregate type
+fn bad(out p: Point^) { }     // error: out requires aggregate type
 fn bad(sink x: u64) { }       // error: sink requires owned type
 ```
 

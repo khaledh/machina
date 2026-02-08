@@ -89,7 +89,7 @@ type Config = {
 
 @[opaque]
 type Buffer = {
-    data: ^u8[],
+    data: u8[]^,
     len: u64,
 }
 ```

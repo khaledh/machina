@@ -4,7 +4,7 @@ requires {
 }
 
 // Linked list using heap nodes and enum end marker.
-type Link = None | Some(^Node)
+type Link = None | Some(Node^)
 type Node = { value: u64, next: Link }
 
 fn sum(list: Link) -> u64 {

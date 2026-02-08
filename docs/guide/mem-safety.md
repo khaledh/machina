@@ -53,13 +53,13 @@ Read-only parameters are the default (no `in` keyword). For `inout`, `out`, and
 
 Examples:
 
-_Note: `^T` means "owned heap value of type T" (explained later)._
+_Note: `T^` means "owned heap value of type T" (explained later)._
 
 ```
 fn read(p: Point) { /* read only */ }
 fn tweak(inout p: Point) { p.x = p.x + 1; }
 fn fill(out p: Point) { p = Point { x: 1, y: 2 }; }
-fn consume(sink p: ^Point) { /* owns it now */ }
+fn consume(sink p: Point^) { /* owns it now */ }
 ```
 
 At the call site:
@@ -87,7 +87,7 @@ consume(move hp2);  // ok: explicit move
 
 ```
 fn bad(inout x: u64) { }    // error: inout requires aggregate or heap type
-fn bad(out p: ^Point) { }   // error: out requires aggregate type
+fn bad(out p: Point^) { }   // error: out requires aggregate type
 fn bad(sink x: u64) { }     // error: sink requires owned type
 ```
 
@@ -112,11 +112,11 @@ fn main() {
 Regular parameters cannot be moved from. Only `sink` parameters own their value:
 
 ```
-fn bad(p: ^Point) {
+fn bad(p: Point^) {
     let q = move p;  // error: cannot move from parameter
 }
 
-fn ok(sink p: ^Point) {
+fn ok(sink p: Point^) {
     let q = move p;  // ok: sink owns the value
 }
 ```
@@ -176,8 +176,8 @@ fn main() {
 
 ## Heap values are explicit
 
-Heap allocation is explicit with the `^` type constructor and `^` allocation
-expression. A `^T` means "this is an owned heap value of type T".
+Heap allocation is explicit with the postfix `^` type constructor and prefix
+`^` allocation expression. A `T^` means "this is an owned heap value of type T".
 
 ```
 type Point = { x: u64, y: u64 }
@@ -425,7 +425,7 @@ If you initialize only part of an aggregate, Machina tracks that. The full
 value must be initialized before the scope ends or the value is used:
 
 ```
-type Pair = { a: ^Point, b: ^Point }
+type Pair = { a: Point^, b: Point^ }
 
 fn main() {
     var pair: Pair;
@@ -468,7 +468,7 @@ fn ok_fill(out p: Point) {
 
 Machina's safety comes from a small set of strong guarantees:
 
-- **Explicit heap ownership**: `^` types are move-only with deterministic drops.
+- **Explicit heap ownership**: `T^` types are move-only with deterministic drops.
 - **Explicit mutation**: requires `inout` or `out` mode.
 - **No hidden aliasing**: overlapping mutable arguments are rejected.
 - **Restricted slices**: cannot escape, cannot outlive their source.
@@ -483,7 +483,7 @@ slices to escape when the compiler can prove it is safe).
 | Feature | Rule |
 |---------|------|
 | Values | By default, no hidden aliasing |
-| Heap (`^T`) | Explicit allocation, move-only ownership |
+| Heap (`T^`) | Explicit allocation, move-only ownership |
 | `move` | Transfers ownership, explicit for sink calls, implicit at last use elsewhere |
 | default | Read-only borrow |
 | `inout` | Mutable borrow, must be mutable lvalue |

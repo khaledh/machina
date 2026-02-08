@@ -1,5 +1,5 @@
 fn maybe_alloc(flag: bool) {
-    var p: ^u64;
+    var p: u64^;
     if flag {
         p = ^1;
         p = ^2;

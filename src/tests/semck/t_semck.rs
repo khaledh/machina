@@ -629,7 +629,7 @@ fn test_sink_param_requires_owned_type() {
 #[test]
 fn test_sink_param_owned_type_ok() {
     let source = r#"
-        fn consume(sink p: ^u64) -> u64 {
+        fn consume(sink p: u64^) -> u64 {
             0
         }
     "#;
@@ -640,7 +640,7 @@ fn test_sink_param_owned_type_ok() {
 #[test]
 fn test_sink_arg_missing_move() {
     let source = r#"
-        fn consume(sink p: ^u64) -> u64 {
+        fn consume(sink p: u64^) -> u64 {
             0
         }
 
@@ -1272,9 +1272,9 @@ fn test_inout_param_scalar_rejected() {
 fn test_inout_param_heap_allowed() {
     let source = r#"
         type Point = { x: u64, y: u64 }
-        type Box = { p: ^Point }
+        type Box = { p: Point^ }
 
-        fn take(inout p: ^Point) {
+        fn take(inout p: Point^) {
             p.x = 3;
         }
 
@@ -1501,7 +1501,7 @@ fn test_out_arg_allows_partial_init_via_subfields() {
 fn test_partial_init_local_without_full_init_rejected() {
     let source = r#"
         type Point = { x: u64, y: u64 }
-        type Boxed = { p: ^Point }
+        type Boxed = { p: Point^ }
         type Pair = { a: Boxed, b: Boxed }
 
         fn fill_a(out a: Boxed) {
@@ -1713,7 +1713,7 @@ fn test_overlap_borrow_and_sink_move_rejected() {
     let source = r#"
         type Point = { x: u64, y: u64 }
 
-        fn take(p: ^Point, sink q: ^Point) {
+        fn take(p: Point^, sink q: Point^) {
         }
 
         fn main() {

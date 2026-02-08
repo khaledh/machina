@@ -125,14 +125,14 @@ String indexing is read-only; assignment to `s[i]` is not supported.
 
 ## Strings and Heap
 
-Strings can be heap-allocated with `^`, which yields a `^string`:
+Strings can be heap-allocated with `^`, which yields a `string^`:
 
 ```
 let hs = ^"heap string";
 println(f"first byte = {hs[0]}");
 ```
 
-`^string` does not implicitly coerce to `string` in calls, so `print` and
+`string^` does not implicitly coerce to `string` in calls, so `print` and
 `println` take plain `string` values.
 
 ## Example: Building Messages

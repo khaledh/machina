@@ -379,7 +379,7 @@ fn test_lower_string_fmt_owned() {
 #[test]
 fn test_lower_heap_alloc() {
     let ctx = analyze(indoc! {"
-        fn main() -> ^u64 {
+        fn main() -> u64^ {
             ^42
         }
     "});

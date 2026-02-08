@@ -187,7 +187,7 @@ Working with heap-allocated values:
 
 ```
 type Node = { value: u64, next: NodeRef }
-type NodeRef = Some(^Node) | None
+type NodeRef = Some(Node^) | None
 
 fn sum_list(node: NodeRef) -> u64 {
     match node {
@@ -215,7 +215,7 @@ fn main() {
 ```
 
 **Key points:**
-- `^T` allocates on the heap
+- `T^` is an owned heap type, and `^expr` performs allocation
 - Optional links are modeled with an enum
 - Implicit dereference for field access
 - Heap values automatically dropped at scope end
@@ -275,7 +275,7 @@ fn make_origin(out p: Point) {
 }
 
 // sink: take ownership
-fn consume(sink p: ^Point) {
+fn consume(sink p: Point^) {
     println(f"consumed point at ({p.x}, {p.y})");
     // p is dropped here
 }

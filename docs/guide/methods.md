@@ -72,10 +72,10 @@ Counter :: {
 Use `sink self` to take ownership (for heap types):
 
 ```
-type Box = { data: ^Data }
+type Box = { data: Data^ }
 
 Box :: {
-    fn unwrap(sink self) -> ^Data {
+    fn unwrap(sink self) -> Data^ {
         move self.data
     }
 }

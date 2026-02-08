@@ -49,17 +49,21 @@ TraitMethodDecl    ::= MethodSig ";"
 ## Type Expressions
 
 ```bnf
-TypeExpr           ::= UnitType | NamedType | ArrayType | SliceType
-                     | TupleType | RangeType | HeapType | FnType
+TypeExpr           ::= TypeExprTerm ("|" TypeExprTerm)*
+TypeExprTerm       ::= TypeExprAtom RefinementType? TypeSuffix*
+TypeExprAtom       ::= UnitType | NamedType | TupleType | RangeType | FnType
+TypeSuffix         ::= ArraySuffix | SliceSuffix | HeapSuffix
+ArraySuffix        ::= "[" IntLitList "]"
+SliceSuffix        ::= "[" "]"
+HeapSuffix         ::= "^"
+RefinementType     ::= ":" Refinement ("&" Refinement)*
 
 UnitType           ::= "()"
 NamedType          ::= Identifier
-ArrayType          ::= TypeExpr "[" IntLitList "]"
-SliceType          ::= TypeExpr "[]"
 TupleType          ::= "(" TypeExpr "," TypeExprList? ")"
 RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
-HeapType           ::= "^" TypeExpr
 FnType             ::= "fn" "(" FnTypeParamList? ")" "->" TypeExpr
+Refinement         ::= "bounds" "(" IntLit ("," IntLit)? ")" | "nonzero"
 
 FnTypeParamList    ::= FnTypeParam ("," FnTypeParam)* ","?
 FnTypeParam        ::= ParamMode? TypeExpr

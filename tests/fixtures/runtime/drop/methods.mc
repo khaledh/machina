@@ -4,7 +4,7 @@ requires {
 }
 
 type Point = { x: u64, y: u64 }
-type Boxed = { p: ^Point }
+type Boxed = { p: Point^ }
 type Msg = Ping(u64) | Pong(u64)
 
 Boxed :: {

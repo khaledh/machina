@@ -5,13 +5,13 @@ requires {
 
 type Point = { x: u64, y: u64 }
 type Msg = Ping(u64) | Pong(u64)
-type BoxedMsg = { msg: ^Msg }
+type BoxedMsg = { msg: Msg^ }
 
-fn make_point(x: u64, y: u64) -> ^Point {
+fn make_point(x: u64, y: u64) -> Point^ {
     ^Point { x: x, y: y }
 }
 
-fn consume_point(p: ^Point) -> u64 {
+fn consume_point(p: Point^) -> u64 {
     0
 }
 

@@ -92,7 +92,7 @@ impl fmt::Display for Type {
                 write!(f, "{}[]", elem_ty)
             }
             Type::Heap { elem_ty } => {
-                write!(f, "^{}", elem_ty)
+                write!(f, "{}^", elem_ty)
             }
             Type::Ref { mutable, elem_ty } => {
                 if *mutable {

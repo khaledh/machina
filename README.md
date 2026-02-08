@@ -125,7 +125,7 @@ fn main() -> u64 {
 ### Features
 
 - Mutable value semantics
-- Owned heap values (`^T`) with automatic drops
+- Owned heap values (`T^`) with automatic drops
 - Explicit ownership transfer (`move`)
 - Parameter modes (`inout`, `out`, `sink`)
 - Borrow rules for slices and `inout` args
@@ -181,7 +181,7 @@ fn main() -> u64 {
   ranges)
 
 **Ownership**
-- `^T` dynamically allocates a value of type `T` and returns an owning handle
+- `T^` is an owning heap type; `^expr` allocates a value and returns that handle
 - The owner must move (`move`) when transferring ownership
 - Owned values are dropped automatically when they go out of scope
 - Access fields/indexes directly (`p.x`, `arr[i]`); deref is implicit
