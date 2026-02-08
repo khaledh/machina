@@ -4,6 +4,8 @@
 //! and type checking. It keeps module-loading concerns out of existing parser
 //! and resolver logic.
 
+pub mod program;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};

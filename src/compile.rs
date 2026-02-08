@@ -6,6 +6,7 @@ use crate::context::{ParsedContext, ProgramParsedContext};
 use crate::diag::CompileError;
 use crate::elaborate;
 use crate::frontend;
+use crate::frontend::program::{flatten_program_module, merge_modules};
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
 use crate::lexer::{LexError, Lexer, Token};
@@ -13,7 +14,7 @@ use crate::monomorphize;
 use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
-use crate::resolve::{resolve, resolve_program};
+use crate::resolve::resolve;
 use crate::semck::sem_check;
 use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
@@ -43,29 +44,13 @@ pub fn compile_with_path(
     source_path: Option<&std::path::Path>,
     opts: &CompileOptions,
 ) -> Result<CompileOutput, Vec<CompileError>> {
-    let mut program_context = if let Some(path) = source_path {
+    let program_context = if let Some(path) = source_path {
         let program =
             frontend::discover_and_parse_program(source, path).map_err(|e| vec![e.into()])?;
         Some(ProgramParsedContext::new(program))
     } else {
         None
     };
-
-    if let Some(program) = program_context.as_mut()
-        && opts.inject_prelude
-    {
-        let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("stdlib")
-            .join("prelude_decl.mc");
-        let prelude_src = std::fs::read_to_string(&prelude_path)
-            .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
-        let (prelude_module, next_id_gen) =
-            parse_with_id_gen(&prelude_src, program.next_node_id_gen().clone())?;
-        for parsed in program.program.modules.values_mut() {
-            parsed.module = merge_modules(&prelude_module, &parsed.module);
-        }
-        program.program.next_node_id_gen = next_id_gen;
-    }
 
     // Parse dump flags from comma-separated list, e.g. --dump ast,ir,liveness
     let mut dump_tokens = false;
@@ -115,7 +100,7 @@ pub fn compile_with_path(
 
     let (user_module, id_gen) = if let Some(program) = &program_context {
         (
-            program.entry_module().module.clone(),
+            flatten_program_module(program),
             program.next_node_id_gen().clone(),
         )
     } else {
@@ -123,7 +108,7 @@ pub fn compile_with_path(
         parse_with_id_gen(source, id_gen)?
     };
 
-    let (module, id_gen) = if opts.inject_prelude && program_context.is_none() {
+    let (module, id_gen) = if opts.inject_prelude {
         // load stdlib/prelude_decl.mc
         let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("stdlib")
@@ -132,21 +117,7 @@ pub fn compile_with_path(
             .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
 
         let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
-
-        // combine top_level_items: prelude first, then user
-        let mut top_level_items = Vec::new();
-        let mut requires = Vec::new();
-        requires.extend(prelude_module.requires);
-        requires.extend(user_module.requires);
-        top_level_items.extend(prelude_module.top_level_items);
-        top_level_items.extend(user_module.top_level_items);
-        (
-            Module {
-                requires,
-                top_level_items,
-            },
-            id_gen,
-        )
+        (merge_modules(&prelude_module, &user_module), id_gen)
     } else {
         (user_module, id_gen)
     };
@@ -161,21 +132,11 @@ pub fn compile_with_path(
     // --- Resolve Defs/Uses (parsed -> resolved) ---
 
     let ast_context = ParsedContext::new(module, id_gen);
-
-    let resolved_context = if let Some(program) = program_context.clone() {
-        let resolved_program = resolve_program(program).map_err(|errs| {
-            errs.into_iter()
-                .map(|e| e.into())
-                .collect::<Vec<CompileError>>()
-        })?;
-        resolved_program.entry_module().clone()
-    } else {
-        resolve(ast_context).map_err(|errs| {
-            errs.into_iter()
-                .map(|e| e.into())
-                .collect::<Vec<CompileError>>()
-        })?
-    };
+    let resolved_context = resolve(ast_context).map_err(|errs| {
+        errs.into_iter()
+            .map(|e| e.into())
+            .collect::<Vec<CompileError>>()
+    })?;
 
     if dump_def_table {
         println!("Def Map:");
@@ -356,23 +317,9 @@ fn parse_with_id_gen(
     Ok((module, id_gen))
 }
 
-fn merge_modules(prelude_module: &Module, user_module: &Module) -> Module {
-    let mut requires =
-        Vec::with_capacity(prelude_module.requires.len() + user_module.requires.len());
-    requires.extend(prelude_module.requires.clone());
-    requires.extend(user_module.requires.clone());
-
-    let mut top_level_items = Vec::with_capacity(
-        prelude_module.top_level_items.len() + user_module.top_level_items.len(),
-    );
-    top_level_items.extend(prelude_module.top_level_items.clone());
-    top_level_items.extend(user_module.top_level_items.clone());
-
-    Module {
-        requires,
-        top_level_items,
-    }
-}
+#[cfg(test)]
+#[path = "tests/t_compile.rs"]
+mod tests;
 
 // --- Formatting ---
 fn format_ssa_globals(globals: &[GlobalData]) -> String {
