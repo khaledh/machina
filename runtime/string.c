@@ -112,6 +112,30 @@ void __mc_string_drop(mc_string_t *s) {
 }
 
 /**
+ * Returns 1 when both strings have identical byte contents, otherwise 0.
+ *
+ * This compares by bytes, not by pointer identity, so string views and owned
+ * strings with the same content compare equal.
+ */
+uint8_t __mc_string_eq(const mc_string_t *lhs, const mc_string_t *rhs) {
+    if (lhs->len != rhs->len) {
+        return 0;
+    }
+    if (lhs->len == 0) {
+        return 1;
+    }
+
+    const uint8_t *l = (const uint8_t *)(uintptr_t)lhs->ptr;
+    const uint8_t *r = (const uint8_t *)(uintptr_t)rhs->ptr;
+    for (uint32_t i = 0; i < lhs->len; ++i) {
+        if (l[i] != r[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
  * Appends a byte slice to the string, promoting it to owned storage if needed.
  */
 void __mc_string_append_bytes(mc_string_t *s, uint64_t ptr, uint64_t len) {
@@ -287,4 +311,10 @@ void __rt_string_ensure(uint64_t s_ptr, uint32_t min_cap) {
 void __rt_string_drop(uint64_t s_ptr) {
     mc_string_t *s = (mc_string_t *)s_ptr;
     __mc_string_drop(s);
+}
+
+uint8_t __rt_string_eq(uint64_t lhs_ptr, uint64_t rhs_ptr) {
+    const mc_string_t *lhs = (const mc_string_t *)lhs_ptr;
+    const mc_string_t *rhs = (const mc_string_t *)rhs_ptr;
+    return __mc_string_eq(lhs, rhs);
 }

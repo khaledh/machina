@@ -206,6 +206,17 @@ fn test_equality_bool_operands_typecheck() {
 }
 
 #[test]
+fn test_equality_string_operands_typecheck() {
+    let source = r#"
+        fn test() -> bool {
+            "abc" == "abc"
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_equality_struct_operands_typecheck() {
     let source = r#"
         type Pair = { a: u64, b: bool }

@@ -493,6 +493,27 @@ fn test_lower_cmp() {
 }
 
 #[test]
+fn test_lower_string_eq_uses_runtime_helper() {
+    let ctx = analyze(indoc! {r#"
+        fn main() -> bool {
+            "a" == "b"
+        }
+    "#});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("__rt_string_eq"));
+}
+
+#[test]
 fn test_lower_tuple_lit() {
     let ctx = analyze(indoc! {"
         fn main() -> (u64, bool) {

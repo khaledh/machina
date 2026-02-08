@@ -114,7 +114,12 @@ fn check_capability_at_path(
 
 fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
     match capability {
-        Capability::Equatable => matches!(ty, Type::Int { .. } | Type::Bool | Type::Char),
+        Capability::Equatable => {
+            matches!(
+                ty,
+                Type::Int { .. } | Type::Bool | Type::Char | Type::String
+            )
+        }
         Capability::Hashable => matches!(ty, Type::Int { .. } | Type::Bool | Type::Char),
     }
 }

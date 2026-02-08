@@ -6,7 +6,7 @@
 //! 2. Emit IR for that plan.
 
 use crate::backend::lower::lowerer::FuncLowerer;
-use crate::ir::{BinOp, CastKind, CmpOp, IrTypeId, ValueId};
+use crate::ir::{BinOp, Callee, CastKind, CmpOp, IrTypeId, RuntimeFn, ValueId};
 use crate::types::{EnumVariant, Type};
 
 #[derive(Clone)]
@@ -16,6 +16,9 @@ enum EqPlan {
 
     /// Scalar leaf compare lowered directly to `cmp eq`.
     LeafCmp,
+
+    /// String content compare lowered to runtime helper.
+    StringEq,
 
     /// Tuple compares each field in source order.
     Tuple {
@@ -58,6 +61,7 @@ impl EqPlan {
         match ty {
             Type::Unit => Self::AlwaysTrue,
             Type::Int { .. } | Type::Bool | Type::Char | Type::Range { .. } => Self::LeafCmp,
+            Type::String => Self::StringEq,
             Type::Tuple { field_tys } => {
                 let field_plans = field_tys.iter().map(Self::build).collect();
                 Self::Tuple {
@@ -151,6 +155,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match plan {
             EqPlan::AlwaysTrue => true_val,
             EqPlan::LeafCmp => self.builder.cmp(CmpOp::Eq, lhs, rhs, bool_ty),
+            EqPlan::StringEq => {
+                let lhs_addr = self.materialize_value_addr(lhs, ty);
+                let rhs_addr = self.materialize_value_addr(rhs, ty);
+                self.builder.call(
+                    Callee::Runtime(RuntimeFn::StringEq),
+                    vec![lhs_addr, rhs_addr],
+                    bool_ty,
+                )
+            }
 
             EqPlan::Tuple {
                 field_tys,
