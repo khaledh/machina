@@ -7,6 +7,9 @@
 /CLAUDE.md
 
 # Example artifacts
-/examples/*
+/examples/**
+!/examples/
+!/examples/**/
 !/examples/*.mc
+!/examples/**/*.mc
 !/examples/*.md
