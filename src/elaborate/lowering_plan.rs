@@ -240,9 +240,9 @@ impl<'a> LoweringPlanBuilder<'a> {
         for segment in &plan.segments {
             match segment {
                 sem::SegmentKind::LiteralBytes(_) => {}
-                sem::SegmentKind::Int { expr, .. } | sem::SegmentKind::StringValue { expr } => {
-                    self.visit_value_expr(expr)
-                }
+                sem::SegmentKind::Bool { expr }
+                | sem::SegmentKind::Int { expr, .. }
+                | sem::SegmentKind::StringValue { expr } => self.visit_value_expr(expr),
             }
         }
     }
@@ -328,9 +328,9 @@ impl<'a> LoweringPlanBuilder<'a> {
             sem::ValueExprKind::StringFmt { plan } => {
                 plan.segments.iter().all(|segment| match segment {
                     sem::SegmentKind::LiteralBytes(_) => true,
-                    sem::SegmentKind::Int { expr, .. } | sem::SegmentKind::StringValue { expr } => {
-                        self.is_linear_value_expr(expr)
-                    }
+                    sem::SegmentKind::Bool { expr }
+                    | sem::SegmentKind::Int { expr, .. }
+                    | sem::SegmentKind::StringValue { expr } => self.is_linear_value_expr(expr),
                 })
             }
 

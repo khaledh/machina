@@ -14,6 +14,7 @@ type LowerFmtSegmentsResult =
 enum LoweredFmtSegment {
     Literal { ptr: ValueId, len: ValueId },
     StringValue { ptr: ValueId, len: ValueId },
+    Bool { value: ValueId },
     Int { value: ValueId, signed: bool },
 }
 
@@ -81,6 +82,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let _ =
                         self.builder
                             .call(Callee::Runtime(callee), vec![fmt_addr, value], unit_ty);
+                }
+                LoweredFmtSegment::Bool { value } => {
+                    let _ = self.builder.call(
+                        Callee::Runtime(RuntimeFn::FmtAppendBool),
+                        vec![fmt_addr, value],
+                        unit_ty,
+                    );
                 }
             }
         }
@@ -180,6 +188,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 LoweredFmtSegment::Int { value, signed } => {
                     self.append_int64_to_string(slot.addr, value, signed);
                 }
+                LoweredFmtSegment::Bool { value } => {
+                    self.append_bool_to_string(slot.addr, value);
+                }
             }
         }
 
@@ -242,6 +253,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.append_bytes_to_string(string_addr, buf_ptr, len_val);
     }
 
+    fn append_bool_to_string(&mut self, string_addr: ValueId, value: ValueId) {
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::StringAppendBool),
+            vec![string_addr, value],
+            unit_ty,
+        );
+    }
+
     // --- Shared between view and owned f-string lowering ---
 
     /// Lowers format segments, propagating early returns from segment expressions.
@@ -295,6 +315,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         value: value_64,
                         signed: *signed,
                     });
+                }
+                sem::SegmentKind::Bool { expr } => {
+                    let Some(value) = self.lower_value_expr_opt(expr)? else {
+                        return Ok(None);
+                    };
+                    segments.push(LoweredFmtSegment::Bool { value });
                 }
             }
         }

@@ -25,6 +25,8 @@ use crate::types::Type;
 
 /// Maximum decimal digits in a u64 (used for reserve length estimation).
 const MAX_U64_DEC_LEN: usize = 20;
+/// Maximum string length of a boolean formatted as `true`/`false`.
+const MAX_BOOL_LEN: usize = 5;
 
 impl<'a> Elaborator<'a> {
     /// Build a formatting plan for a string interpolation expression.
@@ -69,6 +71,12 @@ impl<'a> Elaborator<'a> {
                                 bits,
                             });
                             reserve_terms.push(sem::LenTerm::Literal(MAX_U64_DEC_LEN));
+                        }
+                        Type::Bool => {
+                            plan_segments.push(sem::SegmentKind::Bool {
+                                expr: Box::new(self.elab_value(expr)),
+                            });
+                            reserve_terms.push(sem::LenTerm::Literal(MAX_BOOL_LEN));
                         }
                         _ => {
                             panic!("compiler bug: unsupported f-string expr type");

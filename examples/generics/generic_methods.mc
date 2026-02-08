@@ -19,12 +19,8 @@ fn main() {
     let b2 = Boxed { value: 2 };
 
     let a = b1.cast(42);
-    println(f"a: {a}");
+    println(f"a = {a}");
 
-    let ok = b2.cast(false);
-    if ok {
-      println(f"ok is true");
-    } else {
-      println(f"ok is false");
-    }
+    let b = b2.cast(false);
+    println(f"b = {b}");
 }

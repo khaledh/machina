@@ -206,6 +206,17 @@ void __mc_fmt_append_i64(mc_fmt_t *fmt, int64_t value) {
 }
 
 /**
+ * Appends a boolean as `true`/`false` to the formatting builder.
+ */
+void __mc_fmt_append_bool(mc_fmt_t *fmt, uint8_t value) {
+    if (value) {
+        __mc_fmt_append_bytes(fmt, (uint64_t)(uintptr_t)"true", 4);
+    } else {
+        __mc_fmt_append_bytes(fmt, (uint64_t)(uintptr_t)"false", 5);
+    }
+}
+
+/**
  * Finalizes the formatting builder into a string value.
  */
 void __mc_fmt_finish(mc_string_t *out, const mc_fmt_t *fmt) {
@@ -237,6 +248,11 @@ void __rt_fmt_append_i64(uint64_t fmt_ptr, int64_t value) {
     __mc_fmt_append_i64(fmt, value);
 }
 
+void __rt_fmt_append_bool(uint64_t fmt_ptr, uint8_t value) {
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    __mc_fmt_append_bool(fmt, value);
+}
+
 void __rt_fmt_finish(uint64_t out_ptr, uint64_t fmt_ptr) {
     mc_string_t *out = (mc_string_t *)out_ptr;
     mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
@@ -252,6 +268,15 @@ void __rt_string_from_bytes(uint64_t out_ptr, uint64_t ptr, uint64_t len) {
 void __rt_string_append_bytes(uint64_t s_ptr, uint64_t ptr, uint64_t len) {
     mc_string_t *s = (mc_string_t *)s_ptr;
     __mc_string_append_bytes(s, ptr, len);
+}
+
+void __rt_string_append_bool(uint64_t s_ptr, uint8_t value) {
+    mc_string_t *s = (mc_string_t *)s_ptr;
+    if (value) {
+        __mc_string_append_bytes(s, (uint64_t)(uintptr_t)"true", 4);
+    } else {
+        __mc_string_append_bytes(s, (uint64_t)(uintptr_t)"false", 5);
+    }
 }
 
 void __rt_string_ensure(uint64_t s_ptr, uint32_t min_cap) {

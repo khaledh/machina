@@ -20,7 +20,7 @@ fn pick(x: u64) -> u64 {
     }
 }
 
-fn bool_to_u64(b: bool) -> u64 {
+fn bool_to_int(b: bool) -> u64 {
     match b {
         true => 1,
         false => 0,
@@ -30,7 +30,7 @@ fn bool_to_u64(b: bool) -> u64 {
 fn main() {
     let a = pick(0);
     let b = pick(3);
-    let c = bool_to_u64(true);
+    let c = bool_to_int(true);
     let d = describe_flag(Flag::Off);
     println(f"a={a}, b={b}, c={c}, d={d}");
 }

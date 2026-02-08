@@ -18,6 +18,9 @@ pub enum FmtKind {
 #[derive(Clone, Debug)]
 pub enum SegmentKind {
     LiteralBytes(String),
+    Bool {
+        expr: Box<ValueExpr>,
+    },
     Int {
         expr: Box<ValueExpr>,
         signed: bool,

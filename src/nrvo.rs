@@ -244,9 +244,9 @@ impl NrvoSafetyChecker {
 
             VEK::StringFmt { plan } => plan.segments.iter().all(|segment| match segment {
                 SegmentKind::LiteralBytes(_) => true,
-                SegmentKind::Int { expr, .. } | SegmentKind::StringValue { expr } => {
-                    self.check_expr(expr, false)
-                }
+                SegmentKind::Bool { expr }
+                | SegmentKind::Int { expr, .. }
+                | SegmentKind::StringValue { expr } => self.check_expr(expr, false),
             }),
 
             VEK::HeapAlloc { expr } => self.check_expr(expr, false),

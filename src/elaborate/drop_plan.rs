@@ -278,7 +278,8 @@ impl<'a> DropPlanBuilder<'a> {
             sem::ValueExprKind::StringFmt { plan } => {
                 for segment in &plan.segments {
                     match segment {
-                        sem::SegmentKind::Int { expr, .. }
+                        sem::SegmentKind::Bool { expr }
+                        | sem::SegmentKind::Int { expr, .. }
                         | sem::SegmentKind::StringValue { expr } => {
                             self.visit_value_expr(expr);
                         }

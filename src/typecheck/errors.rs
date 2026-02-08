@@ -316,7 +316,7 @@ pub enum TypeCheckErrorKind {
     #[error("Slice target is a zero-dimension array: {0}")]
     SliceTargetZeroDimArray(Type, Span),
 
-    #[error("Format expression must be string or integer, found {0}")]
+    #[error("Format expression must be string, integer, or bool, found {0}")]
     StringFmtExprUnsupportedType(Type, Span),
 
     #[error("len() target must be an lvalue")]

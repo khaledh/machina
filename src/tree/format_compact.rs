@@ -326,6 +326,11 @@ fn fmt_string_fmt(plan: &sem::StringFmtPlan) -> String {
                     }
                 }
             }
+            sem::SegmentKind::Bool { expr } => {
+                out.push('{');
+                out.push_str(&format_semantic_value_expr_compact(expr));
+                out.push('}');
+            }
             sem::SegmentKind::Int { expr, .. } => {
                 out.push('{');
                 out.push_str(&format_semantic_value_expr_compact(expr));

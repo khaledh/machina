@@ -377,6 +377,48 @@ fn test_lower_string_fmt_owned() {
 }
 
 #[test]
+fn test_lower_string_fmt_view_bool() {
+    let ctx = analyze(indoc! {r#"
+        fn main(b: bool) -> string {
+            f"{b}"
+        }
+    "#});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("__rt_fmt_append_bool"));
+}
+
+#[test]
+fn test_lower_string_fmt_owned_bool_segment() {
+    let ctx = analyze(indoc! {r#"
+        fn main(s: string, b: bool) -> string {
+            f"{s} {b}"
+        }
+    "#});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("__rt_string_append_bool"));
+}
+
+#[test]
 fn test_lower_heap_alloc() {
     let ctx = analyze(indoc! {"
         fn main() -> u64^ {
