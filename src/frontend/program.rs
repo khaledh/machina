@@ -90,6 +90,7 @@ pub(crate) fn flatten_program(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn flatten_program_module(
     program: &ProgramParsedContext,
 ) -> Result<Module, Vec<FrontendError>> {

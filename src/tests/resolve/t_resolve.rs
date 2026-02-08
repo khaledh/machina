@@ -70,6 +70,10 @@ fn test_resolve_program_resolves_dependencies() {
     let resolved = resolved.expect("program resolve should succeed");
     assert_eq!(resolved.modules.len(), 2);
     assert!(resolved.module(resolved.entry).is_some());
+    assert!(
+        !resolved.top_level_owners.is_empty(),
+        "program resolve should retain top-level ownership metadata"
+    );
 }
 
 #[test]

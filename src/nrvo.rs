@@ -23,6 +23,7 @@ impl NrvoAnalyzer {
         let SemanticContext {
             module,
             def_table,
+            def_owners,
             type_map,
             lowering_plans,
             drop_plans,
@@ -40,6 +41,7 @@ impl NrvoAnalyzer {
         AnalyzedContext {
             module,
             def_table,
+            def_owners,
             type_map,
             lowering_plans,
             drop_plans,

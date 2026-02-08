@@ -1,12 +1,14 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::backend;
 use crate::backend::regalloc::arm64::Arm64Target;
-use crate::context::{ParsedContext, ProgramParsedContext};
+use crate::context::{ParsedContext, ProgramParsedContext, ResolvedContext};
 use crate::diag::CompileError;
 use crate::elaborate;
 use crate::frontend;
-use crate::frontend::program::{flatten_program_module, merge_modules};
+use crate::frontend::ModuleId;
+use crate::frontend::program::{flatten_program, merge_modules};
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
 use crate::lexer::{LexError, Lexer, Token};
@@ -16,8 +18,8 @@ use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
 use crate::resolve::resolve;
 use crate::semck::sem_check;
-use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
+use crate::tree::{NodeId, NodeIdGen};
 use crate::typecheck::type_check;
 
 #[derive(Debug)]
@@ -98,18 +100,21 @@ pub fn compile_with_path(
 
     // --- Parse ---
 
-    let (user_module, id_gen) = if let Some(program) = &program_context {
+    let (user_module, id_gen, top_level_owners) = if let Some(program) = &program_context {
+        let flattened = flatten_program(program).map_err(|errs| {
+            errs.into_iter()
+                .map(CompileError::from)
+                .collect::<Vec<CompileError>>()
+        })?;
         (
-            flatten_program_module(program).map_err(|errs| {
-                errs.into_iter()
-                    .map(CompileError::from)
-                    .collect::<Vec<CompileError>>()
-            })?,
+            flattened.module,
             program.next_node_id_gen().clone(),
+            flattened.top_level_owners,
         )
     } else {
         let id_gen = NodeIdGen::new();
-        parse_with_id_gen(source, id_gen)?
+        let (module, id_gen) = parse_with_id_gen(source, id_gen)?;
+        (module, id_gen, HashMap::new())
     };
 
     let (module, id_gen) = if opts.inject_prelude {
@@ -141,6 +146,7 @@ pub fn compile_with_path(
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()
     })?;
+    let resolved_context = attach_def_owners(resolved_context, &top_level_owners);
 
     if dump_def_table {
         println!("Def Map:");
@@ -298,6 +304,23 @@ pub fn compile_with_path(
     }
 
     Ok(CompileOutput { asm, ir })
+}
+
+fn attach_def_owners(
+    resolved_context: ResolvedContext,
+    top_level_owners: &HashMap<NodeId, ModuleId>,
+) -> ResolvedContext {
+    if top_level_owners.is_empty() {
+        return resolved_context;
+    }
+
+    let mut def_owners = HashMap::new();
+    for (node_id, owner) in top_level_owners {
+        if let Some(def_id) = resolved_context.def_table.lookup_node_def_id(*node_id) {
+            def_owners.insert(def_id, *owner);
+        }
+    }
+    resolved_context.with_def_owners(def_owners)
 }
 
 // --- stdlib parsed-tree injection ---

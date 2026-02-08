@@ -1488,11 +1488,15 @@ pub fn resolve_program(
 ) -> Result<ProgramResolvedContext, Vec<ResolveError>> {
     let mut modules = HashMap::new();
     let mut errors = Vec::new();
+    let mut top_level_owners = HashMap::new();
 
     for module_id in program.dependency_order_from_entry() {
         let Some(parsed_module) = program.module(module_id) else {
             continue;
         };
+        for item in &parsed_module.module.top_level_items {
+            top_level_owners.insert(top_level_item_id(item), module_id);
+        }
         let mut imported_modules = HashMap::new();
         for req in &parsed_module.requires {
             let alias = req.alias.clone();
@@ -1532,7 +1536,19 @@ pub fn resolve_program(
         modules,
         by_path: program.program.by_path.clone(),
         edges: program.program.edges.clone(),
+        top_level_owners,
     })
+}
+
+fn top_level_item_id(item: &TopLevelItem) -> crate::tree::NodeId {
+    match item {
+        TopLevelItem::TraitDef(trait_def) => trait_def.id,
+        TopLevelItem::TypeDef(type_def) => type_def.id,
+        TopLevelItem::FuncDecl(func_decl) => func_decl.id,
+        TopLevelItem::FuncDef(func_def) => func_def.id,
+        TopLevelItem::MethodBlock(method_block) => method_block.id,
+        TopLevelItem::ClosureDef(closure_def) => closure_def.id,
+    }
 }
 
 fn module_exported_members(module: &Module) -> HashSet<String> {

@@ -63,6 +63,7 @@ pub struct ProgramResolvedContext {
     pub modules: HashMap<ModuleId, ResolvedContext>,
     pub by_path: HashMap<ModulePath, ModuleId>,
     pub edges: HashMap<ModuleId, Vec<ModuleId>>,
+    pub top_level_owners: HashMap<NodeId, ModuleId>,
 }
 
 impl ProgramResolvedContext {
@@ -100,6 +101,7 @@ impl ParsedContext {
         ResolvedContext {
             module,
             def_table,
+            def_owners: HashMap::new(),
             symbols,
             node_id_gen: self.node_id_gen,
         }
@@ -114,11 +116,17 @@ impl ParsedContext {
 pub struct ResolvedContext {
     pub module: ResolvedModule,
     pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
 
 impl ResolvedContext {
+    pub fn with_def_owners(mut self, def_owners: HashMap<DefId, ModuleId>) -> Self {
+        self.def_owners = def_owners;
+        self
+    }
+
     pub fn with_type_map(
         self,
         type_map: TypeMap,
@@ -129,6 +137,7 @@ impl ResolvedContext {
         TypeCheckedContext {
             module,
             def_table: self.def_table,
+            def_owners: self.def_owners,
             type_map,
             call_sigs,
             generic_insts,
@@ -146,6 +155,7 @@ impl ResolvedContext {
 pub struct TypeCheckedContext {
     pub module: TypedModule,
     pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
@@ -161,6 +171,7 @@ pub struct TypeCheckedContext {
 pub struct NormalizedContext {
     pub module: NormalizedModule,
     pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
@@ -179,6 +190,7 @@ impl NormalizedContext {
         SemanticCheckedContext {
             module: self.module,
             def_table: self.def_table,
+            def_owners: self.def_owners,
             type_map: self.type_map,
             call_sigs: self.call_sigs,
             generic_insts: self.generic_insts,
@@ -200,6 +212,7 @@ impl NormalizedContext {
 pub struct SemanticCheckedContext {
     pub module: NormalizedModule,
     pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
@@ -219,6 +232,7 @@ pub struct SemanticCheckedContext {
 pub struct SemanticContext {
     pub module: SemanticModule,
     pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
     pub type_map: TypeMap,
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
@@ -235,6 +249,7 @@ pub struct SemanticContext {
 pub struct AnalyzedContext {
     pub module: SemanticModule,
     pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
     pub type_map: TypeMap,
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,

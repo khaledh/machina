@@ -51,6 +51,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     let SemanticCheckedContext {
         module,
         def_table,
+        def_owners,
         type_map,
         call_sigs,
         generic_insts,
@@ -107,6 +108,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     SemanticContext {
         module,
         def_table,
+        def_owners,
         type_map,
         lowering_plans,
         drop_plans,

@@ -19,6 +19,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
     let TypeCheckedContext {
         module,
         def_table,
+        def_owners,
         type_map,
         call_sigs,
         generic_insts,
@@ -33,6 +34,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
     NormalizedContext {
         module,
         def_table,
+        def_owners,
         type_map,
         call_sigs,
         generic_insts,
