@@ -1285,7 +1285,18 @@ impl Visitor<()> for SymbolResolver {
             ExprKind::Var { ident: name, .. } => match self.lookup_symbol(name) {
                 Some(symbol) => self.def_table_builder.record_use(expr.id, symbol.def_id()),
                 None => {
-                    if self.is_enum_variant_name(name) {
+                    if let Some((alias, member)) = name.split_once("::")
+                        && self.require_aliases.contains(alias)
+                    {
+                        if self.validate_module_alias_member(alias, member, expr.span) {
+                            self.errors
+                                .push(ResolveError::ModuleQualifiedAccessUnsupported(
+                                    alias.to_string(),
+                                    member.to_string(),
+                                    expr.span,
+                                ));
+                        }
+                    } else if self.is_enum_variant_name(name) {
                         if let Some(def_id) = self.variant_placeholders.get(name).copied() {
                             self.def_table_builder.record_use(expr.id, def_id);
                         } else {

@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 type Option<T>
@@ -46,27 +46,27 @@ fn main() {
 
     // Generic struct instantiation is inferred from arguments.
     let summary = pair("score", from_match);
-    io.println(f"summary.left = {summary.left}");
-    io.println(f"summary.right = {summary.right}");
+    io::println(f"summary.left = {summary.left}");
+    io::println(f"summary.right = {summary.right}");
 
     // Unconstrained integer literals default locally.
     let defaulted = id(123);
-    io.println(f"defaulted = {defaulted}");
+    io::println(f"defaulted = {defaulted}");
 
     // Generic return + fallback unify through local constraints.
     let chosen = choose(make_some(defaulted), 0);
-    io.println(f"chosen = {chosen}");
+    io::println(f"chosen = {chosen}");
 
     // Higher-order function inference.
     let lifted_int = apply(|n| n + 1, 41);
-    io.println(f"lifted_int = {lifted_int}");
+    io::println(f"lifted_int = {lifted_int}");
 
     let lifted_bool_str = apply(|b| if b { "true" } else { "false" }, true);
-    io.println(f"lifted_bool_str = {lifted_bool_str}");
+    io::println(f"lifted_bool_str = {lifted_bool_str}");
 
     // Higher-order typeless closure inference:
     // both `f` and `x` are inferred from call-site usage.
     let apply_fn = |f, x| f(x);
     let lifted = apply_fn(|n| n + 1, 41);
-    io.println(f"lifted = {lifted}");
+    io::println(f"lifted = {lifted}");
 }

@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // Custom types (type aliases, enums, and structs)
@@ -33,9 +33,9 @@ fn main() {
     let (dx, dy) = delta(c, d);
 
     if is_blue(d) {
-        io.println(42);
+        io::println(42);
     } else {
-        io.println(21);
+        io::println(21);
     }
 }
 

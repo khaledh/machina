@@ -1,5 +1,5 @@
 requires {
-    examples.modules_visibility.runtime as rt
+    examples::modules_visibility::runtime as rt
 }
 
 @[opaque]
@@ -29,9 +29,9 @@ Config :: {
     }
 }
 
-Config :: rt.Runnable {
+Config :: rt::Runnable {
     fn run(self) -> u64 {
-        self.tick_count + rt.answer_with_offset()
+        self.tick_count + rt::answer_with_offset()
     }
 }
 

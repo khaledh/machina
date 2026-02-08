@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 fn main() {
@@ -9,6 +9,6 @@ fn main() {
     let bytes = u8[33];
     s.append_bytes(bytes);
 
-    io.println(s);
-    io.println(f"owned = {s}");
+    io::println(s);
+    io::println(f"owned = {s}");
 }

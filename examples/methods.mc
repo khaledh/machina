@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 type Point = { x: u64, y: u64 }
@@ -32,19 +32,19 @@ Msg :: {
 
 fn main() {
     var b = Boxed { p: ^Point { x: 1, y: 2 } };
-    io.println(f"sum: {b.sum()}");
+    io::println(f"sum: {b.sum()}");
 
     b.shift(10, 20);
-    io.println(f"shifted: {b.sum()}");
+    io::println(f"shifted: {b.sum()}");
 
     let total = b.consume();
-    io.println(f"consumed: {total}");
+    io::println(f"consumed: {total}");
 
     let msg = Msg::Ping(1);
     if msg.is_ping() {
-        io.println("ping");
+        io::println("ping");
     } else {
-        io.println("pong");
+        io::println("pong");
     }
 
     // b.shift(10, 20);  // ERROR: use after move

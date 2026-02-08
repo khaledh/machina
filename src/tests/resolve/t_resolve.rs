@@ -44,7 +44,7 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
 fn test_resolve_program_resolves_dependencies() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
@@ -309,8 +309,8 @@ fn test_resolve_trait_bound_expected_trait() {
 fn test_resolve_requires_duplicate_alias_default() {
     let source = r#"
         requires {
-            std.io
-            app.io
+            std::io
+            app::io
         }
 
         fn main() -> u64 { 0 }
@@ -331,8 +331,8 @@ fn test_resolve_requires_duplicate_alias_default() {
 fn test_resolve_requires_duplicate_alias_explicit() {
     let source = r#"
         requires {
-            std.io as net
-            app.net as net
+            std::io as net
+            app::net as net
         }
 
         fn main() -> u64 { 0 }
@@ -353,11 +353,11 @@ fn test_resolve_requires_duplicate_alias_explicit() {
 fn test_resolve_module_qualified_access_reports_specific_error() {
     let source = r#"
         requires {
-            std.io
+            std::io
         }
 
         fn main() -> u64 {
-            io.read_file("foo");
+            io::read_file("foo");
             0
         }
     "#;
@@ -382,11 +382,11 @@ fn test_resolve_module_qualified_access_reports_specific_error() {
 fn test_resolve_program_module_member_undefined() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
-            util.missing();
+            util::missing();
             0
         }
     "#;

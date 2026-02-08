@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 fn add(a: u64, b: u64) -> u64 {
@@ -13,6 +13,6 @@ fn main() {
     let sum = f_add(2, 3);
     let next = f_inc(41);
 
-    io.println(sum);
-    io.println(next);
+    io::println(sum);
+    io::println(next);
 }

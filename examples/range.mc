@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // Range type
@@ -8,7 +8,7 @@ type MidRange = u64: bounds(50, 100);
 type Delta = i8: bounds(-10, 10);
 
 fn take_bounded_int(x: MidRange) {
-    io.println(x);
+    io::println(x);
 }
 
 fn make_int() -> i8 { 11 }
@@ -27,7 +27,7 @@ fn main() {
 
     let delta_pos: Delta = 9;
     let delta_neg: Delta = -10;
-    io.println(f"delta_pos: {delta_pos}, delta_neg: {delta_neg}");
+    io::println(f"delta_pos: {delta_pos}, delta_neg: {delta_neg}");
 
     // let bad_delta_pos: Delta = 11; // Compile error: Value out of range: 11 not in range [-10,10)
     // let bad_delta_neg: Delta = -11; // Compile error: Value out of range: -11 not in range [-10,10)
@@ -35,8 +35,8 @@ fn main() {
     // let delta: Delta = make_int(); // Runtime error: Value out of range: value=11, min(incl)=-10, max(excl)=10
 
     if mid < midhigh {
-        io.println(f"mid: {mid}");
+        io::println(f"mid: {mid}");
     } else {
-        io.println(f"midhigh: {midhigh}");
+        io::println(f"midhigh: {midhigh}");
     }
 }

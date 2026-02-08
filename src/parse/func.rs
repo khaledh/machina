@@ -76,10 +76,10 @@ impl<'a> Parser<'a> {
                 parser.advance();
                 let bound_marker = parser.mark();
                 let mut name = parser.parse_ident()?;
-                while parser.curr_token.kind == TK::Dot {
+                while parser.curr_token.kind == TK::DoubleColon {
                     parser.advance();
                     let segment = parser.parse_ident()?;
-                    name.push('.');
+                    name.push_str("::");
                     name.push_str(&segment);
                 }
                 Some(TypeParamBound {
@@ -114,10 +114,10 @@ impl<'a> Parser<'a> {
             None
         } else {
             let mut name = self.parse_ident()?;
-            while self.curr_token.kind == TK::Dot {
+            while self.curr_token.kind == TK::DoubleColon {
                 self.advance();
                 let segment = self.parse_ident()?;
-                name.push('.');
+                name.push_str("::");
                 name.push_str(&segment);
             }
             Some(name)

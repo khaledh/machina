@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 type Pair = { a: u64[2], b: u64[2] }
@@ -16,5 +16,5 @@ fn main() {
     var p: Pair;
     fill_a(out p.a);
     fill_b(out p.b);
-    io.println(p.a[0] + p.b[0]);
+    io::println(p.a[0] + p.b[0]);
 }

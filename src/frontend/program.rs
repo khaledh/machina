@@ -248,6 +248,20 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut parsed::Expr) {
         visit_mut::walk_expr(self, expr);
 
+        if let parsed::ExprKind::Call { callee, .. } = &mut expr.kind {
+            if let parsed::ExprKind::Var { ident, .. } = &mut callee.kind
+                && let Some(new_name) = self.rewrite_qualified_callable_name(ident, expr.span)
+            {
+                *ident = new_name;
+            }
+        }
+
+        if let parsed::ExprKind::Var { ident, .. } = &mut expr.kind
+            && let Some(new_name) = self.rewrite_qualified_callable_name(ident, expr.span)
+        {
+            *ident = new_name;
+        }
+
         match &expr.kind {
             parsed::ExprKind::MethodCall {
                 callee,
@@ -355,7 +369,7 @@ impl ModuleAliasCallRewriter<'_> {
         span: Span,
         expected: ExpectedMemberKind,
     ) {
-        let Some((alias, member)) = ident.split_once('.') else {
+        let Some((alias, member)) = split_qualified_name(ident) else {
             return;
         };
 
@@ -435,6 +449,47 @@ impl ModuleAliasCallRewriter<'_> {
             _ => member.to_string(),
         };
     }
+
+    fn rewrite_qualified_callable_name(&mut self, ident: &str, span: Span) -> Option<String> {
+        let (alias, member) = split_qualified_name(ident)?;
+        let symbols = self.alias_symbols.get(alias)?;
+        let Some(member_attrs) = symbols.callables.get(member) else {
+            self.errors.push(FrontendError::RequireMemberUndefined {
+                alias: alias.to_string(),
+                module: symbols.module_path.clone(),
+                member: member.to_string(),
+                expected_kind: ExpectedMemberKind::Callable.as_str(),
+                span,
+            });
+            return None;
+        };
+
+        if !member_attrs.public {
+            self.errors.push(FrontendError::RequireMemberPrivate {
+                alias: alias.to_string(),
+                module: symbols.module_path.clone(),
+                member: member.to_string(),
+                expected_kind: ExpectedMemberKind::Callable.as_str(),
+                span,
+            });
+            return None;
+        }
+
+        Some(
+            if self
+                .conflicts
+                .contains_callable(&symbols.module_path, member)
+            {
+                mangled_module_symbol(&symbols.module_path, member)
+            } else {
+                member.to_string()
+            },
+        )
+    }
+}
+
+fn split_qualified_name(name: &str) -> Option<(&str, &str)> {
+    name.split_once("::")
 }
 
 fn mangle_dependency_symbols(

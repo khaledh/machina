@@ -473,7 +473,7 @@ mod tests {
     fn discover_program_collects_dependencies() {
         let entry_src = r#"
             requires {
-                app.util
+                app::util
             }
             fn main() -> u64 { 0 }
         "#;
@@ -498,7 +498,7 @@ mod tests {
     fn discover_program_reports_cycle() {
         let entry_src = r#"
             requires {
-                app.a
+                app::a
             }
             fn main() -> u64 { 0 }
         "#;
@@ -507,7 +507,7 @@ mod tests {
             "app.a".to_string(),
             r#"
             requires {
-                app.main
+                app::main
             }
             fn a() -> u64 { 1 }
         "#
@@ -531,8 +531,8 @@ mod tests {
     fn dependency_order_lists_deps_before_entry() {
         let entry_src = r#"
             requires {
-                app.a
-                app.b
+                app::a
+                app::b
             }
             fn main() -> u64 { 0 }
         "#;
@@ -541,7 +541,7 @@ mod tests {
             "app.a".to_string(),
             r#"
             requires {
-                app.c
+                app::c
             }
             fn a() -> u64 { 1 }
         "#
@@ -564,7 +564,7 @@ mod tests {
         let pos = |m: &str| {
             let id = *program
                 .by_path
-                .get(&ModulePath::new(m.split('.').map(|s| s.to_string()).collect()).unwrap())
+                .get(&ModulePath::new(m.split("::").map(|s| s.to_string()).collect()).unwrap())
                 .expect("module id should exist");
             order
                 .iter()
@@ -572,8 +572,8 @@ mod tests {
                 .expect("module should be in order")
         };
 
-        assert!(pos("app.c") < pos("app.a"));
-        assert!(pos("app.a") < pos("app.main"));
-        assert!(pos("app.b") < pos("app.main"));
+        assert!(pos("app::c") < pos("app::a"));
+        assert!(pos("app::a") < pos("app::main"));
+        assert!(pos("app::b") < pos("app::main"));
     }
 }

@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // Demonstrate function overload resolution.
@@ -18,6 +18,6 @@ fn main() {
     let a: Small = 5;
     let b = 20;
 
-    io.println(id(a));
-    io.println(id(b));
+    io::println(id(a));
+    io::println(id(b));
 }

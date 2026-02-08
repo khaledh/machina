@@ -6,12 +6,12 @@ fn test_print_outputs_string() {
         "print_str",
         r#"
             requires {
-                std.io as io
+                std::io as io
             }
 
             fn main() -> u64 {
-                io.print("hello");
-                io.println();
+                io::print("hello");
+                io::println();
                 0
             }
         "#,
@@ -28,14 +28,14 @@ fn test_print_outputs_u64() {
         "print_u64",
         r#"
             requires {
-                std.io as io
+                std::io as io
             }
 
             fn main() -> u64 {
                 let x = 42;
-                io.print("x=");
-                io.print(x);
-                io.println();
+                io::print("x=");
+                io::print(x);
+                io::println();
                 0
             }
         "#,

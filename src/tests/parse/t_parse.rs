@@ -1761,7 +1761,7 @@ fn test_parse_trait_method_block_with_module_qualified_trait_name() {
     let source = r#"
         type Process = { name: string }
 
-        Process :: rt.Runnable {
+        Process :: rt::Runnable {
             fn run(self) {
                 ()
             }
@@ -1772,7 +1772,7 @@ fn test_parse_trait_method_block_with_module_qualified_trait_name() {
     let method_blocks = module.method_blocks();
     assert_eq!(method_blocks.len(), 1);
     assert_eq!(method_blocks[0].type_name, "Process");
-    assert_eq!(method_blocks[0].trait_name.as_deref(), Some("rt.Runnable"));
+    assert_eq!(method_blocks[0].trait_name.as_deref(), Some("rt::Runnable"));
 }
 
 #[test]
@@ -1803,7 +1803,7 @@ fn test_parse_type_param_with_trait_bound() {
 #[test]
 fn test_parse_type_param_with_module_qualified_trait_bound() {
     let source = r#"
-        fn execute<T: io.Runnable>(value: T) {
+        fn execute<T: io::Runnable>(value: T) {
             ()
         }
     "#;
@@ -1818,7 +1818,7 @@ fn test_parse_type_param_with_module_qualified_trait_bound() {
         .bound
         .as_ref()
         .expect("missing trait bound");
-    assert_eq!(bound.name, "io.Runnable");
+    assert_eq!(bound.name, "io::Runnable");
 }
 
 #[test]
@@ -1866,8 +1866,8 @@ fn test_parse_trait_property_contracts() {
 fn test_parse_requires_block_with_default_alias() {
     let source = r#"
         requires {
-            std.io
-            app.config.loader
+            std::io
+            app::config::loader
         }
 
         fn main() -> u64 { 0 }
@@ -1887,8 +1887,8 @@ fn test_parse_requires_block_with_default_alias() {
 fn test_parse_requires_block_with_explicit_alias() {
     let source = r#"
         requires {
-            std.parse as parse
-            std.parse.u64 as parse_u64
+            std::parse as parse
+            std::parse::u64 as parse_u64
         }
 
         fn main() -> u64 { 0 }
@@ -1907,7 +1907,7 @@ fn test_parse_requires_block_with_explicit_alias() {
 #[test]
 fn test_parse_module_qualified_type_reference() {
     let source = r#"
-        fn use_config(cfg: app.Config) -> app.Config {
+        fn use_config(cfg: app::Config) -> app::Config {
             cfg
         }
     "#;
@@ -1916,12 +1916,36 @@ fn test_parse_module_qualified_type_reference() {
     let func = funcs.first().expect("missing function");
 
     match &func.sig.params[0].typ.kind {
-        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "app.Config"),
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "app::Config"),
         _ => panic!("expected named type"),
     }
 
     match &func.sig.ret_ty_expr.kind {
-        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "app.Config"),
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "app::Config"),
         _ => panic!("expected named return type"),
     }
+}
+
+#[test]
+fn test_parse_requires_rejects_dot_separator() {
+    let source = r#"
+        requires {
+            std.io
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+
+    assert!(parse_module(source).is_err());
+}
+
+#[test]
+fn test_parse_named_type_rejects_dot_separator() {
+    let source = r#"
+        fn use_config(cfg: app.Config) -> u64 {
+            0
+        }
+    "#;
+
+    assert!(parse_source(source).is_err());
 }

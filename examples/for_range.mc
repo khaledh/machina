@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // For-loop over a range
@@ -9,5 +9,5 @@ fn main() {
     for i in 0..10 {
         acc = acc + i;
     }
-    io.println(acc);
+    io::println(acc);
 }

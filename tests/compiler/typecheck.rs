@@ -14,7 +14,7 @@ fn test_overloaded_functions() {
         "overloads",
         r#"
             requires {
-                std.io as io
+                std::io as io
             }
 
             type Small = u64: bounds(0, 10);
@@ -31,8 +31,8 @@ fn test_overloaded_functions() {
             fn main() -> u64 {
                 let a: Small = 5;
                 let b = 20;
-                io.println(id(a));
-                io.println(id(b));
+                io::println(id(a));
+                io::println(id(b));
                 0
             }
         "#,
@@ -95,7 +95,7 @@ fn typecheck_with_modules(
 fn test_modules_opaque_field_access_rejected() {
     let entry_source = r#"
         requires {
-            app.secret
+            app::secret
         }
 
         fn read_secret(v: Secret) -> u64 {
@@ -143,7 +143,7 @@ fn test_modules_opaque_field_access_rejected() {
 fn test_modules_opaque_construction_rejected() {
     let entry_source = r#"
         requires {
-            app.secret
+            app::secret
         }
 
         fn main() -> u64 {
@@ -193,7 +193,7 @@ fn test_modules_opaque_construction_rejected() {
 fn test_modules_private_method_call_rejected() {
     let entry_source = r#"
         requires {
-            app.secret
+            app::secret
         }
 
         fn main() -> u64 {
@@ -245,7 +245,7 @@ fn test_modules_private_method_call_rejected() {
 fn test_modules_private_property_access_rejected() {
     let entry_source = r#"
         requires {
-            app.secret
+            app::secret
         }
 
         fn main() -> u64 {
@@ -296,7 +296,7 @@ fn test_modules_private_property_access_rejected() {
 fn test_modules_opaque_pattern_destructure_rejected() {
     let entry_source = r#"
         requires {
-            app.secret
+            app::secret
         }
 
         fn main() -> u64 {
@@ -346,10 +346,10 @@ fn test_modules_opaque_pattern_destructure_rejected() {
 fn test_modules_private_trait_bound_rejected() {
     let entry_source = r#"
         requires {
-            app.secret as sec
+            app::secret as sec
         }
 
-        fn run_it<T: sec.Internal>(value: T) -> u64 {
+        fn run_it<T: sec::Internal>(value: T) -> u64 {
             0
         }
 
@@ -393,12 +393,12 @@ fn test_modules_private_trait_bound_rejected() {
 fn test_modules_duplicate_public_function_names_allowed_with_aliases() {
     let entry_source = r#"
         requires {
-            app.util as util
-            app.math as math
+            app::util as util
+            app::math as math
         }
 
         fn main() -> u64 {
-            util.answer() + math.answer()
+            util::answer() + math::answer()
         }
     "#;
 

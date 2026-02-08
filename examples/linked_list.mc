@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // Linked list using heap nodes and enum end marker.
@@ -20,5 +20,5 @@ fn main() {
     let list = Link::Some(a);
 
     let total = sum(list);
-    io.println(total);
+    io::println(total);
 }

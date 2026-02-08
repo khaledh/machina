@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 type Counter = { total: u64, last: u64 }
@@ -39,5 +39,5 @@ fn main() {
     }
 
     let (total, last) = counter.snapshot();
-    io.println(f"total={total}, last={last}");
+    io::println(f"total={total}, last={last}");
 }

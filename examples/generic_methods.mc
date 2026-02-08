@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // Demonstrate generic methods on non-generic types.
@@ -18,12 +18,12 @@ fn main() {
     let b2 = Boxed { value: 2 };
 
     let a = b1.cast(42);
-    io.println(f"a: {a}");
+    io::println(f"a: {a}");
 
     let ok = b2.cast(false);
     if ok {
-      io.println(f"ok is true");
+      io::println(f"ok is true");
     } else {
-      io.println(f"ok is false");
+      io::println(f"ok is false");
     }
 }

@@ -249,6 +249,20 @@ impl<'a> Parser<'a> {
                 }
 
                 if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) {
+                    if self.require_aliases.contains(name) {
+                        let alias = self.parse_ident()?;
+                        self.consume(&TK::DoubleColon)?;
+                        let member = self.parse_ident()?;
+                        return Ok(Expr {
+                            id: self.id_gen.new_id(),
+                            kind: ExprKind::Var {
+                                ident: format!("{alias}::{member}"),
+                                def_id: (),
+                            },
+                            ty: (),
+                            span: self.close(marker),
+                        });
+                    }
                     let name = self.parse_ident()?;
                     return self.parse_enum_variant_with_args(marker, name, Vec::new());
                 }

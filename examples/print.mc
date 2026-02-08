@@ -1,12 +1,12 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // Print strings
 
 fn main() {
     let s = greeting();
-    io.print(s);
+    io::print(s);
     output("Machina!");
 }
 
@@ -15,5 +15,5 @@ fn greeting() -> string {
 }
 
 fn output(s: string) {
-    io.println(s);
+    io::println(s);
 }

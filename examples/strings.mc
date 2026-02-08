@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // String literals
@@ -20,5 +20,5 @@ fn greeting() -> string {
 }
 
 fn consume(s: string) {
-  io.println(s);
+  io::println(s);
 }

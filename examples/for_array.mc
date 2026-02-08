@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // For-loop over an array
@@ -10,5 +10,5 @@ fn main() {
     for x in arr {
         acc = acc + x;
     }
-    io.println(acc);
+    io::println(acc);
 }

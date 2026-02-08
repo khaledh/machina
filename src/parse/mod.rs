@@ -2,6 +2,7 @@ use crate::diag::{Position, Span};
 use crate::lexer::{Token, TokenKind, TokenKind as TK};
 use crate::tree::parsed::*;
 use crate::tree::{BinaryOp, CallArgMode, InitInfo, ParamMode, UnaryOp};
+use std::collections::HashSet;
 
 mod bind_pattern;
 mod block;
@@ -31,6 +32,7 @@ pub struct Parser<'a> {
     allow_range_expr: bool,
     closure_base: Option<String>,
     closure_index: u32,
+    require_aliases: HashSet<String>,
 }
 
 impl<'a> Parser<'a> {
@@ -44,6 +46,7 @@ impl<'a> Parser<'a> {
             allow_range_expr: true,
             closure_base: None,
             closure_index: 0,
+            require_aliases: HashSet::new(),
         }
     }
 
@@ -57,6 +60,7 @@ impl<'a> Parser<'a> {
             allow_range_expr: true,
             closure_base: None,
             closure_index: 0,
+            require_aliases: HashSet::new(),
         }
     }
 
@@ -70,6 +74,14 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
+        self.require_aliases = requires
+            .iter()
+            .map(|req| {
+                req.alias
+                    .clone()
+                    .unwrap_or_else(|| req.path.last().cloned().unwrap_or_default())
+            })
+            .collect();
 
         let mut top_level_items = Vec::new();
 
@@ -227,7 +239,7 @@ impl<'a> Parser<'a> {
         while self.curr_token.kind != TK::RBrace {
             let marker = self.mark();
             let mut path = vec![self.parse_ident()?];
-            while self.curr_token.kind == TK::Dot {
+            while self.curr_token.kind == TK::DoubleColon {
                 self.advance();
                 path.push(self.parse_ident()?);
             }

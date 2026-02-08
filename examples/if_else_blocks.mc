@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 // If/else blocks with optional else and else-if chains
@@ -24,13 +24,13 @@ fn main() {
     let b = classify(7);
     let c = classify(20);
     let m = max(10, 3);
-    io.println(f"a={a}");
-    io.println(f"b={b}");
-    io.println(f"c={c}");
-    io.println(f"m={m}");
+    io::println(f"a={a}");
+    io::println(f"b={b}");
+    io::println(f"c={c}");
+    io::println(f"m={m}");
 
     let debug = true;
     if debug {
-        io.println("debug mode");
+        io::println("debug mode");
     }
 }

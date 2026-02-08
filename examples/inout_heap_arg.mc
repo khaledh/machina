@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 type Point = { x: u64, y: u64 }
@@ -21,6 +21,6 @@ fn main() {
 
     update(inout b.p1, inout b.p2);
 
-    io.println(f"b.p1 = {b.p1.x}, {b.p1.y}");
-    io.println(f"b.p2 = {b.p2.x}, {b.p2.y}");
+    io::println(f"b.p1 = {b.p1.x}, {b.p1.y}");
+    io::println(f"b.p2 = {b.p2.x}, {b.p2.y}");
 }

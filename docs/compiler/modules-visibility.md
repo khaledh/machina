@@ -16,8 +16,8 @@
 
 Examples:
 
-- `std/io.mc` -> module path `std.io`
-- `app/config/parser.mc` -> module path `app.config.parser`
+- `std/io.mc` -> module path `std::io`
+- `app/config/parser.mc` -> module path `app::config::parser`
 
 ## Imports (`requires`)
 
@@ -25,35 +25,36 @@ At file top, an optional `requires` block declares module dependencies:
 
 ```mc
 requires {
-    std.io
-    std.parse as parse
-    std.parse.u64 as parse_u64
-    app.config.loader as cfg
+    std::io
+    std::parse as parse
+    std::parse::u64 as parse_u64
+    app::config::loader as cfg
 }
 ```
 
 Rules:
 
-1. Aliases use postfix `as`: `module.path as alias`.
+1. Aliases use postfix `as`: `module::path as alias`.
 2. If `as` is omitted, the default alias is the last path segment.
 3. Bound aliases must be unique in file scope.
 4. `requires` imports modules only in V1 (not individual symbols).
 5. No glob imports in V1.
-6. No grouped imports in V1 (`std.io.{stream, file}` is out of scope).
+6. No grouped imports in V1 (`std::io::{stream, file}` is out of scope).
 7. Unused `requires` entries may become warnings (later).
 8. Resolver only sees names brought in via `requires` plus local scope.
+9. `::` is the only namespace separator. `.` is field/property access only.
 
 Example usage:
 
 ```mc
 requires {
-    std.io
-    std.parse as parse
+    std::io
+    std::parse as parse
 }
 
 fn load(path: string) -> u64 | IoError {
-    let text = io.read_file(path)?;
-    parse.parse_u64(text)
+    let text = io::read_file(path)?;
+    parse::parse_u64(text)
 }
 ```
 
@@ -131,9 +132,7 @@ Point :: {
 
 1. Unqualified names resolve local scope first.
 2. `requires` aliases are top-level module names in current file.
-3. For `alias.name`, resolver first checks whether `alias` is a `requires` alias:
-   - if yes, treat as module-qualified lookup;
-   - otherwise, resolve as ordinary value/member access.
+3. `alias::name` is module-qualified lookup through the `requires` alias.
 4. External access requires symbol visibility checks.
 5. Accessing a private symbol from another module is a hard error.
 
@@ -177,7 +176,7 @@ Point :: {
 ## Out of Scope (V1)
 
 1. Wildcard imports.
-2. Grouped imports (`std.io.{stream, file}`).
+2. Grouped imports (`std::io::{stream, file}`).
 3. Specific symbol imports from modules.
 4. Re-export syntax.
 5. Package manager/external dependencies.

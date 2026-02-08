@@ -135,10 +135,10 @@ impl<'a> Parser<'a> {
                 let mut ident = name.clone();
                 self.advance();
 
-                while self.curr_token.kind == TK::Dot {
+                while self.curr_token.kind == TK::DoubleColon {
                     self.advance();
                     let seg = self.parse_ident()?;
-                    ident.push('.');
+                    ident.push_str("::");
                     ident.push_str(&seg);
                 }
 

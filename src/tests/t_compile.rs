@@ -72,7 +72,7 @@ impl Visitor<()> for CallRewriteStats {
             if ident == "Config" {
                 self.saw_rewritten_type_ref = true;
             }
-            if ident == "cfg.Config" {
+            if ident == "cfg::Config" {
                 self.saw_alias_type_ref = true;
             }
         }
@@ -84,7 +84,7 @@ impl Visitor<()> for CallRewriteStats {
             if bound.name == "Runnable" {
                 self.saw_rewritten_trait_bound = true;
             }
-            if bound.name == "rt.Runnable" {
+            if bound.name == "rt::Runnable" {
                 self.saw_alias_trait_bound = true;
             }
         }
@@ -95,7 +95,7 @@ impl Visitor<()> for CallRewriteStats {
             if trait_name == "Runnable" {
                 self.saw_rewritten_trait_impl_name = true;
             }
-            if trait_name == "rt.Runnable" {
+            if trait_name == "rt::Runnable" {
                 self.saw_alias_trait_impl_name = true;
             }
         }
@@ -107,11 +107,11 @@ impl Visitor<()> for CallRewriteStats {
 fn flatten_program_rewrites_alias_method_call_to_plain_call() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
-            util.answer()
+            util::answer()
         }
     "#;
     let mut modules = HashMap::new();
@@ -143,11 +143,11 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
 fn flatten_program_rewrites_alias_member_access_to_var() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
-            let f = util.answer;
+            let f = util::answer;
             f()
         }
     "#;
@@ -180,10 +180,10 @@ fn flatten_program_rewrites_alias_member_access_to_var() {
 fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
     let entry_src = r#"
         requires {
-            app.config as cfg
+            app::config as cfg
         }
 
-        fn use_config(c: cfg.Config) -> cfg.Config {
+        fn use_config(c: cfg::Config) -> cfg::Config {
             c
         }
     "#;
@@ -216,10 +216,10 @@ fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
 fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
     let entry_src = r#"
         requires {
-            app.runnable as rt
+            app::runnable as rt
         }
 
-        fn execute<T: rt.Runnable>(value: T) {
+        fn execute<T: rt::Runnable>(value: T) {
             ()
         }
     "#;
@@ -252,12 +252,12 @@ fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
 fn flatten_program_rewrites_alias_trait_name_in_method_block() {
     let entry_src = r#"
         requires {
-            app.runnable as rt
+            app::runnable as rt
         }
 
         type Process = { id: u64 }
 
-        Process :: rt.Runnable {
+        Process :: rt::Runnable {
             fn run(self) {
                 ()
             }
@@ -291,7 +291,7 @@ fn flatten_program_rewrites_alias_trait_name_in_method_block() {
 #[test]
 fn flatten_program_reports_unknown_alias_in_type_reference() {
     let entry_src = r#"
-        fn use_config(c: cfg.Config) -> cfg.Config {
+        fn use_config(c: cfg::Config) -> cfg::Config {
             c
         }
     "#;
@@ -320,10 +320,10 @@ fn flatten_program_reports_unknown_alias_in_type_reference() {
 fn flatten_program_reports_missing_trait_member_on_alias() {
     let entry_src = r#"
         requires {
-            app.runnable as rt
+            app::runnable as rt
         }
 
-        fn execute<T: rt.Missing>(value: T) {
+        fn execute<T: rt::Missing>(value: T) {
             ()
         }
     "#;
@@ -357,11 +357,11 @@ fn flatten_program_reports_missing_trait_member_on_alias() {
 fn flatten_program_reports_private_function_on_alias() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
-            util.secret()
+            util::secret()
         }
     "#;
     let mut modules = HashMap::new();
@@ -394,10 +394,10 @@ fn flatten_program_reports_private_function_on_alias() {
 fn flatten_program_reports_private_type_on_alias() {
     let entry_src = r#"
         requires {
-            app.config as cfg
+            app::config as cfg
         }
 
-        fn use_config(c: cfg.Config) -> cfg.Config {
+        fn use_config(c: cfg::Config) -> cfg::Config {
             c
         }
     "#;
@@ -431,10 +431,10 @@ fn flatten_program_reports_private_type_on_alias() {
 fn flatten_program_reports_private_trait_on_alias() {
     let entry_src = r#"
         requires {
-            app.runnable as rt
+            app::runnable as rt
         }
 
-        fn execute<T: rt.Runnable>(value: T) {
+        fn execute<T: rt::Runnable>(value: T) {
             ()
         }
     "#;
@@ -468,12 +468,12 @@ fn flatten_program_reports_private_trait_on_alias() {
 fn flatten_program_allows_conflicting_public_export_names_via_module_qualification() {
     let entry_src = r#"
         requires {
-            app.util as util
-            app.math as math
+            app::util as util
+            app::math as math
         }
 
         fn main() -> u64 {
-            util.answer() + math.answer()
+            util::answer() + math::answer()
         }
     "#;
     let mut modules = HashMap::new();
@@ -534,11 +534,11 @@ fn flatten_program_allows_conflicting_public_export_names_via_module_qualificati
 fn flatten_program_mangles_private_dependency_function_names() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
-            util.answer()
+            util::answer()
         }
     "#;
     let mut modules = HashMap::new();
@@ -590,11 +590,11 @@ fn flatten_program_mangles_private_dependency_function_names() {
 fn program_bindings_include_visibility_and_opaque_flags() {
     let entry_src = r#"
         requires {
-            app.util as util
+            app::util as util
         }
 
         fn main() -> u64 {
-            util.answer()
+            util::answer()
         }
     "#;
     let mut modules = HashMap::new();
@@ -639,11 +639,11 @@ fn program_bindings_include_visibility_and_opaque_flags() {
 fn flatten_program_tracks_top_level_item_owners() {
     let entry_src = r#"
         requires {
-            app.util
+            app::util
         }
 
         fn main() -> u64 {
-            util.answer()
+            util::answer()
         }
     "#;
     let mut modules = HashMap::new();

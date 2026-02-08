@@ -1,5 +1,5 @@
 requires {
-    std.io as io
+    std::io as io
 }
 
 type Flag = On | Off
@@ -31,5 +31,5 @@ fn main() {
     let b = pick(3);
     let c = bool_to_u64(true);
     let d = describe_flag(Flag::Off);
-    io.println(f"a={a}, b={b}, c={c}, d={d}");
+    io::println(f"a={a}, b={b}, c={c}, d={d}");
 }
