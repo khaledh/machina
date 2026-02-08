@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::diag::Span;
+use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding};
@@ -91,7 +92,10 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &constrain.expr_obligations,
         &constrain.def_terms,
         &mut unifier,
+        &engine.context().def_table,
         &engine.env().type_defs,
+        &engine.env().type_symbols,
+        &engine.context().def_owners,
         &engine.env().property_sigs,
         &engine.env().trait_sigs,
         &constrain.var_trait_bounds,
@@ -148,7 +152,10 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &retry_expr_obligations,
             &constrain.def_terms,
             &mut unifier,
+            &engine.context().def_table,
             &engine.env().type_defs,
+            &engine.env().type_symbols,
+            &engine.context().def_owners,
             &engine.env().property_sigs,
             &engine.env().trait_sigs,
             &constrain.var_trait_bounds,
@@ -848,7 +855,10 @@ fn check_expr_obligations(
     obligations: &[ExprObligation],
     def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
+    def_table: &DefTable,
     type_defs: &HashMap<String, Type>,
+    type_symbols: &HashMap<String, DefId>,
+    def_owners: &HashMap<DefId, ModuleId>,
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
@@ -1397,11 +1407,30 @@ fn check_expr_obligations(
                     }
                 }
             }
+            ExprObligation::StructConstruct {
+                expr_id,
+                type_name,
+                caller_def_id,
+                span,
+            } => {
+                if let Some(type_def_id) = type_def_id_for_nominal_name(type_name, type_symbols)
+                    && is_external_opaque_access(*caller_def_id, type_def_id, def_table, def_owners)
+                {
+                    let diag_name = def_table
+                        .lookup_def(type_def_id)
+                        .map(|def| def.name.clone())
+                        .unwrap_or_else(|| compact_nominal_name(type_name));
+                    errors
+                        .push(TypeCheckErrorKind::OpaqueTypeConstruction(diag_name, *span).into());
+                    covered_exprs.insert(*expr_id);
+                }
+            }
             ExprObligation::StructUpdate {
                 expr_id,
                 target,
                 fields,
                 result,
+                caller_def_id,
                 span,
             } => {
                 let target_ty = resolve_term(target, unifier);
@@ -1409,9 +1438,32 @@ fn check_expr_obligations(
                     default_infer_ints_for_diagnostics(target_ty.clone(), unifier.vars());
                 match &target_ty_for_diag {
                     Type::Struct {
+                        name,
                         fields: struct_fields,
-                        ..
                     } => {
+                        if let Some(type_def_id) = type_def_id_for_nominal_name(name, type_symbols)
+                            && is_external_opaque_access(
+                                *caller_def_id,
+                                type_def_id,
+                                def_table,
+                                def_owners,
+                            )
+                        {
+                            let diag_name = def_table
+                                .lookup_def(type_def_id)
+                                .map(|def| def.name.clone())
+                                .unwrap_or_else(|| compact_nominal_name(name));
+                            let field_name = fields
+                                .first()
+                                .map(|(field, _)| field.clone())
+                                .unwrap_or_else(|| "<update>".to_string());
+                            errors.push(
+                                TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field_name, *span)
+                                    .into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
                         for (field_name, found_term) in fields {
                             let found_ty = resolve_term(found_term, unifier);
                             let Some(expected_field) =
@@ -1493,6 +1545,7 @@ fn check_expr_obligations(
                 target,
                 field,
                 result,
+                caller_def_id,
                 span,
             } => {
                 let target_ty = resolve_term(target, unifier);
@@ -1532,7 +1585,30 @@ fn check_expr_obligations(
                     }
                 }
                 match &owner_ty {
-                    Type::Struct { fields, .. } => {
+                    Type::Struct { name, fields } => {
+                        if let Some(type_def_id) = type_def_id_for_nominal_name(name, type_symbols)
+                            && is_external_opaque_access(
+                                *caller_def_id,
+                                type_def_id,
+                                def_table,
+                                def_owners,
+                            )
+                        {
+                            let diag_name = def_table
+                                .lookup_def(type_def_id)
+                                .map(|def| def.name.clone())
+                                .unwrap_or_else(|| compact_nominal_name(name));
+                            errors.push(
+                                TypeCheckErrorKind::OpaqueFieldAccess(
+                                    diag_name,
+                                    field.clone(),
+                                    *span,
+                                )
+                                .into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
                         if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
                             let _ = unifier.unify(result, &struct_field.ty);
                         } else {
@@ -1555,6 +1631,7 @@ fn check_expr_obligations(
                 field,
                 assignee,
                 value,
+                caller_def_id,
                 span,
             } => {
                 let target_ty = resolve_term(target, unifier);
@@ -1609,7 +1686,30 @@ fn check_expr_obligations(
                 }
 
                 match &owner_ty {
-                    Type::Struct { fields, .. } => {
+                    Type::Struct { name, fields } => {
+                        if let Some(type_def_id) = type_def_id_for_nominal_name(name, type_symbols)
+                            && is_external_opaque_access(
+                                *caller_def_id,
+                                type_def_id,
+                                def_table,
+                                def_owners,
+                            )
+                        {
+                            let diag_name = def_table
+                                .lookup_def(type_def_id)
+                                .map(|def| def.name.clone())
+                                .unwrap_or_else(|| compact_nominal_name(name));
+                            errors.push(
+                                TypeCheckErrorKind::OpaqueFieldAccess(
+                                    diag_name,
+                                    field.clone(),
+                                    *span,
+                                )
+                                .into(),
+                            );
+                            covered_exprs.insert(*stmt_id);
+                            continue;
+                        }
                         if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
                             let _ = unifier.unify(assignee, &struct_field.ty);
                             if let Err(_) = solve_assignable(&value_ty, &struct_field.ty, unifier) {
@@ -2080,6 +2180,42 @@ fn compact_type_name(ty: &Type) -> String {
     }
 }
 
+fn compact_nominal_name(name: &str) -> String {
+    name.split('<').next().unwrap_or(name).trim().to_string()
+}
+
+fn type_def_id_for_nominal_name(
+    name: &str,
+    type_symbols: &HashMap<String, DefId>,
+) -> Option<DefId> {
+    let base = compact_nominal_name(name);
+    type_symbols.get(&base).copied()
+}
+
+fn is_external_opaque_access(
+    caller_def_id: Option<DefId>,
+    owner_type_def_id: DefId,
+    def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
+) -> bool {
+    if !def_table
+        .lookup_def(owner_type_def_id)
+        .is_some_and(|def| def.is_opaque())
+    {
+        return false;
+    }
+    let Some(caller_def_id) = caller_def_id else {
+        return false;
+    };
+    let Some(caller_module_id) = def_owners.get(&caller_def_id) else {
+        return false;
+    };
+    let Some(owner_module_id) = def_owners.get(&owner_type_def_id) else {
+        return false;
+    };
+    caller_module_id != owner_module_id
+}
+
 fn error_union_variant_names(ty: &Type) -> Option<Vec<String>> {
     let Type::ErrorUnion { ok_ty, err_tys } = ty else {
         return None;
@@ -2247,6 +2383,7 @@ fn op_span(obligation: &ExprObligation) -> Span {
         | ExprObligation::Range { span, .. }
         | ExprObligation::ForIter { span, .. }
         | ExprObligation::EnumVariantPayload { span, .. }
+        | ExprObligation::StructConstruct { span, .. }
         | ExprObligation::StructUpdate { span, .. }
         | ExprObligation::TupleField { span, .. }
         | ExprObligation::StructField { span, .. }

@@ -163,6 +163,12 @@ pub enum TypeCheckErrorKind {
     #[error("Invalid struct field target: expected struct, found {0}")]
     InvalidStructFieldTarget(Type, Span),
 
+    #[error("Cannot construct opaque type {0} outside its defining module")]
+    OpaqueTypeConstruction(String, Span),
+
+    #[error("Cannot access field {1} of opaque type {0} outside its defining module")]
+    OpaqueFieldAccess(String, String, Span),
+
     #[error("Property {0} is read-only")]
     PropertyNotWritable(String, Span),
 
@@ -365,6 +371,8 @@ impl TypeCheckError {
             TypeCheckErrorKind::UnknownStructField(_, span) => *span,
             TypeCheckErrorKind::StructFieldsMissing(_, span) => *span,
             TypeCheckErrorKind::InvalidStructFieldTarget(_, span) => *span,
+            TypeCheckErrorKind::OpaqueTypeConstruction(_, span) => *span,
+            TypeCheckErrorKind::OpaqueFieldAccess(_, _, span) => *span,
             TypeCheckErrorKind::PropertyNotWritable(_, span) => *span,
             TypeCheckErrorKind::PropertyNotReadable(_, span) => *span,
             TypeCheckErrorKind::PropertyGetterHasParams(_, span) => *span,

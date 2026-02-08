@@ -128,6 +128,13 @@ pub(crate) enum ExprObligation {
         target: Type,
         fields: Vec<(String, Type)>,
         result: Type,
+        caller_def_id: Option<DefId>,
+        span: Span,
+    },
+    StructConstruct {
+        expr_id: NodeId,
+        type_name: String,
+        caller_def_id: Option<DefId>,
         span: Span,
     },
     TupleField {
@@ -142,6 +149,7 @@ pub(crate) enum ExprObligation {
         target: Type,
         field: String,
         result: Type,
+        caller_def_id: Option<DefId>,
         span: Span,
     },
     StructFieldAssign {
@@ -151,6 +159,7 @@ pub(crate) enum ExprObligation {
         field: String,
         assignee: Type,
         value: Type,
+        caller_def_id: Option<DefId>,
         span: Span,
     },
 }
@@ -780,6 +789,21 @@ impl<'a> ConstraintCollector<'a> {
                         self.collect_expr(&field.value, None);
                     }
                 }
+                let type_name = known_struct
+                    .as_ref()
+                    .and_then(|ty| match ty {
+                        Type::Struct { name, .. } => Some(name.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| name.clone());
+                self.out
+                    .expr_obligations
+                    .push(ExprObligation::StructConstruct {
+                        expr_id: expr.id,
+                        type_name,
+                        caller_def_id: self.current_callable_def_id(),
+                        span: expr.span,
+                    });
             }
             ExprKind::EnumVariant {
                 enum_name,
@@ -848,6 +872,7 @@ impl<'a> ConstraintCollector<'a> {
                         target: target_ty,
                         fields: field_terms,
                         result: expr_ty.clone(),
+                        caller_def_id: self.current_callable_def_id(),
                         span: expr.span,
                     });
             }
@@ -888,6 +913,7 @@ impl<'a> ConstraintCollector<'a> {
                     target: target_ty,
                     field: field.clone(),
                     result: expr_ty.clone(),
+                    caller_def_id: self.current_callable_def_id(),
                     span: expr.span,
                 });
             }
@@ -1371,6 +1397,7 @@ impl<'a> ConstraintCollector<'a> {
                             field: field.clone(),
                             assignee: assignee_ty,
                             value: value_ty,
+                            caller_def_id: self.current_callable_def_id(),
                             span: stmt.span,
                         });
                 } else {

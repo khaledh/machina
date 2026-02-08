@@ -1,5 +1,8 @@
 use super::*;
+use std::collections::HashMap;
+
 use crate::context::ParsedContext;
+use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
 use crate::resolve::resolve;
@@ -19,6 +22,37 @@ fn type_check_source(source: &str) -> Result<TypeCheckedContext, Vec<TypeCheckEr
     let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     type_check(resolved_context)
+}
+
+fn type_check_source_with_def_owners(
+    source: &str,
+    owner_by_name: &[(&str, ModuleId)],
+) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
+
+    let ast_context = ParsedContext::new(module, id_gen);
+    let resolved_context = resolve(ast_context).expect("Failed to resolve");
+
+    let owner_by_name = owner_by_name
+        .iter()
+        .map(|(name, module_id)| ((*name).to_string(), *module_id))
+        .collect::<HashMap<_, _>>();
+    let mut def_owners = HashMap::new();
+    for def in resolved_context.def_table.clone() {
+        if let Some(module_id) = owner_by_name.get(&def.name) {
+            def_owners.insert(def.id, *module_id);
+        }
+    }
+
+    type_check(resolved_context.with_def_owners(def_owners))
 }
 
 #[test]
@@ -121,6 +155,55 @@ fn test_struct_field_access_through_heap() {
     "#;
 
     let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_opaque_struct_construction_cross_module_rejected() {
+    let source = r#"
+        @[opaque]
+        type Secret = { x: u64 }
+
+        fn build_secret() -> Secret {
+            Secret { x: 1 }
+        }
+    "#;
+
+    let result = type_check_source_with_def_owners(
+        source,
+        &[("Secret", ModuleId(1)), ("build_secret", ModuleId(2))],
+    );
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::OpaqueTypeConstruction(name, _) if name == "Secret"
+        )));
+    }
+}
+
+#[test]
+fn test_opaque_struct_field_access_cross_module_rejected() {
+    let source = r#"
+        @[opaque]
+        type Secret = { x: u64 }
+
+        fn read_secret(s: Secret) -> u64 {
+            s.x
+        }
+    "#;
+
+    let result = type_check_source_with_def_owners(
+        source,
+        &[("Secret", ModuleId(1)), ("read_secret", ModuleId(2))],
+    );
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::OpaqueFieldAccess(type_name, field, _)
+                if type_name == "Secret" && field == "x"
+        )));
+    }
 }
 
 #[test]
