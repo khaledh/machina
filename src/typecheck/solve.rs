@@ -573,6 +573,12 @@ fn check_call_obligations(
                     }
                     continue;
                 }
+                if let Some(result) = try_solve_set_builtin_method(obligation, name, unifier) {
+                    if let Err(err) = result {
+                        errors.push(err);
+                    }
+                    continue;
+                }
                 let receiver_ty = obligation
                     .receiver
                     .as_ref()
@@ -852,6 +858,100 @@ fn try_solve_dyn_array_builtin_method(
                     1,
                     (*elem_ty).clone(),
                     arg_ty,
+                    obligation.span,
+                )
+                .into()));
+            }
+            unifier
+                .unify(&obligation.ret_ty, &Type::Unit)
+                .map_err(|err| unify_error_to_diag(err, obligation.span))
+        }
+        "len" | "capacity" | "is_empty" => Err(TypeCheckErrorKind::PropertyCalledAsMethod(
+            method_name.to_string(),
+            obligation.span,
+        )
+        .into()),
+        _ => return None,
+    };
+
+    Some(result)
+}
+
+fn try_solve_set_builtin_method(
+    obligation: &CallObligation,
+    method_name: &str,
+    unifier: &mut TcUnifier,
+) -> Option<Result<(), TypeCheckError>> {
+    let receiver_term = obligation.receiver.as_ref()?;
+    let receiver_ty = resolve_term(receiver_term, unifier);
+    let Type::Set { elem_ty } = receiver_ty.peel_heap() else {
+        return None;
+    };
+
+    if !is_unresolved(&elem_ty) && !is_supported_set_elem_type(&elem_ty) {
+        return Some(Err(TypeCheckErrorKind::SetElementTypeUnsupported(
+            (*elem_ty).clone(),
+            obligation.span,
+        )
+        .into()));
+    }
+
+    let arity = obligation.arg_terms.len();
+    let result = match method_name {
+        "insert" => {
+            if arity != 1 {
+                return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
+                    method_name.to_string(),
+                    1,
+                    arity,
+                    obligation.span,
+                )
+                .into()));
+            }
+            let arg_ty = resolve_term(&obligation.arg_terms[0], unifier);
+            if let Err(_) = solve_assignable(&arg_ty, &elem_ty, unifier) {
+                return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
+                    1,
+                    (*elem_ty).clone(),
+                    arg_ty,
+                    obligation.span,
+                )
+                .into()));
+            }
+            unifier
+                .unify(&obligation.ret_ty, &Type::Bool)
+                .map_err(|err| unify_error_to_diag(err, obligation.span))
+        }
+        "remove" | "contains" => {
+            if arity != 1 {
+                return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
+                    method_name.to_string(),
+                    1,
+                    arity,
+                    obligation.span,
+                )
+                .into()));
+            }
+            let arg_ty = resolve_term(&obligation.arg_terms[0], unifier);
+            if let Err(_) = solve_assignable(&arg_ty, &elem_ty, unifier) {
+                return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
+                    1,
+                    (*elem_ty).clone(),
+                    arg_ty,
+                    obligation.span,
+                )
+                .into()));
+            }
+            unifier
+                .unify(&obligation.ret_ty, &Type::Bool)
+                .map_err(|err| unify_error_to_diag(err, obligation.span))
+        }
+        "clear" => {
+            if arity != 0 {
+                return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
+                    method_name.to_string(),
+                    0,
+                    arity,
                     obligation.span,
                 )
                 .into()));
@@ -1463,6 +1563,25 @@ fn check_expr_obligations(
                     },
                 );
             }
+            ExprObligation::SetElemType {
+                expr_id,
+                elem_ty,
+                span,
+            } => {
+                let elem_ty = resolve_term(elem_ty, unifier);
+                let elem_ty_for_diag =
+                    default_infer_ints_for_diagnostics(elem_ty.clone(), unifier.vars());
+                if is_unresolved(&elem_ty_for_diag) {
+                    continue;
+                }
+                if !is_supported_set_elem_type(&elem_ty_for_diag) {
+                    errors.push(
+                        TypeCheckErrorKind::SetElementTypeUnsupported(elem_ty_for_diag, *span)
+                            .into(),
+                    );
+                    covered_exprs.insert(*expr_id);
+                }
+            }
             ExprObligation::ForIter {
                 stmt_id,
                 iter,
@@ -1750,6 +1869,19 @@ fn check_expr_obligations(
                         _ => {}
                     }
                 }
+                if let Type::Set { .. } = &owner_ty {
+                    match field.as_str() {
+                        "capacity" => {
+                            let _ = unifier.unify(result, &Type::uint(64));
+                            continue;
+                        }
+                        "is_empty" => {
+                            let _ = unifier.unify(result, &Type::Bool);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
                 match &owner_ty {
                     Type::Struct { name, fields } => {
                         if let Some(type_def_id) = type_def_id_for_nominal_name(name, type_symbols)
@@ -1861,6 +1993,14 @@ fn check_expr_obligations(
                     continue;
                 }
                 if let Type::DynArray { .. } = &owner_ty
+                    && matches!(field.as_str(), "capacity" | "is_empty")
+                {
+                    errors
+                        .push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
+                    covered_exprs.insert(*stmt_id);
+                    continue;
+                }
+                if let Type::Set { .. } = &owner_ty
                     && matches!(field.as_str(), "capacity" | "is_empty")
                 {
                     errors
@@ -2003,6 +2143,10 @@ fn should_retry_post_call_expr_obligation(
             let assignee_ty = resolve_term(assignee, unifier);
             let value_ty = resolve_term(value, unifier);
             is_unresolved(&owner_ty) || is_unresolved(&assignee_ty) || is_unresolved(&value_ty)
+        }
+        ExprObligation::SetElemType { elem_ty, .. } => {
+            let elem_ty = resolve_term(elem_ty, unifier);
+            is_unresolved(&elem_ty)
         }
         ExprObligation::Try {
             callable_def_id: _, ..
@@ -2640,6 +2784,7 @@ fn op_span(obligation: &ExprObligation) -> Span {
         | ExprObligation::ArrayIndex { span, .. }
         | ExprObligation::Slice { span, .. }
         | ExprObligation::Range { span, .. }
+        | ExprObligation::SetElemType { span, .. }
         | ExprObligation::ForIter { span, .. }
         | ExprObligation::EnumVariantPayload { span, .. }
         | ExprObligation::StructConstruct { span, .. }
@@ -2743,7 +2888,18 @@ fn is_iterable(ty: &Type) -> bool {
 fn is_len_target(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Array { .. } | Type::DynArray { .. } | Type::Slice { .. } | Type::String
+        Type::Array { .. }
+            | Type::DynArray { .. }
+            | Type::Set { .. }
+            | Type::Slice { .. }
+            | Type::String
+    )
+}
+
+fn is_supported_set_elem_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int { .. } | Type::Bool | Type::Char | Type::String
     )
 }
 

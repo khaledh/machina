@@ -108,6 +108,11 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    SetElemType {
+        expr_id: NodeId,
+        elem_ty: Type,
+        span: Span,
+    },
     ForIter {
         stmt_id: NodeId,
         iter: Type,
@@ -775,10 +780,15 @@ impl<'a> ConstraintCollector<'a> {
                 self.push_eq(
                     expr_ty.clone(),
                     Type::Set {
-                        elem_ty: Box::new(elem_term),
+                        elem_ty: Box::new(elem_term.clone()),
                     },
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
+                self.out.expr_obligations.push(ExprObligation::SetElemType {
+                    expr_id: expr.id,
+                    elem_ty: elem_term.clone(),
+                    span: expr.span,
+                });
             }
             ExprKind::StructLit {
                 name,

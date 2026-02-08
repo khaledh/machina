@@ -143,6 +143,57 @@ fn test_typed_empty_set_literal_type() {
 }
 
 #[test]
+fn test_set_methods_and_properties_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            var s = set<u64>{1, 2};
+            let inserted = s.insert(3);
+            let has_three = s.contains(3);
+            let removed = s.remove(2);
+            let cap = s.capacity;
+            s.clear();
+            if inserted && has_three && removed { cap } else { s.len }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_set_property_called_as_method_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let s = set<u64>{1, 2};
+            s.capacity()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_set_unsupported_element_type_rejected() {
+    let source = r#"
+        type Foo = { x: u64 }
+
+        fn test() -> u64 {
+            let s = set<Foo>{};
+            s.len
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::SetElementTypeUnsupported(_, _)
+        )));
+    }
+}
+
+#[test]
 fn test_multidim_array_type_inference() {
     let source = r#"
         fn test() -> u64[2, 2] {

@@ -109,6 +109,9 @@ pub enum TypeCheckErrorKind {
     #[error("Array element type mismatch: expected {0}, found {1}")]
     ArrayElementTypeMismatch(Type, Type, Span),
 
+    #[error("Set element type is unsupported: {0}")]
+    SetElementTypeUnsupported(Type, Span),
+
     #[error("Index must be an integer, found {0}")]
     IndexTypeNotInt(Type, Span),
 
@@ -362,6 +365,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::EmptyArrayLiteral(span) => *span,
             TypeCheckErrorKind::TooManyIndices(_, _, span) => *span,
             TypeCheckErrorKind::ArrayElementTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::SetElementTypeUnsupported(_, span) => *span,
             TypeCheckErrorKind::IndexTypeNotInt(_, span) => *span,
             TypeCheckErrorKind::InvalidIndexTargetType(_, span) => *span,
             TypeCheckErrorKind::UnknownType(span) => *span,
