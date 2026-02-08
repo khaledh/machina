@@ -1,4 +1,11 @@
 use crate::common::run_program;
+use machina::compile::{CompileOptions, compile_with_path};
+use machina::diag::CompileError;
+use machina::typecheck::TypeCheckErrorKind;
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn test_overloaded_functions() {
@@ -29,4 +36,150 @@ fn test_overloaded_functions() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "105\n20\n", "unexpected stdout: {stdout}");
+}
+
+fn with_temp_program(
+    name: &str,
+    entry_source: &str,
+    extra_modules: &[(&str, &str)],
+    test: impl FnOnce(&Path, &str),
+) {
+    let run_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_compiler_test_{}_{}_{}",
+        name,
+        std::process::id(),
+        run_id
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+
+    let entry_path = temp_dir.join("main.mc");
+    std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
+
+    for (module_path, source) in extra_modules {
+        let file_path = temp_dir.join(module_path);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create module parent");
+        }
+        std::fs::write(&file_path, source).expect("failed to write module source");
+    }
+
+    test(&entry_path, entry_source);
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+fn typecheck_with_modules(
+    entry_path: &Path,
+    entry_source: &str,
+) -> Result<machina::compile::CompileOutput, Vec<CompileError>> {
+    compile_with_path(
+        entry_source,
+        Some(entry_path),
+        &CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: false,
+        },
+    )
+}
+
+#[test]
+fn test_modules_opaque_field_access_rejected() {
+    let entry_source = r#"
+        requires {
+            app.secret
+        }
+
+        fn read_secret(v: Secret) -> u64 {
+            v.x
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+
+    let secret_source = r#"
+        @[opaque]
+        type Secret = { x: u64 }
+    "#;
+
+    with_temp_program(
+        "opaque_field_access",
+        entry_source,
+        &[("app/secret.mc", secret_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail for opaque field access"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::OpaqueFieldAccess(type_name, field, _)
+                                    if type_name == "Secret" && field == "x"
+                            )
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_modules_opaque_construction_rejected() {
+    let entry_source = r#"
+        requires {
+            app.secret
+        }
+
+        fn main() -> u64 {
+            let s = Secret { x: 1 };
+            secret.take(s)
+        }
+    "#;
+
+    let secret_source = r#"
+        @[opaque]
+        type Secret = { x: u64 }
+
+        @[public]
+        fn take(v: Secret) -> u64 {
+            0
+        }
+    "#;
+
+    with_temp_program(
+        "opaque_construction",
+        entry_source,
+        &[("app/secret.mc", secret_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail for opaque construction"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::OpaqueTypeConstruction(type_name, _)
+                                    if type_name == "Secret"
+                            )
+                    )
+                }));
+            }
+        },
+    );
 }
