@@ -133,7 +133,14 @@ Set/map runtime receives concrete hash/eq hooks from lowering.
 
 ## Runtime Interface Direction
 
-For hashed containers (future backend for set/map), runtime should accept:
+Current state:
+
+- `set<T>` uses hashed probing in runtime for the current V1 hashable subset.
+- Hashing is currently runtime byte hashing for supported primitive-like keys.
+
+Future direction for generalized hashing (and `map<K, V>`):
+
+- Runtime should accept:
 
 - Equality callback
 - Hash callback
@@ -146,7 +153,8 @@ typedef uint8_t (*mc_eq_fn)(const void* a, const void* b);
 typedef uint64_t (*mc_hash_fn)(const void* value);
 ```
 
-V1 may keep current linear-scan set behavior while compiler/runtime hooks are introduced.
+This callback-based ABI is the compatibility path toward user-defined
+`Hash`/`Eq` and richer key types.
 
 ## Diagnostics
 
@@ -189,7 +197,7 @@ This keeps current V1 work valid and avoids re-architecting set/map.
 3. Enforce hashable keys for map and hashable elements for set.
 4. Add structural equality lowering for aggregates.
 5. Add structural hash synthesis hooks for concrete types used in containers.
-6. Switch map/set runtime from linear scan to hashed probing when ready.
+6. Move map runtime to hashed probing and converge set/map on shared hash-kernel internals.
 7. Introduce public `Eq`/`Hash` traits on top of existing synthesis.
 
 ## Implementation Checklist
@@ -259,11 +267,11 @@ Acceptance:
 - Hash coherence spot tests (`a == b => hash(a) == hash(b)`).
 - Distinct enum variants produce distinct hash streams by tag inclusion.
 
-### Milestone 6: Hashed Container Runtime Backend
+### Milestone 6: Shared Hashed Container Runtime Backend
 
-- Add hashed probing backend for map first (set can reuse map core or same table kernel).
+- Add hashed probing backend for map and share table-kernel logic with set.
 - Preserve current API and ownership semantics.
-- Keep linear-scan backend available during transition behind an internal switch.
+- Introduce callback hooks for generalized `Hash`/`Eq` once trait surface is ready.
 
 Acceptance:
 

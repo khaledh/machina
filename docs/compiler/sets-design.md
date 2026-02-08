@@ -110,25 +110,20 @@ Notes:
 
 ## Runtime Representation
 
-Current V1 representation is a unique-element linear container built on top of
-`mc_dyn_array_t` storage (`ptr`, `len`, `cap` with owned-bit in `cap`).
+V1 set runtime uses open-addressing hash storage built on top of
+`mc_dyn_array_t` header shape (`ptr`, `len`, `cap` with owned-bit in `cap`).
 
 Current behavior:
 
-- `insert`: linear scan for equality; append only if not present.
-- `contains`: linear scan.
-- `remove`: linear scan + swap-remove.
-- `clear`: set `len = 0` and keep capacity.
+- `insert`: hash probe + tombstone reuse, then write when key is absent.
+- `contains`: hash probe lookup.
+- `remove`: mark tombstone on hit.
+- `clear`: reset control bytes to empty and set `len = 0`.
+- Growth: rehash when projected load factor exceeds threshold.
+- Hashing: runtime byte hashing (FNV-1a) for the current V1 key subset.
 
-This keeps implementation simple while `Hash`/`Eq` infrastructure is still
-absent from the language.
-
-## Future Runtime Direction
-
-Target representation after hash/equality support is ready:
-
-- Open-addressing hash table (Swiss-table style or similar), still using
-  `ptr/len/cap` header shape for consistency with other runtime containers.
+This gives hashed lookup semantics now, while trait-driven user-defined
+`Hash`/`Eq` remains future work.
 
 ## Future Optimizations
 
@@ -140,15 +135,11 @@ Target representation after hash/equality support is ready:
 - Add optional bitmap backend for eligible key domains (`bool`, small enums,
   bounded small integer ranges).
 
-3. Primitive-key hash backend
-- Introduce hashed storage first for primitive key families (`u*`, `i*`,
-  `bool`, `char`), while retaining linear fallback for unsupported key kinds.
-
-4. Full generic hashing/equality
+3. Full generic hashing/equality
 - Add trait-based `Hash`/`Eq` support and move all set operations to hashed
   lookup for types that implement those traits.
 
-5. Drop-aware element management
+4. Drop-aware element management
 - Add full element-drop semantics for non-trivial element types once generic
   key support expands beyond scalar keys.
 
