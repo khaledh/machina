@@ -97,32 +97,50 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
     fn visit_expr(&mut self, expr: &mut parsed::Expr) {
         visit_mut::walk_expr(self, expr);
 
-        let parsed::ExprKind::MethodCall {
-            callee,
-            method_name,
-            args,
-        } = &expr.kind
-        else {
-            return;
-        };
-        let parsed::ExprKind::Var { ident: alias, .. } = &callee.kind else {
-            return;
-        };
-        let Some(members) = self.alias_members.get(alias) else {
-            return;
-        };
-        if !members.contains(method_name) {
-            return;
-        }
+        match &expr.kind {
+            parsed::ExprKind::MethodCall {
+                callee,
+                method_name,
+                args,
+            } => {
+                let parsed::ExprKind::Var { ident: alias, .. } = &callee.kind else {
+                    return;
+                };
+                let Some(members) = self.alias_members.get(alias) else {
+                    return;
+                };
+                if !members.contains(method_name) {
+                    return;
+                }
 
-        let mut function_callee = (**callee).clone();
-        if let parsed::ExprKind::Var { ident, .. } = &mut function_callee.kind {
-            *ident = method_name.clone();
-        }
+                let mut function_callee = (**callee).clone();
+                if let parsed::ExprKind::Var { ident, .. } = &mut function_callee.kind {
+                    *ident = method_name.clone();
+                }
 
-        expr.kind = parsed::ExprKind::Call {
-            callee: Box::new(function_callee),
-            args: args.clone(),
-        };
+                expr.kind = parsed::ExprKind::Call {
+                    callee: Box::new(function_callee),
+                    args: args.clone(),
+                };
+            }
+            parsed::ExprKind::StructField { target, field } => {
+                let parsed::ExprKind::Var { ident: alias, .. } = &target.kind else {
+                    return;
+                };
+                let Some(members) = self.alias_members.get(alias) else {
+                    return;
+                };
+                if !members.contains(field) {
+                    return;
+                }
+
+                let mut function_ref = (**target).clone();
+                if let parsed::ExprKind::Var { ident, .. } = &mut function_ref.kind {
+                    *ident = field.clone();
+                }
+                expr.kind = function_ref.kind;
+            }
+            _ => {}
+        }
     }
 }

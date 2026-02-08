@@ -27,7 +27,9 @@ impl ModuleLoader for MockLoader {
 #[derive(Default)]
 struct CallRewriteStats {
     saw_rewritten_call: bool,
+    saw_rewritten_var: bool,
     saw_alias_method_call: bool,
+    saw_alias_struct_field: bool,
 }
 
 impl Visitor<()> for CallRewriteStats {
@@ -38,11 +40,22 @@ impl Visitor<()> for CallRewriteStats {
         {
             self.saw_rewritten_call = true;
         }
+        if let ExprKind::Var { ident, .. } = &expr.kind
+            && ident == "answer"
+        {
+            self.saw_rewritten_var = true;
+        }
         if let ExprKind::MethodCall { callee, .. } = &expr.kind
             && let ExprKind::Var { ident, .. } = &callee.kind
             && ident == "util"
         {
             self.saw_alias_method_call = true;
+        }
+        if let ExprKind::StructField { target, .. } = &expr.kind
+            && let ExprKind::Var { ident, .. } = &target.kind
+            && ident == "util"
+        {
+            self.saw_alias_struct_field = true;
         }
         visit::walk_expr(self, expr);
     }
@@ -81,4 +94,40 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
 
     assert!(stats.saw_rewritten_call);
     assert!(!stats.saw_alias_method_call);
+}
+
+#[test]
+fn flatten_program_rewrites_alias_member_access_to_var() {
+    let entry_src = r#"
+        requires {
+            app.util
+        }
+
+        fn main() -> u64 {
+            let f = util.answer;
+            f()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "fn answer() -> u64 { 7 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program));
+    let mut stats = CallRewriteStats::default();
+    stats.visit_module(&flattened);
+
+    assert!(stats.saw_rewritten_var);
+    assert!(!stats.saw_alias_struct_field);
 }
