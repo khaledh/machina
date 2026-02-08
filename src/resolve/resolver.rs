@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::context::{ParsedContext, ResolvedContext};
+use crate::context::{
+    ParsedContext, ProgramParsedContext, ProgramResolvedContext, ResolvedContext,
+};
 use crate::diag::Span;
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
@@ -21,6 +23,7 @@ pub struct SymbolResolver {
     intrinsic_type_defs: HashSet<DefId>,
     callable_attrs: HashMap<NodeId, FuncAttrs>,
     variant_placeholders: HashMap<String, DefId>,
+    require_aliases: HashSet<String>,
 }
 
 impl Default for SymbolResolver {
@@ -42,6 +45,7 @@ impl SymbolResolver {
             intrinsic_type_defs: HashSet::new(),
             callable_attrs: HashMap::new(),
             variant_placeholders: HashMap::new(),
+            require_aliases: HashSet::new(),
         }
     }
 
@@ -325,6 +329,8 @@ impl SymbolResolver {
             if !seen.insert(alias.clone()) {
                 self.errors
                     .push(ResolveError::DuplicateRequireAlias(alias, req.span));
+            } else {
+                self.require_aliases.insert(alias);
             }
         }
     }
@@ -1235,11 +1241,45 @@ impl Visitor<()> for SymbolResolver {
                 }
             }
 
-            ExprKind::MethodCall { callee, args, .. } => {
+            ExprKind::MethodCall {
+                callee,
+                method_name,
+                args,
+            } => {
+                if let ExprKind::Var { ident: alias, .. } = &callee.kind
+                    && self.require_aliases.contains(alias)
+                {
+                    self.errors
+                        .push(ResolveError::ModuleQualifiedAccessUnsupported(
+                            alias.clone(),
+                            method_name.clone(),
+                            expr.span,
+                        ));
+                    for arg in args {
+                        self.visit_expr(&arg.expr);
+                    }
+                    return;
+                }
+
                 self.visit_expr(callee);
                 for arg in args {
                     self.visit_expr(&arg.expr);
                 }
+            }
+
+            ExprKind::StructField { target, field } => {
+                if let ExprKind::Var { ident: alias, .. } = &target.kind
+                    && self.require_aliases.contains(alias)
+                {
+                    self.errors
+                        .push(ResolveError::ModuleQualifiedAccessUnsupported(
+                            alias.clone(),
+                            field.clone(),
+                            expr.span,
+                        ));
+                    return;
+                }
+                walk_expr(self, expr);
             }
 
             ExprKind::Closure {
@@ -1318,4 +1358,40 @@ pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<Resolv
     let resolved_context = ast_context.with_def_table(def_table, resolved_module);
 
     Ok(resolved_context)
+}
+
+pub fn resolve_program(
+    program: ProgramParsedContext,
+) -> Result<ProgramResolvedContext, Vec<ResolveError>> {
+    let mut modules = HashMap::new();
+    let mut errors = Vec::new();
+
+    for module_id in program.dependency_order_from_entry() {
+        let Some(parsed_module) = program.module(module_id) else {
+            continue;
+        };
+        let parsed_context = ParsedContext::new(
+            parsed_module.module.clone(),
+            program.next_node_id_gen().clone(),
+        );
+        match resolve(parsed_context) {
+            Ok(resolved_context) => {
+                modules.insert(module_id, resolved_context);
+            }
+            Err(mut module_errors) => {
+                errors.append(&mut module_errors);
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    Ok(ProgramResolvedContext {
+        entry: program.entry(),
+        modules,
+        by_path: program.program.by_path.clone(),
+        edges: program.program.edges.clone(),
+    })
 }

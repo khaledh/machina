@@ -68,6 +68,9 @@ pub enum ResolveError {
 
     #[error("Duplicate requires alias: {0}")]
     DuplicateRequireAlias(String, Span),
+
+    #[error("Module-qualified access is not implemented yet: {0}.{1}")]
+    ModuleQualifiedAccessUnsupported(String, String, Span),
 }
 
 impl ResolveError {
@@ -94,6 +97,7 @@ impl ResolveError {
             ResolveError::AttrWrongArgType(_, span) => *span,
             ResolveError::AttrNotAllowed(_, _, span) => *span,
             ResolveError::DuplicateRequireAlias(_, span) => *span,
+            ResolveError::ModuleQualifiedAccessUnsupported(_, _, span) => *span,
         }
     }
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::backend;
 use crate::backend::regalloc::arm64::Arm64Target;
-use crate::context::ParsedContext;
+use crate::context::{ParsedContext, ProgramParsedContext};
 use crate::diag::CompileError;
 use crate::elaborate;
 use crate::frontend;
@@ -13,7 +13,7 @@ use crate::monomorphize;
 use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
-use crate::resolve::resolve;
+use crate::resolve::{resolve, resolve_program};
 use crate::semck::sem_check;
 use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
@@ -43,8 +43,10 @@ pub fn compile_with_path(
     source_path: Option<&std::path::Path>,
     opts: &CompileOptions,
 ) -> Result<CompileOutput, Vec<CompileError>> {
-    let frontend_program = if let Some(path) = source_path {
-        Some(frontend::discover_and_parse_program(source, path).map_err(|e| vec![e.into()])?)
+    let program_context = if let Some(path) = source_path {
+        let program =
+            frontend::discover_and_parse_program(source, path).map_err(|e| vec![e.into()])?;
+        Some(ProgramParsedContext::new(program))
     } else {
         None
     };
@@ -95,10 +97,10 @@ pub fn compile_with_path(
 
     // --- Parse ---
 
-    let (user_module, id_gen) = if let Some(program) = &frontend_program {
+    let (user_module, id_gen) = if let Some(program) = &program_context {
         (
             program.entry_module().module.clone(),
-            program.next_node_id_gen.clone(),
+            program.next_node_id_gen().clone(),
         )
     } else {
         let id_gen = NodeIdGen::new();
@@ -144,11 +146,21 @@ pub fn compile_with_path(
 
     let ast_context = ParsedContext::new(module, id_gen);
 
-    let resolved_context = resolve(ast_context).map_err(|errs| {
-        errs.into_iter()
-            .map(|e| e.into())
-            .collect::<Vec<CompileError>>()
-    })?;
+    let resolved_context =
+        if let Some(program) = program_context.clone().filter(|_| !opts.inject_prelude) {
+            let resolved_program = resolve_program(program).map_err(|errs| {
+                errs.into_iter()
+                    .map(|e| e.into())
+                    .collect::<Vec<CompileError>>()
+            })?;
+            resolved_program.entry_module().clone()
+        } else {
+            resolve(ast_context).map_err(|errs| {
+                errs.into_iter()
+                    .map(|e| e.into())
+                    .collect::<Vec<CompileError>>()
+            })?
+        };
 
     if dump_def_table {
         println!("Def Map:");

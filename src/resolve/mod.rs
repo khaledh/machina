@@ -7,7 +7,7 @@ pub mod symbols;
 pub use def::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TypeAttrs};
 pub use def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 pub use errors::ResolveError;
-pub use resolver::{SymbolResolver, resolve};
+pub use resolver::{SymbolResolver, resolve, resolve_program};
 pub use symbols::SymbolKind;
 
 #[cfg(test)]

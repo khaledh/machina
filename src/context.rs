@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::frontend::{ModuleId, ModulePath, ParsedModule as FrontendParsedModule, ProgramParsed};
 use crate::resolve::{DefId, DefTable};
 use crate::semck::closure::capture::ClosureCapture;
 use crate::symtab::SymbolTable;
@@ -11,6 +12,70 @@ use crate::tree::semantic::{DropPlanMap, LoweringPlanMap};
 use crate::tree::typed::Module as TypedModule;
 use crate::tree::{NodeId, NodeIdGen};
 use crate::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
+
+// -----------------------------------------------------------------------------
+// Program Parsed Context
+// -----------------------------------------------------------------------------
+
+/// Program-level parsed context produced by frontend module discovery/parsing.
+///
+/// This keeps module-graph data in one place so later resolve/typecheck work
+/// can consume a stable program abstraction rather than ad-hoc maps.
+#[derive(Clone)]
+pub struct ProgramParsedContext {
+    pub program: ProgramParsed,
+}
+
+impl ProgramParsedContext {
+    pub fn new(program: ProgramParsed) -> Self {
+        Self { program }
+    }
+
+    pub fn entry(&self) -> ModuleId {
+        self.program.entry
+    }
+
+    pub fn entry_module(&self) -> &FrontendParsedModule {
+        self.program.entry_module()
+    }
+
+    pub fn module(&self, id: ModuleId) -> Option<&FrontendParsedModule> {
+        self.program.module(id)
+    }
+
+    pub fn dependency_order_from_entry(&self) -> Vec<ModuleId> {
+        self.program.dependency_order_from_entry()
+    }
+
+    pub fn next_node_id_gen(&self) -> &NodeIdGen {
+        &self.program.next_node_id_gen
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Program Resolved Context
+// -----------------------------------------------------------------------------
+
+/// Program-level resolved context keyed by module id.
+#[derive(Clone)]
+pub struct ProgramResolvedContext {
+    pub entry: ModuleId,
+    pub modules: HashMap<ModuleId, ResolvedContext>,
+    pub by_path: HashMap<ModulePath, ModuleId>,
+    pub edges: HashMap<ModuleId, Vec<ModuleId>>,
+}
+
+impl ProgramResolvedContext {
+    pub fn entry_module(&self) -> &ResolvedContext {
+        self.modules
+            .get(&self.entry)
+            .expect("resolved entry module should exist")
+    }
+
+    pub fn module(&self, id: ModuleId) -> Option<&ResolvedContext> {
+        self.modules.get(&id)
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Parsed Context

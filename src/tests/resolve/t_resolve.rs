@@ -1,9 +1,29 @@
 use super::*;
-use crate::context::ParsedContext;
-use crate::context::ResolvedContext;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use crate::context::{ParsedContext, ProgramParsedContext, ResolvedContext};
+use crate::frontend::{
+    FrontendError, ModuleLoader, ModulePath, discover_and_parse_program_with_loader,
+};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
-use crate::resolve::resolve;
+use crate::resolve::{resolve, resolve_program};
+
+struct MockLoader {
+    modules: HashMap<String, String>,
+}
+
+impl ModuleLoader for MockLoader {
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+        let key = path.to_string();
+        if let Some(src) = self.modules.get(&key) {
+            Ok((PathBuf::from(format!("{key}.mc")), src.clone()))
+        } else {
+            Err(FrontendError::UnknownModule(path.clone()))
+        }
+    }
+}
 
 fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
     let lexer = Lexer::new(source);
@@ -18,6 +38,38 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
 
     let ast_context = ParsedContext::new(module, id_gen);
     resolve(ast_context)
+}
+
+#[test]
+fn test_resolve_program_resolves_dependencies() {
+    let entry_src = r#"
+        requires {
+            app.util
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert("app.util".to_string(), "fn util() -> u64 { 7 }".to_string());
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let resolved = resolve_program(ProgramParsedContext::new(program));
+    assert!(resolved.is_ok());
+
+    let resolved = resolved.expect("program resolve should succeed");
+    assert_eq!(resolved.modules.len(), 2);
+    assert!(resolved.module(resolved.entry).is_some());
 }
 
 #[test]
@@ -289,6 +341,35 @@ fn test_resolve_requires_duplicate_alias_explicit() {
         assert!(errors.iter().any(|e| matches!(
             e,
             ResolveError::DuplicateRequireAlias(alias, _) if alias == "net"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_module_qualified_access_reports_specific_error() {
+    let source = r#"
+        requires {
+            std.io
+        }
+
+        fn main() -> u64 {
+            io.read_file("foo");
+            0
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::ModuleQualifiedAccessUnsupported(alias, member, _)
+                if alias == "io" && member == "read_file"
+        )));
+        assert!(!errors.iter().any(|e| matches!(
+            e,
+            ResolveError::VarUndefined(name, _) if name == "io"
         )));
     }
 }
