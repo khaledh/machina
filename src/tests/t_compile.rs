@@ -309,9 +309,9 @@ fn flatten_program_reports_unknown_alias_in_type_reference() {
     let result = flatten_program_module(&ProgramParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, FrontendError::UnknownRequireAlias { alias, .. } if alias == "cfg"))
+        errors.iter().any(
+            |e| matches!(e, FrontendError::UnknownRequireAlias { alias, .. } if alias == "cfg")
+        )
     );
 }
 
@@ -343,13 +343,11 @@ fn flatten_program_reports_missing_trait_member_on_alias() {
 
     let result = flatten_program_module(&ProgramParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
-    assert!(
-        errors.iter().any(|e| {
-            matches!(
-                e,
-                FrontendError::RequireMemberUndefined { alias, member, expected_kind, .. }
-                    if alias == "rt" && member == "Missing" && *expected_kind == "trait"
-            )
-        })
-    );
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e,
+            FrontendError::RequireMemberUndefined { alias, member, expected_kind, .. }
+                if alias == "rt" && member == "Missing" && *expected_kind == "trait"
+        )
+    }));
 }

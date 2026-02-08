@@ -8,7 +8,7 @@ use crate::frontend::{
 };
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
-use crate::resolve::{resolve, resolve_program};
+use crate::resolve::{DefKind, Visibility, resolve, resolve_program};
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -410,6 +410,99 @@ fn test_resolve_program_module_member_undefined() {
             e,
             ResolveError::ModuleMemberUndefined(module, member, _)
                 if module == "app.util" && member == "missing"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_visibility_and_opacity_attrs_on_types() {
+    let source = r#"
+        @[public]
+        type Config = { host: string }
+
+        @[opaque]
+        type Buffer = { data: ^u8[] }
+    "#;
+
+    let resolved = resolve_source(source).expect("resolve should succeed");
+    let defs: Vec<_> = resolved.def_table.clone().into_iter().collect();
+
+    let config = defs
+        .iter()
+        .find(|d| d.name == "Config")
+        .expect("missing Config");
+    match &config.kind {
+        DefKind::TypeDef { attrs } => {
+            assert_eq!(attrs.visibility, Visibility::Public);
+            assert!(!attrs.opaque);
+        }
+        other => panic!("expected type def for Config, got {other:?}"),
+    }
+
+    let buffer = defs
+        .iter()
+        .find(|d| d.name == "Buffer")
+        .expect("missing Buffer");
+    match &buffer.kind {
+        DefKind::TypeDef { attrs } => {
+            assert_eq!(attrs.visibility, Visibility::Public);
+            assert!(attrs.opaque);
+        }
+        other => panic!("expected type def for Buffer, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_resolve_public_attrs_on_trait_and_function() {
+    let source = r#"
+        @[public]
+        trait Runnable {
+            fn run(self);
+        }
+
+        @[public]
+        fn execute() -> u64 {
+            0
+        }
+    "#;
+
+    let resolved = resolve_source(source).expect("resolve should succeed");
+    let defs: Vec<_> = resolved.def_table.clone().into_iter().collect();
+
+    let runnable = defs
+        .iter()
+        .find(|d| d.name == "Runnable")
+        .expect("missing Runnable");
+    match &runnable.kind {
+        DefKind::TraitDef { attrs } => {
+            assert_eq!(attrs.visibility, Visibility::Public);
+        }
+        other => panic!("expected trait def for Runnable, got {other:?}"),
+    }
+
+    let execute = defs
+        .iter()
+        .find(|d| d.name == "execute")
+        .expect("missing execute");
+    match &execute.kind {
+        DefKind::FuncDef { attrs } => {
+            assert_eq!(attrs.visibility, Visibility::Public);
+        }
+        other => panic!("expected func def for execute, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_resolve_opaque_attr_not_allowed_on_function() {
+    let source = "@[opaque] fn foo() -> u64 { 0 }";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::AttrNotAllowed(name, where_, _)
+                if name == "opaque" && *where_ == "function"
         )));
     }
 }

@@ -37,7 +37,9 @@ impl DefIdGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
-    TraitDef,
+    TraitDef {
+        attrs: TraitAttrs,
+    },
     TypeDef {
         attrs: TypeAttrs,
     },
@@ -59,9 +61,23 @@ pub enum DefKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+    #[default]
+    Private,
+    Public,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TraitAttrs {
+    pub visibility: Visibility,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeAttrs {
     pub intrinsic: bool,
+    pub visibility: Visibility,
+    pub opaque: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -69,12 +85,13 @@ pub struct FuncAttrs {
     pub intrinsic: bool,
     pub runtime: bool,
     pub link_name: Option<String>,
+    pub visibility: Visibility,
 }
 
 impl fmt::Display for DefKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DefKind::TraitDef => write!(f, "TraitDef"),
+            DefKind::TraitDef { .. } => write!(f, "TraitDef"),
             DefKind::TypeDef { .. } => write!(f, "TypeDef"),
             DefKind::TypeParam => write!(f, "TypeParam"),
             DefKind::EnumVariantName => write!(f, "EnumVariantName"),
@@ -141,6 +158,24 @@ impl Def {
         match &self.kind {
             DefKind::TypeDef { attrs } => attrs.intrinsic,
             DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.intrinsic,
+            _ => false,
+        }
+    }
+
+    pub fn is_public(&self) -> bool {
+        match &self.kind {
+            DefKind::TraitDef { attrs } => attrs.visibility == Visibility::Public,
+            DefKind::TypeDef { attrs } => attrs.visibility == Visibility::Public,
+            DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => {
+                attrs.visibility == Visibility::Public
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_opaque(&self) -> bool {
+        match &self.kind {
+            DefKind::TypeDef { attrs } => attrs.opaque,
             _ => false,
         }
     }

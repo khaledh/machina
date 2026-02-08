@@ -7,7 +7,7 @@ use crate::diag::Span;
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
-use crate::resolve::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TypeAttrs};
+use crate::resolve::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility};
 use crate::tree::ParamMode;
 use crate::tree::parsed::*;
 use crate::tree::resolved::builder::build_module;
@@ -176,7 +176,9 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::TraitDef { .. } => DefKind::TraitDef,
+            SymbolKind::TraitDef { .. } => DefKind::TraitDef {
+                attrs: TraitAttrs::default(),
+            },
             SymbolKind::TypeAlias { .. } => DefKind::TypeDef {
                 attrs: TypeAttrs::default(),
             },
@@ -208,6 +210,31 @@ impl SymbolResolver {
                 continue;
             }
             match attr.name.as_str() {
+                "public" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.visibility = Visibility::Public;
+                    }
+                }
+                "opaque" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.visibility = Visibility::Public;
+                        resolved.opaque = true;
+                    }
+                }
                 "intrinsic" => {
                     if !attr.args.is_empty() {
                         self.errors.push(ResolveError::AttrWrongArgCount(
@@ -236,6 +263,46 @@ impl SymbolResolver {
         resolved
     }
 
+    fn resolve_trait_attrs(&mut self, attrs: &[Attribute]) -> TraitAttrs {
+        let mut resolved = TraitAttrs::default();
+        let mut seen = HashSet::new();
+
+        for attr in attrs {
+            if !seen.insert(attr.name.clone()) {
+                self.errors
+                    .push(ResolveError::AttrDuplicate(attr.name.clone(), attr.span));
+                continue;
+            }
+
+            match attr.name.as_str() {
+                "public" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.visibility = Visibility::Public;
+                    }
+                }
+                "intrinsic" | "runtime" | "link_name" | "opaque" => {
+                    self.errors.push(ResolveError::AttrNotAllowed(
+                        attr.name.clone(),
+                        "trait definition",
+                        attr.span,
+                    ));
+                }
+                _ => self
+                    .errors
+                    .push(ResolveError::UnknownAttribute(attr.name.clone(), attr.span)),
+            }
+        }
+
+        resolved
+    }
+
     fn resolve_func_attrs(&mut self, attrs: &[Attribute]) -> FuncAttrs {
         let mut resolved = FuncAttrs::default();
         let mut seen = HashSet::new();
@@ -247,6 +314,18 @@ impl SymbolResolver {
                 continue;
             }
             match attr.name.as_str() {
+                "public" => {
+                    if !attr.args.is_empty() {
+                        self.errors.push(ResolveError::AttrWrongArgCount(
+                            attr.name.clone(),
+                            0,
+                            attr.args.len(),
+                            attr.span,
+                        ));
+                    } else {
+                        resolved.visibility = Visibility::Public;
+                    }
+                }
                 "intrinsic" => {
                     if !attr.args.is_empty() {
                         self.errors.push(ResolveError::AttrWrongArgCount(
@@ -290,6 +369,13 @@ impl SymbolResolver {
                 }
                 "__property_get" | "__property_set" => {
                     // Internal marker attributes emitted by the parser for properties.
+                }
+                "opaque" => {
+                    self.errors.push(ResolveError::AttrNotAllowed(
+                        attr.name.clone(),
+                        "function",
+                        attr.span,
+                    ));
                 }
                 _ => self
                     .errors
@@ -373,10 +459,11 @@ impl SymbolResolver {
     fn populate_trait_defs(&mut self, trait_defs: &[&TraitDef]) {
         for &trait_def in trait_defs {
             let def_id = self.def_id_gen.new_id();
+            let trait_attrs = self.resolve_trait_attrs(&trait_def.attrs);
             let def = Def {
                 id: def_id,
                 name: trait_def.name.clone(),
-                kind: DefKind::TraitDef,
+                kind: DefKind::TraitDef { attrs: trait_attrs },
             };
             self.def_table_builder.record_def(def, trait_def.id);
             self.insert_symbol(

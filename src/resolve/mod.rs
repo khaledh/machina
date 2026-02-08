@@ -4,7 +4,7 @@ pub mod errors;
 mod resolver;
 pub mod symbols;
 
-pub use def::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TypeAttrs};
+pub use def::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility};
 pub use def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 pub use errors::ResolveError;
 pub use resolver::{
