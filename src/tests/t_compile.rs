@@ -462,3 +462,59 @@ fn flatten_program_reports_private_trait_on_alias() {
         )
     }));
 }
+
+#[test]
+fn flatten_program_mangles_private_dependency_function_names() {
+    let entry_src = r#"
+        requires {
+            app.util
+        }
+
+        fn main() -> u64 {
+            util.answer()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        r#"
+            fn secret() -> u64 { 7 }
+            @[public] fn answer() -> u64 { secret() }
+        "#
+        .to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
+
+    let mut callable_names = Vec::new();
+    for item in &flattened.top_level_items {
+        match item {
+            crate::tree::parsed::TopLevelItem::FuncDecl(func_decl) => {
+                callable_names.push(func_decl.sig.name.clone());
+            }
+            crate::tree::parsed::TopLevelItem::FuncDef(func_def) => {
+                callable_names.push(func_def.sig.name.clone());
+            }
+            _ => {}
+        }
+    }
+
+    assert!(!callable_names.iter().any(|name| name == "secret"));
+    assert!(callable_names.iter().any(|name| name == "answer"));
+    assert!(
+        callable_names
+            .iter()
+            .any(|name| name.starts_with("__m$app$util$secret")),
+        "expected mangled private helper in flattened names: {callable_names:?}"
+    );
+}
