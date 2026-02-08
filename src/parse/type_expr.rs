@@ -132,8 +132,16 @@ impl<'a> Parser<'a> {
                 })
             }
             TK::Ident(name) => {
-                let ident = name.clone();
+                let mut ident = name.clone();
                 self.advance();
+
+                while self.curr_token.kind == TK::Dot {
+                    self.advance();
+                    let seg = self.parse_ident()?;
+                    ident.push('.');
+                    ident.push_str(&seg);
+                }
+
                 let type_args = self.parse_type_args()?;
                 Ok(TypeExpr {
                     id: self.id_gen.new_id(),

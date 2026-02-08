@@ -30,8 +30,8 @@ pub(crate) fn merge_modules(prelude_module: &Module, user_module: &Module) -> Mo
 
 /// Flatten discovered modules into one compile-unit module.
 ///
-/// Dependency order is preserved, and known `alias.func(...)` patterns are
-/// rewritten into plain function calls to fit the current single-module
+/// Dependency order is preserved, and known module-qualified references are
+/// rewritten into unqualified names to fit the current single-module
 /// resolve/typecheck/codegen pipeline.
 pub(crate) fn flatten_program_module(program: &ProgramParsedContext) -> Module {
     let mut merged = Module {
@@ -44,9 +44,9 @@ pub(crate) fn flatten_program_module(program: &ProgramParsedContext) -> Module {
             continue;
         };
         let mut module = parsed.module.clone();
-        let alias_members = collect_alias_members(program, module_id);
-        if !alias_members.is_empty() {
-            let mut rewriter = ModuleAliasCallRewriter { alias_members };
+        let alias_symbols = collect_alias_symbols(program, module_id);
+        if !alias_symbols.is_empty() {
+            let mut rewriter = ModuleAliasCallRewriter { alias_symbols };
             rewriter.visit_module(&mut module);
         }
         merged.top_level_items.extend(module.top_level_items);
@@ -55,10 +55,10 @@ pub(crate) fn flatten_program_module(program: &ProgramParsedContext) -> Module {
     merged
 }
 
-fn collect_alias_members(
+fn collect_alias_symbols(
     program: &ProgramParsedContext,
     module_id: crate::frontend::ModuleId,
-) -> HashMap<String, HashSet<String>> {
+) -> HashMap<String, AliasSymbols> {
     let mut alias_members = HashMap::new();
     let Some(parsed) = program.module(module_id) else {
         return alias_members;
@@ -67,33 +67,57 @@ fn collect_alias_members(
         if let Some(dep_id) = program.program.by_path.get(&req.path)
             && let Some(dep_module) = program.module(*dep_id)
         {
-            alias_members.insert(req.alias.clone(), callable_names(&dep_module.module));
+            alias_members.insert(req.alias.clone(), module_symbols(&dep_module.module));
         }
     }
     alias_members
 }
 
-fn callable_names(module: &Module) -> HashSet<String> {
-    let mut names = HashSet::new();
+#[derive(Default)]
+struct AliasSymbols {
+    callables: HashSet<String>,
+    types: HashSet<String>,
+    traits: HashSet<String>,
+}
+
+fn module_symbols(module: &Module) -> AliasSymbols {
+    let mut symbols = AliasSymbols::default();
     for item in &module.top_level_items {
         match item {
             parsed::TopLevelItem::FuncDecl(func_decl) => {
-                names.insert(func_decl.sig.name.clone());
+                symbols.callables.insert(func_decl.sig.name.clone());
             }
             parsed::TopLevelItem::FuncDef(func_def) => {
-                names.insert(func_def.sig.name.clone());
+                symbols.callables.insert(func_def.sig.name.clone());
+            }
+            parsed::TopLevelItem::TypeDef(type_def) => {
+                symbols.types.insert(type_def.name.clone());
+            }
+            parsed::TopLevelItem::TraitDef(trait_def) => {
+                symbols.traits.insert(trait_def.name.clone());
             }
             _ => {}
         }
     }
-    names
+    symbols
 }
 
 struct ModuleAliasCallRewriter {
-    alias_members: HashMap<String, HashSet<String>>,
+    alias_symbols: HashMap<String, AliasSymbols>,
 }
 
 impl VisitorMut<()> for ModuleAliasCallRewriter {
+    fn visit_method_block(&mut self, method_block: &mut parsed::MethodBlock) {
+        if let Some(trait_name) = &mut method_block.trait_name
+            && let Some((alias, member)) = trait_name.split_once('.')
+            && let Some(symbols) = self.alias_symbols.get(alias)
+            && symbols.traits.contains(member)
+        {
+            *trait_name = member.to_string();
+        }
+        visit_mut::walk_method_block(self, method_block);
+    }
+
     fn visit_expr(&mut self, expr: &mut parsed::Expr) {
         visit_mut::walk_expr(self, expr);
 
@@ -106,10 +130,10 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
                 let parsed::ExprKind::Var { ident: alias, .. } = &callee.kind else {
                     return;
                 };
-                let Some(members) = self.alias_members.get(alias) else {
+                let Some(symbols) = self.alias_symbols.get(alias) else {
                     return;
                 };
-                if !members.contains(method_name) {
+                if !symbols.callables.contains(method_name) {
                     return;
                 }
 
@@ -127,10 +151,10 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
                 let parsed::ExprKind::Var { ident: alias, .. } = &target.kind else {
                     return;
                 };
-                let Some(members) = self.alias_members.get(alias) else {
+                let Some(symbols) = self.alias_symbols.get(alias) else {
                     return;
                 };
-                if !members.contains(field) {
+                if !symbols.callables.contains(field) {
                     return;
                 }
 
@@ -141,6 +165,44 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
                 expr.kind = function_ref.kind;
             }
             _ => {}
+        }
+    }
+
+    fn visit_type_expr(&mut self, type_expr: &mut parsed::TypeExpr) {
+        visit_mut::walk_type_expr(self, type_expr);
+
+        let parsed::TypeExprKind::Named { ident, .. } = &mut type_expr.kind else {
+            return;
+        };
+
+        let Some((alias, member)) = ident.split_once('.') else {
+            return;
+        };
+
+        let Some(symbols) = self.alias_symbols.get(alias) else {
+            return;
+        };
+
+        if symbols.types.contains(member) {
+            *ident = member.to_string();
+        }
+    }
+
+    fn visit_type_param(&mut self, param: &mut parsed::TypeParam) {
+        let Some(bound) = &mut param.bound else {
+            return;
+        };
+
+        let Some((alias, member)) = bound.name.split_once('.') else {
+            return;
+        };
+
+        let Some(symbols) = self.alias_symbols.get(alias) else {
+            return;
+        };
+
+        if symbols.traits.contains(member) {
+            bound.name = member.to_string();
         }
     }
 }

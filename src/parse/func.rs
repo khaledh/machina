@@ -75,7 +75,13 @@ impl<'a> Parser<'a> {
             let bound = if parser.curr_token.kind == TK::Colon {
                 parser.advance();
                 let bound_marker = parser.mark();
-                let name = parser.parse_ident()?;
+                let mut name = parser.parse_ident()?;
+                while parser.curr_token.kind == TK::Dot {
+                    parser.advance();
+                    let segment = parser.parse_ident()?;
+                    name.push('.');
+                    name.push_str(&segment);
+                }
                 Some(TypeParamBound {
                     id: parser.id_gen.new_id(),
                     name,
@@ -107,7 +113,14 @@ impl<'a> Parser<'a> {
         let trait_name = if self.curr_token.kind == TK::LBrace {
             None
         } else {
-            Some(self.parse_ident()?)
+            let mut name = self.parse_ident()?;
+            while self.curr_token.kind == TK::Dot {
+                self.advance();
+                let segment = self.parse_ident()?;
+                name.push('.');
+                name.push_str(&segment);
+            }
+            Some(name)
         };
         self.consume(&TK::LBrace)?;
 

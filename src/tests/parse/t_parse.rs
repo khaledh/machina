@@ -1757,6 +1757,25 @@ fn test_parse_trait_def_and_trait_method_block() {
 }
 
 #[test]
+fn test_parse_trait_method_block_with_module_qualified_trait_name() {
+    let source = r#"
+        type Process = { name: string }
+
+        Process :: rt.Runnable {
+            fn run(self) {
+                ()
+            }
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let method_blocks = module.method_blocks();
+    assert_eq!(method_blocks.len(), 1);
+    assert_eq!(method_blocks[0].type_name, "Process");
+    assert_eq!(method_blocks[0].trait_name.as_deref(), Some("rt.Runnable"));
+}
+
+#[test]
 fn test_parse_type_param_with_trait_bound() {
     let source = r#"
         trait Runnable {
@@ -1779,6 +1798,27 @@ fn test_parse_type_param_with_trait_bound() {
         .as_ref()
         .expect("missing trait bound");
     assert_eq!(bound.name, "Runnable");
+}
+
+#[test]
+fn test_parse_type_param_with_module_qualified_trait_bound() {
+    let source = r#"
+        fn execute<T: io.Runnable>(value: T) {
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let execute = funcs
+        .iter()
+        .find(|func| func.sig.name == "execute")
+        .expect("missing execute");
+    assert_eq!(execute.sig.type_params.len(), 1);
+    let bound = execute.sig.type_params[0]
+        .bound
+        .as_ref()
+        .expect("missing trait bound");
+    assert_eq!(bound.name, "io.Runnable");
 }
 
 #[test]
@@ -1862,4 +1902,26 @@ fn test_parse_requires_block_with_explicit_alias() {
 
     assert_eq!(module.requires[1].path, vec!["std", "parse", "u64"]);
     assert_eq!(module.requires[1].alias.as_deref(), Some("parse_u64"));
+}
+
+#[test]
+fn test_parse_module_qualified_type_reference() {
+    let source = r#"
+        fn use_config(cfg: app.Config) -> app.Config {
+            cfg
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = funcs.first().expect("missing function");
+
+    match &func.sig.params[0].typ.kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "app.Config"),
+        _ => panic!("expected named type"),
+    }
+
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "app.Config"),
+        _ => panic!("expected named return type"),
+    }
 }
