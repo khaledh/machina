@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -23,9 +24,9 @@ fn main() {
     var p: Pair;
     make_pair(out p);
     let sum = p.x + p.y;
-    io::println(f"sum = {sum}");
+    println(f"sum = {sum}");
 
     var b: Boxed;
     make_boxed(out b);
-    io::println(f"boxed: b.p.x = {b.p.x}, b.p.y = {b.p.y}");
+    println(f"boxed: b.p.x = {b.p.x}, b.p.y = {b.p.y}");
 }

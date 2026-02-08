@@ -1,4 +1,6 @@
 requires {
+    std::io::println
+    std::io::print
     std::io as io
 }
 
@@ -14,14 +16,14 @@ fn main() {
     let div = a / b;
     let rem = a % b;
 
-    io::print("add = ");
-    io::println(add);
-    io::print("sub = ");
-    io::println(sub);
-    io::print("mul = ");
-    io::println(mul);
-    io::print("div = ");
-    io::println(div);
-    io::print("rem = ");
-    io::println(rem);
+    print("add = ");
+    println(add);
+    print("sub = ");
+    println(sub);
+    print("mul = ");
+    println(mul);
+    print("div = ");
+    println(div);
+    print("rem = ");
+    println(rem);
 }

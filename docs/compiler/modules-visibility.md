@@ -26,8 +26,8 @@ At file top, an optional `requires` block declares module dependencies:
 ```mc
 requires {
     std::io
+    std::io::println
     std::parse as parse
-    std::parse::u64 as parse_u64
     app::config::loader as cfg
 }
 ```
@@ -37,7 +37,7 @@ Rules:
 1. Aliases use postfix `as`: `module::path as alias`.
 2. If `as` is omitted, the default alias is the last path segment.
 3. Bound aliases must be unique in file scope.
-4. `requires` imports modules only in V1 (not individual symbols).
+4. `requires` supports module imports (`std::io`) and symbol imports (`std::io::println`).
 5. No glob imports in V1.
 6. No grouped imports in V1 (`std::io::{stream, file}` is out of scope).
 7. Unused `requires` entries may become warnings (later).
@@ -48,15 +48,23 @@ Example usage:
 
 ```mc
 requires {
-    std::io
+    std::io::println
+    std::io as io
     std::parse as parse
 }
 
 fn load(path: string) -> u64 | IoError {
+    println("loading");
     let text = io::read_file(path)?;
     parse::parse_u64(text)
 }
 ```
+
+Symbol import notes:
+
+1. `module::symbol` imports one exported top-level symbol.
+2. Symbol-import aliasing (`module::symbol as alias`) is currently rejected.
+3. Symbol imports still add a dependency edge on the owning module.
 
 ## Visibility (Item-Annotated)
 
@@ -132,9 +140,10 @@ Point :: {
 
 1. Unqualified names resolve local scope first.
 2. `requires` aliases are top-level module names in current file.
-3. `alias::name` is module-qualified lookup through the `requires` alias.
-4. External access requires symbol visibility checks.
-5. Accessing a private symbol from another module is a hard error.
+3. `alias::name` is module-qualified lookup through a module-import alias.
+4. Symbol imports introduce unqualified names directly.
+5. External access requires symbol visibility checks.
+6. Accessing a private symbol from another module is a hard error.
 
 ## Diagnostics (Current V1 Surface)
 
@@ -177,7 +186,6 @@ Point :: {
 
 1. Wildcard imports.
 2. Grouped imports (`std::io::{stream, file}`).
-3. Specific symbol imports from modules.
-4. Re-export syntax.
-5. Package manager/external dependencies.
-6. Friend/internal visibility tiers.
+3. Re-export syntax.
+4. Package manager/external dependencies.
+5. Friend/internal visibility tiers.

@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -10,5 +11,5 @@ fn main() {
     for x in arr {
         acc = acc + x;
     }
-    io::println(acc);
+    println(acc);
 }

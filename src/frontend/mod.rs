@@ -66,9 +66,17 @@ pub struct ModuleId(pub u32);
 
 #[derive(Debug, Clone)]
 pub struct RequireSpec {
-    pub path: ModulePath,
+    pub module_path: ModulePath,
+    pub member: Option<String>,
+    pub kind: RequireKind,
     pub alias: String,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequireKind {
+    Module,
+    Symbol,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +178,14 @@ pub enum FrontendError {
 
     #[error("module dependency cycle detected: {0}")]
     ModuleDependencyCycle(String),
+
+    #[error("symbol import aliasing is not supported yet: `{module}::{member} as {alias}`")]
+    SymbolImportAliasUnsupported {
+        module: ModulePath,
+        member: String,
+        alias: String,
+        span: Span,
+    },
 
     #[error("failed to read module file {0}: {1}")]
     Io(PathBuf, std::io::Error),
@@ -285,29 +301,31 @@ pub fn discover_and_parse_program_with_loader(
     queue.push_back(entry_id);
 
     while let Some(module_id) = queue.pop_front() {
-        let requires = modules
+        let mut requires = modules
             .get(&module_id)
             .map(|m| m.requires.clone())
             .unwrap_or_default();
         let mut module_edges = Vec::new();
 
-        for req in requires {
-            let dep_id = if let Some(existing) = by_path.get(&req.path) {
+        for req in &mut requires {
+            resolve_require_target(req, &by_path, loader)?;
+
+            let dep_id = if let Some(existing) = by_path.get(&req.module_path) {
                 *existing
             } else {
-                let (dep_file, dep_source) = loader.load(&req.path)?;
+                let (dep_file, dep_source) = loader.load(&req.module_path)?;
                 let (dep_module, next_id_gen) = parse_module(&dep_source, &dep_file, id_gen)?;
                 id_gen = next_id_gen;
-                let dep_requires = collect_requires(&req.path, &dep_module)?;
+                let dep_requires = collect_requires(&req.module_path, &dep_module)?;
                 let dep_id = ModuleId(next_module_id);
                 next_module_id += 1;
-                by_path.insert(req.path.clone(), dep_id);
+                by_path.insert(req.module_path.clone(), dep_id);
                 modules.insert(
                     dep_id,
                     ParsedModule {
                         source: ModuleSource {
                             id: dep_id,
-                            path: req.path.clone(),
+                            path: req.module_path.clone(),
                             file_path: dep_file,
                             source: dep_source,
                         },
@@ -321,6 +339,9 @@ pub fn discover_and_parse_program_with_loader(
             module_edges.push(dep_id);
         }
 
+        if let Some(module) = modules.get_mut(&module_id) {
+            module.requires = requires;
+        }
         edges.insert(module_id, module_edges);
     }
 
@@ -356,12 +377,52 @@ fn collect_requires(
             });
         }
         out.push(RequireSpec {
-            path,
+            module_path: path,
+            member: None,
+            kind: RequireKind::Module,
             alias,
             span: req.span,
         });
     }
     Ok(out)
+}
+
+fn resolve_require_target(
+    req: &mut RequireSpec,
+    by_path: &HashMap<ModulePath, ModuleId>,
+    loader: &impl ModuleLoader,
+) -> Result<(), FrontendError> {
+    // Exact module path always wins when it exists.
+    if by_path.contains_key(&req.module_path) || loader.load(&req.module_path).is_ok() {
+        req.kind = RequireKind::Module;
+        req.member = None;
+        return Ok(());
+    }
+
+    // Fallback: treat `<module>::<symbol>` as importing `symbol` from `<module>`.
+    let segments = req.module_path.segments();
+    if segments.len() < 2 {
+        return Err(FrontendError::UnknownModule(req.module_path.clone()));
+    }
+
+    let parent = ModulePath::new(segments[..segments.len() - 1].to_vec())?;
+    let member = segments.last().cloned().unwrap_or_default();
+    if by_path.contains_key(&parent) || loader.load(&parent).is_ok() {
+        if req.alias != member {
+            return Err(FrontendError::SymbolImportAliasUnsupported {
+                module: parent,
+                member,
+                alias: req.alias.clone(),
+                span: req.span,
+            });
+        }
+        req.module_path = parent;
+        req.member = Some(req.alias.clone());
+        req.kind = RequireKind::Symbol;
+        return Ok(());
+    }
+
+    Err(FrontendError::UnknownModule(req.module_path.clone()))
 }
 
 fn parse_module(
@@ -575,5 +636,70 @@ mod tests {
         assert!(pos("app::c") < pos("app::a"));
         assert!(pos("app::a") < pos("app::main"));
         assert!(pos("app::b") < pos("app::main"));
+    }
+
+    #[test]
+    fn discover_program_resolves_symbol_import_to_parent_module() {
+        let entry_src = r#"
+            requires {
+                app::util::answer
+            }
+            fn main() -> u64 { answer() }
+        "#;
+        let mut modules = HashMap::new();
+        modules.insert(
+            "app.util".to_string(),
+            "@[public] fn answer() -> u64 { 7 }".to_string(),
+        );
+        let loader = MockLoader { modules };
+        let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+        let program = discover_and_parse_program_with_loader(
+            entry_src,
+            Path::new("app/main.mc"),
+            entry_path,
+            &loader,
+        )
+        .expect("program should parse");
+
+        let entry = program.entry_module();
+        assert_eq!(entry.requires.len(), 1);
+        let req = &entry.requires[0];
+        assert_eq!(
+            req.module_path,
+            ModulePath::new(vec!["app".to_string(), "util".to_string()]).unwrap()
+        );
+        assert_eq!(req.member.as_deref(), Some("answer"));
+        assert_eq!(req.kind, RequireKind::Symbol);
+        assert_eq!(req.alias, "answer");
+    }
+
+    #[test]
+    fn discover_program_rejects_symbol_import_alias_for_now() {
+        let entry_src = r#"
+            requires {
+                app::util::answer as a
+            }
+            fn main() -> u64 { 0 }
+        "#;
+        let mut modules = HashMap::new();
+        modules.insert(
+            "app.util".to_string(),
+            "@[public] fn answer() -> u64 { 7 }".to_string(),
+        );
+        let loader = MockLoader { modules };
+        let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+        let err = discover_and_parse_program_with_loader(
+            entry_src,
+            Path::new("app/main.mc"),
+            entry_path,
+            &loader,
+        )
+        .expect_err("symbol import aliases should be rejected");
+        assert!(matches!(
+            err,
+            FrontendError::SymbolImportAliasUnsupported { .. }
+        ));
     }
 }

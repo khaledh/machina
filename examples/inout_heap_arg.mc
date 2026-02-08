@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -21,6 +22,6 @@ fn main() {
 
     update(inout b.p1, inout b.p2);
 
-    io::println(f"b.p1 = {b.p1.x}, {b.p1.y}");
-    io::println(f"b.p2 = {b.p2.x}, {b.p2.y}");
+    println(f"b.p1 = {b.p1.x}, {b.p1.y}");
+    println(f"b.p2 = {b.p2.x}, {b.p2.y}");
 }

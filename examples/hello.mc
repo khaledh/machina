@@ -1,8 +1,9 @@
 requires {
+    std::io::println
     std::io as io
 }
 
 fn main() {
-    io::println("Hello, Machina!");
+    println("Hello, Machina!");
 }
 

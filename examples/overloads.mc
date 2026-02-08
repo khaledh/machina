@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -18,6 +19,6 @@ fn main() {
     let a: Small = 5;
     let b = 20;
 
-    io::println(id(a));
-    io::println(id(b));
+    println(id(a));
+    println(id(b));
 }

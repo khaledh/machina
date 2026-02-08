@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -11,10 +12,10 @@ fn main() {
     let hex = 0x2a;
     let grouped = 1_000_000;
 
-    io::println(f"dec = {dec}");
-    io::println(dec);
-    io::println(f"bin = {bin}");
-    io::println(f"oct = {oct}");
-    io::println(f"hex = {hex}");
-    io::println(f"grouped = {grouped}");
+    println(f"dec = {dec}");
+    println(dec);
+    println(f"bin = {bin}");
+    println(f"oct = {oct}");
+    println(f"hex = {hex}");
+    println(f"grouped = {grouped}");
 }

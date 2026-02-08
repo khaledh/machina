@@ -1,9 +1,11 @@
 requires {
+    std::io::println
+    std::io::print
     std::io as io
 }
 
 fn main() {
-    io::println("std::io demo");
-    io::print("count = ");
-    io::println(42);
+    println("std::io demo");
+    print("count = ");
+    println(42);
 }

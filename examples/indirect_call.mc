@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -13,6 +14,6 @@ fn main() {
     let sum = f_add(2, 3);
     let next = f_inc(41);
 
-    io::println(sum);
-    io::println(next);
+    println(sum);
+    println(next);
 }

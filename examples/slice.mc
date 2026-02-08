@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -28,5 +29,5 @@ fn main() {
     let row = s_rows[0];       // type: u64[3]   (array of u64 elements)
     let s_elems = row[0..3];   // type: u64[]    (slice of u64 elements)
     let s_elem = s_elems[0];   // type: u64      (element)
-    io::println(f"s_elem={s_elem}");
+    println(f"s_elem={s_elem}");
 }

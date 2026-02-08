@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -28,5 +29,5 @@ fn main() {
     let b = describe((5, Flag::On, false));
     let c = nested((3, (true, Wrap::Wrap(4))));
     let d = nested((7, (false, Wrap::Empty)));
-    io::println(f"a={a}, b={b}, c={c}, d={d}");
+    println(f"a={a}, b={b}, c={c}, d={d}");
 }

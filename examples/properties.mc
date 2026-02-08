@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -31,10 +32,10 @@ fn main() {
     var p = Point { x: 1, y: 2 };
 
     p.y_val = 5;
-    io::println(f"y: {p.y_val}");
+    println(f"y: {p.y_val}");
 
-    io::println(f"sum: {p.sum}");
+    println(f"sum: {p.sum}");
 
     let msg = Msg::Pong(9);
-    io::println(f"id: {msg.id}");
+    println(f"id: {msg.id}");
 }

@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -39,5 +40,5 @@ fn main() {
     }
 
     let (total, last) = counter.snapshot();
-    io::println(f"total={total}, last={last}");
+    println(f"total={total}, last={last}");
 }

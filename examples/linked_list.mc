@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -20,5 +21,5 @@ fn main() {
     let list = Link::Some(a);
 
     let total = sum(list);
-    io::println(total);
+    println(total);
 }

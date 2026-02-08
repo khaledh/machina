@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -52,13 +53,13 @@ fn main() {
         value: u64 => value,
         err: IoError => err.code,
     };
-    io::println(f"left: {left}");
+    println(f"left: {left}");
 
     let right = match err_case {
         value: u64 => value,
         err: IoError => err.code,
     };
-    io::println(f"right: {right}");
+    println(f"right: {right}");
 
     let lifted_if_ok = choose_if_lift(true, 10);
     let lifted_if_err = choose_if_lift(false, 10);
@@ -70,8 +71,8 @@ fn main() {
         value: u64 => value,
         err: IoError => err.code,
     };
-    io::println(f"if_lift_ok: {if_left}");
-    io::println(f"if_lift_err: {if_right}");
+    println(f"if_lift_ok: {if_left}");
+    println(f"if_lift_err: {if_right}");
 
     let lifted_match_ok = choose_match_lift(true, 11);
     let lifted_match_err = choose_match_lift(false, 11);
@@ -83,6 +84,6 @@ fn main() {
         value: u64 => value,
         err: IoError => err.code,
     };
-    io::println(f"match_lift_ok: {match_left}");
-    io::println(f"match_lift_err: {match_right}");
+    println(f"match_lift_ok: {match_left}");
+    println(f"match_lift_err: {match_right}");
 }

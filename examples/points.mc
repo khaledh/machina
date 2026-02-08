@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -33,9 +34,9 @@ fn main() {
     let (dx, dy) = delta(c, d);
 
     if is_blue(d) {
-        io::println(42);
+        println(42);
     } else {
-        io::println(21);
+        println(21);
     }
 }
 

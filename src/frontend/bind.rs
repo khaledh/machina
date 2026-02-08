@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use crate::context::ProgramParsedContext;
-use crate::frontend::{ModuleId, ModulePath};
+use crate::frontend::{ModuleId, ModulePath, RequireKind};
 use crate::tree::parsed;
 
 #[derive(Clone, Copy, Default)]
@@ -70,6 +70,7 @@ pub(crate) struct AliasSymbols {
 #[derive(Clone, Default)]
 pub(crate) struct ProgramBindings {
     alias_symbols_by_module: HashMap<ModuleId, HashMap<String, AliasSymbols>>,
+    exports_by_module: HashMap<ModuleId, ModuleExports>,
 }
 
 impl ProgramBindings {
@@ -88,13 +89,16 @@ impl ProgramBindings {
             };
             let mut aliases = HashMap::new();
             for req in &parsed.requires {
-                if let Some(dep_id) = program.program.by_path.get(&req.path)
+                if req.kind != RequireKind::Module {
+                    continue;
+                }
+                if let Some(dep_id) = program.program.by_path.get(&req.module_path)
                     && let Some(dep_exports) = exports_by_module.get(dep_id)
                 {
                     aliases.insert(
                         req.alias.clone(),
                         AliasSymbols {
-                            module_path: req.path.clone(),
+                            module_path: req.module_path.clone(),
                             callables: dep_exports.callables.clone(),
                             types: dep_exports.types.clone(),
                             traits: dep_exports.traits.clone(),
@@ -107,6 +111,7 @@ impl ProgramBindings {
 
         Self {
             alias_symbols_by_module,
+            exports_by_module,
         }
     }
 
@@ -115,6 +120,10 @@ impl ProgramBindings {
             .get(&module_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub(crate) fn exports_for(&self, module_id: ModuleId) -> Option<&ModuleExports> {
+        self.exports_by_module.get(&module_id)
     }
 }
 

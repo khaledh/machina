@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -28,7 +29,7 @@ fn move_primitive() {
     let a = add(5);
     let b = add(7);
 
-    io::println(f"a={a}, b={b}");
+    println(f"a={a}, b={b}");
 }
 
 fn move_aggregate() {
@@ -38,7 +39,7 @@ fn move_aggregate() {
         p.x + p.y
     };
     let s = sum();
-    io::println(f"sum={s}");
+    println(f"sum={s}");
 }
 
 fn move_heap() {
@@ -48,7 +49,7 @@ fn move_heap() {
         hp.x + hp.y
     };
     let hs = hsum();
-    io::println(f"(heap) sum={hs}");
+    println(f"(heap) sum={hs}");
 }
 
 fn borrow_mut() {
@@ -62,7 +63,7 @@ fn borrow_mut() {
     let c2 = bump();
     counter = counter + 1;
 
-    io::println(f"c1={c1}, c2={c2}, counter={counter}");
+    println(f"c1={c1}, c2={c2}, counter={counter}");
 }
 
 fn borrow_after_last_call() {
@@ -71,7 +72,7 @@ fn borrow_after_last_call() {
     let get = || -> u64 n;
     let v = get();
     n = n + 1;
-    io::println(f"v={v}, n={n}");
+    println(f"v={v}, n={n}");
 }
 
 // Rejected: move-captured base used after closure creation.

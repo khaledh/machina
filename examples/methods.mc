@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -32,19 +33,19 @@ Msg :: {
 
 fn main() {
     var b = Boxed { p: ^Point { x: 1, y: 2 } };
-    io::println(f"sum: {b.sum()}");
+    println(f"sum: {b.sum()}");
 
     b.shift(10, 20);
-    io::println(f"shifted: {b.sum()}");
+    println(f"shifted: {b.sum()}");
 
     let total = b.consume();
-    io::println(f"consumed: {total}");
+    println(f"consumed: {total}");
 
     let msg = Msg::Ping(1);
     if msg.is_ping() {
-        io::println("ping");
+        println("ping");
     } else {
-        io::println("pong");
+        println("pong");
     }
 
     // b.shift(10, 20);  // ERROR: use after move

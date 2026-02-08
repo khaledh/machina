@@ -1,4 +1,6 @@
 requires {
+    std::io::println
+    std::io::print
     std::io as io
 }
 
@@ -6,7 +8,7 @@ requires {
 
 fn main() {
     let s = greeting();
-    io::print(s);
+    print(s);
     output("Machina!");
 }
 
@@ -15,5 +17,5 @@ fn greeting() -> string {
 }
 
 fn output(s: string) {
-    io::println(s);
+    println(s);
 }

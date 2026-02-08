@@ -1,4 +1,6 @@
 requires {
+    std::io::println
+    std::io::print
     std::io as io
 }
 
@@ -6,6 +8,6 @@ requires {
 
 fn main() {
     let x = 42;
-    io::print("x = ");
-    io::println(x);
+    print("x = ");
+    println(x);
 }

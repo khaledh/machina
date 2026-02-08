@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -16,5 +17,5 @@ fn main() {
     var p: Pair;
     fill_a(out p.a);
     fill_b(out p.b);
-    io::println(p.a[0] + p.b[0]);
+    println(p.a[0] + p.b[0]);
 }

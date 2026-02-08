@@ -4,6 +4,7 @@ use crate::context::{
     ParsedContext, ProgramParsedContext, ProgramResolvedContext, ResolvedContext,
 };
 use crate::diag::Span;
+use crate::frontend::RequireKind;
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
@@ -1510,14 +1511,17 @@ pub fn resolve_program(
         }
         let mut imported_modules = HashMap::new();
         for req in &parsed_module.requires {
+            if req.kind != RequireKind::Module {
+                continue;
+            }
             let alias = req.alias.clone();
-            if let Some(dep_id) = program.program.by_path.get(&req.path)
+            if let Some(dep_id) = program.program.by_path.get(&req.module_path)
                 && let Some(dep_module) = program.module(*dep_id)
             {
                 imported_modules.insert(
                     alias,
                     ImportedModule {
-                        path: req.path.to_string(),
+                        path: req.module_path.to_string(),
                         members: module_exported_members(&dep_module.module),
                     },
                 );

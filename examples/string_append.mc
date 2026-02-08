@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -9,6 +10,6 @@ fn main() {
     let bytes = u8[33];
     s.append_bytes(bytes);
 
-    io::println(s);
-    io::println(f"owned = {s}");
+    println(s);
+    println(f"owned = {s}");
 }

@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -18,8 +19,8 @@ fn main() {
 
     let total = forward_sum(move p, q);
 
-    io::println(f"total: {total}");
+    println(f"total: {total}");
 
-    io::println(f"q.x: {q.x}"); // OK: non-sink param is a borrow
-    // io::println(p.x); // ERROR: use after move into sink param
+    println(f"q.x: {q.x}"); // OK: non-sink param is a borrow
+    // println(p.x); // ERROR: use after move into sink param
 }

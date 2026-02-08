@@ -690,3 +690,79 @@ fn flatten_program_tracks_top_level_item_owners() {
     assert_eq!(owner_by_func.get("answer"), Some(&util_id));
     assert_eq!(owner_by_func.get("main"), Some(&entry_id));
 }
+
+#[test]
+fn flatten_program_accepts_public_symbol_import() {
+    let entry_src = r#"
+        requires {
+            app::util::answer
+        }
+
+        fn main() -> u64 {
+            answer()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "@[public] fn answer() -> u64 { 7 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+        .expect("flatten should succeed");
+    let mut stats = CallRewriteStats::default();
+    stats.visit_module(&flattened);
+
+    assert!(stats.saw_rewritten_call);
+}
+
+#[test]
+fn flatten_program_rejects_private_symbol_import() {
+    let entry_src = r#"
+        requires {
+            app::util::secret
+        }
+
+        fn main() -> u64 {
+            secret()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "fn secret() -> u64 { 7 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let errors =
+        flatten_program_module(&ProgramParsedContext::new(program)).expect_err("flatten fails");
+    assert!(errors.iter().any(|error| {
+        matches!(
+            error,
+            FrontendError::RequireMemberPrivate {
+                alias,
+                expected_kind,
+                ..
+            } if alias == "secret" && *expected_kind == "symbol"
+        )
+    }));
+}

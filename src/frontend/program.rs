@@ -9,7 +9,7 @@ use crate::context::ProgramParsedContext;
 use crate::diag::Span;
 use crate::frontend::ModuleId;
 use crate::frontend::bind::{AliasSymbols, ProgramBindings};
-use crate::frontend::{FrontendError, ModulePath};
+use crate::frontend::{FrontendError, ModulePath, RequireKind};
 use crate::tree::NodeId;
 use crate::tree::parsed::{self, Module};
 use crate::tree::visit_mut::{self, VisitorMut};
@@ -58,6 +58,8 @@ pub(crate) fn flatten_program(
     let mut errors = Vec::new();
     let mut top_level_owners = HashMap::new();
 
+    errors.extend(validate_symbol_imports(program, &bindings));
+
     for module_id in program.dependency_order_from_entry() {
         let Some(parsed) = program.module(module_id) else {
             continue;
@@ -90,6 +92,60 @@ pub(crate) fn flatten_program(
     } else {
         Err(errors)
     }
+}
+
+fn validate_symbol_imports(
+    program: &ProgramParsedContext,
+    bindings: &ProgramBindings,
+) -> Vec<FrontendError> {
+    let mut errors = Vec::new();
+    for module_id in program.dependency_order_from_entry() {
+        let Some(parsed) = program.module(module_id) else {
+            continue;
+        };
+        for req in &parsed.requires {
+            if req.kind != RequireKind::Symbol {
+                continue;
+            }
+            let Some(member) = &req.member else {
+                continue;
+            };
+            let Some(dep_id) = program.program.by_path.get(&req.module_path) else {
+                continue;
+            };
+            let Some(exports) = bindings.exports_for(*dep_id) else {
+                continue;
+            };
+
+            let callable = exports.callables.get(member);
+            let type_def = exports.types.get(member);
+            let trait_def = exports.traits.get(member);
+            let has_any = callable.is_some() || type_def.is_some() || trait_def.is_some();
+            let is_public = callable.is_some_and(|m| m.public)
+                || type_def.is_some_and(|m| m.public)
+                || trait_def.is_some_and(|m| m.public);
+            if !has_any {
+                errors.push(FrontendError::RequireMemberUndefined {
+                    alias: req.alias.clone(),
+                    module: req.module_path.clone(),
+                    member: member.clone(),
+                    expected_kind: "symbol",
+                    span: req.span,
+                });
+                continue;
+            }
+            if !is_public {
+                errors.push(FrontendError::RequireMemberPrivate {
+                    alias: req.alias.clone(),
+                    module: req.module_path.clone(),
+                    member: member.clone(),
+                    expected_kind: "symbol",
+                    span: req.span,
+                });
+            }
+        }
+    }
+    errors
 }
 
 fn has_public_attr(attrs: &[parsed::Attribute]) -> bool {

@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -36,6 +37,6 @@ fn sum_until(limit: u64) -> u64 {
 fn main() {
     let a = last_even_below(9);
     let b = sum_until(10);
-    io::println(a);
-    io::println(b);
+    println(a);
+    println(b);
 }

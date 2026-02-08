@@ -1,4 +1,5 @@
 requires {
+    std::io::println
     std::io as io
 }
 
@@ -10,7 +11,7 @@ fn id<T>(x: T) -> T {
 
 fn main() -> bool {
     let value = id(42);
-    io::println(value);
+    println(value);
 
     let ok = id(false);
     return ok;
