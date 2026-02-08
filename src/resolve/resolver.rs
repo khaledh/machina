@@ -314,6 +314,21 @@ impl SymbolResolver {
         );
     }
 
+    fn check_requires(&mut self, module: &Module) {
+        let mut seen = HashSet::new();
+        for req in &module.requires {
+            let alias = req
+                .alias
+                .clone()
+                .or_else(|| req.path.last().cloned())
+                .unwrap_or_default();
+            if !seen.insert(alias.clone()) {
+                self.errors
+                    .push(ResolveError::DuplicateRequireAlias(alias, req.span));
+            }
+        }
+    }
+
     fn populate_decls(&mut self, module: &Module) {
         // Populate trait definitions
         self.populate_trait_defs(&module.trait_defs());
@@ -495,6 +510,7 @@ impl SymbolResolver {
                 });
             }
 
+            resolver.check_requires(module);
             resolver.populate_decls(module);
 
             resolver.visit_module(module);

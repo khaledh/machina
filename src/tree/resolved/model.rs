@@ -8,6 +8,7 @@ pub use crate::tree::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
 // -- Resolved tree aliases (parsed ir specialized with DefId) ---
 
 pub type Module = model::Module<DefId>;
+pub type Require = model::Require;
 
 pub type TopLevelItem = model::TopLevelItem<DefId>;
 

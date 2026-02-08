@@ -4,6 +4,7 @@ pub use crate::tree::node::*;
 // -- String-specialized parsed tree aliases ---
 
 pub type Module = model::Module<()>;
+pub type Require = model::Require;
 
 pub type TopLevelItem = model::TopLevelItem<()>;
 

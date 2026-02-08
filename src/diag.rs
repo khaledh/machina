@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::backend::lower::LowerToIrError as SsaLoweringError;
 use crate::backend::verify::VerifyIrError as SsaVerifyError;
+use crate::frontend::FrontendError;
 use crate::lexer::LexError;
 use crate::monomorphize::MonomorphizeError;
 use crate::parse::ParseError;
@@ -36,6 +37,9 @@ pub enum CompileError {
 
     #[error(transparent)]
     VerifyIr(#[from] SsaVerifyError),
+
+    #[error(transparent)]
+    Frontend(#[from] FrontendError),
 
     #[error("IO error: {0}")]
     Io(PathBuf, std::io::Error),

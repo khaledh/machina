@@ -4,6 +4,7 @@ pub mod compile;
 pub mod context;
 pub mod diag;
 pub mod elaborate;
+pub mod frontend;
 pub mod ir;
 pub mod lexer;
 pub mod monomorphize;

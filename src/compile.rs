@@ -5,6 +5,7 @@ use crate::backend::regalloc::arm64::Arm64Target;
 use crate::context::ParsedContext;
 use crate::diag::CompileError;
 use crate::elaborate;
+use crate::frontend;
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
 use crate::lexer::{LexError, Lexer, Token};
@@ -34,6 +35,20 @@ pub struct CompileOutput {
 }
 
 pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec<CompileError>> {
+    compile_with_path(source, None, opts)
+}
+
+pub fn compile_with_path(
+    source: &str,
+    source_path: Option<&std::path::Path>,
+    opts: &CompileOptions,
+) -> Result<CompileOutput, Vec<CompileError>> {
+    let frontend_program = if let Some(path) = source_path {
+        Some(frontend::discover_and_parse_program(source, path).map_err(|e| vec![e.into()])?)
+    } else {
+        None
+    };
+
     // Parse dump flags from comma-separated list, e.g. --dump ast,ir,liveness
     let mut dump_tokens = false;
     let mut dump_ast = false;
@@ -80,7 +95,15 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
 
     // --- Parse ---
 
-    let id_gen = NodeIdGen::new();
+    let (user_module, id_gen) = if let Some(program) = &frontend_program {
+        (
+            program.entry_module().module.clone(),
+            program.next_node_id_gen.clone(),
+        )
+    } else {
+        let id_gen = NodeIdGen::new();
+        parse_with_id_gen(source, id_gen)?
+    };
 
     let (module, id_gen) = if opts.inject_prelude {
         // load stdlib/prelude_decl.mc
@@ -91,15 +114,22 @@ pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec
             .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
 
         let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
-        let (user_module, id_gen) = parse_with_id_gen(source, id_gen)?;
 
         // combine top_level_items: prelude first, then user
         let mut top_level_items = Vec::new();
+        let mut requires = Vec::new();
+        requires.extend(prelude_module.requires);
+        requires.extend(user_module.requires);
         top_level_items.extend(prelude_module.top_level_items);
         top_level_items.extend(user_module.top_level_items);
-        (Module { top_level_items }, id_gen)
+        (
+            Module {
+                requires,
+                top_level_items,
+            },
+            id_gen,
+        )
     } else {
-        let (user_module, id_gen) = parse_with_id_gen(source, id_gen)?;
         (user_module, id_gen)
     };
 

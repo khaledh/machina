@@ -1821,3 +1821,45 @@ fn test_parse_trait_property_contracts() {
     assert!(count.has_get);
     assert!(count.has_set);
 }
+
+#[test]
+fn test_parse_requires_block_with_default_alias() {
+    let source = r#"
+        requires {
+            std.io
+            app.config.loader
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    assert_eq!(module.requires.len(), 2);
+
+    assert_eq!(module.requires[0].path, vec!["std", "io"]);
+    assert_eq!(module.requires[0].alias, None);
+
+    assert_eq!(module.requires[1].path, vec!["app", "config", "loader"]);
+    assert_eq!(module.requires[1].alias, None);
+}
+
+#[test]
+fn test_parse_requires_block_with_explicit_alias() {
+    let source = r#"
+        requires {
+            std.parse as parse
+            std.parse.u64 as parse_u64
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    assert_eq!(module.requires.len(), 2);
+
+    assert_eq!(module.requires[0].path, vec!["std", "parse"]);
+    assert_eq!(module.requires[0].alias.as_deref(), Some("parse"));
+
+    assert_eq!(module.requires[1].path, vec!["std", "parse", "u64"]);
+    assert_eq!(module.requires[1].alias.as_deref(), Some("parse_u64"));
+}

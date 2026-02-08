@@ -65,6 +65,12 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<Module, ParseError> {
+        let requires = if self.curr_token.kind == TK::KwRequires {
+            self.parse_requires_block()?
+        } else {
+            Vec::new()
+        };
+
         let mut top_level_items = Vec::new();
 
         // Parse the top-level items
@@ -72,7 +78,10 @@ impl<'a> Parser<'a> {
             top_level_items.push(self.parse_top_level_item()?);
         }
 
-        Ok(Module { top_level_items })
+        Ok(Module {
+            requires,
+            top_level_items,
+        })
     }
 
     fn advance(&mut self) {
@@ -208,6 +217,42 @@ impl<'a> Parser<'a> {
 
         self.consume(&TK::RBracket)?;
         Ok(attrs)
+    }
+
+    fn parse_requires_block(&mut self) -> Result<Vec<Require>, ParseError> {
+        self.consume_keyword(TK::KwRequires)?;
+        self.consume(&TK::LBrace)?;
+
+        let mut requires = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            let marker = self.mark();
+            let mut path = vec![self.parse_ident()?];
+            while self.curr_token.kind == TK::Dot {
+                self.advance();
+                path.push(self.parse_ident()?);
+            }
+
+            let alias = if matches!(&self.curr_token.kind, TK::Ident(name) if name == "as") {
+                self.advance();
+                Some(self.parse_ident()?)
+            } else {
+                None
+            };
+
+            requires.push(Require {
+                id: self.id_gen.new_id(),
+                path,
+                alias,
+                span: self.close(marker),
+            });
+
+            if matches!(self.curr_token.kind, TK::Comma | TK::Semicolon) {
+                self.advance();
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(requires)
     }
 
     fn lookahead_for(&self, target: TokenKind, stop_at: TokenKind) -> bool {

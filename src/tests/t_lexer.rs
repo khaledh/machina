@@ -18,8 +18,9 @@ fn test_lex_identifier() {
 
 #[test]
 fn test_lex_keywords_and_bools() {
-    let mut lexer =
-        Lexer::new("fn let var if else match while for in inout out sink move self true false");
+    let mut lexer = Lexer::new(
+        "fn let var if else match while for in inout out sink move self requires true false",
+    );
 
     let expected = [
         TokenKind::KwFn,
@@ -36,6 +37,7 @@ fn test_lex_keywords_and_bools() {
         TokenKind::KwSink,
         TokenKind::KwMove,
         TokenKind::KwSelf,
+        TokenKind::KwRequires,
         TokenKind::BoolLit(true),
         TokenKind::BoolLit(false),
         TokenKind::Eof,

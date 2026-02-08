@@ -248,3 +248,47 @@ fn test_resolve_trait_bound_expected_trait() {
         )));
     }
 }
+
+#[test]
+fn test_resolve_requires_duplicate_alias_default() {
+    let source = r#"
+        requires {
+            std.io
+            app.io
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::DuplicateRequireAlias(alias, _) if alias == "io"
+        )));
+    }
+}
+
+#[test]
+fn test_resolve_requires_duplicate_alias_explicit() {
+    let source = r#"
+        requires {
+            std.io as net
+            app.net as net
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ResolveError::DuplicateRequireAlias(alias, _) if alias == "net"
+        )));
+    }
+}

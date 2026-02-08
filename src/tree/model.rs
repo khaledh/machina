@@ -21,7 +21,16 @@ pub struct Attribute {
 
 #[derive(Clone, Debug)]
 pub struct Module<D, T = ()> {
+    pub requires: Vec<Require>,
     pub top_level_items: Vec<TopLevelItem<D, T>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Require {
+    pub id: NodeId,
+    pub path: Vec<String>,
+    pub alias: Option<String>,
+    pub span: Span,
 }
 
 impl<D, T> Module<D, T> {

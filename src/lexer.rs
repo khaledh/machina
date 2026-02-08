@@ -85,6 +85,8 @@ pub enum TokenKind {
     KwGet,
     #[display("set")]
     KwSet,
+    #[display("requires")]
+    KwRequires,
 
     // Brackets
     #[display("[")]
@@ -554,6 +556,7 @@ impl<'a> Lexer<'a> {
                         "prop" => TokenKind::KwProp,
                         "get" => TokenKind::KwGet,
                         "set" => TokenKind::KwSet,
+                        "requires" => TokenKind::KwRequires,
                         "true" => TokenKind::BoolLit(true),
                         "false" => TokenKind::BoolLit(false),
                         _ => TokenKind::Ident(ident),

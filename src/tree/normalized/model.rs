@@ -9,6 +9,7 @@ pub use crate::tree::{BinaryOp, CallArgMode, CoerceKind, InitInfo, NodeId, Param
 // -- Normalized tree aliases (parsed ir specialized with DefId + TypeId) ---
 
 pub type Module = model::Module<DefId, TypeId>;
+pub type Require = model::Require;
 pub type TopLevelItem = model::TopLevelItem<DefId, TypeId>;
 pub type Decl = model::TopLevelItem<DefId, TypeId>;
 pub type CallableRef<'a> = model::CallableRef<'a, DefId, TypeId>;

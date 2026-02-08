@@ -65,6 +65,9 @@ pub enum ResolveError {
 
     #[error("Attribute `{0}` is not allowed on {1}")]
     AttrNotAllowed(String, &'static str, Span),
+
+    #[error("Duplicate requires alias: {0}")]
+    DuplicateRequireAlias(String, Span),
 }
 
 impl ResolveError {
@@ -90,6 +93,7 @@ impl ResolveError {
             ResolveError::AttrWrongArgCount(_, _, _, span) => *span,
             ResolveError::AttrWrongArgType(_, span) => *span,
             ResolveError::AttrNotAllowed(_, _, span) => *span,
+            ResolveError::DuplicateRequireAlias(_, span) => *span,
         }
     }
 }

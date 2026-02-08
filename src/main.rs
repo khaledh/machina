@@ -1,5 +1,5 @@
 use clap::Parser as ClapParser;
-use machina::compile::{CompileOptions, compile};
+use machina::compile::{CompileOptions, compile_with_path};
 use machina::diag::{CompileError, Span, format_error};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -144,7 +144,7 @@ fn main() {
         trace_drops,
         inject_prelude: true,
     };
-    let output = compile(&source, &opts);
+    let output = compile_with_path(&source, Some(input_path), &opts);
 
     match output {
         Ok(output) => {
@@ -276,6 +276,9 @@ fn main() {
                     CompileError::VerifyIr(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
+                    CompileError::Frontend(e) => {
+                        println!("{e}");
+                    }
                     CompileError::Io(path, e) => {
                         println!("{}: {}", path.display(), e);
                     }
@@ -376,13 +379,14 @@ fn compile_prelude_impl_object(
         inject_prelude: false,
     };
 
-    let output = compile(&prelude_src, &impl_opts).map_err(|errs| {
-        let mut message = String::new();
-        for err in errs {
-            message.push_str(&format!("{err}\n"));
-        }
-        message
-    })?;
+    let output =
+        compile_with_path(&prelude_src, Some(&prelude_path), &impl_opts).map_err(|errs| {
+            let mut message = String::new();
+            for err in errs {
+                message.push_str(&format!("{err}\n"));
+            }
+            message
+        })?;
 
     if let Some(ir) = output.ir.as_ref() {
         let ir_path = ir_dir.join("prelude_impl.ir");

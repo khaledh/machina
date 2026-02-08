@@ -329,6 +329,7 @@ pub fn walk_module<M: TreeMapper + ?Sized>(
     ctx: &mut M::Context,
 ) -> Module<M::OutD, M::OutT> {
     Module {
+        requires: module.requires.clone(),
         top_level_items: module
             .top_level_items
             .iter()

@@ -14,6 +14,20 @@ fn format_type_param(param: &TypeParam) -> String {
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.requires.is_empty() {
+            writeln!(f, "Requires:")?;
+            for req in &self.requires {
+                if let Some(alias) = &req.alias {
+                    writeln!(f, "  - {} as {}", req.path.join("."), alias)?;
+                } else {
+                    writeln!(f, "  - {}", req.path.join("."))?;
+                }
+            }
+            if !self.top_level_items.is_empty() {
+                writeln!(f, "--------------------------------")?;
+            }
+        }
+
         for (i, item) in self.top_level_items.iter().enumerate() {
             match item {
                 TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
