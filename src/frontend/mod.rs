@@ -4,6 +4,7 @@
 //! and type checking. It keeps module-loading concerns out of existing parser
 //! and resolver logic.
 
+pub mod bind;
 pub mod program;
 
 use std::collections::{HashMap, HashSet, VecDeque};

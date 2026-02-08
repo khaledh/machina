@@ -7,7 +7,10 @@ use std::collections::HashMap;
 
 use crate::context::ProgramParsedContext;
 use crate::diag::Span;
+use crate::frontend::ModuleId;
+use crate::frontend::bind::{AliasSymbols, ProgramBindings};
 use crate::frontend::{FrontendError, ModulePath};
+use crate::tree::NodeId;
 use crate::tree::parsed::{self, Module};
 use crate::tree::visit_mut::{self, VisitorMut};
 
@@ -35,21 +38,31 @@ pub(crate) fn merge_modules(prelude_module: &Module, user_module: &Module) -> Mo
 /// Dependency order is preserved, and known module-qualified references are
 /// rewritten into unqualified names to fit the current single-module
 /// resolve/typecheck/codegen pipeline.
-pub(crate) fn flatten_program_module(
+#[derive(Clone)]
+pub(crate) struct FlattenedProgram {
+    pub module: Module,
+    #[allow(dead_code)]
+    pub top_level_owners: HashMap<NodeId, ModuleId>,
+}
+
+pub(crate) fn flatten_program(
     program: &ProgramParsedContext,
-) -> Result<Module, Vec<FrontendError>> {
+) -> Result<FlattenedProgram, Vec<FrontendError>> {
+    let bindings = ProgramBindings::build(program);
+
     let mut merged = Module {
         requires: Vec::new(),
         top_level_items: Vec::new(),
     };
     let mut errors = Vec::new();
+    let mut top_level_owners = HashMap::new();
 
     for module_id in program.dependency_order_from_entry() {
         let Some(parsed) = program.module(module_id) else {
             continue;
         };
         let mut module = parsed.module.clone();
-        let alias_symbols = collect_alias_symbols(program, module_id);
+        let alias_symbols = bindings.alias_symbols_for(module_id);
         let mut rewriter = ModuleAliasCallRewriter {
             alias_symbols,
             errors: Vec::new(),
@@ -61,103 +74,36 @@ pub(crate) fn flatten_program_module(
             mangle_private_symbols(&mut module, &parsed.source.path);
         }
 
+        for item in &module.top_level_items {
+            top_level_owners.insert(top_level_item_id(item), module_id);
+        }
         merged.top_level_items.extend(module.top_level_items);
     }
 
     if errors.is_empty() {
-        Ok(merged)
+        Ok(FlattenedProgram {
+            module: merged,
+            top_level_owners,
+        })
     } else {
         Err(errors)
     }
 }
 
-fn collect_alias_symbols(
+pub(crate) fn flatten_program_module(
     program: &ProgramParsedContext,
-    module_id: crate::frontend::ModuleId,
-) -> HashMap<String, AliasSymbols> {
-    let mut alias_members = HashMap::new();
-    let Some(parsed) = program.module(module_id) else {
-        return alias_members;
-    };
-    for req in &parsed.requires {
-        if let Some(dep_id) = program.program.by_path.get(&req.path)
-            && let Some(dep_module) = program.module(*dep_id)
-        {
-            alias_members.insert(
-                req.alias.clone(),
-                module_symbols(&req.path, &dep_module.module),
-            );
-        }
-    }
-    alias_members
+) -> Result<Module, Vec<FrontendError>> {
+    flatten_program(program).map(|flattened| flattened.module)
 }
 
-struct AliasSymbols {
-    module_path: ModulePath,
-    callables: HashMap<String, MemberAttrs>,
-    types: HashMap<String, TypeMemberAttrs>,
-    traits: HashMap<String, MemberAttrs>,
-}
-
-fn module_symbols(path: &ModulePath, module: &Module) -> AliasSymbols {
-    let mut symbols = AliasSymbols {
-        module_path: path.clone(),
-        callables: HashMap::new(),
-        types: HashMap::new(),
-        traits: HashMap::new(),
-    };
-    for item in &module.top_level_items {
-        match item {
-            parsed::TopLevelItem::FuncDecl(func_decl) => {
-                let member = symbols
-                    .callables
-                    .entry(func_decl.sig.name.clone())
-                    .or_default();
-                member.public |= has_public_attr(&func_decl.attrs);
-            }
-            parsed::TopLevelItem::FuncDef(func_def) => {
-                let member = symbols
-                    .callables
-                    .entry(func_def.sig.name.clone())
-                    .or_default();
-                member.public |= has_public_attr(&func_def.attrs);
-            }
-            parsed::TopLevelItem::TypeDef(type_def) => {
-                symbols
-                    .types
-                    .insert(type_def.name.clone(), type_member_attrs(&type_def.attrs));
-            }
-            parsed::TopLevelItem::TraitDef(trait_def) => {
-                let member = symbols.traits.entry(trait_def.name.clone()).or_default();
-                member.public |= has_public_attr(&trait_def.attrs);
-            }
-            _ => {}
-        }
-    }
-    symbols
-}
-
-#[derive(Clone, Copy, Default)]
-struct MemberAttrs {
-    public: bool,
-}
-
-#[derive(Clone, Copy, Default)]
-struct TypeMemberAttrs {
-    public: bool,
-    opaque: bool,
-}
-
-fn has_public_attr(attrs: &[parsed::Attribute]) -> bool {
-    attrs
-        .iter()
-        .any(|attr| attr.name == "public" || attr.name == "opaque")
-}
-
-fn type_member_attrs(attrs: &[parsed::Attribute]) -> TypeMemberAttrs {
-    TypeMemberAttrs {
-        public: has_public_attr(attrs),
-        opaque: attrs.iter().any(|attr| attr.name == "opaque"),
+fn top_level_item_id(item: &parsed::TopLevelItem) -> NodeId {
+    match item {
+        parsed::TopLevelItem::TraitDef(trait_def) => trait_def.id,
+        parsed::TopLevelItem::TypeDef(type_def) => type_def.id,
+        parsed::TopLevelItem::FuncDecl(func_decl) => func_decl.id,
+        parsed::TopLevelItem::FuncDef(func_def) => func_def.id,
+        parsed::TopLevelItem::MethodBlock(method_block) => method_block.id,
+        parsed::TopLevelItem::ClosureDef(closure_def) => closure_def.id,
     }
 }
 
@@ -360,7 +306,7 @@ fn mangle_private_symbols(module: &mut Module, module_path: &ModulePath) {
     for item in &mut module.top_level_items {
         match item {
             parsed::TopLevelItem::FuncDecl(func_decl) => {
-                if !has_public_attr(&func_decl.attrs) {
+                if !is_public_item(&func_decl.attrs) {
                     let old = func_decl.sig.name.clone();
                     let new_name = format!("__m${module_tag}${old}");
                     func_decl.sig.name = new_name.clone();
@@ -368,7 +314,7 @@ fn mangle_private_symbols(module: &mut Module, module_path: &ModulePath) {
                 }
             }
             parsed::TopLevelItem::FuncDef(func_def) => {
-                if !has_public_attr(&func_def.attrs) {
+                if !is_public_item(&func_def.attrs) {
                     let old = func_def.sig.name.clone();
                     let new_name = format!("__m${module_tag}${old}");
                     func_def.sig.name = new_name.clone();
@@ -376,7 +322,7 @@ fn mangle_private_symbols(module: &mut Module, module_path: &ModulePath) {
                 }
             }
             parsed::TopLevelItem::TypeDef(type_def) => {
-                if !has_public_attr(&type_def.attrs) {
+                if !is_public_item(&type_def.attrs) {
                     let old = type_def.name.clone();
                     let new_name = format!("__m${module_tag}${old}");
                     type_def.name = new_name.clone();
@@ -384,7 +330,7 @@ fn mangle_private_symbols(module: &mut Module, module_path: &ModulePath) {
                 }
             }
             parsed::TopLevelItem::TraitDef(trait_def) => {
-                if !has_public_attr(&trait_def.attrs) {
+                if !is_public_item(&trait_def.attrs) {
                     let old = trait_def.name.clone();
                     let new_name = format!("__m${module_tag}${old}");
                     trait_def.name = new_name.clone();
@@ -407,6 +353,12 @@ fn mangle_private_symbols(module: &mut Module, module_path: &ModulePath) {
         type_param_scopes: vec![HashMap::new()],
     };
     renamer.visit_module(module);
+}
+
+fn is_public_item(attrs: &[parsed::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.name == "public" || attr.name == "opaque")
 }
 
 struct PrivateSymbolRenamer {

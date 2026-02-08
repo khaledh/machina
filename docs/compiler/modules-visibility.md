@@ -153,11 +153,16 @@ Point :: {
    - Add `@public` / `@opaque` item attributes in AST where missing.
 2. Context:
    - Build module graph from file paths.
+   - Build program-level bindings (`frontend::bind`) that map each module's
+     `requires` aliases to dependency export surfaces.
 3. Resolver:
-   - Resolve module aliases.
+   - Consume flattened module plus program metadata.
+   - Resolve module aliases after frontend rewrite.
    - Resolve item references across module boundaries.
 4. Def metadata:
    - Store visibility and opacity flags.
+   - Track top-level owner module ids as side metadata for future
+     per-module checks/diagnostics.
 5. Typecheck:
    - Enforce opacity/visibility access rules.
 6. Diagnostics:

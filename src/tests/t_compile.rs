@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::context::ProgramParsedContext;
-use crate::frontend::program::flatten_program_module;
+use crate::frontend::bind::ProgramBindings;
+use crate::frontend::program::{flatten_program, flatten_program_module};
 use crate::frontend::{
     FrontendError, ModuleLoader, ModulePath, discover_and_parse_program_with_loader,
 };
@@ -517,4 +518,109 @@ fn flatten_program_mangles_private_dependency_function_names() {
             .any(|name| name.starts_with("__m$app$util$secret")),
         "expected mangled private helper in flattened names: {callable_names:?}"
     );
+}
+
+#[test]
+fn program_bindings_include_visibility_and_opaque_flags() {
+    let entry_src = r#"
+        requires {
+            app.util as util
+        }
+
+        fn main() -> u64 {
+            util.answer()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        r#"
+            fn secret() -> u64 { 7 }
+            @[public] fn answer() -> u64 { 7 }
+            type Hidden = { x: u64 }
+            @[opaque] type Buffer = { data: u64 }
+            trait Internal { fn f(self); }
+            @[public] trait Runnable { fn run(self); }
+        "#
+        .to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+    let program_ctx = ProgramParsedContext::new(program);
+
+    let bindings = ProgramBindings::build(&program_ctx);
+    let aliases = bindings.alias_symbols_for(program_ctx.entry());
+    let util = aliases.get("util").expect("util alias should be bound");
+
+    assert!(!util.callables["secret"].public);
+    assert!(util.callables["answer"].public);
+    assert!(!util.types["Hidden"].public);
+    assert!(!util.types["Hidden"].opaque);
+    assert!(util.types["Buffer"].public);
+    assert!(util.types["Buffer"].opaque);
+    assert!(!util.traits["Internal"].public);
+    assert!(util.traits["Runnable"].public);
+}
+
+#[test]
+fn flatten_program_tracks_top_level_item_owners() {
+    let entry_src = r#"
+        requires {
+            app.util
+        }
+
+        fn main() -> u64 {
+            util.answer()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "@[public] fn answer() -> u64 { 7 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let util_path = ModulePath::new(vec!["app".to_string(), "util".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path.clone(),
+        &loader,
+    )
+    .expect("program should parse");
+    let program_ctx = ProgramParsedContext::new(program);
+    let entry_id = *program_ctx
+        .program
+        .by_path
+        .get(&entry_path)
+        .expect("entry module id should exist");
+    let util_id = *program_ctx
+        .program
+        .by_path
+        .get(&util_path)
+        .expect("util module id should exist");
+
+    let flattened = flatten_program(&program_ctx).expect("flatten should succeed");
+    let mut owner_by_func = HashMap::new();
+
+    for item in &flattened.module.top_level_items {
+        if let crate::tree::parsed::TopLevelItem::FuncDef(def) = item {
+            let owner = flattened
+                .top_level_owners
+                .get(&def.id)
+                .copied()
+                .expect("owner must be recorded for each top-level item");
+            owner_by_func.insert(def.sig.name.clone(), owner);
+        }
+    }
+
+    assert_eq!(owner_by_func.get("answer"), Some(&util_id));
+    assert_eq!(owner_by_func.get("main"), Some(&entry_id));
 }
