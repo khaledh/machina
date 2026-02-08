@@ -1,6 +1,7 @@
 use crate::common::run_program;
 use machina::compile::{CompileOptions, compile_with_path};
 use machina::diag::CompileError;
+use machina::frontend::FrontendError;
 use machina::typecheck::TypeCheckErrorKind;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -333,6 +334,90 @@ fn test_modules_opaque_pattern_destructure_rejected() {
                     )
                 }));
             }
+        },
+    );
+}
+
+#[test]
+fn test_modules_private_trait_bound_rejected() {
+    let entry_source = r#"
+        requires {
+            app.secret as sec
+        }
+
+        fn run_it<T: sec.Internal>(value: T) -> u64 {
+            0
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+
+    let secret_source = r#"
+        trait Internal {
+            fn run(self);
+        }
+    "#;
+
+    with_temp_program(
+        "private_trait_bound",
+        entry_source,
+        &[("app/secret.mc", secret_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail for private trait bound"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::Frontend(FrontendError::RequireMemberPrivate {
+                            alias,
+                            member,
+                            expected_kind,
+                            ..
+                        }) if alias == "sec" && member == "Internal" && *expected_kind == "trait"
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_modules_duplicate_public_function_names_allowed_with_aliases() {
+    let entry_source = r#"
+        requires {
+            app.util as util
+            app.math as math
+        }
+
+        fn main() -> u64 {
+            util.answer() + math.answer()
+        }
+    "#;
+
+    let util_source = r#"
+        @[public]
+        fn answer() -> u64 { 7 }
+    "#;
+
+    let math_source = r#"
+        @[public]
+        fn answer() -> u64 { 11 }
+    "#;
+
+    with_temp_program(
+        "duplicate_public_callables",
+        entry_source,
+        &[("app/util.mc", util_source), ("app/math.mc", math_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_ok(),
+                "compile should succeed for aliased duplicate exports"
+            );
         },
     );
 }

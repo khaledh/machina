@@ -3,7 +3,7 @@
 //! This module contains logic that is specific to composing a discovered
 //! multi-module program into a single compile unit for the current pipeline.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::context::ProgramParsedContext;
 use crate::diag::Span;
@@ -49,6 +49,7 @@ pub(crate) fn flatten_program(
     program: &ProgramParsedContext,
 ) -> Result<FlattenedProgram, Vec<FrontendError>> {
     let bindings = ProgramBindings::build(program);
+    let conflicts = collect_conflicting_public_exports(program);
 
     let mut merged = Module {
         requires: Vec::new(),
@@ -65,13 +66,14 @@ pub(crate) fn flatten_program(
         let alias_symbols = bindings.alias_symbols_for(module_id);
         let mut rewriter = ModuleAliasCallRewriter {
             alias_symbols,
+            conflicts: &conflicts,
             errors: Vec::new(),
         };
         rewriter.visit_module(&mut module);
         errors.extend(rewriter.errors);
 
         if module_id != program.entry() {
-            mangle_private_symbols(&mut module, &parsed.source.path);
+            mangle_dependency_symbols(&mut module, &parsed.source.path, &conflicts);
         }
 
         for item in &module.top_level_items {
@@ -88,6 +90,110 @@ pub(crate) fn flatten_program(
     } else {
         Err(errors)
     }
+}
+
+fn has_public_attr(attrs: &[parsed::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.name == "public" || attr.name == "opaque")
+}
+
+#[derive(Default)]
+struct ConflictingPublicExports {
+    callables: HashSet<(ModulePath, String)>,
+    types: HashSet<(ModulePath, String)>,
+    traits: HashSet<(ModulePath, String)>,
+}
+
+impl ConflictingPublicExports {
+    fn contains_callable(&self, module_path: &ModulePath, symbol: &str) -> bool {
+        self.callables
+            .contains(&(module_path.clone(), symbol.to_string()))
+    }
+
+    fn contains_type(&self, module_path: &ModulePath, symbol: &str) -> bool {
+        self.types
+            .contains(&(module_path.clone(), symbol.to_string()))
+    }
+
+    fn contains_trait(&self, module_path: &ModulePath, symbol: &str) -> bool {
+        self.traits
+            .contains(&(module_path.clone(), symbol.to_string()))
+    }
+}
+
+fn collect_conflicting_public_exports(program: &ProgramParsedContext) -> ConflictingPublicExports {
+    let mut callable_origins = HashMap::<String, HashSet<ModulePath>>::new();
+    let mut type_origins = HashMap::<String, HashSet<ModulePath>>::new();
+    let mut trait_origins = HashMap::<String, HashSet<ModulePath>>::new();
+
+    for module_id in program.dependency_order_from_entry() {
+        if module_id == program.entry() {
+            continue;
+        }
+        let Some(parsed) = program.module(module_id) else {
+            continue;
+        };
+        let module_path = parsed.source.path.clone();
+        for item in &parsed.module.top_level_items {
+            match item {
+                parsed::TopLevelItem::FuncDecl(func_decl) if has_public_attr(&func_decl.attrs) => {
+                    callable_origins
+                        .entry(func_decl.sig.name.clone())
+                        .or_default()
+                        .insert(module_path.clone());
+                }
+                parsed::TopLevelItem::FuncDef(func_def) if has_public_attr(&func_def.attrs) => {
+                    callable_origins
+                        .entry(func_def.sig.name.clone())
+                        .or_default()
+                        .insert(module_path.clone());
+                }
+                parsed::TopLevelItem::TypeDef(type_def) if has_public_attr(&type_def.attrs) => {
+                    type_origins
+                        .entry(type_def.name.clone())
+                        .or_default()
+                        .insert(module_path.clone());
+                }
+                parsed::TopLevelItem::TraitDef(trait_def) if has_public_attr(&trait_def.attrs) => {
+                    trait_origins
+                        .entry(trait_def.name.clone())
+                        .or_default()
+                        .insert(module_path.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut conflicts = ConflictingPublicExports::default();
+    for (symbol, origins) in callable_origins {
+        if origins.len() > 1 {
+            for module in origins {
+                conflicts.callables.insert((module, symbol.clone()));
+            }
+        }
+    }
+    for (symbol, origins) in type_origins {
+        if origins.len() > 1 {
+            for module in origins {
+                conflicts.types.insert((module, symbol.clone()));
+            }
+        }
+    }
+    for (symbol, origins) in trait_origins {
+        if origins.len() > 1 {
+            for module in origins {
+                conflicts.traits.insert((module, symbol.clone()));
+            }
+        }
+    }
+    conflicts
+}
+
+fn mangled_module_symbol(module_path: &ModulePath, symbol: &str) -> String {
+    let module_tag = module_path.to_string().replace('.', "$");
+    format!("__m${module_tag}${symbol}")
 }
 
 #[cfg(test)]
@@ -108,8 +214,9 @@ fn top_level_item_id(item: &parsed::TopLevelItem) -> NodeId {
     }
 }
 
-struct ModuleAliasCallRewriter {
+struct ModuleAliasCallRewriter<'a> {
     alias_symbols: HashMap<String, AliasSymbols>,
+    conflicts: &'a ConflictingPublicExports,
     errors: Vec<FrontendError>,
 }
 
@@ -130,7 +237,7 @@ impl ExpectedMemberKind {
     }
 }
 
-impl VisitorMut<()> for ModuleAliasCallRewriter {
+impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
     fn visit_method_block(&mut self, method_block: &mut parsed::MethodBlock) {
         if let Some(trait_name) = &mut method_block.trait_name {
             self.rewrite_qualified_name(trait_name, method_block.span, ExpectedMemberKind::Trait);
@@ -169,7 +276,14 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
 
                 let mut function_callee = (**callee).clone();
                 if let parsed::ExprKind::Var { ident, .. } = &mut function_callee.kind {
-                    *ident = method_name.clone();
+                    *ident = if self
+                        .conflicts
+                        .contains_callable(&symbols.module_path, method_name)
+                    {
+                        mangled_module_symbol(&symbols.module_path, method_name)
+                    } else {
+                        method_name.clone()
+                    };
                 }
 
                 expr.kind = parsed::ExprKind::Call {
@@ -200,7 +314,14 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
 
                 let mut function_ref = (**target).clone();
                 if let parsed::ExprKind::Var { ident, .. } = &mut function_ref.kind {
-                    *ident = field.clone();
+                    *ident = if self
+                        .conflicts
+                        .contains_callable(&symbols.module_path, field)
+                    {
+                        mangled_module_symbol(&symbols.module_path, field)
+                    } else {
+                        field.clone()
+                    };
                 }
                 expr.kind = function_ref.kind;
             }
@@ -227,7 +348,7 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
     }
 }
 
-impl ModuleAliasCallRewriter {
+impl ModuleAliasCallRewriter<'_> {
     fn rewrite_qualified_name(
         &mut self,
         ident: &mut String,
@@ -293,47 +414,73 @@ impl ModuleAliasCallRewriter {
             .types
             .get(member)
             .is_some_and(|member_attrs| member_attrs.opaque);
-        *ident = member.to_string();
+        *ident = match expected {
+            ExpectedMemberKind::Callable
+                if self
+                    .conflicts
+                    .contains_callable(&symbols.module_path, member) =>
+            {
+                mangled_module_symbol(&symbols.module_path, member)
+            }
+            ExpectedMemberKind::Type
+                if self.conflicts.contains_type(&symbols.module_path, member) =>
+            {
+                mangled_module_symbol(&symbols.module_path, member)
+            }
+            ExpectedMemberKind::Trait
+                if self.conflicts.contains_trait(&symbols.module_path, member) =>
+            {
+                mangled_module_symbol(&symbols.module_path, member)
+            }
+            _ => member.to_string(),
+        };
     }
 }
 
-fn mangle_private_symbols(module: &mut Module, module_path: &ModulePath) {
+fn mangle_dependency_symbols(
+    module: &mut Module,
+    module_path: &ModulePath,
+    conflicts: &ConflictingPublicExports,
+) {
     let mut value_renames = HashMap::new();
     let mut type_renames = HashMap::new();
     let mut trait_renames = HashMap::new();
 
-    let module_tag = module_path.to_string().replace('.', "$");
-
     for item in &mut module.top_level_items {
         match item {
             parsed::TopLevelItem::FuncDecl(func_decl) => {
-                if !is_public_item(&func_decl.attrs) {
-                    let old = func_decl.sig.name.clone();
-                    let new_name = format!("__m${module_tag}${old}");
+                let old = func_decl.sig.name.clone();
+                if !is_public_item(&func_decl.attrs)
+                    || conflicts.contains_callable(module_path, &old)
+                {
+                    let new_name = mangled_module_symbol(module_path, &old);
                     func_decl.sig.name = new_name.clone();
                     value_renames.insert(old, new_name);
                 }
             }
             parsed::TopLevelItem::FuncDef(func_def) => {
-                if !is_public_item(&func_def.attrs) {
-                    let old = func_def.sig.name.clone();
-                    let new_name = format!("__m${module_tag}${old}");
+                let old = func_def.sig.name.clone();
+                if !is_public_item(&func_def.attrs)
+                    || conflicts.contains_callable(module_path, &old)
+                {
+                    let new_name = mangled_module_symbol(module_path, &old);
                     func_def.sig.name = new_name.clone();
                     value_renames.insert(old, new_name);
                 }
             }
             parsed::TopLevelItem::TypeDef(type_def) => {
-                if !is_public_item(&type_def.attrs) {
-                    let old = type_def.name.clone();
-                    let new_name = format!("__m${module_tag}${old}");
+                let old = type_def.name.clone();
+                if !is_public_item(&type_def.attrs) || conflicts.contains_type(module_path, &old) {
+                    let new_name = mangled_module_symbol(module_path, &old);
                     type_def.name = new_name.clone();
                     type_renames.insert(old, new_name);
                 }
             }
             parsed::TopLevelItem::TraitDef(trait_def) => {
-                if !is_public_item(&trait_def.attrs) {
-                    let old = trait_def.name.clone();
-                    let new_name = format!("__m${module_tag}${old}");
+                let old = trait_def.name.clone();
+                if !is_public_item(&trait_def.attrs) || conflicts.contains_trait(module_path, &old)
+                {
+                    let new_name = mangled_module_symbol(module_path, &old);
                     trait_def.name = new_name.clone();
                     trait_renames.insert(old, new_name);
                 }

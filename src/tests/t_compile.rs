@@ -465,6 +465,72 @@ fn flatten_program_reports_private_trait_on_alias() {
 }
 
 #[test]
+fn flatten_program_allows_conflicting_public_export_names_via_module_qualification() {
+    let entry_src = r#"
+        requires {
+            app.util as util
+            app.math as math
+        }
+
+        fn main() -> u64 {
+            util.answer() + math.answer()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "@[public] fn answer() -> u64 { 7 }".to_string(),
+    );
+    modules.insert(
+        "app.math".to_string(),
+        "@[public] fn answer() -> u64 { 11 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let flattened =
+        flatten_program_module(&ProgramParsedContext::new(program)).expect("flatten should pass");
+
+    #[derive(Default)]
+    struct CalledFnNames {
+        names: Vec<String>,
+    }
+
+    impl Visitor<()> for CalledFnNames {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if let ExprKind::Call { callee, .. } = &expr.kind
+                && let ExprKind::Var { ident, .. } = &callee.kind
+            {
+                self.names.push(ident.clone());
+            }
+            visit::walk_expr(self, expr);
+        }
+    }
+
+    let mut called = CalledFnNames::default();
+    called.visit_module(&flattened);
+    assert!(
+        called
+            .names
+            .iter()
+            .any(|name| name.starts_with("__m$app$util$answer"))
+    );
+    assert!(
+        called
+            .names
+            .iter()
+            .any(|name| name.starts_with("__m$app$math$answer"))
+    );
+}
+
+#[test]
 fn flatten_program_mangles_private_dependency_function_names() {
     let entry_src = r#"
         requires {
