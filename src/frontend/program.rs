@@ -3,7 +3,7 @@
 //! This module contains logic that is specific to composing a discovered
 //! multi-module program into a single compile unit for the current pipeline.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::context::ProgramParsedContext;
 use crate::diag::Span;
@@ -89,36 +89,71 @@ fn collect_alias_symbols(
 
 struct AliasSymbols {
     module_path: ModulePath,
-    callables: HashSet<String>,
-    types: HashSet<String>,
-    traits: HashSet<String>,
+    callables: HashMap<String, MemberAttrs>,
+    types: HashMap<String, TypeMemberAttrs>,
+    traits: HashMap<String, MemberAttrs>,
 }
 
 fn module_symbols(path: &ModulePath, module: &Module) -> AliasSymbols {
     let mut symbols = AliasSymbols {
         module_path: path.clone(),
-        callables: HashSet::new(),
-        types: HashSet::new(),
-        traits: HashSet::new(),
+        callables: HashMap::new(),
+        types: HashMap::new(),
+        traits: HashMap::new(),
     };
     for item in &module.top_level_items {
         match item {
             parsed::TopLevelItem::FuncDecl(func_decl) => {
-                symbols.callables.insert(func_decl.sig.name.clone());
+                let member = symbols
+                    .callables
+                    .entry(func_decl.sig.name.clone())
+                    .or_default();
+                member.public |= has_public_attr(&func_decl.attrs);
             }
             parsed::TopLevelItem::FuncDef(func_def) => {
-                symbols.callables.insert(func_def.sig.name.clone());
+                let member = symbols
+                    .callables
+                    .entry(func_def.sig.name.clone())
+                    .or_default();
+                member.public |= has_public_attr(&func_def.attrs);
             }
             parsed::TopLevelItem::TypeDef(type_def) => {
-                symbols.types.insert(type_def.name.clone());
+                symbols
+                    .types
+                    .insert(type_def.name.clone(), type_member_attrs(&type_def.attrs));
             }
             parsed::TopLevelItem::TraitDef(trait_def) => {
-                symbols.traits.insert(trait_def.name.clone());
+                let member = symbols.traits.entry(trait_def.name.clone()).or_default();
+                member.public |= has_public_attr(&trait_def.attrs);
             }
             _ => {}
         }
     }
     symbols
+}
+
+#[derive(Clone, Copy, Default)]
+struct MemberAttrs {
+    public: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TypeMemberAttrs {
+    public: bool,
+    opaque: bool,
+}
+
+fn has_public_attr(attrs: &[parsed::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.name == "public" || attr.name == "opaque")
+}
+
+fn type_member_attrs(attrs: &[parsed::Attribute]) -> TypeMemberAttrs {
+    TypeMemberAttrs {
+        public: has_public_attr(attrs),
+        opaque: attrs.iter().any(|attr| attr.name == "opaque"),
+    }
 }
 
 struct ModuleAliasCallRewriter {
@@ -128,6 +163,7 @@ struct ModuleAliasCallRewriter {
 
 #[derive(Clone, Copy)]
 enum ExpectedMemberKind {
+    Callable,
     Type,
     Trait,
 }
@@ -135,6 +171,7 @@ enum ExpectedMemberKind {
 impl ExpectedMemberKind {
     fn as_str(self) -> &'static str {
         match self {
+            ExpectedMemberKind::Callable => "function",
             ExpectedMemberKind::Type => "type",
             ExpectedMemberKind::Trait => "trait",
         }
@@ -164,7 +201,17 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
                 let Some(symbols) = self.alias_symbols.get(alias) else {
                     return;
                 };
-                if !symbols.callables.contains(method_name) {
+                let Some(member) = symbols.callables.get(method_name) else {
+                    return;
+                };
+                if !member.public {
+                    self.errors.push(FrontendError::RequireMemberPrivate {
+                        alias: alias.clone(),
+                        module: symbols.module_path.clone(),
+                        member: method_name.clone(),
+                        expected_kind: ExpectedMemberKind::Callable.as_str(),
+                        span: expr.span,
+                    });
                     return;
                 }
 
@@ -185,7 +232,17 @@ impl VisitorMut<()> for ModuleAliasCallRewriter {
                 let Some(symbols) = self.alias_symbols.get(alias) else {
                     return;
                 };
-                if !symbols.callables.contains(field) {
+                let Some(member) = symbols.callables.get(field) else {
+                    return;
+                };
+                if !member.public {
+                    self.errors.push(FrontendError::RequireMemberPrivate {
+                        alias: alias.clone(),
+                        module: symbols.module_path.clone(),
+                        member: field.clone(),
+                        expected_kind: ExpectedMemberKind::Callable.as_str(),
+                        span: expr.span,
+                    });
                     return;
                 }
 
@@ -238,21 +295,52 @@ impl ModuleAliasCallRewriter {
         };
 
         let found = match expected {
-            ExpectedMemberKind::Type => symbols.types.contains(member),
-            ExpectedMemberKind::Trait => symbols.traits.contains(member),
+            ExpectedMemberKind::Callable => symbols.callables.contains_key(member),
+            ExpectedMemberKind::Type => symbols.types.contains_key(member),
+            ExpectedMemberKind::Trait => symbols.traits.contains_key(member),
         };
 
-        if found {
-            *ident = member.to_string();
+        if !found {
+            self.errors.push(FrontendError::RequireMemberUndefined {
+                alias: alias.to_string(),
+                module: symbols.module_path.clone(),
+                member: member.to_string(),
+                expected_kind: expected.as_str(),
+                span,
+            });
             return;
         }
 
-        self.errors.push(FrontendError::RequireMemberUndefined {
-            alias: alias.to_string(),
-            module: symbols.module_path.clone(),
-            member: member.to_string(),
-            expected_kind: expected.as_str(),
-            span,
-        });
+        let public = match expected {
+            ExpectedMemberKind::Callable => symbols
+                .callables
+                .get(member)
+                .is_some_and(|member_attrs| member_attrs.public),
+            ExpectedMemberKind::Type => symbols
+                .types
+                .get(member)
+                .is_some_and(|member_attrs| member_attrs.public),
+            ExpectedMemberKind::Trait => symbols
+                .traits
+                .get(member)
+                .is_some_and(|member_attrs| member_attrs.public),
+        };
+
+        if !public {
+            self.errors.push(FrontendError::RequireMemberPrivate {
+                alias: alias.to_string(),
+                module: symbols.module_path.clone(),
+                member: member.to_string(),
+                expected_kind: expected.as_str(),
+                span,
+            });
+            return;
+        }
+
+        let _opaque = symbols
+            .types
+            .get(member)
+            .is_some_and(|member_attrs| member_attrs.opaque);
+        *ident = member.to_string();
     }
 }

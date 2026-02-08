@@ -158,6 +158,15 @@ pub enum FrontendError {
         span: Span,
     },
 
+    #[error("{expected_kind} `{member}` in module `{module}` (imported as `{alias}`) is private")]
+    RequireMemberPrivate {
+        alias: String,
+        module: ModulePath,
+        member: String,
+        expected_kind: &'static str,
+        span: Span,
+    },
+
     #[error("module dependency cycle detected: {0}")]
     ModuleDependencyCycle(String),
 

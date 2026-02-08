@@ -116,7 +116,7 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "fn answer() -> u64 { 7 }".to_string(),
+        "@[public] fn answer() -> u64 { 7 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -153,7 +153,7 @@ fn flatten_program_rewrites_alias_member_access_to_var() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "fn answer() -> u64 { 7 }".to_string(),
+        "@[public] fn answer() -> u64 { 7 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -189,7 +189,7 @@ fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.config".to_string(),
-        "type Config = { port: u64 }".to_string(),
+        "@[public] type Config = { port: u64 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -225,7 +225,7 @@ fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.runnable".to_string(),
-        "trait Runnable { fn run(self); }".to_string(),
+        "@[public] trait Runnable { fn run(self); }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -265,7 +265,7 @@ fn flatten_program_rewrites_alias_trait_name_in_method_block() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.runnable".to_string(),
-        "trait Runnable { fn run(self); }".to_string(),
+        "@[public] trait Runnable { fn run(self); }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -329,7 +329,7 @@ fn flatten_program_reports_missing_trait_member_on_alias() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.runnable".to_string(),
-        "trait Runnable { fn run(self); }".to_string(),
+        "@[public] trait Runnable { fn run(self); }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -348,6 +348,117 @@ fn flatten_program_reports_missing_trait_member_on_alias() {
             e,
             FrontendError::RequireMemberUndefined { alias, member, expected_kind, .. }
                 if alias == "rt" && member == "Missing" && *expected_kind == "trait"
+        )
+    }));
+}
+
+#[test]
+fn flatten_program_reports_private_function_on_alias() {
+    let entry_src = r#"
+        requires {
+            app.util
+        }
+
+        fn main() -> u64 {
+            util.secret()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.util".to_string(),
+        "fn secret() -> u64 { 7 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let errors = result.expect_err("flatten should fail");
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e,
+            FrontendError::RequireMemberPrivate { alias, member, expected_kind, .. }
+                if alias == "util" && member == "secret" && *expected_kind == "function"
+        )
+    }));
+}
+
+#[test]
+fn flatten_program_reports_private_type_on_alias() {
+    let entry_src = r#"
+        requires {
+            app.config as cfg
+        }
+
+        fn use_config(c: cfg.Config) -> cfg.Config {
+            c
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.config".to_string(),
+        "type Config = { port: u64 }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let errors = result.expect_err("flatten should fail");
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e,
+            FrontendError::RequireMemberPrivate { alias, member, expected_kind, .. }
+                if alias == "cfg" && member == "Config" && *expected_kind == "type"
+        )
+    }));
+}
+
+#[test]
+fn flatten_program_reports_private_trait_on_alias() {
+    let entry_src = r#"
+        requires {
+            app.runnable as rt
+        }
+
+        fn execute<T: rt.Runnable>(value: T) {
+            ()
+        }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert(
+        "app.runnable".to_string(),
+        "trait Runnable { fn run(self); }".to_string(),
+    );
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let errors = result.expect_err("flatten should fail");
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e,
+            FrontendError::RequireMemberPrivate { alias, member, expected_kind, .. }
+                if alias == "rt" && member == "Runnable" && *expected_kind == "trait"
         )
     }));
 }
