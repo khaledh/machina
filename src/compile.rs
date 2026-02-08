@@ -3,11 +3,10 @@ use std::path::PathBuf;
 
 use crate::backend;
 use crate::backend::regalloc::arm64::Arm64Target;
-use crate::context::{ParsedContext, ProgramParsedContext, ResolvedContext};
+use crate::context::{ParsedContext, ProgramParsedContext};
 use crate::diag::CompileError;
 use crate::elaborate;
 use crate::frontend;
-use crate::frontend::ModuleId;
 use crate::frontend::program::{flatten_program, merge_modules};
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
@@ -16,10 +15,10 @@ use crate::monomorphize;
 use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
-use crate::resolve::resolve;
+use crate::resolve::{attach_def_owners, resolve};
 use crate::semck::sem_check;
+use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
-use crate::tree::{NodeId, NodeIdGen};
 use crate::typecheck::type_check;
 
 #[derive(Debug)]
@@ -304,23 +303,6 @@ pub fn compile_with_path(
     }
 
     Ok(CompileOutput { asm, ir })
-}
-
-fn attach_def_owners(
-    resolved_context: ResolvedContext,
-    top_level_owners: &HashMap<NodeId, ModuleId>,
-) -> ResolvedContext {
-    if top_level_owners.is_empty() {
-        return resolved_context;
-    }
-
-    let mut def_owners = HashMap::new();
-    for (node_id, owner) in top_level_owners {
-        if let Some(def_id) = resolved_context.def_table.lookup_node_def_id(*node_id) {
-            def_owners.insert(def_id, *owner);
-        }
-    }
-    resolved_context.with_def_owners(def_owners)
 }
 
 // --- stdlib parsed-tree injection ---

@@ -183,3 +183,156 @@ fn test_modules_opaque_construction_rejected() {
         },
     );
 }
+
+#[test]
+fn test_modules_private_method_call_rejected() {
+    let entry_source = r#"
+        requires {
+            app.secret
+        }
+
+        fn main() -> u64 {
+            var c = Counter { ticks: 0 };
+            c.inc();
+            0
+        }
+    "#;
+
+    let secret_source = r#"
+        @[public]
+        type Counter = { ticks: u64 }
+
+        Counter :: {
+            fn inc(inout self) {
+                self.ticks = self.ticks + 1;
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "private_method_call",
+        entry_source,
+        &[("app/secret.mc", secret_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail for private method call"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::CallableNotAccessible(name, _)
+                                    if name == "inc"
+                            )
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_modules_private_property_access_rejected() {
+    let entry_source = r#"
+        requires {
+            app.secret
+        }
+
+        fn main() -> u64 {
+            let c = Counter { ticks: 3 };
+            c.tick_count
+        }
+    "#;
+
+    let secret_source = r#"
+        @[public]
+        type Counter = { ticks: u64 }
+
+        Counter :: {
+            prop tick_count: u64 {
+                get { self.ticks }
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "private_property_access",
+        entry_source,
+        &[("app/secret.mc", secret_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail for private property access"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::PropertyNotAccessible(name, _)
+                                    if name == "tick_count"
+                            )
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_modules_opaque_pattern_destructure_rejected() {
+    let entry_source = r#"
+        requires {
+            app.secret
+        }
+
+        fn main() -> u64 {
+            let Token { raw } = secret.make();
+            raw
+        }
+    "#;
+
+    let secret_source = r#"
+        @[opaque]
+        type Token = { raw: u64 }
+
+        @[public]
+        fn make() -> Token {
+            Token { raw: 7 }
+        }
+    "#;
+
+    with_temp_program(
+        "opaque_pattern_destructure",
+        entry_source,
+        &[("app/secret.mc", secret_source)],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail for opaque destructuring pattern"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::OpaquePatternDestructure(type_name, _)
+                                    if type_name == "Token"
+                            )
+                    )
+                }));
+            }
+        },
+    );
+}

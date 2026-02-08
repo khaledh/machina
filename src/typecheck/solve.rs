@@ -83,7 +83,9 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &constrain.def_terms,
         &mut unifier,
         &engine.env().type_defs,
+        &engine.env().type_symbols,
         &engine.context().def_table,
+        &engine.context().def_owners,
         &engine.context().module,
     );
 
@@ -120,6 +122,8 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &engine.env().trait_sigs,
             &engine.env().trait_impls,
             &constrain.var_trait_bounds,
+            &engine.context().def_table,
+            &engine.context().def_owners,
         );
         call_errors.append(&mut round_errors);
         resolved_call_defs.extend(round_resolved);
@@ -210,7 +214,9 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &constrain.def_terms,
         &mut unifier,
         &engine.env().type_defs,
+        &engine.env().type_symbols,
         &engine.context().def_table,
+        &engine.context().def_owners,
         &engine.context().module,
     );
     for (pattern_id, err, span) in deferred_pattern_errors {
@@ -436,6 +442,8 @@ fn check_call_obligations(
     trait_sigs: &HashMap<String, crate::typecheck::engine::CollectedTraitSig>,
     trait_impls: &HashMap<String, HashSet<String>>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
+    def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
 ) -> (
     Vec<TypeCheckError>,
     HashMap<NodeId, DefId>,
@@ -528,13 +536,28 @@ fn check_call_obligations(
             CallCallee::Dynamic { .. } => Vec::new(),
         };
 
+        let inaccessible_count = candidates
+            .iter()
+            .filter(|sig| {
+                !is_def_accessible_from(obligation.caller_def_id, sig.def_id, def_table, def_owners)
+            })
+            .count();
+        candidates.retain(|sig| {
+            is_def_accessible_from(obligation.caller_def_id, sig.def_id, def_table, def_owners)
+        });
+
         if candidates.is_empty() {
             let name = match &obligation.callee {
                 CallCallee::NamedFunction { name, .. } => name.clone(),
                 CallCallee::Method { name } => name.clone(),
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
-            errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
+            if inaccessible_count > 0 {
+                errors
+                    .push(TypeCheckErrorKind::CallableNotAccessible(name, obligation.span).into());
+            } else {
+                errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
+            }
             continue;
         }
 
@@ -1556,6 +1579,9 @@ fn check_expr_obligations(
                     property_sigs,
                     trait_sigs,
                     var_trait_bounds,
+                    *caller_def_id,
+                    def_table,
+                    def_owners,
                 ) {
                     Ok(prop) => {
                         if !prop.readable {
@@ -1572,6 +1598,13 @@ fn check_expr_obligations(
                     Err(PropertyResolution::Ambiguous) => {
                         errors.push(
                             TypeCheckErrorKind::OverloadAmbiguous(field.clone(), *span).into(),
+                        );
+                        covered_exprs.insert(*expr_id);
+                        continue;
+                    }
+                    Err(PropertyResolution::Private) => {
+                        errors.push(
+                            TypeCheckErrorKind::PropertyNotAccessible(field.clone(), *span).into(),
                         );
                         covered_exprs.insert(*expr_id);
                         continue;
@@ -1644,6 +1677,9 @@ fn check_expr_obligations(
                     property_sigs,
                     trait_sigs,
                     var_trait_bounds,
+                    *caller_def_id,
+                    def_table,
+                    def_owners,
                 ) {
                     Ok(prop) => {
                         if !prop.writable {
@@ -1671,6 +1707,13 @@ fn check_expr_obligations(
                     Err(PropertyResolution::Ambiguous) => {
                         errors.push(
                             TypeCheckErrorKind::OverloadAmbiguous(field.clone(), *span).into(),
+                        );
+                        covered_exprs.insert(*stmt_id);
+                        continue;
+                    }
+                    Err(PropertyResolution::Private) => {
+                        errors.push(
+                            TypeCheckErrorKind::PropertyNotAccessible(field.clone(), *span).into(),
                         );
                         covered_exprs.insert(*stmt_id);
                         continue;
@@ -1981,7 +2024,9 @@ fn check_pattern_obligations(
     def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
+    type_symbols: &HashMap<String, DefId>,
     def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
     module: &crate::tree::resolved::Module,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
@@ -1993,10 +2038,19 @@ fn check_pattern_obligations(
                 pattern_id,
                 pattern,
                 value_ty,
+                caller_def_id,
                 span,
             } => {
                 let value_ty = resolve_term_for_diagnostics(value_ty, unifier);
-                if let Some(error) = check_bind_pattern(pattern, &value_ty, *span) {
+                if let Some(error) = check_bind_pattern(
+                    pattern,
+                    &value_ty,
+                    *span,
+                    *caller_def_id,
+                    type_symbols,
+                    def_table,
+                    def_owners,
+                ) {
                     errors.push(error);
                     covered.insert(*pattern_id);
                 }
@@ -2005,6 +2059,7 @@ fn check_pattern_obligations(
                 arm_id,
                 pattern,
                 scrutinee_ty,
+                caller_def_id: _,
                 ..
             } => {
                 let scrutinee_ty = resolve_term(scrutinee_ty, unifier);
@@ -2216,6 +2271,31 @@ fn is_external_opaque_access(
     caller_module_id != owner_module_id
 }
 
+fn is_def_accessible_from(
+    caller_def_id: Option<DefId>,
+    target_def_id: DefId,
+    def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
+) -> bool {
+    if def_table
+        .lookup_def(target_def_id)
+        .is_some_and(|def| def.is_public())
+    {
+        return true;
+    }
+
+    let Some(caller_def_id) = caller_def_id else {
+        return true;
+    };
+    let Some(caller_module_id) = def_owners.get(&caller_def_id) else {
+        return true;
+    };
+    let Some(target_module_id) = def_owners.get(&target_def_id) else {
+        return true;
+    };
+    caller_module_id == target_module_id
+}
+
 fn error_union_variant_names(ty: &Type) -> Option<Vec<String>> {
     let Type::ErrorUnion { ok_ty, err_tys } = ty else {
         return None;
@@ -2283,6 +2363,10 @@ fn check_bind_pattern(
     pattern: &BindPattern,
     value_ty: &Type,
     span: Span,
+    caller_def_id: Option<DefId>,
+    type_symbols: &HashMap<String, DefId>,
+    def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
 ) -> Option<TypeCheckError> {
     match &pattern.kind {
         BindPatternKind::Name { .. } => None,
@@ -2299,7 +2383,15 @@ fn check_bind_pattern(
                     );
                 }
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
-                    if let Some(error) = check_bind_pattern(child, child_ty, child.span) {
+                    if let Some(error) = check_bind_pattern(
+                        child,
+                        child_ty,
+                        child.span,
+                        caller_def_id,
+                        type_symbols,
+                        def_table,
+                        def_owners,
+                    ) {
                         return Some(error);
                     }
                 }
@@ -2333,7 +2425,15 @@ fn check_bind_pattern(
                     }
                 };
                 for child in patterns {
-                    if let Some(error) = check_bind_pattern(child, &child_ty, child.span) {
+                    if let Some(error) = check_bind_pattern(
+                        child,
+                        &child_ty,
+                        child.span,
+                        caller_def_id,
+                        type_symbols,
+                        def_table,
+                        def_owners,
+                    ) {
                         return Some(error);
                     }
                 }
@@ -2347,17 +2447,35 @@ fn check_bind_pattern(
         },
         BindPatternKind::Struct { fields, .. } => match value_ty {
             Type::Struct {
+                name,
                 fields: struct_fields,
                 ..
             } => {
+                if let Some(type_def_id) = type_def_id_for_nominal_name(name, type_symbols)
+                    && is_external_opaque_access(caller_def_id, type_def_id, def_table, def_owners)
+                {
+                    let diag_name = def_table
+                        .lookup_def(type_def_id)
+                        .map(|def| def.name.clone())
+                        .unwrap_or_else(|| compact_nominal_name(name));
+                    return Some(
+                        TypeCheckErrorKind::OpaquePatternDestructure(diag_name, span).into(),
+                    );
+                }
                 for field in fields {
                     let Some(struct_field) = struct_fields.iter().find(|f| f.name == field.name)
                     else {
                         continue;
                     };
-                    if let Some(error) =
-                        check_bind_pattern(&field.pattern, &struct_field.ty, field.span)
-                    {
+                    if let Some(error) = check_bind_pattern(
+                        &field.pattern,
+                        &struct_field.ty,
+                        field.span,
+                        caller_def_id,
+                        type_symbols,
+                        def_table,
+                        def_owners,
+                    ) {
                         return Some(error);
                     }
                 }
@@ -2496,6 +2614,7 @@ struct ResolvedPropertyAccess {
 enum PropertyResolution {
     Missing,
     Ambiguous,
+    Private,
 }
 
 fn property_owner_name(ty: &Type) -> Option<&str> {
@@ -2521,12 +2640,24 @@ fn resolve_property_access(
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
+    caller_def_id: Option<DefId>,
+    def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
 ) -> Result<ResolvedPropertyAccess, PropertyResolution> {
     if let Some(prop) = lookup_property(property_sigs, owner_ty, field) {
+        let readable = prop.getter.is_some_and(|def_id| {
+            is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
+        });
+        let writable = prop.setter.is_some_and(|def_id| {
+            is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
+        });
+        if (prop.getter.is_some() || prop.setter.is_some()) && !readable && !writable {
+            return Err(PropertyResolution::Private);
+        }
         return Ok(ResolvedPropertyAccess {
             ty: prop.ty.clone(),
-            readable: prop.getter.is_some(),
-            writable: prop.setter.is_some(),
+            readable,
+            writable,
         });
     }
 

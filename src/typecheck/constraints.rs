@@ -175,6 +175,7 @@ pub(crate) enum CallCallee {
 pub(crate) struct CallObligation {
     pub(crate) call_node: NodeId,
     pub(crate) span: Span,
+    pub(crate) caller_def_id: Option<DefId>,
     pub(crate) callee: CallCallee,
     pub(crate) callee_ty: Option<Type>,
     pub(crate) receiver: Option<Type>,
@@ -189,12 +190,14 @@ pub(crate) enum PatternObligation {
         pattern_id: NodeId,
         pattern: BindPattern,
         value_ty: Type,
+        caller_def_id: Option<DefId>,
         span: Span,
     },
     MatchArm {
         arm_id: NodeId,
         pattern: MatchPattern,
         scrutinee_ty: Type,
+        caller_def_id: Option<DefId>,
         span: Span,
     },
 }
@@ -1010,6 +1013,7 @@ impl<'a> ConstraintCollector<'a> {
                             arm_id: arm.id,
                             pattern: arm.pattern.clone(),
                             scrutinee_ty: scrutinee_ty.clone(),
+                            caller_def_id: self.current_callable_def_id(),
                             span: arm.span,
                         });
                     let arm_ty = self.collect_match_arm(arm, expected.clone());
@@ -1049,6 +1053,7 @@ impl<'a> ConstraintCollector<'a> {
                 self.out.call_obligations.push(CallObligation {
                     call_node: expr.id,
                     span: expr.span,
+                    caller_def_id: self.current_callable_def_id(),
                     callee: CallCallee::Method {
                         name: method_name.clone(),
                     },
@@ -1256,6 +1261,7 @@ impl<'a> ConstraintCollector<'a> {
         self.out.call_obligations.push(CallObligation {
             call_node: call_expr.id,
             span: call_expr.span,
+            caller_def_id: self.current_callable_def_id(),
             callee: callee_kind,
             callee_ty: Some(callee_ty),
             receiver: None,
@@ -1484,6 +1490,7 @@ impl<'a> ConstraintCollector<'a> {
             pattern_id: pattern.id,
             pattern: pattern.clone(),
             value_ty: value_ty.clone(),
+            caller_def_id: self.current_callable_def_id(),
             span: pattern.span,
         });
 

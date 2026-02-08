@@ -298,6 +298,12 @@ pub enum TypeCheckErrorKind {
     #[error("Function overload is ambiguous: {0}")]
     OverloadAmbiguous(String, Span),
 
+    #[error("Cannot access private callable: {0}")]
+    CallableNotAccessible(String, Span),
+
+    #[error("Cannot access private property: {0}")]
+    PropertyNotAccessible(String, Span),
+
     #[error("Type {1} does not satisfy trait bound {0}")]
     TraitBoundNotSatisfied(String, Type, Span),
 
@@ -312,6 +318,9 @@ pub enum TypeCheckErrorKind {
 
     #[error("len() target must be an lvalue")]
     LenTargetNotLvalue(Span),
+
+    #[error("Cannot destructure opaque type {0} outside its defining module")]
+    OpaquePatternDestructure(String, Span),
 }
 
 impl TypeCheckError {
@@ -416,11 +425,14 @@ impl TypeCheckError {
             TypeCheckErrorKind::DivisionByZero(span) => *span,
             TypeCheckErrorKind::OverloadNoMatch(_, span) => *span,
             TypeCheckErrorKind::OverloadAmbiguous(_, span) => *span,
+            TypeCheckErrorKind::CallableNotAccessible(_, span) => *span,
+            TypeCheckErrorKind::PropertyNotAccessible(_, span) => *span,
             TypeCheckErrorKind::TraitBoundNotSatisfied(_, _, span) => *span,
             TypeCheckErrorKind::SliceTargetNotArrayOrString(_, span) => *span,
             TypeCheckErrorKind::SliceTargetZeroDimArray(_, span) => *span,
             TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,
             TypeCheckErrorKind::LenTargetNotLvalue(span) => *span,
+            TypeCheckErrorKind::OpaquePatternDestructure(_, span) => *span,
         }
     }
 }
