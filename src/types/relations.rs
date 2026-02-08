@@ -66,6 +66,13 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
         return TypeAssignability::Exact;
     }
 
+    if array_to_slice_assignable(from, to)
+        || array_to_dyn_array_assignable(from, to)
+        || dyn_array_to_slice_assignable(from, to)
+    {
+        return TypeAssignability::Exact;
+    }
+
     if let Some(assignability) = nominal_instance_assignable(from, to) {
         return assignability;
     }
@@ -207,6 +214,29 @@ pub fn array_to_slice_assignable(from: &Type, to: &Type) -> bool {
         return false;
     };
     matches!(from.array_item_type(), Some(item) if item == **elem_ty)
+}
+
+pub fn array_to_dyn_array_assignable(from: &Type, to: &Type) -> bool {
+    let Type::DynArray { elem_ty } = to else {
+        return false;
+    };
+    matches!(from.array_item_type(), Some(item) if item == **elem_ty)
+}
+
+pub fn dyn_array_to_slice_assignable(from: &Type, to: &Type) -> bool {
+    let Type::DynArray {
+        elem_ty: from_elem_ty,
+    } = from
+    else {
+        return false;
+    };
+    let Type::Slice {
+        elem_ty: to_elem_ty,
+    } = to
+    else {
+        return false;
+    };
+    **from_elem_ty == **to_elem_ty
 }
 
 fn type_tag(ty: &Type) -> TypeTag {

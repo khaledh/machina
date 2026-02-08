@@ -320,6 +320,16 @@ fn solve_assignable(from: &Type, to: &Type, unifier: &mut TcUnifier) -> Result<(
     if let Some(result) = infer_array_to_slice_assignability(&from_applied, &to_applied, unifier) {
         return result;
     }
+    if let Some(result) =
+        infer_array_to_dyn_array_assignability(&from_applied, &to_applied, unifier)
+    {
+        return result;
+    }
+    if let Some(result) =
+        infer_dyn_array_to_slice_assignability(&from_applied, &to_applied, unifier)
+    {
+        return result;
+    }
 
     if !is_unresolved(&from_applied) && !is_unresolved(&to_applied) {
         return match type_assignable(&from_applied, &to_applied) {
@@ -358,6 +368,43 @@ fn infer_array_to_slice_assignability(
     Some(unifier.unify(&array_item_ty, slice_elem_ty))
 }
 
+fn infer_array_to_dyn_array_assignability(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+) -> Option<Result<(), TcUnifyError>> {
+    let Type::DynArray {
+        elem_ty: dyn_elem_ty,
+    } = to
+    else {
+        return None;
+    };
+    let Some(array_item_ty) = from.array_item_type() else {
+        return None;
+    };
+    Some(unifier.unify(&array_item_ty, dyn_elem_ty))
+}
+
+fn infer_dyn_array_to_slice_assignability(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+) -> Option<Result<(), TcUnifyError>> {
+    let Type::DynArray {
+        elem_ty: dyn_elem_ty,
+    } = from
+    else {
+        return None;
+    };
+    let Type::Slice {
+        elem_ty: slice_elem_ty,
+    } = to
+    else {
+        return None;
+    };
+    Some(unifier.unify(dyn_elem_ty, slice_elem_ty))
+}
+
 fn assignability_rank(from: &Type, to: &Type) -> i32 {
     if is_unresolved(from) || is_unresolved(to) {
         return 0;
@@ -380,7 +427,7 @@ fn join_variant_rank(ty: &Type) -> u8 {
     match ty {
         Type::Unit => 0,
         Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Range { .. } => 1,
-        Type::Tuple { .. } | Type::Array { .. } => 2,
+        Type::Tuple { .. } | Type::Array { .. } | Type::DynArray { .. } => 2,
         Type::Struct { .. } | Type::Enum { .. } => 3,
         Type::Fn { .. } => 4,
         Type::Slice { .. } | Type::Ref { .. } | Type::Heap { .. } => 5,
@@ -519,6 +566,13 @@ fn check_call_obligations(
                 named_call_candidates(name, obligation.arg_terms.len(), func_sigs)
             }
             CallCallee::Method { name } => {
+                if let Some(result) = try_solve_dyn_array_builtin_method(obligation, name, unifier)
+                {
+                    if let Err(err) = result {
+                        errors.push(err);
+                    }
+                    continue;
+                }
                 let receiver_ty = obligation
                     .receiver
                     .as_ref()
@@ -767,6 +821,54 @@ fn called_property_name(
     } else {
         None
     }
+}
+
+fn try_solve_dyn_array_builtin_method(
+    obligation: &CallObligation,
+    method_name: &str,
+    unifier: &mut TcUnifier,
+) -> Option<Result<(), TypeCheckError>> {
+    let receiver_term = obligation.receiver.as_ref()?;
+    let receiver_ty = resolve_term(receiver_term, unifier);
+    let Type::DynArray { elem_ty } = receiver_ty.peel_heap() else {
+        return None;
+    };
+
+    let arity = obligation.arg_terms.len();
+    let result = match method_name {
+        "append" => {
+            if arity != 1 {
+                return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
+                    method_name.to_string(),
+                    1,
+                    arity,
+                    obligation.span,
+                )
+                .into()));
+            }
+            let arg_ty = resolve_term(&obligation.arg_terms[0], unifier);
+            if let Err(_) = solve_assignable(&arg_ty, &elem_ty, unifier) {
+                return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
+                    1,
+                    (*elem_ty).clone(),
+                    arg_ty,
+                    obligation.span,
+                )
+                .into()));
+            }
+            unifier
+                .unify(&obligation.ret_ty, &Type::Unit)
+                .map_err(|err| unify_error_to_diag(err, obligation.span))
+        }
+        "len" | "capacity" | "is_empty" => Err(TypeCheckErrorKind::PropertyCalledAsMethod(
+            method_name.to_string(),
+            obligation.span,
+        )
+        .into()),
+        _ => return None,
+    };
+
+    Some(result)
 }
 
 struct InstantiatedSig {
@@ -1210,6 +1312,16 @@ fn check_expr_obligations(
                         }
                         let _ = unifier.unify(result, elem_ty);
                     }
+                    Type::DynArray { elem_ty } => {
+                        if indices.len() != 1 {
+                            errors.push(
+                                TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let _ = unifier.unify(result, elem_ty);
+                    }
                     Type::String => {
                         if indices.len() != 1 {
                             errors.push(
@@ -1289,6 +1401,14 @@ fn check_expr_obligations(
                         );
                     }
                     Type::Slice { elem_ty } => {
+                        let _ = unifier.unify(
+                            result,
+                            &Type::Slice {
+                                elem_ty: elem_ty.clone(),
+                            },
+                        );
+                    }
+                    Type::DynArray { elem_ty } => {
                         let _ = unifier.unify(
                             result,
                             &Type::Slice {
@@ -1617,6 +1737,19 @@ fn check_expr_obligations(
                         continue;
                     }
                 }
+                if let Type::DynArray { .. } = &owner_ty {
+                    match field.as_str() {
+                        "capacity" => {
+                            let _ = unifier.unify(result, &Type::uint(64));
+                            continue;
+                        }
+                        "is_empty" => {
+                            let _ = unifier.unify(result, &Type::Bool);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
                 match &owner_ty {
                     Type::Struct { name, fields } => {
                         if let Some(type_def_id) = type_def_id_for_nominal_name(name, type_symbols)
@@ -1722,6 +1855,14 @@ fn check_expr_obligations(
                 }
 
                 if field == "len" && is_len_target(&owner_ty) {
+                    errors
+                        .push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
+                    covered_exprs.insert(*stmt_id);
+                    continue;
+                }
+                if let Type::DynArray { .. } = &owner_ty
+                    && matches!(field.as_str(), "capacity" | "is_empty")
+                {
                     errors
                         .push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
                     covered_exprs.insert(*stmt_id);
@@ -2591,12 +2732,19 @@ fn is_unresolved(ty: &Type) -> bool {
 fn is_iterable(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Range { .. } | Type::Array { .. } | Type::Slice { .. } | Type::String
+        Type::Range { .. }
+            | Type::Array { .. }
+            | Type::DynArray { .. }
+            | Type::Slice { .. }
+            | Type::String
     )
 }
 
 fn is_len_target(ty: &Type) -> bool {
-    matches!(ty, Type::Array { .. } | Type::Slice { .. } | Type::String)
+    matches!(
+        ty,
+        Type::Array { .. } | Type::DynArray { .. } | Type::Slice { .. } | Type::String
+    )
 }
 
 fn peel_heap(ty: Type) -> Type {
@@ -2695,6 +2843,7 @@ fn iterable_elem_type(ty: &Type) -> Option<Type> {
     match ty {
         Type::Range { elem_ty } => Some((**elem_ty).clone()),
         Type::Array { elem_ty, .. } => Some((**elem_ty).clone()),
+        Type::DynArray { elem_ty } => Some((**elem_ty).clone()),
         Type::Slice { elem_ty } => Some((**elem_ty).clone()),
         Type::String => Some(Type::Char),
         _ => None,

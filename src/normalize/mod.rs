@@ -8,8 +8,10 @@ use crate::tree::normalized::build_module;
 use crate::tree::visit_mut;
 use crate::tree::visit_mut::VisitorMut;
 use crate::typecheck::type_map::{CallParam, CallSigMap, TypeMap};
-use crate::types::array_to_slice_assignable;
-use crate::types::{Type, TypeId};
+use crate::types::{
+    Type, TypeId, array_to_dyn_array_assignable, array_to_slice_assignable,
+    dyn_array_to_slice_assignable,
+};
 
 /// Normalize a typed tree into a normalized tree.
 ///
@@ -70,41 +72,60 @@ impl<'a> Normalizer<'a> {
             return;
         };
         for (param, arg) in call_sig.params.iter().zip(args.iter_mut()) {
-            self.coerce_array_to_slice(param, arg);
+            self.coerce_to_param(param, arg);
         }
     }
 
-    fn coerce_array_to_slice(&mut self, param: &CallParam, arg: &mut norm::CallArg) {
+    fn coerce_to_param(&mut self, param: &CallParam, arg: &mut norm::CallArg) {
         if !matches!(
             arg.mode,
             norm::CallArgMode::Default | norm::CallArgMode::InOut
         ) {
             return;
         }
+        self.coerce_expr_to_expected(&param.ty, &mut arg.expr);
+    }
+
+    fn coerce_kind_for(&self, from: &Type, to: &Type) -> Option<norm::CoerceKind> {
+        if array_to_slice_assignable(from, to) {
+            return Some(norm::CoerceKind::ArrayToSlice);
+        }
+        if array_to_dyn_array_assignable(from, to) {
+            return Some(norm::CoerceKind::ArrayToDynArray);
+        }
+        if dyn_array_to_slice_assignable(from, to) {
+            return Some(norm::CoerceKind::DynArrayToSlice);
+        }
+        None
+    }
+
+    fn coerce_expr_to_expected(&mut self, expected_ty: &Type, expr: &mut norm::Expr) {
+        let Some(from_ty) = self.type_map.lookup_node_type(expr.id) else {
+            return;
+        };
+        let Some(kind) = self.coerce_kind_for(&from_ty, expected_ty) else {
+            return;
+        };
         if matches!(
-            arg.expr.kind,
+            &expr.kind,
             norm::ExprKind::Coerce {
-                kind: norm::CoerceKind::ArrayToSlice,
+                kind: existing_kind,
                 ..
-            }
+            } if *existing_kind == kind
         ) {
             return;
         }
-        let Some(arg_ty) = self.type_map.lookup_node_type(arg.expr.id) else {
-            return;
-        };
-        if !array_to_slice_assignable(&arg_ty, &param.ty) {
-            return;
-        }
 
-        let span = arg.expr.span;
-        let inner = arg.expr.clone();
+        let span = expr.span;
+        let inner = expr.clone();
         let coerce_id = self.node_id_gen.new_id();
-        let ty_id = self.type_map.insert_node_type(coerce_id, param.ty.clone());
-        arg.expr = norm::Expr {
+        let ty_id = self
+            .type_map
+            .insert_node_type(coerce_id, expected_ty.clone());
+        *expr = norm::Expr {
             id: coerce_id,
             kind: norm::ExprKind::Coerce {
-                kind: norm::CoerceKind::ArrayToSlice,
+                kind,
                 expr: Box::new(inner),
             },
             ty: ty_id,
@@ -155,6 +176,27 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
             *item = norm::BlockItem::Expr(call_expr);
         } else {
             visit_mut::walk_block_item(self, item);
+
+            if let norm::BlockItem::Stmt(stmt) = item {
+                match &mut stmt.kind {
+                    norm::StmtExprKind::LetBind { pattern, value, .. }
+                    | norm::StmtExprKind::VarBind { pattern, value, .. } => {
+                        if let norm::BindPatternKind::Name { def_id, .. } = pattern.kind
+                            && let Some(def) = self.def_table.lookup_def(def_id)
+                            && let Some(expected_ty) = self.type_map.lookup_def_type(def)
+                        {
+                            self.coerce_expr_to_expected(&expected_ty, value);
+                        }
+                    }
+                    norm::StmtExprKind::Assign {
+                        assignee, value, ..
+                    } => {
+                        let expected_ty = self.type_map.type_table().get(assignee.ty).clone();
+                        self.coerce_expr_to_expected(&expected_ty, value);
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 

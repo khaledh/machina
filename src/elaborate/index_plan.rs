@@ -14,6 +14,7 @@ impl<'a> Elaborator<'a> {
                 dims: dims.iter().map(|dim| *dim as u64).collect(),
                 deref_count,
             },
+            Type::DynArray { .. } => sem::IndexBaseKind::DynArray { deref_count },
             Type::Slice { .. } => sem::IndexBaseKind::Slice { deref_count },
             Type::String => sem::IndexBaseKind::String { deref_count },
             _ => {
@@ -43,6 +44,7 @@ impl<'a> Elaborator<'a> {
                     deref_count,
                 }
             }
+            Type::DynArray { .. } => sem::SliceBaseKind::DynArray { deref_count },
             Type::Slice { .. } => sem::SliceBaseKind::Slice { deref_count },
             Type::String => sem::SliceBaseKind::String { deref_count },
             _ => {

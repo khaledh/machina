@@ -563,6 +563,9 @@ fn reseed_type_expr(type_expr: &mut res::TypeExpr, node_id_gen: &mut NodeIdGen) 
         res::TypeExprKind::Array { elem_ty_expr, .. } => {
             reseed_type_expr(elem_ty_expr, node_id_gen);
         }
+        res::TypeExprKind::DynArray { elem_ty_expr } => {
+            reseed_type_expr(elem_ty_expr, node_id_gen);
+        }
         res::TypeExprKind::Tuple { field_ty_exprs } => {
             for field in field_ty_exprs {
                 reseed_type_expr(field, node_id_gen);
@@ -1042,6 +1045,9 @@ fn type_expr_from_type(
         Type::Array { elem_ty, dims } => res::TypeExprKind::Array {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
             dims: dims.clone(),
+        },
+        Type::DynArray { elem_ty } => res::TypeExprKind::DynArray {
+            elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
         },
         Type::Tuple { field_tys } => res::TypeExprKind::Tuple {
             field_ty_exprs: field_tys

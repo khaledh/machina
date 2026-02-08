@@ -58,6 +58,9 @@ impl fmt::Display for Type {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))
             }
+            Type::DynArray { elem_ty } => {
+                write!(f, "{}[*]", elem_ty)
+            }
             Type::Tuple { field_tys } => {
                 let fields_str = field_tys.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "({})", fields_str.join(", "))

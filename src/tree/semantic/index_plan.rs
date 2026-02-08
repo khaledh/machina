@@ -8,6 +8,7 @@ pub struct IndexPlan {
 #[derive(Clone, Debug)]
 pub enum IndexBaseKind {
     Array { dims: Vec<u64>, deref_count: usize },
+    DynArray { deref_count: usize },
     Slice { deref_count: usize },
     String { deref_count: usize },
 }
@@ -21,6 +22,7 @@ pub struct SlicePlan {
 #[derive(Clone, Debug)]
 pub enum SliceBaseKind {
     Array { len: u64, deref_count: usize },
+    DynArray { deref_count: usize },
     Slice { deref_count: usize },
     String { deref_count: usize },
 }

@@ -328,6 +328,9 @@ pub enum TypeExprKind<D> {
         elem_ty_expr: Box<TypeExpr<D>>,
         dims: Vec<usize>,
     },
+    DynArray {
+        elem_ty_expr: Box<TypeExpr<D>>,
+    },
     Tuple {
         field_ty_exprs: Vec<TypeExpr<D>>,
     },
@@ -831,6 +834,8 @@ pub enum ExprKind<D, T = ()> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoerceKind {
     ArrayToSlice,
+    ArrayToDynArray,
+    DynArrayToSlice,
 }
 
 // -- Array literals ---

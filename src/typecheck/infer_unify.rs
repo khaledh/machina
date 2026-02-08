@@ -208,6 +208,7 @@ impl Unifier {
                 }
                 self.unify(&l_elem, &r_elem)
             }
+            (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r }) => self.unify(&l, &r),
 
             // Tuple types: must have same arity and unify field-wise
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
@@ -343,6 +344,9 @@ impl Unifier {
                     ));
                 }
                 self.unify_infer(&l_elem, &r_elem, is_infer)
+            }
+            (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r }) => {
+                self.unify_infer(&l, &r, is_infer)
             }
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
                 if l.len() != r.len() {

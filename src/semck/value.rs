@@ -141,6 +141,7 @@ impl<'a> ValueChecker<'a> {
                 self.check_type_expr(base_ty_expr);
             }
             TypeExprKind::Array { elem_ty_expr, .. } => self.check_type_expr(elem_ty_expr),
+            TypeExprKind::DynArray { elem_ty_expr } => self.check_type_expr(elem_ty_expr),
             TypeExprKind::Tuple { field_ty_exprs } => {
                 for field in field_ty_exprs {
                     self.check_type_expr(field);

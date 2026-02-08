@@ -520,6 +520,9 @@ pub fn walk_type_expr<M: TreeMapper + ?Sized>(
                 elem_ty_expr: Box::new(mapper.map_type_expr(elem_ty_expr, ctx)),
                 dims: dims.clone(),
             },
+            TypeExprKind::DynArray { elem_ty_expr } => TypeExprKind::DynArray {
+                elem_ty_expr: Box::new(mapper.map_type_expr(elem_ty_expr, ctx)),
+            },
             TypeExprKind::Tuple { field_ty_exprs } => TypeExprKind::Tuple {
                 field_ty_exprs: field_ty_exprs
                     .iter()

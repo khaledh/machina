@@ -25,11 +25,32 @@ impl<'a> Elaborator<'a> {
     ///
     /// The plan includes target dispatch (direct/indirect/intrinsic),
     /// argument lowering strategy, and post-call drop requirements.
-    pub(super) fn build_call_plan(&mut self, call_id: NodeId, call_sig: &CallSig) -> sem::CallPlan {
+    pub(super) fn build_call_plan(
+        &mut self,
+        call_id: NodeId,
+        method_name: Option<&str>,
+        call_sig: &CallSig,
+    ) -> sem::CallPlan {
         let def_id = call_sig.def_id;
         let mut target = def_id
             .map(sem::CallTarget::Direct)
             .unwrap_or(sem::CallTarget::Indirect);
+
+        if def_id.is_none()
+            && let Some(method_name) = method_name
+            && matches!(
+                call_sig
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| receiver.ty.peel_heap()),
+                Some(Type::DynArray { .. })
+            )
+        {
+            target = match method_name {
+                "append" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::DynArrayAppend),
+                _ => target,
+            };
+        }
 
         if let Some(def_id) = def_id {
             let def = self
@@ -241,6 +262,21 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::DynArrayAppend) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic dyn-array append missing receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic dyn-array append expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                ]
             }
             _ => {
                 // Default lowering passes inputs straight through in ABI order.

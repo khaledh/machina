@@ -3,8 +3,8 @@ mod relations;
 mod type_cache;
 
 pub use relations::{
-    TypeAssignability, ValueAssignability, array_to_slice_assignable, type_assignable,
-    value_assignable,
+    TypeAssignability, ValueAssignability, array_to_dyn_array_assignable,
+    array_to_slice_assignable, dyn_array_to_slice_assignable, type_assignable, value_assignable,
 };
 pub use type_cache::{TypeCache, TypeId};
 
@@ -42,6 +42,9 @@ pub enum Type {
     Array {
         elem_ty: Box<Type>,
         dims: Vec<usize>,
+    },
+    DynArray {
+        elem_ty: Box<Type>,
     },
     Tuple {
         field_tys: Vec<Type>,
@@ -167,6 +170,7 @@ impl PartialEq for Type {
                     dims: d2,
                 },
             ) => e1 == e2 && d1 == d2,
+            (Type::DynArray { elem_ty: e1 }, Type::DynArray { elem_ty: e2 }) => e1 == e2,
             (Type::Tuple { field_tys: f1 }, Type::Tuple { field_tys: f2 }) => f1 == f2,
             (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
             (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
@@ -236,6 +240,10 @@ impl Hash for Type {
                 10u8.hash(state);
                 elem_ty.hash(state);
                 dims.hash(state);
+            }
+            Type::DynArray { elem_ty } => {
+                18u8.hash(state);
+                elem_ty.hash(state);
             }
             Type::Tuple { field_tys } => {
                 11u8.hash(state);
@@ -391,6 +399,7 @@ impl Type {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
             }
+            Type::DynArray { .. } => 16,
             Type::Tuple { field_tys } => {
                 let total_size: usize = field_tys.iter().map(|f| f.size_of()).sum();
                 total_size
@@ -425,6 +434,7 @@ impl Type {
             Type::ErrorUnion { .. } => self.error_union_max_payload_align().max(8),
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
+            Type::DynArray { .. } => 8,
             Type::Tuple { field_tys } => field_tys.iter().map(|t| t.align_of()).max().unwrap_or(1),
             Type::Struct { fields, .. } => {
                 fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
@@ -450,6 +460,7 @@ impl Type {
         let is_compound = matches!(
             self,
             Type::Array { .. }
+                | Type::DynArray { .. }
                 | Type::Tuple { .. }
                 | Type::Struct { .. }
                 | Type::String
@@ -498,6 +509,7 @@ impl Type {
             Type::Heap { .. } => true,
             Type::String => true,
             Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
+            Type::DynArray { .. } => true,
             Type::Tuple { field_tys } => field_tys.iter().any(Type::needs_drop),
             Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.needs_drop()),
             Type::Enum { variants, .. } => variants
@@ -529,6 +541,13 @@ impl Type {
                 dims: dims[1..].to_vec(),
             })
         }
+    }
+
+    pub fn dyn_array_elem_type(&self) -> Option<Type> {
+        let Type::DynArray { elem_ty } = self else {
+            return None;
+        };
+        Some((**elem_ty).clone())
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
@@ -705,6 +724,9 @@ impl Type {
                 elem_ty: Box::new((*elem_ty).map(f)),
                 dims,
             },
+            Type::DynArray { elem_ty } => Type::DynArray {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
             Type::Tuple { field_tys } => Type::Tuple {
                 field_tys: field_tys.into_iter().map(|ty| ty.map(f)).collect(),
             },
@@ -811,6 +833,16 @@ impl Type {
                     Cow::Owned(Type::Array {
                         elem_ty: Box::new(mapped_elem.into_owned()),
                         dims: dims.clone(),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::DynArray { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::DynArray {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
                     })
                 } else {
                     Cow::Borrowed(self)
@@ -934,6 +966,7 @@ impl Type {
             }
             Type::Range { elem_ty }
             | Type::Array { elem_ty, .. }
+            | Type::DynArray { elem_ty }
             | Type::Slice { elem_ty }
             | Type::Heap { elem_ty }
             | Type::Ref { elem_ty, .. } => elem_ty.any(predicate),

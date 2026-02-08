@@ -307,6 +307,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         BaseView { ptr, len }
     }
 
+    /// Loads ptr/len from a dyn-array base stored at `base_addr`.
+    pub(super) fn load_dyn_array_view(
+        &mut self,
+        base_addr: ValueId,
+        elem_ptr_ty: IrTypeId,
+    ) -> BaseView {
+        let ptr = self.load_field(base_addr, 0, elem_ptr_ty);
+
+        // Dyn-array lengths are stored as u32; widen for index arithmetic.
+        let len_u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let len_u32 = self.load_field(base_addr, 1, len_u32_ty);
+        let len_u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self.builder.int_extend(len_u32, len_u64_ty, false);
+
+        BaseView { ptr, len }
+    }
+
     /// Builds ptr/len for array bases using a constant length.
     pub(super) fn load_array_view(
         &mut self,
@@ -744,8 +761,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
                 (ptr_ty, len_ty)
             }
+            Type::DynArray { elem_ty } => {
+                if len_bits != 64 {
+                    panic!("backend ptr/len lowering invalid len_bits {len_bits} for dyn array");
+                }
+                let elem_ir = self.type_lowerer.lower_type(elem_ty);
+                let ptr_ty = self.type_lowerer.ptr_to(elem_ir);
+                let len_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                (ptr_ty, len_ty)
+            }
             _ => {
-                panic!("compiler bug: backend ptr/len lowering expects string or slice, got {ty:?}")
+                panic!(
+                    "compiler bug: backend ptr/len lowering expects string, slice, or dyn array, got {ty:?}"
+                )
             }
         };
 
@@ -756,7 +784,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let ptr_val = self.load_field(slot.addr, 0, ptr_ty);
         let mut len_val = self.load_field(slot.addr, 1, len_ty);
-        if len_bits == 32 {
+        if len_bits == 32 || matches!(ty, Type::DynArray { .. }) {
             let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
             len_val = self.builder.int_extend(len_val, u64_ty, false);
         }

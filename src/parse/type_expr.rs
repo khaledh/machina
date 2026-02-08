@@ -203,6 +203,18 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         self.advance();
+        if self.curr_token.kind == TK::Star {
+            self.advance();
+            self.consume(&TK::RBracket)?;
+            return Ok(TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::DynArray {
+                    elem_ty_expr: Box::new(elem_ty_expr),
+                },
+                span: self.close(marker),
+            });
+        }
+
         let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
         self.consume(&TK::RBracket)?;
 

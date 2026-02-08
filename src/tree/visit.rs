@@ -261,6 +261,7 @@ pub fn walk_type_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_expr: &Ty
         }
         TypeExprKind::Refined { base_ty_expr, .. } => v.visit_type_expr(base_ty_expr),
         TypeExprKind::Array { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
+        TypeExprKind::DynArray { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Tuple { field_ty_exprs } => {
             for field in field_ty_exprs {
                 v.visit_type_expr(field);

@@ -402,6 +402,9 @@ impl<T> fmt::Display for model::TypeExprKind<T> {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;
             }
+            model::TypeExprKind::DynArray { elem_ty_expr } => {
+                write!(f, "DynArray({})", elem_ty_expr)?;
+            }
             model::TypeExprKind::Tuple { field_ty_exprs } => {
                 let field_ty_exprs_str = field_ty_exprs
                     .iter()
@@ -1048,6 +1051,8 @@ impl fmt::Display for CoerceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             CoerceKind::ArrayToSlice => "ArrayToSlice",
+            CoerceKind::ArrayToDynArray => "ArrayToDynArray",
+            CoerceKind::DynArrayToSlice => "DynArrayToSlice",
         };
         write!(f, "{}", name)
     }

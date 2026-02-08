@@ -127,6 +127,26 @@ fn test_parse_multidim_array_type_3d() {
 }
 
 #[test]
+fn test_parse_dyn_array_type() {
+    let source = r#"
+        fn test() -> u64[*] {
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::DynArray { elem_ty_expr } => match &elem_ty_expr.kind {
+            TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
+            _ => panic!("Expected named element type"),
+        },
+        _ => panic!("Expected dyn-array type"),
+    }
+}
+
+#[test]
 fn test_parse_refined_type_multiple_refinements() {
     let source = r#"
         type NonZeroSmall = u64: bounds(0, 10) & nonzero;

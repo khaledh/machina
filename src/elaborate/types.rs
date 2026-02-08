@@ -91,6 +91,9 @@ impl<'a> Elaborator<'a> {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
                 dims: dims.clone(),
             },
+            Type::DynArray { elem_ty } => sem::TypeExprKind::DynArray {
+                elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
+            },
             Type::Tuple { field_tys } => sem::TypeExprKind::Tuple {
                 field_ty_exprs: field_tys
                     .iter()

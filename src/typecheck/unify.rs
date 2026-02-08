@@ -152,6 +152,7 @@ impl TcUnifier {
                 }
                 self.unify(&l_elem, &r_elem)
             }
+            (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r }) => self.unify(&l, &r),
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
                 if l.len() != r.len() {
                     return Err(TcUnifyError::Mismatch(

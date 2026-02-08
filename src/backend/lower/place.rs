@@ -41,9 +41,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
             sem::PlaceExprKind::StructField { target, field } => {
                 let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
-                if field == "len"
-                    && let Some(place_addr) =
-                        self.lower_builtin_len_place(base_addr, &base_ty, place.ty)
+                if let Some(place_addr) =
+                    self.lower_builtin_property_place(base_addr, &base_ty, field, place.ty)
                 {
                     return Ok(place_addr);
                 }
@@ -131,6 +130,29 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             value_ty: u8_ty,
                         })
                     }
+                    sem::IndexBaseKind::DynArray { deref_count } => {
+                        if indices.len() != 1 {
+                            panic!("backend dyn-array index expects exactly one index");
+                        }
+
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::DynArray { elem_ty } = base_ty else {
+                            panic!(
+                                "backend dyn-array index on non-dyn-array base {:?}",
+                                base_ty
+                            );
+                        };
+
+                        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                        let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
+                        let index_val = self.lower_linear_value_expr(&indices[0])?;
+                        let addr = self.index_with_bounds(view, index_val, elem_ptr_ty);
+                        Ok(PlaceAddr {
+                            addr,
+                            value_ty: elem_ir_ty,
+                        })
+                    }
                 }
             }
         }
@@ -153,33 +175,64 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok((base.addr, curr_ty))
     }
 
-    fn lower_builtin_len_place(
+    fn lower_builtin_property_place(
         &mut self,
         base_addr: ValueId,
         base_ty: &Type,
+        field: &str,
         place_ty: crate::types::TypeId,
     ) -> Option<PlaceAddr> {
         let target_ir_ty = self.type_lowerer.lower_type_id(place_ty);
-        let len_value = match base_ty {
-            Type::Array { dims, .. } => {
-                let len = dims.first().copied().unwrap_or(0) as i128;
-                self.build_int_const_for_ty(len, target_ir_ty)
-            }
-            Type::Slice { .. } => {
-                let src_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let raw = self.load_field(base_addr, 1, src_ty);
-                self.cast_int_if_needed(raw, src_ty, target_ir_ty)
-            }
-            Type::String => {
-                let src_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                let raw = self.load_field(base_addr, 1, src_ty);
-                self.cast_int_if_needed(raw, src_ty, target_ir_ty)
-            }
+        let value = match field {
+            "len" => match base_ty {
+                Type::Array { dims, .. } => {
+                    let len = dims.first().copied().unwrap_or(0) as i128;
+                    self.build_int_const_for_ty(len, target_ir_ty)
+                }
+                Type::Slice { .. } => {
+                    let src_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                    let raw = self.load_field(base_addr, 1, src_ty);
+                    self.cast_int_if_needed(raw, src_ty, target_ir_ty)
+                }
+                Type::DynArray { .. } => {
+                    let src_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let raw = self.load_field(base_addr, 1, src_ty);
+                    self.cast_int_if_needed(raw, src_ty, target_ir_ty)
+                }
+                Type::String => {
+                    let src_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let raw = self.load_field(base_addr, 1, src_ty);
+                    self.cast_int_if_needed(raw, src_ty, target_ir_ty)
+                }
+                _ => return None,
+            },
+            "capacity" => match base_ty {
+                Type::DynArray { .. } => {
+                    let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let cap_raw = self.load_field(base_addr, 2, u32_ty);
+                    let cap_mask = self.builder.const_int(0x7fff_ffff, false, 32, u32_ty);
+                    let cap = self
+                        .builder
+                        .binop(crate::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
+                    self.cast_int_if_needed(cap, u32_ty, target_ir_ty)
+                }
+                _ => return None,
+            },
+            "is_empty" => match base_ty {
+                Type::DynArray { .. } => {
+                    let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let len = self.load_field(base_addr, 1, u32_ty);
+                    let zero = self.builder.const_int(0, false, 32, u32_ty);
+                    self.builder
+                        .cmp(crate::ir::CmpOp::Eq, len, zero, target_ir_ty)
+                }
+                _ => return None,
+            },
             _ => return None,
         };
 
         let addr = self.alloc_local_addr(target_ir_ty);
-        self.builder.store(addr, len_value);
+        self.builder.store(addr, value);
         Some(PlaceAddr {
             addr,
             value_ty: target_ir_ty,
@@ -196,7 +249,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn cast_int_if_needed(
+    pub(super) fn cast_int_if_needed(
         &mut self,
         value: ValueId,
         from_ty: IrTypeId,

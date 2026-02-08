@@ -495,6 +495,9 @@ impl<'a> Parser<'a> {
                 elem_ty_expr: Box::new(self.clone_type_expr_with_new_ids(elem_ty_expr)),
                 dims: dims.clone(),
             },
+            TypeExprKind::DynArray { elem_ty_expr } => TypeExprKind::DynArray {
+                elem_ty_expr: Box::new(self.clone_type_expr_with_new_ids(elem_ty_expr)),
+            },
             TypeExprKind::Tuple { field_ty_exprs } => TypeExprKind::Tuple {
                 field_ty_exprs: field_ty_exprs
                     .iter()

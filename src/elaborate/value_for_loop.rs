@@ -89,6 +89,7 @@ impl<'a> Elaborator<'a> {
                     Type::Array { .. } => iter_ty
                         .array_item_type()
                         .unwrap_or_else(|| panic!("compiler bug: empty array dims")),
+                    Type::DynArray { elem_ty } => (**elem_ty).clone(),
                     Type::Slice { elem_ty } => (**elem_ty).clone(),
                     _ => panic!("compiler bug: invalid for-iter type"),
                 };
@@ -108,6 +109,10 @@ impl<'a> Elaborator<'a> {
                         self.make_u64_lit(len as u64, span)
                     }
                     Type::Slice { .. } => {
+                        let iter_place = self.make_var_place(&iter_info, span);
+                        self.make_len_expr(iter_place, span)
+                    }
+                    Type::DynArray { .. } => {
                         let iter_place = self.make_var_place(&iter_info, span);
                         self.make_len_expr(iter_place, span)
                     }
@@ -160,7 +165,7 @@ impl<'a> Elaborator<'a> {
             self.make_load_expr(cur_place, u64_ty.clone(), span)
         } else {
             let iter_place = iter_place
-                .unwrap_or_else(|| panic!("compiler bug: missing iter place for array/slice loop"));
+                .unwrap_or_else(|| panic!("compiler bug: missing iter place for iterable loop"));
             let cur_place = self.make_var_place(&cur_info, span);
             let cur_value = self.make_load_expr(cur_place, u64_ty.clone(), span);
             let index_place = self.make_index_place(iter_place, cur_value, elem_ty.clone(), span);

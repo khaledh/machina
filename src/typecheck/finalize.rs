@@ -164,6 +164,12 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             }
             CallCallee::Dynamic { .. } => None,
         };
+        let builtin = match &obligation.callee {
+            CallCallee::Method { name } => {
+                resolve_builtin_dyn_array_method_call(engine, obligation.receiver.as_ref(), name)
+            }
+            _ => None,
+        };
         let (def_id, receiver, params, generic_inst) = if let Some(resolved) = resolved {
             (
                 Some(resolved.def_id),
@@ -171,6 +177,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                 resolved.params,
                 resolved.inst,
             )
+        } else if let Some((receiver, params)) = builtin {
+            (None, Some(receiver), params, None)
         } else {
             let params = arg_types
                 .into_iter()
@@ -557,6 +565,7 @@ fn match_template_type(
         (Type::String, Type::String) => true,
         (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
         | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
+        | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
         | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => {
             match_template_type(l, r, bindings)
         }
@@ -946,6 +955,40 @@ fn resolve_method_call(
         span,
         expected_ret,
     ))
+}
+
+fn resolve_builtin_dyn_array_method_call(
+    engine: &TypecheckEngine,
+    receiver: Option<&Type>,
+    method_name: &str,
+) -> Option<(CallParam, Vec<CallParam>)> {
+    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
+    let Type::DynArray { elem_ty } = receiver_ty.peel_heap() else {
+        return None;
+    };
+    let elem_ty = (*elem_ty).clone();
+
+    let receiver_param = match method_name {
+        "append" => CallParam {
+            mode: crate::tree::ParamMode::InOut,
+            ty: receiver_ty.clone(),
+        },
+        _ => return None,
+    };
+
+    let params = match method_name {
+        "append" => vec![CallParam {
+            mode: if elem_ty.needs_drop() {
+                crate::tree::ParamMode::Sink
+            } else {
+                crate::tree::ParamMode::In
+            },
+            ty: elem_ty,
+        }],
+        _ => return None,
+    };
+
+    Some((receiver_param, params))
 }
 
 fn resolve_method_call_by_def_id(

@@ -245,6 +245,63 @@ fn test_len_intrinsic_on_string() {
 }
 
 #[test]
+fn test_dyn_array_append_and_properties_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            var arr: u64[*] = [1, 2, 3];
+            arr.append(4);
+            let cap = arr.capacity;
+            let empty = arr.is_empty;
+            if empty { 0 } else { cap + arr[3] }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_dyn_array_property_called_as_method_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            var arr: u64[*] = [1, 2, 3];
+            arr.capacity()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_dyn_array_to_slice_coercion_typecheck() {
+    let source = r#"
+        fn first(xs: u64[]) -> u64 {
+            xs[0]
+        }
+
+        fn test() -> u64 {
+            var arr: u64[*] = [1, 2, 3];
+            first(arr)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_dyn_array_append_drop_elem_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            var arr: string[*] = ["a"];
+            arr.append("b");
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_if_without_else_requires_unit() {
     let source = r#"
         fn test() -> () {

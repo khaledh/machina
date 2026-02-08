@@ -200,7 +200,7 @@ impl<'a> Elaborator<'a> {
                 params: call_sig.params.clone(),
             };
 
-            let plan = self.build_call_plan(expr.id, &plan_sig);
+            let plan = self.build_call_plan(expr.id, Some("invoke"), &plan_sig);
             self.type_map.insert_call_plan(expr.id, plan);
 
             let receiver = sem::MethodReceiver::ValueExpr(Box::new(self.elab_value(callee)));
@@ -217,7 +217,7 @@ impl<'a> Elaborator<'a> {
                 args,
             }
         } else {
-            let plan = self.build_call_plan(expr.id, &call_sig);
+            let plan = self.build_call_plan(expr.id, None, &call_sig);
             self.type_map.insert_call_plan(expr.id, plan);
 
             let args = call_sig
@@ -264,7 +264,7 @@ impl<'a> Elaborator<'a> {
             .zip(args.iter())
             .map(|(param, arg)| self.elab_call_arg(param, arg))
             .collect();
-        let plan = self.build_call_plan(expr.id, &call_sig);
+        let plan = self.build_call_plan(expr.id, Some(method_name), &call_sig);
         self.type_map.insert_call_plan(expr.id, plan);
         sem::ValueExprKind::MethodCall {
             receiver,
@@ -375,7 +375,7 @@ impl<'a> Elaborator<'a> {
                 }
             }
             norm::ExprKind::Coerce { kind, expr: inner } => {
-                if matches!(kind, CoerceKind::ArrayToSlice) {
+                if matches!(kind, CoerceKind::ArrayToSlice | CoerceKind::DynArrayToSlice) {
                     let target_ty = self.type_map.type_table().get(inner.ty).clone();
                     let slice_ty = self.type_map.type_table().get(expr.ty).clone();
                     let plan = self.build_slice_plan(&target_ty, &slice_ty);

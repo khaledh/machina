@@ -422,6 +422,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let view = self.load_string_view(base_addr);
                         (view.ptr, view.len)
                     }
+                    sem::SliceBaseKind::DynArray { deref_count } => {
+                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                        let Type::DynArray { .. } = base_ty else {
+                            panic!("backend slice on non-dyn-array base {:?}", base_ty);
+                        };
+                        let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
+                        (view.ptr, view.len)
+                    }
                 };
 
                 // Evaluate bounds (default start=0, end=base_len).
@@ -492,6 +500,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     Type::String => {
                         let place_addr = self.lower_place_addr(place)?;
                         let view = self.load_string_view(place_addr.addr);
+                        Ok(view.len.into())
+                    }
+                    Type::DynArray { .. } => {
+                        let place_addr = self.lower_place_addr(place)?;
+                        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+                        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+                        let view = self.load_dyn_array_view(
+                            place_addr.addr,
+                            u8_ptr_ty,
+                        );
                         Ok(view.len.into())
                     }
                     other => panic!("backend len on unsupported type {:?}", other),
@@ -585,6 +603,142 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             base_len,
                             start_val,
                             end_val,
+                        )
+                        .into())
+                }
+                CoerceKind::ArrayToDynArray => {
+                    let target_dyn_ty = self.type_map.type_table().get(expr.ty).clone();
+                    let Type::DynArray { elem_ty } = target_dyn_ty else {
+                        panic!("backend coerce array-to-dyn-array has non-dyn-array type");
+                    };
+
+                    let source_array_ty = self.type_map.type_table().get(inner.ty).clone();
+                    let Type::Array { dims, .. } = source_array_ty else {
+                        panic!(
+                            "backend coerce array-to-dyn-array expects array source, got {:?}",
+                            source_array_ty
+                        );
+                    };
+                    let len = dims
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| panic!("backend array-to-dyn-array source missing dims"));
+                    let len_u32 = u32::try_from(len).unwrap_or_else(|_| {
+                        panic!("backend array length {} exceeds u32::MAX for dyn array", len)
+                    });
+
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                    let dyn_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+                    let dyn_slot = self.alloc_value_slot(dyn_ir_ty);
+
+                    // Lower the source as an addressable array value.
+                    let source_addr = match &inner.kind {
+                        sem::ValueExprKind::Load { place }
+                        | sem::ValueExprKind::Move { place }
+                        | sem::ValueExprKind::ImplicitMove { place } => {
+                            self.lower_place_addr(place)?.addr
+                        }
+                        _ => {
+                            let value = eval_value!(inner);
+                            let array_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+                            let addr = self.alloc_local_addr(array_ir_ty);
+                            let array_sem_ty = self.type_map.type_table().get(inner.ty);
+                            self.store_value_into_addr(addr, value, array_sem_ty, array_ir_ty);
+                            addr
+                        }
+                    };
+
+                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                    let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                    let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+                    let elem_size = layout.size() as u64;
+                    let elem_align = layout.align() as u64;
+
+                    let data_ptr = if len_u32 == 0 || elem_size == 0 {
+                        let zero = self.builder.const_int(0, false, 64, u64_ty);
+                        self.builder.cast(CastKind::IntToPtr, zero, elem_ptr_ty)
+                    } else {
+                        let bytes = self
+                            .builder
+                            .const_int((len_u32 as u64 * elem_size) as i128, false, 64, u64_ty);
+                        let align = self.builder.const_int(elem_align as i128, false, 64, u64_ty);
+                        let dst_ptr =
+                            self.builder.call(Callee::Runtime(RuntimeFn::Alloc), vec![bytes, align], elem_ptr_ty);
+
+                        let zero = self.builder.const_int(0, false, 64, u64_ty);
+                        let src_ptr = self.builder.index_addr(source_addr, zero, elem_ptr_ty);
+                        self.builder.memcopy(dst_ptr, src_ptr, bytes);
+                        dst_ptr
+                    };
+
+                    let len_val = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
+                    let cap_raw = (len_u32 | 0x8000_0000) as i128;
+                    let cap_val = self.builder.const_int(cap_raw, false, 32, u32_ty);
+
+                    self.store_field(dyn_slot.addr, 0, elem_ptr_ty, data_ptr);
+                    self.store_field(dyn_slot.addr, 1, u32_ty, len_val);
+                    self.store_field(dyn_slot.addr, 2, u32_ty, cap_val);
+
+                    Ok(self.load_slot(&dyn_slot).into())
+                }
+                CoerceKind::DynArrayToSlice => {
+                    let plan = self.slice_plan(expr.id);
+
+                    let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
+                    else {
+                        panic!("backend coerce dyn-array-to-slice has non-slice type");
+                    };
+
+                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+
+                    let (base_ptr, base_len) = match plan.base {
+                        sem::SliceBaseKind::DynArray { deref_count } => {
+                            let base_ty = self.type_map.type_table().get(inner.ty).clone();
+                            let (base_addr, base_ty) = match &inner.kind {
+                                sem::ValueExprKind::Load { place }
+                                | sem::ValueExprKind::Move { place }
+                                | sem::ValueExprKind::ImplicitMove { place } => {
+                                    self.resolve_deref_base(place, deref_count)?
+                                }
+                                _ => {
+                                    let value = eval_value!(inner);
+                                    if deref_count == 0 {
+                                        let dyn_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+                                        let addr = self.alloc_local_addr(dyn_ir_ty);
+                                        let dyn_sem_ty = self.type_map.type_table().get(inner.ty);
+                                        self.store_value_into_addr(addr, value, dyn_sem_ty, dyn_ir_ty);
+                                        (addr, base_ty)
+                                    } else {
+                                        self.resolve_deref_base_value(value, base_ty, deref_count)
+                                    }
+                                }
+                            };
+
+                            let Type::DynArray { .. } = base_ty else {
+                                panic!("backend coerce dyn-array-to-slice on {:?}", base_ty);
+                            };
+                            let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
+                            (view.ptr, view.len)
+                        }
+                        other => {
+                            panic!("backend coerce dyn-array-to-slice with base {:?}", other);
+                        }
+                    };
+
+                    let start_val = self.builder.const_int(0, false, 64, u64_ty);
+                    let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+                    Ok(self
+                        .emit_slice_value(
+                            slice_ty,
+                            elem_ptr_ty,
+                            u64_ty,
+                            base_ptr,
+                            base_len,
+                            start_val,
+                            base_len,
                         )
                         .into())
                 }

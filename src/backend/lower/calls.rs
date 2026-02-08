@@ -251,6 +251,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 sem::IntrinsicCall::StringLen => {
                     panic!("backend call expr cannot lower string len without a receiver");
                 }
+                sem::IntrinsicCall::DynArrayAppend => {
+                    panic!("backend call expr cannot lower dyn-array intrinsic without a receiver");
+                }
             },
             sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
         };
@@ -319,15 +322,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Callee::Value(callee_value)
             }
             sem::CallTarget::Intrinsic(intrinsic) => {
-                if matches!(intrinsic, sem::IntrinsicCall::StringLen) {
-                    // String length is a field load; avoid emitting a runtime call.
-                    return self
-                        .lower_string_len_method(expr.span, receiver, &receiver_value)
-                        .map(Some);
-                }
-                panic!(
-                    "backend method call intrinsic {:?} not supported",
-                    intrinsic
+                return self.lower_method_intrinsic(
+                    expr,
+                    receiver,
+                    args,
+                    &call_plan,
+                    &mut receiver_value,
+                    intrinsic,
                 );
             }
             sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
@@ -361,6 +362,114 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.clear_sink_drop_flags(&call_plan, Some(&receiver_value), &arg_values);
         self.mark_out_init_flags(args, &arg_values);
         Ok(Some(result))
+    }
+
+    fn lower_method_intrinsic(
+        &mut self,
+        expr: &sem::ValueExpr,
+        receiver: &sem::MethodReceiver,
+        args: &[sem::CallArg],
+        call_plan: &sem::CallPlan,
+        receiver_value: &mut CallInputValue,
+        intrinsic: &sem::IntrinsicCall,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        match intrinsic {
+            sem::IntrinsicCall::StringLen => {
+                // String length is a field load; avoid emitting a runtime call.
+                self.lower_string_len_method(expr.span, receiver, receiver_value)
+                    .map(Some)
+            }
+            sem::IntrinsicCall::DynArrayAppend => {
+                let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend dyn-array append expects exactly one arg, got {}",
+                        arg_values.len()
+                    );
+                }
+
+                let (dyn_addr, dyn_ty) = self.resolve_dyn_array_receiver(receiver_value);
+                let Type::DynArray { elem_ty } = dyn_ty else {
+                    panic!("backend dyn-array append expects dyn-array receiver");
+                };
+
+                let arg = &mut arg_values[0];
+                let elem_addr = if arg.is_addr {
+                    arg.value
+                } else {
+                    let addr = self.materialize_value_addr(arg.value, &arg.ty);
+                    arg.value = addr;
+                    arg.is_addr = true;
+                    addr
+                };
+
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let size_val = self
+                    .builder
+                    .const_int(layout.size() as i128, false, 64, u64_ty);
+                let align_val = self
+                    .builder
+                    .const_int(layout.align() as i128, false, 64, u64_ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let result = self.builder.call(
+                    Callee::Runtime(RuntimeFn::DynArrayAppendElem),
+                    vec![dyn_addr, elem_addr, size_val, align_val],
+                    ret_ty,
+                );
+
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
+        }
+    }
+
+    fn resolve_dyn_array_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
+        let (_base_ty, deref_count) = receiver_value.ty.peel_heap_with_count();
+        let (mut addr, ty) = if receiver_value.is_addr {
+            let mut addr = receiver_value.value;
+            let mut curr_ty = receiver_value.ty.clone();
+            for _ in 0..deref_count {
+                let elem_ty = match curr_ty {
+                    Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                    other => panic!(
+                        "backend dyn-array receiver expects heap/ref, got {:?}",
+                        other
+                    ),
+                };
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                addr = self.builder.load(addr, ptr_ir_ty);
+                curr_ty = (*elem_ty).clone();
+            }
+            (addr, curr_ty)
+        } else {
+            self.resolve_deref_base_value(
+                receiver_value.value,
+                receiver_value.ty.clone(),
+                deref_count,
+            )
+        };
+
+        let Type::DynArray { .. } = ty else {
+            panic!(
+                "backend dyn-array receiver resolved to non-dyn-array {:?}",
+                receiver_value.ty
+            );
+        };
+
+        // Value receivers of plain dyn-array type need a temporary slot so
+        // field loads/indexing can treat the base as an address.
+        if !receiver_value.is_addr && deref_count == 0 {
+            addr = self.materialize_value_addr(addr, &ty);
+        }
+
+        (addr, ty)
     }
 
     fn emit_call_drops(

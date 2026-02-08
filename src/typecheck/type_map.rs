@@ -243,6 +243,20 @@ fn resolve_type_expr_impl(
                 dims: dims.clone(),
             })
         }
+        res::TypeExprKind::DynArray { elem_ty_expr } => {
+            let elem_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                elem_ty_expr,
+                type_params,
+                type_args,
+                in_progress,
+                allow_error_union,
+            )?;
+            Ok(Type::DynArray {
+                elem_ty: Box::new(elem_ty),
+            })
+        }
         res::TypeExprKind::Tuple { field_ty_exprs } => {
             let field_tys = field_ty_exprs
                 .iter()
