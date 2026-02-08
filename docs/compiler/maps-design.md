@@ -4,6 +4,8 @@
 
 Proposed.
 
+Companion foundation: `docs/compiler/hash-eq-design.md`.
+
 ## Goals
 
 - Add a built-in hash table map with lightweight literal syntax:
@@ -57,6 +59,7 @@ In expression position, for `{ ... }`:
   - unify all keys to `K`
   - unify all values to `V`
 - Empty map literal is `map<K, V>{}`; bare `{}` never denotes a map.
+- Key hash/equality capability and diagnostics follow `hash-eq-design.md`.
 - V1 key constraints (same as set element constraints):
   - integer types, `bool`, `char`, `string`
 - Value type `V` has no special restriction beyond normal type rules.

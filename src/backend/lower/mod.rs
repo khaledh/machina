@@ -8,6 +8,7 @@ mod branching;
 mod calls;
 mod drop_glue;
 mod drops;
+mod equality;
 mod error;
 mod fstring;
 mod globals;

@@ -519,12 +519,14 @@ impl<'a> TypeLowerer<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct EnumLayout {
     pub tag_ty: IrTypeId,  // u32 tag type
     pub blob_ty: IrTypeId, // blob of bytes for the payload
     pub variants: Vec<EnumVariantLayout>,
 }
 
+#[derive(Clone)]
 pub struct EnumVariantLayout {
     pub name: String,
     pub tag: u32,                 // index of the variant

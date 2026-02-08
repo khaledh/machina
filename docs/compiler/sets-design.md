@@ -4,6 +4,8 @@
 
 Proposed.
 
+Companion foundation: `docs/compiler/hash-eq-design.md`.
+
 ## Goals
 
 - Add a built-in set type that is easy to use for common cases.
@@ -66,6 +68,7 @@ ambiguity for singleton sets by requiring `{e,}`.
 - `{e1, e2, ...}` infers `set<T>` where all elements are assignable to one unified `T`.
 - Duplicate elements are allowed syntactically; dedup is runtime behavior.
 - Empty set literal is `set<T>{}`; bare `{}` never denotes a set.
+- Hash/equality capability and diagnostics follow `hash-eq-design.md`.
 - Keys allowed in V1:
   - integer types, `bool`, `char`
 - Other element types produce a clear type error:

@@ -240,14 +240,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 for elem_expr in elems.iter() {
                     let value = eval_value!(elem_expr);
                     let elem_value_ty = self.type_map.type_table().get(elem_expr.ty).clone();
-                    let elem_addr = if elem_value_ty.is_scalar() {
-                        self.materialize_value_addr(value, &elem_value_ty)
-                    } else {
-                        panic!(
-                            "backend set literal element must be scalar in v1, got {:?}",
-                            elem_value_ty
-                        );
-                    };
+                    let elem_addr = self.materialize_value_addr(value, &elem_value_ty);
                     let _ = self.builder.call(
                         Callee::Runtime(RuntimeFn::SetInsertElem),
                         vec![slot.addr, elem_addr, elem_size, elem_align],
@@ -425,6 +418,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         self.emit_div_by_zero_check(rhs, sem_ty);
                     }
                     return Ok(self.builder.binop(binop, lhs, rhs, ty).into());
+                }
+                if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+                    let operand_ty = self.type_map.type_table().get(left.ty).clone();
+                    let eq_value = self.lower_eq_value(lhs, rhs, &operand_ty);
+                    let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+                    let value = if matches!(op, BinaryOp::Eq) {
+                        eq_value
+                    } else {
+                        self.builder.unop(UnOp::Not, eq_value, bool_ty)
+                    };
+                    return Ok(value.into());
                 }
                 if let Some(cmp) = map_cmp(*op) {
                     return Ok(self.builder.cmp(cmp, lhs, rhs, ty).into());

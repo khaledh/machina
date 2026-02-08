@@ -18,6 +18,7 @@ use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding};
+use crate::typecheck::capability::{ensure_equatable, ensure_hashable};
 use crate::typecheck::constraints::{
     CallCallee, CallObligation, Constraint, ConstraintReason, ExprObligation,
 };
@@ -888,9 +889,13 @@ fn try_solve_set_builtin_method(
         return None;
     };
 
-    if !is_unresolved(&elem_ty) && !is_supported_set_elem_type(&elem_ty) {
-        return Some(Err(TypeCheckErrorKind::SetElementTypeUnsupported(
+    if !is_unresolved(&elem_ty)
+        && let Err(failure) = ensure_hashable(&elem_ty)
+    {
+        return Some(Err(TypeCheckErrorKind::TypeNotHashable(
             (*elem_ty).clone(),
+            failure.path,
+            failure.failing_ty,
             obligation.span,
         )
         .into()));
@@ -1123,9 +1128,17 @@ fn check_expr_obligations(
                             covered_exprs.insert(*expr_id);
                         }
                     }
-                    crate::tree::resolved::BinaryOp::Eq
-                    | crate::tree::resolved::BinaryOp::Ne
-                    | crate::tree::resolved::BinaryOp::Lt
+                    crate::tree::resolved::BinaryOp::Eq | crate::tree::resolved::BinaryOp::Ne => {
+                        if let Some(err) = first_non_equatable_cmp_operand(
+                            &left_ty,
+                            &right_ty,
+                            op_span(obligation),
+                        ) {
+                            errors.push(err);
+                            covered_exprs.insert(*expr_id);
+                        }
+                    }
+                    crate::tree::resolved::BinaryOp::Lt
                     | crate::tree::resolved::BinaryOp::Gt
                     | crate::tree::resolved::BinaryOp::LtEq
                     | crate::tree::resolved::BinaryOp::GtEq => {
@@ -1574,10 +1587,15 @@ fn check_expr_obligations(
                 if is_unresolved(&elem_ty_for_diag) {
                     continue;
                 }
-                if !is_supported_set_elem_type(&elem_ty_for_diag) {
+                if let Err(failure) = ensure_hashable(&elem_ty_for_diag) {
                     errors.push(
-                        TypeCheckErrorKind::SetElementTypeUnsupported(elem_ty_for_diag, *span)
-                            .into(),
+                        TypeCheckErrorKind::TypeNotHashable(
+                            elem_ty_for_diag,
+                            failure.path,
+                            failure.failing_ty,
+                            *span,
+                        )
+                        .into(),
                     );
                     covered_exprs.insert(*expr_id);
                 }
@@ -2820,6 +2838,40 @@ fn first_non_int_cmp_operand(left: &Type, right: &Type, span: Span) -> Option<Ty
     None
 }
 
+fn first_non_equatable_cmp_operand(
+    left: &Type,
+    right: &Type,
+    span: Span,
+) -> Option<TypeCheckError> {
+    if !is_unresolved(left)
+        && let Err(failure) = ensure_equatable(left)
+    {
+        return Some(
+            TypeCheckErrorKind::TypeNotEquatable(
+                left.clone(),
+                failure.path,
+                failure.failing_ty,
+                span,
+            )
+            .into(),
+        );
+    }
+    if !is_unresolved(right)
+        && let Err(failure) = ensure_equatable(right)
+    {
+        return Some(
+            TypeCheckErrorKind::TypeNotEquatable(
+                right.clone(),
+                failure.path,
+                failure.failing_ty,
+                span,
+            )
+            .into(),
+        );
+    }
+    None
+}
+
 fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if *left != Type::Bool && !is_unresolved(left) {
         return Some(TypeCheckErrorKind::LogicalOperandNotBoolean(left.clone(), span).into());
@@ -2894,10 +2946,6 @@ fn is_len_target(ty: &Type) -> bool {
             | Type::Slice { .. }
             | Type::String
     )
-}
-
-fn is_supported_set_elem_type(ty: &Type) -> bool {
-    matches!(ty, Type::Int { .. } | Type::Bool | Type::Char)
 }
 
 fn peel_heap(ty: Type) -> Type {

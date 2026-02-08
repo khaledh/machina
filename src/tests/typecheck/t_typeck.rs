@@ -175,7 +175,7 @@ fn test_set_property_called_as_method_rejected() {
 #[test]
 fn test_set_unsupported_element_type_rejected() {
     let source = r#"
-        type Foo = { x: u64 }
+        type Foo = { x: u64^ }
 
         fn test() -> u64 {
             let s = set<Foo>{};
@@ -186,10 +186,94 @@ fn test_set_unsupported_element_type_rejected() {
     let result = type_check_source(source);
     assert!(result.is_err());
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e.kind(),
-            TypeCheckErrorKind::SetElementTypeUnsupported(_, _)
-        )));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotHashable(_, _, _, _)))
+        );
+    }
+}
+
+#[test]
+fn test_equality_bool_operands_typecheck() {
+    let source = r#"
+        fn test() -> bool {
+            true == false
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_equality_struct_operands_typecheck() {
+    let source = r#"
+        type Pair = { a: u64, b: bool }
+
+        fn test() -> bool {
+            let x = Pair { a: 1, b: true };
+            let y = Pair { a: 1, b: true };
+            x == y
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_equality_enum_operands_typecheck() {
+    let source = r#"
+        type E = A(u64, bool) | B
+
+        fn test() -> bool {
+            let x = E::A(3, true);
+            let y = E::A(3, true);
+            x == y
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_equality_non_equatable_operand_rejected() {
+    let source = r#"
+        fn test() -> bool {
+            let s = set<u64>{1, 2};
+            s == s
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotEquatable(_, _, _, _)))
+        );
+    }
+}
+
+#[test]
+fn test_set_non_hashable_reports_root_path() {
+    let source = r#"
+        type Inner = { p: u64^ }
+        type Foo = { inner: Inner }
+
+        fn test() -> u64 {
+            let s = set<Foo>{};
+            s.len
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| match e.kind() {
+            TypeCheckErrorKind::TypeNotHashable(_, path, _, _) => path == "value",
+            _ => false,
+        }));
     }
 }
 
