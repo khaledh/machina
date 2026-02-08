@@ -201,7 +201,7 @@ Add tests under `src/tests/*`:
 - Typecheck tests for subset propagation and exhaustiveness.
 - Negative tests for forbidden union positions.
 - Normalize/lowering tests for union control-flow and payload behavior.
-- End-to-end examples under `examples/*.mc`.
+- End-to-end examples under subfolders in `examples/` (e.g. `examples/error_handling/*.mc`).
 
 ## Rollout
 

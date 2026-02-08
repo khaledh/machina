@@ -246,7 +246,7 @@ fn main() -> u64 {
 During development, run the compiler via cargo (prefix `cargo mcc` or
 `cargo run --`):
 ```
-cargo mcc run examples/for_array.mc
+cargo mcc run examples/control_flow/for_array.mc
 ```
 
 The compiler supports three modes:

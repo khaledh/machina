@@ -16,10 +16,15 @@ fn trace_opts() -> CompileOptions {
     }
 }
 
-fn load_example(name: &str) -> String {
+fn load_fixture(name: &str) -> String {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = repo_root.join("examples").join(format!("{name}.mc"));
-    std::fs::read_to_string(&path).expect("failed to read example source")
+    let path = repo_root
+        .join("tests")
+        .join("fixtures")
+        .join("runtime")
+        .join("drop")
+        .join(format!("{name}.mc"));
+    std::fs::read_to_string(&path).expect("failed to read runtime drop fixture")
 }
 
 fn parse_trace(output: &std::process::Output) -> (HashMap<String, usize>, HashMap<String, usize>) {
@@ -76,8 +81,8 @@ fn assert_no_leak_or_double_free(output: &std::process::Output) {
     }
 }
 
-fn assert_example_no_leak(name: &str) {
-    let source = load_example(name);
+fn assert_fixture_no_leak(name: &str) {
+    let source = load_fixture(name);
     let run = run_program_with_opts(name, &source, trace_opts());
     assert_eq!(run.status.code(), Some(0));
     assert_no_leak_or_double_free(&run);
@@ -85,50 +90,50 @@ fn assert_example_no_leak(name: &str) {
 
 #[test]
 fn test_drop_trace_linked_list() {
-    assert_example_no_leak("linked_list");
+    assert_fixture_no_leak("linked_list");
 }
 
 #[test]
 fn test_drop_trace_sink_params() {
-    assert_example_no_leak("sink_params");
+    assert_fixture_no_leak("sink_params");
 }
 
 #[test]
 fn test_drop_trace_partial_init_drop() {
-    assert_example_no_leak("partial_init_drop");
+    assert_fixture_no_leak("partial_init_drop");
 }
 
 #[test]
 fn test_drop_trace_string_append() {
-    assert_example_no_leak("string_append");
+    assert_fixture_no_leak("string_append");
 }
 
 #[test]
 fn test_drop_trace_methods() {
-    assert_example_no_leak("methods");
+    assert_fixture_no_leak("methods");
 }
 
 #[test]
 fn test_drop_trace_heap_alloc() {
-    assert_example_no_leak("heap_alloc");
+    assert_fixture_no_leak("heap_alloc");
 }
 
 #[test]
 fn test_drop_trace_out_params() {
-    assert_example_no_leak("out_params");
+    assert_fixture_no_leak("out_params");
 }
 
 #[test]
 fn test_drop_trace_inout_heap_arg() {
-    assert_example_no_leak("inout_heap_arg");
+    assert_fixture_no_leak("inout_heap_arg");
 }
 
 #[test]
 fn test_drop_trace_var_decl_drop() {
-    assert_example_no_leak("var_decl_drop");
+    assert_fixture_no_leak("var_decl_drop");
 }
 
 #[test]
 fn test_drop_trace_drop_path() {
-    assert_example_no_leak("drop_path");
+    assert_fixture_no_leak("drop_path");
 }
