@@ -714,6 +714,11 @@ pub enum ExprKind<D, T = ()> {
         elem_ty: Option<TypeExpr<D>>,
         elems: Vec<Expr<D, T>>,
     },
+    MapLit {
+        key_ty: Option<TypeExpr<D>>,
+        value_ty: Option<TypeExpr<D>>,
+        entries: Vec<MapLitEntry<D, T>>,
+    },
     TupleLit(Vec<Expr<D, T>>),
     StructLit {
         name: String,
@@ -863,6 +868,14 @@ impl<D, T> ArrayLitInit<D, T> {
 pub struct StructLitField<D, T = ()> {
     pub id: NodeId,
     pub name: String,
+    pub value: Expr<D, T>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct MapLitEntry<D, T = ()> {
+    pub id: NodeId,
+    pub key: Expr<D, T>,
     pub value: Expr<D, T>,
     pub span: Span,
 }

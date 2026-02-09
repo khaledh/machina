@@ -113,6 +113,11 @@ pub(crate) enum ExprObligation {
         elem_ty: Type,
         span: Span,
     },
+    MapKeyType {
+        expr_id: NodeId,
+        key_ty: Type,
+        span: Span,
+    },
     ForIter {
         stmt_id: NodeId,
         iter: Type,
@@ -787,6 +792,54 @@ impl<'a> ConstraintCollector<'a> {
                 self.out.expr_obligations.push(ExprObligation::SetElemType {
                     expr_id: expr.id,
                     elem_ty: elem_term.clone(),
+                    span: expr.span,
+                });
+            }
+            ExprKind::MapLit {
+                key_ty,
+                value_ty,
+                entries,
+            } => {
+                let key_term = if let Some(explicit_key_ty) = key_ty {
+                    self.resolve_type_in_scope(explicit_key_ty)
+                        .unwrap_or_else(|_| self.fresh_var_term())
+                } else {
+                    self.fresh_var_term()
+                };
+                let value_term = if let Some(explicit_value_ty) = value_ty {
+                    self.resolve_type_in_scope(explicit_value_ty)
+                        .unwrap_or_else(|_| self.fresh_var_term())
+                } else {
+                    self.fresh_var_term()
+                };
+
+                for entry in entries {
+                    let key_expr_ty = self.collect_expr(&entry.key, Some(key_term.clone()));
+                    self.push_assignable(
+                        key_expr_ty,
+                        key_term.clone(),
+                        ConstraintReason::Expr(entry.key.id, entry.key.span),
+                    );
+
+                    let value_expr_ty = self.collect_expr(&entry.value, Some(value_term.clone()));
+                    self.push_assignable(
+                        value_expr_ty,
+                        value_term.clone(),
+                        ConstraintReason::Expr(entry.value.id, entry.value.span),
+                    );
+                }
+
+                self.push_eq(
+                    expr_ty.clone(),
+                    Type::Map {
+                        key_ty: Box::new(key_term.clone()),
+                        value_ty: Box::new(value_term.clone()),
+                    },
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.out.expr_obligations.push(ExprObligation::MapKeyType {
+                    expr_id: expr.id,
+                    key_ty: key_term,
                     span: expr.span,
                 });
             }

@@ -306,6 +306,14 @@ pub trait TreeMapper {
         walk_struct_lit_field(self, field, ctx)
     }
 
+    fn map_map_lit_entry(
+        &mut self,
+        entry: &MapLitEntry<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> MapLitEntry<Self::OutD, Self::OutT> {
+        walk_map_lit_entry(self, entry, ctx)
+    }
+
     fn map_struct_update_field(
         &mut self,
         field: &StructUpdateField<Self::InD, Self::InT>,
@@ -1077,6 +1085,18 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
                 .map(|elem| mapper.map_expr(elem, ctx))
                 .collect(),
         },
+        ExprKind::MapLit {
+            key_ty,
+            value_ty,
+            entries,
+        } => ExprKind::MapLit {
+            key_ty: key_ty.as_ref().map(|ty| mapper.map_type_expr(ty, ctx)),
+            value_ty: value_ty.as_ref().map(|ty| mapper.map_type_expr(ty, ctx)),
+            entries: entries
+                .iter()
+                .map(|entry| mapper.map_map_lit_entry(entry, ctx))
+                .collect(),
+        },
         ExprKind::TupleLit(items) => ExprKind::TupleLit(
             items
                 .iter()
@@ -1289,6 +1309,19 @@ pub fn walk_struct_lit_field<M: TreeMapper + ?Sized>(
         name: field.name.clone(),
         value: mapper.map_expr(&field.value, ctx),
         span: field.span,
+    }
+}
+
+pub fn walk_map_lit_entry<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    entry: &MapLitEntry<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> MapLitEntry<M::OutD, M::OutT> {
+    MapLitEntry {
+        id: entry.id,
+        key: mapper.map_expr(&entry.key, ctx),
+        value: mapper.map_expr(&entry.value, ctx),
+        span: entry.span,
     }
 }
 

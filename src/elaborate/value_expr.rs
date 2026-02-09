@@ -300,6 +300,22 @@ impl<'a> Elaborator<'a> {
                 elem_ty: elem_ty.clone(),
                 elems: elems.iter().map(|elem| self.elab_value(elem)).collect(),
             },
+            norm::ExprKind::MapLit {
+                key_ty,
+                value_ty,
+                entries,
+            } => sem::ValueExprKind::MapLit {
+                key_ty: key_ty.clone(),
+                value_ty: value_ty.clone(),
+                entries: entries
+                    .iter()
+                    .map(|entry| sem::MapLitEntry {
+                        key: self.elab_value(&entry.key),
+                        value: self.elab_value(&entry.value),
+                        span: entry.span,
+                    })
+                    .collect(),
+            },
             norm::ExprKind::TupleLit(items) => sem::ValueExprKind::TupleLit(
                 items.iter().map(|item| self.elab_value(item)).collect(),
             ),

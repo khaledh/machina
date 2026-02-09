@@ -102,6 +102,7 @@ fn check_capability_at_path(
         | Type::String
         | Type::DynArray { .. }
         | Type::Set { .. }
+        | Type::Map { .. }
         | Type::Slice { .. }
         | Type::Heap { .. }
         | Type::Ref { .. }

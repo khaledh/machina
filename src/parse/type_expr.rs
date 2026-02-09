@@ -30,7 +30,7 @@ impl<'a> Parser<'a> {
 
     fn token_can_start_type(kind: &TK, tokens: &[Token], pos: usize) -> bool {
         match kind {
-            TK::KwFn | TK::Ident(_) => true,
+            TK::KwFn | TK::KwSet | TK::KwMap | TK::Ident(_) => true,
             TK::LParen => true,
             TK::LBracket => false,
             _ => {
@@ -159,6 +159,19 @@ impl<'a> Parser<'a> {
                     id: self.id_gen.new_id(),
                     kind: TypeExprKind::Named {
                         ident: "set".to_string(),
+                        def_id: (),
+                        type_args,
+                    },
+                    span: self.close(marker),
+                })
+            }
+            TK::KwMap => {
+                self.advance();
+                let type_args = self.parse_type_args()?;
+                Ok(TypeExpr {
+                    id: self.id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: "map".to_string(),
                         def_id: (),
                         type_args,
                     },

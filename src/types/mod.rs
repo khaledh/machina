@@ -49,6 +49,10 @@ pub enum Type {
     Set {
         elem_ty: Box<Type>,
     },
+    Map {
+        key_ty: Box<Type>,
+        value_ty: Box<Type>,
+    },
     Tuple {
         field_tys: Vec<Type>,
     },
@@ -175,6 +179,16 @@ impl PartialEq for Type {
             ) => e1 == e2 && d1 == d2,
             (Type::DynArray { elem_ty: e1 }, Type::DynArray { elem_ty: e2 }) => e1 == e2,
             (Type::Set { elem_ty: e1 }, Type::Set { elem_ty: e2 }) => e1 == e2,
+            (
+                Type::Map {
+                    key_ty: lk,
+                    value_ty: lv,
+                },
+                Type::Map {
+                    key_ty: rk,
+                    value_ty: rv,
+                },
+            ) => lk == rk && lv == rv,
             (Type::Tuple { field_tys: f1 }, Type::Tuple { field_tys: f2 }) => f1 == f2,
             (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
             (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
@@ -252,6 +266,11 @@ impl Hash for Type {
             Type::Set { elem_ty } => {
                 19u8.hash(state);
                 elem_ty.hash(state);
+            }
+            Type::Map { key_ty, value_ty } => {
+                20u8.hash(state);
+                key_ty.hash(state);
+                value_ty.hash(state);
             }
             Type::Tuple { field_tys } => {
                 11u8.hash(state);
@@ -409,6 +428,7 @@ impl Type {
             }
             Type::DynArray { .. } => 16,
             Type::Set { .. } => 16,
+            Type::Map { .. } => 16,
             Type::Tuple { field_tys } => {
                 let total_size: usize = field_tys.iter().map(|f| f.size_of()).sum();
                 total_size
@@ -445,6 +465,7 @@ impl Type {
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::DynArray { .. } => 8,
             Type::Set { .. } => 8,
+            Type::Map { .. } => 8,
             Type::Tuple { field_tys } => field_tys.iter().map(|t| t.align_of()).max().unwrap_or(1),
             Type::Struct { fields, .. } => {
                 fields.iter().map(|f| f.ty.align_of()).max().unwrap_or(1)
@@ -472,6 +493,7 @@ impl Type {
             Type::Array { .. }
                 | Type::DynArray { .. }
                 | Type::Set { .. }
+                | Type::Map { .. }
                 | Type::Tuple { .. }
                 | Type::Struct { .. }
                 | Type::String
@@ -522,6 +544,7 @@ impl Type {
             Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
             Type::DynArray { .. } => true,
             Type::Set { .. } => true,
+            Type::Map { .. } => true,
             Type::Tuple { field_tys } => field_tys.iter().any(Type::needs_drop),
             Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.needs_drop()),
             Type::Enum { variants, .. } => variants
@@ -742,6 +765,10 @@ impl Type {
             Type::Set { elem_ty } => Type::Set {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
+            Type::Map { key_ty, value_ty } => Type::Map {
+                key_ty: Box::new((*key_ty).map(f)),
+                value_ty: Box::new((*value_ty).map(f)),
+            },
             Type::Tuple { field_tys } => Type::Tuple {
                 field_tys: field_tys.into_iter().map(|ty| ty.map(f)).collect(),
             },
@@ -873,6 +900,18 @@ impl Type {
                     Cow::Borrowed(self)
                 }
             }
+            Type::Map { key_ty, value_ty } => {
+                let mapped_key = key_ty.map_cow(f);
+                let mapped_value = value_ty.map_cow(f);
+                if matches!(mapped_key, Cow::Owned(_)) || matches!(mapped_value, Cow::Owned(_)) {
+                    Cow::Owned(Type::Map {
+                        key_ty: Box::new(mapped_key.into_owned()),
+                        value_ty: Box::new(mapped_value.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
             Type::Tuple { field_tys } => {
                 let mapped_fields = field_tys.iter().map(|ty| ty.map_cow(f)).collect::<Vec<_>>();
                 if mapped_fields.iter().any(|ty| matches!(ty, Cow::Owned(_))) {
@@ -996,6 +1035,7 @@ impl Type {
             | Type::Slice { elem_ty }
             | Type::Heap { elem_ty }
             | Type::Ref { elem_ty, .. } => elem_ty.any(predicate),
+            Type::Map { key_ty, value_ty } => key_ty.any(predicate) || value_ty.any(predicate),
             Type::Tuple { field_tys } => field_tys.iter().any(|ty| ty.any(predicate)),
             Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.any(predicate)),
             Type::Enum { variants, .. } => variants

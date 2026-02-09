@@ -60,6 +60,7 @@ pub type MatchPattern = model::MatchPattern<()>;
 pub type MatchPatternBinding = model::MatchPatternBinding<()>;
 
 pub type ArrayLitInit = model::ArrayLitInit<()>;
+pub type MapLitEntry = model::MapLitEntry<()>;
 pub type StructLitField = model::StructLitField<()>;
 pub type StructUpdateField = model::StructUpdateField<()>;
 

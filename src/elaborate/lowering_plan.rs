@@ -74,6 +74,12 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_value_expr(elem);
                 }
             }
+            sem::ValueExprKind::MapLit { entries, .. } => {
+                for entry in entries {
+                    self.visit_value_expr(&entry.key);
+                    self.visit_value_expr(&entry.value);
+                }
+            }
             sem::ValueExprKind::TupleLit(items) => {
                 for item in items {
                     self.visit_value_expr(item);
@@ -270,6 +276,9 @@ impl<'a> LoweringPlanBuilder<'a> {
                 }
                 sem::ArrayLitInit::Repeat(expr, _) => self.is_linear_value_expr(expr),
             },
+            sem::ValueExprKind::MapLit { entries, .. } => entries.iter().all(|entry| {
+                self.is_linear_value_expr(&entry.key) && self.is_linear_value_expr(&entry.value)
+            }),
 
             sem::ValueExprKind::TupleLit(items) => {
                 items.iter().all(|item| self.is_linear_value_expr(item))

@@ -210,6 +210,31 @@ impl<'a> TypeLowerer<'a> {
                 ];
                 self.ir_type_cache.add(IrTypeKind::Struct { fields })
             }
+            // Map is lowered as { ptr, len, cap } with pointer to key/value pairs.
+            Type::Map { key_ty, value_ty } => {
+                let key = self.lower_type(key_ty);
+                let value = self.lower_type(value_ty);
+                let pair = self.ir_type_cache.add(IrTypeKind::Tuple {
+                    fields: vec![key, value],
+                });
+                let ptr = self.ptr_to(pair);
+                let u32 = self.lower_type(&Type::uint(32));
+                let fields = vec![
+                    IrStructField {
+                        name: "ptr".to_string(),
+                        ty: ptr,
+                    },
+                    IrStructField {
+                        name: "len".to_string(),
+                        ty: u32,
+                    },
+                    IrStructField {
+                        name: "cap".to_string(),
+                        ty: u32,
+                    },
+                ];
+                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+            }
 
             // Compound types: recursively convert element/field types.
             Type::Tuple { field_tys } => {

@@ -421,6 +421,11 @@ pub enum ValueExprKind {
         elem_ty: Option<TypeExpr>,
         elems: Vec<ValueExpr>,
     },
+    MapLit {
+        key_ty: Option<TypeExpr>,
+        value_ty: Option<TypeExpr>,
+        entries: Vec<MapLitEntry>,
+    },
     TupleLit(Vec<ValueExpr>),
     StructLit {
         name: String,
@@ -543,6 +548,13 @@ impl ArrayLitInit {
 #[derive(Clone, Debug)]
 pub struct StructLitField {
     pub name: String,
+    pub value: ValueExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct MapLitEntry {
+    pub key: ValueExpr,
     pub value: ValueExpr,
     pub span: Span,
 }

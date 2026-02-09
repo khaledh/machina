@@ -214,6 +214,9 @@ impl NrvoSafetyChecker {
                 ArrayLitInit::Repeat(expr, _) => self.check_expr(expr, false),
             },
             VEK::SetLit { elems, .. } => elems.iter().all(|e| self.check_expr(e, false)),
+            VEK::MapLit { entries, .. } => entries.iter().all(|entry| {
+                self.check_expr(&entry.key, false) && self.check_expr(&entry.value, false)
+            }),
 
             VEK::Slice { target, start, end } => {
                 let target_ok = self.check_place_lvalue(target);

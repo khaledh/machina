@@ -191,6 +191,11 @@ fn has_nontrivial_drop(ty: &Type) -> bool {
         | Type::Set { elem_ty } => {
             has_nontrivial_drop(elem_ty) || matches!(ty, Type::DynArray { .. } | Type::Set { .. })
         }
+        Type::Map { key_ty, value_ty } => {
+            has_nontrivial_drop(key_ty)
+                || has_nontrivial_drop(value_ty)
+                || matches!(ty, Type::Map { .. })
+        }
         Type::Tuple { field_tys } => field_tys.iter().any(has_nontrivial_drop),
         Type::Struct { fields, .. } => fields.iter().any(|field| has_nontrivial_drop(&field.ty)),
         Type::Enum { variants, .. } => variants
@@ -473,6 +478,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Type::Array { dims, .. } => self.drop_array(addr, ty, dims),
             Type::DynArray { elem_ty } => self.drop_dyn_array(addr, elem_ty),
             Type::Set { elem_ty } => self.drop_set(addr, elem_ty),
+            Type::Map { .. } => self.drop_map(addr),
             Type::Enum { variants, .. } => self.drop_enum(addr, ty, variants),
             Type::ErrorUnion { ok_ty, err_tys } => {
                 let variants = std::iter::once(EnumVariant {
@@ -628,6 +634,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         });
 
         self.builder.select_block(ret_bb);
+        Ok(())
+    }
+
+    fn drop_map(&mut self, addr: ValueId) -> Result<(), LowerToIrError> {
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::MapDrop), vec![addr], unit_ty);
         Ok(())
     }
 

@@ -195,6 +195,84 @@ fn test_set_unsupported_element_type_rejected() {
 }
 
 #[test]
+fn test_map_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = {1: 10, 2: 20};
+            if m.contains_key(1) { m.len } else { 0 }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_typed_empty_map_literal_type() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, u64>{};
+            m.len
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_map_methods_and_properties_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            var m = map<u64, string>{1: "one"};
+            let inserted = m.insert(2, "two");
+            let has_one = m.contains_key(1);
+            let removed = m.remove(1);
+            let cap = m.capacity;
+            let empty0 = m.is_empty;
+            m.clear();
+            let empty1 = m.is_empty;
+            if inserted && has_one && removed && !empty0 && empty1 { cap } else { m.len }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_map_property_called_as_method_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, bool>{1: true};
+            m.capacity()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_map_unsupported_key_type_rejected() {
+    let source = r#"
+        type Foo = { x: u64^ }
+
+        fn test() -> u64 {
+            let m = map<Foo, u64>{};
+            m.len
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotHashable(_, _, _, _)))
+        );
+    }
+}
+
+#[test]
 fn test_equality_bool_operands_typecheck() {
     let source = r#"
         fn test() -> bool {

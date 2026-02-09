@@ -250,6 +250,57 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 Ok(self.load_slot(&slot).into())
             }
+            sem::ValueExprKind::MapLit { entries, .. } => {
+                let map_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+                let Type::Map { key_ty, value_ty } = map_sem_ty else {
+                    panic!("backend map literal has non-map type");
+                };
+
+                let map_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let slot = self.alloc_value_slot(map_ir_ty);
+
+                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+                let key_ptr_ty = self.type_lowerer.ptr_to(key_ir_ty);
+                let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+                let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, key_ptr_ty);
+                let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+
+                // Start with an empty, non-owned map; runtime insert promotes to owned.
+                self.store_field(slot.addr, 0, key_ptr_ty, zero_ptr);
+                self.store_field(slot.addr, 1, u32_ty, zero_u32);
+                self.store_field(slot.addr, 2, u32_ty, zero_u32);
+
+                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+                let key_size = self
+                    .builder
+                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
+                let value_size = self
+                    .builder
+                    .const_int(value_layout.size() as i128, false, 64, u64_ty);
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+
+                for entry in entries.iter() {
+                    let key_value = eval_value!(&entry.key);
+                    let key_value_ty = self.type_map.type_table().get(entry.key.ty).clone();
+                    let key_addr = self.materialize_value_addr(key_value, &key_value_ty);
+
+                    let value_value = eval_value!(&entry.value);
+                    let value_value_ty = self.type_map.type_table().get(entry.value.ty).clone();
+                    let value_addr = self.materialize_value_addr(value_value, &value_value_ty);
+
+                    let _ = self.builder.call(
+                        Callee::Runtime(RuntimeFn::MapInsertOrAssign),
+                        vec![slot.addr, key_addr, value_addr, key_size, value_size],
+                        bool_ty,
+                    );
+                }
+
+                Ok(self.load_slot(&slot).into())
+            }
 
             sem::ValueExprKind::TupleLit(items) => {
                 // Allocate a local for the tuple and get its address

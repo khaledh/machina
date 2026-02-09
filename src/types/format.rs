@@ -64,6 +64,9 @@ impl fmt::Display for Type {
             Type::Set { elem_ty } => {
                 write!(f, "set<{}>", elem_ty)
             }
+            Type::Map { key_ty, value_ty } => {
+                write!(f, "map<{}, {}>", key_ty, value_ty)
+            }
             Type::Tuple { field_tys } => {
                 let fields_str = field_tys.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "({})", fields_str.join(", "))

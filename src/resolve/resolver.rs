@@ -639,6 +639,18 @@ impl SymbolResolver {
                     span: Span::default(),
                 },
             });
+            resolver.add_built_in_symbol("map", false, |def_id| SymbolKind::TypeAlias {
+                def_id,
+                ty_expr: TypeExpr {
+                    id: NodeId(0),
+                    kind: TypeExprKind::Named {
+                        ident: "map".to_string(),
+                        def_id: (),
+                        type_args: Vec::new(),
+                    },
+                    span: Span::default(),
+                },
+            });
 
             resolver.check_requires(module);
             resolver.populate_decls(module);

@@ -257,7 +257,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 sem::IntrinsicCall::SetInsert
                 | sem::IntrinsicCall::SetContains
                 | sem::IntrinsicCall::SetRemove
-                | sem::IntrinsicCall::SetClear => {
+                | sem::IntrinsicCall::SetClear
+                | sem::IntrinsicCall::MapInsert
+                | sem::IntrinsicCall::MapContainsKey
+                | sem::IntrinsicCall::MapRemove
+                | sem::IntrinsicCall::MapClear => {
                     panic!("backend call expr cannot lower set intrinsic without a receiver");
                 }
             },
@@ -540,6 +544,133 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.mark_out_init_flags(args, &arg_values);
                 Ok(Some(result))
             }
+            sem::IntrinsicCall::MapInsert => {
+                let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 2 {
+                    panic!(
+                        "backend map insert expects exactly two args, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (map_addr, map_ty) = self.resolve_map_receiver(receiver_value);
+                let Type::Map { key_ty, value_ty } = map_ty else {
+                    panic!("backend map insert expects map receiver");
+                };
+
+                let key_arg = &mut arg_values[0];
+                let key_addr = if key_arg.is_addr {
+                    key_arg.value
+                } else {
+                    let addr = self.materialize_value_addr(key_arg.value, &key_arg.ty);
+                    key_arg.value = addr;
+                    key_arg.is_addr = true;
+                    addr
+                };
+
+                let value_arg = &mut arg_values[1];
+                let value_addr = if value_arg.is_addr {
+                    value_arg.value
+                } else {
+                    let addr = self.materialize_value_addr(value_arg.value, &value_arg.ty);
+                    value_arg.value = addr;
+                    value_arg.is_addr = true;
+                    addr
+                };
+
+                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let key_size = self
+                    .builder
+                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
+                let value_size =
+                    self.builder
+                        .const_int(value_layout.size() as i128, false, 64, u64_ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let result = self.builder.call(
+                    Callee::Runtime(RuntimeFn::MapInsertOrAssign),
+                    vec![map_addr, key_addr, value_addr, key_size, value_size],
+                    ret_ty,
+                );
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
+            sem::IntrinsicCall::MapContainsKey | sem::IntrinsicCall::MapRemove => {
+                let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend map method expects exactly one arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (map_addr, map_ty) = self.resolve_map_receiver(receiver_value);
+                let Type::Map { key_ty, value_ty } = map_ty else {
+                    panic!("backend map method expects map receiver");
+                };
+                let key_arg = &mut arg_values[0];
+                let key_addr = if key_arg.is_addr {
+                    key_arg.value
+                } else {
+                    let addr = self.materialize_value_addr(key_arg.value, &key_arg.ty);
+                    key_arg.value = addr;
+                    key_arg.is_addr = true;
+                    addr
+                };
+                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let key_size = self
+                    .builder
+                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
+                let value_size =
+                    self.builder
+                        .const_int(value_layout.size() as i128, false, 64, u64_ty);
+                let runtime = match intrinsic {
+                    sem::IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsKey,
+                    sem::IntrinsicCall::MapRemove => RuntimeFn::MapRemoveKey,
+                    _ => unreachable!(),
+                };
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let result = self.builder.call(
+                    Callee::Runtime(runtime),
+                    vec![map_addr, key_addr, key_size, value_size],
+                    ret_ty,
+                );
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
+            sem::IntrinsicCall::MapClear => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if !arg_values.is_empty() {
+                    panic!(
+                        "backend map clear expects zero args, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (map_addr, _map_ty) = self.resolve_map_receiver(receiver_value);
+                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let result =
+                    self.builder
+                        .call(Callee::Runtime(RuntimeFn::MapClear), vec![map_addr], ret_ty);
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
         }
     }
 
@@ -618,6 +749,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         // Value receivers of plain set type need a temporary slot so field
+        // loads/mutations can treat the base as an address.
+        if !receiver_value.is_addr && deref_count == 0 {
+            addr = self.materialize_value_addr(addr, &ty);
+        }
+
+        (addr, ty)
+    }
+
+    fn resolve_map_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
+        let (_base_ty, deref_count) = receiver_value.ty.peel_heap_with_count();
+        let (mut addr, ty) = if receiver_value.is_addr {
+            let mut addr = receiver_value.value;
+            let mut curr_ty = receiver_value.ty.clone();
+            for _ in 0..deref_count {
+                let elem_ty = match curr_ty {
+                    Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
+                    other => panic!("backend map receiver expects heap/ref, got {:?}", other),
+                };
+                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                addr = self.builder.load(addr, ptr_ir_ty);
+                curr_ty = (*elem_ty).clone();
+            }
+            (addr, curr_ty)
+        } else {
+            self.resolve_deref_base_value(
+                receiver_value.value,
+                receiver_value.ty.clone(),
+                deref_count,
+            )
+        };
+
+        let Type::Map { .. } = ty else {
+            panic!(
+                "backend map receiver resolved to non-map {:?}",
+                receiver_value.ty
+            );
+        };
+
+        // Value receivers of plain map type need a temporary slot so field
         // loads/mutations can treat the base as an address.
         if !receiver_value.is_addr && deref_count == 0 {
             addr = self.materialize_value_addr(addr, &ty);

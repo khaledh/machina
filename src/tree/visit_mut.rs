@@ -528,6 +528,22 @@ pub fn walk_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, expr: &mut Expr<
                 v.visit_expr(elem);
             }
         }
+        ExprKind::MapLit {
+            key_ty,
+            value_ty,
+            entries,
+        } => {
+            if let Some(key_ty) = key_ty {
+                v.visit_type_expr(key_ty);
+            }
+            if let Some(value_ty) = value_ty {
+                v.visit_type_expr(value_ty);
+            }
+            for entry in entries {
+                v.visit_expr(&mut entry.key);
+                v.visit_expr(&mut entry.value);
+            }
+        }
 
         ExprKind::TupleLit(fields) => {
             for field in fields {

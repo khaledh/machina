@@ -302,6 +302,12 @@ impl<'a> DropPlanBuilder<'a> {
                     self.visit_value_expr(elem);
                 }
             }
+            sem::ValueExprKind::MapLit { entries, .. } => {
+                for entry in entries {
+                    self.visit_value_expr(&entry.key);
+                    self.visit_value_expr(&entry.value);
+                }
+            }
             sem::ValueExprKind::TupleLit(items) => {
                 for item in items {
                     self.visit_value_expr(item);

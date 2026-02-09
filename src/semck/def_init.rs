@@ -1080,6 +1080,12 @@ impl<'a> DefInitChecker<'a> {
                     self.check_expr(elem);
                 }
             }
+            ExprKind::MapLit { entries, .. } => {
+                for entry in entries {
+                    self.check_expr(&entry.key);
+                    self.check_expr(&entry.value);
+                }
+            }
             ExprKind::TupleLit(fields) => {
                 for field in fields {
                     self.check_expr(field);

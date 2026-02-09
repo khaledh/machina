@@ -69,6 +69,24 @@ impl<'a> Elaborator<'a> {
                 _ => target,
             };
         }
+        if def_id.is_none()
+            && let Some(method_name) = method_name
+            && matches!(
+                call_sig
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| receiver.ty.peel_heap()),
+                Some(Type::Map { .. })
+            )
+        {
+            target = match method_name {
+                "insert" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapInsert),
+                "contains_key" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapContainsKey),
+                "remove" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapRemove),
+                "clear" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapClear),
+                _ => target,
+            };
+        }
 
         if let Some(def_id) = def_id {
             let def = self
@@ -320,6 +338,50 @@ impl<'a> Elaborator<'a> {
                 if !call_sig.params.is_empty() {
                     panic!(
                         "compiler bug: intrinsic set clear expects 0 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapInsert) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic map insert missing receiver");
+                }
+                if call_sig.params.len() != 2 {
+                    panic!(
+                        "compiler bug: intrinsic map insert expects 2 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapContainsKey)
+            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapRemove) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic map method missing receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic map method expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
+                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                ]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapClear) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic map clear missing receiver");
+                }
+                if !call_sig.params.is_empty() {
+                    panic!(
+                        "compiler bug: intrinsic map clear expects 0 args, got {}",
                         call_sig.params.len()
                     );
                 }

@@ -522,6 +522,39 @@ fn resolve_named_type(
             elem_ty: Box::new(elem_ty),
         });
     }
+    if def.name == "map" {
+        if type_arg_exprs.len() != 2 {
+            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                def.name.clone(),
+                2,
+                type_arg_exprs.len(),
+                type_expr.span,
+            )
+            .into());
+        }
+        let key_ty = resolve_type_expr_impl(
+            def_table,
+            module,
+            &type_arg_exprs[0],
+            type_params,
+            type_args,
+            in_progress,
+            allow_error_union,
+        )?;
+        let value_ty = resolve_type_expr_impl(
+            def_table,
+            module,
+            &type_arg_exprs[1],
+            type_params,
+            type_args,
+            in_progress,
+            allow_error_union,
+        )?;
+        return Ok(Type::Map {
+            key_ty: Box::new(key_ty),
+            value_ty: Box::new(value_ty),
+        });
+    }
 
     if let Some(ty) = builtin_type(&def.name) {
         if !type_arg_exprs.is_empty() {

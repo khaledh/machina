@@ -755,6 +755,23 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 reseed_expr(elem, node_id_gen);
             }
         }
+        res::ExprKind::MapLit {
+            key_ty,
+            value_ty,
+            entries,
+        } => {
+            if let Some(key_ty) = key_ty {
+                reseed_type_expr(key_ty, node_id_gen);
+            }
+            if let Some(value_ty) = value_ty {
+                reseed_type_expr(value_ty, node_id_gen);
+            }
+            for entry in entries {
+                entry.id = node_id_gen.new_id();
+                reseed_expr(&mut entry.key, node_id_gen);
+                reseed_expr(&mut entry.value, node_id_gen);
+            }
+        }
         res::ExprKind::TupleLit(fields) => {
             for field in fields {
                 reseed_expr(field, node_id_gen);
@@ -1063,6 +1080,16 @@ fn type_expr_from_type(
                 .lookup_type_def_id("set")
                 .ok_or(MonomorphizeError::UnsupportedType { span })?,
             type_args: vec![type_expr_from_type(elem_ty, def_table, node_id_gen, span)?],
+        },
+        Type::Map { key_ty, value_ty } => res::TypeExprKind::Named {
+            ident: "map".to_string(),
+            def_id: def_table
+                .lookup_type_def_id("map")
+                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+            type_args: vec![
+                type_expr_from_type(key_ty, def_table, node_id_gen, span)?,
+                type_expr_from_type(value_ty, def_table, node_id_gen, span)?,
+            ],
         },
         Type::Tuple { field_tys } => res::TypeExprKind::Tuple {
             field_ty_exprs: field_tys

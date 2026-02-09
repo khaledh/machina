@@ -170,6 +170,9 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                     .or_else(|| {
                         resolve_builtin_set_method_call(engine, obligation.receiver.as_ref(), name)
                     })
+                    .or_else(|| {
+                        resolve_builtin_map_method_call(engine, obligation.receiver.as_ref(), name)
+                    })
             }
             _ => None,
         };
@@ -572,6 +575,19 @@ fn match_template_type(
         | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
         | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => {
             match_template_type(l, r, bindings)
+        }
+        (
+            Type::Map {
+                key_ty: l_key,
+                value_ty: l_value,
+            },
+            Type::Map {
+                key_ty: r_key,
+                value_ty: r_value,
+            },
+        ) => {
+            match_template_type(l_key, r_key, bindings)
+                && match_template_type(l_value, r_value, bindings)
         }
         (
             Type::Ref {
@@ -1020,6 +1036,50 @@ fn resolve_builtin_set_method_call(
         "insert" | "remove" | "contains" => vec![CallParam {
             mode: crate::tree::ParamMode::In,
             ty: elem_ty,
+        }],
+        "clear" => Vec::new(),
+        _ => return None,
+    };
+
+    Some((receiver_param, params))
+}
+
+fn resolve_builtin_map_method_call(
+    engine: &TypecheckEngine,
+    receiver: Option<&Type>,
+    method_name: &str,
+) -> Option<(CallParam, Vec<CallParam>)> {
+    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
+    let Type::Map { key_ty, value_ty } = receiver_ty.peel_heap() else {
+        return None;
+    };
+    let key_ty = (*key_ty).clone();
+    let value_ty = (*value_ty).clone();
+
+    let receiver_mode = match method_name {
+        "contains_key" => crate::tree::ParamMode::In,
+        "insert" | "remove" | "clear" => crate::tree::ParamMode::InOut,
+        _ => return None,
+    };
+    let receiver_param = CallParam {
+        mode: receiver_mode,
+        ty: receiver_ty.clone(),
+    };
+
+    let params = match method_name {
+        "insert" => vec![
+            CallParam {
+                mode: crate::tree::ParamMode::In,
+                ty: key_ty,
+            },
+            CallParam {
+                mode: crate::tree::ParamMode::In,
+                ty: value_ty,
+            },
+        ],
+        "remove" | "contains_key" => vec![CallParam {
+            mode: crate::tree::ParamMode::In,
+            ty: key_ty,
         }],
         "clear" => Vec::new(),
         _ => return None,

@@ -11,6 +11,10 @@ pub enum IntrinsicCall {
     SetContains,
     SetRemove,
     SetClear,
+    MapInsert,
+    MapContainsKey,
+    MapRemove,
+    MapClear,
 }
 
 #[derive(Clone, Debug)]

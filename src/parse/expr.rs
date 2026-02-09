@@ -295,6 +295,16 @@ impl<'a> Parser<'a> {
                 }
                 Err(ParseError::ExpectedPrimary(self.curr_token.clone()))
             }
+            TK::KwMap => {
+                let marker = self.mark();
+                if self.peek().map(|t| &t.kind) == Some(&TK::LessThan)
+                    && let Some(GenericLitKind::StructLit) = self.peek_generic_lit_kind()
+                {
+                    let (_type_name, type_args) = self.parse_type_name_with_args()?;
+                    return self.parse_typed_map_lit_with_args(marker, type_args);
+                }
+                Err(ParseError::ExpectedPrimary(self.curr_token.clone()))
+            }
             TK::KwSelf => {
                 let marker = self.mark();
                 self.advance();
@@ -313,6 +323,10 @@ impl<'a> Parser<'a> {
             TK::LParen => self.parse_paren_or_tuple(),
 
             TK::LBrace if self.lookahead_for(TK::Pipe, TK::RBrace) => self.parse_struct_update(),
+
+            TK::LBrace if self.lookahead_for(TK::Colon, TK::RBrace) => {
+                self.parse_map_lit(None, None)
+            }
 
             TK::LBrace if self.lookahead_for(TK::Comma, TK::RBrace) => self.parse_set_lit(None),
 
@@ -572,9 +586,30 @@ impl<'a> Parser<'a> {
         self.parse_set_lit_with_marker(elem_ty, marker)
     }
 
+    fn parse_typed_map_lit_with_args(
+        &mut self,
+        marker: Marker,
+        type_args: Vec<TypeExpr>,
+    ) -> Result<Expr, ParseError> {
+        let (key_ty, value_ty) = match type_args.as_slice() {
+            [key_ty, value_ty] => (Some(key_ty.clone()), Some(value_ty.clone())),
+            _ => (None, None),
+        };
+        self.parse_map_lit_with_marker(key_ty, value_ty, marker)
+    }
+
     fn parse_set_lit(&mut self, elem_ty: Option<TypeExpr>) -> Result<Expr, ParseError> {
         let marker = self.mark();
         self.parse_set_lit_with_marker(elem_ty, marker)
+    }
+
+    fn parse_map_lit(
+        &mut self,
+        key_ty: Option<TypeExpr>,
+        value_ty: Option<TypeExpr>,
+    ) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.parse_map_lit_with_marker(key_ty, value_ty, marker)
     }
 
     fn parse_set_lit_with_marker(
@@ -624,6 +659,62 @@ impl<'a> Parser<'a> {
         let rest = self.parse_list(TK::Comma, TK::RBrace, |p| p.parse_expr(0))?;
         elems.extend(rest);
         Ok(elems)
+    }
+
+    fn parse_map_lit_with_marker(
+        &mut self,
+        key_ty: Option<TypeExpr>,
+        value_ty: Option<TypeExpr>,
+        marker: Marker,
+    ) -> Result<Expr, ParseError> {
+        self.consume(&TK::LBrace)?;
+        let allow_empty = key_ty.is_some() && value_ty.is_some();
+        let entries = self.parse_map_lit_entries(allow_empty)?;
+        self.consume(&TK::RBrace)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::MapLit {
+                key_ty,
+                value_ty,
+                entries,
+            },
+            ty: (),
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_map_lit_entries(&mut self, allow_empty: bool) -> Result<Vec<MapLitEntry>, ParseError> {
+        if self.curr_token.kind == TK::RBrace {
+            if allow_empty {
+                return Ok(Vec::new());
+            }
+            return Err(ParseError::ExpectedPrimary(self.curr_token.clone()));
+        }
+
+        let first = self.parse_map_lit_entry()?;
+        if self.curr_token.kind != TK::Comma {
+            return Ok(vec![first]);
+        }
+        self.advance();
+
+        let mut entries = vec![first];
+        let rest = self.parse_list(TK::Comma, TK::RBrace, |p| p.parse_map_lit_entry())?;
+        entries.extend(rest);
+        Ok(entries)
+    }
+
+    fn parse_map_lit_entry(&mut self) -> Result<MapLitEntry, ParseError> {
+        let marker = self.mark();
+        let key = self.parse_expr(0)?;
+        self.consume(&TK::Colon)?;
+        let value = self.parse_expr(0)?;
+        Ok(MapLitEntry {
+            id: self.id_gen.new_id(),
+            key,
+            value,
+            span: self.close(marker),
+        })
     }
 
     fn parse_typed_array_lit(&mut self, type_name: String) -> Result<Expr, ParseError> {
@@ -766,6 +857,10 @@ impl<'a> Parser<'a> {
             TK::KwSet => {
                 self.advance();
                 "set".to_string()
+            }
+            TK::KwMap => {
+                self.advance();
+                "map".to_string()
             }
             _ => return Err(ParseError::ExpectedIdent(self.curr_token.clone())),
         };

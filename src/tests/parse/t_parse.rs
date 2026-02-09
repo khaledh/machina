@@ -525,6 +525,123 @@ fn test_parse_typed_singleton_set_allows_no_trailing_comma() {
 }
 
 #[test]
+fn test_parse_map_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = {"one": 1, "two": 2};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::MapLit {
+            key_ty,
+            value_ty,
+            entries,
+        } = &value.kind
+        {
+            assert!(key_ty.is_none());
+            assert!(value_ty.is_none());
+            assert_eq!(entries.len(), 2);
+            assert!(matches!(entries[0].key.kind, ExprKind::StringLit { .. }));
+            assert!(matches!(entries[0].value.kind, ExprKind::IntLit(1)));
+            assert!(matches!(entries[1].key.kind, ExprKind::StringLit { .. }));
+            assert!(matches!(entries[1].value.kind, ExprKind::IntLit(2)));
+        } else {
+            panic!("Expected MapLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
+fn test_parse_typed_empty_map_literal() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<string, u64>{};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::MapLit {
+            key_ty: Some(key_ty),
+            value_ty: Some(value_ty),
+            entries,
+        } = &value.kind
+        {
+            assert!(entries.is_empty());
+            match &key_ty.kind {
+                TypeExprKind::Named { ident, .. } => assert_eq!(ident, "string"),
+                _ => panic!("Expected named string key type"),
+            }
+            match &value_ty.kind {
+                TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+                _ => panic!("Expected named u64 value type"),
+            }
+        } else {
+            panic!("Expected typed MapLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
+fn test_parse_typed_singleton_map_allows_no_trailing_comma() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, bool>{1: true};
+            0
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    if let StmtExprKind::LetBind { value, .. } = &stmt.kind {
+        if let ExprKind::MapLit {
+            key_ty: Some(key_ty),
+            value_ty: Some(value_ty),
+            entries,
+        } = &value.kind
+        {
+            assert_eq!(entries.len(), 1);
+            assert!(matches!(entries[0].key.kind, ExprKind::IntLit(1)));
+            assert!(matches!(entries[0].value.kind, ExprKind::BoolLit(true)));
+            match &key_ty.kind {
+                TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+                _ => panic!("Expected named u64 key type"),
+            }
+            match &value_ty.kind {
+                TypeExprKind::Named { ident, .. } => assert_eq!(ident, "bool"),
+                _ => panic!("Expected named bool value type"),
+            }
+        } else {
+            panic!("Expected typed MapLit");
+        }
+    } else {
+        panic!("Expected Let");
+    }
+}
+
+#[test]
 fn test_parse_tuple_type() {
     let source = r#"
         fn test() -> (u64, bool) {

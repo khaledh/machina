@@ -101,6 +101,16 @@ impl<'a> Elaborator<'a> {
                 }),
                 type_args: vec![self.type_expr_from_type(elem_ty, span)],
             },
+            Type::Map { key_ty, value_ty } => sem::TypeExprKind::Named {
+                ident: "map".to_string(),
+                def_id: self.def_table.lookup_type_def_id("map").unwrap_or_else(|| {
+                    panic!("compiler bug: missing def id for type map at {}", span)
+                }),
+                type_args: vec![
+                    self.type_expr_from_type(key_ty, span),
+                    self.type_expr_from_type(value_ty, span),
+                ],
+            },
             Type::Tuple { field_tys } => sem::TypeExprKind::Tuple {
                 field_ty_exprs: field_tys
                     .iter()

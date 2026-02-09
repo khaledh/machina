@@ -709,6 +709,28 @@ impl Expr {
                     elem.fmt_with_indent(f, level + 1)?;
                 }
             }
+            ExprKind::MapLit {
+                key_ty,
+                value_ty,
+                entries,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}MapLit [{}]", pad, self.id)?;
+                if let Some(key_ty) = key_ty {
+                    writeln!(f, "{}Key Type: {}", pad1, key_ty)?;
+                }
+                if let Some(value_ty) = value_ty {
+                    writeln!(f, "{}Value Type: {}", pad1, value_ty)?;
+                }
+                writeln!(f, "{}Length: {}", pad1, entries.len())?;
+                for entry in entries {
+                    writeln!(f, "{}Entry [{}]", pad1, entry.id)?;
+                    writeln!(f, "{}Key:", indent(level + 2))?;
+                    entry.key.fmt_with_indent(f, level + 3)?;
+                    writeln!(f, "{}Value:", indent(level + 2))?;
+                    entry.value.fmt_with_indent(f, level + 3)?;
+                }
+            }
             ExprKind::ArrayIndex { target, indices } => {
                 writeln!(f, "{}ArrayIndex [{}]", pad, self.id)?;
                 let pad1 = indent(level + 1);

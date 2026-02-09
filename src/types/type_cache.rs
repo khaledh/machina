@@ -87,6 +87,7 @@ fn type_info_score(ty: &Type) -> usize {
         | Type::Set { elem_ty }
         | Type::Heap { elem_ty }
         | Type::Ref { elem_ty, .. } => 1 + type_info_score(elem_ty),
+        Type::Map { key_ty, value_ty } => 1 + type_info_score(key_ty) + type_info_score(value_ty),
         Type::Array { elem_ty, dims } => 1 + dims.len() + type_info_score(elem_ty),
         Type::Tuple { field_tys } => 1 + field_tys.iter().map(type_info_score).sum::<usize>(),
         Type::Struct { fields, .. } => {
