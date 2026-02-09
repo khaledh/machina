@@ -56,7 +56,9 @@ pub(super) fn check_call_obligations(
                         obligation.arg_terms.iter().zip(params.iter()).enumerate()
                     {
                         let arg_ty = super::resolve_term(arg_term, unifier);
-                        if let Err(_) = super::solve_assignable(&arg_ty, &param.ty, unifier) {
+                        if let Err(_) =
+                            super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
+                        {
                             errors.push(
                                 TypeCheckErrorKind::ArgTypeMismatch(
                                     index + 1,
@@ -191,7 +193,9 @@ pub(super) fn check_call_obligations(
                 .enumerate()
             {
                 let arg_ty = super::resolve_term(arg_term, &trial);
-                if let Err(_) = super::solve_assignable(&arg_ty, param_ty, &mut trial) {
+                if let Err(_) =
+                    super::assignability::solve_assignable(&arg_ty, param_ty, &mut trial)
+                {
                     first_error.get_or_insert_with(|| {
                         TypeCheckErrorKind::ArgTypeMismatch(
                             index + 1,
@@ -204,7 +208,7 @@ pub(super) fn check_call_obligations(
                     failed = true;
                     break;
                 }
-                score += super::assignability_rank(
+                score += super::assignability::assignability_rank(
                     &super::resolve_term(arg_term, &trial),
                     &super::canonicalize_type(trial.apply(param_ty)),
                 );
@@ -409,7 +413,7 @@ fn try_solve_dyn_array_builtin_method(
                 .into()));
             }
             let arg_ty = super::resolve_term(&obligation.arg_terms[0], unifier);
-            if let Err(_) = super::solve_assignable(&arg_ty, &elem_ty, unifier) {
+            if let Err(_) = super::assignability::solve_assignable(&arg_ty, &elem_ty, unifier) {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     1,
                     (*elem_ty).clone(),
@@ -469,7 +473,7 @@ fn try_solve_set_builtin_method(
                 .into()));
             }
             let arg_ty = super::resolve_term(&obligation.arg_terms[0], unifier);
-            if let Err(_) = super::solve_assignable(&arg_ty, &elem_ty, unifier) {
+            if let Err(_) = super::assignability::solve_assignable(&arg_ty, &elem_ty, unifier) {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     1,
                     (*elem_ty).clone(),
@@ -493,7 +497,7 @@ fn try_solve_set_builtin_method(
                 .into()));
             }
             let arg_ty = super::resolve_term(&obligation.arg_terms[0], unifier);
-            if let Err(_) = super::solve_assignable(&arg_ty, &elem_ty, unifier) {
+            if let Err(_) = super::assignability::solve_assignable(&arg_ty, &elem_ty, unifier) {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     1,
                     (*elem_ty).clone(),
@@ -567,7 +571,7 @@ fn try_solve_map_builtin_method(
                 .into()));
             }
             let key_arg_ty = super::resolve_term(&obligation.arg_terms[0], unifier);
-            if let Err(_) = super::solve_assignable(&key_arg_ty, &key_ty, unifier) {
+            if let Err(_) = super::assignability::solve_assignable(&key_arg_ty, &key_ty, unifier) {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     1,
                     (*key_ty).clone(),
@@ -577,7 +581,9 @@ fn try_solve_map_builtin_method(
                 .into()));
             }
             let value_arg_ty = super::resolve_term(&obligation.arg_terms[1], unifier);
-            if let Err(_) = super::solve_assignable(&value_arg_ty, &value_ty, unifier) {
+            if let Err(_) =
+                super::assignability::solve_assignable(&value_arg_ty, &value_ty, unifier)
+            {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     2,
                     (*value_ty).clone(),
@@ -601,7 +607,7 @@ fn try_solve_map_builtin_method(
                 .into()));
             }
             let key_arg_ty = super::resolve_term(&obligation.arg_terms[0], unifier);
-            if let Err(_) = super::solve_assignable(&key_arg_ty, &key_ty, unifier) {
+            if let Err(_) = super::assignability::solve_assignable(&key_arg_ty, &key_ty, unifier) {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     1,
                     (*key_ty).clone(),
@@ -625,7 +631,7 @@ fn try_solve_map_builtin_method(
                 .into()));
             }
             let key_arg_ty = super::resolve_term(&obligation.arg_terms[0], unifier);
-            if let Err(_) = super::solve_assignable(&key_arg_ty, &key_ty, unifier) {
+            if let Err(_) = super::assignability::solve_assignable(&key_arg_ty, &key_ty, unifier) {
                 return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                     1,
                     (*key_ty).clone(),

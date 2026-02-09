@@ -155,9 +155,11 @@ pub(super) fn try_check_expr_obligation_nominal(
                         else {
                             continue;
                         };
-                        if let Err(_) =
-                            super::solve_assignable(&found_ty, &expected_field.ty, unifier)
-                        {
+                        if let Err(_) = super::assignability::solve_assignable(
+                            &found_ty,
+                            &expected_field.ty,
+                            unifier,
+                        ) {
                             let found_ty = super::canonicalize_type(unifier.apply(&found_ty));
                             if super::is_unresolved(&found_ty) {
                                 continue;
@@ -381,7 +383,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                         return true;
                     }
                     let _ = unifier.unify(assignee, &prop.ty);
-                    if let Err(_) = super::solve_assignable(&value_ty, &prop.ty, unifier) {
+                    if let Err(_) =
+                        super::assignability::solve_assignable(&value_ty, &prop.ty, unifier)
+                    {
                         let value_ty = super::canonicalize_type(unifier.apply(&value_ty));
                         if super::is_unresolved(&value_ty) {
                             return true;
@@ -459,9 +463,11 @@ pub(super) fn try_check_expr_obligation_nominal(
                     }
                     if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
                         let _ = unifier.unify(assignee, &struct_field.ty);
-                        if let Err(_) =
-                            super::solve_assignable(&value_ty, &struct_field.ty, unifier)
-                        {
+                        if let Err(_) = super::assignability::solve_assignable(
+                            &value_ty,
+                            &struct_field.ty,
+                            unifier,
+                        ) {
                             let value_ty = super::canonicalize_type(unifier.apply(&value_ty));
                             if super::is_unresolved(&value_ty) {
                                 return true;

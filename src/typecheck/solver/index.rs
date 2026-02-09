@@ -174,7 +174,9 @@ pub(super) fn try_check_expr_obligation_index(
                         return true;
                     }
                     let key_index_ty = super::resolve_term(&indices[0], unifier);
-                    if let Err(_) = super::solve_assignable(&key_index_ty, key_ty, unifier) {
+                    if let Err(_) =
+                        super::assignability::solve_assignable(&key_index_ty, key_ty, unifier)
+                    {
                         if !super::is_unresolved(&key_index_ty) {
                             let diag_span = index_spans.first().copied().unwrap_or(*span);
                             errors.push(

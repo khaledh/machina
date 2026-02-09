@@ -12,7 +12,7 @@ use crate::types::Type;
 
 pub(super) fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
     if let Constraint::Assignable { from, to, .. } = constraint {
-        let _ = super::solve_assignable(from, to, unifier);
+        let _ = super::assignability::solve_assignable(from, to, unifier);
     }
 }
 
@@ -30,7 +30,9 @@ pub(super) fn apply_constraint(
             &super::canonicalize_type(left.clone()),
             &super::canonicalize_type(right.clone()),
         ),
-        Constraint::Assignable { from, to, .. } => super::solve_assignable(from, to, unifier),
+        Constraint::Assignable { from, to, .. } => {
+            super::assignability::solve_assignable(from, to, unifier)
+        }
     };
     if let Err(err) = result {
         *failed_constraints += 1;
