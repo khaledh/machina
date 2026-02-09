@@ -14,7 +14,9 @@ mod calls;
 mod collections;
 mod constraint_checks;
 mod control;
+mod expr_ops;
 mod index;
+mod joins;
 mod nominal;
 mod patterns;
 
@@ -26,7 +28,7 @@ use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind};
-use crate::typecheck::capability::{ensure_equatable, ensure_hashable};
+use crate::typecheck::capability::ensure_hashable;
 use crate::typecheck::constraints::{Constraint, ConstraintReason, ExprObligation};
 use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -281,73 +283,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     }
 }
 
-fn push_unique_join_variant(variants: &mut Vec<Type>, candidate: Type) {
-    if !variants.iter().any(|existing| existing == &candidate) {
-        variants.push(candidate);
-    }
-}
-
-fn join_variant_rank(ty: &Type) -> u8 {
-    match ty {
-        Type::Unit => 0,
-        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Range { .. } => 1,
-        Type::Tuple { .. }
-        | Type::Array { .. }
-        | Type::DynArray { .. }
-        | Type::Set { .. }
-        | Type::Map { .. } => 2,
-        Type::Struct { .. } | Type::Enum { .. } => 3,
-        Type::Fn { .. } => 4,
-        Type::Slice { .. } | Type::Ref { .. } | Type::Heap { .. } => 5,
-        Type::Var(_) | Type::Unknown => 6,
-        Type::ErrorUnion { .. } => 7,
-    }
-}
-
-fn sort_join_variants_canonical(variants: &mut [Type]) {
-    variants.sort_by(|left, right| {
-        let left_key = (join_variant_rank(left), format!("{left:?}"));
-        let right_key = (join_variant_rank(right), format!("{right:?}"));
-        left_key.cmp(&right_key)
-    });
-}
-
-fn collect_join_variants(ty: &Type, out: &mut Vec<Type>) {
-    match ty {
-        Type::ErrorUnion { ok_ty, err_tys } => {
-            collect_join_variants(ok_ty, out);
-            for err_ty in err_tys {
-                collect_join_variants(err_ty, out);
-            }
-        }
-        _ => push_unique_join_variant(out, ty.clone()),
-    }
-}
-
-fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
-    let mut variants = Vec::new();
-    for arm_ty in arms {
-        if is_unresolved(arm_ty) {
-            continue;
-        }
-        collect_join_variants(arm_ty, &mut variants);
-    }
-    sort_join_variants_canonical(&mut variants);
-    variants.dedup();
-    if variants.is_empty() {
-        return None;
-    }
-    if variants.len() == 1 {
-        return variants.into_iter().next();
-    }
-    let ok_ty = variants[0].clone();
-    let err_tys = variants.into_iter().skip(1).collect::<Vec<_>>();
-    Some(Type::ErrorUnion {
-        ok_ty: Box::new(ok_ty),
-        err_tys,
-    })
-}
-
 fn check_expr_obligations(
     obligations: &[ExprObligation],
     def_terms: &HashMap<DefId, Type>,
@@ -404,98 +339,17 @@ fn check_expr_obligations(
         ) {
             continue;
         }
+        if expr_ops::try_check_expr_obligation_ops(
+            obligation,
+            unifier,
+            &mut errors,
+            &mut covered_exprs,
+        ) {
+            continue;
+        }
         match obligation {
-            ExprObligation::BinOp {
-                expr_id,
-                op,
-                left,
-                right,
-                ..
-            } => {
-                let left_ty = resolve_term_for_diagnostics(left, unifier);
-                let right_ty = resolve_term_for_diagnostics(right, unifier);
-                match op {
-                    crate::tree::resolved::BinaryOp::Add
-                    | crate::tree::resolved::BinaryOp::Sub
-                    | crate::tree::resolved::BinaryOp::Mul
-                    | crate::tree::resolved::BinaryOp::Div
-                    | crate::tree::resolved::BinaryOp::Mod
-                    | crate::tree::resolved::BinaryOp::BitOr
-                    | crate::tree::resolved::BinaryOp::BitXor
-                    | crate::tree::resolved::BinaryOp::BitAnd
-                    | crate::tree::resolved::BinaryOp::Shl
-                    | crate::tree::resolved::BinaryOp::Shr => {
-                        if let Some(err) = first_non_int_operand(
-                            &left_ty,
-                            &right_ty,
-                            *expr_id,
-                            op_span(obligation),
-                        ) {
-                            errors.push(err);
-                            covered_exprs.insert(*expr_id);
-                        }
-                    }
-                    crate::tree::resolved::BinaryOp::Eq | crate::tree::resolved::BinaryOp::Ne => {
-                        if let Some(err) = first_non_equatable_cmp_operand(
-                            &left_ty,
-                            &right_ty,
-                            op_span(obligation),
-                        ) {
-                            errors.push(err);
-                            covered_exprs.insert(*expr_id);
-                        }
-                    }
-                    crate::tree::resolved::BinaryOp::Lt
-                    | crate::tree::resolved::BinaryOp::Gt
-                    | crate::tree::resolved::BinaryOp::LtEq
-                    | crate::tree::resolved::BinaryOp::GtEq => {
-                        if let Some(err) =
-                            first_non_int_cmp_operand(&left_ty, &right_ty, op_span(obligation))
-                        {
-                            errors.push(err);
-                            covered_exprs.insert(*expr_id);
-                        }
-                    }
-                    crate::tree::resolved::BinaryOp::LogicalAnd
-                    | crate::tree::resolved::BinaryOp::LogicalOr => {
-                        if let Some(err) =
-                            first_non_bool_operand(&left_ty, &right_ty, op_span(obligation))
-                        {
-                            errors.push(err);
-                            covered_exprs.insert(*expr_id);
-                        }
-                    }
-                }
-            }
-            ExprObligation::UnaryOp {
-                expr_id,
-                op,
-                operand,
-                span,
-                ..
-            } => {
-                let operand_ty = resolve_term_for_diagnostics(operand, unifier);
-                match op {
-                    crate::tree::resolved::UnaryOp::Neg
-                    | crate::tree::resolved::UnaryOp::BitNot => {
-                        if !is_int_like(&operand_ty) && !is_unresolved(&operand_ty) {
-                            errors.push(
-                                TypeCheckErrorKind::NegationOperandNotInt(operand_ty, *span).into(),
-                            );
-                            covered_exprs.insert(*expr_id);
-                        }
-                    }
-                    crate::tree::resolved::UnaryOp::LogicalNot => {
-                        if operand_ty != Type::Bool && !is_unresolved(&operand_ty) {
-                            errors.push(
-                                TypeCheckErrorKind::LogicalOperandNotBoolean(operand_ty, *span)
-                                    .into(),
-                            );
-                            covered_exprs.insert(*expr_id);
-                        }
-                    }
-                    crate::tree::resolved::UnaryOp::Try => {}
-                }
+            ExprObligation::BinOp { .. } | ExprObligation::UnaryOp { .. } => {
+                unreachable!("operator obligations are handled by solve::expr_ops");
             }
             ExprObligation::Join { .. } | ExprObligation::Try { .. } => {
                 unreachable!("control obligations are handled by solve::control");
@@ -825,97 +679,6 @@ fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
     for var in unresolved {
         unifier.vars_mut().bind(var, Type::sint(32));
     }
-}
-
-fn op_span(obligation: &ExprObligation) -> Span {
-    match obligation {
-        ExprObligation::BinOp { span, .. }
-        | ExprObligation::UnaryOp { span, .. }
-        | ExprObligation::Join { span, .. }
-        | ExprObligation::Try { span, .. }
-        | ExprObligation::ArrayIndex { span, .. }
-        | ExprObligation::Slice { span, .. }
-        | ExprObligation::Range { span, .. }
-        | ExprObligation::SetElemType { span, .. }
-        | ExprObligation::MapKeyType { span, .. }
-        | ExprObligation::ForIter { span, .. }
-        | ExprObligation::EnumVariantPayload { span, .. }
-        | ExprObligation::StructConstruct { span, .. }
-        | ExprObligation::StructUpdate { span, .. }
-        | ExprObligation::TupleField { span, .. }
-        | ExprObligation::StructField { span, .. }
-        | ExprObligation::StructFieldAssign { span, .. }
-        | ExprObligation::MapIndexAssign { span, .. } => *span,
-    }
-}
-
-fn first_non_int_operand(
-    left: &Type,
-    right: &Type,
-    _expr_id: NodeId,
-    span: Span,
-) -> Option<TypeCheckError> {
-    if !is_int_like(left) && !is_unresolved(left) {
-        return Some(TypeCheckErrorKind::ArithOperandNotInt(left.clone(), span).into());
-    }
-    if !is_int_like(right) && !is_unresolved(right) {
-        return Some(TypeCheckErrorKind::ArithOperandNotInt(right.clone(), span).into());
-    }
-    None
-}
-
-fn first_non_int_cmp_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
-    if !is_int_like(left) && !is_unresolved(left) {
-        return Some(TypeCheckErrorKind::CmpOperandNotInt(left.clone(), span).into());
-    }
-    if !is_int_like(right) && !is_unresolved(right) {
-        return Some(TypeCheckErrorKind::CmpOperandNotInt(right.clone(), span).into());
-    }
-    None
-}
-
-fn first_non_equatable_cmp_operand(
-    left: &Type,
-    right: &Type,
-    span: Span,
-) -> Option<TypeCheckError> {
-    if !is_unresolved(left)
-        && let Err(failure) = ensure_equatable(left)
-    {
-        return Some(
-            TypeCheckErrorKind::TypeNotEquatable(
-                left.clone(),
-                failure.path,
-                failure.failing_ty,
-                span,
-            )
-            .into(),
-        );
-    }
-    if !is_unresolved(right)
-        && let Err(failure) = ensure_equatable(right)
-    {
-        return Some(
-            TypeCheckErrorKind::TypeNotEquatable(
-                right.clone(),
-                failure.path,
-                failure.failing_ty,
-                span,
-            )
-            .into(),
-        );
-    }
-    None
-}
-
-fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
-    if *left != Type::Bool && !is_unresolved(left) {
-        return Some(TypeCheckErrorKind::LogicalOperandNotBoolean(left.clone(), span).into());
-    }
-    if *right != Type::Bool && !is_unresolved(right) {
-        return Some(TypeCheckErrorKind::LogicalOperandNotBoolean(right.clone(), span).into());
-    }
-    None
 }
 
 fn resolve_term_for_diagnostics(ty: &Type, unifier: &TcUnifier) -> Type {

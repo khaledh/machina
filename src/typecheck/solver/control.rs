@@ -33,7 +33,7 @@ pub(super) fn try_check_expr_obligation_control(
             let mut result_ty = super::resolve_term(result, unifier);
 
             if super::is_unresolved(&result_ty)
-                && let Some(inferred_join) = super::infer_join_type_from_arms(
+                && let Some(inferred_join) = super::joins::infer_join_type_from_arms(
                     &resolved_arms
                         .iter()
                         .cloned()
