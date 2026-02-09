@@ -77,7 +77,10 @@ pub(super) fn check_call_obligations(
                         &super::canonicalize_type(obligation.ret_ty.clone()),
                         &super::canonicalize_type((*ret_ty).clone()),
                     ) {
-                        errors.push(super::unify_error_to_diag(err, obligation.span));
+                        errors.push(super::constraint_checks::unify_error_to_diag(
+                            err,
+                            obligation.span,
+                        ));
                     }
                 } else if super::is_unresolved(&callee_ty) {
                     deferred.push(obligation.clone());
@@ -213,7 +216,9 @@ pub(super) fn check_call_obligations(
                 &super::canonicalize_type(obligation.ret_ty.clone()),
                 &super::canonicalize_type(instantiated.ret_ty.clone()),
             ) {
-                first_error.get_or_insert_with(|| super::unify_error_to_diag(err, obligation.span));
+                first_error.get_or_insert_with(|| {
+                    super::constraint_checks::unify_error_to_diag(err, obligation.span)
+                });
                 continue;
             }
 
@@ -415,7 +420,7 @@ fn try_solve_dyn_array_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Unit)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "len" | "capacity" | "is_empty" => Err(TypeCheckErrorKind::PropertyCalledAsMethod(
             method_name.to_string(),
@@ -475,7 +480,7 @@ fn try_solve_set_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Bool)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "remove" | "contains" => {
             if arity != 1 {
@@ -499,7 +504,7 @@ fn try_solve_set_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Bool)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "clear" => {
             if arity != 0 {
@@ -513,7 +518,7 @@ fn try_solve_set_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Unit)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "len" | "capacity" | "is_empty" => Err(TypeCheckErrorKind::PropertyCalledAsMethod(
             method_name.to_string(),
@@ -583,7 +588,7 @@ fn try_solve_map_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Bool)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "remove" | "contains_key" => {
             if arity != 1 {
@@ -607,7 +612,7 @@ fn try_solve_map_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Bool)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "get" => {
             if arity != 1 {
@@ -642,7 +647,7 @@ fn try_solve_map_builtin_method(
             };
             unifier
                 .unify(&obligation.ret_ty, &result_ty)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "clear" => {
             if arity != 0 {
@@ -656,7 +661,7 @@ fn try_solve_map_builtin_method(
             }
             unifier
                 .unify(&obligation.ret_ty, &Type::Unit)
-                .map_err(|err| super::unify_error_to_diag(err, obligation.span))
+                .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
         }
         "len" | "capacity" | "is_empty" => Err(TypeCheckErrorKind::PropertyCalledAsMethod(
             method_name.to_string(),

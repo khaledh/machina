@@ -11,6 +11,7 @@
 //! assignability/runtime-refinement behavior.
 mod calls;
 mod collections;
+mod constraint_checks;
 mod control;
 mod index;
 mod nominal;
@@ -57,7 +58,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         .iter()
         .filter(|constraint| matches!(constraint, Constraint::Eq { .. }))
     {
-        apply_constraint(
+        constraint_checks::apply_constraint(
             constraint,
             &mut unifier,
             &mut failed_constraints,
@@ -74,7 +75,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         .iter()
         .filter(|constraint| matches!(constraint, Constraint::Assignable { .. }))
     {
-        apply_assignable_inference(constraint, &mut unifier);
+        constraint_checks::apply_assignable_inference(constraint, &mut unifier);
     }
 
     // Pre-pass: apply pattern-driven unifications before expression/call
@@ -176,7 +177,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         .iter()
         .filter(|constraint| matches!(constraint, Constraint::Assignable { .. }))
     {
-        apply_constraint(
+        constraint_checks::apply_constraint(
             constraint,
             &mut unifier,
             &mut failed_constraints,
@@ -193,20 +194,24 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 
     for (expr_id, err, span) in deferred_expr_errors {
         if let Some(index_span) = index_nodes.get(&expr_id)
-            && let Some(index_error) = remap_index_unify_error(&err, *index_span)
+            && let Some(index_error) = constraint_checks::remap_index_unify_error(&err, *index_span)
         {
             expr_errors.push(index_error);
             continue;
         }
         if let Some((variant, index, payload_span)) = enum_payload_nodes.get(&expr_id)
-            && let Some(payload_error) =
-                remap_enum_payload_unify_error(&err, variant, *index, *payload_span)
+            && let Some(payload_error) = constraint_checks::remap_enum_payload_unify_error(
+                &err,
+                variant,
+                *index,
+                *payload_span,
+            )
         {
             expr_errors.push(payload_error);
             continue;
         }
         if !covered_exprs.contains(&expr_id) && !covered_expr_spans.contains(&span) {
-            expr_errors.push(unify_error_to_diag(err, span));
+            expr_errors.push(constraint_checks::unify_error_to_diag(err, span));
         }
     }
 
@@ -223,7 +228,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     );
     for (pattern_id, err, span) in deferred_pattern_errors {
         if !covered_patterns.contains(&pattern_id) {
-            pattern_errors.push(unify_error_to_diag(err, span));
+            pattern_errors.push(constraint_checks::unify_error_to_diag(err, span));
         }
     }
 
@@ -272,44 +277,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     } else {
         engine.state_mut().diags.extend(errors.clone());
         Err(errors)
-    }
-}
-
-fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
-    if let Constraint::Assignable { from, to, .. } = constraint {
-        let _ = solve_assignable(from, to, unifier);
-    }
-}
-
-fn apply_constraint(
-    constraint: &Constraint,
-    unifier: &mut TcUnifier,
-    failed_constraints: &mut usize,
-    deferred_expr_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
-    deferred_pattern_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
-    non_expr_errors: &mut Vec<TypeCheckError>,
-) {
-    let reason = constraint_reason(constraint);
-    let result = match constraint {
-        Constraint::Eq { left, right, .. } => unifier.unify(
-            &canonicalize_type(left.clone()),
-            &canonicalize_type(right.clone()),
-        ),
-        Constraint::Assignable { from, to, .. } => solve_assignable(from, to, unifier),
-    };
-    if let Err(err) = result {
-        *failed_constraints += 1;
-        match reason_subject_id(constraint) {
-            ConstraintSubject::Expr(expr_id) => {
-                deferred_expr_errors.push((expr_id, err, reason_span(constraint)));
-            }
-            ConstraintSubject::Pattern(pattern_id) => {
-                deferred_pattern_errors.push((pattern_id, err, reason_span(constraint)));
-            }
-            ConstraintSubject::Other => {
-                non_expr_errors.push(unify_error_to_diag_with_reason(err, reason, constraint));
-            }
-        }
     }
 }
 
@@ -484,39 +451,6 @@ fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
         ok_ty: Box::new(ok_ty),
         err_tys,
     })
-}
-
-fn reason_span(constraint: &Constraint) -> Span {
-    let reason = constraint_reason(constraint);
-    match reason {
-        ConstraintReason::Expr(_, span)
-        | ConstraintReason::Stmt(_, span)
-        | ConstraintReason::Pattern(_, span)
-        | ConstraintReason::Decl(_, span)
-        | ConstraintReason::Return(_, span) => *span,
-    }
-}
-
-fn constraint_reason(constraint: &Constraint) -> &ConstraintReason {
-    match constraint {
-        Constraint::Eq { reason, .. } => reason,
-        Constraint::Assignable { reason, .. } => reason,
-    }
-}
-
-enum ConstraintSubject {
-    Expr(NodeId),
-    Pattern(NodeId),
-    Other,
-}
-
-fn reason_subject_id(constraint: &Constraint) -> ConstraintSubject {
-    let reason = constraint_reason(constraint);
-    match reason {
-        ConstraintReason::Expr(expr_id, _) => ConstraintSubject::Expr(*expr_id),
-        ConstraintReason::Pattern(pattern_id, _) => ConstraintSubject::Pattern(*pattern_id),
-        _ => ConstraintSubject::Other,
-    }
 }
 
 fn check_expr_obligations(
@@ -787,49 +721,6 @@ fn should_retry_post_call_expr_obligation(
             callable_def_id: _, ..
         } => true,
         _ => false,
-    }
-}
-
-fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<TypeCheckError> {
-    match err {
-        TcUnifyError::Mismatch(left, right) => {
-            if !is_int_like(left) && !is_unresolved(left) {
-                return Some(TypeCheckErrorKind::IndexTypeNotInt(left.clone(), span).into());
-            }
-            if !is_int_like(right) && !is_unresolved(right) {
-                return Some(TypeCheckErrorKind::IndexTypeNotInt(right.clone(), span).into());
-            }
-            None
-        }
-        TcUnifyError::CannotBindRigid(_, found) if !is_int_like(found) && !is_unresolved(found) => {
-            Some(TypeCheckErrorKind::IndexTypeNotInt(found.clone(), span).into())
-        }
-        _ => None,
-    }
-}
-
-fn remap_enum_payload_unify_error(
-    err: &TcUnifyError,
-    variant: &str,
-    index: usize,
-    span: Span,
-) -> Option<TypeCheckError> {
-    match err {
-        TcUnifyError::Mismatch(expected, found)
-            if !is_unresolved(expected) && !is_unresolved(found) =>
-        {
-            Some(
-                TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
-                    variant.to_string(),
-                    index,
-                    expected.clone(),
-                    found.clone(),
-                    span,
-                )
-                .into(),
-            )
-        }
-        _ => None,
     }
 }
 
@@ -1336,50 +1227,6 @@ fn erase_refinements(ty: &Type) -> Type {
         },
         other => other,
     })
-}
-
-fn unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
-    match err {
-        TcUnifyError::Mismatch(expected, found) => {
-            TypeCheckErrorKind::DeclTypeMismatch(expected, found, span).into()
-        }
-        TcUnifyError::CannotBindRigid(var, found) => {
-            TypeCheckErrorKind::DeclTypeMismatch(Type::Var(var), found, span).into()
-        }
-        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
-    }
-}
-
-fn unify_error_to_diag_with_reason(
-    err: TcUnifyError,
-    reason: &ConstraintReason,
-    constraint: &Constraint,
-) -> TypeCheckError {
-    match reason {
-        ConstraintReason::Return(_, span) => return_unify_error_to_diag(err, *span),
-        _ => unify_error_to_diag(err, reason_span(constraint)),
-    }
-}
-
-fn return_unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
-    match err {
-        TcUnifyError::Mismatch(expected, found) => {
-            if let Type::ErrorUnion { ok_ty, err_tys } = &expected {
-                let mut variants = std::iter::once(ok_ty.as_ref())
-                    .chain(err_tys.iter())
-                    .map(compact_type_name)
-                    .collect::<Vec<_>>();
-                variants.sort();
-                variants.dedup();
-                return TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, span).into();
-            }
-            TypeCheckErrorKind::ReturnTypeMismatch(expected, found, span).into()
-        }
-        TcUnifyError::CannotBindRigid(var, found) => {
-            TypeCheckErrorKind::ReturnTypeMismatch(Type::Var(var), found, span).into()
-        }
-        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
-    }
 }
 
 #[cfg(test)]

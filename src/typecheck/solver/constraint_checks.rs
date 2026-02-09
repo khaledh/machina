@@ -1,0 +1,171 @@
+//! Constraint solving and deferred constraint diagnostics.
+//!
+//! This module keeps constraint-application mechanics separate from the main
+//! solver orchestration loop.
+
+use crate::diag::Span;
+use crate::tree::NodeId;
+use crate::typecheck::constraints::{Constraint, ConstraintReason};
+use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::typecheck::unify::{TcUnifier, TcUnifyError};
+use crate::types::Type;
+
+pub(super) fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
+    if let Constraint::Assignable { from, to, .. } = constraint {
+        let _ = super::solve_assignable(from, to, unifier);
+    }
+}
+
+pub(super) fn apply_constraint(
+    constraint: &Constraint,
+    unifier: &mut TcUnifier,
+    failed_constraints: &mut usize,
+    deferred_expr_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
+    deferred_pattern_errors: &mut Vec<(NodeId, TcUnifyError, Span)>,
+    non_expr_errors: &mut Vec<TypeCheckError>,
+) {
+    let reason = constraint_reason(constraint);
+    let result = match constraint {
+        Constraint::Eq { left, right, .. } => unifier.unify(
+            &super::canonicalize_type(left.clone()),
+            &super::canonicalize_type(right.clone()),
+        ),
+        Constraint::Assignable { from, to, .. } => super::solve_assignable(from, to, unifier),
+    };
+    if let Err(err) = result {
+        *failed_constraints += 1;
+        match reason_subject_id(constraint) {
+            ConstraintSubject::Expr(expr_id) => {
+                deferred_expr_errors.push((expr_id, err, reason_span(constraint)));
+            }
+            ConstraintSubject::Pattern(pattern_id) => {
+                deferred_pattern_errors.push((pattern_id, err, reason_span(constraint)));
+            }
+            ConstraintSubject::Other => {
+                non_expr_errors.push(unify_error_to_diag_with_reason(err, reason, constraint));
+            }
+        }
+    }
+}
+
+pub(super) fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<TypeCheckError> {
+    match err {
+        TcUnifyError::Mismatch(left, right) => {
+            if !super::is_int_like(left) && !super::is_unresolved(left) {
+                return Some(TypeCheckErrorKind::IndexTypeNotInt(left.clone(), span).into());
+            }
+            if !super::is_int_like(right) && !super::is_unresolved(right) {
+                return Some(TypeCheckErrorKind::IndexTypeNotInt(right.clone(), span).into());
+            }
+            None
+        }
+        TcUnifyError::CannotBindRigid(_, found)
+            if !super::is_int_like(found) && !super::is_unresolved(found) =>
+        {
+            Some(TypeCheckErrorKind::IndexTypeNotInt(found.clone(), span).into())
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn remap_enum_payload_unify_error(
+    err: &TcUnifyError,
+    variant: &str,
+    index: usize,
+    span: Span,
+) -> Option<TypeCheckError> {
+    match err {
+        TcUnifyError::Mismatch(expected, found)
+            if !super::is_unresolved(expected) && !super::is_unresolved(found) =>
+        {
+            Some(
+                TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
+                    variant.to_string(),
+                    index,
+                    expected.clone(),
+                    found.clone(),
+                    span,
+                )
+                .into(),
+            )
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
+    match err {
+        TcUnifyError::Mismatch(expected, found) => {
+            TypeCheckErrorKind::DeclTypeMismatch(expected, found, span).into()
+        }
+        TcUnifyError::CannotBindRigid(var, found) => {
+            TypeCheckErrorKind::DeclTypeMismatch(Type::Var(var), found, span).into()
+        }
+        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
+    }
+}
+
+fn unify_error_to_diag_with_reason(
+    err: TcUnifyError,
+    reason: &ConstraintReason,
+    constraint: &Constraint,
+) -> TypeCheckError {
+    match reason {
+        ConstraintReason::Return(_, span) => return_unify_error_to_diag(err, *span),
+        _ => unify_error_to_diag(err, reason_span(constraint)),
+    }
+}
+
+fn return_unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
+    match err {
+        TcUnifyError::Mismatch(expected, found) => {
+            if let Type::ErrorUnion { ok_ty, err_tys } = &expected {
+                let mut variants = std::iter::once(ok_ty.as_ref())
+                    .chain(err_tys.iter())
+                    .map(super::compact_type_name)
+                    .collect::<Vec<_>>();
+                variants.sort();
+                variants.dedup();
+                return TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, span).into();
+            }
+            TypeCheckErrorKind::ReturnTypeMismatch(expected, found, span).into()
+        }
+        TcUnifyError::CannotBindRigid(var, found) => {
+            TypeCheckErrorKind::ReturnTypeMismatch(Type::Var(var), found, span).into()
+        }
+        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
+    }
+}
+
+fn reason_span(constraint: &Constraint) -> Span {
+    let reason = constraint_reason(constraint);
+    match reason {
+        ConstraintReason::Expr(_, span)
+        | ConstraintReason::Stmt(_, span)
+        | ConstraintReason::Pattern(_, span)
+        | ConstraintReason::Decl(_, span)
+        | ConstraintReason::Return(_, span) => *span,
+    }
+}
+
+fn constraint_reason(constraint: &Constraint) -> &ConstraintReason {
+    match constraint {
+        Constraint::Eq { reason, .. } => reason,
+        Constraint::Assignable { reason, .. } => reason,
+    }
+}
+
+enum ConstraintSubject {
+    Expr(NodeId),
+    Pattern(NodeId),
+    Other,
+}
+
+fn reason_subject_id(constraint: &Constraint) -> ConstraintSubject {
+    let reason = constraint_reason(constraint);
+    match reason {
+        ConstraintReason::Expr(expr_id, _) => ConstraintSubject::Expr(*expr_id),
+        ConstraintReason::Pattern(pattern_id, _) => ConstraintSubject::Pattern(*pattern_id),
+        _ => ConstraintSubject::Other,
+    }
+}
