@@ -63,11 +63,11 @@ pub(super) fn try_check_expr_obligation_nominal(
                 .zip(payload.iter())
                 .enumerate()
             {
-                let found_ty = super::resolve_term(found_term, unifier);
+                let found_ty = super::term_utils::resolve_term(found_term, unifier);
                 if matches!(
                     type_assignable(&found_ty, expected_ty),
                     TypeAssignability::Incompatible
-                ) && !super::is_unresolved(&found_ty)
+                ) && !super::term_utils::is_unresolved(&found_ty)
                 {
                     errors.push(
                         TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
@@ -91,8 +91,9 @@ pub(super) fn try_check_expr_obligation_nominal(
             caller_def_id,
             span,
         } => {
-            if let Some(type_def_id) = super::type_def_id_for_nominal_name(type_name, type_symbols)
-                && super::is_external_opaque_access(
+            if let Some(type_def_id) =
+                super::access_utils::type_def_id_for_nominal_name(type_name, type_symbols)
+                && super::access_utils::is_external_opaque_access(
                     *caller_def_id,
                     type_def_id,
                     def_table,
@@ -102,7 +103,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                 let diag_name = def_table
                     .lookup_def(type_def_id)
                     .map(|def| def.name.clone())
-                    .unwrap_or_else(|| super::compact_nominal_name(type_name));
+                    .unwrap_or_else(|| super::diag_utils::compact_nominal_name(type_name));
                 errors.push(TypeCheckErrorKind::OpaqueTypeConstruction(diag_name, *span).into());
                 covered_exprs.insert(*expr_id);
             }
@@ -116,17 +117,19 @@ pub(super) fn try_check_expr_obligation_nominal(
             caller_def_id,
             span,
         } => {
-            let target_ty = super::resolve_term(target, unifier);
-            let target_ty_for_diag =
-                super::default_infer_ints_for_diagnostics(target_ty.clone(), unifier.vars());
+            let target_ty = super::term_utils::resolve_term(target, unifier);
+            let target_ty_for_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                target_ty.clone(),
+                unifier.vars(),
+            );
             match &target_ty_for_diag {
                 Type::Struct {
                     name,
                     fields: struct_fields,
                 } => {
                     if let Some(type_def_id) =
-                        super::type_def_id_for_nominal_name(name, type_symbols)
-                        && super::is_external_opaque_access(
+                        super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
+                        && super::access_utils::is_external_opaque_access(
                             *caller_def_id,
                             type_def_id,
                             def_table,
@@ -136,7 +139,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let diag_name = def_table
                             .lookup_def(type_def_id)
                             .map(|def| def.name.clone())
-                            .unwrap_or_else(|| super::compact_nominal_name(name));
+                            .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                         let field_name = fields
                             .first()
                             .map(|(field, _)| field.clone())
@@ -149,7 +152,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         return true;
                     }
                     for (field_name, found_term) in fields {
-                        let found_ty = super::resolve_term(found_term, unifier);
+                        let found_ty = super::term_utils::resolve_term(found_term, unifier);
                         let Some(expected_field) =
                             struct_fields.iter().find(|field| field.name == *field_name)
                         else {
@@ -160,8 +163,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                             &expected_field.ty,
                             unifier,
                         ) {
-                            let found_ty = super::canonicalize_type(unifier.apply(&found_ty));
-                            if super::is_unresolved(&found_ty) {
+                            let found_ty =
+                                super::term_utils::canonicalize_type(unifier.apply(&found_ty));
+                            if super::term_utils::is_unresolved(&found_ty) {
                                 continue;
                             }
                             errors.push(
@@ -179,7 +183,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                     }
                     let _ = unifier.unify(result, &target_ty);
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
                         TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty_for_diag, *span)
@@ -197,8 +201,8 @@ pub(super) fn try_check_expr_obligation_nominal(
             result,
             span,
         } => {
-            let target_ty = super::resolve_term(target, unifier);
-            let tuple_target_ty = super::peel_heap(target_ty.clone());
+            let target_ty = super::term_utils::resolve_term(target, unifier);
+            let tuple_target_ty = super::term_utils::peel_heap(target_ty.clone());
             match &tuple_target_ty {
                 Type::Tuple { field_tys } => {
                     if *index >= field_tys.len() {
@@ -215,7 +219,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                     }
                     let _ = unifier.unify(result, &field_tys[*index]);
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
                         TypeCheckErrorKind::InvalidTupleFieldTarget(tuple_target_ty, *span).into(),
@@ -233,8 +237,8 @@ pub(super) fn try_check_expr_obligation_nominal(
             caller_def_id,
             span,
         } => {
-            let target_ty = super::resolve_term(target, unifier);
-            let owner_ty = super::peel_heap(target_ty.clone());
+            let target_ty = super::term_utils::resolve_term(target, unifier);
+            let owner_ty = super::term_utils::peel_heap(target_ty.clone());
             match super::resolve_property_access(
                 &owner_ty,
                 field,
@@ -316,8 +320,8 @@ pub(super) fn try_check_expr_obligation_nominal(
             match &owner_ty {
                 Type::Struct { name, fields } => {
                     if let Some(type_def_id) =
-                        super::type_def_id_for_nominal_name(name, type_symbols)
-                        && super::is_external_opaque_access(
+                        super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
+                        && super::access_utils::is_external_opaque_access(
                             *caller_def_id,
                             type_def_id,
                             def_table,
@@ -327,7 +331,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let diag_name = def_table
                             .lookup_def(type_def_id)
                             .map(|def| def.name.clone())
-                            .unwrap_or_else(|| super::compact_nominal_name(name));
+                            .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                         errors.push(
                             TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field.clone(), *span)
                                 .into(),
@@ -341,7 +345,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let _ = unifier.unify(result, &Type::Unknown);
                     }
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors
                         .push(TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty, *span).into());
@@ -360,9 +364,9 @@ pub(super) fn try_check_expr_obligation_nominal(
             caller_def_id,
             span,
         } => {
-            let target_ty = super::resolve_term(target, unifier);
-            let value_ty = super::resolve_term(value, unifier);
-            let owner_ty = super::peel_heap(target_ty.clone());
+            let target_ty = super::term_utils::resolve_term(target, unifier);
+            let value_ty = super::term_utils::resolve_term(value, unifier);
+            let owner_ty = super::term_utils::peel_heap(target_ty.clone());
 
             match super::resolve_property_access(
                 &owner_ty,
@@ -386,8 +390,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                     if let Err(_) =
                         super::assignability::solve_assignable(&value_ty, &prop.ty, unifier)
                     {
-                        let value_ty = super::canonicalize_type(unifier.apply(&value_ty));
-                        if super::is_unresolved(&value_ty) {
+                        let value_ty =
+                            super::term_utils::canonicalize_type(unifier.apply(&value_ty));
+                        if super::term_utils::is_unresolved(&value_ty) {
                             return true;
                         }
                         errors.push(
@@ -442,8 +447,8 @@ pub(super) fn try_check_expr_obligation_nominal(
             match &owner_ty {
                 Type::Struct { name, fields } => {
                     if let Some(type_def_id) =
-                        super::type_def_id_for_nominal_name(name, type_symbols)
-                        && super::is_external_opaque_access(
+                        super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
+                        && super::access_utils::is_external_opaque_access(
                             *caller_def_id,
                             type_def_id,
                             def_table,
@@ -453,7 +458,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let diag_name = def_table
                             .lookup_def(type_def_id)
                             .map(|def| def.name.clone())
-                            .unwrap_or_else(|| super::compact_nominal_name(name));
+                            .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                         errors.push(
                             TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field.clone(), *span)
                                 .into(),
@@ -468,8 +473,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                             &struct_field.ty,
                             unifier,
                         ) {
-                            let value_ty = super::canonicalize_type(unifier.apply(&value_ty));
-                            if super::is_unresolved(&value_ty) {
+                            let value_ty =
+                                super::term_utils::canonicalize_type(unifier.apply(&value_ty));
+                            if super::term_utils::is_unresolved(&value_ty) {
                                 return true;
                             }
                             errors.push(
@@ -486,7 +492,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let _ = unifier.unify(assignee, &Type::Unknown);
                     }
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors
                         .push(TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty, *span).into());

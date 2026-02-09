@@ -22,10 +22,12 @@ pub(super) fn try_check_expr_obligation_collections(
             elem_ty,
             span,
         } => {
-            let elem_ty = super::resolve_term(elem_ty, unifier);
-            let elem_ty_for_diag =
-                super::default_infer_ints_for_diagnostics(elem_ty.clone(), unifier.vars());
-            if super::is_unresolved(&elem_ty_for_diag) {
+            let elem_ty = super::term_utils::resolve_term(elem_ty, unifier);
+            let elem_ty_for_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                elem_ty.clone(),
+                unifier.vars(),
+            );
+            if super::term_utils::is_unresolved(&elem_ty_for_diag) {
                 return true;
             }
             if let Err(failure) = super::ensure_hashable(&elem_ty_for_diag) {
@@ -47,10 +49,12 @@ pub(super) fn try_check_expr_obligation_collections(
             key_ty,
             span,
         } => {
-            let key_ty = super::resolve_term(key_ty, unifier);
-            let key_ty_for_diag =
-                super::default_infer_ints_for_diagnostics(key_ty.clone(), unifier.vars());
-            if super::is_unresolved(&key_ty_for_diag) {
+            let key_ty = super::term_utils::resolve_term(key_ty, unifier);
+            let key_ty_for_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                key_ty.clone(),
+                unifier.vars(),
+            );
+            if super::term_utils::is_unresolved(&key_ty_for_diag) {
                 return true;
             }
             if let Err(failure) = super::ensure_hashable(&key_ty_for_diag) {

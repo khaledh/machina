@@ -9,16 +9,19 @@
 //!
 //! This split keeps inference productive while preserving precise
 //! assignability/runtime-refinement behavior.
+mod access_utils;
 mod assignability;
 mod calls;
 mod collections;
 mod constraint_checks;
 mod control;
+mod diag_utils;
 mod expr_ops;
 mod index;
 mod joins;
 mod nominal;
 mod patterns;
+mod term_utils;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -255,12 +258,12 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     for (node_id, term) in &constrain.node_terms {
         output
             .resolved_node_types
-            .insert(*node_id, canonicalize_type(unifier.apply(term)));
+            .insert(*node_id, term_utils::canonicalize_type(unifier.apply(term)));
     }
     for (def_id, term) in &constrain.def_terms {
         output
             .resolved_def_types
-            .insert(*def_id, canonicalize_type(unifier.apply(term)));
+            .insert(*def_id, term_utils::canonicalize_type(unifier.apply(term)));
     }
 
     errors.extend(check_unresolved_local_infer_vars(
@@ -425,23 +428,23 @@ fn should_retry_post_call_expr_obligation(
 ) -> bool {
     match obligation {
         ExprObligation::Join { arms, result, .. } => {
-            let result_ty = resolve_term(result, unifier);
-            if is_unresolved(&result_ty) {
+            let result_ty = term_utils::resolve_term(result, unifier);
+            if term_utils::is_unresolved(&result_ty) {
                 return true;
             }
             arms.iter()
-                .map(|arm| resolve_term(arm, unifier))
-                .any(|arm_ty| is_unresolved(&arm_ty))
+                .map(|arm| term_utils::resolve_term(arm, unifier))
+                .any(|arm_ty| term_utils::is_unresolved(&arm_ty))
         }
         ExprObligation::StructField { target, result, .. } => {
-            let owner_ty = peel_heap(resolve_term(target, unifier));
-            let result_ty = resolve_term(result, unifier);
-            is_unresolved(&owner_ty) || is_unresolved(&result_ty)
+            let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&owner_ty) || term_utils::is_unresolved(&result_ty)
         }
         ExprObligation::TupleField { target, result, .. } => {
-            let owner_ty = peel_heap(resolve_term(target, unifier));
-            let result_ty = resolve_term(result, unifier);
-            is_unresolved(&owner_ty) || is_unresolved(&result_ty)
+            let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&owner_ty) || term_utils::is_unresolved(&result_ty)
         }
         ExprObligation::StructFieldAssign {
             target,
@@ -449,22 +452,24 @@ fn should_retry_post_call_expr_obligation(
             value,
             ..
         } => {
-            let owner_ty = peel_heap(resolve_term(target, unifier));
-            let assignee_ty = resolve_term(assignee, unifier);
-            let value_ty = resolve_term(value, unifier);
-            is_unresolved(&owner_ty) || is_unresolved(&assignee_ty) || is_unresolved(&value_ty)
+            let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
+            let assignee_ty = term_utils::resolve_term(assignee, unifier);
+            let value_ty = term_utils::resolve_term(value, unifier);
+            term_utils::is_unresolved(&owner_ty)
+                || term_utils::is_unresolved(&assignee_ty)
+                || term_utils::is_unresolved(&value_ty)
         }
         ExprObligation::SetElemType { elem_ty, .. } => {
-            let elem_ty = resolve_term(elem_ty, unifier);
-            is_unresolved(&elem_ty)
+            let elem_ty = term_utils::resolve_term(elem_ty, unifier);
+            term_utils::is_unresolved(&elem_ty)
         }
         ExprObligation::MapKeyType { key_ty, .. } => {
-            let key_ty = resolve_term(key_ty, unifier);
-            is_unresolved(&key_ty)
+            let key_ty = term_utils::resolve_term(key_ty, unifier);
+            term_utils::is_unresolved(&key_ty)
         }
         ExprObligation::MapIndexAssign { target, .. } => {
-            let owner_ty = peel_heap(resolve_term(target, unifier));
-            is_unresolved(&owner_ty)
+            let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
+            term_utils::is_unresolved(&owner_ty)
         }
         ExprObligation::Try {
             callable_def_id: _, ..
@@ -579,99 +584,6 @@ fn has_unresolved_infer_var(ty: &Type, vars: &crate::typecheck::typesys::TypeVar
     })
 }
 
-fn compact_type_name(ty: &Type) -> String {
-    match ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
-        Type::Int { signed, bits, .. } => format!("{}{}", if *signed { "i" } else { "u" }, bits),
-        Type::Bool => "bool".to_string(),
-        Type::Char => "char".to_string(),
-        Type::String => "string".to_string(),
-        Type::Unit => "()".to_string(),
-        _ => ty.to_string(),
-    }
-}
-
-fn compact_nominal_name(name: &str) -> String {
-    name.split('<').next().unwrap_or(name).trim().to_string()
-}
-
-fn type_def_id_for_nominal_name(
-    name: &str,
-    type_symbols: &HashMap<String, DefId>,
-) -> Option<DefId> {
-    let base = compact_nominal_name(name);
-    type_symbols.get(&base).copied()
-}
-
-fn is_external_opaque_access(
-    caller_def_id: Option<DefId>,
-    owner_type_def_id: DefId,
-    def_table: &DefTable,
-    def_owners: &HashMap<DefId, ModuleId>,
-) -> bool {
-    if !def_table
-        .lookup_def(owner_type_def_id)
-        .is_some_and(|def| def.is_opaque())
-    {
-        return false;
-    }
-    let Some(caller_def_id) = caller_def_id else {
-        return false;
-    };
-    let Some(caller_module_id) = def_owners.get(&caller_def_id) else {
-        return false;
-    };
-    let Some(owner_module_id) = def_owners.get(&owner_type_def_id) else {
-        return false;
-    };
-    caller_module_id != owner_module_id
-}
-
-fn is_def_accessible_from(
-    caller_def_id: Option<DefId>,
-    target_def_id: DefId,
-    def_table: &DefTable,
-    def_owners: &HashMap<DefId, ModuleId>,
-) -> bool {
-    if def_table
-        .lookup_def(target_def_id)
-        .is_some_and(|def| def.is_public())
-    {
-        return true;
-    }
-
-    let Some(caller_def_id) = caller_def_id else {
-        return true;
-    };
-    let Some(caller_module_id) = def_owners.get(&caller_def_id) else {
-        return true;
-    };
-    let Some(target_module_id) = def_owners.get(&target_def_id) else {
-        return true;
-    };
-    caller_module_id == target_module_id
-}
-
-fn error_union_variant_names(ty: &Type) -> Option<Vec<String>> {
-    let Type::ErrorUnion { ok_ty, err_tys } = ty else {
-        return None;
-    };
-    let mut names = std::iter::once(ok_ty.as_ref())
-        .chain(err_tys.iter())
-        .map(compact_type_name)
-        .collect::<Vec<_>>();
-    names.sort();
-    names.dedup();
-    Some(names)
-}
-
-fn map_key_not_found_type() -> Type {
-    Type::Struct {
-        name: "KeyNotFound".to_string(),
-        fields: Vec::new(),
-    }
-}
-
 fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
     let unresolved = unifier
         .vars()
@@ -679,32 +591,6 @@ fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
     for var in unresolved {
         unifier.vars_mut().bind(var, Type::sint(32));
     }
-}
-
-fn resolve_term_for_diagnostics(ty: &Type, unifier: &TcUnifier) -> Type {
-    default_infer_ints_for_diagnostics(resolve_term(ty, unifier), unifier.vars())
-}
-
-fn resolve_term(ty: &Type, unifier: &TcUnifier) -> Type {
-    canonicalize_type(unifier.apply(ty))
-}
-
-fn default_infer_ints_for_diagnostics(
-    ty: Type,
-    vars: &crate::typecheck::typesys::TypeVarStore,
-) -> Type {
-    ty.map(&|t| match t {
-        Type::Var(var) if matches!(vars.kind(var), Some(TypeVarKind::InferInt)) => Type::sint(32),
-        other => other,
-    })
-}
-
-fn is_int_like(ty: &Type) -> bool {
-    matches!(ty, Type::Int { .. })
-}
-
-fn is_unresolved(ty: &Type) -> bool {
-    ty.any(&|t| matches!(t, Type::Unknown | Type::Var(_)))
 }
 
 fn is_iterable(ty: &Type) -> bool {
@@ -728,10 +614,6 @@ fn is_len_target(ty: &Type) -> bool {
             | Type::Slice { .. }
             | Type::String
     )
-}
-
-fn peel_heap(ty: Type) -> Type {
-    ty.peel_heap()
 }
 
 #[derive(Debug, Clone)]
@@ -777,10 +659,10 @@ fn resolve_property_access(
 ) -> Result<ResolvedPropertyAccess, PropertyResolution> {
     if let Some(prop) = lookup_property(property_sigs, owner_ty, field) {
         let readable = prop.getter.is_some_and(|def_id| {
-            is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
+            access_utils::is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
         });
         let writable = prop.setter.is_some_and(|def_id| {
-            is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
+            access_utils::is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
         });
         if (prop.getter.is_some() || prop.setter.is_some()) && !readable && !writable {
             return Err(PropertyResolution::Private);
@@ -831,30 +713,6 @@ fn iterable_elem_type(ty: &Type) -> Option<Type> {
         Type::String => Some(Type::Char),
         _ => None,
     }
-}
-
-fn canonicalize_type(ty: Type) -> Type {
-    ty.map(&|t| match t {
-        // Flatten nested arrays.
-        Type::Array { elem_ty, dims } => match *elem_ty {
-            Type::Array {
-                elem_ty: inner_elem,
-                dims: inner_dims,
-            } => {
-                let mut merged = dims;
-                merged.extend(inner_dims);
-                Type::Array {
-                    elem_ty: inner_elem,
-                    dims: merged,
-                }
-            }
-            other => Type::Array {
-                elem_ty: Box::new(other),
-                dims,
-            },
-        },
-        other => other,
-    })
 }
 
 #[cfg(test)]

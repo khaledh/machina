@@ -11,10 +11,10 @@ pub(super) fn solve_assignable(
     to: &Type,
     unifier: &mut TcUnifier,
 ) -> Result<(), TcUnifyError> {
-    let from_raw = super::canonicalize_type(from.clone());
-    let to_raw = super::canonicalize_type(to.clone());
-    let from_applied = super::canonicalize_type(unifier.apply(&from_raw));
-    let to_applied = super::canonicalize_type(unifier.apply(&to_raw));
+    let from_raw = super::term_utils::canonicalize_type(from.clone());
+    let to_raw = super::term_utils::canonicalize_type(to.clone());
+    let from_applied = super::term_utils::canonicalize_type(unifier.apply(&from_raw));
+    let to_applied = super::term_utils::canonicalize_type(unifier.apply(&to_raw));
 
     if let Some(result) = infer_array_to_slice_assignability(&from_applied, &to_applied, unifier) {
         return result;
@@ -30,7 +30,9 @@ pub(super) fn solve_assignable(
         return result;
     }
 
-    if !super::is_unresolved(&from_applied) && !super::is_unresolved(&to_applied) {
+    if !super::term_utils::is_unresolved(&from_applied)
+        && !super::term_utils::is_unresolved(&to_applied)
+    {
         return match type_assignable(&from_applied, &to_applied) {
             TypeAssignability::Incompatible
                 if array_to_slice_assignable(&from_applied, &to_applied) =>
@@ -51,7 +53,7 @@ pub(super) fn solve_assignable(
 }
 
 pub(super) fn assignability_rank(from: &Type, to: &Type) -> i32 {
-    if super::is_unresolved(from) || super::is_unresolved(to) {
+    if super::term_utils::is_unresolved(from) || super::term_utils::is_unresolved(to) {
         return 0;
     }
     match type_assignable(from, to) {

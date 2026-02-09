@@ -27,8 +27,8 @@ pub(super) fn apply_constraint(
     let reason = constraint_reason(constraint);
     let result = match constraint {
         Constraint::Eq { left, right, .. } => unifier.unify(
-            &super::canonicalize_type(left.clone()),
-            &super::canonicalize_type(right.clone()),
+            &super::term_utils::canonicalize_type(left.clone()),
+            &super::term_utils::canonicalize_type(right.clone()),
         ),
         Constraint::Assignable { from, to, .. } => {
             super::assignability::solve_assignable(from, to, unifier)
@@ -53,16 +53,17 @@ pub(super) fn apply_constraint(
 pub(super) fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<TypeCheckError> {
     match err {
         TcUnifyError::Mismatch(left, right) => {
-            if !super::is_int_like(left) && !super::is_unresolved(left) {
+            if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
                 return Some(TypeCheckErrorKind::IndexTypeNotInt(left.clone(), span).into());
             }
-            if !super::is_int_like(right) && !super::is_unresolved(right) {
+            if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
                 return Some(TypeCheckErrorKind::IndexTypeNotInt(right.clone(), span).into());
             }
             None
         }
         TcUnifyError::CannotBindRigid(_, found)
-            if !super::is_int_like(found) && !super::is_unresolved(found) =>
+            if !super::term_utils::is_int_like(found)
+                && !super::term_utils::is_unresolved(found) =>
         {
             Some(TypeCheckErrorKind::IndexTypeNotInt(found.clone(), span).into())
         }
@@ -78,7 +79,8 @@ pub(super) fn remap_enum_payload_unify_error(
 ) -> Option<TypeCheckError> {
     match err {
         TcUnifyError::Mismatch(expected, found)
-            if !super::is_unresolved(expected) && !super::is_unresolved(found) =>
+            if !super::term_utils::is_unresolved(expected)
+                && !super::term_utils::is_unresolved(found) =>
         {
             Some(
                 TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
@@ -124,7 +126,7 @@ fn return_unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
             if let Type::ErrorUnion { ok_ty, err_tys } = &expected {
                 let mut variants = std::iter::once(ok_ty.as_ref())
                     .chain(err_tys.iter())
-                    .map(super::compact_type_name)
+                    .map(super::diag_utils::compact_type_name)
                     .collect::<Vec<_>>();
                 variants.sort();
                 variants.dedup();

@@ -28,40 +28,50 @@ pub(super) fn try_check_expr_obligation_control(
         } => {
             let resolved_arms = arms
                 .iter()
-                .map(|arm| super::resolve_term(arm, unifier))
+                .map(|arm| super::term_utils::resolve_term(arm, unifier))
                 .collect::<Vec<_>>();
-            let mut result_ty = super::resolve_term(result, unifier);
+            let mut result_ty = super::term_utils::resolve_term(result, unifier);
 
-            if super::is_unresolved(&result_ty)
+            if super::term_utils::is_unresolved(&result_ty)
                 && let Some(inferred_join) = super::joins::infer_join_type_from_arms(
                     &resolved_arms
                         .iter()
                         .cloned()
-                        .map(|ty| super::default_infer_ints_for_diagnostics(ty, unifier.vars()))
+                        .map(|ty| {
+                            super::term_utils::default_infer_ints_for_diagnostics(
+                                ty,
+                                unifier.vars(),
+                            )
+                        })
                         .collect::<Vec<_>>(),
                 )
             {
                 let _ = unifier.unify(result, &inferred_join);
-                result_ty = super::resolve_term(result, unifier);
+                result_ty = super::term_utils::resolve_term(result, unifier);
             }
 
-            let result_ty_diag =
-                super::default_infer_ints_for_diagnostics(result_ty.clone(), unifier.vars());
-            if super::is_unresolved(&result_ty_diag) {
+            let result_ty_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                result_ty.clone(),
+                unifier.vars(),
+            );
+            if super::term_utils::is_unresolved(&result_ty_diag) {
                 return true;
             }
 
             for (arm_term, arm_ty) in arms.iter().zip(resolved_arms.into_iter()) {
-                if super::is_unresolved(&arm_ty) {
+                if super::term_utils::is_unresolved(&arm_ty) {
                     let _ = unifier.unify(arm_term, &result_ty_diag);
                     continue;
                 }
-                let arm_ty_diag = super::default_infer_ints_for_diagnostics(arm_ty, unifier.vars());
+                let arm_ty_diag =
+                    super::term_utils::default_infer_ints_for_diagnostics(arm_ty, unifier.vars());
                 if matches!(
                     type_assignable(&arm_ty_diag, &result_ty_diag),
                     TypeAssignability::Incompatible
                 ) {
-                    if let Some(variants) = super::error_union_variant_names(&result_ty_diag) {
+                    if let Some(variants) =
+                        super::diag_utils::error_union_variant_names(&result_ty_diag)
+                    {
                         errors.push(
                             TypeCheckErrorKind::JoinArmNotInErrorUnion(
                                 variants,
@@ -94,11 +104,13 @@ pub(super) fn try_check_expr_obligation_control(
             callable_def_id,
             span,
         } => {
-            let operand_ty = super::resolve_term(operand, unifier);
-            let operand_ty_for_diag =
-                super::default_infer_ints_for_diagnostics(operand_ty.clone(), unifier.vars());
+            let operand_ty = super::term_utils::resolve_term(operand, unifier);
+            let operand_ty_for_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                operand_ty.clone(),
+                unifier.vars(),
+            );
             let Type::ErrorUnion { ok_ty, err_tys } = &operand_ty else {
-                if !super::is_unresolved(&operand_ty_for_diag) {
+                if !super::term_utils::is_unresolved(&operand_ty_for_diag) {
                     errors.push(
                         TypeCheckErrorKind::TryOperandNotErrorUnion(operand_ty_for_diag, *span)
                             .into(),
@@ -112,18 +124,19 @@ pub(super) fn try_check_expr_obligation_control(
 
             let mut return_ty = expected_return_ty
                 .as_ref()
-                .map(|term| super::resolve_term(term, unifier))
+                .map(|term| super::term_utils::resolve_term(term, unifier))
                 .unwrap_or(Type::Unknown);
 
-            if super::is_unresolved(&return_ty)
+            if super::term_utils::is_unresolved(&return_ty)
                 && let Some(def_id) = callable_def_id
                 && let Some(callable_term) = def_terms.get(def_id)
-                && let Type::Fn { ret_ty, .. } = super::resolve_term(callable_term, unifier)
+                && let Type::Fn { ret_ty, .. } =
+                    super::term_utils::resolve_term(callable_term, unifier)
             {
                 return_ty = *ret_ty;
             }
 
-            if super::is_unresolved(&return_ty)
+            if super::term_utils::is_unresolved(&return_ty)
                 && let Some(return_ty_term) = expected_return_ty
             {
                 let fresh_ok = Type::Var(unifier.vars_mut().fresh_infer_local());
@@ -132,7 +145,7 @@ pub(super) fn try_check_expr_obligation_control(
                     err_tys: err_tys.clone(),
                 };
                 let _ = unifier.unify(return_ty_term, &expected_union);
-                return_ty = super::resolve_term(return_ty_term, unifier);
+                return_ty = super::term_utils::resolve_term(return_ty_term, unifier);
             }
 
             if expected_return_ty.is_none() && callable_def_id.is_none() {
@@ -155,7 +168,7 @@ pub(super) fn try_check_expr_obligation_control(
                             )
                         });
                         if !present
-                            && !super::is_unresolved(err_ty)
+                            && !super::term_utils::is_unresolved(err_ty)
                             && !missing.iter().any(|seen| seen == err_ty)
                         {
                             missing.push(err_ty.clone());
@@ -164,13 +177,13 @@ pub(super) fn try_check_expr_obligation_control(
                     if !missing.is_empty() {
                         let mut missing_names = missing
                             .iter()
-                            .map(super::compact_type_name)
+                            .map(super::diag_utils::compact_type_name)
                             .collect::<Vec<_>>();
                         missing_names.sort();
                         missing_names.dedup();
                         let mut return_variant_names = std::iter::once(ok_ty.as_ref())
                             .chain(return_err_tys.iter())
-                            .map(super::compact_type_name)
+                            .map(super::diag_utils::compact_type_name)
                             .collect::<Vec<_>>();
                         return_variant_names.sort();
                         return_variant_names.dedup();
@@ -185,7 +198,7 @@ pub(super) fn try_check_expr_obligation_control(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
                         TypeCheckErrorKind::TryReturnTypeNotErrorUnion(return_ty.clone(), *span)
@@ -202,10 +215,14 @@ pub(super) fn try_check_expr_obligation_control(
             pattern,
             span,
         } => {
-            let iter_ty = super::resolve_term(iter, unifier);
-            let iter_ty_for_diag =
-                super::default_infer_ints_for_diagnostics(iter_ty.clone(), unifier.vars());
-            if !super::is_iterable(&iter_ty_for_diag) && !super::is_unresolved(&iter_ty_for_diag) {
+            let iter_ty = super::term_utils::resolve_term(iter, unifier);
+            let iter_ty_for_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                iter_ty.clone(),
+                unifier.vars(),
+            );
+            if !super::is_iterable(&iter_ty_for_diag)
+                && !super::term_utils::is_unresolved(&iter_ty_for_diag)
+            {
                 errors.push(TypeCheckErrorKind::ForIterNotIterable(iter_ty_for_diag, *span).into());
                 covered_exprs.insert(*stmt_id);
                 return true;
@@ -213,12 +230,12 @@ pub(super) fn try_check_expr_obligation_control(
 
             if let Some(elem_ty) = super::iterable_elem_type(&iter_ty) {
                 let _ = unifier.unify(pattern, &elem_ty);
-                let pattern_ty = super::resolve_term(pattern, unifier);
+                let pattern_ty = super::term_utils::resolve_term(pattern, unifier);
                 if matches!(
                     type_assignable(&pattern_ty, &elem_ty),
                     TypeAssignability::Incompatible
-                ) && !super::is_unresolved(&pattern_ty)
-                    && !super::is_unresolved(&elem_ty)
+                ) && !super::term_utils::is_unresolved(&pattern_ty)
+                    && !super::term_utils::is_unresolved(&elem_ty)
                 {
                     errors.push(
                         TypeCheckErrorKind::DeclTypeMismatch(pattern_ty, elem_ty, *span).into(),

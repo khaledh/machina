@@ -38,7 +38,7 @@ pub(super) fn check_pattern_obligations(
                 caller_def_id,
                 span,
             } => {
-                let value_ty = super::resolve_term_for_diagnostics(value_ty, unifier);
+                let value_ty = super::term_utils::resolve_term_for_diagnostics(value_ty, unifier);
                 if let Some(error) = check_bind_pattern(
                     pattern,
                     &value_ty,
@@ -59,7 +59,7 @@ pub(super) fn check_pattern_obligations(
                 caller_def_id: _,
                 ..
             } => {
-                let scrutinee_ty = super::resolve_term(scrutinee_ty, unifier);
+                let scrutinee_ty = super::term_utils::resolve_term(scrutinee_ty, unifier);
                 bind_match_pattern_types(
                     pattern,
                     &scrutinee_ty,
@@ -95,12 +95,12 @@ fn bind_match_pattern_types(
     match pattern {
         MatchPattern::Wildcard { .. } => {}
         MatchPattern::BoolLit { .. } => {
-            if super::is_unresolved(scrutinee_ty) {
+            if super::term_utils::is_unresolved(scrutinee_ty) {
                 let _ = unifier.unify(scrutinee_ty, &Type::Bool);
             }
         }
         MatchPattern::IntLit { .. } => {
-            if super::is_unresolved(scrutinee_ty) {
+            if super::term_utils::is_unresolved(scrutinee_ty) {
                 let int_var = Type::Var(unifier.vars_mut().fresh_infer_int());
                 let _ = unifier.unify(scrutinee_ty, &int_var);
             }
@@ -134,10 +134,10 @@ fn bind_match_pattern_types(
                         if let Some(term) = def_terms.get(def_id) {
                             let _ = unifier.unify(term, &pat_ty);
                         }
-                    } else if !super::is_unresolved(&pat_ty) {
+                    } else if !super::term_utils::is_unresolved(&pat_ty) {
                         let variant_names = variants
                             .iter()
-                            .map(super::compact_type_name)
+                            .map(super::diag_utils::compact_type_name)
                             .collect::<Vec<_>>();
                         errors.push(
                             TypeCheckErrorKind::MatchTypedBindingTypeMismatch(
@@ -165,7 +165,7 @@ fn bind_match_pattern_types(
                         covered, pattern_id,
                     );
                 }
-            } else if super::is_unresolved(scrutinee_ty) {
+            } else if super::term_utils::is_unresolved(scrutinee_ty) {
                 let inferred_fields = patterns
                     .iter()
                     .map(|_| Type::Var(unifier.vars_mut().fresh_infer_local()))
@@ -190,12 +190,12 @@ fn bind_match_pattern_types(
             bindings,
             ..
         } => {
-            let owner_ty = super::peel_heap(scrutinee_ty.clone());
+            let owner_ty = super::term_utils::peel_heap(scrutinee_ty.clone());
             let mut matched_variant = None;
 
             if let Type::Enum { variants, .. } = owner_ty.clone() {
                 matched_variant = variants.iter().find(|v| v.name == *variant_name).cloned();
-            } else if super::is_unresolved(&owner_ty) {
+            } else if super::term_utils::is_unresolved(&owner_ty) {
                 let inferred_enum = resolve_pattern_enum_type(
                     *id, enum_name, type_args, type_defs, def_table, module, unifier,
                 );
@@ -300,7 +300,7 @@ fn check_bind_pattern(
                 }
                 None
             }
-            ty if super::is_unresolved(ty) => None,
+            ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
                 TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone(), span)
                     .into(),
@@ -342,7 +342,7 @@ fn check_bind_pattern(
                 }
                 None
             }
-            ty if super::is_unresolved(ty) => None,
+            ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
                 TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone(), span)
                     .into(),
@@ -354,8 +354,9 @@ fn check_bind_pattern(
                 fields: struct_fields,
                 ..
             } => {
-                if let Some(type_def_id) = super::type_def_id_for_nominal_name(name, type_symbols)
-                    && super::is_external_opaque_access(
+                if let Some(type_def_id) =
+                    super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
+                    && super::access_utils::is_external_opaque_access(
                         caller_def_id,
                         type_def_id,
                         def_table,
@@ -365,7 +366,7 @@ fn check_bind_pattern(
                     let diag_name = def_table
                         .lookup_def(type_def_id)
                         .map(|def| def.name.clone())
-                        .unwrap_or_else(|| super::compact_nominal_name(name));
+                        .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                     return Some(
                         TypeCheckErrorKind::OpaquePatternDestructure(diag_name, span).into(),
                     );
@@ -389,7 +390,7 @@ fn check_bind_pattern(
                 }
                 None
             }
-            ty if super::is_unresolved(ty) => None,
+            ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
                 TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone(), span)
                     .into(),

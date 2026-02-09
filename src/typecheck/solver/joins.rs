@@ -7,7 +7,7 @@ use crate::types::Type;
 pub(super) fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
     let mut variants = Vec::new();
     for arm_ty in arms {
-        if super::is_unresolved(arm_ty) {
+        if super::term_utils::is_unresolved(arm_ty) {
             continue;
         }
         collect_join_variants(arm_ty, &mut variants);

@@ -28,16 +28,19 @@ pub(super) fn try_check_expr_obligation_index(
             result,
             span,
         } => {
-            let target_ty = super::resolve_term(target, unifier);
-            let indexed_target_ty = super::peel_heap(target_ty.clone());
+            let target_ty = super::term_utils::resolve_term(target, unifier);
+            let indexed_target_ty = super::term_utils::peel_heap(target_ty.clone());
 
             match &indexed_target_ty {
                 Type::Array { elem_ty, dims } => {
                     if let Some((idx_i, bad_idx_ty)) = indices
                         .iter()
-                        .map(|term| super::resolve_term(term, unifier))
+                        .map(|term| super::term_utils::resolve_term(term, unifier))
                         .enumerate()
-                        .find(|(_, ty)| !super::is_int_like(ty) && !super::is_unresolved(ty))
+                        .find(|(_, ty)| {
+                            !super::term_utils::is_int_like(ty)
+                                && !super::term_utils::is_unresolved(ty)
+                        })
                     {
                         emit_bad_int_index(
                             errors,
@@ -75,9 +78,12 @@ pub(super) fn try_check_expr_obligation_index(
                 Type::Slice { elem_ty } => {
                     if let Some((idx_i, bad_idx_ty)) = indices
                         .iter()
-                        .map(|term| super::resolve_term(term, unifier))
+                        .map(|term| super::term_utils::resolve_term(term, unifier))
                         .enumerate()
-                        .find(|(_, ty)| !super::is_int_like(ty) && !super::is_unresolved(ty))
+                        .find(|(_, ty)| {
+                            !super::term_utils::is_int_like(ty)
+                                && !super::term_utils::is_unresolved(ty)
+                        })
                     {
                         emit_bad_int_index(
                             errors,
@@ -106,9 +112,12 @@ pub(super) fn try_check_expr_obligation_index(
                 Type::DynArray { elem_ty } => {
                     if let Some((idx_i, bad_idx_ty)) = indices
                         .iter()
-                        .map(|term| super::resolve_term(term, unifier))
+                        .map(|term| super::term_utils::resolve_term(term, unifier))
                         .enumerate()
-                        .find(|(_, ty)| !super::is_int_like(ty) && !super::is_unresolved(ty))
+                        .find(|(_, ty)| {
+                            !super::term_utils::is_int_like(ty)
+                                && !super::term_utils::is_unresolved(ty)
+                        })
                     {
                         emit_bad_int_index(
                             errors,
@@ -137,9 +146,12 @@ pub(super) fn try_check_expr_obligation_index(
                 Type::String => {
                     if let Some((idx_i, bad_idx_ty)) = indices
                         .iter()
-                        .map(|term| super::resolve_term(term, unifier))
+                        .map(|term| super::term_utils::resolve_term(term, unifier))
                         .enumerate()
-                        .find(|(_, ty)| !super::is_int_like(ty) && !super::is_unresolved(ty))
+                        .find(|(_, ty)| {
+                            !super::term_utils::is_int_like(ty)
+                                && !super::term_utils::is_unresolved(ty)
+                        })
                     {
                         emit_bad_int_index(
                             errors,
@@ -173,11 +185,11 @@ pub(super) fn try_check_expr_obligation_index(
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
-                    let key_index_ty = super::resolve_term(&indices[0], unifier);
+                    let key_index_ty = super::term_utils::resolve_term(&indices[0], unifier);
                     if let Err(_) =
                         super::assignability::solve_assignable(&key_index_ty, key_ty, unifier)
                     {
-                        if !super::is_unresolved(&key_index_ty) {
+                        if !super::term_utils::is_unresolved(&key_index_ty) {
                             let diag_span = index_spans.first().copied().unwrap_or(*span);
                             errors.push(
                                 TypeCheckErrorKind::MapKeyTypeMismatch(
@@ -194,7 +206,7 @@ pub(super) fn try_check_expr_obligation_index(
                         }
                         return true;
                     }
-                    if !super::is_unresolved(key_ty)
+                    if !super::term_utils::is_unresolved(key_ty)
                         && let Err(failure) = super::ensure_hashable(key_ty)
                     {
                         errors.push(
@@ -209,7 +221,7 @@ pub(super) fn try_check_expr_obligation_index(
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
-                    if value_ty.needs_drop() && !super::is_unresolved(value_ty) {
+                    if value_ty.needs_drop() && !super::term_utils::is_unresolved(value_ty) {
                         errors.push(
                             TypeCheckErrorKind::MapIndexValueNotCopySafe(
                                 value_ty.as_ref().clone(),
@@ -222,11 +234,11 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     let result_ty = Type::ErrorUnion {
                         ok_ty: value_ty.clone(),
-                        err_tys: vec![super::map_key_not_found_type()],
+                        err_tys: vec![super::diag_utils::map_key_not_found_type()],
                     };
                     let _ = unifier.unify(result, &result_ty);
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
                         TypeCheckErrorKind::InvalidIndexTargetType(indexed_target_ty, *span).into(),
@@ -242,7 +254,8 @@ pub(super) fn try_check_expr_obligation_index(
             target,
             span,
         } => {
-            let owner_ty = super::peel_heap(super::resolve_term(target, unifier));
+            let owner_ty =
+                super::term_utils::peel_heap(super::term_utils::resolve_term(target, unifier));
             if matches!(owner_ty, Type::Map { .. }) {
                 errors.push(TypeCheckErrorKind::MapIndexAssignUnsupported(*span).into());
                 covered_exprs.insert(*stmt_id);
@@ -257,21 +270,23 @@ pub(super) fn try_check_expr_obligation_index(
             result,
             span,
         } => {
-            let target_ty = super::resolve_term(target, unifier);
-            let sliced_target_ty = super::peel_heap(target_ty.clone());
+            let target_ty = super::term_utils::resolve_term(target, unifier);
+            let sliced_target_ty = super::term_utils::peel_heap(target_ty.clone());
             let mut bad_bound_ty = None;
             if let Some(start_ty) = start
                 .as_ref()
-                .map(|term| super::resolve_term(term, unifier))
-                && !super::is_int_like(&start_ty)
-                && !super::is_unresolved(&start_ty)
+                .map(|term| super::term_utils::resolve_term(term, unifier))
+                && !super::term_utils::is_int_like(&start_ty)
+                && !super::term_utils::is_unresolved(&start_ty)
             {
                 bad_bound_ty = Some(start_ty);
             }
             if bad_bound_ty.is_none()
-                && let Some(end_ty) = end.as_ref().map(|term| super::resolve_term(term, unifier))
-                && !super::is_int_like(&end_ty)
-                && !super::is_unresolved(&end_ty)
+                && let Some(end_ty) = end
+                    .as_ref()
+                    .map(|term| super::term_utils::resolve_term(term, unifier))
+                && !super::term_utils::is_int_like(&end_ty)
+                && !super::term_utils::is_unresolved(&end_ty)
             {
                 bad_bound_ty = Some(end_ty);
             }
@@ -330,7 +345,7 @@ pub(super) fn try_check_expr_obligation_index(
                         },
                     );
                 }
-                ty if super::is_unresolved(ty) => {}
+                ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
                         TypeCheckErrorKind::SliceTargetNotArrayOrString(sliced_target_ty, *span)
@@ -349,14 +364,18 @@ pub(super) fn try_check_expr_obligation_index(
             result,
             span,
         } => {
-            let start_ty = super::resolve_term(start, unifier);
-            if !super::is_int_like(&start_ty) && !super::is_unresolved(&start_ty) {
+            let start_ty = super::term_utils::resolve_term(start, unifier);
+            if !super::term_utils::is_int_like(&start_ty)
+                && !super::term_utils::is_unresolved(&start_ty)
+            {
                 errors.push(TypeCheckErrorKind::IndexTypeNotInt(start_ty, *span).into());
                 covered_exprs.insert(*expr_id);
                 return true;
             }
-            let end_ty = super::resolve_term(end, unifier);
-            if !super::is_int_like(&end_ty) && !super::is_unresolved(&end_ty) {
+            let end_ty = super::term_utils::resolve_term(end, unifier);
+            if !super::term_utils::is_int_like(&end_ty)
+                && !super::term_utils::is_unresolved(&end_ty)
+            {
                 errors.push(TypeCheckErrorKind::IndexTypeNotInt(end_ty, *span).into());
                 covered_exprs.insert(*expr_id);
                 return true;
@@ -374,7 +393,7 @@ pub(super) fn try_check_expr_obligation_index(
 }
 
 fn force_unresolved_index_to_u64(index_term: &Type, unifier: &mut TcUnifier) {
-    let resolved = super::resolve_term(index_term, unifier);
+    let resolved = super::term_utils::resolve_term(index_term, unifier);
     if let Type::Var(var) = resolved
         && matches!(unifier.vars().kind(var), Some(TypeVarKind::InferInt))
     {
