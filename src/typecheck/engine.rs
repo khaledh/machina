@@ -17,7 +17,7 @@ use crate::tree::ParamMode;
 use crate::typecheck::errors::TypeCheckError;
 use crate::types::{TyVarId, Type};
 
-use super::{collect, constraints, finalize, solve, typesys, validate};
+use super::{collect, constraints, finalize, solver, typesys, validate};
 
 /// Immutable shared environment populated by early passes.
 #[derive(Clone)]
@@ -39,7 +39,7 @@ pub(crate) struct TcState {
     pub(crate) diags: Vec<TypeCheckError>,
     pub(crate) phase: Option<TcPhase>,
     pub(crate) constrain: constraints::ConstrainOutput,
-    pub(crate) solve: solve::SolveOutput,
+    pub(crate) solve: solver::SolveOutput,
     pub(crate) finalize: Option<finalize::FinalizeOutput>,
     #[allow(dead_code)]
     pub(crate) diag_ctx: DiagCtx,
@@ -146,7 +146,7 @@ impl TypecheckEngine {
         // The pipeline is intentionally linear and phase-ordered.
         self.run_phase(TcPhase::Collect, collect::run)?;
         self.run_phase(TcPhase::Constrain, constraints::run)?;
-        self.run_phase(TcPhase::Solve, solve::run)?;
+        self.run_phase(TcPhase::Solve, solver::run)?;
         self.run_phase(TcPhase::Validate, validate::run)?;
         self.run_phase(TcPhase::Finalize, finalize::run)?;
 

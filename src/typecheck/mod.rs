@@ -8,7 +8,7 @@ mod errors;
 mod finalize;
 mod infer_unify;
 pub(crate) mod nominal;
-mod solve;
+mod solver;
 pub mod type_map;
 pub(crate) mod type_view;
 mod typesys;

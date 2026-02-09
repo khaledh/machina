@@ -62,7 +62,7 @@ mod tests {
     use crate::lexer::{LexError, Lexer, Token};
     use crate::parse::Parser;
     use crate::resolve::resolve;
-    use crate::typecheck::{collect, constraints, engine::TypecheckEngine, solve};
+    use crate::typecheck::{collect, constraints, engine::TypecheckEngine, solver};
 
     fn resolve_source(source: &str) -> crate::context::ResolvedContext {
         let lexer = Lexer::new(source);
@@ -82,7 +82,7 @@ mod tests {
         let mut engine = TypecheckEngine::new(resolved);
         collect::run(&mut engine).expect("collect pass failed");
         constraints::run(&mut engine).expect("constrain pass failed");
-        solve::run(&mut engine).expect("solve pass failed");
+        solver::run(&mut engine).expect("solve pass failed");
         run(&mut engine)
     }
 
