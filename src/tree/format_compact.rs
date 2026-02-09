@@ -260,6 +260,11 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
             out.push(']');
             out
         }
+        sem::ValueExprKind::MapGet { target, key } => format!(
+            "{}[{}]",
+            format_semantic_value_expr_compact(target),
+            format_semantic_value_expr_compact(key)
+        ),
         sem::ValueExprKind::Len { place } => {
             format!("len({})", format_semantic_place_expr_compact(place))
         }

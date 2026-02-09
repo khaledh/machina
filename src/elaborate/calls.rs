@@ -82,6 +82,7 @@ impl<'a> Elaborator<'a> {
             target = match method_name {
                 "insert" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapInsert),
                 "contains_key" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapContainsKey),
+                "get" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapGet),
                 "remove" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapRemove),
                 "clear" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapClear),
                 _ => target,
@@ -360,6 +361,7 @@ impl<'a> Elaborator<'a> {
                 ]
             }
             sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapContainsKey)
+            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapGet)
             | sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapRemove) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic map method missing receiver");

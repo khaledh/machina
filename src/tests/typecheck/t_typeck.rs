@@ -273,6 +273,84 @@ fn test_map_unsupported_key_type_rejected() {
 }
 
 #[test]
+fn test_map_index_get_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, u64>{1: 10, 2: 20};
+            match m[2] {
+                value: u64 => value,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_map_index_key_type_mismatch_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, u64>{1: 10};
+            let x = m[true];
+            match x {
+                value: u64 => value,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::MapKeyTypeMismatch(_, _, _)))
+        );
+    }
+}
+
+#[test]
+fn test_map_method_get_typecheck() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, u64>{1: 10, 2: 20};
+            match m.get(2) {
+                value: u64 => value,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_map_method_get_key_type_mismatch_rejected() {
+    let source = r#"
+        fn test() -> u64 {
+            let m = map<u64, u64>{1: 10};
+            let x = m.get(true);
+            match x {
+                value: u64 => value,
+                _ => 0,
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::ArgTypeMismatch(_, _, _, _)))
+        );
+    }
+}
+
+#[test]
 fn test_equality_bool_operands_typecheck() {
     let source = r#"
         fn test() -> bool {

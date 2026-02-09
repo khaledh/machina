@@ -360,6 +360,10 @@ impl<'a> DropPlanBuilder<'a> {
                     self.visit_value_expr(end);
                 }
             }
+            sem::ValueExprKind::MapGet { target, key } => {
+                self.visit_value_expr(target);
+                self.visit_value_expr(key);
+            }
             sem::ValueExprKind::Len { place } => self.visit_place_expr(place),
             sem::ValueExprKind::Match { scrutinee, arms } => {
                 self.visit_value_expr(scrutinee);

@@ -13,6 +13,7 @@ pub enum IntrinsicCall {
     SetClear,
     MapInsert,
     MapContainsKey,
+    MapGet,
     MapRemove,
     MapClear,
 }

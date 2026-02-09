@@ -121,6 +121,15 @@ pub enum TypeCheckErrorKind {
     #[error("Index on non-array type: {0}")]
     InvalidIndexTargetType(Type, Span),
 
+    #[error("Map index key type mismatch: expected {0}, found {1}")]
+    MapKeyTypeMismatch(Type, Type, Span),
+
+    #[error("Map indexing requires copy-safe value type, found {0}")]
+    MapIndexValueNotCopySafe(Type, Span),
+
+    #[error("Map index assignment is not supported")]
+    MapIndexAssignUnsupported(Span),
+
     #[error("Type cannot be inferred")]
     UnknownType(Span),
 
@@ -372,6 +381,9 @@ impl TypeCheckError {
             TypeCheckErrorKind::TypeNotHashable(_, _, _, span) => *span,
             TypeCheckErrorKind::IndexTypeNotInt(_, span) => *span,
             TypeCheckErrorKind::InvalidIndexTargetType(_, span) => *span,
+            TypeCheckErrorKind::MapKeyTypeMismatch(_, _, span) => *span,
+            TypeCheckErrorKind::MapIndexValueNotCopySafe(_, span) => *span,
+            TypeCheckErrorKind::MapIndexAssignUnsupported(span) => *span,
             TypeCheckErrorKind::UnknownType(span) => *span,
             TypeCheckErrorKind::UnionNotAllowedHere(span) => *span,
             TypeCheckErrorKind::PatternTypeMismatch(_, _, span) => *span,

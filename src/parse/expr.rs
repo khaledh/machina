@@ -496,6 +496,36 @@ impl<'a> Parser<'a> {
                     })
                 }
             }
+            TK::KwGet => {
+                self.advance();
+                let name = "get".to_string();
+                if self.curr_token.kind == TK::LParen {
+                    self.advance();
+                    let args =
+                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+                    self.consume(&TK::RParen)?;
+                    Ok(Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::MethodCall {
+                            callee: Box::new(expr),
+                            method_name: name,
+                            args,
+                        },
+                        ty: (),
+                        span: self.close(marker),
+                    })
+                } else {
+                    Ok(Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::StructField {
+                            target: Box::new(expr),
+                            field: name,
+                        },
+                        ty: (),
+                        span: self.close(marker),
+                    })
+                }
+            }
             _ => Err(ParseError::ExpectedStructField(self.curr_token.clone())),
         }
     }

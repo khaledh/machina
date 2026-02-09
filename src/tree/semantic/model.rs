@@ -499,6 +499,10 @@ pub enum ValueExprKind {
         start: Option<Box<ValueExpr>>,
         end: Option<Box<ValueExpr>>,
     },
+    MapGet {
+        target: Box<ValueExpr>,
+        key: Box<ValueExpr>,
+    },
     Len {
         place: Box<PlaceExpr>,
     },

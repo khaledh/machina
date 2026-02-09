@@ -1069,6 +1069,41 @@ fn try_solve_map_builtin_method(
                 .unify(&obligation.ret_ty, &Type::Bool)
                 .map_err(|err| unify_error_to_diag(err, obligation.span))
         }
+        "get" => {
+            if arity != 1 {
+                return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
+                    method_name.to_string(),
+                    1,
+                    arity,
+                    obligation.span,
+                )
+                .into()));
+            }
+            let key_arg_ty = resolve_term(&obligation.arg_terms[0], unifier);
+            if let Err(_) = solve_assignable(&key_arg_ty, &key_ty, unifier) {
+                return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
+                    1,
+                    (*key_ty).clone(),
+                    key_arg_ty,
+                    obligation.span,
+                )
+                .into()));
+            }
+            if value_ty.needs_drop() && !is_unresolved(&value_ty) {
+                return Some(Err(TypeCheckErrorKind::MapIndexValueNotCopySafe(
+                    value_ty.as_ref().clone(),
+                    obligation.span,
+                )
+                .into()));
+            }
+            let result_ty = Type::ErrorUnion {
+                ok_ty: value_ty.clone(),
+                err_tys: vec![map_key_not_found_type()],
+            };
+            unifier
+                .unify(&obligation.ret_ty, &result_ty)
+                .map_err(|err| unify_error_to_diag(err, obligation.span))
+        }
         "clear" => {
             if arity != 0 {
                 return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
@@ -1494,23 +1529,38 @@ fn check_expr_obligations(
             } => {
                 let target_ty = resolve_term(target, unifier);
                 let indexed_target_ty = peel_heap(target_ty.clone());
-                if let Some((idx_i, bad_idx_ty)) = indices
-                    .iter()
-                    .map(|term| resolve_term(term, unifier))
-                    .enumerate()
-                    .find(|(_, ty)| !is_int_like(ty) && !is_unresolved(ty))
-                {
+                let force_unresolved_index_to_u64 = |index_term: &Type, unifier: &mut TcUnifier| {
+                    let resolved = resolve_term(index_term, unifier);
+                    if let Type::Var(var) = resolved
+                        && matches!(unifier.vars().kind(var), Some(TypeVarKind::InferInt))
+                    {
+                        let _ = unifier.unify(index_term, &Type::uint(64));
+                    }
+                };
+
+                let mut emit_bad_int_index = |idx_i: usize, bad_idx_ty: Type| {
                     let diag_span = index_spans.get(idx_i).copied().unwrap_or(*span);
                     errors.push(TypeCheckErrorKind::IndexTypeNotInt(bad_idx_ty, diag_span).into());
                     covered_exprs.insert(*expr_id);
                     if let Some(node_id) = index_nodes.get(idx_i) {
                         covered_exprs.insert(*node_id);
                     }
-                    continue;
-                }
+                };
 
                 match &indexed_target_ty {
                     Type::Array { elem_ty, dims } => {
+                        if let Some((idx_i, bad_idx_ty)) = indices
+                            .iter()
+                            .map(|term| resolve_term(term, unifier))
+                            .enumerate()
+                            .find(|(_, ty)| !is_int_like(ty) && !is_unresolved(ty))
+                        {
+                            emit_bad_int_index(idx_i, bad_idx_ty);
+                            continue;
+                        }
+                        for index_term in indices {
+                            force_unresolved_index_to_u64(index_term, unifier);
+                        }
                         if indices.len() > dims.len() {
                             errors.push(
                                 TypeCheckErrorKind::TooManyIndices(
@@ -1534,6 +1584,18 @@ fn check_expr_obligations(
                         let _ = unifier.unify(result, &result_ty);
                     }
                     Type::Slice { elem_ty } => {
+                        if let Some((idx_i, bad_idx_ty)) = indices
+                            .iter()
+                            .map(|term| resolve_term(term, unifier))
+                            .enumerate()
+                            .find(|(_, ty)| !is_int_like(ty) && !is_unresolved(ty))
+                        {
+                            emit_bad_int_index(idx_i, bad_idx_ty);
+                            continue;
+                        }
+                        for index_term in indices {
+                            force_unresolved_index_to_u64(index_term, unifier);
+                        }
                         if indices.len() != 1 {
                             errors.push(
                                 TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
@@ -1544,6 +1606,18 @@ fn check_expr_obligations(
                         let _ = unifier.unify(result, elem_ty);
                     }
                     Type::DynArray { elem_ty } => {
+                        if let Some((idx_i, bad_idx_ty)) = indices
+                            .iter()
+                            .map(|term| resolve_term(term, unifier))
+                            .enumerate()
+                            .find(|(_, ty)| !is_int_like(ty) && !is_unresolved(ty))
+                        {
+                            emit_bad_int_index(idx_i, bad_idx_ty);
+                            continue;
+                        }
+                        for index_term in indices {
+                            force_unresolved_index_to_u64(index_term, unifier);
+                        }
                         if indices.len() != 1 {
                             errors.push(
                                 TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
@@ -1554,6 +1628,18 @@ fn check_expr_obligations(
                         let _ = unifier.unify(result, elem_ty);
                     }
                     Type::String => {
+                        if let Some((idx_i, bad_idx_ty)) = indices
+                            .iter()
+                            .map(|term| resolve_term(term, unifier))
+                            .enumerate()
+                            .find(|(_, ty)| !is_int_like(ty) && !is_unresolved(ty))
+                        {
+                            emit_bad_int_index(idx_i, bad_idx_ty);
+                            continue;
+                        }
+                        for index_term in indices {
+                            force_unresolved_index_to_u64(index_term, unifier);
+                        }
                         if indices.len() != 1 {
                             errors.push(
                                 TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
@@ -1563,6 +1649,65 @@ fn check_expr_obligations(
                         }
                         let _ = unifier.unify(result, &Type::uint(8));
                     }
+                    Type::Map { key_ty, value_ty } => {
+                        if indices.len() != 1 {
+                            errors.push(
+                                TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let key_index_ty = resolve_term(&indices[0], unifier);
+                        if let Err(_) = solve_assignable(&key_index_ty, key_ty, unifier) {
+                            if !is_unresolved(&key_index_ty) {
+                                let diag_span = index_spans.first().copied().unwrap_or(*span);
+                                errors.push(
+                                    TypeCheckErrorKind::MapKeyTypeMismatch(
+                                        key_ty.as_ref().clone(),
+                                        key_index_ty,
+                                        diag_span,
+                                    )
+                                    .into(),
+                                );
+                                covered_exprs.insert(*expr_id);
+                                if let Some(node_id) = index_nodes.first() {
+                                    covered_exprs.insert(*node_id);
+                                }
+                            }
+                            continue;
+                        }
+                        if !is_unresolved(key_ty)
+                            && let Err(failure) = ensure_hashable(key_ty)
+                        {
+                            errors.push(
+                                TypeCheckErrorKind::TypeNotHashable(
+                                    key_ty.as_ref().clone(),
+                                    failure.path,
+                                    failure.failing_ty,
+                                    *span,
+                                )
+                                .into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        if value_ty.needs_drop() && !is_unresolved(value_ty) {
+                            errors.push(
+                                TypeCheckErrorKind::MapIndexValueNotCopySafe(
+                                    value_ty.as_ref().clone(),
+                                    *span,
+                                )
+                                .into(),
+                            );
+                            covered_exprs.insert(*expr_id);
+                            continue;
+                        }
+                        let result_ty = Type::ErrorUnion {
+                            ok_ty: value_ty.clone(),
+                            err_tys: vec![map_key_not_found_type()],
+                        };
+                        let _ = unifier.unify(result, &result_ty);
+                    }
                     ty if is_unresolved(ty) => {}
                     _ => {
                         errors.push(
@@ -1571,6 +1716,17 @@ fn check_expr_obligations(
                         );
                         covered_exprs.insert(*expr_id);
                     }
+                }
+            }
+            ExprObligation::MapIndexAssign {
+                stmt_id,
+                target,
+                span,
+            } => {
+                let owner_ty = peel_heap(resolve_term(target, unifier));
+                if matches!(owner_ty, Type::Map { .. }) {
+                    errors.push(TypeCheckErrorKind::MapIndexAssignUnsupported(*span).into());
+                    covered_exprs.insert(*stmt_id);
                 }
             }
             ExprObligation::Slice {
@@ -2333,6 +2489,10 @@ fn should_retry_post_call_expr_obligation(
             let key_ty = resolve_term(key_ty, unifier);
             is_unresolved(&key_ty)
         }
+        ExprObligation::MapIndexAssign { target, .. } => {
+            let owner_ty = peel_heap(resolve_term(target, unifier));
+            is_unresolved(&owner_ty)
+        }
         ExprObligation::Try {
             callable_def_id: _, ..
         } => true,
@@ -2820,6 +2980,13 @@ fn resolve_pattern_enum_type(
     None
 }
 
+fn map_key_not_found_type() -> Type {
+    Type::Struct {
+        name: "KeyNotFound".to_string(),
+        fields: Vec::new(),
+    }
+}
+
 fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
     let unresolved = unifier
         .vars()
@@ -2977,7 +3144,8 @@ fn op_span(obligation: &ExprObligation) -> Span {
         | ExprObligation::StructUpdate { span, .. }
         | ExprObligation::TupleField { span, .. }
         | ExprObligation::StructField { span, .. }
-        | ExprObligation::StructFieldAssign { span, .. } => *span,
+        | ExprObligation::StructFieldAssign { span, .. }
+        | ExprObligation::MapIndexAssign { span, .. } => *span,
     }
 }
 

@@ -101,3 +101,59 @@ fn main() -> u64 {
     let run = run_program("map_hashed_ops", source);
     assert_eq!(run.status.code(), Some(0));
 }
+
+#[test]
+fn test_map_index_get_runtime() {
+    let source = r#"
+fn main() -> u64 {
+    let m = map<u64, u64>{1: 10, 2: 20};
+
+    let hit = m[2];
+    let hit_via_method = m.get(1);
+    match hit {
+        value: u64 => {
+            if value == 20 {
+            } else {
+                return 1;
+            };
+        }
+        _ => {
+            return 1;
+        }
+    };
+    match hit_via_method {
+        value: u64 => {
+            if value == 10 {
+            } else {
+                return 3;
+            };
+        }
+        _ => {
+            return 3;
+        }
+    };
+
+    let miss = m[99];
+    let miss_via_method = m.get(100);
+    match miss {
+        value: u64 => {
+            return 2;
+        }
+        _ => {
+        }
+    };
+    match miss_via_method {
+        value: u64 => {
+            return 4;
+        }
+        _ => {
+        }
+    };
+
+    return 0;
+}
+"#;
+
+    let run = run_program("map_index_get", source);
+    assert_eq!(run.status.code(), Some(0));
+}

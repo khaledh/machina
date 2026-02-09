@@ -55,10 +55,34 @@ impl<'a> Elaborator<'a> {
     fn elab_lvalue_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
         match &expr.kind {
             norm::ExprKind::Var { .. }
-            | norm::ExprKind::ArrayIndex { .. }
             | norm::ExprKind::TupleField { .. }
             | norm::ExprKind::StructField { .. }
             | norm::ExprKind::Deref { .. } => {
+                let place = self.elab_place(expr);
+                let place_ty = place.ty;
+                if self.implicit_moves.contains(&expr.id) {
+                    return Some(self.new_value(
+                        sem::ValueExprKind::ImplicitMove {
+                            place: Box::new(place),
+                        },
+                        place_ty,
+                        expr.span,
+                    ));
+                }
+                Some(self.new_value(
+                    sem::ValueExprKind::Load {
+                        place: Box::new(place),
+                    },
+                    place_ty,
+                    expr.span,
+                ))
+            }
+            norm::ExprKind::ArrayIndex { target, .. }
+                if !matches!(
+                    self.type_map.type_table().get(target.ty).peel_heap(),
+                    crate::types::Type::Map { .. }
+                ) =>
+            {
                 let place = self.elab_place(expr);
                 let place_ty = place.ty;
                 if self.implicit_moves.contains(&expr.id) {
@@ -381,6 +405,20 @@ impl<'a> Elaborator<'a> {
                     end: end.as_ref().map(|expr| Box::new(self.elab_value(expr))),
                 }
             }
+            norm::ExprKind::ArrayIndex { target, indices }
+                if matches!(
+                    self.type_map.type_table().get(target.ty).peel_heap(),
+                    crate::types::Type::Map { .. }
+                ) =>
+            {
+                let key_expr = indices
+                    .first()
+                    .unwrap_or_else(|| panic!("backend map index expects a single key expression"));
+                sem::ValueExprKind::MapGet {
+                    target: Box::new(self.elab_value(target)),
+                    key: Box::new(self.elab_value(key_expr)),
+                }
+            }
             norm::ExprKind::Match { scrutinee, arms } => {
                 // Elaborate the scrutinee first so match planning can use the
                 // semantically-correct scrutinee type (including place-based deref behavior).
@@ -415,10 +453,10 @@ impl<'a> Elaborator<'a> {
             | norm::ExprKind::Move { .. }
             | norm::ExprKind::ImplicitMove { .. }
             | norm::ExprKind::Var { .. }
-            | norm::ExprKind::ArrayIndex { .. }
             | norm::ExprKind::TupleField { .. }
             | norm::ExprKind::StructField { .. }
             | norm::ExprKind::Deref { .. } => unreachable!("handled earlier"),
+            norm::ExprKind::ArrayIndex { .. } => unreachable!("handled earlier"),
         }
     }
 

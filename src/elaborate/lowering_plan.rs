@@ -139,6 +139,10 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_value_expr(end);
                 }
             }
+            sem::ValueExprKind::MapGet { target, key } => {
+                self.visit_value_expr(target);
+                self.visit_value_expr(key);
+            }
 
             sem::ValueExprKind::Match { scrutinee, arms } => {
                 self.visit_value_expr(scrutinee);
@@ -332,6 +336,9 @@ impl<'a> LoweringPlanBuilder<'a> {
                         .as_deref()
                         .map(|expr| self.is_linear_value_expr(expr))
                         .unwrap_or(true)
+            }
+            sem::ValueExprKind::MapGet { target, key } => {
+                self.is_linear_value_expr(target) && self.is_linear_value_expr(key)
             }
 
             sem::ValueExprKind::StringFmt { plan } => {

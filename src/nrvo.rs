@@ -228,6 +228,9 @@ impl NrvoSafetyChecker {
                     .is_none_or(|expr| self.check_expr(expr, false));
                 target_ok && start_ok && end_ok
             }
+            VEK::MapGet { target, key } => {
+                self.check_expr(target, false) && self.check_expr(key, false)
+            }
 
             VEK::Len { place } => self.check_place_lvalue(place),
 

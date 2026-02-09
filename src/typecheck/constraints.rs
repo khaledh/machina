@@ -172,6 +172,11 @@ pub(crate) enum ExprObligation {
         caller_def_id: Option<DefId>,
         span: Span,
     },
+    MapIndexAssign {
+        stmt_id: NodeId,
+        target: Type,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -973,7 +978,7 @@ impl<'a> ConstraintCollector<'a> {
                 for index in indices {
                     index_nodes.push(index.id);
                     index_spans.push(index.span);
-                    index_terms.push(self.collect_expr(index, Some(Type::uint(64))));
+                    index_terms.push(self.collect_expr(index, None));
                 }
                 self.out.expr_obligations.push(ExprObligation::ArrayIndex {
                     expr_id: expr.id,
@@ -1492,6 +1497,23 @@ impl<'a> ConstraintCollector<'a> {
                             caller_def_id: self.current_callable_def_id(),
                             span: stmt.span,
                         });
+                } else if let ExprKind::ArrayIndex { target, .. } = &assignee.kind {
+                    let target_ty = self.collect_expr(target, None);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::MapIndexAssign {
+                            stmt_id: stmt.id,
+                            target: target_ty,
+                            span: stmt.span,
+                        });
+
+                    let lhs_ty = self.collect_expr(assignee, None);
+                    let rhs_ty = self.collect_expr(value, Some(lhs_ty.clone()));
+                    self.push_assignable(
+                        rhs_ty,
+                        lhs_ty,
+                        ConstraintReason::Stmt(stmt.id, stmt.span),
+                    );
                 } else {
                     let lhs_ty = self.collect_expr(assignee, None);
                     let rhs_ty = self.collect_expr(value, Some(lhs_ty.clone()));

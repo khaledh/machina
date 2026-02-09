@@ -583,6 +583,79 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .into())
             }
 
+            sem::ValueExprKind::MapGet { target, key } => {
+                let map_value = eval_value!(target);
+                let map_target_ty = self.type_map.type_table().get(target.ty).clone();
+                let (map_addr, map_ty) = {
+                    let (peeled_ty, deref_count) = map_target_ty.peel_heap_with_count();
+                    let (addr, ty) = if deref_count == 0 {
+                        let addr = self.materialize_value_addr(map_value, &map_target_ty);
+                        (addr, peeled_ty)
+                    } else {
+                        self.resolve_deref_base_value(map_value, map_target_ty.clone(), deref_count)
+                    };
+                    (addr, ty)
+                };
+                let Type::Map { key_ty, value_ty } = map_ty else {
+                    panic!("backend map index on non-map type");
+                };
+
+                let key_value = eval_value!(key);
+                let key_addr = self.materialize_value_addr(key_value, &key_ty);
+
+                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+                let value_slot = self.alloc_value_slot(value_ir_ty);
+
+                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let key_size = self
+                    .builder
+                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
+                let value_size = self
+                    .builder
+                    .const_int(value_layout.size() as i128, false, 64, u64_ty);
+
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+                let hit = self.builder.call(
+                    Callee::Runtime(RuntimeFn::MapGetValue),
+                    vec![map_addr, key_addr, key_size, value_size, value_slot.addr],
+                    bool_ty,
+                );
+
+                // Build `V | KeyNotFound`: tag 0 when key is present, tag 1 otherwise.
+                let union_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let union_slot = self.alloc_value_slot(union_ir_ty);
+                let (tag_ty, blob_ty, payload_offset, payload_ty) = {
+                    let layout = self.type_lowerer.enum_layout(expr.ty);
+                    let ok_variant = layout
+                        .variants
+                        .first()
+                        .unwrap_or_else(|| panic!("backend map get missing ok union variant"));
+                    if ok_variant.field_offsets.len() != 1 || ok_variant.field_tys.len() != 1 {
+                        panic!("backend map get expects single-payload ok union variant");
+                    }
+                    (
+                        layout.tag_ty,
+                        layout.blob_ty,
+                        ok_variant.field_offsets[0],
+                        ok_variant.field_tys[0],
+                    )
+                };
+
+                let hit_u32 = self.builder.int_extend(hit, tag_ty, false);
+                let one_u32 = self.builder.const_int(1, false, 32, tag_ty);
+                let tag = self.builder.binop(BinOp::Xor, one_u32, hit_u32, tag_ty);
+                self.store_field(union_slot.addr, 0, tag_ty, tag);
+
+                let payload = self.builder.load(value_slot.addr, value_ir_ty);
+                let blob_ptr = self.field_addr_typed(union_slot.addr, 1, blob_ty);
+                self.store_into_blob(blob_ptr, payload_offset, payload, payload_ty);
+
+                Ok(self.load_slot(&union_slot).into())
+            }
+
             sem::ValueExprKind::Len { place } => {
                 // Length is an internal node for array/slice iteration.
                 let place_ty = self.type_map.type_table().get(place.ty).clone();

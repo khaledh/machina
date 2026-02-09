@@ -260,6 +260,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 | sem::IntrinsicCall::SetClear
                 | sem::IntrinsicCall::MapInsert
                 | sem::IntrinsicCall::MapContainsKey
+                | sem::IntrinsicCall::MapGet
                 | sem::IntrinsicCall::MapRemove
                 | sem::IntrinsicCall::MapClear => {
                     panic!("backend call expr cannot lower set intrinsic without a receiver");
@@ -646,6 +647,87 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     vec![map_addr, key_addr, key_size, value_size],
                     ret_ty,
                 );
+                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
+                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
+                self.mark_out_init_flags(args, &arg_values);
+                Ok(Some(result))
+            }
+            sem::IntrinsicCall::MapGet => {
+                let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend map get expects exactly one arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let (map_addr, map_ty) = self.resolve_map_receiver(receiver_value);
+                let Type::Map { key_ty, value_ty } = map_ty else {
+                    panic!("backend map get expects map receiver");
+                };
+
+                let key_arg = &mut arg_values[0];
+                let key_addr = if key_arg.is_addr {
+                    key_arg.value
+                } else {
+                    let addr = self.materialize_value_addr(key_arg.value, &key_arg.ty);
+                    key_arg.value = addr;
+                    key_arg.is_addr = true;
+                    addr
+                };
+                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+                let value_slot = self.alloc_value_slot(value_ir_ty);
+
+                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let key_size = self
+                    .builder
+                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
+                let value_size =
+                    self.builder
+                        .const_int(value_layout.size() as i128, false, 64, u64_ty);
+
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+                let hit = self.builder.call(
+                    Callee::Runtime(RuntimeFn::MapGetValue),
+                    vec![map_addr, key_addr, key_size, value_size, value_slot.addr],
+                    bool_ty,
+                );
+
+                let union_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let union_slot = self.alloc_value_slot(union_ir_ty);
+                let (tag_ty, blob_ty, payload_offset, payload_ty) = {
+                    let layout = self.type_lowerer.enum_layout(expr.ty);
+                    let ok_variant = layout
+                        .variants
+                        .first()
+                        .unwrap_or_else(|| panic!("backend map get missing ok union variant"));
+                    if ok_variant.field_offsets.len() != 1 || ok_variant.field_tys.len() != 1 {
+                        panic!("backend map get expects single-payload ok union variant");
+                    }
+                    (
+                        layout.tag_ty,
+                        layout.blob_ty,
+                        ok_variant.field_offsets[0],
+                        ok_variant.field_tys[0],
+                    )
+                };
+
+                let hit_u32 = self.builder.int_extend(hit, tag_ty, false);
+                let one_u32 = self.builder.const_int(1, false, 32, tag_ty);
+                let tag = self
+                    .builder
+                    .binop(crate::ir::BinOp::Xor, one_u32, hit_u32, tag_ty);
+                self.store_field(union_slot.addr, 0, tag_ty, tag);
+
+                let payload = self.builder.load(value_slot.addr, value_ir_ty);
+                let blob_ptr = self.field_addr_typed(union_slot.addr, 1, blob_ty);
+                self.store_into_blob(blob_ptr, payload_offset, payload, payload_ty);
+
+                let result = self.load_slot(&union_slot);
                 self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
                 self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
                 self.mark_out_init_flags(args, &arg_values);

@@ -11,6 +11,8 @@ fn __rt_memset(inout buf: u8[], value: u8);
 @[runtime]
 fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
+type KeyNotFound = {}
+
 string :: {
   @[intrinsic]
   prop len: u64 {

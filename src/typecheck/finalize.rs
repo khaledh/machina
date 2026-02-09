@@ -1057,7 +1057,7 @@ fn resolve_builtin_map_method_call(
     let value_ty = (*value_ty).clone();
 
     let receiver_mode = match method_name {
-        "contains_key" => crate::tree::ParamMode::In,
+        "contains_key" | "get" => crate::tree::ParamMode::In,
         "insert" | "remove" | "clear" => crate::tree::ParamMode::InOut,
         _ => return None,
     };
@@ -1077,7 +1077,7 @@ fn resolve_builtin_map_method_call(
                 ty: value_ty,
             },
         ],
-        "remove" | "contains_key" => vec![CallParam {
+        "remove" | "contains_key" | "get" => vec![CallParam {
             mode: crate::tree::ParamMode::In,
             ty: key_ty,
         }],
