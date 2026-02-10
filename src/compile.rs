@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::analysis::batch::{self, BatchQueryError};
+use crate::analysis::db::AnalysisDb;
 use crate::backend;
 use crate::backend::regalloc::arm64::Arm64Target;
 use crate::context::{ParsedContext, ProgramParsedContext};
 use crate::diag::CompileError;
 use crate::elaborate;
 use crate::frontend;
+use crate::frontend::ModuleId;
 use crate::frontend::program::{flatten_program, merge_modules};
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
@@ -15,11 +18,10 @@ use crate::monomorphize;
 use crate::normalize;
 use crate::nrvo::NrvoAnalyzer;
 use crate::parse::Parser;
-use crate::resolve::{attach_def_owners, resolve};
+use crate::resolve::attach_def_owners;
 use crate::semck::sem_check;
 use crate::tree::NodeIdGen;
 use crate::tree::parsed::Module;
-use crate::typecheck::type_check;
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -140,12 +142,20 @@ pub fn compile_with_path(
     // --- Resolve Defs/Uses (parsed -> resolved) ---
 
     let ast_context = ParsedContext::new(module, id_gen);
-    let resolved_context = resolve(ast_context).map_err(|errs| {
-        errs.into_iter()
-            .map(|e| e.into())
-            .collect::<Vec<CompileError>>()
-    })?;
-    let resolved_context = attach_def_owners(resolved_context, &top_level_owners);
+    let module_id = program_context
+        .as_ref()
+        .map(ProgramParsedContext::entry)
+        .unwrap_or(ModuleId(0));
+    let mut analysis_db = AnalysisDb::new();
+    let (resolved_result, mut typed_result) = batch::query_parse_resolve_typecheck(
+        &mut analysis_db,
+        module_id,
+        0,
+        ast_context,
+        top_level_owners.clone(),
+    )
+    .map_err(map_batch_query_error)?;
+    let resolved_context = resolved_result.into_context();
 
     if dump_def_table {
         println!("Def Map:");
@@ -156,22 +166,22 @@ pub fn compile_with_path(
 
     // --- Type Check (resolved -> type-checked) ---
 
-    let mut type_checked_context = type_check(resolved_context.clone()).map_err(|errs| {
-        errs.into_iter()
-            .map(|e| e.into())
-            .collect::<Vec<CompileError>>()
-    })?;
+    let mut type_checked_context = typed_result.clone().into_context();
 
     // If any generic instantiations were recorded, monomorphize and re-type-check.
     if !type_checked_context.generic_insts.is_empty() {
         let monomorphized_context =
             monomorphize::monomorphize(resolved_context, &type_checked_context.generic_insts)
                 .map_err(|e| vec![e.into()])?;
-        type_checked_context = type_check(monomorphized_context).map_err(|errs| {
-            errs.into_iter()
-                .map(|e| e.into())
-                .collect::<Vec<CompileError>>()
-        })?;
+        typed_result = batch::query_typecheck(&mut analysis_db, module_id, 1, {
+            let monomorphized_context = attach_def_owners(monomorphized_context, &top_level_owners);
+            crate::analysis::results::ResolvedModuleResult::from_context(
+                module_id,
+                monomorphized_context,
+            )
+        })
+        .map_err(map_batch_query_error)?;
+        type_checked_context = typed_result.into_context();
     }
 
     if dump_type_map {
@@ -324,6 +334,14 @@ fn parse_with_id_gen(
     let id_gen = parser.into_id_gen();
 
     Ok((module, id_gen))
+}
+
+fn map_batch_query_error(err: BatchQueryError) -> Vec<CompileError> {
+    match err {
+        BatchQueryError::Cancelled => vec![CompileError::QueryCancelled],
+        BatchQueryError::Resolve(errs) => errs.into_iter().map(CompileError::from).collect(),
+        BatchQueryError::TypeCheck(errs) => errs.into_iter().map(CompileError::from).collect(),
+    }
 }
 
 #[cfg(test)]

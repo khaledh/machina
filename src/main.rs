@@ -282,6 +282,9 @@ fn main() {
                     CompileError::Io(path, e) => {
                         println!("{}: {}", path.display(), e);
                     }
+                    CompileError::QueryCancelled => {
+                        println!("analysis query cancelled");
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 //! Shared compiler analyses (CFG, dataflow, etc).
 
+pub mod batch;
 pub mod dataflow;
 pub mod db;
 pub mod diagnostics;
