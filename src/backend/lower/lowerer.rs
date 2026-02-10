@@ -1,7 +1,5 @@
 //! SSA lowering state and shared helpers.
 
-use std::collections::HashMap;
-
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::drop_glue::DropGlueRegistry;
 use crate::backend::lower::drops::DropTracker;
@@ -71,7 +69,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
     pub(super) locals: LocalMap,
-    pub(super) lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+    pub(super) lowering_plans: &'a sem::LoweringPlanMap,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
     pub(super) param_modes: Vec<ParamMode>,
@@ -112,35 +110,34 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Fetches the lowering plan for a node.
     pub(super) fn lowering_plan(&self, node_id: NodeId) -> sem::LoweringPlan {
         self.lowering_plans
-            .get(&node_id)
-            .cloned()
+            .lookup_value_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing lowering plan {:?}", node_id))
     }
 
     /// Fetches a call plan for a node.
     pub(super) fn call_plan(&self, node_id: NodeId) -> sem::CallPlan {
-        self.type_map
+        self.lowering_plans
             .lookup_call_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing call plan {:?}", node_id))
     }
 
     /// Fetches an index plan for a node.
     pub(super) fn index_plan(&self, node_id: NodeId) -> sem::IndexPlan {
-        self.type_map
+        self.lowering_plans
             .lookup_index_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing index plan {:?}", node_id))
     }
 
     /// Fetches a match plan for a node.
     pub(super) fn match_plan(&self, node_id: NodeId) -> sem::MatchPlan {
-        self.type_map
+        self.lowering_plans
             .lookup_match_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing match plan {:?}", node_id))
     }
 
     /// Fetches a slice plan for a node.
     pub(super) fn slice_plan(&self, node_id: NodeId) -> sem::SlicePlan {
-        self.type_map
+        self.lowering_plans
             .lookup_slice_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing slice plan {:?}", node_id))
     }
@@ -154,7 +151,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         def_table: &'a DefTable,
         module: Option<&'a sem::Module>,
         type_map: &'a TypeMap,
-        lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        lowering_plans: &'a sem::LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -240,7 +237,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         def_table: &'a DefTable,
         module: &'a sem::Module,
         type_map: &'a TypeMap,
-        lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        lowering_plans: &'a sem::LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -353,7 +350,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         param_ty: Type,
         def_table: &'a DefTable,
         type_map: &'a TypeMap,
-        lowering_plans: &'a HashMap<NodeId, sem::LoweringPlan>,
+        lowering_plans: &'a sem::LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,

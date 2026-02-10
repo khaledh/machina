@@ -278,7 +278,7 @@ impl<'a> Elaborator<'a> {
         let id = self.node_id_gen.new_id();
         let target_ty = self.type_map.type_table().get(target.ty).clone();
         let plan = self.build_index_plan(&target_ty);
-        self.type_map.insert_index_plan(id, plan);
+        self.index_plans.insert(id, plan);
         let ty_id = self.type_map.insert_node_type(id, elem_ty);
 
         sem::PlaceExpr {

@@ -77,7 +77,13 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
     );
 
     let module = elaborator.elaborate_module(&module);
-    let lowering_plans = build_lowering_plans(&module, &type_map);
+    let lowering_plans = build_lowering_plans(
+        &module,
+        &elaborator.call_plans,
+        &elaborator.index_plans,
+        &elaborator.match_plans,
+        &elaborator.slice_plans,
+    );
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
 
     // Generate method names for lifted closures and add them to the symbol table

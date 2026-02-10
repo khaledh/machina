@@ -1,6 +1,9 @@
 //! Semantic call plans consumed by lowering to avoid re-deriving call intent.
 
+use std::collections::HashMap;
+
 use crate::resolve::DefId;
+use crate::tree::NodeId;
 use crate::tree::ParamMode;
 
 #[derive(Clone, Debug)]
@@ -57,3 +60,5 @@ pub struct CallPlan {
     pub input_modes: Vec<ParamMode>,
     pub has_receiver: bool,
 }
+
+pub type CallPlanMap = HashMap<NodeId, CallPlan>;

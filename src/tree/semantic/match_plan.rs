@@ -1,5 +1,7 @@
 //! Semantic match plan consumed by lowering to avoid re-deriving pattern logic.
 
+use std::collections::HashMap;
+
 use crate::resolve::DefId;
 use crate::tree::NodeId;
 use crate::types::Type;
@@ -86,3 +88,5 @@ pub enum MatchProjection {
     Field { index: usize },
     ByteOffset { offset: usize },
 }
+
+pub type MatchPlanMap = HashMap<NodeId, MatchPlan>;

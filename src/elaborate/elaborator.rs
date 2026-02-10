@@ -111,6 +111,12 @@ pub struct Elaborator<'a> {
     pub(super) closure_stack: Vec<ClosureContext>,
     /// Track captureless closures already emitted as functions.
     pub(super) closure_func_ids: HashSet<DefId>,
+
+    // Elaboration-produced lowering side tables (consumed by backend lowering).
+    pub(super) call_plans: sem::CallPlanMap,
+    pub(super) index_plans: sem::IndexPlanMap,
+    pub(super) match_plans: sem::MatchPlanMap,
+    pub(super) slice_plans: sem::SlicePlanMap,
 }
 
 impl<'a> Elaborator<'a> {
@@ -141,6 +147,10 @@ impl<'a> Elaborator<'a> {
             closure_bindings: HashMap::new(),
             closure_stack: Vec::new(),
             closure_func_ids: HashSet::new(),
+            call_plans: HashMap::new(),
+            index_plans: HashMap::new(),
+            match_plans: HashMap::new(),
+            slice_plans: HashMap::new(),
         }
     }
 
@@ -156,6 +166,10 @@ impl<'a> Elaborator<'a> {
         self.closure_bindings.clear();
         self.closure_stack.clear();
         self.closure_func_ids.clear();
+        self.call_plans.clear();
+        self.index_plans.clear();
+        self.match_plans.clear();
+        self.slice_plans.clear();
 
         let mut top_level_items: Vec<_> = module
             .top_level_items

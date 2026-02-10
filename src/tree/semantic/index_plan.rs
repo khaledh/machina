@@ -1,5 +1,9 @@
 //! Indexing and slicing plans computed during elaboration.
 
+use std::collections::HashMap;
+
+use crate::tree::NodeId;
+
 #[derive(Clone, Debug)]
 pub struct IndexPlan {
     pub base: IndexBaseKind,
@@ -26,3 +30,6 @@ pub enum SliceBaseKind {
     Slice { deref_count: usize },
     String { deref_count: usize },
 }
+
+pub type IndexPlanMap = HashMap<NodeId, IndexPlan>;
+pub type SlicePlanMap = HashMap<NodeId, SlicePlan>;

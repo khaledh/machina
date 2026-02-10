@@ -7,21 +7,32 @@ use std::collections::HashMap;
 
 use crate::tree::semantic as sem;
 use crate::tree::{BinaryOp, NodeId, UnaryOp};
-use crate::typecheck::type_map::TypeMap;
 
-pub fn build_lowering_plans(module: &sem::Module, type_map: &TypeMap) -> sem::LoweringPlanMap {
+pub fn build_lowering_plans(
+    module: &sem::Module,
+    call_plans: &sem::CallPlanMap,
+    index_plans: &sem::IndexPlanMap,
+    match_plans: &sem::MatchPlanMap,
+    slice_plans: &sem::SlicePlanMap,
+) -> sem::LoweringPlanMap {
     let mut builder = LoweringPlanBuilder {
-        type_map,
+        call_plans,
         plans: HashMap::new(),
     };
 
     builder.visit_module(module);
-    builder.plans
+    sem::LoweringPlanMap {
+        value_plans: builder.plans,
+        call_plans: call_plans.clone(),
+        index_plans: index_plans.clone(),
+        match_plans: match_plans.clone(),
+        slice_plans: slice_plans.clone(),
+    }
 }
 
 struct LoweringPlanBuilder<'a> {
-    type_map: &'a TypeMap,
-    plans: sem::LoweringPlanMap,
+    call_plans: &'a sem::CallPlanMap,
+    plans: HashMap<NodeId, sem::LoweringPlan>,
 }
 
 impl<'a> LoweringPlanBuilder<'a> {
@@ -419,7 +430,7 @@ impl<'a> LoweringPlanBuilder<'a> {
     }
 
     fn is_linear_call_plan(&self, call_id: NodeId, has_receiver: bool) -> bool {
-        let Some(plan) = self.type_map.lookup_call_plan(call_id) else {
+        let Some(plan) = self.call_plans.get(&call_id) else {
             return false;
         };
 

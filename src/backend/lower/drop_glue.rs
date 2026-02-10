@@ -5,7 +5,6 @@ use crate::backend::lower::lowerer::FuncLowerer;
 use crate::backend::lower::{LowerToIrError, LoweredFunction};
 use crate::ir::Terminator;
 use crate::resolve::{DefId, DefTable};
-use crate::tree::NodeId;
 use crate::tree::resolved as res;
 use crate::tree::semantic as sem;
 use crate::typecheck::nominal::NominalKey;
@@ -103,7 +102,7 @@ impl DropGlueRegistry {
         trace_drops: bool,
     ) -> Result<Vec<LoweredFunction>, LowerToIrError> {
         let mut funcs = Vec::new();
-        let empty_plans: HashMap<NodeId, sem::LoweringPlan> = HashMap::new();
+        let empty_plans = sem::LoweringPlanMap::default();
         let mut pending: Vec<(NominalKey, Type)> = self.tys.drain().collect();
         while let Some((nominal_key, ty)) = pending.pop() {
             let def_id =
