@@ -13,6 +13,7 @@ use crate::tree::map::TreeMapper;
 use crate::tree::resolved as res;
 use crate::tree::typed::build_module;
 use crate::typecheck::Unifier;
+use crate::typecheck::builtin_methods;
 use crate::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::typecheck::engine::TypecheckEngine;
 use crate::typecheck::engine::lookup_property;
@@ -961,71 +962,16 @@ fn resolve_builtin_method_call(
     method_name: &str,
 ) -> Option<(CallParam, Vec<CallParam>)> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
-    let peeled = receiver_ty.peel_heap();
-
-    let (receiver_mode, params) = match (&peeled, method_name) {
-        (Type::DynArray { elem_ty }, "append") => {
-            let param_mode = if elem_ty.needs_drop() {
-                crate::tree::ParamMode::Sink
-            } else {
-                crate::tree::ParamMode::In
-            };
-            (
-                crate::tree::ParamMode::InOut,
-                vec![CallParam {
-                    mode: param_mode,
-                    ty: (**elem_ty).clone(),
-                }],
-            )
-        }
-
-        (Type::Set { elem_ty }, "insert" | "remove") => (
-            crate::tree::ParamMode::InOut,
-            vec![CallParam {
-                mode: crate::tree::ParamMode::In,
-                ty: (**elem_ty).clone(),
-            }],
-        ),
-        (Type::Set { elem_ty }, "contains") => (
-            crate::tree::ParamMode::In,
-            vec![CallParam {
-                mode: crate::tree::ParamMode::In,
-                ty: (**elem_ty).clone(),
-            }],
-        ),
-        (Type::Set { .. }, "clear") => (crate::tree::ParamMode::InOut, Vec::new()),
-
-        (Type::Map { key_ty, value_ty }, "insert") => (
-            crate::tree::ParamMode::InOut,
-            vec![
-                CallParam {
-                    mode: crate::tree::ParamMode::In,
-                    ty: (**key_ty).clone(),
-                },
-                CallParam {
-                    mode: crate::tree::ParamMode::In,
-                    ty: (**value_ty).clone(),
-                },
-            ],
-        ),
-        (Type::Map { key_ty, .. }, "remove") => (
-            crate::tree::ParamMode::InOut,
-            vec![CallParam {
-                mode: crate::tree::ParamMode::In,
-                ty: (**key_ty).clone(),
-            }],
-        ),
-        (Type::Map { key_ty, .. }, "contains_key" | "get") => (
-            crate::tree::ParamMode::In,
-            vec![CallParam {
-                mode: crate::tree::ParamMode::In,
-                ty: (**key_ty).clone(),
-            }],
-        ),
-        (Type::Map { .. }, "clear") => (crate::tree::ParamMode::InOut, Vec::new()),
-
-        _ => return None,
-    };
+    let builtin = builtin_methods::resolve_builtin_method(&receiver_ty, method_name)?;
+    let receiver_mode = builtin.receiver_mode();
+    let params = builtin
+        .params()
+        .into_iter()
+        .map(|param| CallParam {
+            mode: param.mode,
+            ty: param.ty,
+        })
+        .collect();
 
     Some((
         CallParam {

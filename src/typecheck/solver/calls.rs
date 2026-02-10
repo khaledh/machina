@@ -8,6 +8,8 @@ use std::collections::{HashMap, HashSet};
 use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
+use crate::typecheck::builtin_methods;
+use crate::typecheck::builtin_methods::BuiltinMethodRet;
 use crate::typecheck::constraints::{CallCallee, CallObligation};
 use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, CollectedTraitSig};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -383,44 +385,12 @@ fn try_solve_builtin_method(
 ) -> Option<Result<(), TypeCheckError>> {
     let receiver_term = obligation.receiver.as_ref()?;
     let receiver_ty = super::term_utils::resolve_term(receiver_term, unifier);
-    let peeled = receiver_ty.peel_heap();
-
-    if !matches!(
-        &peeled,
-        Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
-    ) {
+    if !builtin_methods::is_builtin_collection_receiver(&receiver_ty) {
         return None;
     }
 
-    // Hashability check for Set elem / Map key.
-    match &peeled {
-        Type::Set { elem_ty } if !super::term_utils::is_unresolved(elem_ty) => {
-            if let Err(failure) = super::ensure_hashable(elem_ty) {
-                return Some(Err(TypeCheckErrorKind::TypeNotHashable(
-                    (**elem_ty).clone(),
-                    failure.path,
-                    failure.failing_ty,
-                    obligation.span,
-                )
-                .into()));
-            }
-        }
-        Type::Map { key_ty, .. } if !super::term_utils::is_unresolved(key_ty) => {
-            if let Err(failure) = super::ensure_hashable(key_ty) {
-                return Some(Err(TypeCheckErrorKind::TypeNotHashable(
-                    (**key_ty).clone(),
-                    failure.path,
-                    failure.failing_ty,
-                    obligation.span,
-                )
-                .into()));
-            }
-        }
-        _ => {}
-    }
-
     // Properties that should not be called as methods.
-    if matches!(method_name, "len" | "capacity" | "is_empty") {
+    if builtin_methods::is_builtin_collection_property(method_name) {
         return Some(Err(TypeCheckErrorKind::PropertyCalledAsMethod(
             method_name.to_string(),
             obligation.span,
@@ -428,57 +398,40 @@ fn try_solve_builtin_method(
         .into()));
     }
 
-    // Build expected parameter types and return type per method.
-    // Map::get is handled as a special case due to its copy-safety check and
-    // ErrorUnion return type.
-    let sig: Option<(Vec<&Type>, Type)> = match (&peeled, method_name) {
-        (Type::DynArray { elem_ty }, "append") => Some((vec![elem_ty], Type::Unit)),
-
-        (Type::Set { elem_ty }, "insert" | "remove" | "contains") => {
-            Some((vec![elem_ty], Type::Bool))
-        }
-        (Type::Set { .. }, "clear") => Some((vec![], Type::Unit)),
-
-        (Type::Map { key_ty, value_ty }, "insert") => Some((vec![key_ty, value_ty], Type::Bool)),
-        (Type::Map { key_ty, .. }, "remove" | "contains_key") => Some((vec![key_ty], Type::Bool)),
-        (Type::Map { key_ty, value_ty }, "get") => {
-            return Some(solve_map_get(
-                obligation,
-                method_name,
-                key_ty,
-                value_ty,
-                unifier,
-            ));
-        }
-        (Type::Map { .. }, "clear") => Some((vec![], Type::Unit)),
-
-        _ => None,
-    };
-
-    let (param_tys, ret_ty) = sig?;
+    let builtin = builtin_methods::resolve_builtin_method(&receiver_ty, method_name)?;
+    if let Some(hashable_ty) = builtin.hashable_ty()
+        && !super::term_utils::is_unresolved(hashable_ty)
+        && let Err(failure) = super::ensure_hashable(hashable_ty)
+    {
+        return Some(Err(TypeCheckErrorKind::TypeNotHashable(
+            hashable_ty.clone(),
+            failure.path,
+            failure.failing_ty,
+            obligation.span,
+        )
+        .into()));
+    }
+    let params = builtin.params();
 
     // Generic arity + assignability check.
     let arity = obligation.arg_terms.len();
-    if arity != param_tys.len() {
+    if arity != params.len() {
         return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
             method_name.to_string(),
-            param_tys.len(),
+            params.len(),
             arity,
             obligation.span,
         )
         .into()));
     }
-    for (index, (arg_term, expected_ty)) in obligation
-        .arg_terms
-        .iter()
-        .zip(param_tys.iter())
-        .enumerate()
+    for (index, (arg_term, expected_ty)) in
+        obligation.arg_terms.iter().zip(params.iter()).enumerate()
     {
         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
-        if let Err(_) = super::assignability::solve_assignable(&arg_ty, expected_ty, unifier) {
+        if let Err(_) = super::assignability::solve_assignable(&arg_ty, &expected_ty.ty, unifier) {
             return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
                 index + 1,
-                (*expected_ty).clone(),
+                expected_ty.ty.clone(),
                 arg_ty,
                 obligation.span,
             )
@@ -486,54 +439,29 @@ fn try_solve_builtin_method(
         }
     }
 
+    let ret_ty = match builtin.ret_kind() {
+        BuiltinMethodRet::Unit => Type::Unit,
+        BuiltinMethodRet::Bool => Type::Bool,
+        BuiltinMethodRet::MapGet { value_ty } => {
+            if value_ty.needs_drop() && !super::term_utils::is_unresolved(&value_ty) {
+                return Some(Err(TypeCheckErrorKind::MapIndexValueNotCopySafe(
+                    value_ty,
+                    obligation.span,
+                )
+                .into()));
+            }
+            Type::ErrorUnion {
+                ok_ty: Box::new(value_ty),
+                err_tys: vec![super::diag_utils::map_key_not_found_type()],
+            }
+        }
+    };
+
     Some(
         unifier
             .unify(&obligation.ret_ty, &ret_ty)
             .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span)),
     )
-}
-
-fn solve_map_get(
-    obligation: &CallObligation,
-    method_name: &str,
-    key_ty: &Type,
-    value_ty: &Type,
-    unifier: &mut TcUnifier,
-) -> Result<(), TypeCheckError> {
-    let arity = obligation.arg_terms.len();
-    if arity != 1 {
-        return Err(TypeCheckErrorKind::ArgCountMismatch(
-            method_name.to_string(),
-            1,
-            arity,
-            obligation.span,
-        )
-        .into());
-    }
-    let key_arg_ty = super::term_utils::resolve_term(&obligation.arg_terms[0], unifier);
-    if let Err(_) = super::assignability::solve_assignable(&key_arg_ty, key_ty, unifier) {
-        return Err(TypeCheckErrorKind::ArgTypeMismatch(
-            1,
-            key_ty.clone(),
-            key_arg_ty,
-            obligation.span,
-        )
-        .into());
-    }
-    if value_ty.needs_drop() && !super::term_utils::is_unresolved(value_ty) {
-        return Err(TypeCheckErrorKind::MapIndexValueNotCopySafe(
-            value_ty.clone(),
-            obligation.span,
-        )
-        .into());
-    }
-    let result_ty = Type::ErrorUnion {
-        ok_ty: Box::new(value_ty.clone()),
-        err_tys: vec![super::diag_utils::map_key_not_found_type()],
-    };
-    unifier
-        .unify(&obligation.ret_ty, &result_ty)
-        .map_err(|err| super::constraint_checks::unify_error_to_diag(err, obligation.span))
 }
 
 struct InstantiatedSig {

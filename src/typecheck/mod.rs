@@ -1,5 +1,6 @@
 //! Type checker pipeline entrypoint.
 
+mod builtin_methods;
 mod capability;
 mod collect;
 mod constraints;
