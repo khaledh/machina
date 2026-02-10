@@ -1,4 +1,6 @@
 use clap::Parser as ClapParser;
+use machina::analysis::db::AnalysisDb;
+use machina::analysis::diagnostics::DiagnosticPhase;
 use machina::compile::{CompileOptions, compile_with_path};
 use machina::diag::{CompileError, Span, format_error};
 use std::ffi::OsStr;
@@ -68,6 +70,10 @@ enum Command {
         /// Input source file path
         input: String,
     },
+    Check {
+        /// Input source file path
+        input: String,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone)]
@@ -125,6 +131,18 @@ fn main() {
             output: None,
             kind: DriverKind::Run,
         },
+        Command::Check { input } => {
+            let input_path = PathBuf::from(input);
+            match run_check(&input_path) {
+                Ok(0) => {}
+                Ok(_) => std::process::exit(1),
+                Err(message) => {
+                    println!("[ERROR] check failed: {message}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
     };
     let input_path = invocation.input_path.as_path();
     let source = match std::fs::read_to_string(input_path) {
@@ -289,6 +307,34 @@ fn main() {
             }
         }
     }
+}
+
+fn run_check(input_path: &Path) -> Result<usize, String> {
+    let source = std::fs::read_to_string(input_path)
+        .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
+
+    let mut db = AnalysisDb::new();
+    let file_id = db.upsert_disk_text(input_path.to_path_buf(), source.as_str());
+    let diagnostics = db
+        .diagnostics_for_file(file_id)
+        .map_err(|_| "analysis query cancelled".to_string())?;
+
+    if diagnostics.is_empty() {
+        println!("[OK] no diagnostics");
+        return Ok(0);
+    }
+
+    for diag in &diagnostics {
+        let phase = match diag.phase {
+            DiagnosticPhase::Parse => "parse",
+            DiagnosticPhase::Resolve => "resolve",
+            DiagnosticPhase::Typecheck => "typecheck",
+        };
+        let message = format!("[{phase}:{}] {}", diag.code, diag.message);
+        println!("{}", format_error(&source, diag.span, message));
+    }
+
+    Ok(diagnostics.len())
 }
 
 fn default_exe_path(input_path: &Path) -> PathBuf {
