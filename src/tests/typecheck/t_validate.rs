@@ -1,0 +1,83 @@
+use super::*;
+use crate::context::ParsedContext;
+use crate::lexer::{LexError, Lexer, Token};
+use crate::parse::Parser;
+use crate::resolve::resolve;
+use crate::typecheck::{collect, constraints, engine::TypecheckEngine, solver};
+
+fn resolve_source(source: &str) -> crate::context::ResolvedContext {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
+    let ast_context = ParsedContext::new(module, id_gen);
+    resolve(ast_context).expect("Failed to resolve")
+}
+
+fn run_validate(source: &str) -> Result<(), Vec<TypeCheckError>> {
+    let resolved = resolve_source(source);
+    let mut engine = TypecheckEngine::new(resolved);
+    collect::run(&mut engine).expect("collect pass failed");
+    constraints::run(&mut engine).expect("constrain pass failed");
+    solver::run(&mut engine).expect("solve pass failed");
+    run(&mut engine)
+}
+
+#[test]
+fn test_validate_break_outside_loop() {
+    let source = r#"
+        fn test() -> u64 {
+            break;
+            0
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(
+        errors
+            .iter()
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::BreakOutsideLoop(_)))
+    );
+}
+
+#[test]
+fn test_validate_return_value_unexpected() {
+    let source = r#"
+        fn test() -> () {
+            return 1;
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(
+        errors
+            .iter()
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueUnexpected(_)))
+    );
+}
+
+#[test]
+fn test_validate_return_value_missing() {
+    let source = r#"
+        fn test() -> u64 {
+            return;
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(
+        errors
+            .iter()
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueMissing(_, _)))
+    );
+}
