@@ -8,12 +8,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::analysis::diagnostics::Diagnostic;
+use crate::analysis::diagnostics::{Diagnostic, DiagnosticValue};
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
 use crate::analysis::results::{
-    CompletionItem, CompletionKind, DocumentSymbol, DocumentSymbolKind, HoverInfo, Location,
-    RenameConflict, RenameEdit, RenamePlan, SemanticToken, SemanticTokenKind, SignatureHelp,
+    CodeAction, CodeActionKind, CompletionItem, CompletionKind, DocumentSymbol, DocumentSymbolKind,
+    HoverInfo, Location, RenameConflict, RenameEdit, RenamePlan, SemanticToken, SemanticTokenKind,
+    SignatureHelp, TextEdit,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::diag::{Position, Span};
@@ -504,6 +505,48 @@ impl AnalysisDb {
         Ok(out)
     }
 
+    pub fn code_actions_at_path(
+        &mut self,
+        path: &Path,
+        range: Span,
+    ) -> QueryResult<Vec<CodeAction>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(Vec::new());
+        };
+        self.code_actions_at_file(file_id, range)
+    }
+
+    pub fn code_actions_at_file(
+        &mut self,
+        file_id: FileId,
+        range: Span,
+    ) -> QueryResult<Vec<CodeAction>> {
+        let diagnostics = self.diagnostics_for_file(file_id)?;
+        let mut actions = Vec::new();
+        for diag in diagnostics {
+            if !span_intersects_span(diag.span, range) {
+                continue;
+            }
+            actions.extend(code_actions_for_diagnostic(&diag));
+        }
+        actions.sort_by_key(|action| {
+            (
+                action.title.clone(),
+                action.diagnostic_code.clone(),
+                action
+                    .edits
+                    .first()
+                    .map(|e| (e.span.start.line, e.span.start.column))
+                    .unwrap_or((0, 0)),
+            )
+        });
+        actions.dedup_by(|a, b| {
+            a.title == b.title && a.diagnostic_code == b.diagnostic_code && a.edits == b.edits
+        });
+        Ok(actions)
+    }
+
     pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
         let snapshot = self.snapshot();
         let mut out = Vec::new();
@@ -737,8 +780,52 @@ fn span_contains_span(span: Span, query: Span) -> bool {
     position_leq(span.start, query.start) && position_leq(query.end, span.end)
 }
 
+fn span_intersects_span(a: Span, b: Span) -> bool {
+    position_leq(a.start, b.end) && position_leq(b.start, a.end)
+}
+
 fn position_leq(lhs: Position, rhs: Position) -> bool {
     (lhs.line, lhs.column) <= (rhs.line, rhs.column)
+}
+
+fn code_actions_for_diagnostic(diag: &Diagnostic) -> Vec<CodeAction> {
+    match diag.code.as_str() {
+        "MC-PARSE-SET-MISSING-COMMA" | "MC-PARSE-TUPLE-MISSING-COMMA" => vec![CodeAction {
+            title: "Insert missing comma".to_string(),
+            kind: CodeActionKind::QuickFix,
+            diagnostic_code: diag.code.clone(),
+            edits: vec![TextEdit {
+                span: Span {
+                    start: diag.span.end,
+                    end: diag.span.end,
+                },
+                new_text: ",".to_string(),
+            }],
+        }],
+        "MC-TYPECHECK-TryErrorNotInReturn" => {
+            let missing = diag
+                .metadata
+                .get("missing")
+                .and_then(|v| match v {
+                    DiagnosticValue::StringList(items) => Some(items.join(" | ")),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "missing error variants".to_string());
+            vec![CodeAction {
+                title: format!("Add `{missing}` to function return error union"),
+                kind: CodeActionKind::QuickFix,
+                diagnostic_code: diag.code.clone(),
+                edits: Vec::new(),
+            }]
+        }
+        "MC-TYPECHECK-TryReturnTypeNotErrorUnion" => vec![CodeAction {
+            title: "Change function return type to an error union (or remove `?`)".to_string(),
+            kind: CodeActionKind::QuickFix,
+            diagnostic_code: diag.code.clone(),
+            edits: Vec::new(),
+        }],
+        _ => Vec::new(),
+    }
 }
 
 fn is_identifier_name(name: &str) -> bool {

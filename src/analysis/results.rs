@@ -158,6 +158,25 @@ pub struct SemanticToken {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CodeActionKind {
+    QuickFix,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextEdit {
+    pub span: Span,
+    pub new_text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeAction {
+    pub title: String,
+    pub kind: CodeActionKind,
+    pub diagnostic_code: String,
+    pub edits: Vec<TextEdit>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
     pub file_id: FileId,
     pub path: Option<PathBuf>,

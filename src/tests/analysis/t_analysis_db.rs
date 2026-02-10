@@ -408,6 +408,66 @@ fn main() -> u64 { id(1) + id(2) }
     assert!(!tokens_a.is_empty(), "expected at least one semantic token");
 }
 
+#[test]
+fn code_actions_include_try_union_fix() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type ParseErr = {}
+type OtherErr = {}
+
+fn may_fail() -> u64 | ParseErr {
+    ParseErr{}
+}
+
+fn use_try() -> u64 | OtherErr {
+    let x = may_fail()?;
+    x
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/code_actions_try.mc"), source);
+    let query_span = span_for_substring(source, "may_fail()?");
+
+    let actions = db
+        .code_actions_at_file(file_id, query_span)
+        .expect("code action query should succeed");
+
+    assert!(
+        actions.iter().any(|a| a
+            .title
+            .contains("Add `ParseErr` to function return error union")),
+        "expected try-propagation quick fix, got: {:?}",
+        actions
+    );
+}
+
+#[test]
+fn code_actions_are_deterministic() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type ParseErr = {}
+fn may_fail() -> u64 | ParseErr { ParseErr{} }
+fn use_try() -> u64 {
+    let x = may_fail()?;
+    x
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/code_actions_deterministic.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "may_fail()?");
+
+    let a = db
+        .code_actions_at_file(file_id, query_span)
+        .expect("first code action query should succeed");
+    let b = db
+        .code_actions_at_file(file_id, query_span)
+        .expect("second code action query should succeed");
+
+    assert_eq!(a, b, "code actions should be deterministic");
+    assert!(!a.is_empty(), "expected at least one code action");
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)

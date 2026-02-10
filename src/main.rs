@@ -114,6 +114,7 @@ enum QueryLookupKind {
     Rename,
     DocumentSymbols,
     SemanticTokens,
+    CodeActions,
 }
 
 #[derive(Copy, Clone)]
@@ -577,6 +578,30 @@ fn run_query(
                         token.span
                     )
                 );
+            }
+            Ok(0)
+        }
+        QueryLookupKind::CodeActions => {
+            let actions = db
+                .code_actions_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if actions.is_empty() {
+                println!("[NONE] no code actions at {line}:{col}");
+                return Ok(1);
+            }
+            for action in actions {
+                println!("{} [{}]", action.title, action.diagnostic_code);
+                for edit in action.edits {
+                    println!(
+                        "  edit {} => `{}`",
+                        format_location(
+                            &Some(input_path.to_path_buf()),
+                            file_id.0 as u64,
+                            edit.span
+                        ),
+                        edit.new_text
+                    );
+                }
             }
             Ok(0)
         }
