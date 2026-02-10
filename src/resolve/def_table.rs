@@ -68,6 +68,12 @@ impl DefTable {
         self.node_def.get(&node_id).copied()
     }
 
+    pub fn node_def_entries(&self) -> impl Iterator<Item = (NodeId, DefId)> + '_ {
+        self.node_def
+            .iter()
+            .map(|(node_id, def_id)| (*node_id, *def_id))
+    }
+
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {
         self.lookup_def(def_id)
             .is_some_and(|def| def.is_intrinsic())

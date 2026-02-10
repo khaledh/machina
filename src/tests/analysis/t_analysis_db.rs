@@ -252,6 +252,115 @@ fn main() -> u64 { pair(1, 2) }
     assert_eq!(sig.active_parameter, 1);
 }
 
+#[test]
+fn references_returns_definition_and_use_sites() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) + id(2) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/references.mc"), source);
+
+    let mut def_span = span_for_substring(source, "id(x");
+    def_span.end = position_at(source, def_span.start.offset + 2);
+    let def_id = db
+        .def_at_file(file_id, def_span)
+        .expect("def lookup should succeed")
+        .expect("expected def id for `id`");
+
+    let refs = db
+        .references(def_id)
+        .expect("references query should succeed");
+    assert!(
+        refs.len() >= 3,
+        "expected definition plus both call sites, got {}",
+        refs.len()
+    );
+    for pair in refs.windows(2) {
+        let lhs = &pair[0];
+        let rhs = &pair[1];
+        assert!(
+            (lhs.path.clone(), lhs.span.start.offset) <= (rhs.path.clone(), rhs.span.start.offset),
+            "references should be deterministically sorted"
+        );
+    }
+}
+
+#[test]
+fn rename_plan_reports_conflicts_for_existing_name() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn foo() -> u64 { 1 }
+fn bar() -> u64 { foo() }
+fn baz() -> u64 { 2 }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/rename_conflict.mc"), source);
+
+    let mut foo_span = span_for_substring(source, "foo()");
+    foo_span.end = position_at(source, foo_span.start.offset + 3);
+    let def_id = db
+        .def_at_file(file_id, foo_span)
+        .expect("def lookup should succeed")
+        .expect("expected def id for foo");
+
+    let plan = db
+        .rename_plan(def_id, "baz")
+        .expect("rename plan query should succeed");
+    assert!(
+        !plan.can_apply(),
+        "rename should be blocked by existing symbol conflict"
+    );
+    assert!(!plan.conflicts.is_empty(), "expected conflict details");
+}
+
+#[test]
+fn rename_plan_returns_deterministic_edits() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn foo() -> u64 { 1 }
+fn main() -> u64 {
+    let a = foo();
+    let b = foo();
+    a + b
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/rename_ok.mc"), source);
+
+    let mut foo_span = span_for_substring(source, "foo()");
+    foo_span.end = position_at(source, foo_span.start.offset + 3);
+    let def_id = db
+        .def_at_file(file_id, foo_span)
+        .expect("def lookup should succeed")
+        .expect("expected def id for foo");
+
+    let plan = db
+        .rename_plan(def_id, "renamed")
+        .expect("rename plan query should succeed");
+    assert!(
+        plan.conflicts.is_empty(),
+        "unexpected conflicts: {:?}",
+        plan.conflicts
+    );
+    assert!(plan.can_apply(), "expected rename to be applicable");
+    assert!(
+        plan.edits.len() >= 3,
+        "expected definition plus use sites, got {}",
+        plan.edits.len()
+    );
+    assert!(
+        plan.edits.iter().all(|edit| edit.replacement == "renamed"),
+        "all edits should use new identifier spelling"
+    );
+    for pair in plan.edits.windows(2) {
+        let lhs = &pair[0].location;
+        let rhs = &pair[1].location;
+        assert!(
+            (lhs.path.clone(), lhs.span.start.offset) <= (rhs.path.clone(), rhs.span.start.offset),
+            "rename edits should be deterministically sorted"
+        );
+    }
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)

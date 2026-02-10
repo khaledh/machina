@@ -85,6 +85,10 @@ enum Command {
         /// Lookup kind to run.
         #[clap(long, value_enum, default_value_t = QueryLookupKind::Hover)]
         kind: QueryLookupKind,
+
+        /// New identifier name for rename planning (required for `--kind rename`).
+        #[clap(long)]
+        new_name: Option<String>,
     },
 }
 
@@ -106,6 +110,8 @@ enum QueryLookupKind {
     Hover,
     Completions,
     Signature,
+    References,
+    Rename,
 }
 
 #[derive(Copy, Clone)]
@@ -164,9 +170,14 @@ fn main() {
             }
             return;
         }
-        Command::Query { input, pos, kind } => {
+        Command::Query {
+            input,
+            pos,
+            kind,
+            new_name,
+        } => {
             let input_path = PathBuf::from(input);
-            match run_query(&input_path, &pos, kind) {
+            match run_query(&input_path, &pos, kind, new_name.as_deref()) {
                 Ok(0) => {}
                 Ok(_) => std::process::exit(1),
                 Err(message) => {
@@ -370,7 +381,12 @@ fn run_check(input_path: &Path) -> Result<usize, String> {
     Ok(diagnostics.len())
 }
 
-fn run_query(input_path: &Path, pos: &str, kind: QueryLookupKind) -> Result<usize, String> {
+fn run_query(
+    input_path: &Path,
+    pos: &str,
+    kind: QueryLookupKind,
+    new_name: Option<&str>,
+) -> Result<usize, String> {
     let source = std::fs::read_to_string(input_path)
         .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
     let (line, col) = parse_pos_arg(pos)?;
@@ -450,7 +466,90 @@ fn run_query(input_path: &Path, pos: &str, kind: QueryLookupKind) -> Result<usiz
                 Ok(1)
             }
         }
+        QueryLookupKind::References => {
+            let def_id = db
+                .def_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            let Some(def_id) = def_id else {
+                println!("[NONE] no definition at {line}:{col}");
+                return Ok(1);
+            };
+
+            let refs = db
+                .references(def_id)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if refs.is_empty() {
+                println!("[NONE] no references for def {}", def_id.0);
+                return Ok(1);
+            }
+            println!("def {} references {}", def_id.0, refs.len());
+            for loc in refs {
+                println!(
+                    "{}",
+                    format_location(&loc.path, loc.file_id.0 as u64, loc.span)
+                );
+            }
+            Ok(0)
+        }
+        QueryLookupKind::Rename => {
+            let Some(new_name) = new_name else {
+                return Err("`--new-name` is required for `--kind rename`".to_string());
+            };
+            let def_id = db
+                .def_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            let Some(def_id) = def_id else {
+                println!("[NONE] no definition at {line}:{col}");
+                return Ok(1);
+            };
+
+            let plan = db
+                .rename_plan(def_id, new_name)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            let old_name = plan.old_name.as_deref().unwrap_or("<unknown>");
+            let can_apply = plan.can_apply();
+            println!(
+                "rename {} {} -> {} (edits: {}, conflicts: {}, can_apply: {})",
+                plan.def_id.0,
+                old_name,
+                plan.new_name,
+                plan.edits.len(),
+                plan.conflicts.len(),
+                can_apply
+            );
+            for conflict in &plan.conflicts {
+                match conflict.existing_def {
+                    Some(existing) => {
+                        println!("conflict [{}]: {}", existing.0, conflict.message);
+                    }
+                    None => println!("conflict: {}", conflict.message),
+                }
+            }
+            for edit in &plan.edits {
+                println!(
+                    "edit {} => `{}`",
+                    format_location(
+                        &edit.location.path,
+                        edit.location.file_id.0 as u64,
+                        edit.location.span
+                    ),
+                    edit.replacement
+                );
+            }
+            if can_apply { Ok(0) } else { Ok(1) }
+        }
     }
+}
+
+fn format_location(path: &Option<PathBuf>, file_id: u64, span: Span) -> String {
+    let base = path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| format!("<file:{file_id}>"));
+    format!(
+        "{}:{}:{}-{}:{}",
+        base, span.start.line, span.start.column, span.end.line, span.end.column
+    )
 }
 
 fn parse_pos_arg(pos: &str) -> Result<(usize, usize), String> {

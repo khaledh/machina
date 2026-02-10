@@ -37,6 +37,12 @@ impl AnalysisSnapshot {
     pub fn text(&self, file_id: FileId) -> Option<Arc<str>> {
         self.file_text.get(&file_id).cloned()
     }
+
+    pub fn file_ids(&self) -> Vec<FileId> {
+        let mut ids: Vec<_> = self.file_text.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
 }
 
 /// Mutable source state that tracks disk text and unsaved overlays.

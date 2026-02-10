@@ -6,7 +6,9 @@
 //! CLI and IDE consumers.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
+use crate::analysis::snapshot::FileId;
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diag::Span;
 use crate::frontend::{ModuleId, ParsedModule};
@@ -115,6 +117,40 @@ pub struct SignatureHelp {
     pub def_id: Option<DefId>,
     pub active_parameter: usize,
     pub parameters: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Location {
+    pub file_id: FileId,
+    pub path: Option<PathBuf>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenameEdit {
+    pub location: Location,
+    pub replacement: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenameConflict {
+    pub message: String,
+    pub existing_def: Option<DefId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenamePlan {
+    pub def_id: DefId,
+    pub old_name: Option<String>,
+    pub new_name: String,
+    pub edits: Vec<RenameEdit>,
+    pub conflicts: Vec<RenameConflict>,
+}
+
+impl RenamePlan {
+    pub fn can_apply(&self) -> bool {
+        !self.edits.is_empty() && self.conflicts.is_empty()
+    }
 }
 
 impl TypedModuleResult {

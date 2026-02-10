@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use crate::analysis::diagnostics::Diagnostic;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
-use crate::analysis::results::{CompletionItem, CompletionKind, HoverInfo, SignatureHelp};
+use crate::analysis::results::{
+    CompletionItem, CompletionKind, HoverInfo, Location, RenameConflict, RenameEdit, RenamePlan,
+    SignatureHelp,
+};
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::diag::{Position, Span};
 use crate::frontend::ModuleId;
@@ -405,6 +408,124 @@ impl AnalysisDb {
         }))
     }
 
+    pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
+        let snapshot = self.snapshot();
+        let mut out = Vec::new();
+
+        for file_id in snapshot.file_ids() {
+            let state = self.lookup_state_for_file(file_id)?;
+            let Some(resolved) = state.resolved else {
+                continue;
+            };
+
+            let node_spans = node_span_map(&resolved.module);
+            for (node_id, mapped_def_id) in resolved.def_table.node_def_entries() {
+                if mapped_def_id != def_id {
+                    continue;
+                }
+                let Some(span) = node_spans.get(&node_id).copied() else {
+                    continue;
+                };
+                out.push(Location {
+                    file_id,
+                    path: snapshot.path(file_id).map(Path::to_path_buf),
+                    span,
+                });
+            }
+        }
+
+        out.sort_by_key(|loc| {
+            (
+                loc.path.clone(),
+                loc.span.start.line,
+                loc.span.start.column,
+                loc.span.end.line,
+                loc.span.end.column,
+                loc.file_id,
+            )
+        });
+        out.dedup();
+        Ok(out)
+    }
+
+    pub fn rename_plan(&mut self, def_id: DefId, new_name: &str) -> QueryResult<RenamePlan> {
+        let references = self.references(def_id)?;
+        let mut plan = RenamePlan {
+            def_id,
+            old_name: None,
+            new_name: new_name.to_string(),
+            edits: Vec::new(),
+            conflicts: Vec::new(),
+        };
+
+        if !is_identifier_name(new_name) {
+            plan.conflicts.push(RenameConflict {
+                message: format!("`{new_name}` is not a valid identifier"),
+                existing_def: None,
+            });
+            return Ok(plan);
+        }
+
+        let snapshot = self.snapshot();
+        let mut owner_module = None;
+        let mut existing_same_name = HashSet::new();
+        for file_id in snapshot.file_ids() {
+            let state = self.lookup_state_for_file(file_id)?;
+            let Some(resolved) = state.resolved else {
+                continue;
+            };
+
+            if plan.old_name.is_none()
+                && let Some(def) = resolved.def_table.lookup_def(def_id)
+            {
+                plan.old_name = Some(def.name.clone());
+                owner_module = resolved
+                    .def_owners
+                    .get(&def_id)
+                    .copied()
+                    .or(Some(ModuleId(file_id.0)));
+            }
+
+            let Some(target_owner) = owner_module else {
+                continue;
+            };
+            for def in resolved.def_table.defs() {
+                if def.id == def_id || def.name != new_name {
+                    continue;
+                }
+                let owner = resolved
+                    .def_owners
+                    .get(&def.id)
+                    .copied()
+                    .or(Some(ModuleId(file_id.0)));
+                if owner == Some(target_owner) && existing_same_name.insert(def.id) {
+                    plan.conflicts.push(RenameConflict {
+                        message: format!("name `{new_name}` already exists as {}", def.kind),
+                        existing_def: Some(def.id),
+                    });
+                }
+            }
+        }
+
+        if let Some(old_name) = &plan.old_name
+            && old_name == new_name
+        {
+            plan.conflicts.push(RenameConflict {
+                message: "new name matches existing symbol name".to_string(),
+                existing_def: Some(def_id),
+            });
+        }
+
+        for location in references {
+            plan.edits.push(RenameEdit {
+                location,
+                replacement: new_name.to_string(),
+            });
+        }
+
+        Ok(plan)
+    }
+
     fn lookup_state_for_file(&mut self, file_id: FileId) -> QueryResult<LookupState> {
         let snapshot = self.snapshot();
         let Some(source) = snapshot.text(file_id) else {
@@ -504,6 +625,14 @@ fn node_at_span<D, T>(module: &crate::tree::Module<D, T>, query_span: Span) -> O
     best.map(|(node_id, _)| node_id)
 }
 
+fn node_span_map<D, T>(
+    module: &crate::tree::Module<D, T>,
+) -> std::collections::HashMap<NodeId, Span> {
+    let mut collector = NodeSpanCollector::default();
+    collector.visit_module(module);
+    collector.nodes.into_iter().collect()
+}
+
 fn span_width(span: Span) -> usize {
     span.end.offset.saturating_sub(span.start.offset)
 }
@@ -514,6 +643,17 @@ fn span_contains_span(span: Span, query: Span) -> bool {
 
 fn position_leq(lhs: Position, rhs: Position) -> bool {
     (lhs.line, lhs.column) <= (rhs.line, rhs.column)
+}
+
+fn is_identifier_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
