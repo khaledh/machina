@@ -12,8 +12,8 @@ use crate::analysis::diagnostics::Diagnostic;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
 use crate::analysis::results::{
-    CompletionItem, CompletionKind, HoverInfo, Location, RenameConflict, RenameEdit, RenamePlan,
-    SignatureHelp,
+    CompletionItem, CompletionKind, DocumentSymbol, DocumentSymbolKind, HoverInfo, Location,
+    RenameConflict, RenameEdit, RenamePlan, SemanticToken, SemanticTokenKind, SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::diag::{Position, Span};
@@ -408,6 +408,102 @@ impl AnalysisDb {
         }))
     }
 
+    pub fn document_symbols_at_path(&mut self, path: &Path) -> QueryResult<Vec<DocumentSymbol>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(Vec::new());
+        };
+        self.document_symbols_at_file(file_id)
+    }
+
+    pub fn document_symbols_at_file(
+        &mut self,
+        file_id: FileId,
+    ) -> QueryResult<Vec<DocumentSymbol>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(resolved) = state.resolved else {
+            return Ok(Vec::new());
+        };
+
+        let node_spans = node_span_map(&resolved.module);
+        let mut collector = DocumentSymbolNodeCollector::default();
+        collector.visit_module(&resolved.module);
+
+        let mut out = Vec::new();
+        for (node_id, kind) in collector.nodes {
+            let Some(def_id) = resolved.def_table.lookup_node_def_id(node_id) else {
+                continue;
+            };
+            let Some(def) = resolved.def_table.lookup_def(def_id) else {
+                continue;
+            };
+            let Some(span) = node_spans.get(&node_id).copied() else {
+                continue;
+            };
+            out.push(DocumentSymbol {
+                name: def.name.clone(),
+                kind: kind.clone(),
+                def_id,
+                span,
+                detail: Some(def.kind.to_string()),
+            });
+        }
+
+        out.sort_by_key(|sym| {
+            (
+                sym.span.start.line,
+                sym.span.start.column,
+                sym.span.end.line,
+                sym.span.end.column,
+                sym.name.clone(),
+                sym.def_id,
+            )
+        });
+        out.dedup_by(|a, b| a.def_id == b.def_id && a.kind == b.kind && a.span == b.span);
+        Ok(out)
+    }
+
+    pub fn semantic_tokens_at_path(&mut self, path: &Path) -> QueryResult<Vec<SemanticToken>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(Vec::new());
+        };
+        self.semantic_tokens_at_file(file_id)
+    }
+
+    pub fn semantic_tokens_at_file(&mut self, file_id: FileId) -> QueryResult<Vec<SemanticToken>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(resolved) = state.resolved else {
+            return Ok(Vec::new());
+        };
+
+        let node_spans = node_span_map(&resolved.module);
+        let mut out = Vec::new();
+        for (node_id, def_id) in resolved.def_table.node_def_entries() {
+            let Some(def) = resolved.def_table.lookup_def(def_id) else {
+                continue;
+            };
+            let Some(kind) = semantic_token_kind_for_def(&def.kind) else {
+                continue;
+            };
+            let Some(span) = node_spans.get(&node_id).copied() else {
+                continue;
+            };
+            out.push(SemanticToken { span, kind, def_id });
+        }
+        out.sort_by_key(|tok| {
+            (
+                tok.span.start.line,
+                tok.span.start.column,
+                tok.span.end.line,
+                tok.span.end.column,
+                tok.def_id,
+            )
+        });
+        out.dedup_by(|a, b| a.span == b.span && a.kind == b.kind && a.def_id == b.def_id);
+        Ok(out)
+    }
+
     pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
         let snapshot = self.snapshot();
         let mut out = Vec::new();
@@ -668,6 +764,18 @@ fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
     }
 }
 
+fn semantic_token_kind_for_def(kind: &DefKind) -> Option<SemanticTokenKind> {
+    match kind {
+        DefKind::TypeDef { .. } => Some(SemanticTokenKind::Type),
+        DefKind::TraitDef { .. } => Some(SemanticTokenKind::Trait),
+        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(SemanticTokenKind::Function),
+        DefKind::TypeParam => Some(SemanticTokenKind::TypeParameter),
+        DefKind::EnumVariantName => Some(SemanticTokenKind::EnumVariant),
+        DefKind::LocalVar { .. } => Some(SemanticTokenKind::Variable),
+        DefKind::Param { .. } => Some(SemanticTokenKind::Parameter),
+    }
+}
+
 fn param_mode_name(mode: &crate::tree::ParamMode) -> &'static str {
     match mode {
         crate::tree::ParamMode::In => "in",
@@ -736,6 +844,55 @@ impl<D, T> Visitor<D, T> for CallSiteCollector {
             _ => {}
         }
         visit::walk_expr(self, expr);
+    }
+}
+
+#[derive(Default)]
+struct DocumentSymbolNodeCollector {
+    nodes: Vec<(NodeId, DocumentSymbolKind)>,
+}
+
+impl<D, T> Visitor<D, T> for DocumentSymbolNodeCollector {
+    fn visit_type_def(&mut self, type_def: &crate::tree::TypeDef<D>) {
+        self.nodes.push((type_def.id, DocumentSymbolKind::Type));
+        visit::walk_type_def::<Self, D, T>(self, type_def);
+    }
+
+    fn visit_trait_def(&mut self, trait_def: &crate::tree::TraitDef<D>) {
+        self.nodes.push((trait_def.id, DocumentSymbolKind::Trait));
+        visit::walk_trait_def::<Self, D, T>(self, trait_def);
+    }
+
+    fn visit_func_decl(&mut self, func_decl: &crate::tree::FuncDecl<D>) {
+        self.nodes
+            .push((func_decl.id, DocumentSymbolKind::Function));
+        visit::walk_func_decl::<Self, D, T>(self, func_decl);
+    }
+
+    fn visit_func_def(&mut self, func_def: &crate::tree::FuncDef<D, T>) {
+        self.nodes.push((func_def.id, DocumentSymbolKind::Function));
+        visit::walk_func_def(self, func_def);
+    }
+
+    fn visit_method_decl(&mut self, method_decl: &crate::tree::MethodDecl<D>) {
+        self.nodes
+            .push((method_decl.id, DocumentSymbolKind::Method));
+        visit::walk_method_decl::<Self, D, T>(self, method_decl);
+    }
+
+    fn visit_method_def(&mut self, method_def: &crate::tree::MethodDef<D, T>) {
+        self.nodes.push((method_def.id, DocumentSymbolKind::Method));
+        visit::walk_method_def(self, method_def);
+    }
+
+    fn visit_trait_method(&mut self, method: &crate::tree::TraitMethod<D>) {
+        self.nodes.push((method.id, DocumentSymbolKind::Method));
+        visit::walk_trait_method::<Self, D, T>(self, method);
+    }
+
+    fn visit_trait_property(&mut self, property: &crate::tree::TraitProperty<D>) {
+        self.nodes.push((property.id, DocumentSymbolKind::Property));
+        visit::walk_trait_property::<Self, D, T>(self, property);
     }
 }
 

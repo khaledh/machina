@@ -112,6 +112,8 @@ enum QueryLookupKind {
     Signature,
     References,
     Rename,
+    DocumentSymbols,
+    SemanticTokens,
 }
 
 #[derive(Copy, Clone)]
@@ -537,6 +539,46 @@ fn run_query(
                 );
             }
             if can_apply { Ok(0) } else { Ok(1) }
+        }
+        QueryLookupKind::DocumentSymbols => {
+            let symbols = db
+                .document_symbols_at_file(file_id)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if symbols.is_empty() {
+                println!("[NONE] no document symbols");
+                return Ok(1);
+            }
+            for sym in symbols {
+                println!(
+                    "{} [{}] {}",
+                    sym.name,
+                    sym.def_id.0,
+                    format_location(&Some(input_path.to_path_buf()), file_id.0 as u64, sym.span)
+                );
+            }
+            Ok(0)
+        }
+        QueryLookupKind::SemanticTokens => {
+            let tokens = db
+                .semantic_tokens_at_file(file_id)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if tokens.is_empty() {
+                println!("[NONE] no semantic tokens");
+                return Ok(1);
+            }
+            for token in tokens {
+                println!(
+                    "{:?} [{}] {}",
+                    token.kind,
+                    token.def_id.0,
+                    format_location(
+                        &Some(input_path.to_path_buf()),
+                        file_id.0 as u64,
+                        token.span
+                    )
+                );
+            }
+            Ok(0)
         }
     }
 }

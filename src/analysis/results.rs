@@ -120,6 +120,44 @@ pub struct SignatureHelp {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DocumentSymbolKind {
+    Type,
+    Trait,
+    Function,
+    Method,
+    Property,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DocumentSymbol {
+    pub name: String,
+    pub kind: DocumentSymbolKind,
+    pub def_id: DefId,
+    pub span: Span,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SemanticTokenKind {
+    Type,
+    Trait,
+    Function,
+    Method,
+    Property,
+    Variable,
+    Parameter,
+    TypeParameter,
+    EnumVariant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemanticToken {
+    pub span: Span,
+    pub kind: SemanticTokenKind,
+    pub def_id: DefId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
     pub file_id: FileId,
     pub path: Option<PathBuf>,

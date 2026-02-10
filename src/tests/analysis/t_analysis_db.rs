@@ -361,6 +361,53 @@ fn main() -> u64 {
     }
 }
 
+#[test]
+fn document_symbols_returns_outline_entries() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Packet = { id: u64 }
+trait Runnable { fn run(self) -> u64; }
+fn ping() -> u64 { 1 }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/document_symbols.mc"), source);
+    let symbols = db
+        .document_symbols_at_file(file_id)
+        .expect("document symbol query should succeed");
+
+    assert!(
+        symbols.iter().any(|s| s.name == "Packet"),
+        "expected type symbol"
+    );
+    assert!(
+        symbols.iter().any(|s| s.name == "Runnable"),
+        "expected trait symbol"
+    );
+    assert!(
+        symbols.iter().any(|s| s.name == "ping"),
+        "expected function symbol"
+    );
+}
+
+#[test]
+fn semantic_tokens_are_stable_for_same_snapshot() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) + id(2) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/semantic_tokens.mc"), source);
+
+    let tokens_a = db
+        .semantic_tokens_at_file(file_id)
+        .expect("semantic token query should succeed");
+    let tokens_b = db
+        .semantic_tokens_at_file(file_id)
+        .expect("semantic token query should succeed");
+
+    assert_eq!(tokens_a, tokens_b, "token query should be deterministic");
+    assert!(!tokens_a.is_empty(), "expected at least one semantic token");
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)
