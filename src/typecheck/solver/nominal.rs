@@ -278,33 +278,10 @@ pub(super) fn try_check_expr_obligation_nominal(
                 let _ = unifier.unify(result, &Type::uint(64));
                 return true;
             }
-            if let Type::DynArray { .. } = &owner_ty {
-                match field.as_str() {
-                    "capacity" => {
-                        let _ = unifier.unify(result, &Type::uint(64));
-                        return true;
-                    }
-                    "is_empty" => {
-                        let _ = unifier.unify(result, &Type::Bool);
-                        return true;
-                    }
-                    _ => {}
-                }
-            }
-            if let Type::Set { .. } = &owner_ty {
-                match field.as_str() {
-                    "capacity" => {
-                        let _ = unifier.unify(result, &Type::uint(64));
-                        return true;
-                    }
-                    "is_empty" => {
-                        let _ = unifier.unify(result, &Type::Bool);
-                        return true;
-                    }
-                    _ => {}
-                }
-            }
-            if let Type::Map { .. } = &owner_ty {
+            if matches!(
+                &owner_ty,
+                Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
+            ) {
                 match field.as_str() {
                     "capacity" => {
                         let _ = unifier.unify(result, &Type::uint(64));
@@ -422,22 +399,10 @@ pub(super) fn try_check_expr_obligation_nominal(
                 covered_exprs.insert(*stmt_id);
                 return true;
             }
-            if let Type::DynArray { .. } = &owner_ty
-                && matches!(field.as_str(), "capacity" | "is_empty")
-            {
-                errors.push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
-                covered_exprs.insert(*stmt_id);
-                return true;
-            }
-            if let Type::Set { .. } = &owner_ty
-                && matches!(field.as_str(), "capacity" | "is_empty")
-            {
-                errors.push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
-                covered_exprs.insert(*stmt_id);
-                return true;
-            }
-            if let Type::Map { .. } = &owner_ty
-                && matches!(field.as_str(), "capacity" | "is_empty")
+            if matches!(
+                &owner_ty,
+                Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
+            ) && matches!(field.as_str(), "capacity" | "is_empty")
             {
                 errors.push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
                 covered_exprs.insert(*stmt_id);

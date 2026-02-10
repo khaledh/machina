@@ -166,13 +166,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         };
         let builtin = match &obligation.callee {
             CallCallee::Method { name } => {
-                resolve_builtin_dyn_array_method_call(engine, obligation.receiver.as_ref(), name)
-                    .or_else(|| {
-                        resolve_builtin_set_method_call(engine, obligation.receiver.as_ref(), name)
-                    })
-                    .or_else(|| {
-                        resolve_builtin_map_method_call(engine, obligation.receiver.as_ref(), name)
-                    })
+                resolve_builtin_method_call(engine, obligation.receiver.as_ref(), name)
             }
             _ => None,
         };
@@ -977,115 +971,85 @@ fn resolve_method_call(
     ))
 }
 
-fn resolve_builtin_dyn_array_method_call(
+fn resolve_builtin_method_call(
     engine: &TypecheckEngine,
     receiver: Option<&Type>,
     method_name: &str,
 ) -> Option<(CallParam, Vec<CallParam>)> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
-    let Type::DynArray { elem_ty } = receiver_ty.peel_heap() else {
-        return None;
-    };
-    let elem_ty = (*elem_ty).clone();
+    let peeled = receiver_ty.peel_heap();
 
-    let receiver_param = match method_name {
-        "append" => CallParam {
-            mode: crate::tree::ParamMode::InOut,
-            ty: receiver_ty.clone(),
-        },
-        _ => return None,
-    };
-
-    let params = match method_name {
-        "append" => vec![CallParam {
-            mode: if elem_ty.needs_drop() {
+    let (receiver_mode, params) = match (&peeled, method_name) {
+        (Type::DynArray { elem_ty }, "append") => {
+            let param_mode = if elem_ty.needs_drop() {
                 crate::tree::ParamMode::Sink
             } else {
                 crate::tree::ParamMode::In
-            },
-            ty: elem_ty,
-        }],
-        _ => return None,
-    };
+            };
+            (
+                crate::tree::ParamMode::InOut,
+                vec![CallParam {
+                    mode: param_mode,
+                    ty: (**elem_ty).clone(),
+                }],
+            )
+        }
 
-    Some((receiver_param, params))
-}
-
-fn resolve_builtin_set_method_call(
-    engine: &TypecheckEngine,
-    receiver: Option<&Type>,
-    method_name: &str,
-) -> Option<(CallParam, Vec<CallParam>)> {
-    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
-    let Type::Set { elem_ty } = receiver_ty.peel_heap() else {
-        return None;
-    };
-    let elem_ty = (*elem_ty).clone();
-
-    let receiver_mode = match method_name {
-        "contains" => crate::tree::ParamMode::In,
-        "insert" | "remove" | "clear" => crate::tree::ParamMode::InOut,
-        _ => return None,
-    };
-    let receiver_param = CallParam {
-        mode: receiver_mode,
-        ty: receiver_ty.clone(),
-    };
-
-    let params = match method_name {
-        "insert" | "remove" | "contains" => vec![CallParam {
-            mode: crate::tree::ParamMode::In,
-            ty: elem_ty,
-        }],
-        "clear" => Vec::new(),
-        _ => return None,
-    };
-
-    Some((receiver_param, params))
-}
-
-fn resolve_builtin_map_method_call(
-    engine: &TypecheckEngine,
-    receiver: Option<&Type>,
-    method_name: &str,
-) -> Option<(CallParam, Vec<CallParam>)> {
-    let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
-    let Type::Map { key_ty, value_ty } = receiver_ty.peel_heap() else {
-        return None;
-    };
-    let key_ty = (*key_ty).clone();
-    let value_ty = (*value_ty).clone();
-
-    let receiver_mode = match method_name {
-        "contains_key" | "get" => crate::tree::ParamMode::In,
-        "insert" | "remove" | "clear" => crate::tree::ParamMode::InOut,
-        _ => return None,
-    };
-    let receiver_param = CallParam {
-        mode: receiver_mode,
-        ty: receiver_ty.clone(),
-    };
-
-    let params = match method_name {
-        "insert" => vec![
-            CallParam {
+        (Type::Set { elem_ty }, "insert" | "remove") => (
+            crate::tree::ParamMode::InOut,
+            vec![CallParam {
                 mode: crate::tree::ParamMode::In,
-                ty: key_ty,
-            },
-            CallParam {
+                ty: (**elem_ty).clone(),
+            }],
+        ),
+        (Type::Set { elem_ty }, "contains") => (
+            crate::tree::ParamMode::In,
+            vec![CallParam {
                 mode: crate::tree::ParamMode::In,
-                ty: value_ty,
-            },
-        ],
-        "remove" | "contains_key" | "get" => vec![CallParam {
-            mode: crate::tree::ParamMode::In,
-            ty: key_ty,
-        }],
-        "clear" => Vec::new(),
+                ty: (**elem_ty).clone(),
+            }],
+        ),
+        (Type::Set { .. }, "clear") => (crate::tree::ParamMode::InOut, Vec::new()),
+
+        (Type::Map { key_ty, value_ty }, "insert") => (
+            crate::tree::ParamMode::InOut,
+            vec![
+                CallParam {
+                    mode: crate::tree::ParamMode::In,
+                    ty: (**key_ty).clone(),
+                },
+                CallParam {
+                    mode: crate::tree::ParamMode::In,
+                    ty: (**value_ty).clone(),
+                },
+            ],
+        ),
+        (Type::Map { key_ty, .. }, "remove") => (
+            crate::tree::ParamMode::InOut,
+            vec![CallParam {
+                mode: crate::tree::ParamMode::In,
+                ty: (**key_ty).clone(),
+            }],
+        ),
+        (Type::Map { key_ty, .. }, "contains_key" | "get") => (
+            crate::tree::ParamMode::In,
+            vec![CallParam {
+                mode: crate::tree::ParamMode::In,
+                ty: (**key_ty).clone(),
+            }],
+        ),
+        (Type::Map { .. }, "clear") => (crate::tree::ParamMode::InOut, Vec::new()),
+
         _ => return None,
     };
 
-    Some((receiver_param, params))
+    Some((
+        CallParam {
+            mode: receiver_mode,
+            ty: receiver_ty.clone(),
+        },
+        params,
+    ))
 }
 
 fn resolve_method_call_by_def_id(
