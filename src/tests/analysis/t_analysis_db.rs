@@ -5,7 +5,9 @@ use crate::analysis::db::AnalysisDb;
 use crate::analysis::diagnostics::DiagnosticPhase;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
+use crate::diag::{Position, Span};
 use crate::frontend::ModuleId;
+use crate::types::Type;
 
 #[test]
 fn analysis_db_snapshot_reflects_overlay_edits() {
@@ -138,4 +140,94 @@ fn diagnostics_respect_cancellation() {
         Err(QueryCancelled),
         "cancelled token should abort diagnostics"
     );
+}
+
+#[test]
+fn def_at_returns_definition_for_use_site() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup.mc"), source);
+
+    let mut use_span = span_for_substring(source, "id(1)");
+    use_span.end = position_at(source, use_span.start.offset + 2);
+    let def_id = db
+        .def_at_file(file_id, use_span)
+        .expect("def_at query should succeed");
+
+    assert!(def_id.is_some(), "expected def lookup at call site");
+}
+
+#[test]
+fn type_at_returns_expression_type() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_type.mc"), source);
+
+    let call_span = span_for_substring(source, "id(1)");
+    let ty = db
+        .type_at_file(file_id, call_span)
+        .expect("type_at query should succeed");
+
+    assert_eq!(ty, Some(Type::uint(64)));
+}
+
+#[test]
+fn hover_includes_symbol_and_type() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_hover.mc"), source);
+
+    let mut call_span = span_for_substring(source, "id(1)");
+    call_span.end = position_at(source, call_span.start.offset + 2);
+    let hover = db
+        .hover_at_file(file_id, call_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info");
+
+    assert_eq!(hover.def_name.as_deref(), Some("id"));
+    assert!(hover.ty.is_some(), "expected hover type for symbol");
+    assert!(
+        hover.display.starts_with("id:"),
+        "expected hover label to include symbol name"
+    );
+}
+
+fn span_for_substring(source: &str, needle: &str) -> Span {
+    let start = source
+        .find(needle)
+        .expect("needle should exist in source for span helper");
+    let end = start + needle.len();
+    let start_pos = position_at(source, start);
+    let end_pos = position_at(source, end);
+    Span {
+        start: start_pos,
+        end: end_pos,
+    }
+}
+
+fn position_at(source: &str, offset: usize) -> Position {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for ch in source[..offset].chars() {
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    Position {
+        offset,
+        line,
+        column,
+    }
 }

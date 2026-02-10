@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use crate::context::{ResolvedContext, TypeCheckedContext};
+use crate::diag::Span;
 use crate::frontend::{ModuleId, ParsedModule};
 use crate::resolve::{Def, DefId, DefTable};
 use crate::symtab::SymbolTable;
@@ -77,6 +78,16 @@ pub struct TypedModuleResult {
     pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoverInfo {
+    pub node_id: NodeId,
+    pub span: Span,
+    pub def_id: Option<DefId>,
+    pub def_name: Option<String>,
+    pub ty: Option<Type>,
+    pub display: String,
 }
 
 impl TypedModuleResult {

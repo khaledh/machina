@@ -2,7 +2,7 @@ use clap::Parser as ClapParser;
 use machina::analysis::db::AnalysisDb;
 use machina::analysis::diagnostics::DiagnosticPhase;
 use machina::compile::{CompileOptions, compile_with_path};
-use machina::diag::{CompileError, Span, format_error};
+use machina::diag::{CompileError, Position, Span, format_error};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -74,6 +74,18 @@ enum Command {
         /// Input source file path
         input: String,
     },
+    Query {
+        /// Input source file path
+        input: String,
+
+        /// Query position formatted as line:col (1-based).
+        #[clap(long)]
+        pos: String,
+
+        /// Lookup kind to run.
+        #[clap(long, value_enum, default_value_t = QueryLookupKind::Hover)]
+        kind: QueryLookupKind,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone)]
@@ -85,6 +97,13 @@ enum EmitKind {
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum TargetKind {
     Arm64,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy)]
+enum QueryLookupKind {
+    Def,
+    Type,
+    Hover,
 }
 
 #[derive(Copy, Clone)]
@@ -138,6 +157,18 @@ fn main() {
                 Ok(_) => std::process::exit(1),
                 Err(message) => {
                     println!("[ERROR] check failed: {message}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        Command::Query { input, pos, kind } => {
+            let input_path = PathBuf::from(input);
+            match run_query(&input_path, &pos, kind) {
+                Ok(0) => {}
+                Ok(_) => std::process::exit(1),
+                Err(message) => {
+                    println!("[ERROR] query failed: {message}");
                     std::process::exit(1);
                 }
             }
@@ -335,6 +366,105 @@ fn run_check(input_path: &Path) -> Result<usize, String> {
     }
 
     Ok(diagnostics.len())
+}
+
+fn run_query(input_path: &Path, pos: &str, kind: QueryLookupKind) -> Result<usize, String> {
+    let source = std::fs::read_to_string(input_path)
+        .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
+    let (line, col) = parse_pos_arg(pos)?;
+    let position = position_from_line_col(&source, line, col)?;
+    let query_span = Span {
+        start: position,
+        end: position,
+    };
+
+    let mut db = AnalysisDb::new();
+    let file_id = db.upsert_disk_text(input_path.to_path_buf(), source.as_str());
+
+    match kind {
+        QueryLookupKind::Def => {
+            let def_id = db
+                .def_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if let Some(def_id) = def_id {
+                println!("def {}", def_id.0);
+                Ok(0)
+            } else {
+                println!("[NONE] no definition at {line}:{col}");
+                Ok(1)
+            }
+        }
+        QueryLookupKind::Type => {
+            let ty = db
+                .type_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if let Some(ty) = ty {
+                println!("{ty}");
+                Ok(0)
+            } else {
+                println!("[NONE] no type at {line}:{col}");
+                Ok(1)
+            }
+        }
+        QueryLookupKind::Hover => {
+            let hover = db
+                .hover_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if let Some(hover) = hover {
+                println!("{}", hover.display);
+                Ok(0)
+            } else {
+                println!("[NONE] no hover info at {line}:{col}");
+                Ok(1)
+            }
+        }
+    }
+}
+
+fn parse_pos_arg(pos: &str) -> Result<(usize, usize), String> {
+    let (line, col) = pos
+        .split_once(':')
+        .ok_or_else(|| format!("invalid --pos format `{pos}`; expected line:col"))?;
+    let line = line
+        .parse::<usize>()
+        .map_err(|_| format!("invalid line in --pos `{pos}`"))?;
+    let col = col
+        .parse::<usize>()
+        .map_err(|_| format!("invalid column in --pos `{pos}`"))?;
+    if line == 0 || col == 0 {
+        return Err(format!("--pos must be 1-based, got `{pos}`"));
+    }
+    Ok((line, col))
+}
+
+fn position_from_line_col(source: &str, line: usize, col: usize) -> Result<Position, String> {
+    let mut curr_line = 1usize;
+    let mut curr_col = 1usize;
+    for (offset, ch) in source.char_indices() {
+        if curr_line == line && curr_col == col {
+            return Ok(Position {
+                offset,
+                line,
+                column: col,
+            });
+        }
+        if ch == '\n' {
+            curr_line += 1;
+            curr_col = 1;
+        } else {
+            curr_col += 1;
+        }
+    }
+    if curr_line == line && curr_col == col {
+        return Ok(Position {
+            offset: source.len(),
+            line,
+            column: col,
+        });
+    }
+    Err(format!(
+        "position {line}:{col} is outside source range (line={curr_line}, col={curr_col})"
+    ))
 }
 
 fn default_exe_path(input_path: &Path) -> PathBuf {

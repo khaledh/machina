@@ -11,13 +11,17 @@ use std::path::{Path, PathBuf};
 use crate::analysis::diagnostics::Diagnostic;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
+use crate::analysis::results::HoverInfo;
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
+use crate::diag::{Position, Span};
 use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer};
 use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::tree::NodeIdGen;
+use crate::resolve::{DefId, resolve};
+use crate::tree::visit::{self, Visitor};
+use crate::tree::{Expr, MatchPattern, MatchPatternBinding, NodeId, NodeIdGen, StmtExpr};
 use crate::typecheck::type_check;
+use crate::types::Type;
 
 #[derive(Default)]
 pub struct AnalysisDb {
@@ -40,7 +44,14 @@ struct ResolveDiagState {
 
 #[derive(Clone, Default)]
 struct TypecheckDiagState {
+    typed: Option<crate::context::TypeCheckedContext>,
     diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Default)]
+struct LookupState {
+    resolved: Option<crate::context::ResolvedContext>,
+    typed: Option<crate::context::TypeCheckedContext>,
 }
 
 impl AnalysisDb {
@@ -175,12 +186,15 @@ impl AnalysisDb {
             let typecheck_input = resolved.resolved.clone();
             let typechecked = rt.execute(typecheck_key, move |_rt| {
                 let mut state = TypecheckDiagState::default();
-                if let Some(resolved) = typecheck_input
-                    && let Err(errors) = type_check(resolved)
-                {
-                    state
-                        .diagnostics
-                        .extend(errors.iter().map(Diagnostic::from_typecheck_error));
+                if let Some(resolved) = typecheck_input {
+                    match type_check(resolved) {
+                        Ok(typed) => state.typed = Some(typed),
+                        Err(errors) => {
+                            state
+                                .diagnostics
+                                .extend(errors.iter().map(Diagnostic::from_typecheck_error));
+                        }
+                    }
                 }
                 Ok(state)
             })?;
@@ -198,6 +212,151 @@ impl AnalysisDb {
                 )
             });
             Ok(diagnostics)
+        })
+    }
+
+    pub fn def_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<DefId>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(None);
+        };
+        self.def_at_file(file_id, query_span)
+    }
+
+    pub fn def_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<DefId>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(resolved) = state.resolved else {
+            return Ok(None);
+        };
+        let Some(node_id) = node_at_span(&resolved.module, query_span) else {
+            return Ok(None);
+        };
+        Ok(resolved.def_table.lookup_node_def_id(node_id))
+    }
+
+    pub fn type_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<Type>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(None);
+        };
+        self.type_at_file(file_id, query_span)
+    }
+
+    pub fn type_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<Type>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(typed) = state.typed else {
+            return Ok(None);
+        };
+        let Some(node_id) = node_at_span(&typed.module, query_span) else {
+            return Ok(None);
+        };
+        Ok(typed.type_map.lookup_node_type(node_id))
+    }
+
+    pub fn hover_at_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Option<HoverInfo>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(None);
+        };
+        self.hover_at_file(file_id, query_span)
+    }
+
+    pub fn hover_at_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<HoverInfo>> {
+        let LookupState { resolved, typed } = self.lookup_state_for_file(file_id)?;
+
+        if let Some(typed) = typed {
+            if let Some(node_id) = node_at_span(&typed.module, query_span) {
+                let def_id = typed.def_table.lookup_node_def_id(node_id);
+                let def_name =
+                    def_id.and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()));
+                let ty = typed.type_map.lookup_node_type(node_id);
+                if def_id.is_none() && ty.is_none() {
+                    return Ok(None);
+                }
+                let display = format_hover_label(def_name.as_deref(), ty.as_ref());
+                return Ok(Some(HoverInfo {
+                    node_id,
+                    span: query_span,
+                    def_id,
+                    def_name,
+                    ty,
+                    display,
+                }));
+            }
+            return Ok(None);
+        }
+
+        let Some(resolved) = resolved else {
+            return Ok(None);
+        };
+        let Some(node_id) = node_at_span(&resolved.module, query_span) else {
+            return Ok(None);
+        };
+        let def_id = resolved.def_table.lookup_node_def_id(node_id);
+        let Some(def_id) = def_id else {
+            return Ok(None);
+        };
+        let def_name = resolved
+            .def_table
+            .lookup_def(def_id)
+            .map(|def| def.name.clone());
+        let display = format_hover_label(def_name.as_deref(), None);
+        Ok(Some(HoverInfo {
+            node_id,
+            span: query_span,
+            def_id: Some(def_id),
+            def_name,
+            ty: None,
+            display,
+        }))
+    }
+
+    fn lookup_state_for_file(&mut self, file_id: FileId) -> QueryResult<LookupState> {
+        let snapshot = self.snapshot();
+        let Some(source) = snapshot.text(file_id) else {
+            return Ok(LookupState::default());
+        };
+        let revision = snapshot.revision();
+        let module_id = ModuleId(file_id.0);
+
+        let lookup_key = QueryKey::new(
+            crate::analysis::query::QueryKind::LookupState,
+            module_id,
+            revision,
+        );
+        self.execute_query(lookup_key, move |_rt| {
+            let lexer = Lexer::new(&source);
+            let tokens = match lexer.tokenize().collect::<Result<Vec<_>, LexError>>() {
+                Ok(tokens) => tokens,
+                Err(_) => return Ok(LookupState::default()),
+            };
+
+            let id_gen = NodeIdGen::new();
+            let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
+            let parsed_module = match parser.parse() {
+                Ok(module) => module,
+                Err(_) => return Ok(LookupState::default()),
+            };
+            let parsed = crate::context::ParsedContext::new(parsed_module, parser.into_id_gen());
+
+            let resolved = match resolve(parsed) {
+                Ok(resolved) => resolved,
+                Err(_) => return Ok(LookupState::default()),
+            };
+            let typed = type_check(resolved.clone()).ok();
+
+            Ok(LookupState {
+                resolved: Some(resolved),
+                typed,
+            })
         })
     }
 
@@ -225,6 +384,168 @@ impl AnalysisDb {
     pub fn invalidate_changed_modules(&mut self, changed: &HashSet<ModuleId>) {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
+    }
+}
+
+fn format_hover_label(def_name: Option<&str>, ty: Option<&Type>) -> String {
+    match (def_name, ty) {
+        (Some(name), Some(ty)) => format!("{name}: {ty}"),
+        (Some(name), None) => name.to_string(),
+        (None, Some(ty)) => ty.to_string(),
+        (None, None) => String::new(),
+    }
+}
+
+fn node_at_span<D, T>(module: &crate::tree::Module<D, T>, query_span: Span) -> Option<NodeId> {
+    let mut collector = NodeSpanCollector::default();
+    collector.visit_module(module);
+
+    let mut best: Option<(NodeId, Span)> = None;
+    for (node_id, span) in collector.nodes {
+        if !span_contains_span(span, query_span) {
+            continue;
+        }
+        let replace = best.as_ref().is_none_or(|(_, best_span)| {
+            let width = span_width(span);
+            let best_width = span_width(*best_span);
+            width < best_width
+                || (width == best_width && span.start.offset >= best_span.start.offset)
+        });
+        if replace {
+            best = Some((node_id, span));
+        }
+    }
+    best.map(|(node_id, _)| node_id)
+}
+
+fn span_width(span: Span) -> usize {
+    span.end.offset.saturating_sub(span.start.offset)
+}
+
+fn span_contains_span(span: Span, query: Span) -> bool {
+    position_leq(span.start, query.start) && position_leq(query.end, span.end)
+}
+
+fn position_leq(lhs: Position, rhs: Position) -> bool {
+    (lhs.line, lhs.column) <= (rhs.line, rhs.column)
+}
+
+#[derive(Default)]
+struct NodeSpanCollector {
+    nodes: Vec<(NodeId, Span)>,
+}
+
+impl NodeSpanCollector {
+    fn record(&mut self, id: NodeId, span: Span) {
+        self.nodes.push((id, span));
+    }
+}
+
+impl<D, T> Visitor<D, T> for NodeSpanCollector {
+    fn visit_type_def(&mut self, type_def: &crate::tree::TypeDef<D>) {
+        self.record(type_def.id, type_def.span);
+        visit::walk_type_def::<Self, D, T>(self, type_def);
+    }
+
+    fn visit_trait_def(&mut self, trait_def: &crate::tree::TraitDef<D>) {
+        self.record(trait_def.id, trait_def.span);
+        visit::walk_trait_def::<Self, D, T>(self, trait_def);
+    }
+
+    fn visit_trait_method(&mut self, method: &crate::tree::TraitMethod<D>) {
+        self.record(method.id, method.span);
+        visit::walk_trait_method::<Self, D, T>(self, method);
+    }
+
+    fn visit_trait_property(&mut self, property: &crate::tree::TraitProperty<D>) {
+        self.record(property.id, property.span);
+        visit::walk_trait_property::<Self, D, T>(self, property);
+    }
+
+    fn visit_type_expr(&mut self, type_expr: &crate::tree::TypeExpr<D>) {
+        self.record(type_expr.id, type_expr.span);
+        visit::walk_type_expr::<Self, D, T>(self, type_expr);
+    }
+
+    fn visit_func_decl(&mut self, func_decl: &crate::tree::FuncDecl<D>) {
+        self.record(func_decl.id, func_decl.span);
+        visit::walk_func_decl::<Self, D, T>(self, func_decl);
+    }
+
+    fn visit_func_def(&mut self, func_def: &crate::tree::FuncDef<D, T>) {
+        self.record(func_def.id, func_def.span);
+        visit::walk_func_def(self, func_def);
+    }
+
+    fn visit_type_param(&mut self, param: &crate::tree::TypeParam<D>) {
+        self.record(param.id, param.span);
+        visit::walk_type_param::<Self, D, T>(self, param);
+    }
+
+    fn visit_method_block(&mut self, method_block: &crate::tree::MethodBlock<D, T>) {
+        self.record(method_block.id, method_block.span);
+        visit::walk_method_block(self, method_block);
+    }
+
+    fn visit_method_decl(&mut self, method_decl: &crate::tree::MethodDecl<D>) {
+        self.record(method_decl.id, method_decl.span);
+        visit::walk_method_decl::<Self, D, T>(self, method_decl);
+    }
+
+    fn visit_method_def(&mut self, method_def: &crate::tree::MethodDef<D, T>) {
+        self.record(method_def.id, method_def.span);
+        visit::walk_method_def(self, method_def);
+    }
+
+    fn visit_closure_def(&mut self, closure_def: &crate::tree::ClosureDef<D, T>) {
+        self.record(closure_def.id, closure_def.span);
+        visit::walk_closure_def(self, closure_def);
+    }
+
+    fn visit_param(&mut self, param: &crate::tree::Param<D>) {
+        self.record(param.id, param.span);
+        visit::walk_param::<Self, D, T>(self, param);
+    }
+
+    fn visit_bind_pattern(&mut self, pattern: &crate::tree::BindPattern<D>) {
+        self.record(pattern.id, pattern.span);
+        visit::walk_bind_pattern::<Self, D, T>(self, pattern);
+    }
+
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern<D>) {
+        match pattern {
+            MatchPattern::Binding { id, span, .. }
+            | MatchPattern::TypedBinding { id, span, .. }
+            | MatchPattern::EnumVariant { id, span, .. } => self.record(*id, *span),
+            MatchPattern::Wildcard { .. }
+            | MatchPattern::BoolLit { .. }
+            | MatchPattern::IntLit { .. }
+            | MatchPattern::Tuple { .. } => {}
+        }
+        visit::walk_match_pattern::<Self, D, T>(self, pattern);
+        visit::walk_match_pattern_bindings::<Self, D, T>(self, pattern);
+    }
+
+    fn visit_match_pattern_binding(&mut self, binding: &MatchPatternBinding<D>) {
+        if let MatchPatternBinding::Named { id, span, .. } = binding {
+            self.record(*id, *span);
+        }
+        visit::walk_match_pattern_binding::<Self, D, T>(self, binding);
+    }
+
+    fn visit_match_arm(&mut self, arm: &crate::tree::MatchArm<D, T>) {
+        self.record(arm.id, arm.span);
+        visit::walk_match_arm(self, arm);
+    }
+
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr<D, T>) {
+        self.record(stmt.id, stmt.span);
+        visit::walk_stmt_expr(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &Expr<D, T>) {
+        self.record(expr.id, expr.span);
+        visit::walk_expr(self, expr);
     }
 }
 

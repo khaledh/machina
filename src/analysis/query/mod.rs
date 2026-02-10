@@ -21,6 +21,7 @@ pub enum QueryKind {
     ResolveModule,
     TypecheckModule,
     Diagnostics,
+    LookupState,
 }
 
 /// Query identity keyed by semantic stage, module, and revision snapshot.
