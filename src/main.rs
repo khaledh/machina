@@ -104,6 +104,8 @@ enum QueryLookupKind {
     Def,
     Type,
     Hover,
+    Completions,
+    Signature,
 }
 
 #[derive(Copy, Clone)]
@@ -415,6 +417,36 @@ fn run_query(input_path: &Path, pos: &str, kind: QueryLookupKind) -> Result<usiz
                 Ok(0)
             } else {
                 println!("[NONE] no hover info at {line}:{col}");
+                Ok(1)
+            }
+        }
+        QueryLookupKind::Completions => {
+            let items = db
+                .completions_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if items.is_empty() {
+                println!("[NONE] no completions at {line}:{col}");
+                return Ok(1);
+            }
+            for item in items {
+                if let Some(detail) = item.detail {
+                    println!("{} ({detail})", item.label);
+                } else {
+                    println!("{}", item.label);
+                }
+            }
+            Ok(0)
+        }
+        QueryLookupKind::Signature => {
+            let sig = db
+                .signature_help_at_file(file_id, query_span)
+                .map_err(|_| "analysis query cancelled".to_string())?;
+            if let Some(sig) = sig {
+                println!("{}", sig.label);
+                println!("active_parameter={}", sig.active_parameter);
+                Ok(0)
+            } else {
+                println!("[NONE] no signature info at {line}:{col}");
                 Ok(1)
             }
         }

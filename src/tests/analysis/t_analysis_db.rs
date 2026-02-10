@@ -201,6 +201,57 @@ fn main() -> u64 { id(1) }
     );
 }
 
+#[test]
+fn completions_include_callables_and_types() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Packet = {
+    id: u64,
+}
+
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions.mc"), source);
+    let query_span = span_for_substring(source, "main");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "id"),
+        "expected function completion for `id`"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "Packet"),
+        "expected type completion for `Packet`"
+    );
+}
+
+#[test]
+fn signature_help_returns_call_signature_and_active_parameter() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn pair(a: u64, b: u64) -> u64 { a + b }
+fn main() -> u64 { pair(1, 2) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/signature_help.mc"), source);
+
+    let query_span = span_for_substring(source, "2");
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help at call site");
+
+    assert!(
+        sig.label.starts_with("pair("),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 1);
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)

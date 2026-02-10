@@ -113,6 +113,10 @@ impl DefTable {
         self.defs.push(Def { id, name, kind });
         id
     }
+
+    pub fn defs(&self) -> &[Def] {
+        &self.defs
+    }
 }
 
 impl IntoIterator for DefTable {

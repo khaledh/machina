@@ -90,6 +90,33 @@ pub struct HoverInfo {
     pub display: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompletionKind {
+    Function,
+    Type,
+    Trait,
+    Variable,
+    Parameter,
+    TypeParameter,
+    EnumVariant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub label: String,
+    pub kind: CompletionKind,
+    pub def_id: DefId,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignatureHelp {
+    pub label: String,
+    pub def_id: Option<DefId>,
+    pub active_parameter: usize,
+    pub parameters: Vec<String>,
+}
+
 impl TypedModuleResult {
     pub fn from_context(module_id: ModuleId, context: TypeCheckedContext) -> Self {
         Self {

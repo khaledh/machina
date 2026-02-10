@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 use crate::analysis::diagnostics::Diagnostic;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
-use crate::analysis::results::HoverInfo;
+use crate::analysis::results::{CompletionItem, CompletionKind, HoverInfo, SignatureHelp};
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::diag::{Position, Span};
 use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer};
 use crate::parse::Parser;
-use crate::resolve::{DefId, resolve};
+use crate::resolve::{DefId, DefKind, resolve};
 use crate::tree::visit::{self, Visitor};
 use crate::tree::{Expr, MatchPattern, MatchPatternBinding, NodeId, NodeIdGen, StmtExpr};
 use crate::typecheck::type_check;
@@ -319,6 +319,92 @@ impl AnalysisDb {
         }))
     }
 
+    pub fn completions_at_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Vec<CompletionItem>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(Vec::new());
+        };
+        self.completions_at_file(file_id, query_span)
+    }
+
+    pub fn completions_at_file(
+        &mut self,
+        file_id: FileId,
+        _query_span: Span,
+    ) -> QueryResult<Vec<CompletionItem>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(resolved) = state.resolved else {
+            return Ok(Vec::new());
+        };
+
+        let mut out = Vec::new();
+        for def in resolved.def_table.defs() {
+            let Some(kind) = completion_kind_for_def(&def.kind) else {
+                continue;
+            };
+            out.push(CompletionItem {
+                label: def.name.clone(),
+                kind,
+                def_id: def.id,
+                detail: Some(def.kind.to_string()),
+            });
+        }
+        out.sort_by(|a, b| a.label.cmp(&b.label).then(a.def_id.0.cmp(&b.def_id.0)));
+        out.dedup_by(|a, b| a.label == b.label && a.kind == b.kind && a.def_id == b.def_id);
+        Ok(out)
+    }
+
+    pub fn signature_help_at_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Option<SignatureHelp>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(None);
+        };
+        self.signature_help_at_file(file_id, query_span)
+    }
+
+    pub fn signature_help_at_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<SignatureHelp>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(typed) = state.typed else {
+            return Ok(None);
+        };
+        let Some(call) = call_site_at_span(&typed.module, query_span) else {
+            return Ok(None);
+        };
+        let Some(sig) = typed.call_sigs.get(&call.node_id) else {
+            return Ok(None);
+        };
+
+        let mut params = Vec::with_capacity(sig.params.len());
+        for param in &sig.params {
+            params.push(format!("{} {}", param_mode_name(&param.mode), param.ty));
+        }
+        let active_parameter = active_param_index(&call.arg_spans, query_span.start);
+        let name = sig
+            .def_id
+            .and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()))
+            .unwrap_or_else(|| "<call>".to_string());
+        let label = format!("{name}({})", params.join(", "));
+
+        Ok(Some(SignatureHelp {
+            label,
+            def_id: sig.def_id,
+            active_parameter,
+            parameters: params,
+        }))
+    }
+
     fn lookup_state_for_file(&mut self, file_id: FileId) -> QueryResult<LookupState> {
         let snapshot = self.snapshot();
         let Some(source) = snapshot.text(file_id) else {
@@ -428,6 +514,89 @@ fn span_contains_span(span: Span, query: Span) -> bool {
 
 fn position_leq(lhs: Position, rhs: Position) -> bool {
     (lhs.line, lhs.column) <= (rhs.line, rhs.column)
+}
+
+fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
+    match kind {
+        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
+        DefKind::TypeDef { .. } => Some(CompletionKind::Type),
+        DefKind::TraitDef { .. } => Some(CompletionKind::Trait),
+        DefKind::LocalVar { .. } => Some(CompletionKind::Variable),
+        DefKind::Param { .. } => Some(CompletionKind::Parameter),
+        DefKind::TypeParam => Some(CompletionKind::TypeParameter),
+        DefKind::EnumVariantName => Some(CompletionKind::EnumVariant),
+    }
+}
+
+fn param_mode_name(mode: &crate::tree::ParamMode) -> &'static str {
+    match mode {
+        crate::tree::ParamMode::In => "in",
+        crate::tree::ParamMode::InOut => "inout",
+        crate::tree::ParamMode::Out => "out",
+        crate::tree::ParamMode::Sink => "sink",
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CallSite {
+    node_id: NodeId,
+    span: Span,
+    arg_spans: Vec<Span>,
+}
+
+fn call_site_at_span<D, T>(
+    module: &crate::tree::Module<D, T>,
+    query_span: Span,
+) -> Option<CallSite> {
+    let mut collector = CallSiteCollector::default();
+    collector.visit_module(module);
+    let mut best: Option<CallSite> = None;
+    for call in collector.calls {
+        if !span_contains_span(call.span, query_span) {
+            continue;
+        }
+        let replace = best
+            .as_ref()
+            .is_none_or(|best_call| span_width(call.span) <= span_width(best_call.span));
+        if replace {
+            best = Some(call);
+        }
+    }
+    best
+}
+
+fn active_param_index(arg_spans: &[Span], pos: Position) -> usize {
+    if arg_spans.is_empty() {
+        return 0;
+    }
+    for (i, span) in arg_spans.iter().enumerate() {
+        if position_leq(pos, span.end) {
+            return i;
+        }
+    }
+    arg_spans.len().saturating_sub(1)
+}
+
+#[derive(Default)]
+struct CallSiteCollector {
+    calls: Vec<CallSite>,
+}
+
+impl<D, T> Visitor<D, T> for CallSiteCollector {
+    fn visit_expr(&mut self, expr: &Expr<D, T>) {
+        match &expr.kind {
+            crate::tree::ExprKind::Call { args, .. }
+            | crate::tree::ExprKind::MethodCall { args, .. } => {
+                self.calls.push(CallSite {
+                    node_id: expr.id,
+                    span: expr.span,
+                    arg_spans: args.iter().map(|arg| arg.span).collect(),
+                });
+            }
+            _ => {}
+        }
+        visit::walk_expr(self, expr);
+    }
 }
 
 #[derive(Default)]
