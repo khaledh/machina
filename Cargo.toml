@@ -5,6 +5,10 @@ edition = "2024"
 authors = ["Khaled Hammouda"]
 description = "Machina Compiler"
 
+[workspace]
+members = [".", "tooling/lsp"]
+default-members = ["."]
+
 [[bin]]
 name = "mcc"
 path = "src/main.rs"
