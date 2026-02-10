@@ -21,6 +21,13 @@ pub(crate) enum BuiltinMethodRet {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct BuiltinProperty {
+    pub(crate) ty: Type,
+    pub(crate) readable: bool,
+    pub(crate) writable: bool,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum BuiltinMethod {
     DynArrayAppend { elem_ty: Type, elem_mode: ParamMode },
     SetInsert { elem_ty: Type },
@@ -122,8 +129,52 @@ pub(crate) fn is_builtin_collection_receiver(ty: &Type) -> bool {
     )
 }
 
-pub(crate) fn is_builtin_collection_property(name: &str) -> bool {
-    matches!(name, "len" | "capacity" | "is_empty")
+pub(crate) fn resolve_builtin_property(owner_ty: &Type, field: &str) -> Option<BuiltinProperty> {
+    let owner = owner_ty.peel_heap();
+    match field {
+        "len"
+            if matches!(
+                owner,
+                Type::Array { .. }
+                    | Type::DynArray { .. }
+                    | Type::Set { .. }
+                    | Type::Map { .. }
+                    | Type::Slice { .. }
+                    | Type::String
+            ) =>
+        {
+            Some(BuiltinProperty {
+                ty: Type::uint(64),
+                readable: true,
+                writable: false,
+            })
+        }
+        "capacity"
+            if matches!(
+                owner,
+                Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
+            ) =>
+        {
+            Some(BuiltinProperty {
+                ty: Type::uint(64),
+                readable: true,
+                writable: false,
+            })
+        }
+        "is_empty"
+            if matches!(
+                owner,
+                Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
+            ) =>
+        {
+            Some(BuiltinProperty {
+                ty: Type::Bool,
+                readable: true,
+                writable: false,
+            })
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn resolve_builtin_method(

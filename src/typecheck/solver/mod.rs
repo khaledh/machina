@@ -605,18 +605,6 @@ fn is_iterable(ty: &Type) -> bool {
     )
 }
 
-fn is_len_target(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Array { .. }
-            | Type::DynArray { .. }
-            | Type::Set { .. }
-            | Type::Map { .. }
-            | Type::Slice { .. }
-            | Type::String
-    )
-}
-
 #[derive(Debug, Clone)]
 struct ResolvedPropertyAccess {
     ty: Type,

@@ -390,7 +390,7 @@ fn try_solve_builtin_method(
     }
 
     // Properties that should not be called as methods.
-    if builtin_methods::is_builtin_collection_property(method_name) {
+    if builtin_methods::resolve_builtin_property(&receiver_ty, method_name).is_some() {
         return Some(Err(TypeCheckErrorKind::PropertyCalledAsMethod(
             method_name.to_string(),
             obligation.span,

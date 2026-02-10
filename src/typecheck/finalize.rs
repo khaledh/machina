@@ -26,7 +26,8 @@ use crate::typecheck::type_map::{
     CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
     resolve_type_def_with_args, resolve_type_expr,
 };
-use crate::types::{FnParam, FnParamMode, TyVarId, Type};
+use crate::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
+use crate::types::{FnParam, TyVarId, Type};
 
 #[derive(Debug, Clone)]
 pub(crate) struct FinalizeOutput {
@@ -656,13 +657,6 @@ fn match_template_type(
     }
 }
 
-fn nominal_key_concreteness(key: &NominalKey) -> usize {
-    key.type_args
-        .iter()
-        .filter(|arg| !matches!(arg, Type::Var(_)))
-        .count()
-}
-
 #[derive(Debug, Clone)]
 struct ExplicitNominalUse {
     def_id: DefId,
@@ -868,15 +862,6 @@ fn callable_sig_to_fn_type(sig: &CollectedCallableSig) -> Type {
     Type::Fn {
         params,
         ret_ty: Box::new(sig.ret_ty.clone()),
-    }
-}
-
-fn fn_param_mode(mode: crate::tree::ParamMode) -> FnParamMode {
-    match mode {
-        crate::tree::ParamMode::In => FnParamMode::In,
-        crate::tree::ParamMode::InOut => FnParamMode::InOut,
-        crate::tree::ParamMode::Out => FnParamMode::Out,
-        crate::tree::ParamMode::Sink => FnParamMode::Sink,
     }
 }
 

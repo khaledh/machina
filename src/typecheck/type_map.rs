@@ -13,9 +13,8 @@ use crate::tree::semantic::{CallPlan, IndexPlan, MatchPlan, SlicePlan};
 use crate::tree::{NodeId, ParamMode, RefinementKind};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::nominal::NominalKey;
-use crate::types::{
-    EnumVariant, FnParam, FnParamMode, StructField, TyVarId, Type, TypeCache, TypeId,
-};
+use crate::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
+use crate::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -452,15 +451,6 @@ fn apply_refinements(
     }
 
     Ok(ty)
-}
-
-fn fn_param_mode(mode: ParamMode) -> FnParamMode {
-    match mode {
-        ParamMode::In => FnParamMode::In,
-        ParamMode::InOut => FnParamMode::InOut,
-        ParamMode::Out => FnParamMode::Out,
-        ParamMode::Sink => FnParamMode::Sink,
-    }
 }
 
 fn type_arg_name(ty: &Type) -> String {
@@ -1170,11 +1160,4 @@ fn select_more_concrete_nominal_key(
     let existing_score = nominal_key_concreteness(existing);
     let candidate_score = nominal_key_concreteness(candidate);
     (candidate_score > existing_score).then(|| candidate.clone())
-}
-
-fn nominal_key_concreteness(key: &NominalKey) -> usize {
-    key.type_args
-        .iter()
-        .filter(|arg| !matches!(arg, Type::Var(_)))
-        .count()
 }

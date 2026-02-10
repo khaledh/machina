@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
+use crate::typecheck::builtin_methods;
 use crate::typecheck::constraints::ExprObligation;
 use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
@@ -274,25 +275,15 @@ pub(super) fn try_check_expr_obligation_nominal(
                 }
                 Err(super::PropertyResolution::Missing) => {}
             }
-            if field == "len" && super::is_len_target(&owner_ty) {
-                let _ = unifier.unify(result, &Type::uint(64));
-                return true;
-            }
-            if matches!(
-                &owner_ty,
-                Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
-            ) {
-                match field.as_str() {
-                    "capacity" => {
-                        let _ = unifier.unify(result, &Type::uint(64));
-                        return true;
-                    }
-                    "is_empty" => {
-                        let _ = unifier.unify(result, &Type::Bool);
-                        return true;
-                    }
-                    _ => {}
+            if let Some(prop) = builtin_methods::resolve_builtin_property(&owner_ty, field) {
+                if !prop.readable {
+                    errors
+                        .push(TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into());
+                    covered_exprs.insert(*expr_id);
+                    return true;
                 }
+                let _ = unifier.unify(result, &prop.ty);
+                return true;
             }
             match &owner_ty {
                 Type::Struct { name, fields } => {
@@ -394,18 +385,25 @@ pub(super) fn try_check_expr_obligation_nominal(
                 Err(super::PropertyResolution::Missing) => {}
             }
 
-            if field == "len" && super::is_len_target(&owner_ty) {
-                errors.push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
-                covered_exprs.insert(*stmt_id);
-                return true;
-            }
-            if matches!(
-                &owner_ty,
-                Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
-            ) && matches!(field.as_str(), "capacity" | "is_empty")
-            {
-                errors.push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
-                covered_exprs.insert(*stmt_id);
+            if let Some(prop) = builtin_methods::resolve_builtin_property(&owner_ty, field) {
+                if !prop.writable {
+                    errors
+                        .push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
+                    covered_exprs.insert(*stmt_id);
+                    return true;
+                }
+                let _ = unifier.unify(assignee, &prop.ty);
+                if let Err(_) = super::assignability::solve_assignable(&value_ty, &prop.ty, unifier)
+                {
+                    let value_ty = super::term_utils::canonicalize_type(unifier.apply(&value_ty));
+                    if super::term_utils::is_unresolved(&value_ty) {
+                        return true;
+                    }
+                    errors.push(
+                        TypeCheckErrorKind::AssignTypeMismatch(prop.ty, value_ty, *span).into(),
+                    );
+                    covered_exprs.insert(*stmt_id);
+                }
                 return true;
             }
 

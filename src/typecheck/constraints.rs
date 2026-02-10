@@ -27,6 +27,7 @@ use crate::typecheck::type_map::{
 use crate::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
+use super::utils::fn_param_mode;
 
 /// Canonical constraints emitted by AST traversal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1789,7 +1790,7 @@ impl<'a> ConstraintCollector<'a> {
                 self.resolve_type_in_scope(&param.typ).ok()?
             };
             fn_params.push(crate::types::FnParam {
-                mode: map_param_mode(param.mode.clone()),
+                mode: fn_param_mode(param.mode.clone()),
                 ty: param_ty.clone(),
             });
             param_tys.push(param_ty);
@@ -1821,7 +1822,7 @@ impl<'a> ConstraintCollector<'a> {
         let tail_params = self.resolve_fn_params(&sig.params)?;
         let mut params = Vec::with_capacity(sig.params.len() + 1);
         params.push(crate::types::FnParam {
-            mode: map_param_mode(sig.self_param.mode.clone()),
+            mode: fn_param_mode(sig.self_param.mode.clone()),
             ty: self_ty,
         });
         params.extend(tail_params);
@@ -1838,7 +1839,7 @@ impl<'a> ConstraintCollector<'a> {
                 self.resolve_type_in_scope(&param.typ)
                     .ok()
                     .map(|ty| crate::types::FnParam {
-                        mode: map_param_mode(param.mode.clone()),
+                        mode: fn_param_mode(param.mode.clone()),
                         ty,
                     })
             })
@@ -1895,15 +1896,6 @@ impl<'a> ConstraintCollector<'a> {
             ExprKind::Closure { .. } => false,
             _ => false,
         }
-    }
-}
-
-fn map_param_mode(mode: crate::tree::ParamMode) -> crate::types::FnParamMode {
-    match mode {
-        crate::tree::ParamMode::In => crate::types::FnParamMode::In,
-        crate::tree::ParamMode::InOut => crate::types::FnParamMode::InOut,
-        crate::tree::ParamMode::Out => crate::types::FnParamMode::Out,
-        crate::tree::ParamMode::Sink => crate::types::FnParamMode::Sink,
     }
 }
 

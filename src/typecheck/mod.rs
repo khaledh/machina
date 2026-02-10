@@ -14,6 +14,7 @@ pub mod type_map;
 pub(crate) mod type_view;
 mod typesys;
 mod unify;
+mod utils;
 mod validate;
 
 pub use errors::{TypeCheckError, TypeCheckErrorKind};
