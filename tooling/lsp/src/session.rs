@@ -43,6 +43,11 @@ pub struct AnalysisSession {
     docs: HashMap<String, DocumentState>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleResultPolicy {
+    LatestOnly,
+}
+
 impl Default for AnalysisSession {
     fn default() -> Self {
         Self::new()
@@ -131,6 +136,30 @@ impl AnalysisSession {
             .map_err(SessionError::from)
     }
 
+    pub fn diagnostics_for_uri_if_version(
+        &mut self,
+        uri: &str,
+        expected_version: i32,
+    ) -> SessionResult<Option<Vec<machina::analysis::diagnostics::Diagnostic>>> {
+        let state = self.lookup_document(uri)?.clone();
+        if state.version != expected_version {
+            return Ok(None);
+        }
+        let diagnostics = self
+            .db
+            .diagnostics_for_file(state.file_id)
+            .map_err(SessionError::from)?;
+        let latest = self.lookup_document(uri)?;
+        if latest.version != expected_version {
+            return Ok(None);
+        }
+        Ok(Some(diagnostics))
+    }
+
+    pub fn is_current_version(&self, uri: &str, expected_version: i32) -> SessionResult<bool> {
+        Ok(self.lookup_document(uri)?.version == expected_version)
+    }
+
     pub fn execute_query<T, F>(&mut self, query: F) -> SessionResult<T>
     where
         F: FnOnce(&mut AnalysisDb) -> QueryResult<T>,
@@ -144,6 +173,10 @@ impl AnalysisSession {
 
     pub fn file_id_for_uri(&self, uri: &str) -> SessionResult<FileId> {
         Ok(self.lookup_document(uri)?.file_id)
+    }
+
+    pub fn stale_policy(&self) -> StaleResultPolicy {
+        StaleResultPolicy::LatestOnly
     }
 }
 
@@ -265,5 +298,21 @@ mod tests {
             .file_id_for_uri(uri)
             .expect("file id should be available");
         assert_eq!(mapped, file_id);
+    }
+
+    #[test]
+    fn diagnostics_for_uri_if_version_drops_stale_results() {
+        let mut session = AnalysisSession::new();
+        let uri = "file:///tmp/session-stale-diag.mc";
+        session
+            .open_document(uri, 1, "fn main() {}")
+            .expect("open should succeed");
+        session
+            .change_document(uri, 2, "fn main(")
+            .expect("change should succeed");
+        let stale = session
+            .diagnostics_for_uri_if_version(uri, 1)
+            .expect("query should succeed");
+        assert!(stale.is_none(), "stale version should be dropped");
     }
 }

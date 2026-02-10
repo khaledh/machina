@@ -29,9 +29,12 @@ pub fn handle_message(
                             "openClose": true,
                             "change": 1
                         },
-                        "hoverProvider": false,
-                        "completionProvider": Value::Null,
-                        "definitionProvider": false,
+                        "hoverProvider": true,
+                        "completionProvider": {
+                            "resolveProvider": false,
+                            "triggerCharacters": [".", ":"]
+                        },
+                        "definitionProvider": true,
                         "referencesProvider": false,
                         "renameProvider": false,
                         "signatureHelpProvider": Value::Null,
@@ -70,11 +73,7 @@ pub fn handle_message(
                     id.map(|id| session_error_response(id, &error)),
                 );
             }
-            let diagnostics = session
-                .diagnostics_for_uri(uri)
-                .unwrap_or_else(|_| Vec::new());
-            let notification = publish_diagnostics_notification(uri, version as i32, diagnostics);
-            (HandlerAction::Continue, Some(notification))
+            publish_diagnostics_if_current(session, uri, version as i32)
         }
         Some("textDocument/didChange") => {
             let Some(params) = params else {
@@ -105,11 +104,7 @@ pub fn handle_message(
                     id.map(|id| session_error_response(id, &error)),
                 );
             }
-            let diagnostics = session
-                .diagnostics_for_uri(uri)
-                .unwrap_or_else(|_| Vec::new());
-            let notification = publish_diagnostics_notification(uri, version as i32, diagnostics);
-            (HandlerAction::Continue, Some(notification))
+            publish_diagnostics_if_current(session, uri, version as i32)
         }
         Some("textDocument/didClose") => {
             let Some(params) = params else {
@@ -137,6 +132,105 @@ pub fn handle_message(
                 }
             });
             (HandlerAction::Continue, Some(notification))
+        }
+        Some("textDocument/hover") => {
+            let Some(params) = params else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(text_doc) = params.get("textDocument") else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(position) = params.get("position") else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(line) = position.get("line").and_then(Value::as_u64) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(character) = position.get("character").and_then(Value::as_u64) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(version) = params
+                .get("_machinaVersion")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32)
+            else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let response =
+                hover_response(session, id, uri, line as usize, character as usize, version);
+            (HandlerAction::Continue, Some(response))
+        }
+        Some("textDocument/definition") => {
+            let Some(params) = params else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(text_doc) = params.get("textDocument") else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(position) = params.get("position") else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(line) = position.get("line").and_then(Value::as_u64) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(character) = position.get("character").and_then(Value::as_u64) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(version) = params
+                .get("_machinaVersion")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32)
+            else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let response =
+                definition_response(session, id, uri, line as usize, character as usize, version);
+            (HandlerAction::Continue, Some(response))
+        }
+        Some("textDocument/completion") => {
+            let Some(params) = params else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(text_doc) = params.get("textDocument") else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(position) = params.get("position") else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(line) = position.get("line").and_then(Value::as_u64) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(character) = position.get("character").and_then(Value::as_u64) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(version) = params
+                .get("_machinaVersion")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32)
+            else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let response =
+                completion_response(session, id, uri, line as usize, character as usize, version);
+            (HandlerAction::Continue, Some(response))
         }
         Some("shutdown") => {
             let response = json!({
@@ -174,6 +268,172 @@ pub fn handle_message(
             (HandlerAction::Continue, response)
         }
     }
+}
+
+fn publish_diagnostics_if_current(
+    session: &mut AnalysisSession,
+    uri: &str,
+    version: i32,
+) -> (HandlerAction, Option<Value>) {
+    let diagnostics = match session.diagnostics_for_uri_if_version(uri, version) {
+        Ok(Some(diag)) => diag,
+        Ok(None) => return (HandlerAction::Continue, None),
+        Err(_) => Vec::new(),
+    };
+    let notification = publish_diagnostics_notification(uri, version, diagnostics);
+    (HandlerAction::Continue, Some(notification))
+}
+
+fn span_from_lsp_position(line0: usize, col0: usize) -> machina::diag::Span {
+    let line = line0.saturating_add(1);
+    let col = col0.saturating_add(1);
+    machina::diag::Span {
+        start: machina::diag::Position {
+            offset: 0,
+            line,
+            column: col,
+        },
+        end: machina::diag::Position {
+            offset: 0,
+            line,
+            column: col,
+        },
+    }
+}
+
+fn hover_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    line0: usize,
+    col0: usize,
+    version: i32,
+) -> Value {
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    let file_id = match session.file_id_for_uri(uri) {
+        Ok(file_id) => file_id,
+        Err(error) => return session_error_response(id, &error),
+    };
+    let span = span_from_lsp_position(line0, col0);
+    let result = session.execute_query(|db| db.hover_at_file(file_id, span));
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    match result {
+        Ok(Some(hover)) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "contents": {
+                    "kind": "plaintext",
+                    "value": hover.display
+                },
+                "range": {
+                    "start": {"line": hover.span.start.line.saturating_sub(1), "character": hover.span.start.column.saturating_sub(1)},
+                    "end": {"line": hover.span.end.line.saturating_sub(1), "character": hover.span.end.column.saturating_sub(1)}
+                }
+            }
+        }),
+        Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": Value::Null}),
+        Err(_) => session_error_response(id, &SessionError::Cancelled),
+    }
+}
+
+fn definition_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    line0: usize,
+    col0: usize,
+    version: i32,
+) -> Value {
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    let file_id = match session.file_id_for_uri(uri) {
+        Ok(file_id) => file_id,
+        Err(error) => return session_error_response(id, &error),
+    };
+    let span = span_from_lsp_position(line0, col0);
+    let result = session.execute_query(|db| db.def_at_file(file_id, span));
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    match result {
+        Ok(Some(_def_id)) => {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": []
+            })
+        }
+        Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": []}),
+        Err(_) => session_error_response(id, &SessionError::Cancelled),
+    }
+}
+
+fn completion_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    line0: usize,
+    col0: usize,
+    version: i32,
+) -> Value {
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    let file_id = match session.file_id_for_uri(uri) {
+        Ok(file_id) => file_id,
+        Err(error) => return session_error_response(id, &error),
+    };
+    let span = span_from_lsp_position(line0, col0);
+    let result = session.execute_query(|db| db.completions_at_file(file_id, span));
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    match result {
+        Ok(items) => {
+            let items: Vec<Value> = items
+                .into_iter()
+                .map(|item| {
+                    let kind = match item.kind {
+                        machina::analysis::results::CompletionKind::Function => 3,
+                        machina::analysis::results::CompletionKind::Type => 7,
+                        machina::analysis::results::CompletionKind::Trait => 7,
+                        machina::analysis::results::CompletionKind::Variable => 6,
+                        machina::analysis::results::CompletionKind::Parameter => 6,
+                        machina::analysis::results::CompletionKind::TypeParameter => 25,
+                        machina::analysis::results::CompletionKind::EnumVariant => 20,
+                    };
+                    json!({
+                        "label": item.label,
+                        "kind": kind,
+                        "detail": item.detail
+                    })
+                })
+                .collect();
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "isIncomplete": false,
+                    "items": items
+                }
+            })
+        }
+        Err(_) => session_error_response(id, &SessionError::Cancelled),
+    }
+}
+
+fn stale_result_response(id: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": Value::Null
+    })
 }
 
 fn publish_diagnostics_notification(
@@ -246,7 +506,7 @@ fn invalid_params_response(id: Option<Value>) -> Option<Value> {
 mod tests {
     use super::{HandlerAction, handle_message};
     use crate::session::AnalysisSession;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn initialize_returns_capabilities() {
@@ -399,5 +659,124 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn hover_request_returns_response_when_version_matches() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-hover.mc",
+                        "version": 4,
+                        "languageId": "machina",
+                        "text": "fn main() {}"
+                    }
+                }
+            }),
+        );
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 50,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-hover.mc" },
+                    "position": { "line": 0, "character": 1 },
+                    "_machinaVersion": 4
+                }
+            }),
+        );
+        let response = response.expect("expected hover response");
+        assert_eq!(response["id"], 50);
+    }
+
+    #[test]
+    fn hover_request_returns_null_when_version_is_stale() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-hover-stale.mc",
+                        "version": 10,
+                        "languageId": "machina",
+                        "text": "fn main() {}"
+                    }
+                }
+            }),
+        );
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 51,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-hover-stale.mc" },
+                    "position": { "line": 0, "character": 1 },
+                    "_machinaVersion": 9
+                }
+            }),
+        );
+        let response = response.expect("expected hover response");
+        assert_eq!(response["result"], Value::Null);
+    }
+
+    #[test]
+    fn completion_and_definition_requests_are_version_gated() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-comp-def.mc",
+                        "version": 2,
+                        "languageId": "machina",
+                        "text": "fn id(x: u64) -> u64 { x }\nfn main() -> u64 { id(1) }"
+                    }
+                }
+            }),
+        );
+        let (_a, completion) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 60,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-comp-def.mc" },
+                    "position": { "line": 1, "character": 5 },
+                    "_machinaVersion": 2
+                }
+            }),
+        );
+        assert!(completion.is_some());
+        let (_b, definition) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 61,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-comp-def.mc" },
+                    "position": { "line": 1, "character": 18 },
+                    "_machinaVersion": 1
+                }
+            }),
+        );
+        let definition = definition.expect("expected definition response");
+        assert_eq!(definition["result"], Value::Null);
     }
 }

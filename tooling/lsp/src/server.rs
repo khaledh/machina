@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn unknown_request_returns_method_not_found() {
-        let unknown = r#"{"jsonrpc":"2.0","id":3,"method":"textDocument/hover"}"#;
+        let unknown = r#"{"jsonrpc":"2.0","id":3,"method":"workspace/unknownMethod"}"#;
         let exit = r#"{"jsonrpc":"2.0","method":"exit"}"#;
         let input = format!("{}{}", frame(unknown), frame(exit));
         let mut out = Vec::new();
