@@ -6,4 +6,5 @@ pub mod diagnostics;
 pub mod facts;
 pub mod module_graph;
 pub mod query;
+pub mod results;
 pub mod snapshot;

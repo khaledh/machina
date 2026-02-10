@@ -1,0 +1,203 @@
+//! Shared analysis result schemas and lookup APIs.
+//!
+//! These result objects are query-friendly immutable products that mirror
+//! parser/resolve/typecheck outputs. Lookup traits are implemented for both
+//! result objects and existing batch contexts to keep one API surface for
+//! CLI and IDE consumers.
+
+use std::collections::HashMap;
+
+use crate::context::{ResolvedContext, TypeCheckedContext};
+use crate::frontend::{ModuleId, ParsedModule};
+use crate::resolve::{Def, DefId, DefTable};
+use crate::symtab::SymbolTable;
+use crate::tree::NodeId;
+use crate::tree::NodeIdGen;
+use crate::tree::resolved::Module as ResolvedModule;
+use crate::tree::typed::Module as TypedModule;
+use crate::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
+use crate::types::Type;
+
+#[derive(Clone)]
+pub struct ParsedModuleResult {
+    pub parsed: ParsedModule,
+}
+
+impl ParsedModuleResult {
+    pub fn new(parsed: ParsedModule) -> Self {
+        Self { parsed }
+    }
+
+    pub fn module_id(&self) -> ModuleId {
+        self.parsed.source.id
+    }
+}
+
+#[derive(Clone)]
+pub struct ResolvedModuleResult {
+    pub module_id: ModuleId,
+    pub module: ResolvedModule,
+    pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
+    pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
+}
+
+impl ResolvedModuleResult {
+    pub fn from_context(module_id: ModuleId, context: ResolvedContext) -> Self {
+        Self {
+            module_id,
+            module: context.module,
+            def_table: context.def_table,
+            def_owners: context.def_owners,
+            symbols: context.symbols,
+            node_id_gen: context.node_id_gen,
+        }
+    }
+
+    pub fn into_context(self) -> ResolvedContext {
+        ResolvedContext {
+            module: self.module,
+            def_table: self.def_table,
+            def_owners: self.def_owners,
+            symbols: self.symbols,
+            node_id_gen: self.node_id_gen,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TypedModuleResult {
+    pub module_id: ModuleId,
+    pub module: TypedModule,
+    pub def_table: DefTable,
+    pub def_owners: HashMap<DefId, ModuleId>,
+    pub type_map: TypeMap,
+    pub call_sigs: CallSigMap,
+    pub generic_insts: GenericInstMap,
+    pub symbols: SymbolTable,
+    pub node_id_gen: NodeIdGen,
+}
+
+impl TypedModuleResult {
+    pub fn from_context(module_id: ModuleId, context: TypeCheckedContext) -> Self {
+        Self {
+            module_id,
+            module: context.module,
+            def_table: context.def_table,
+            def_owners: context.def_owners,
+            type_map: context.type_map,
+            call_sigs: context.call_sigs,
+            generic_insts: context.generic_insts,
+            symbols: context.symbols,
+            node_id_gen: context.node_id_gen,
+        }
+    }
+
+    pub fn into_context(self) -> TypeCheckedContext {
+        TypeCheckedContext {
+            module: self.module,
+            def_table: self.def_table,
+            def_owners: self.def_owners,
+            type_map: self.type_map,
+            call_sigs: self.call_sigs,
+            generic_insts: self.generic_insts,
+            symbols: self.symbols,
+            node_id_gen: self.node_id_gen,
+        }
+    }
+}
+
+/// Common symbol/definition lookup surface shared by contexts and query results.
+pub trait SymbolLookup {
+    fn def_table(&self) -> &DefTable;
+
+    fn lookup_def(&self, def_id: DefId) -> Option<&Def> {
+        self.def_table().lookup_def(def_id)
+    }
+
+    fn lookup_def_id_by_node(&self, node_id: NodeId) -> Option<DefId> {
+        self.def_table().lookup_node_def_id(node_id)
+    }
+
+    fn lookup_def_by_node(&self, node_id: NodeId) -> Option<&Def> {
+        let def_id = self.lookup_def_id_by_node(node_id)?;
+        self.lookup_def(def_id)
+    }
+}
+
+/// Common type/call lookup surface shared by typed contexts and typed results.
+pub trait TypeLookup: SymbolLookup {
+    fn type_map(&self) -> &TypeMap;
+    fn call_sig_map(&self) -> &CallSigMap;
+    fn generic_inst_map(&self) -> &GenericInstMap;
+
+    fn lookup_node_type(&self, node_id: NodeId) -> Option<Type> {
+        self.type_map().lookup_node_type(node_id)
+    }
+
+    fn lookup_def_type(&self, def_id: DefId) -> Option<Type> {
+        let def = self.lookup_def(def_id)?;
+        self.type_map().lookup_def_type(def)
+    }
+
+    fn lookup_call_sig(&self, node_id: NodeId) -> Option<&CallSig> {
+        self.call_sig_map().get(&node_id)
+    }
+}
+
+impl SymbolLookup for ResolvedContext {
+    fn def_table(&self) -> &DefTable {
+        &self.def_table
+    }
+}
+
+impl SymbolLookup for TypeCheckedContext {
+    fn def_table(&self) -> &DefTable {
+        &self.def_table
+    }
+}
+
+impl SymbolLookup for ResolvedModuleResult {
+    fn def_table(&self) -> &DefTable {
+        &self.def_table
+    }
+}
+
+impl SymbolLookup for TypedModuleResult {
+    fn def_table(&self) -> &DefTable {
+        &self.def_table
+    }
+}
+
+impl TypeLookup for TypeCheckedContext {
+    fn type_map(&self) -> &TypeMap {
+        &self.type_map
+    }
+
+    fn call_sig_map(&self) -> &CallSigMap {
+        &self.call_sigs
+    }
+
+    fn generic_inst_map(&self) -> &GenericInstMap {
+        &self.generic_insts
+    }
+}
+
+impl TypeLookup for TypedModuleResult {
+    fn type_map(&self) -> &TypeMap {
+        &self.type_map
+    }
+
+    fn call_sig_map(&self) -> &CallSigMap {
+        &self.call_sigs
+    }
+
+    fn generic_inst_map(&self) -> &GenericInstMap {
+        &self.generic_insts
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/analysis/t_results.rs"]
+mod tests;
