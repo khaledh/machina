@@ -11,7 +11,9 @@ use crate::tree::NodeId;
 use crate::typecheck::builtin_methods;
 use crate::typecheck::builtin_methods::BuiltinMethodRet;
 use crate::typecheck::constraints::{CallCallee, CallObligation};
-use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, CollectedTraitSig};
+use crate::typecheck::engine::{
+    CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
+};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::unify::TcUnifier;
 use crate::types::{TyVarId, Type};
@@ -370,7 +372,7 @@ fn called_property_name(
         .as_ref()
         .map(|term| super::term_utils::resolve_term(term, unifier))
         .map(super::term_utils::peel_heap)?;
-    let prop = super::lookup_property(property_sigs, &owner_ty, name)?;
+    let prop = lookup_property(property_sigs, &owner_ty, name)?;
     if prop.getter == Some(selected_def_id) || prop.setter == Some(selected_def_id) {
         Some(name.clone())
     } else {

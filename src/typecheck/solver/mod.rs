@@ -33,9 +33,9 @@ use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind};
 use crate::typecheck::capability::ensure_hashable;
 use crate::typecheck::constraints::{Constraint, ConstraintReason, ExprObligation};
-use crate::typecheck::engine::lookup_property;
 use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::typecheck::property_access;
 use crate::typecheck::typesys::TypeVarKind;
 use crate::typecheck::unify::TcUnifier;
 use crate::types::{TyVarId, Type};
@@ -629,51 +629,26 @@ fn resolve_property_access(
     def_table: &DefTable,
     def_owners: &HashMap<DefId, ModuleId>,
 ) -> Result<ResolvedPropertyAccess, PropertyResolution> {
-    if let Some(prop) = lookup_property(property_sigs, owner_ty, field) {
-        let readable = prop.getter.is_some_and(|def_id| {
-            access_utils::is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
-        });
-        let writable = prop.setter.is_some_and(|def_id| {
-            access_utils::is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
-        });
-        if (prop.getter.is_some() || prop.setter.is_some()) && !readable && !writable {
-            return Err(PropertyResolution::Private);
+    match property_access::lookup(owner_ty, field, property_sigs, trait_sigs, var_trait_bounds) {
+        Ok(prop) => {
+            let readable = prop.getter_def.is_some_and(|def_id| {
+                access_utils::is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
+            }) || (prop.getter_def.is_none() && prop.has_get);
+            let writable = prop.setter_def.is_some_and(|def_id| {
+                access_utils::is_def_accessible_from(caller_def_id, def_id, def_table, def_owners)
+            }) || (prop.setter_def.is_none() && prop.has_set);
+            if (prop.has_get || prop.has_set) && !readable && !writable {
+                return Err(PropertyResolution::Private);
+            }
+            Ok(ResolvedPropertyAccess {
+                ty: prop.ty,
+                readable,
+                writable,
+            })
         }
-        return Ok(ResolvedPropertyAccess {
-            ty: prop.ty.clone(),
-            readable,
-            writable,
-        });
+        Err(property_access::PropertyLookupError::Missing) => Err(PropertyResolution::Missing),
+        Err(property_access::PropertyLookupError::Ambiguous) => Err(PropertyResolution::Ambiguous),
     }
-
-    let Type::Var(var) = owner_ty else {
-        return Err(PropertyResolution::Missing);
-    };
-
-    let mut matched = None;
-    for trait_name in var_trait_bounds
-        .get(var)
-        .into_iter()
-        .flat_map(|names| names.iter())
-    {
-        let Some(trait_sig) = trait_sigs.get(trait_name) else {
-            continue;
-        };
-        let Some(prop) = trait_sig.properties.get(field) else {
-            continue;
-        };
-
-        if matched.is_some() {
-            return Err(PropertyResolution::Ambiguous);
-        }
-        matched = Some(ResolvedPropertyAccess {
-            ty: prop.ty.clone(),
-            readable: prop.has_get,
-            writable: prop.has_set,
-        });
-    }
-
-    matched.ok_or(PropertyResolution::Missing)
 }
 
 fn iterable_elem_type(ty: &Type) -> Option<Type> {

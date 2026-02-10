@@ -16,12 +16,10 @@ use crate::typecheck::Unifier;
 use crate::typecheck::builtin_methods;
 use crate::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::typecheck::engine::TypecheckEngine;
-use crate::typecheck::engine::lookup_property;
-use crate::typecheck::engine::{
-    CollectedCallableSig, CollectedPropertySig, CollectedTraitPropertySig, CollectedTraitSig,
-};
+use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, CollectedTraitSig};
 use crate::typecheck::errors::TypeCheckError;
 use crate::typecheck::nominal::NominalKey;
+use crate::typecheck::property_access;
 use crate::typecheck::type_map::{
     CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
     resolve_type_def_with_args, resolve_type_expr,
@@ -330,43 +328,14 @@ fn resolve_property_access_for_finalize(
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
 ) -> Option<ResolvedPropertyAccess> {
-    if let Some(prop) = lookup_property(property_sigs, owner_ty, field) {
-        return Some(ResolvedPropertyAccess {
-            readable: prop.getter.is_some(),
-            writable: prop.setter.is_some(),
-            getter_def: prop.getter,
-            setter_def: prop.setter,
-        });
-    }
-
-    let Type::Var(var) = owner_ty else {
-        return None;
-    };
-
-    let mut found: Option<&CollectedTraitPropertySig> = None;
-    for trait_name in var_trait_bounds
-        .get(var)
-        .into_iter()
-        .flat_map(|names| names.iter())
-    {
-        let Some(trait_sig) = trait_sigs.get(trait_name) else {
-            continue;
-        };
-        let Some(prop) = trait_sig.properties.get(field) else {
-            continue;
-        };
-        if found.is_some() {
-            return None;
-        }
-        found = Some(prop);
-    }
-
-    let prop = found?;
+    let prop =
+        property_access::lookup(owner_ty, field, property_sigs, trait_sigs, var_trait_bounds)
+            .ok()?;
     Some(ResolvedPropertyAccess {
         readable: prop.has_get,
         writable: prop.has_set,
-        getter_def: None,
-        setter_def: None,
+        getter_def: prop.getter_def,
+        setter_def: prop.setter_def,
     })
 }
 

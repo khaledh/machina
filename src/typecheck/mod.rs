@@ -9,6 +9,7 @@ mod errors;
 mod finalize;
 mod infer_unify;
 pub(crate) mod nominal;
+mod property_access;
 mod solver;
 pub mod type_map;
 pub(crate) mod type_view;
