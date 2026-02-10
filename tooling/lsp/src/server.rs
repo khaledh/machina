@@ -6,6 +6,7 @@ use serde_json::json;
 use thiserror::Error;
 
 use crate::handlers::{HandlerAction, handle_message};
+use crate::session::AnalysisSession;
 use crate::transport::{self, TransportError};
 
 #[derive(Debug, Error)]
@@ -21,6 +22,7 @@ pub type ServerResult<T> = Result<T, ServerError>;
 pub fn run_stdio<R: Read, W: Write>(input: R, output: W) -> ServerResult<()> {
     let mut reader = BufReader::new(input);
     let mut writer = BufWriter::new(output);
+    let mut session = AnalysisSession::new();
 
     loop {
         let message = match transport::read_message(&mut reader) {
@@ -40,7 +42,7 @@ pub fn run_stdio<R: Read, W: Write>(input: R, output: W) -> ServerResult<()> {
             Err(error) => return Err(error.into()),
         };
 
-        let (action, response) = handle_message(message);
+        let (action, response) = handle_message(&mut session, message);
         if let Some(payload) = response {
             transport::write_message(&mut writer, &payload)?;
         }
