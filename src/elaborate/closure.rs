@@ -42,6 +42,7 @@
 //! }
 //! ```
 
+use crate::analysis::facts::SyntheticReason;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind, TypeAttrs};
 use crate::semck::closure::capture::CaptureMode;
@@ -94,9 +95,9 @@ impl<'a> Elaborator<'a> {
                         mutable: capture.mode == CaptureMode::MutBorrow,
                         elem_ty: Box::new(base_ty.clone()),
                     };
-                    let field_ty_id = self
-                        .type_map
-                        .insert_node_type(self.node_id_gen.new_id(), field_ty.clone());
+                    let field_ty_node = self.node_id_gen.new_id();
+                    let field_ty_id =
+                        self.insert_closure_node_type(field_ty_node, field_ty.clone());
                     let field_ty_expr = self.type_expr_from_type(&field_ty, span);
                     (field_ty, field_ty_id, field_ty_expr)
                 }
@@ -157,13 +158,12 @@ impl<'a> Elaborator<'a> {
 
         // The resolver registers a def_id for closures but doesn't assign a def type.
         if self.type_map.lookup_def_type_id(&def).is_none() {
-            self.type_map.insert_def_type(def, fn_ty.clone());
+            self.insert_closure_def_type(def, fn_ty.clone());
         }
 
         // The generated function gets a fresh node id but reuses the closure def id.
         let func_id = self.node_id_gen.new_id();
-        self.type_map
-            .insert_node_type(func_id, return_ty_val.clone());
+        self.insert_closure_node_type(func_id, return_ty_val.clone());
 
         let func_def = sem::FuncDef {
             id: func_id,
@@ -192,11 +192,12 @@ impl<'a> Elaborator<'a> {
         captures: &[CaptureField],
     ) -> (String, TypeId, Type, DefId) {
         let type_name = ident.to_string();
-        let type_def_id = self.def_table.add_def(
+        let type_def_id = self.add_synthetic_def(
             type_name.clone(),
             DefKind::TypeDef {
                 attrs: TypeAttrs::default(),
             },
+            SyntheticReason::ClosureLowering,
         );
         let fields = captures
             .iter()
@@ -219,12 +220,13 @@ impl<'a> Elaborator<'a> {
         self.closure_types.push(type_def);
 
         let self_def_name = "env".to_string();
-        let self_def_id = self.def_table.add_def(
+        let self_def_id = self.add_synthetic_def(
             self_def_name,
             DefKind::Param {
                 index: 0,
                 is_mutable: false,
             },
+            SyntheticReason::ClosureLowering,
         );
 
         let closure_fields: Vec<StructField> = captures
@@ -238,13 +240,10 @@ impl<'a> Elaborator<'a> {
             name: type_name.clone(),
             fields: closure_fields,
         };
-        let ty_id = self
-            .type_map
-            .insert_node_type(self.node_id_gen.new_id(), closure_ty.clone());
+        let closure_ty_node = self.node_id_gen.new_id();
+        let ty_id = self.insert_closure_node_type(closure_ty_node, closure_ty.clone());
         if let Some(def) = self.def_table.lookup_def(self_def_id) {
-            let _ = self
-                .type_map
-                .insert_def_type(def.clone(), closure_ty.clone());
+            let _ = self.insert_closure_def_type(def.clone(), closure_ty.clone());
         }
 
         (type_name, ty_id, closure_ty, self_def_id)
@@ -305,8 +304,7 @@ impl<'a> Elaborator<'a> {
             span,
         };
         let method_id = self.node_id_gen.new_id();
-        self.type_map
-            .insert_node_type(method_id, return_ty_val.clone());
+        self.insert_closure_node_type(method_id, return_ty_val.clone());
 
         self.closure_stack.push(ClosureContext::new(&info));
         let method_def = sem::MethodDef {
@@ -352,7 +350,7 @@ impl<'a> Elaborator<'a> {
         for def_id in defs {
             self.closure_bindings.insert(def_id, closure_def_id);
             if let Some(def) = self.def_table.lookup_def(def_id) {
-                let _ = self.type_map.insert_def_type(def.clone(), info.ty.clone());
+                let _ = self.insert_closure_def_type(def.clone(), info.ty.clone());
             }
         }
     }
@@ -441,8 +439,8 @@ impl<'a> Elaborator<'a> {
         place_id: NodeId,
         span: Span,
     ) -> Option<sem::PlaceExpr> {
-        let ctx = self.closure_stack.last()?;
-        let field = ctx.capture_field(def_id)?;
+        let ctx = self.closure_stack.last()?.clone();
+        let field = ctx.capture_field(def_id)?.clone();
         let env_id = self.node_id_gen.new_id();
         let env_place = sem::PlaceExpr {
             id: env_id,
@@ -453,7 +451,7 @@ impl<'a> Elaborator<'a> {
             ty: ctx.type_id,
             span,
         };
-        self.type_map.insert_node_type(env_id, ctx.ty.clone());
+        self.insert_closure_node_type(env_id, ctx.ty.clone());
 
         let field_place_id = self.node_id_gen.new_id();
         let field_place = sem::PlaceExpr {
@@ -465,13 +463,11 @@ impl<'a> Elaborator<'a> {
             ty: field.field_ty_id,
             span,
         };
-        self.type_map
-            .insert_node_type(field_place_id, field.field_ty.clone());
+        self.insert_closure_node_type(field_place_id, field.field_ty.clone());
 
         if field.mode == CaptureMode::Move {
             // For move captures, env.<field> is already the place.
-            self.type_map
-                .insert_node_type(place_id, field.base_ty.clone());
+            self.insert_closure_node_type(place_id, field.base_ty.clone());
             return Some(sem::PlaceExpr {
                 id: place_id,
                 kind: sem::PlaceExprKind::StructField {
@@ -492,11 +488,9 @@ impl<'a> Elaborator<'a> {
             ty: field.field_ty_id,
             span,
         };
-        self.type_map
-            .insert_node_type(load_id, field.field_ty.clone());
+        self.insert_closure_node_type(load_id, field.field_ty.clone());
 
-        self.type_map
-            .insert_node_type(place_id, field.base_ty.clone());
+        self.insert_closure_node_type(place_id, field.base_ty.clone());
         Some(sem::PlaceExpr {
             id: place_id,
             kind: sem::PlaceExprKind::Deref {
@@ -526,13 +520,11 @@ impl<'a> Elaborator<'a> {
             ty: capture.base_ty_id,
             span,
         };
-        self.type_map
-            .insert_node_type(place_id, capture.base_ty.clone());
+        self.insert_closure_node_type(place_id, capture.base_ty.clone());
 
         if capture.mode == CaptureMode::Move {
             let move_id = self.node_id_gen.new_id();
-            self.type_map
-                .insert_node_type(move_id, capture.base_ty.clone());
+            self.insert_closure_node_type(move_id, capture.base_ty.clone());
             return sem::ValueExpr {
                 id: move_id,
                 kind: sem::ValueExprKind::Move {
@@ -544,8 +536,7 @@ impl<'a> Elaborator<'a> {
         }
 
         let addr_id = self.node_id_gen.new_id();
-        self.type_map
-            .insert_node_type(addr_id, capture.field_ty.clone());
+        self.insert_closure_node_type(addr_id, capture.field_ty.clone());
         sem::ValueExpr {
             id: addr_id,
             kind: sem::ValueExprKind::AddrOf {

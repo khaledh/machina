@@ -2,6 +2,7 @@
 
 pub mod dataflow;
 pub mod db;
+pub mod facts;
 pub mod module_graph;
 pub mod query;
 pub mod snapshot;

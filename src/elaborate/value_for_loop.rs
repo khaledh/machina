@@ -29,6 +29,7 @@
 //! For range loops (`for i in 0..10`), the iterator binding is omitted
 //! and the element is just the current index value.
 
+use crate::analysis::facts::SyntheticReason;
 use crate::diag::Span;
 use crate::elaborate::elaborator::Elaborator;
 use crate::resolve::{DefId, DefKind};
@@ -194,15 +195,21 @@ impl<'a> Elaborator<'a> {
     fn new_for_local(&mut self, suffix: &str, ty: Type, is_mutable: bool, span: Span) -> ForLocal {
         let def_id = self.def_table.next_def_id();
         let name = format!("__for_{}_{}", suffix, def_id.0);
-        let def_id = self.def_table.add_def(
+        let def_id = self.add_synthetic_def(
             name.clone(),
             DefKind::LocalVar {
                 nrvo_eligible: false,
                 is_mutable,
             },
+            SyntheticReason::ElaborateSyntheticNode,
         );
         if let Some(def) = self.def_table.lookup_def(def_id) {
-            let _ = self.type_map.insert_def_type(def.clone(), ty.clone());
+            let _ = self.type_map.insert_def_type(
+                def.clone(),
+                ty.clone(),
+                "elaborate",
+                SyntheticReason::ElaborateSyntheticNode,
+            );
         }
         let pattern = sem::BindPattern {
             id: self.node_id_gen.new_id(),
@@ -279,7 +286,7 @@ impl<'a> Elaborator<'a> {
         let target_ty = self.type_map.type_table().get(target.ty).clone();
         let plan = self.build_index_plan(&target_ty);
         self.index_plans.insert(id, plan);
-        let ty_id = self.type_map.insert_node_type(id, elem_ty);
+        let ty_id = self.insert_synth_node_type(id, elem_ty);
 
         sem::PlaceExpr {
             id,
@@ -373,7 +380,7 @@ impl<'a> Elaborator<'a> {
         span: Span,
     ) -> sem::ValueExpr {
         let id = self.node_id_gen.new_id();
-        let ty_id = self.type_map.insert_node_type(id, ty);
+        let ty_id = self.insert_synth_node_type(id, ty);
         sem::ValueExpr {
             id,
             kind,
@@ -389,7 +396,7 @@ impl<'a> Elaborator<'a> {
         span: Span,
     ) -> sem::PlaceExpr {
         let id = self.node_id_gen.new_id();
-        let ty_id = self.type_map.insert_node_type(id, ty);
+        let ty_id = self.insert_synth_node_type(id, ty);
         sem::PlaceExpr {
             id,
             kind,

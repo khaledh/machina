@@ -81,7 +81,7 @@ impl<'a> Elaborator<'a> {
                 match inner_ty {
                     crate::types::Type::Heap { elem_ty }
                     | crate::types::Type::Ref { elem_ty, .. } => {
-                        self.type_map.insert_node_type(expr.id, (*elem_ty).clone())
+                        self.insert_synth_node_type(expr.id, (*elem_ty).clone())
                     }
                     _ => expr.ty,
                 }
@@ -93,7 +93,7 @@ impl<'a> Elaborator<'a> {
                     crate::types::Type::Tuple { field_tys } => field_tys
                         .get(*index)
                         .cloned()
-                        .map(|ty| self.type_map.insert_node_type(expr.id, ty))
+                        .map(|ty| self.insert_synth_node_type(expr.id, ty))
                         .unwrap_or(expr.ty),
                     _ => expr.ty,
                 }
@@ -105,7 +105,7 @@ impl<'a> Elaborator<'a> {
                     crate::types::Type::Struct { fields, .. } => fields
                         .iter()
                         .find(|f| f.name == *field)
-                        .map(|f| self.type_map.insert_node_type(expr.id, f.ty.clone()))
+                        .map(|f| self.insert_synth_node_type(expr.id, f.ty.clone()))
                         .unwrap_or(expr.ty),
                     _ => expr.ty,
                 }

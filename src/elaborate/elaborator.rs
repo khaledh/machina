@@ -8,15 +8,15 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::analysis::facts::{DefTableOverlay, SyntheticReason, TypeMapOverlay};
 use crate::diag::Span;
 use crate::resolve::DefId;
-use crate::resolve::DefTable;
 use crate::semck::closure::capture::CaptureMode;
 use crate::semck::closure::capture::ClosureCapture;
 use crate::tree::normalized as norm;
 use crate::tree::semantic as sem;
 use crate::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
-use crate::typecheck::type_map::{CallSigMap, TypeMap};
+use crate::typecheck::type_map::CallSigMap;
 use crate::types::{Type, TypeId};
 
 /// Information about a single captured variable in a closure's environment.
@@ -90,8 +90,8 @@ impl ClosureContext {
 /// rules defined in the submodules.
 pub struct Elaborator<'a> {
     // Shared compiler state (borrowed)
-    pub(super) def_table: &'a mut DefTable,
-    pub(super) type_map: &'a mut TypeMap,
+    pub(super) def_table: &'a mut DefTableOverlay,
+    pub(super) type_map: &'a mut TypeMapOverlay,
     pub(super) call_sigs: &'a CallSigMap,
     pub(super) node_id_gen: &'a mut NodeIdGen,
 
@@ -122,8 +122,8 @@ pub struct Elaborator<'a> {
 impl<'a> Elaborator<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        def_table: &'a mut DefTable,
-        type_map: &'a mut TypeMap,
+        def_table: &'a mut DefTableOverlay,
+        type_map: &'a mut TypeMapOverlay,
         call_sigs: &'a CallSigMap,
         node_id_gen: &'a mut NodeIdGen,
         implicit_moves: &'a HashSet<NodeId>,
@@ -252,6 +252,34 @@ impl<'a> Elaborator<'a> {
             sig: decl.sig.clone(),
             span: decl.span,
         }
+    }
+
+    pub(super) fn insert_synth_node_type(&mut self, node_id: NodeId, ty: Type) -> TypeId {
+        self.type_map.insert_node_type(
+            node_id,
+            ty,
+            "elaborate",
+            SyntheticReason::ElaborateSyntheticNode,
+        )
+    }
+
+    pub(super) fn insert_closure_node_type(&mut self, node_id: NodeId, ty: Type) -> TypeId {
+        self.type_map
+            .insert_node_type(node_id, ty, "elaborate", SyntheticReason::ClosureLowering)
+    }
+
+    pub(super) fn insert_closure_def_type(&mut self, def: crate::resolve::Def, ty: Type) -> TypeId {
+        self.type_map
+            .insert_def_type(def, ty, "elaborate", SyntheticReason::ClosureLowering)
+    }
+
+    pub(super) fn add_synthetic_def(
+        &mut self,
+        name: String,
+        kind: crate::resolve::DefKind,
+        reason: SyntheticReason,
+    ) -> DefId {
+        self.def_table.add_def(name, kind, "elaborate", reason)
     }
 
     /// Retrieve initialization status for an assignment target from semck.

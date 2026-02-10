@@ -161,7 +161,7 @@ impl<'a> Elaborator<'a> {
 
         let info =
             self.ensure_closure_info(ident, *def_id, params, return_ty, body, expr.span, expr.id);
-        let ty_id = self.type_map.insert_node_type(expr.id, info.ty.clone());
+        let ty_id = self.insert_synth_node_type(expr.id, info.ty.clone());
         let fields = info
             .captures
             .iter()

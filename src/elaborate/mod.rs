@@ -27,6 +27,7 @@
 //! The output semantic tree contains all information needed for lowering to
 //! proceed without further semantic reasoning.
 
+use crate::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::context::{SemanticCheckedContext, SemanticContext};
 use crate::tree::semantic as sem;
 mod bind_pattern;
@@ -63,8 +64,8 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         closure_captures,
     } = ctx;
     let mut node_id_gen = node_id_gen;
-    let mut def_table = def_table;
-    let mut type_map = type_map;
+    let mut def_table = DefTableOverlay::new(def_table);
+    let mut type_map = TypeMapOverlay::new(type_map);
     let mut elaborator = Elaborator::new(
         &mut def_table,
         &mut type_map,
@@ -113,9 +114,9 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
 
     SemanticContext {
         module,
-        def_table,
+        def_table: def_table.into_inner(),
         def_owners,
-        type_map,
+        type_map: type_map.into_inner(),
         lowering_plans,
         drop_plans,
         symbols,

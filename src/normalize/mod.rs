@@ -1,3 +1,4 @@
+use crate::analysis::facts::{SyntheticReason, TypeMapOverlay};
 use crate::context::{NormalizedContext, TypeCheckedContext};
 use crate::resolve::DefId;
 use crate::resolve::DefKind;
@@ -7,7 +8,7 @@ use crate::tree::normalized as norm;
 use crate::tree::normalized::build_module;
 use crate::tree::visit_mut;
 use crate::tree::visit_mut::VisitorMut;
-use crate::typecheck::type_map::{CallParam, CallSigMap, TypeMap};
+use crate::typecheck::type_map::{CallParam, CallSigMap};
 use crate::types::{
     Type, TypeId, array_to_dyn_array_assignable, array_to_slice_assignable,
     dyn_array_to_slice_assignable,
@@ -29,7 +30,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         node_id_gen,
     } = ctx;
     let mut module = build_module(&module);
-    let mut type_map = type_map;
+    let mut type_map = TypeMapOverlay::new(type_map);
     let mut node_id_gen = node_id_gen;
     let mut normalizer = Normalizer::new(&def_table, &mut type_map, &call_sigs, &mut node_id_gen);
     normalizer.visit_module(&mut module);
@@ -37,7 +38,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         module,
         def_table,
         def_owners,
-        type_map,
+        type_map: type_map.into_inner(),
         call_sigs,
         generic_insts,
         symbols,
@@ -47,7 +48,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
 
 struct Normalizer<'a> {
     def_table: &'a DefTable,
-    type_map: &'a mut TypeMap,
+    type_map: &'a mut TypeMapOverlay,
     call_sigs: &'a CallSigMap,
     node_id_gen: &'a mut NodeIdGen,
 }
@@ -55,7 +56,7 @@ struct Normalizer<'a> {
 impl<'a> Normalizer<'a> {
     fn new(
         def_table: &'a DefTable,
-        type_map: &'a mut TypeMap,
+        type_map: &'a mut TypeMapOverlay,
         call_sigs: &'a CallSigMap,
         node_id_gen: &'a mut NodeIdGen,
     ) -> Self {
@@ -119,9 +120,12 @@ impl<'a> Normalizer<'a> {
         let span = expr.span;
         let inner = expr.clone();
         let coerce_id = self.node_id_gen.new_id();
-        let ty_id = self
-            .type_map
-            .insert_node_type(coerce_id, expected_ty.clone());
+        let ty_id = self.type_map.insert_node_type(
+            coerce_id,
+            expected_ty.clone(),
+            "normalize",
+            SyntheticReason::NormalizeCoercion,
+        );
         *expr = norm::Expr {
             id: coerce_id,
             kind: norm::ExprKind::Coerce {
@@ -162,7 +166,12 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
                             span: value.span,
                         }],
                     },
-                    ty: self.type_map.insert_node_type(assignee.id, Type::Unit),
+                    ty: self.type_map.insert_node_type(
+                        assignee.id,
+                        Type::Unit,
+                        "normalize",
+                        SyntheticReason::NormalizeCoercion,
+                    ),
                     span: stmt.span,
                 };
                 property_call = Some(call_expr);
