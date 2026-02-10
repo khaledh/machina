@@ -2,6 +2,7 @@ use crate::analysis::diagnostics::{
     Diagnostic, DiagnosticPhase, DiagnosticSeverity, DiagnosticValue, collect_partial_diagnostics,
 };
 use crate::diag::Span;
+use crate::lexer::LexError;
 use crate::lexer::{Token, TokenKind};
 use crate::parse::ParseError;
 use crate::resolve::ResolveError;
@@ -29,6 +30,21 @@ fn parse_diagnostic_is_phase_tagged_and_stable_coded() {
     assert_eq!(
         diag.metadata.get("found"),
         Some(&DiagnosticValue::String("type".to_string()))
+    );
+}
+
+#[test]
+fn lex_diagnostic_is_phase_tagged_and_stable_coded() {
+    let span = Span::default();
+    let err = LexError::UnexpectedCharacter('@', span);
+    let diag = Diagnostic::from_lex_error(&err);
+
+    assert_eq!(diag.phase, DiagnosticPhase::Parse);
+    assert_eq!(diag.severity, DiagnosticSeverity::Error);
+    assert_eq!(diag.code, "MC-LEX-UNEXPECTED-CHARACTER");
+    assert_eq!(
+        diag.metadata.get("character"),
+        Some(&DiagnosticValue::String("@".to_string()))
     );
 }
 

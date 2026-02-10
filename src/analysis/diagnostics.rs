@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::diag::Span;
+use crate::lexer::LexError;
 use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 use crate::typecheck::{TypeCheckError, TypeCheckErrorKind};
@@ -53,6 +54,33 @@ pub struct WireDiagnostic {
 }
 
 impl Diagnostic {
+    pub fn from_lex_error(error: &LexError) -> Self {
+        let mut metadata = DiagnosticMetadata::new();
+        let code = match error {
+            LexError::UnexpectedCharacter(ch, _) => {
+                metadata.insert(
+                    "character".to_string(),
+                    DiagnosticValue::String(ch.to_string()),
+                );
+                "MC-LEX-UNEXPECTED-CHARACTER"
+            }
+            LexError::InvalidInteger(_, _) => "MC-LEX-INVALID-INTEGER",
+            LexError::InvalidEscapeSequence(seq, _) => {
+                metadata.insert("escape".to_string(), DiagnosticValue::String(seq.clone()));
+                "MC-LEX-INVALID-ESCAPE-SEQUENCE"
+            }
+            LexError::UnterminatedString(_) => "MC-LEX-UNTERMINATED-STRING",
+        };
+        Self {
+            phase: DiagnosticPhase::Parse,
+            code: code.to_string(),
+            severity: DiagnosticSeverity::Error,
+            span: error.span(),
+            message: error.to_string(),
+            metadata,
+        }
+    }
+
     pub fn to_wire(&self) -> WireDiagnostic {
         WireDiagnostic {
             phase: self.phase,

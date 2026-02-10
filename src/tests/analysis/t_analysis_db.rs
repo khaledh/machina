@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::analysis::db::AnalysisDb;
+use crate::analysis::diagnostics::DiagnosticPhase;
 use crate::analysis::module_graph::ModuleGraph;
-use crate::analysis::query::{QueryCancelled, QueryKey, QueryKind};
+use crate::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
 use crate::frontend::ModuleId;
 
 #[test]
@@ -90,4 +91,51 @@ fn analysis_db_module_invalidation_keeps_unaffected_cache() {
     assert_eq!(isolated, 9);
     assert_eq!(leaf_recomputed, 1);
     assert_eq!(db.cache_stats().hits, 1);
+}
+
+#[test]
+fn diagnostics_follow_overlay_edits() {
+    let mut db = AnalysisDb::new();
+    let path = PathBuf::from("examples/tmp.mc");
+    let file_id = db.upsert_disk_text(path.clone(), "fn main() -> u64 { 0 }");
+
+    let clean = db
+        .diagnostics_for_file(file_id)
+        .expect("diagnostics query should succeed");
+    assert!(clean.is_empty(), "expected no diagnostics for valid source");
+
+    db.set_overlay(file_id, "fn main( {");
+    let broken = db
+        .diagnostics_for_file(file_id)
+        .expect("diagnostics query should succeed");
+    assert!(
+        !broken.is_empty(),
+        "expected diagnostics for broken overlay"
+    );
+    assert!(broken.iter().any(|d| d.phase == DiagnosticPhase::Parse));
+
+    db.clear_overlay(file_id);
+    let recovered = db
+        .diagnostics_for_path(&path)
+        .expect("diagnostics query should succeed");
+    assert!(
+        recovered.is_empty(),
+        "expected diagnostics to clear after overlay removal"
+    );
+}
+
+#[test]
+fn diagnostics_respect_cancellation() {
+    let token = CancellationToken::new();
+    token.cancel();
+
+    let mut db = AnalysisDb::with_cancellation_token(token);
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/cancel.mc"), "fn main() {}");
+
+    let result = db.diagnostics_for_file(file_id);
+    assert_eq!(
+        result,
+        Err(QueryCancelled),
+        "cancelled token should abort diagnostics"
+    );
 }

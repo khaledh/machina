@@ -6,18 +6,41 @@
 //! - module-closure invalidation.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::analysis::diagnostics::Diagnostic;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::frontend::ModuleId;
+use crate::lexer::{LexError, Lexer};
+use crate::parse::Parser;
+use crate::resolve::resolve;
+use crate::tree::NodeIdGen;
+use crate::typecheck::type_check;
 
 #[derive(Default)]
 pub struct AnalysisDb {
     runtime: QueryRuntime,
     sources: SourceStore,
     module_graph: ModuleGraph,
+}
+
+#[derive(Clone, Default)]
+struct ParseDiagState {
+    parsed: Option<crate::context::ParsedContext>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Default)]
+struct ResolveDiagState {
+    resolved: Option<crate::context::ResolvedContext>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Default)]
+struct TypecheckDiagState {
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl AnalysisDb {
@@ -68,6 +91,114 @@ impl AnalysisDb {
 
     pub fn snapshot(&self) -> AnalysisSnapshot {
         self.sources.snapshot()
+    }
+
+    pub fn diagnostics_for_path(&mut self, path: &Path) -> QueryResult<Vec<Diagnostic>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(Vec::new());
+        };
+        self.diagnostics_for_file(file_id)
+    }
+
+    pub fn diagnostics_for_file(&mut self, file_id: FileId) -> QueryResult<Vec<Diagnostic>> {
+        let snapshot = self.snapshot();
+        let Some(source) = snapshot.text(file_id) else {
+            return Ok(Vec::new());
+        };
+        let revision = snapshot.revision();
+        let module_id = ModuleId(file_id.0);
+
+        let diagnostics_key = QueryKey::new(
+            crate::analysis::query::QueryKind::Diagnostics,
+            module_id,
+            revision,
+        );
+        self.execute_query(diagnostics_key, move |rt| {
+            let parse_key = QueryKey::new(
+                crate::analysis::query::QueryKind::ParseModule,
+                module_id,
+                revision,
+            );
+            let source_for_parse = source.clone();
+            let parsed = rt.execute(parse_key, move |_rt| {
+                let mut state = ParseDiagState::default();
+                let lexer = Lexer::new(&source_for_parse);
+                let tokens = match lexer.tokenize().collect::<Result<Vec<_>, LexError>>() {
+                    Ok(tokens) => tokens,
+                    Err(error) => {
+                        state.diagnostics.push(Diagnostic::from_lex_error(&error));
+                        return Ok(state);
+                    }
+                };
+
+                let id_gen = NodeIdGen::new();
+                let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
+                match parser.parse() {
+                    Ok(module) => {
+                        state.parsed = Some(crate::context::ParsedContext::new(
+                            module,
+                            parser.into_id_gen(),
+                        ));
+                    }
+                    Err(error) => state.diagnostics.push(Diagnostic::from_parse_error(&error)),
+                }
+                Ok(state)
+            })?;
+
+            let resolve_key = QueryKey::new(
+                crate::analysis::query::QueryKind::ResolveModule,
+                module_id,
+                revision,
+            );
+            let resolve_input = parsed.parsed.clone();
+            let resolved = rt.execute(resolve_key, move |_rt| {
+                let mut state = ResolveDiagState::default();
+                if let Some(parsed) = resolve_input {
+                    match resolve(parsed) {
+                        Ok(resolved) => state.resolved = Some(resolved),
+                        Err(errors) => {
+                            state
+                                .diagnostics
+                                .extend(errors.iter().map(Diagnostic::from_resolve_error));
+                        }
+                    }
+                }
+                Ok(state)
+            })?;
+
+            let typecheck_key = QueryKey::new(
+                crate::analysis::query::QueryKind::TypecheckModule,
+                module_id,
+                revision,
+            );
+            let typecheck_input = resolved.resolved.clone();
+            let typechecked = rt.execute(typecheck_key, move |_rt| {
+                let mut state = TypecheckDiagState::default();
+                if let Some(resolved) = typecheck_input
+                    && let Err(errors) = type_check(resolved)
+                {
+                    state
+                        .diagnostics
+                        .extend(errors.iter().map(Diagnostic::from_typecheck_error));
+                }
+                Ok(state)
+            })?;
+
+            let mut diagnostics = parsed.diagnostics;
+            diagnostics.extend(resolved.diagnostics);
+            diagnostics.extend(typechecked.diagnostics);
+
+            diagnostics.sort_by_key(|diag| {
+                (
+                    diag.phase,
+                    diag.span.start.line,
+                    diag.span.start.column,
+                    diag.code.clone(),
+                )
+            });
+            Ok(diagnostics)
+        })
     }
 
     pub fn execute_query<T, F>(&mut self, key: QueryKey, compute: F) -> QueryResult<T>
