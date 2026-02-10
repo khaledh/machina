@@ -32,12 +32,14 @@ use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind};
 use crate::typecheck::capability::ensure_hashable;
-use crate::typecheck::constraints::{Constraint, ConstraintReason, ExprObligation};
+use crate::typecheck::constraints::{
+    ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
+};
 use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::property_access;
 use crate::typecheck::typesys::TypeVarKind;
-use crate::typecheck::unify::TcUnifier;
+use crate::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::types::{TyVarId, Type};
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +51,9 @@ pub(crate) struct SolveOutput {
     pub(crate) failed_constraints: usize,
 }
 
+type DeferredExprError = (NodeId, TcUnifyError, Span);
+type DeferredPatternError = (NodeId, TcUnifyError, Span);
+
 /// Pass 3: solve constraints and obligations.
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {
     let constrain = engine.state().constrain.clone();
@@ -59,7 +64,89 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     let mut non_expr_errors = Vec::new();
     let mut deferred_expr_errors = Vec::new();
     let mut deferred_pattern_errors = Vec::new();
-    // Stage A: strict equalities.
+    solve_strict_equalities(
+        &constrain,
+        &mut unifier,
+        &mut failed_constraints,
+        &mut deferred_expr_errors,
+        &mut deferred_pattern_errors,
+        &mut non_expr_errors,
+    );
+    apply_assignable_inference_pass(&constrain, &mut unifier);
+    prepass_pattern_obligations(&constrain, &mut unifier, engine);
+
+    let (mut expr_errors, mut covered_exprs, index_nodes, enum_payload_nodes) =
+        solve_expr_stage(&constrain, &mut unifier, engine);
+    let (mut call_errors, resolved_call_defs) = solve_call_stage(&constrain, &mut unifier, engine);
+
+    retry_expr_stage(
+        &constrain,
+        &mut unifier,
+        engine,
+        &mut expr_errors,
+        &mut covered_exprs,
+    );
+
+    apply_final_assignability(
+        &constrain,
+        &mut unifier,
+        &mut failed_constraints,
+        &mut deferred_expr_errors,
+        &mut deferred_pattern_errors,
+        &mut non_expr_errors,
+    );
+
+    remap_deferred_expr_errors(
+        deferred_expr_errors,
+        &mut expr_errors,
+        &covered_exprs,
+        &index_nodes,
+        &enum_payload_nodes,
+    );
+
+    let pattern_errors =
+        solve_pattern_stage(&constrain, &mut unifier, engine, deferred_pattern_errors);
+
+    let mut errors = Vec::new();
+    errors.append(&mut call_errors);
+    errors.extend(expr_errors);
+    errors.extend(pattern_errors);
+    errors.extend(non_expr_errors);
+
+    // Apply local numeric defaulting after all inference/obligation solving.
+    // Any still-unresolved integer-literal vars become i32.
+    default_unresolved_int_vars(&mut unifier);
+
+    let output = build_solve_output(&constrain, &unifier, resolved_call_defs, failed_constraints);
+
+    errors.extend(check_unresolved_local_infer_vars(
+        &output.resolved_def_types,
+        &constrain.constraints,
+        &constrain.pattern_obligations,
+        &engine.context().def_table,
+        unifier.vars(),
+        &errors,
+    ));
+
+    *engine.type_vars_mut() = unifier.vars().clone();
+    engine.state_mut().solve = output;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        engine.state_mut().diags.extend(errors.clone());
+        Err(errors)
+    }
+}
+
+fn solve_strict_equalities(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    failed_constraints: &mut usize,
+    deferred_expr_errors: &mut Vec<DeferredExprError>,
+    deferred_pattern_errors: &mut Vec<DeferredPatternError>,
+    non_expr_errors: &mut Vec<TypeCheckError>,
+) {
     for constraint in constrain
         .constraints
         .iter()
@@ -67,43 +154,56 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     {
         constraint_checks::apply_constraint(
             constraint,
-            &mut unifier,
-            &mut failed_constraints,
-            &mut deferred_expr_errors,
-            &mut deferred_pattern_errors,
-            &mut non_expr_errors,
+            unifier,
+            failed_constraints,
+            deferred_expr_errors,
+            deferred_pattern_errors,
+            non_expr_errors,
         );
     }
+}
 
-    // Stage B: best-effort assignable inference to reduce unresolved vars
-    // before semantic obligations are interpreted.
+fn apply_assignable_inference_pass(constrain: &ConstrainOutput, unifier: &mut TcUnifier) {
     for constraint in constrain
         .constraints
         .iter()
         .filter(|constraint| matches!(constraint, Constraint::Assignable { .. }))
     {
-        constraint_checks::apply_assignable_inference(constraint, &mut unifier);
+        constraint_checks::apply_assignable_inference(constraint, unifier);
     }
+}
 
-    // Pre-pass: apply pattern-driven unifications before expression/call
-    // obligations so match-arm bindings have concrete types when arm bodies
-    // are checked (e.g. field access and formatting on typed bindings).
+fn prepass_pattern_obligations(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    engine: &TypecheckEngine,
+) {
     let _ = patterns::check_pattern_obligations(
         &constrain.pattern_obligations,
         &constrain.def_terms,
-        &mut unifier,
+        unifier,
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_table,
         &engine.context().def_owners,
         &engine.context().module,
     );
+}
 
-    // Stage C: expression obligations.
-    let (mut expr_errors, mut covered_exprs) = check_expr_obligations(
+fn solve_expr_stage(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    engine: &TypecheckEngine,
+) -> (
+    Vec<TypeCheckError>,
+    HashSet<NodeId>,
+    HashMap<NodeId, Span>,
+    HashMap<NodeId, (String, usize, Span)>,
+) {
+    let (expr_errors, covered_exprs) = check_expr_obligations(
         &constrain.expr_obligations,
         &constrain.def_terms,
-        &mut unifier,
+        unifier,
         &engine.context().def_table,
         &engine.env().type_defs,
         &engine.env().type_symbols,
@@ -114,10 +214,14 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     );
     let index_nodes = collect_index_nodes(&constrain.expr_obligations);
     let enum_payload_nodes = collect_enum_payload_nodes(&constrain.expr_obligations);
+    (expr_errors, covered_exprs, index_nodes, enum_payload_nodes)
+}
 
-    // Stage D: call obligations (overload/generic resolution). Dynamic calls
-    // may need a second pass when callee function types become known only
-    // after other call constraints are solved.
+fn solve_call_stage(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    engine: &TypecheckEngine,
+) -> (Vec<TypeCheckError>, HashMap<NodeId, DefId>) {
     let mut call_errors = Vec::new();
     let mut resolved_call_defs = HashMap::new();
     let mut pending_calls = constrain.call_obligations.clone();
@@ -125,7 +229,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         let prior_pending = pending_calls.len();
         let (mut round_errors, round_resolved, deferred) = calls::check_call_obligations(
             &pending_calls,
-            &mut unifier,
+            unifier,
             &engine.env().func_sigs,
             &engine.env().method_sigs,
             &engine.env().property_sigs,
@@ -141,44 +245,58 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         if deferred.is_empty() {
             break;
         }
-
         if deferred.len() == prior_pending {
             // No progress this round: keep legacy behavior for remaining
             // unresolved dynamic calls and let other obligations/late checks
             // decide whether diagnostics are needed.
             break;
         }
-
         pending_calls = deferred;
     }
+    (call_errors, resolved_call_defs)
+}
 
-    // Stage E: retry unresolved expression obligations that depend on
-    // post-call type information (e.g. field projections over generic call
-    // results). The first pass may see unresolved owner types and skip them.
+fn retry_expr_stage(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    engine: &TypecheckEngine,
+    expr_errors: &mut Vec<TypeCheckError>,
+    covered_exprs: &mut HashSet<NodeId>,
+) {
     let retry_expr_obligations = constrain
         .expr_obligations
         .iter()
-        .filter(|obligation| should_retry_post_call_expr_obligation(obligation, &unifier))
+        .filter(|obligation| should_retry_post_call_expr_obligation(obligation, unifier))
         .cloned()
         .collect::<Vec<_>>();
-    if !retry_expr_obligations.is_empty() {
-        let (mut retry_errors, retry_covered) = check_expr_obligations(
-            &retry_expr_obligations,
-            &constrain.def_terms,
-            &mut unifier,
-            &engine.context().def_table,
-            &engine.env().type_defs,
-            &engine.env().type_symbols,
-            &engine.context().def_owners,
-            &engine.env().property_sigs,
-            &engine.env().trait_sigs,
-            &constrain.var_trait_bounds,
-        );
-        expr_errors.append(&mut retry_errors);
-        covered_exprs.extend(retry_covered);
+    if retry_expr_obligations.is_empty() {
+        return;
     }
 
-    // Stage F: final assignability check (diagnostics-producing).
+    let (mut retry_errors, retry_covered) = check_expr_obligations(
+        &retry_expr_obligations,
+        &constrain.def_terms,
+        unifier,
+        &engine.context().def_table,
+        &engine.env().type_defs,
+        &engine.env().type_symbols,
+        &engine.context().def_owners,
+        &engine.env().property_sigs,
+        &engine.env().trait_sigs,
+        &constrain.var_trait_bounds,
+    );
+    expr_errors.append(&mut retry_errors);
+    covered_exprs.extend(retry_covered);
+}
+
+fn apply_final_assignability(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    failed_constraints: &mut usize,
+    deferred_expr_errors: &mut Vec<DeferredExprError>,
+    deferred_pattern_errors: &mut Vec<DeferredPatternError>,
+    non_expr_errors: &mut Vec<TypeCheckError>,
+) {
     for constraint in constrain
         .constraints
         .iter()
@@ -186,14 +304,22 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     {
         constraint_checks::apply_constraint(
             constraint,
-            &mut unifier,
-            &mut failed_constraints,
-            &mut deferred_expr_errors,
-            &mut deferred_pattern_errors,
-            &mut non_expr_errors,
+            unifier,
+            failed_constraints,
+            deferred_expr_errors,
+            deferred_pattern_errors,
+            non_expr_errors,
         );
     }
+}
 
+fn remap_deferred_expr_errors(
+    deferred_expr_errors: Vec<DeferredExprError>,
+    expr_errors: &mut Vec<TypeCheckError>,
+    covered_exprs: &HashSet<NodeId>,
+    index_nodes: &HashMap<NodeId, Span>,
+    enum_payload_nodes: &HashMap<NodeId, (String, usize, Span)>,
+) {
     let covered_expr_spans = expr_errors
         .iter()
         .map(TypeCheckError::span)
@@ -221,12 +347,18 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             expr_errors.push(constraint_checks::unify_error_to_diag(err, span));
         }
     }
+}
 
-    // Stage G: pattern obligations and late unresolved-local checks.
+fn solve_pattern_stage(
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    engine: &TypecheckEngine,
+    deferred_pattern_errors: Vec<DeferredPatternError>,
+) -> Vec<TypeCheckError> {
     let (mut pattern_errors, covered_patterns) = patterns::check_pattern_obligations(
         &constrain.pattern_obligations,
         &constrain.def_terms,
-        &mut unifier,
+        unifier,
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_table,
@@ -238,17 +370,15 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             pattern_errors.push(constraint_checks::unify_error_to_diag(err, span));
         }
     }
+    pattern_errors
+}
 
-    let mut errors = Vec::new();
-    errors.append(&mut call_errors);
-    errors.extend(expr_errors);
-    errors.extend(pattern_errors);
-    errors.extend(non_expr_errors);
-
-    // Apply local numeric defaulting after all inference/obligation solving.
-    // Any still-unresolved integer-literal vars become i32.
-    default_unresolved_int_vars(&mut unifier);
-
+fn build_solve_output(
+    constrain: &ConstrainOutput,
+    unifier: &TcUnifier,
+    resolved_call_defs: HashMap<NodeId, DefId>,
+    failed_constraints: usize,
+) -> SolveOutput {
     let mut output = SolveOutput {
         resolved_node_types: HashMap::new(),
         resolved_def_types: HashMap::new(),
@@ -267,24 +397,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             .insert(*def_id, term_utils::canonicalize_type(unifier.apply(term)));
     }
 
-    errors.extend(check_unresolved_local_infer_vars(
-        &output.resolved_def_types,
-        &constrain.constraints,
-        &constrain.pattern_obligations,
-        &engine.context().def_table,
-        unifier.vars(),
-        &errors,
-    ));
-
-    *engine.type_vars_mut() = unifier.vars().clone();
-    engine.state_mut().solve = output;
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        engine.state_mut().diags.extend(errors.clone());
-        Err(errors)
-    }
+    output
 }
 
 fn check_expr_obligations(
