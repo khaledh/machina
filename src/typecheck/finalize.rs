@@ -15,6 +15,7 @@ use crate::tree::typed::build_module;
 use crate::typecheck::Unifier;
 use crate::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::typecheck::engine::TypecheckEngine;
+use crate::typecheck::engine::lookup_property;
 use crate::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitPropertySig, CollectedTraitSig,
 };
@@ -365,23 +366,6 @@ fn resolve_property_access_for_finalize(
         getter_def: None,
         setter_def: None,
     })
-}
-
-fn property_owner_name(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
-        Type::String => Some("string"),
-        _ => None,
-    }
-}
-
-fn lookup_property<'a>(
-    property_sigs: &'a HashMap<String, HashMap<String, CollectedPropertySig>>,
-    owner_ty: &Type,
-    field: &str,
-) -> Option<&'a CollectedPropertySig> {
-    let owner = property_owner_name(owner_ty)?;
-    property_sigs.get(owner).and_then(|props| props.get(field))
 }
 
 fn resolve_term(ty: &Type, engine: &TypecheckEngine) -> Type {

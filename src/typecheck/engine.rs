@@ -116,6 +116,23 @@ pub(crate) struct CollectedPropertySig {
     pub(crate) setter: Option<DefId>,
 }
 
+pub(crate) fn property_owner_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
+        Type::String => Some("string"),
+        _ => None,
+    }
+}
+
+pub(crate) fn lookup_property<'a>(
+    property_sigs: &'a HashMap<String, HashMap<String, CollectedPropertySig>>,
+    owner_ty: &Type,
+    field: &str,
+) -> Option<&'a CollectedPropertySig> {
+    let owner = property_owner_name(owner_ty)?;
+    property_sigs.get(owner).and_then(|props| props.get(field))
+}
+
 pub(crate) struct TypecheckEngine {
     env: TcEnv,
     state: TcState,

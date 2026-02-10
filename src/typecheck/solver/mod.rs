@@ -33,6 +33,7 @@ use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind};
 use crate::typecheck::capability::ensure_hashable;
 use crate::typecheck::constraints::{Constraint, ConstraintReason, ExprObligation};
+use crate::typecheck::engine::lookup_property;
 use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
 use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::typecheck::typesys::TypeVarKind;
@@ -628,23 +629,6 @@ enum PropertyResolution {
     Missing,
     Ambiguous,
     Private,
-}
-
-fn property_owner_name(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
-        Type::String => Some("string"),
-        _ => None,
-    }
-}
-
-fn lookup_property<'a>(
-    property_sigs: &'a HashMap<String, HashMap<String, CollectedPropertySig>>,
-    owner_ty: &Type,
-    field: &str,
-) -> Option<&'a CollectedPropertySig> {
-    let owner = property_owner_name(owner_ty)?;
-    property_sigs.get(owner).and_then(|props| props.get(field))
 }
 
 fn resolve_property_access(
