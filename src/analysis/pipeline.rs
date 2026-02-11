@@ -12,7 +12,7 @@ use crate::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
 use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer};
 use crate::parse::Parser;
-use crate::resolve::resolve;
+use crate::resolve::resolve_partial;
 use crate::tree::NodeId;
 use crate::tree::NodeIdGen;
 use crate::typecheck::type_check;
@@ -97,21 +97,24 @@ pub(crate) fn run_module_pipeline(
     let resolved = rt.execute(resolve_key, move |_rt| {
         let mut state = ResolveStageOutput::default();
         if let Some(parsed) = resolve_input {
-            match resolve(parsed) {
-                Ok(resolved) => state.product = Some(resolved),
-                Err(errors) => {
-                    state
-                        .diagnostics
-                        .extend(errors.iter().map(Diagnostic::from_resolve_error));
-                    state.poisoned_nodes.insert(ROOT_POISON_NODE);
-                }
+            let resolved = resolve_partial(parsed);
+            state.product = Some(resolved.context);
+            if !resolved.errors.is_empty() {
+                state
+                    .diagnostics
+                    .extend(resolved.errors.iter().map(Diagnostic::from_resolve_error));
+                state.poisoned_nodes.insert(ROOT_POISON_NODE);
             }
         }
         Ok(state)
     })?;
 
     let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
-    let typecheck_input = resolved.product.clone();
+    let typecheck_input = if resolved.diagnostics.is_empty() {
+        resolved.product.clone()
+    } else {
+        None
+    };
     let typechecked = rt.execute(typecheck_key, move |_rt| {
         let mut state = TypecheckStageOutput::default();
         if let Some(resolved) = typecheck_input {

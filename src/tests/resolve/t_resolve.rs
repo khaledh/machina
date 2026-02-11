@@ -8,7 +8,7 @@ use crate::frontend::{
 };
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
-use crate::resolve::{DefKind, Visibility, resolve, resolve_program};
+use crate::resolve::{DefKind, Visibility, resolve, resolve_partial, resolve_program};
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -38,6 +38,21 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
 
     let ast_context = ParsedContext::new(module, id_gen);
     resolve(ast_context)
+}
+
+fn resolve_source_partial(source: &str) -> ResolveOutput {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
+
+    let ast_context = ParsedContext::new(module, id_gen);
+    resolve_partial(ast_context)
 }
 
 #[test]
@@ -97,6 +112,33 @@ fn test_resolve_enum_undefined() {
             e => panic!("Expected EnumUndefined, got {:?}", e),
         }
     }
+}
+
+#[test]
+fn test_resolve_partial_preserves_context_with_errors() {
+    let source = r#"
+        fn id(x: u64) -> u64 { x }
+        fn main() -> u64 {
+            let y = missing;
+            id(1)
+        }
+    "#;
+
+    let output = resolve_source_partial(source);
+    assert!(
+        !output.errors.is_empty(),
+        "expected unresolved-name errors in partial resolve"
+    );
+
+    let defs: Vec<_> = output.context.def_table.clone().into_iter().collect();
+    assert!(
+        defs.iter().any(|d| d.name == "id"),
+        "partial resolve should preserve healthy defs"
+    );
+    assert!(
+        defs.iter().any(|d| d.name == "main"),
+        "partial resolve should preserve function defs"
+    );
 }
 
 #[test]

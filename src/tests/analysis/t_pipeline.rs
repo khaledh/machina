@@ -30,12 +30,12 @@ fn pipeline_marks_resolve_failure_as_poisoned() {
 
     assert!(state.parsed.product.is_some());
     assert!(!state.resolved.diagnostics.is_empty());
-    assert!(state.resolved.product.is_none());
+    assert!(state.resolved.product.is_some());
     assert!(state.resolved.poisoned_nodes.contains(&ROOT_POISON_NODE));
 
     let lookup = to_lookup_state(&state);
     assert!(lookup.poisoned_nodes.contains(&ROOT_POISON_NODE));
-    assert!(lookup.resolved.is_none());
+    assert!(lookup.resolved.is_some());
     assert!(lookup.typed.is_none());
 }
 

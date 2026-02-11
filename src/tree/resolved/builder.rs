@@ -1,7 +1,7 @@
 //! Build the resolved tree from the parsed tree.
 
-use crate::resolve::DefId;
 use crate::resolve::def_table::NodeDefLookup;
+use crate::resolve::{DefId, UNKNOWN_DEF_ID};
 use crate::tree::NodeId;
 use crate::tree::map::TreeMapper;
 use crate::tree::parsed as par;
@@ -26,7 +26,7 @@ impl<'a> TreeMapper for ResolvedTreeMapper<'a> {
     ) -> Self::OutD {
         self.node_def_lookup
             .lookup_node_def_id(node_id)
-            .unwrap_or_else(|| panic!("Missing def for NodeId({})", node_id.0))
+            .unwrap_or(UNKNOWN_DEF_ID)
     }
 
     fn map_type_payload(

@@ -7,6 +7,10 @@ use std::hash::{Hash, Hasher};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(pub u32);
 
+/// Sentinel def-id used in partial resolve paths when a node has no resolved
+/// definition binding.
+pub const UNKNOWN_DEF_ID: DefId = DefId(u32::MAX);
+
 impl fmt::Display for DefId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)

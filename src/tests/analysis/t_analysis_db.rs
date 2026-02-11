@@ -173,6 +173,27 @@ fn main() -> u64 { id(1) }
 }
 
 #[test]
+fn def_at_still_works_with_unrelated_resolve_error() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 {
+    let y = missing;
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_partial.mc"), source);
+
+    let mut use_span = span_for_substring(source, "id(1)");
+    use_span.end = position_at(source, use_span.start.offset + 2);
+    let def_id = db
+        .def_at_file(file_id, use_span)
+        .expect("def_at query should succeed");
+
+    assert!(def_id.is_some(), "expected def lookup at healthy call site");
+}
+
+#[test]
 fn def_location_points_to_declaration_site() {
     let mut db = AnalysisDb::new();
     let source = r#"

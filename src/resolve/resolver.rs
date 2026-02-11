@@ -34,6 +34,12 @@ pub struct SymbolResolver {
     imported_modules: HashMap<String, ImportedModule>,
 }
 
+#[derive(Clone)]
+pub struct ResolveOutput {
+    pub context: ResolvedContext,
+    pub errors: Vec<ResolveError>,
+}
+
 impl Default for SymbolResolver {
     fn default() -> Self {
         Self::new()
@@ -603,10 +609,10 @@ impl SymbolResolver {
         );
     }
 
-    pub fn resolve(
+    pub fn resolve_partial(
         &mut self,
         module: &Module,
-    ) -> Result<(DefTable, NodeDefLookup), Vec<ResolveError>> {
+    ) -> (DefTable, NodeDefLookup, Vec<ResolveError>) {
         self.with_scope(|resolver| {
             // global scope
 
@@ -658,11 +664,20 @@ impl SymbolResolver {
             resolver.visit_module(module);
         });
 
-        if self.errors.is_empty() {
-            let (def_table, node_def_lookup) = std::mem::take(&mut self.def_table_builder).finish();
+        let (def_table, node_def_lookup) = std::mem::take(&mut self.def_table_builder).finish();
+        let errors = std::mem::take(&mut self.errors);
+        (def_table, node_def_lookup, errors)
+    }
+
+    pub fn resolve(
+        &mut self,
+        module: &Module,
+    ) -> Result<(DefTable, NodeDefLookup), Vec<ResolveError>> {
+        let (def_table, node_def_lookup, errors) = self.resolve_partial(module);
+        if errors.is_empty() {
             Ok((def_table, node_def_lookup))
         } else {
-            Err(self.errors.clone())
+            Err(errors)
         }
     }
 
@@ -1503,20 +1518,37 @@ pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<Resolv
     resolve_with_imports(ast_context, HashMap::new())
 }
 
+pub fn resolve_partial(ast_context: ParsedContext) -> ResolveOutput {
+    resolve_with_imports_partial(ast_context, HashMap::new())
+}
+
 pub fn resolve_with_imports(
     ast_context: ParsedContext,
     imported_modules: HashMap<String, ImportedModule>,
 ) -> Result<ResolvedContext, Vec<ResolveError>> {
+    let output = resolve_with_imports_partial(ast_context, imported_modules);
+    if output.errors.is_empty() {
+        Ok(output.context)
+    } else {
+        Err(output.errors)
+    }
+}
+
+pub fn resolve_with_imports_partial(
+    ast_context: ParsedContext,
+    imported_modules: HashMap<String, ImportedModule>,
+) -> ResolveOutput {
     let mut resolver = SymbolResolver::new();
     resolver.imported_modules = imported_modules;
-    let (def_table, node_def_lookup) = resolver.resolve(&ast_context.module)?;
+    let (def_table, node_def_lookup, errors) = resolver.resolve_partial(&ast_context.module);
 
     // Build resolved tree from parsed tree + NodeDefLookup
     let resolved_module = build_module(&node_def_lookup, &ast_context.module);
 
-    let resolved_context = ast_context.with_def_table(def_table, resolved_module);
-
-    Ok(resolved_context)
+    ResolveOutput {
+        context: ast_context.with_def_table(def_table, resolved_module),
+        errors,
+    }
 }
 
 pub fn resolve_program(
