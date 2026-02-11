@@ -35,6 +35,7 @@ use crate::frontend::program::flatten_program;
 use crate::frontend::{self, ModuleId, ModulePath};
 use crate::resolve::DefId;
 use crate::tree::NodeId;
+use crate::typecheck::type_check_partial;
 use crate::types::Type;
 
 #[derive(Default)]
@@ -343,7 +344,15 @@ impl AnalysisDb {
         let Some(resolved) = resolved else {
             return Ok(Vec::new());
         };
-        let mut out = collect_completions(&active_source, cursor, &resolved, typed.as_ref());
+        // Keep member completions useful when unrelated resolve errors suppress
+        // typed lookup-state output by running a local best-effort typecheck.
+        let fallback_typed = if typed.is_none() {
+            Some(type_check_partial(resolved.clone()).context)
+        } else {
+            None
+        };
+        let typed_for_completion = typed.as_ref().or(fallback_typed.as_ref());
+        let mut out = collect_completions(&active_source, cursor, &resolved, typed_for_completion);
         out.sort_by(|a, b| a.label.cmp(&b.label).then(a.def_id.0.cmp(&b.def_id.0)));
         out.dedup_by(|a, b| a.label == b.label && a.kind == b.kind && a.def_id == b.def_id);
         Ok(out)
