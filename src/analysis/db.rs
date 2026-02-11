@@ -6,13 +6,15 @@
 //! - module-closure invalidation.
 
 use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use crate::analysis::completion::{
     collect as collect_completions, synthesize_member_completion_source,
 };
 use crate::analysis::diagnostics::Diagnostic;
+use crate::analysis::frontend_support::{
+    SnapshotOverlayLoader, frontend_error_diagnostics, infer_project_root, stable_source_revision,
+};
 use crate::analysis::lookups::{
     code_actions_for_range, def_at_span, def_location_at_span, document_symbols, hover_at_span,
     semantic_tokens, signature_help_at_span, type_at_span,
@@ -30,7 +32,7 @@ use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::analysis::syntax_index::node_span_map;
 use crate::diag::Span;
 use crate::frontend::program::flatten_program;
-use crate::frontend::{self, FrontendError, ModuleId, ModuleLoader, ModulePath};
+use crate::frontend::{self, ModuleId, ModulePath};
 use crate::resolve::DefId;
 use crate::tree::NodeId;
 use crate::types::Type;
@@ -561,11 +563,7 @@ impl AnalysisDb {
             return Ok(None);
         }
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        source.hash(&mut hasher);
-        let source_hash = hasher.finish();
-
-        let revision = snapshot.revision() ^ source_hash | (1u64 << 63);
+        let revision = snapshot.revision() ^ stable_source_revision(&source) | (1u64 << 63);
         let module_id = ModuleId(file_id.0);
         let pipeline = run_module_pipeline(
             &mut self.runtime,
@@ -612,86 +610,6 @@ fn is_identifier_name(name: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-struct SnapshotOverlayLoader {
-    snapshot: AnalysisSnapshot,
-    fs_loader: frontend::FsModuleLoader,
-}
-
-impl SnapshotOverlayLoader {
-    fn new(snapshot: AnalysisSnapshot, project_root: PathBuf) -> Self {
-        Self {
-            snapshot,
-            fs_loader: frontend::FsModuleLoader::new(project_root),
-        }
-    }
-}
-
-impl ModuleLoader for SnapshotOverlayLoader {
-    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
-        let (file_path, disk_source) = self.fs_loader.load(path)?;
-        if let Some(overlay) = snapshot_text_for_path(&self.snapshot, &file_path) {
-            return Ok((file_path, overlay));
-        }
-        Ok((file_path, disk_source))
-    }
-}
-
-fn snapshot_text_for_path(snapshot: &AnalysisSnapshot, path: &Path) -> Option<String> {
-    if let Some(file_id) = snapshot.file_id(path) {
-        return snapshot.text(file_id).map(|s| s.to_string());
-    }
-    if let Ok(canon) = path.canonicalize()
-        && let Some(file_id) = snapshot.file_id(&canon)
-    {
-        return snapshot.text(file_id).map(|s| s.to_string());
-    }
-    None
-}
-
-fn infer_project_root(entry_file: &Path) -> PathBuf {
-    for ancestor in entry_file.ancestors() {
-        if ancestor.join("Cargo.toml").exists() {
-            return ancestor.to_path_buf();
-        }
-    }
-    entry_file
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf()
-}
-
-fn stable_source_revision(source: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn frontend_error_diagnostics(error: FrontendError) -> Vec<Diagnostic> {
-    fn frontend_diag(message: String, span: Span) -> Diagnostic {
-        Diagnostic {
-            phase: crate::analysis::diagnostics::DiagnosticPhase::Resolve,
-            code: "MC-FRONTEND".to_string(),
-            severity: crate::analysis::diagnostics::DiagnosticSeverity::Error,
-            span,
-            message,
-            metadata: Default::default(),
-        }
-    }
-
-    match error {
-        FrontendError::Lex { error, .. } => vec![Diagnostic::from_lex_error(&error)],
-        FrontendError::Parse { error, .. } => vec![Diagnostic::from_parse_error(&error)],
-        FrontendError::UnknownRequireAlias { span, .. }
-        | FrontendError::RequireMemberUndefined { span, .. }
-        | FrontendError::RequireMemberPrivate { span, .. }
-        | FrontendError::DuplicateRequireAlias { span, .. }
-        | FrontendError::SymbolImportAliasUnsupported { span, .. } => {
-            vec![frontend_diag(error.to_string(), span)]
-        }
-        _ => vec![frontend_diag(error.to_string(), Span::default())],
-    }
 }
 
 #[cfg(test)]
