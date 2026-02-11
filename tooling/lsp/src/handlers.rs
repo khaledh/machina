@@ -888,7 +888,10 @@ mod tests {
         let locations = response["result"]
             .as_array()
             .expect("expected location array");
-        assert!(!locations.is_empty(), "expected at least one definition location");
+        assert!(
+            !locations.is_empty(),
+            "expected at least one definition location"
+        );
         assert_eq!(locations[0]["uri"], "file:///tmp/lsp-definition.mc");
     }
 

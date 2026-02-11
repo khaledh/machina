@@ -228,7 +228,9 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
-        let LookupState { resolved, typed, .. } = self.lookup_state_for_file(file_id)?;
+        let LookupState {
+            resolved, typed, ..
+        } = self.lookup_state_for_file(file_id)?;
 
         if let Some(typed) = typed {
             if let Some(node_id) = node_at_span(&typed.module, query_span) {

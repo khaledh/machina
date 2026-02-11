@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::analysis::db::AnalysisDb;
 use crate::analysis::diagnostics::DiagnosticPhase;
 use crate::analysis::module_graph::ModuleGraph;
+use crate::analysis::pipeline::ROOT_POISON_NODE;
 use crate::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
 use crate::diag::{Position, Span};
 use crate::frontend::ModuleId;
@@ -140,6 +141,17 @@ fn diagnostics_respect_cancellation() {
         Err(QueryCancelled),
         "cancelled token should abort diagnostics"
     );
+}
+
+#[test]
+fn poisoned_nodes_are_exposed_for_broken_files() {
+    let mut db = AnalysisDb::new();
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/poisoned.mc"), "fn main( {");
+
+    let poisoned = db
+        .poisoned_nodes_for_file(file_id)
+        .expect("poison query should succeed");
+    assert!(poisoned.contains(&ROOT_POISON_NODE));
 }
 
 #[test]
