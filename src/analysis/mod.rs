@@ -12,6 +12,7 @@ pub mod lookups;
 pub mod module_graph;
 pub mod pipeline;
 pub mod query;
+pub mod rename;
 pub mod results;
 pub mod snapshot;
 pub mod syntax_index;

@@ -24,12 +24,12 @@ use crate::analysis::pipeline::{
     LookupState, collect_sorted_diagnostics, run_module_pipeline, to_lookup_state,
 };
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
+use crate::analysis::rename::{references as collect_references, rename_plan as build_rename_plan};
 use crate::analysis::results::{
-    CodeAction, CompletionItem, DocumentSymbol, HoverInfo, Location, RenameConflict, RenameEdit,
-    RenamePlan, SemanticToken, SignatureHelp,
+    CodeAction, CompletionItem, DocumentSymbol, HoverInfo, Location, RenamePlan, SemanticToken,
+    SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
-use crate::analysis::syntax_index::node_span_map;
 use crate::diag::Span;
 use crate::frontend::program::flatten_program;
 use crate::frontend::{self, ModuleId, ModulePath};
@@ -94,12 +94,22 @@ impl AnalysisDb {
         self.sources.snapshot()
     }
 
-    pub fn diagnostics_for_path(&mut self, path: &Path) -> QueryResult<Vec<Diagnostic>> {
+    fn with_file_id<R, F, D>(&mut self, path: &Path, default: D, f: F) -> QueryResult<R>
+    where
+        F: FnOnce(&mut Self, FileId) -> QueryResult<R>,
+        D: FnOnce() -> R,
+    {
         let snapshot = self.snapshot();
         let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(Vec::new());
+            return Ok(default());
         };
-        self.diagnostics_for_file(file_id)
+        f(self, file_id)
+    }
+
+    pub fn diagnostics_for_path(&mut self, path: &Path) -> QueryResult<Vec<Diagnostic>> {
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.diagnostics_for_file(file_id)
+        })
     }
 
     pub fn diagnostics_for_file(&mut self, file_id: FileId) -> QueryResult<Vec<Diagnostic>> {
@@ -125,11 +135,9 @@ impl AnalysisDb {
     /// Program-aware diagnostics for an entry file, loading dependency modules from
     /// disk or snapshot overlays.
     pub fn diagnostics_for_program_path(&mut self, path: &Path) -> QueryResult<Vec<Diagnostic>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(Vec::new());
-        };
-        self.diagnostics_for_program_file(file_id)
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.diagnostics_for_program_file(file_id)
+        })
     }
 
     /// Program-aware diagnostics for an entry file id.
@@ -212,11 +220,9 @@ impl AnalysisDb {
     }
 
     pub fn poisoned_nodes_for_path(&mut self, path: &Path) -> QueryResult<HashSet<NodeId>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(HashSet::new());
-        };
-        self.poisoned_nodes_for_file(file_id)
+        self.with_file_id(path, HashSet::new, |db, file_id| {
+            db.poisoned_nodes_for_file(file_id)
+        })
     }
 
     pub fn poisoned_nodes_for_file(&mut self, file_id: FileId) -> QueryResult<HashSet<NodeId>> {
@@ -225,11 +231,11 @@ impl AnalysisDb {
     }
 
     pub fn def_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<DefId>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(None);
-        };
-        self.def_at_file(file_id, query_span)
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.def_at_file(file_id, query_span),
+        )
     }
 
     pub fn def_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<DefId>> {
@@ -242,11 +248,11 @@ impl AnalysisDb {
         path: &Path,
         query_span: Span,
     ) -> QueryResult<Option<Location>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(None);
-        };
-        self.def_location_at_file(file_id, query_span)
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.def_location_at_file(file_id, query_span),
+        )
     }
 
     pub fn def_location_at_file(
@@ -260,11 +266,11 @@ impl AnalysisDb {
     }
 
     pub fn type_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<Type>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(None);
-        };
-        self.type_at_file(file_id, query_span)
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.type_at_file(file_id, query_span),
+        )
     }
 
     pub fn type_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<Type>> {
@@ -277,11 +283,11 @@ impl AnalysisDb {
         path: &Path,
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(None);
-        };
-        self.hover_at_file(file_id, query_span)
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.hover_at_file(file_id, query_span),
+        )
     }
 
     pub fn hover_at_file(
@@ -298,11 +304,9 @@ impl AnalysisDb {
         path: &Path,
         query_span: Span,
     ) -> QueryResult<Vec<CompletionItem>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(Vec::new());
-        };
-        self.completions_at_file(file_id, query_span)
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.completions_at_file(file_id, query_span)
+        })
     }
 
     pub fn completions_at_file(
@@ -350,11 +354,11 @@ impl AnalysisDb {
         path: &Path,
         query_span: Span,
     ) -> QueryResult<Option<SignatureHelp>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(None);
-        };
-        self.signature_help_at_file(file_id, query_span)
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.signature_help_at_file(file_id, query_span),
+        )
     }
 
     pub fn signature_help_at_file(
@@ -367,11 +371,9 @@ impl AnalysisDb {
     }
 
     pub fn document_symbols_at_path(&mut self, path: &Path) -> QueryResult<Vec<DocumentSymbol>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(Vec::new());
-        };
-        self.document_symbols_at_file(file_id)
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.document_symbols_at_file(file_id)
+        })
     }
 
     pub fn document_symbols_at_file(
@@ -383,11 +385,9 @@ impl AnalysisDb {
     }
 
     pub fn semantic_tokens_at_path(&mut self, path: &Path) -> QueryResult<Vec<SemanticToken>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(Vec::new());
-        };
-        self.semantic_tokens_at_file(file_id)
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.semantic_tokens_at_file(file_id)
+        })
     }
 
     pub fn semantic_tokens_at_file(&mut self, file_id: FileId) -> QueryResult<Vec<SemanticToken>> {
@@ -400,11 +400,9 @@ impl AnalysisDb {
         path: &Path,
         range: Span,
     ) -> QueryResult<Vec<CodeAction>> {
-        let snapshot = self.snapshot();
-        let Some(file_id) = snapshot.file_id(path) else {
-            return Ok(Vec::new());
-        };
-        self.code_actions_at_file(file_id, range)
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.code_actions_at_file(file_id, range)
+        })
     }
 
     pub fn code_actions_at_file(
@@ -418,120 +416,16 @@ impl AnalysisDb {
 
     pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
         let snapshot = self.snapshot();
-        let mut out = Vec::new();
-
-        for file_id in snapshot.file_ids() {
-            let state = self.lookup_state_for_file(file_id)?;
-            let Some(resolved) = state.resolved else {
-                continue;
-            };
-
-            let node_spans = node_span_map(&resolved.module);
-            for (node_id, mapped_def_id) in resolved.def_table.node_def_entries() {
-                if mapped_def_id != def_id {
-                    continue;
-                }
-                let Some(span) = node_spans.get(&node_id).copied() else {
-                    continue;
-                };
-                out.push(Location {
-                    file_id,
-                    path: snapshot.path(file_id).map(Path::to_path_buf),
-                    span,
-                });
-            }
-        }
-
-        out.sort_by_key(|loc| {
-            (
-                loc.path.clone(),
-                loc.span.start.line,
-                loc.span.start.column,
-                loc.span.end.line,
-                loc.span.end.column,
-                loc.file_id,
-            )
-        });
-        out.dedup();
-        Ok(out)
+        collect_references(&snapshot, def_id, |file_id| {
+            self.lookup_state_for_file(file_id)
+        })
     }
 
     pub fn rename_plan(&mut self, def_id: DefId, new_name: &str) -> QueryResult<RenamePlan> {
-        let references = self.references(def_id)?;
-        let mut plan = RenamePlan {
-            def_id,
-            old_name: None,
-            new_name: new_name.to_string(),
-            edits: Vec::new(),
-            conflicts: Vec::new(),
-        };
-
-        if !is_identifier_name(new_name) {
-            plan.conflicts.push(RenameConflict {
-                message: format!("`{new_name}` is not a valid identifier"),
-                existing_def: None,
-            });
-            return Ok(plan);
-        }
-
         let snapshot = self.snapshot();
-        let mut owner_module = None;
-        let mut existing_same_name = HashSet::new();
-        for file_id in snapshot.file_ids() {
-            let state = self.lookup_state_for_file(file_id)?;
-            let Some(resolved) = state.resolved else {
-                continue;
-            };
-
-            if plan.old_name.is_none()
-                && let Some(def) = resolved.def_table.lookup_def(def_id)
-            {
-                plan.old_name = Some(def.name.clone());
-                owner_module = resolved
-                    .def_owners
-                    .get(&def_id)
-                    .copied()
-                    .or(Some(ModuleId(file_id.0)));
-            }
-
-            let Some(target_owner) = owner_module else {
-                continue;
-            };
-            for def in resolved.def_table.defs() {
-                if def.id == def_id || def.name != new_name {
-                    continue;
-                }
-                let owner = resolved
-                    .def_owners
-                    .get(&def.id)
-                    .copied()
-                    .or(Some(ModuleId(file_id.0)));
-                if owner == Some(target_owner) && existing_same_name.insert(def.id) {
-                    plan.conflicts.push(RenameConflict {
-                        message: format!("name `{new_name}` already exists as {}", def.kind),
-                        existing_def: Some(def.id),
-                    });
-                }
-            }
-        }
-
-        if let Some(old_name) = &plan.old_name
-            && old_name == new_name
-        {
-            plan.conflicts.push(RenameConflict {
-                message: "new name matches existing symbol name".to_string(),
-                existing_def: Some(def_id),
-            });
-        }
-
-        for location in references {
-            plan.edits.push(RenameEdit {
-                location,
-                replacement: new_name.to_string(),
-            });
-        }
-
-        Ok(plan)
+        build_rename_plan(&snapshot, def_id, new_name, |file_id| {
+            self.lookup_state_for_file(file_id)
+        })
     }
 
     fn lookup_state_for_file(&mut self, file_id: FileId) -> QueryResult<LookupState> {
@@ -599,17 +493,6 @@ impl AnalysisDb {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
     }
-}
-
-fn is_identifier_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 #[cfg(test)]
