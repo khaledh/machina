@@ -399,6 +399,111 @@ fn main() -> u64 {
 }
 
 #[test]
+fn mixed_region_resolve_fixture_keeps_healthy_symbol_queries() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Packet = {
+    id: u64,
+}
+
+fn id(x: u64) -> u64 { x }
+
+fn bad_region() -> u64 {
+    missing
+}
+
+fn main() -> u64 {
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/mixed_resolve_regions.mc"), source);
+
+    let mut id_use_span = span_for_substring(source, "id(1)");
+    id_use_span.end = position_at(source, id_use_span.start.offset + 2);
+
+    let def_id = db
+        .def_at_file(file_id, id_use_span)
+        .expect("def_at query should succeed");
+    assert!(
+        def_id.is_some(),
+        "expected def lookup in healthy region despite unresolved symbol elsewhere"
+    );
+
+    let hover = db
+        .hover_at_file(file_id, id_use_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info in healthy region");
+    assert_eq!(hover.def_name.as_deref(), Some("id"));
+
+    let completions = db
+        .completions_at_file(file_id, span_for_substring(source, "main"))
+        .expect("completions query should succeed");
+    assert!(
+        completions.iter().any(|c| c.label == "id"),
+        "expected function completion in mixed resolve fixture"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "Packet"),
+        "expected type completion in mixed resolve fixture"
+    );
+}
+
+#[test]
+fn mixed_region_type_fixture_keeps_healthy_type_queries() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+
+fn bad_region() -> u64 {
+    let v: u64 = true;
+    v
+}
+
+fn main() -> u64 {
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/mixed_type_regions.mc"), source);
+
+    let mut id_use_span = span_for_substring(source, "id(1)");
+    id_use_span.end = position_at(source, id_use_span.start.offset + 2);
+
+    let def_id = db
+        .def_at_file(file_id, id_use_span)
+        .expect("def_at query should succeed");
+    assert!(
+        def_id.is_some(),
+        "expected def lookup in healthy region despite type error elsewhere"
+    );
+
+    let ty = db
+        .type_at_file(file_id, span_for_substring(source, "id(1)"))
+        .expect("type_at query should succeed");
+    assert!(
+        ty.is_some(),
+        "expected a concrete type in healthy region despite type error elsewhere"
+    );
+
+    let hover = db
+        .hover_at_file(file_id, id_use_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info in healthy region");
+    assert_eq!(hover.def_name.as_deref(), Some("id"));
+    assert!(
+        hover.ty.is_some(),
+        "expected hover type in healthy region despite type error elsewhere"
+    );
+
+    let completions = db
+        .completions_at_file(file_id, span_for_substring(source, "main"))
+        .expect("completions query should succeed");
+    assert!(
+        completions.iter().any(|c| c.label == "id"),
+        "expected function completion in mixed type fixture"
+    );
+}
+
+#[test]
 fn signature_help_returns_call_signature_and_active_parameter() {
     let mut db = AnalysisDb::new();
     let source = r#"

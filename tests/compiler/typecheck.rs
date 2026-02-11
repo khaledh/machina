@@ -293,6 +293,81 @@ fn test_modules_private_property_access_rejected() {
 }
 
 #[test]
+fn test_strict_compile_rejects_mixed_region_resolve_fixture() {
+    let entry_source = r#"
+        fn id(x: u64) -> u64 { x }
+
+        fn bad_region() -> u64 {
+            missing
+        }
+
+        fn main() -> u64 {
+            id(1)
+        }
+    "#;
+
+    with_temp_program(
+        "strict_mixed_region_resolve",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "strict compile must still fail on unresolved symbols"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::Resolve(resolve_err)
+                            if resolve_err.to_string().contains("Undefined variable")
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_strict_compile_rejects_mixed_region_type_fixture() {
+    let entry_source = r#"
+        fn id(x: u64) -> u64 { x }
+
+        fn bad_region() -> u64 {
+            let v: u64 = true;
+            v
+        }
+
+        fn main() -> u64 {
+            id(1)
+        }
+    "#;
+
+    with_temp_program(
+        "strict_mixed_region_type",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = typecheck_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "strict compile must still fail on type errors"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(type_err.kind(), TypeCheckErrorKind::DeclTypeMismatch(_, _, _))
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
 fn test_modules_opaque_pattern_destructure_rejected() {
     let entry_source = r#"
         requires {
