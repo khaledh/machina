@@ -1,8 +1,10 @@
 use clap::Parser as ClapParser;
 use machina::analysis::db::AnalysisDb;
+use machina::analysis::diagnostics::Diagnostic;
 use machina::analysis::diagnostics::DiagnosticPhase;
-use machina::compile::{CompileOptions, compile_with_path};
+use machina::compile::{CompileOptions, check_with_path, compile_with_path};
 use machina::diag::{CompileError, Position, Span, format_error};
+use machina::frontend::FrontendError;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -359,29 +361,82 @@ fn main() {
 fn run_check(input_path: &Path) -> Result<usize, String> {
     let source = std::fs::read_to_string(input_path)
         .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
-
-    let mut db = AnalysisDb::new();
-    let file_id = db.upsert_disk_text(input_path.to_path_buf(), source.as_str());
-    let diagnostics = db
-        .diagnostics_for_file(file_id)
-        .map_err(|_| "analysis query cancelled".to_string())?;
-
-    if diagnostics.is_empty() {
-        println!("[OK] no diagnostics");
-        return Ok(0);
+    match check_with_path(&source, input_path, true) {
+        Ok(()) => {
+            println!("[OK] no diagnostics");
+            Ok(0)
+        }
+        Err(errors) => {
+            let mut count = 0usize;
+            for error in errors {
+                count += print_check_error(&source, error);
+            }
+            Ok(count)
+        }
     }
+}
 
-    for diag in &diagnostics {
-        let phase = match diag.phase {
-            DiagnosticPhase::Parse => "parse",
-            DiagnosticPhase::Resolve => "resolve",
-            DiagnosticPhase::Typecheck => "typecheck",
-        };
-        let message = format!("[{phase}:{}] {}", diag.code, diag.message);
-        println!("{}", format_error(&source, diag.span, message));
+fn print_check_error(entry_source: &str, error: CompileError) -> usize {
+    match error {
+        CompileError::Lex(e) => {
+            print_structured_diag(entry_source, Diagnostic::from_lex_error(&e));
+            1
+        }
+        CompileError::Parse(e) => {
+            print_structured_diag(entry_source, Diagnostic::from_parse_error(&e));
+            1
+        }
+        CompileError::Resolve(e) => {
+            print_structured_diag(entry_source, Diagnostic::from_resolve_error(&e));
+            1
+        }
+        CompileError::TypeCheck(e) => {
+            print_structured_diag(entry_source, Diagnostic::from_typecheck_error(&e));
+            1
+        }
+        CompileError::Frontend(frontend) => print_frontend_check_error(frontend),
+        CompileError::Io(path, err) => {
+            println!("{}: {}", path.display(), err);
+            1
+        }
+        CompileError::QueryCancelled => {
+            println!("analysis query cancelled");
+            1
+        }
+        other => {
+            println!("{other}");
+            1
+        }
     }
+}
 
-    Ok(diagnostics.len())
+fn print_frontend_check_error(error: FrontendError) -> usize {
+    match error {
+        FrontendError::Lex { path, error } => {
+            let source = std::fs::read_to_string(&path).unwrap_or_default();
+            print_structured_diag(&source, Diagnostic::from_lex_error(&error));
+            1
+        }
+        FrontendError::Parse { path, error } => {
+            let source = std::fs::read_to_string(&path).unwrap_or_default();
+            print_structured_diag(&source, Diagnostic::from_parse_error(&error));
+            1
+        }
+        other => {
+            println!("{other}");
+            1
+        }
+    }
+}
+
+fn print_structured_diag(source: &str, diag: Diagnostic) {
+    let phase = match diag.phase {
+        DiagnosticPhase::Parse => "parse",
+        DiagnosticPhase::Resolve => "resolve",
+        DiagnosticPhase::Typecheck => "typecheck",
+    };
+    let message = format!("[{phase}:{}] {}", diag.code, diag.message);
+    println!("{}", format_error(source, diag.span, message));
 }
 
 fn run_query(

@@ -38,6 +38,73 @@ pub struct CompileOutput {
     pub ir: Option<String>,
 }
 
+/// Run a module-aware frontend check (parse/resolve/typecheck) without backend lowering.
+pub fn check_with_path(
+    source: &str,
+    source_path: &std::path::Path,
+    inject_prelude: bool,
+) -> Result<(), Vec<CompileError>> {
+    let program =
+        frontend::discover_and_parse_program(source, source_path).map_err(|e| vec![e.into()])?;
+    let program_context = ProgramParsedContext::new(program);
+
+    let flattened = flatten_program(&program_context).map_err(|errs| {
+        errs.into_iter()
+            .map(CompileError::from)
+            .collect::<Vec<CompileError>>()
+    })?;
+    let user_module = flattened.module;
+    let top_level_owners = flattened.top_level_owners;
+
+    let mut id_gen = program_context.next_node_id_gen().clone();
+    let (module, id_gen_out) = if inject_prelude {
+        let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("std")
+            .join("prelude_decl.mc");
+        let prelude_src = std::fs::read_to_string(&prelude_path)
+            .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
+        let (prelude_module, id_gen_after_prelude) = parse_with_id_gen(&prelude_src, id_gen)?;
+        (
+            merge_modules(&prelude_module, &user_module),
+            id_gen_after_prelude,
+        )
+    } else {
+        (user_module, id_gen)
+    };
+    id_gen = id_gen_out;
+
+    let ast_context = ParsedContext::new(module, id_gen);
+    let module_id = program_context.entry();
+    let mut analysis_db = AnalysisDb::new();
+    let (resolved_result, mut typed_result) = batch::query_parse_resolve_typecheck(
+        &mut analysis_db,
+        module_id,
+        0,
+        ast_context,
+        top_level_owners.clone(),
+    )
+    .map_err(map_batch_query_error)?;
+    let resolved_context = resolved_result.into_context();
+
+    // Preserve compile-path parity: re-type-check after monomorphization if instantiations exist.
+    if !typed_result.generic_insts.is_empty() {
+        let monomorphized_context =
+            monomorphize::monomorphize(resolved_context, &typed_result.generic_insts)
+                .map_err(|e| vec![e.into()])?;
+        typed_result = batch::query_typecheck(&mut analysis_db, module_id, 1, {
+            let monomorphized_context = attach_def_owners(monomorphized_context, &top_level_owners);
+            crate::analysis::results::ResolvedModuleResult::from_context(
+                module_id,
+                monomorphized_context,
+            )
+        })
+        .map_err(map_batch_query_error)?;
+    }
+
+    let _ = typed_result;
+    Ok(())
+}
+
 pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec<CompileError>> {
     compile_with_path(source, None, opts)
 }

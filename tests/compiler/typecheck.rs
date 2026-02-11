@@ -1,5 +1,5 @@
 use crate::common::run_program;
-use machina::compile::{CompileOptions, compile_with_path};
+use machina::compile::{CompileOptions, check_with_path, compile_with_path};
 use machina::diag::CompileError;
 use machina::frontend::FrontendError;
 use machina::typecheck::TypeCheckErrorKind;
@@ -89,6 +89,10 @@ fn typecheck_with_modules(
             inject_prelude: false,
         },
     )
+}
+
+fn check_with_modules(entry_path: &Path, entry_source: &str) -> Result<(), Vec<CompileError>> {
+    check_with_path(entry_source, entry_path, true)
 }
 
 #[test]
@@ -361,6 +365,93 @@ fn test_strict_compile_rejects_mixed_region_type_fixture() {
                         CompileError::TypeCheck(type_err)
                             if matches!(type_err.kind(), TypeCheckErrorKind::DeclTypeMismatch(_, _, _))
                     )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_check_module_graph_parity_std_io_import() {
+    let entry_source = r#"
+        requires {
+            std::io as io
+        }
+
+        fn main() -> u64 {
+            io::println("ok");
+            0
+        }
+    "#;
+
+    with_temp_program(
+        "check_std_io_parity",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_ok(),
+                "module-aware check should accept std::io usage without unresolved symbol false positives"
+            );
+        },
+    );
+}
+
+#[test]
+fn test_check_module_graph_parity_multi_module_requires() {
+    let entry_source = r#"
+        requires {
+            app::util as util
+        }
+
+        fn main() -> u64 {
+            util::answer()
+        }
+    "#;
+
+    let util_source = r#"
+        @[public]
+        fn answer() -> u64 {
+            42
+        }
+    "#;
+
+    with_temp_program(
+        "check_multi_module_parity",
+        entry_source,
+        &[("app/util.mc", util_source)],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_ok(),
+                "module-aware check should follow requires/module flattening like compile"
+            );
+        },
+    );
+}
+
+#[test]
+fn test_check_single_file_behavior_unchanged() {
+    let entry_source = r#"
+        fn main() -> u64 {
+            missing
+        }
+    "#;
+
+    with_temp_program(
+        "check_single_file_behavior",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "single-file unresolved symbol should still fail check"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(err, CompileError::Resolve(resolve_err) if resolve_err.to_string().contains("Undefined variable"))
                 }));
             }
         },

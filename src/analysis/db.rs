@@ -6,6 +6,7 @@
 //! - module-closure invalidation.
 
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use crate::analysis::code_actions::code_actions_for_diagnostic;
@@ -25,7 +26,8 @@ use crate::analysis::syntax_index::{
     span_intersects_span,
 };
 use crate::diag::Span;
-use crate::frontend::ModuleId;
+use crate::frontend::program::flatten_program;
+use crate::frontend::{self, FrontendError, ModuleId, ModuleLoader, ModulePath};
 use crate::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
 use crate::tree::NodeId;
 use crate::types::Type;
@@ -112,6 +114,95 @@ impl AnalysisDb {
         self.execute_query(diagnostics_key, move |rt| {
             let state = run_module_pipeline(rt, module_id, revision, source_for_pipeline)?;
             Ok(collect_sorted_diagnostics(&state))
+        })
+    }
+
+    /// Program-aware diagnostics for an entry file, loading dependency modules from
+    /// disk or snapshot overlays.
+    pub fn diagnostics_for_program_path(&mut self, path: &Path) -> QueryResult<Vec<Diagnostic>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(Vec::new());
+        };
+        self.diagnostics_for_program_file(file_id)
+    }
+
+    /// Program-aware diagnostics for an entry file id.
+    ///
+    /// This is intended for IDE/check workflows where dependency overlays may exist.
+    pub fn diagnostics_for_program_file(
+        &mut self,
+        file_id: FileId,
+    ) -> QueryResult<Vec<Diagnostic>> {
+        let snapshot = self.snapshot();
+        let Some(entry_source) = snapshot.text(file_id) else {
+            return Ok(Vec::new());
+        };
+        let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
+            return Ok(Vec::new());
+        };
+        let revision = snapshot.revision();
+        let module_id = ModuleId(file_id.0);
+        let diagnostics_key = QueryKey::new(
+            crate::analysis::query::QueryKind::Diagnostics,
+            module_id,
+            revision,
+        );
+
+        self.execute_query(diagnostics_key, move |rt| {
+            let project_root = infer_project_root(&entry_path);
+            let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
+                Ok(path) => path,
+                Err(err) => return Ok(frontend_error_diagnostics(err)),
+            };
+            let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
+
+            let program = match frontend::discover_and_parse_program_with_loader(
+                &entry_source,
+                &entry_path,
+                entry_module_path,
+                &loader,
+            ) {
+                Ok(program) => program,
+                Err(err) => return Ok(frontend_error_diagnostics(err)),
+            };
+            let program_context = crate::context::ProgramParsedContext::new(program);
+
+            if let Err(errs) = flatten_program(&program_context) {
+                let mut diagnostics = Vec::new();
+                for err in errs {
+                    diagnostics.extend(frontend_error_diagnostics(err));
+                }
+                diagnostics.sort_by_key(|diag| {
+                    (
+                        diag.phase,
+                        diag.span.start.line,
+                        diag.span.start.column,
+                        diag.code.clone(),
+                    )
+                });
+                return Ok(diagnostics);
+            }
+
+            let mut all = Vec::new();
+            for module_id in program_context.dependency_order_from_entry() {
+                let Some(parsed) = program_context.module(module_id) else {
+                    continue;
+                };
+                let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
+                let module_revision = stable_source_revision(&parsed.source.source);
+                let state = run_module_pipeline(rt, module_id, module_revision, source)?;
+                all.extend(collect_sorted_diagnostics(&state));
+            }
+            all.sort_by_key(|diag| {
+                (
+                    diag.phase,
+                    diag.span.start.line,
+                    diag.span.start.column,
+                    diag.code.clone(),
+                )
+            });
+            Ok(all)
         })
     }
 
@@ -751,6 +842,86 @@ fn param_mode_name(mode: &crate::tree::ParamMode) -> &'static str {
         crate::tree::ParamMode::InOut => "inout",
         crate::tree::ParamMode::Out => "out",
         crate::tree::ParamMode::Sink => "sink",
+    }
+}
+
+struct SnapshotOverlayLoader {
+    snapshot: AnalysisSnapshot,
+    fs_loader: frontend::FsModuleLoader,
+}
+
+impl SnapshotOverlayLoader {
+    fn new(snapshot: AnalysisSnapshot, project_root: PathBuf) -> Self {
+        Self {
+            snapshot,
+            fs_loader: frontend::FsModuleLoader::new(project_root),
+        }
+    }
+}
+
+impl ModuleLoader for SnapshotOverlayLoader {
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+        let (file_path, disk_source) = self.fs_loader.load(path)?;
+        if let Some(overlay) = snapshot_text_for_path(&self.snapshot, &file_path) {
+            return Ok((file_path, overlay));
+        }
+        Ok((file_path, disk_source))
+    }
+}
+
+fn snapshot_text_for_path(snapshot: &AnalysisSnapshot, path: &Path) -> Option<String> {
+    if let Some(file_id) = snapshot.file_id(path) {
+        return snapshot.text(file_id).map(|s| s.to_string());
+    }
+    if let Ok(canon) = path.canonicalize()
+        && let Some(file_id) = snapshot.file_id(&canon)
+    {
+        return snapshot.text(file_id).map(|s| s.to_string());
+    }
+    None
+}
+
+fn infer_project_root(entry_file: &Path) -> PathBuf {
+    for ancestor in entry_file.ancestors() {
+        if ancestor.join("Cargo.toml").exists() {
+            return ancestor.to_path_buf();
+        }
+    }
+    entry_file
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
+}
+
+fn stable_source_revision(source: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn frontend_error_diagnostics(error: FrontendError) -> Vec<Diagnostic> {
+    fn frontend_diag(message: String, span: Span) -> Diagnostic {
+        Diagnostic {
+            phase: crate::analysis::diagnostics::DiagnosticPhase::Resolve,
+            code: "MC-FRONTEND".to_string(),
+            severity: crate::analysis::diagnostics::DiagnosticSeverity::Error,
+            span,
+            message,
+            metadata: Default::default(),
+        }
+    }
+
+    match error {
+        FrontendError::Lex { error, .. } => vec![Diagnostic::from_lex_error(&error)],
+        FrontendError::Parse { error, .. } => vec![Diagnostic::from_parse_error(&error)],
+        FrontendError::UnknownRequireAlias { span, .. }
+        | FrontendError::RequireMemberUndefined { span, .. }
+        | FrontendError::RequireMemberPrivate { span, .. }
+        | FrontendError::DuplicateRequireAlias { span, .. }
+        | FrontendError::SymbolImportAliasUnsupported { span, .. } => {
+            vec![frontend_diag(error.to_string(), span)]
+        }
+        _ => vec![frontend_diag(error.to_string(), Span::default())],
     }
 }
 
