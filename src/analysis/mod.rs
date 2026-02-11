@@ -7,6 +7,7 @@ pub mod dataflow;
 pub mod db;
 pub mod diagnostics;
 pub mod facts;
+pub mod lookups;
 pub mod module_graph;
 pub mod pipeline;
 pub mod query;

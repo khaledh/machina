@@ -9,11 +9,14 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use crate::analysis::code_actions::code_actions_for_diagnostic;
 use crate::analysis::completion::{
     collect as collect_completions, synthesize_member_completion_source,
 };
 use crate::analysis::diagnostics::Diagnostic;
+use crate::analysis::lookups::{
+    code_actions_for_range, def_at_span, def_location_at_span, document_symbols, hover_at_span,
+    semantic_tokens, signature_help_at_span, type_at_span,
+};
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::pipeline::{
     LookupState, collect_sorted_diagnostics, run_module_pipeline, to_lookup_state,
@@ -21,17 +24,14 @@ use crate::analysis::pipeline::{
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
 use crate::analysis::results::{
     CodeAction, CompletionItem, DocumentSymbol, HoverInfo, Location, RenameConflict, RenameEdit,
-    RenamePlan, SemanticToken, SemanticTokenKind, SignatureHelp,
+    RenamePlan, SemanticToken, SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
-use crate::analysis::syntax_index::{
-    active_param_index, call_site_at_span, document_symbol_nodes, node_at_span, node_span_map,
-    span_intersects_span,
-};
+use crate::analysis::syntax_index::node_span_map;
 use crate::diag::Span;
 use crate::frontend::program::flatten_program;
 use crate::frontend::{self, FrontendError, ModuleId, ModuleLoader, ModulePath};
-use crate::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
+use crate::resolve::DefId;
 use crate::tree::NodeId;
 use crate::types::Type;
 
@@ -232,19 +232,7 @@ impl AnalysisDb {
 
     pub fn def_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<DefId>> {
         let state = self.lookup_state_for_file(file_id)?;
-        let Some(resolved) = state.resolved else {
-            return Ok(None);
-        };
-        let Some(node_id) = node_at_span(&resolved.module, query_span) else {
-            return Ok(None);
-        };
-        if state.poisoned_nodes.contains(&node_id) {
-            return Ok(None);
-        }
-        Ok(resolved
-            .def_table
-            .lookup_node_def_id(node_id)
-            .filter(|id| *id != UNKNOWN_DEF_ID))
+        Ok(def_at_span(&state, query_span))
     }
 
     pub fn def_location_at_path(
@@ -266,36 +254,7 @@ impl AnalysisDb {
     ) -> QueryResult<Option<Location>> {
         let snapshot = self.snapshot();
         let state = self.lookup_state_for_file(file_id)?;
-        let Some(resolved) = state.resolved else {
-            return Ok(None);
-        };
-
-        let Some(use_node_id) = node_at_span(&resolved.module, query_span) else {
-            return Ok(None);
-        };
-        if state.poisoned_nodes.contains(&use_node_id) {
-            return Ok(None);
-        }
-        let Some(def_id) = resolved.def_table.lookup_node_def_id(use_node_id) else {
-            return Ok(None);
-        };
-        if def_id == UNKNOWN_DEF_ID {
-            return Ok(None);
-        }
-        let Some(def_node_id) = resolved.def_table.lookup_def_node_id(def_id) else {
-            return Ok(None);
-        };
-
-        let node_spans = node_span_map(&resolved.module);
-        let Some(def_span) = node_spans.get(&def_node_id).copied() else {
-            return Ok(None);
-        };
-
-        Ok(Some(Location {
-            file_id,
-            path: snapshot.path(file_id).map(Path::to_path_buf),
-            span: def_span,
-        }))
+        Ok(def_location_at_span(&snapshot, file_id, &state, query_span))
     }
 
     pub fn type_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<Type>> {
@@ -308,19 +267,7 @@ impl AnalysisDb {
 
     pub fn type_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<Type>> {
         let state = self.lookup_state_for_file(file_id)?;
-        let Some(typed) = state.typed else {
-            return Ok(None);
-        };
-        let Some(node_id) = node_at_span(&typed.module, query_span) else {
-            return Ok(None);
-        };
-        if state.poisoned_nodes.contains(&node_id) {
-            return Ok(None);
-        }
-        Ok(typed
-            .type_map
-            .lookup_node_type(node_id)
-            .filter(|ty| !matches!(ty, Type::Unknown)))
+        Ok(type_at_span(&state, query_span))
     }
 
     pub fn hover_at_path(
@@ -340,72 +287,8 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
-        let LookupState {
-            resolved,
-            typed,
-            poisoned_nodes,
-        } = self.lookup_state_for_file(file_id)?;
-
-        if let Some(typed) = typed {
-            if let Some(node_id) = node_at_span(&typed.module, query_span) {
-                if poisoned_nodes.contains(&node_id) {
-                    return Ok(None);
-                }
-                let def_id = typed
-                    .def_table
-                    .lookup_node_def_id(node_id)
-                    .filter(|id| *id != UNKNOWN_DEF_ID);
-                let def_name =
-                    def_id.and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()));
-                let ty = typed
-                    .type_map
-                    .lookup_node_type(node_id)
-                    .filter(|ty| !matches!(ty, Type::Unknown));
-                if def_id.is_none() && ty.is_none() {
-                    return Ok(None);
-                }
-                let display = format_hover_label(def_name.as_deref(), ty.as_ref());
-                return Ok(Some(HoverInfo {
-                    node_id,
-                    span: query_span,
-                    def_id,
-                    def_name,
-                    ty,
-                    display,
-                }));
-            }
-            return Ok(None);
-        }
-
-        let Some(resolved) = resolved else {
-            return Ok(None);
-        };
-        let Some(node_id) = node_at_span(&resolved.module, query_span) else {
-            return Ok(None);
-        };
-        if poisoned_nodes.contains(&node_id) {
-            return Ok(None);
-        }
-        let def_id = resolved
-            .def_table
-            .lookup_node_def_id(node_id)
-            .filter(|id| *id != UNKNOWN_DEF_ID);
-        let Some(def_id) = def_id else {
-            return Ok(None);
-        };
-        let def_name = resolved
-            .def_table
-            .lookup_def(def_id)
-            .map(|def| def.name.clone());
-        let display = format_hover_label(def_name.as_deref(), None);
-        Ok(Some(HoverInfo {
-            node_id,
-            span: query_span,
-            def_id: Some(def_id),
-            def_name,
-            ty: None,
-            display,
-        }))
+        let state = self.lookup_state_for_file(file_id)?;
+        Ok(hover_at_span(&state, query_span))
     }
 
     pub fn completions_at_path(
@@ -478,33 +361,7 @@ impl AnalysisDb {
         query_span: Span,
     ) -> QueryResult<Option<SignatureHelp>> {
         let state = self.lookup_state_for_file(file_id)?;
-        let Some(typed) = state.typed else {
-            return Ok(None);
-        };
-        let Some(call) = call_site_at_span(&typed.module, query_span) else {
-            return Ok(None);
-        };
-        let Some(sig) = typed.call_sigs.get(&call.node_id) else {
-            return Ok(None);
-        };
-
-        let mut params = Vec::with_capacity(sig.params.len());
-        for param in &sig.params {
-            params.push(format!("{} {}", param_mode_name(&param.mode), param.ty));
-        }
-        let active_parameter = active_param_index(&call.arg_spans, query_span.start);
-        let name = sig
-            .def_id
-            .and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()))
-            .unwrap_or_else(|| "<call>".to_string());
-        let label = format!("{name}({})", params.join(", "));
-
-        Ok(Some(SignatureHelp {
-            label,
-            def_id: sig.def_id,
-            active_parameter,
-            parameters: params,
-        }))
+        Ok(signature_help_at_span(&state, query_span))
     }
 
     pub fn document_symbols_at_path(&mut self, path: &Path) -> QueryResult<Vec<DocumentSymbol>> {
@@ -520,45 +377,7 @@ impl AnalysisDb {
         file_id: FileId,
     ) -> QueryResult<Vec<DocumentSymbol>> {
         let state = self.lookup_state_for_file(file_id)?;
-        let Some(resolved) = state.resolved else {
-            return Ok(Vec::new());
-        };
-
-        let node_spans = node_span_map(&resolved.module);
-        let nodes = document_symbol_nodes(&resolved.module);
-
-        let mut out = Vec::new();
-        for (node_id, kind) in nodes {
-            let Some(def_id) = resolved.def_table.lookup_node_def_id(node_id) else {
-                continue;
-            };
-            let Some(def) = resolved.def_table.lookup_def(def_id) else {
-                continue;
-            };
-            let Some(span) = node_spans.get(&node_id).copied() else {
-                continue;
-            };
-            out.push(DocumentSymbol {
-                name: def.name.clone(),
-                kind: kind.clone(),
-                def_id,
-                span,
-                detail: Some(def.kind.to_string()),
-            });
-        }
-
-        out.sort_by_key(|sym| {
-            (
-                sym.span.start.line,
-                sym.span.start.column,
-                sym.span.end.line,
-                sym.span.end.column,
-                sym.name.clone(),
-                sym.def_id,
-            )
-        });
-        out.dedup_by(|a, b| a.def_id == b.def_id && a.kind == b.kind && a.span == b.span);
-        Ok(out)
+        Ok(document_symbols(&state))
     }
 
     pub fn semantic_tokens_at_path(&mut self, path: &Path) -> QueryResult<Vec<SemanticToken>> {
@@ -571,35 +390,7 @@ impl AnalysisDb {
 
     pub fn semantic_tokens_at_file(&mut self, file_id: FileId) -> QueryResult<Vec<SemanticToken>> {
         let state = self.lookup_state_for_file(file_id)?;
-        let Some(resolved) = state.resolved else {
-            return Ok(Vec::new());
-        };
-
-        let node_spans = node_span_map(&resolved.module);
-        let mut out = Vec::new();
-        for (node_id, def_id) in resolved.def_table.node_def_entries() {
-            let Some(def) = resolved.def_table.lookup_def(def_id) else {
-                continue;
-            };
-            let Some(kind) = semantic_token_kind_for_def(&def.kind) else {
-                continue;
-            };
-            let Some(span) = node_spans.get(&node_id).copied() else {
-                continue;
-            };
-            out.push(SemanticToken { span, kind, def_id });
-        }
-        out.sort_by_key(|tok| {
-            (
-                tok.span.start.line,
-                tok.span.start.column,
-                tok.span.end.line,
-                tok.span.end.column,
-                tok.def_id,
-            )
-        });
-        out.dedup_by(|a, b| a.span == b.span && a.kind == b.kind && a.def_id == b.def_id);
-        Ok(out)
+        Ok(semantic_tokens(&state))
     }
 
     pub fn code_actions_at_path(
@@ -620,28 +411,7 @@ impl AnalysisDb {
         range: Span,
     ) -> QueryResult<Vec<CodeAction>> {
         let diagnostics = self.diagnostics_for_file(file_id)?;
-        let mut actions = Vec::new();
-        for diag in diagnostics {
-            if !span_intersects_span(diag.span, range) {
-                continue;
-            }
-            actions.extend(code_actions_for_diagnostic(&diag));
-        }
-        actions.sort_by_key(|action| {
-            (
-                action.title.clone(),
-                action.diagnostic_code.clone(),
-                action
-                    .edits
-                    .first()
-                    .map(|e| (e.span.start.line, e.span.start.column))
-                    .unwrap_or((0, 0)),
-            )
-        });
-        actions.dedup_by(|a, b| {
-            a.title == b.title && a.diagnostic_code == b.diagnostic_code && a.edits == b.edits
-        });
-        Ok(actions)
+        Ok(code_actions_for_range(&diagnostics, range))
     }
 
     pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
@@ -833,15 +603,6 @@ impl AnalysisDb {
     }
 }
 
-fn format_hover_label(def_name: Option<&str>, ty: Option<&Type>) -> String {
-    match (def_name, ty) {
-        (Some(name), Some(ty)) => format!("{name}: {ty}"),
-        (Some(name), None) => name.to_string(),
-        (None, Some(ty)) => ty.to_string(),
-        (None, None) => String::new(),
-    }
-}
-
 fn is_identifier_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
@@ -851,27 +612,6 @@ fn is_identifier_name(name: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn semantic_token_kind_for_def(kind: &DefKind) -> Option<SemanticTokenKind> {
-    match kind {
-        DefKind::TypeDef { .. } => Some(SemanticTokenKind::Type),
-        DefKind::TraitDef { .. } => Some(SemanticTokenKind::Trait),
-        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(SemanticTokenKind::Function),
-        DefKind::TypeParam => Some(SemanticTokenKind::TypeParameter),
-        DefKind::EnumVariantName => Some(SemanticTokenKind::EnumVariant),
-        DefKind::LocalVar { .. } => Some(SemanticTokenKind::Variable),
-        DefKind::Param { .. } => Some(SemanticTokenKind::Parameter),
-    }
-}
-
-fn param_mode_name(mode: &crate::tree::ParamMode) -> &'static str {
-    match mode {
-        crate::tree::ParamMode::In => "in",
-        crate::tree::ParamMode::InOut => "inout",
-        crate::tree::ParamMode::Out => "out",
-        crate::tree::ParamMode::Sink => "sink",
-    }
 }
 
 struct SnapshotOverlayLoader {
