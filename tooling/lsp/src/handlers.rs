@@ -10,6 +10,33 @@ pub enum HandlerAction {
     Exit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DidOpenParams {
+    uri: String,
+    version: i32,
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DidChangeParams {
+    uri: String,
+    version: i32,
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DidCloseParams {
+    uri: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadRequestParams {
+    uri: String,
+    line0: usize,
+    col0: usize,
+    version: i32,
+}
+
 pub fn handle_message(
     session: &mut AnalysisSession,
     message: Value,
@@ -52,71 +79,34 @@ pub fn handle_message(
         }
         Some("initialized") => (HandlerAction::Continue, None),
         Some("textDocument/didOpen") => {
-            let Some(params) = params else {
+            let Some(params) = params.and_then(parse_did_open_params) else {
                 return (HandlerAction::Continue, invalid_params_response(id));
             };
-            let Some(text_doc) = params.get("textDocument") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(version) = text_doc.get("version").and_then(Value::as_i64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(text) = text_doc.get("text").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            if let Err(error) = session.open_document(uri, version as i32, text) {
+            if let Err(error) = session.open_document(&params.uri, params.version, &params.text) {
                 return (
                     HandlerAction::Continue,
                     id.map(|id| session_error_response(id, &error)),
                 );
             }
-            publish_diagnostics_if_current(session, uri, version as i32)
+            publish_diagnostics_if_current(session, &params.uri, params.version)
         }
         Some("textDocument/didChange") => {
-            let Some(params) = params else {
+            let Some(params) = params.and_then(parse_did_change_params) else {
                 return (HandlerAction::Continue, invalid_params_response(id));
             };
-            let Some(text_doc) = params.get("textDocument") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(version) = text_doc.get("version").and_then(Value::as_i64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(changes) = params.get("contentChanges").and_then(Value::as_array) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(last_change_text) = changes
-                .last()
-                .and_then(|c| c.get("text"))
-                .and_then(Value::as_str)
-            else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            if let Err(error) = session.change_document(uri, version as i32, last_change_text) {
+            if let Err(error) = session.change_document(&params.uri, params.version, &params.text) {
                 return (
                     HandlerAction::Continue,
                     id.map(|id| session_error_response(id, &error)),
                 );
             }
-            publish_diagnostics_if_current(session, uri, version as i32)
+            publish_diagnostics_if_current(session, &params.uri, params.version)
         }
         Some("textDocument/didClose") => {
-            let Some(params) = params else {
+            let Some(params) = params.and_then(parse_did_close_params) else {
                 return (HandlerAction::Continue, invalid_params_response(id));
             };
-            let Some(text_doc) = params.get("textDocument") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            if let Err(error) = session.close_document(uri) {
+            if let Err(error) = session.close_document(&params.uri) {
                 return (
                     HandlerAction::Continue,
                     id.map(|id| session_error_response(id, &error)),
@@ -126,7 +116,7 @@ pub fn handle_message(
                 "jsonrpc": "2.0",
                 "method": "textDocument/publishDiagnostics",
                 "params": {
-                    "uri": uri,
+                    "uri": params.uri,
                     "version": Value::Null,
                     "diagnostics": []
                 }
@@ -134,102 +124,54 @@ pub fn handle_message(
             (HandlerAction::Continue, Some(notification))
         }
         Some("textDocument/hover") => {
-            let Some(params) = params else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(text_doc) = params.get("textDocument") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(position) = params.get("position") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(line) = position.get("line").and_then(Value::as_u64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(character) = position.get("character").and_then(Value::as_u64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(version) = params
-                .get("_machinaVersion")
-                .and_then(Value::as_i64)
-                .map(|v| v as i32)
-            else {
+            let Some(params) = params.and_then(parse_read_request_params) else {
                 return (HandlerAction::Continue, invalid_params_response(id));
             };
             let Some(id) = id else {
                 return (HandlerAction::Continue, None);
             };
-            let response =
-                hover_response(session, id, uri, line as usize, character as usize, version);
+            let response = hover_response(
+                session,
+                id,
+                &params.uri,
+                params.line0,
+                params.col0,
+                params.version,
+            );
             (HandlerAction::Continue, Some(response))
         }
         Some("textDocument/definition") => {
-            let Some(params) = params else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(text_doc) = params.get("textDocument") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(position) = params.get("position") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(line) = position.get("line").and_then(Value::as_u64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(character) = position.get("character").and_then(Value::as_u64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(version) = params
-                .get("_machinaVersion")
-                .and_then(Value::as_i64)
-                .map(|v| v as i32)
-            else {
+            let Some(params) = params.and_then(parse_read_request_params) else {
                 return (HandlerAction::Continue, invalid_params_response(id));
             };
             let Some(id) = id else {
                 return (HandlerAction::Continue, None);
             };
-            let response =
-                definition_response(session, id, uri, line as usize, character as usize, version);
+            let response = definition_response(
+                session,
+                id,
+                &params.uri,
+                params.line0,
+                params.col0,
+                params.version,
+            );
             (HandlerAction::Continue, Some(response))
         }
         Some("textDocument/completion") => {
-            let Some(params) = params else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(text_doc) = params.get("textDocument") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(uri) = text_doc.get("uri").and_then(Value::as_str) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(position) = params.get("position") else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(line) = position.get("line").and_then(Value::as_u64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(character) = position.get("character").and_then(Value::as_u64) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(version) = params
-                .get("_machinaVersion")
-                .and_then(Value::as_i64)
-                .map(|v| v as i32)
-            else {
+            let Some(params) = params.and_then(parse_read_request_params) else {
                 return (HandlerAction::Continue, invalid_params_response(id));
             };
             let Some(id) = id else {
                 return (HandlerAction::Continue, None);
             };
-            let response =
-                completion_response(session, id, uri, line as usize, character as usize, version);
+            let response = completion_response(
+                session,
+                id,
+                &params.uri,
+                params.line0,
+                params.col0,
+                params.version,
+            );
             (HandlerAction::Continue, Some(response))
         }
         Some("shutdown") => {
@@ -268,6 +210,48 @@ pub fn handle_message(
             (HandlerAction::Continue, response)
         }
     }
+}
+
+fn parse_did_open_params(params: &Value) -> Option<DidOpenParams> {
+    let text_doc = params.get("textDocument")?;
+    let uri = text_doc.get("uri")?.as_str()?.to_string();
+    let version = i32::try_from(text_doc.get("version")?.as_i64()?).ok()?;
+    let text = text_doc.get("text")?.as_str()?.to_string();
+    Some(DidOpenParams { uri, version, text })
+}
+
+fn parse_did_change_params(params: &Value) -> Option<DidChangeParams> {
+    let text_doc = params.get("textDocument")?;
+    let uri = text_doc.get("uri")?.as_str()?.to_string();
+    let version = i32::try_from(text_doc.get("version")?.as_i64()?).ok()?;
+    let content_changes = params.get("contentChanges")?.as_array()?;
+    let text = content_changes
+        .last()
+        .and_then(|change| change.get("text"))
+        .and_then(Value::as_str)?
+        .to_string();
+    Some(DidChangeParams { uri, version, text })
+}
+
+fn parse_did_close_params(params: &Value) -> Option<DidCloseParams> {
+    let text_doc = params.get("textDocument")?;
+    let uri = text_doc.get("uri")?.as_str()?.to_string();
+    Some(DidCloseParams { uri })
+}
+
+fn parse_read_request_params(params: &Value) -> Option<ReadRequestParams> {
+    let text_doc = params.get("textDocument")?;
+    let uri = text_doc.get("uri")?.as_str()?.to_string();
+    let position = params.get("position")?;
+    let line0 = usize::try_from(position.get("line")?.as_u64()?).ok()?;
+    let col0 = usize::try_from(position.get("character")?.as_u64()?).ok()?;
+    let version = i32::try_from(params.get("_machinaVersion")?.as_i64()?).ok()?;
+    Some(ReadRequestParams {
+        uri,
+        line0,
+        col0,
+        version,
+    })
 }
 
 fn publish_diagnostics_if_current(
@@ -478,6 +462,7 @@ fn session_error_response(id: Value, error: &SessionError) -> Value {
         SessionError::UnsupportedUri(_) => "unsupported uri",
         SessionError::UnknownUri(_) => "unknown document",
         SessionError::Cancelled => "analysis query cancelled",
+        SessionError::StaleVersion { .. } => "stale document version",
     };
     json!({
         "jsonrpc": "2.0",
@@ -618,6 +603,46 @@ mod tests {
                 .len()
                 >= 1
         );
+    }
+
+    #[test]
+    fn did_change_with_stale_version_returns_session_error() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-change-stale.mc",
+                        "version": 5,
+                        "languageId": "machina",
+                        "text": "fn main() {}"
+                    }
+                }
+            }),
+        );
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-change-stale.mc",
+                        "version": 4
+                    },
+                    "contentChanges": [
+                        { "text": "fn main() { let x = 1; }" }
+                    ]
+                }
+            }),
+        );
+        let response = response.expect("expected error response");
+        assert_eq!(response["id"], 42);
+        assert_eq!(response["error"]["code"], -32001);
     }
 
     #[test]

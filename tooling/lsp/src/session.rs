@@ -28,6 +28,8 @@ pub enum SessionError {
     UnknownUri(String),
     #[error("query cancelled")]
     Cancelled,
+    #[error("stale document version: expected >= {expected}, found {found}")]
+    StaleVersion { expected: i32, found: i32 },
 }
 
 impl From<QueryCancelled> for SessionError {
@@ -102,6 +104,12 @@ impl AnalysisSession {
             .docs
             .get_mut(uri)
             .ok_or_else(|| SessionError::UnknownUri(uri.to_string()))?;
+        if version < state.version {
+            return Err(SessionError::StaleVersion {
+                expected: state.version,
+                found: version,
+            });
+        }
         state.version = version;
         self.db.set_overlay(state.file_id, text);
         Ok(state.file_id)
@@ -284,6 +292,25 @@ mod tests {
         assert!(matches!(
             session.diagnostics_for_uri(uri),
             Err(SessionError::UnknownUri(_))
+        ));
+    }
+
+    #[test]
+    fn change_document_rejects_stale_version() {
+        let mut session = AnalysisSession::new();
+        let uri = "file:///tmp/session-stale-version.mc";
+        session
+            .open_document(uri, 4, "fn main() {}")
+            .expect("open should succeed");
+        let err = session
+            .change_document(uri, 3, "fn main() { let x = 1; }")
+            .expect_err("stale version should be rejected");
+        assert!(matches!(
+            err,
+            SessionError::StaleVersion {
+                expected: 4,
+                found: 3
+            }
         ));
     }
 
