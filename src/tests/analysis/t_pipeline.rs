@@ -49,11 +49,11 @@ fn pipeline_marks_typecheck_failure_as_poisoned() {
     assert!(state.parsed.product.is_some());
     assert!(state.resolved.product.is_some());
     assert!(!state.typechecked.diagnostics.is_empty());
-    assert!(state.typechecked.product.is_none());
+    assert!(state.typechecked.product.is_some());
     assert!(state.typechecked.poisoned_nodes.contains(&ROOT_POISON_NODE));
 
     let lookup = to_lookup_state(&state);
     assert!(lookup.poisoned_nodes.contains(&ROOT_POISON_NODE));
     assert!(lookup.resolved.is_some());
-    assert!(lookup.typed.is_none());
+    assert!(lookup.typed.is_some());
 }

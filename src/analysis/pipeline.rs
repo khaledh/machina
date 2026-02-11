@@ -15,7 +15,7 @@ use crate::parse::Parser;
 use crate::resolve::resolve_partial;
 use crate::tree::NodeId;
 use crate::tree::NodeIdGen;
-use crate::typecheck::type_check;
+use crate::typecheck::type_check_partial;
 
 /// Sentinel used when a stage fails before node-level attribution is possible.
 pub(crate) const ROOT_POISON_NODE: NodeId = NodeId(0);
@@ -118,14 +118,13 @@ pub(crate) fn run_module_pipeline(
     let typechecked = rt.execute(typecheck_key, move |_rt| {
         let mut state = TypecheckStageOutput::default();
         if let Some(resolved) = typecheck_input {
-            match type_check(resolved) {
-                Ok(typed) => state.product = Some(typed),
-                Err(errors) => {
-                    state
-                        .diagnostics
-                        .extend(errors.iter().map(Diagnostic::from_typecheck_error));
-                    state.poisoned_nodes.insert(ROOT_POISON_NODE);
-                }
+            let typed = type_check_partial(resolved);
+            state.product = Some(typed.context);
+            if !typed.errors.is_empty() {
+                state
+                    .diagnostics
+                    .extend(typed.errors.iter().map(Diagnostic::from_typecheck_error));
+                state.poisoned_nodes.insert(ROOT_POISON_NODE);
             }
         }
         Ok(state)

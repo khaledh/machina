@@ -63,6 +63,12 @@ pub(crate) enum TcPhase {
     Finalize,
 }
 
+#[derive(Clone)]
+pub struct TypecheckOutput {
+    pub context: TypeCheckedContext,
+    pub errors: Vec<TypeCheckError>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CollectedParamSig {
     pub(crate) name: String,
@@ -159,15 +165,32 @@ impl TypecheckEngine {
         }
     }
 
-    pub(crate) fn run(mut self) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
-        // The pipeline is intentionally linear and phase-ordered.
-        self.run_phase(TcPhase::Collect, collect::run)?;
-        self.run_phase(TcPhase::Constrain, constraints::run)?;
-        self.run_phase(TcPhase::Solve, solver::run)?;
-        self.run_phase(TcPhase::Validate, validate::run)?;
-        self.run_phase(TcPhase::Finalize, finalize::run)?;
+    pub(crate) fn run(self) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+        let mut this = self;
+        // Strict pipeline: stop at first failing phase.
+        this.run_phase(TcPhase::Collect, collect::run)?;
+        this.run_phase(TcPhase::Constrain, constraints::run)?;
+        this.run_phase(TcPhase::Solve, solver::run)?;
+        this.run_phase(TcPhase::Validate, validate::run)?;
+        this.run_phase(TcPhase::Finalize, finalize::run)?;
 
-        finalize::materialize(self)
+        finalize::materialize(this)
+    }
+
+    pub(crate) fn run_partial(mut self) -> TypecheckOutput {
+        // Keep strict phase order, but continue through failures so analysis
+        // can still materialize a best-effort typed context.
+        let _ = self.run_phase(TcPhase::Collect, collect::run);
+        let _ = self.run_phase(TcPhase::Constrain, constraints::run);
+        let _ = self.run_phase(TcPhase::Solve, solver::run);
+        let _ = self.run_phase(TcPhase::Validate, validate::run);
+        self.state.phase = Some(TcPhase::Finalize);
+        finalize::run_partial(&mut self);
+
+        let errors = self.state.diags.clone();
+        let context = finalize::materialize(self)
+            .expect("finalize::run_partial must prepare materialization output");
+        TypecheckOutput { context, errors }
     }
 
     fn run_phase(

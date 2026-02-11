@@ -78,10 +78,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut errors,
     );
 
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-
     // Publish the collected environment as the shared immutable phase input.
     let env = engine.env_mut();
     env.type_symbols = type_symbols;
@@ -93,7 +89,12 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     env.property_sigs = property_sigs;
     env.generic_envs = generic_envs;
 
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        engine.state_mut().diags.extend(errors.clone());
+        Err(errors)
+    }
 }
 
 fn collect_type_defs(

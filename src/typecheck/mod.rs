@@ -18,6 +18,7 @@ mod unify;
 mod utils;
 mod validate;
 
+pub use engine::TypecheckOutput;
 pub use errors::{TypeCheckError, TypeCheckErrorKind};
 pub use infer_unify::{Unifier, UnifyError};
 
@@ -26,6 +27,10 @@ use crate::typecheck::engine::TypecheckEngine;
 
 pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
     TypecheckEngine::new(context).run()
+}
+
+pub fn type_check_partial(context: ResolvedContext) -> TypecheckOutput {
+    TypecheckEngine::new(context).run_partial()
 }
 
 #[cfg(test)]

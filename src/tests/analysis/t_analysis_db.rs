@@ -232,6 +232,26 @@ fn main() -> u64 { id(1) }
 }
 
 #[test]
+fn type_at_still_works_with_unrelated_type_error() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 {
+    let bad: u64 = true;
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/type_at_partial.mc"), source);
+
+    let call_span = span_for_substring(source, "id(1)");
+    let ty = db
+        .type_at_file(file_id, call_span)
+        .expect("type_at query should succeed");
+
+    assert_eq!(ty, Some(Type::uint(64)));
+}
+
+#[test]
 fn hover_includes_symbol_and_type() {
     let mut db = AnalysisDb::new();
     let source = r#"

@@ -45,6 +45,13 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     Ok(())
 }
 
+/// Partial finalize used by analysis mode: always materialize side tables even
+/// when earlier phases produced diagnostics.
+pub(crate) fn run_partial(engine: &mut TypecheckEngine) {
+    let finalized = build_outputs(engine);
+    engine.state_mut().finalize = Some(finalized);
+}
+
 pub(crate) fn materialize(
     engine: TypecheckEngine,
 ) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
