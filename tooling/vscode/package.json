@@ -1,0 +1,54 @@
+{
+  "name": "machina-vscode",
+  "displayName": "Machina",
+  "description": "Machina language support for VS Code and Cursor.",
+  "version": "0.0.1",
+  "publisher": "khaledh",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:machina",
+    "onCommand:machina.showOutput",
+    "onCommand:machina.ping"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "machina",
+        "aliases": [
+          "Machina",
+          "machina"
+        ],
+        "extensions": [
+          ".mc"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "machina.showOutput",
+        "title": "Machina: Show Output"
+      },
+      {
+        "command": "machina.ping",
+        "title": "Machina: Ping"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "clean": "rm -rf out"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  }
+}
