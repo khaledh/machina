@@ -354,7 +354,7 @@ fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
     let file_id = db.upsert_disk_text(PathBuf::from("examples/completions.mc"), source);
-    let query_span = span_for_substring(source, "main");
+    let query_span = cursor_after_substring(source, "{ id(1)");
     let completions = db
         .completions_at_file(file_id, query_span)
         .expect("completions query should succeed");
@@ -387,7 +387,7 @@ fn main() -> u64 {
         PathBuf::from("examples/completions_partial_resolve.mc"),
         source,
     );
-    let query_span = span_for_substring(source, "main");
+    let query_span = cursor_after_substring(source, "{\n    ");
     let completions = db
         .completions_at_file(file_id, query_span)
         .expect("completions query should succeed");
@@ -399,6 +399,281 @@ fn main() -> u64 {
     assert!(
         completions.iter().any(|c| c.label == "Packet"),
         "expected type completion for `Packet` even with unrelated resolve error"
+    );
+}
+
+#[test]
+fn completions_respect_lexical_scope_and_shadowing() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn main() -> u64 {
+    let outer_a = 1;
+    {
+        let inner_a = 2;
+        inner
+    }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/completions_scope_shadow.mc"),
+        source,
+    );
+    let query_span = span_for_last_substring(source, "inner");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "inner_a"),
+        "expected local completion from current scope"
+    );
+    assert!(
+        !completions.iter().any(|c| c.label == "outer_a"),
+        "did not expect unrelated outer-name prefix in filtered results"
+    );
+}
+
+#[test]
+fn completions_do_not_leak_sibling_block_bindings() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn main() -> u64 {
+    {
+        let hidden = 1;
+    }
+    hi
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions_scope_leak.mc"), source);
+    let query_span = span_for_last_substring(source, "hi");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        !completions.iter().any(|c| c.label == "hidden"),
+        "sibling block binding should not be visible outside its block"
+    );
+}
+
+#[test]
+fn completions_support_member_mode_for_struct_fields_methods_and_properties() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Point = {
+    x: u64,
+    y: u64,
+}
+
+Point :: {
+    fn sum(self) -> u64 {
+        self.x + self.y
+    }
+
+    prop total: u64 {
+        get { self.x + self.y }
+    }
+}
+
+fn main() -> u64 {
+    let p = Point { x: 1, y: 2 };
+    let probe = p.t;
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions_members.mc"), source);
+    let query_span = span_for_substring(source, "p.");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "total"),
+        "expected property completion on receiver"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "sum"),
+        "expected method completion on receiver"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "x"),
+        "expected field completion on receiver"
+    );
+    assert!(
+        !completions.iter().any(|c| c.label == "main"),
+        "member completion should not include unrelated global symbols"
+    );
+}
+
+#[test]
+fn member_completions_survive_unrelated_resolve_errors() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Point = {
+    x: u64,
+    y: u64,
+}
+
+Point :: {
+    fn sum(self) -> u64 {
+        self.x + self.y
+    }
+
+    prop total: u64 {
+        get { self.x + self.y }
+    }
+}
+
+fn main() -> u64 {
+    let p = Point { x: 1, y: 2 };
+    let bad = missing_symbol;
+    let probe = p.t;
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/completions_members_partial_resolve.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "p.");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "total"),
+        "expected property completion even with unrelated resolve error"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "sum"),
+        "expected method completion even with unrelated resolve error"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "x"),
+        "expected field completion even with unrelated resolve error"
+    );
+}
+
+#[test]
+fn member_completions_work_when_cursor_is_after_dot_in_incomplete_member_expr() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Point = {
+    x: u64,
+    y: u64,
+}
+
+Point :: {
+    fn sum(self) -> u64 {
+        self.x + self.y
+    }
+
+    prop total: u64 {
+        get { self.x + self.y }
+    }
+}
+
+fn main() -> u64 {
+    let p = Point { x: 1, y: 2 };
+    let bad = missing_symbol;
+    let probe = p.;
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/completions_members_after_dot.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "p.");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "total"),
+        "expected property completion when querying at `p.`"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "sum"),
+        "expected method completion when querying at `p.`"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "x"),
+        "expected field completion when querying at `p.`"
+    );
+}
+
+#[test]
+fn member_completions_work_for_standalone_dot_expr_without_semicolon() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Point = {
+    x: u64,
+    y: u64,
+}
+
+Point :: {
+    fn sum(self) -> u64 {
+        self.x + self.y
+    }
+
+    prop total: u64 {
+        get { self.x + self.y }
+    }
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    p.
+    let z = 0;
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/completions_members_standalone_dot.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "p.");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "total"),
+        "expected property completion for standalone `p.`"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "sum"),
+        "expected method completion for standalone `p.`"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "x"),
+        "expected field completion for standalone `p.`"
+    );
+}
+
+#[test]
+fn completions_apply_prefix_filtering() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn alpha() -> u64 { 1 }
+fn beta() -> u64 { 2 }
+fn main() -> u64 {
+    al
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions_prefix.mc"), source);
+    let query_span = span_for_last_substring(source, "al");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "alpha"),
+        "expected matching prefix candidate"
+    );
+    assert!(
+        !completions.iter().any(|c| c.label == "beta"),
+        "did not expect non-matching prefix candidate"
     );
 }
 
@@ -440,7 +715,7 @@ fn main() -> u64 {
     assert_eq!(hover.def_name.as_deref(), Some("id"));
 
     let completions = db
-        .completions_at_file(file_id, span_for_substring(source, "main"))
+        .completions_at_file(file_id, cursor_after_substring(source, "{\n    id(1)"))
         .expect("completions query should succeed");
     assert!(
         completions.iter().any(|c| c.label == "id"),
@@ -499,7 +774,7 @@ fn main() -> u64 {
     );
 
     let completions = db
-        .completions_at_file(file_id, span_for_substring(source, "main"))
+        .completions_at_file(file_id, cursor_after_substring(source, "{\n    id(1)"))
         .expect("completions query should succeed");
     assert!(
         completions.iter().any(|c| c.label == "id"),
@@ -926,6 +1201,31 @@ fn span_for_substring(source: &str, needle: &str) -> Span {
     Span {
         start: start_pos,
         end: end_pos,
+    }
+}
+
+fn span_for_last_substring(source: &str, needle: &str) -> Span {
+    let start = source
+        .rfind(needle)
+        .expect("needle should exist in source for span helper");
+    let end = start + needle.len();
+    let start_pos = position_at(source, start);
+    let end_pos = position_at(source, end);
+    Span {
+        start: start_pos,
+        end: end_pos,
+    }
+}
+
+fn cursor_after_substring(source: &str, needle: &str) -> Span {
+    let start = source
+        .find(needle)
+        .expect("needle should exist in source for cursor helper");
+    let offset = start + needle.len();
+    let pos = position_at(source, offset);
+    Span {
+        start: pos,
+        end: pos,
     }
 }
 

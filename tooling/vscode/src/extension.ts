@@ -71,6 +71,21 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
       configurationSection: "machina.languageServer",
     },
     middleware: {
+      async provideHover(document, position, token, next) {
+        const debug = isDebugLoggingEnabled();
+        if (debug) {
+          output?.appendLine(
+            `[lsp] hover request uri=${document.uri.toString()} line=${position.line} col=${position.character} docVersion=${document.version}`
+          );
+        }
+
+        const result = await next(document, position, token);
+
+        if (debug) {
+          output?.appendLine(`[lsp] hover response ${summarizeHoverResult(result)}`);
+        }
+        return result;
+      },
       async provideDefinition(document, position, token, next) {
         const debug = isDebugLoggingEnabled();
         if (debug) {
@@ -83,6 +98,27 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
 
         if (debug) {
           output?.appendLine(`[lsp] definition response ${summarizeDefinitionResult(result)}`);
+        }
+        return result;
+      },
+      async provideCompletionItem(document, position, context, token, next) {
+        const debug = isDebugLoggingEnabled();
+        if (debug) {
+          output?.appendLine(
+            `[lsp] completion request uri=${document.uri.toString()} line=${position.line} col=${position.character} triggerKind=${context.triggerKind} triggerChar=${context.triggerCharacter ?? "<none>"} docVersion=${document.version}`
+          );
+        }
+
+        const result = await next(document, position, context, token);
+
+        if (debug) {
+          output?.appendLine(
+            `[lsp] completion response ${summarizeCompletionResult(result)}`
+          );
+          const labels = completionLabels(result).slice(0, 25);
+          output?.appendLine(
+            `[lsp] completion labels(${labels.length}): ${labels.join(", ")}`
+          );
         }
         return result;
       },
@@ -191,4 +227,43 @@ function summarizeDefinitionResult(
     return `result=array(len=${result.length})`;
   }
   return "result=single-location";
+}
+
+function summarizeHoverResult(result: vscode.Hover | null | undefined): string {
+  if (result == null) {
+    return "result=null";
+  }
+  return "result=hover";
+}
+
+function summarizeCompletionResult(
+  result:
+    | vscode.CompletionItem[]
+    | vscode.CompletionList<vscode.CompletionItem>
+    | null
+    | undefined
+): string {
+  if (result == null) {
+    return "result=null";
+  }
+  if (Array.isArray(result)) {
+    return `result=array(len=${result.length})`;
+  }
+  return `result=list(len=${result.items.length}, isIncomplete=${result.isIncomplete})`;
+}
+
+function completionLabels(
+  result:
+    | vscode.CompletionItem[]
+    | vscode.CompletionList<vscode.CompletionItem>
+    | null
+    | undefined
+): string[] {
+  if (result == null) {
+    return [];
+  }
+  const items = Array.isArray(result) ? result : result.items;
+  return items.map((item) =>
+    typeof item.label === "string" ? item.label : item.label.label
+  );
 }

@@ -110,11 +110,7 @@ pub(crate) fn run_module_pipeline(
     })?;
 
     let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
-    let typecheck_input = if resolved.diagnostics.is_empty() {
-        resolved.product.clone()
-    } else {
-        None
-    };
+    let typecheck_input = resolved.product.clone();
     let typechecked = rt.execute(typecheck_key, move |_rt| {
         let mut state = TypecheckStageOutput::default();
         if let Some(resolved) = typecheck_input {
