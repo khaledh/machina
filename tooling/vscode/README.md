@@ -14,3 +14,9 @@ The extension activates on `.mc` files and exposes:
 
 - `Machina: Show Output`
 - `Machina: Ping`
+- `Machina: Restart Language Server`
+
+## Language server settings
+
+- `machina.languageServer.path`: path to `machina-lsp` (optional)
+- `machina.languageServer.args`: extra arguments for `machina-lsp`

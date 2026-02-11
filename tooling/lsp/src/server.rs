@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn cancelled_request_returns_request_cancelled_error() {
         let cancel = r#"{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":7}}"#;
-        let hover = r#"{"jsonrpc":"2.0","id":7,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///tmp/cancelled.mc"},"position":{"line":0,"character":0},"_machinaVersion":1}}"#;
+        let hover = r#"{"jsonrpc":"2.0","id":7,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///tmp/cancelled.mc"},"position":{"line":0,"character":0},"mcDocVersion":1}}"#;
         let exit = r#"{"jsonrpc":"2.0","method":"exit"}"#;
         let input = format!("{}{}{}", frame(cancel), frame(hover), frame(exit));
         let mut out = Vec::new();

@@ -14,7 +14,8 @@
   "activationEvents": [
     "onLanguage:machina",
     "onCommand:machina.showOutput",
-    "onCommand:machina.ping"
+    "onCommand:machina.ping",
+    "onCommand:machina.restartLanguageServer"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -38,8 +39,30 @@
       {
         "command": "machina.ping",
         "title": "Machina: Ping"
+      },
+      {
+        "command": "machina.restartLanguageServer",
+        "title": "Machina: Restart Language Server"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Machina",
+      "properties": {
+        "machina.languageServer.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the machina-lsp executable. If empty, the extension uses a local debug build when available, otherwise `machina-lsp` from PATH."
+        },
+        "machina.languageServer.args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra command-line arguments passed to machina-lsp."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p .",
@@ -50,5 +73,8 @@
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }

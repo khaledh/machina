@@ -34,7 +34,7 @@ struct ReadRequestParams {
     uri: String,
     line0: usize,
     col0: usize,
-    version: i32,
+    version: Option<i32>,
 }
 
 pub fn handle_message(
@@ -130,14 +130,17 @@ pub fn handle_message(
             let Some(id) = id else {
                 return (HandlerAction::Continue, None);
             };
-            let response = hover_response(
-                session,
-                id,
-                &params.uri,
-                params.line0,
-                params.col0,
-                params.version,
-            );
+            let version = match read_request_version(session, &params) {
+                Ok(version) => version,
+                Err(error) => {
+                    return (
+                        HandlerAction::Continue,
+                        Some(session_error_response(id, &error)),
+                    );
+                }
+            };
+            let response =
+                hover_response(session, id, &params.uri, params.line0, params.col0, version);
             (HandlerAction::Continue, Some(response))
         }
         Some("textDocument/definition") => {
@@ -147,14 +150,17 @@ pub fn handle_message(
             let Some(id) = id else {
                 return (HandlerAction::Continue, None);
             };
-            let response = definition_response(
-                session,
-                id,
-                &params.uri,
-                params.line0,
-                params.col0,
-                params.version,
-            );
+            let version = match read_request_version(session, &params) {
+                Ok(version) => version,
+                Err(error) => {
+                    return (
+                        HandlerAction::Continue,
+                        Some(session_error_response(id, &error)),
+                    );
+                }
+            };
+            let response =
+                definition_response(session, id, &params.uri, params.line0, params.col0, version);
             (HandlerAction::Continue, Some(response))
         }
         Some("textDocument/completion") => {
@@ -164,14 +170,17 @@ pub fn handle_message(
             let Some(id) = id else {
                 return (HandlerAction::Continue, None);
             };
-            let response = completion_response(
-                session,
-                id,
-                &params.uri,
-                params.line0,
-                params.col0,
-                params.version,
-            );
+            let version = match read_request_version(session, &params) {
+                Ok(version) => version,
+                Err(error) => {
+                    return (
+                        HandlerAction::Continue,
+                        Some(session_error_response(id, &error)),
+                    );
+                }
+            };
+            let response =
+                completion_response(session, id, &params.uri, params.line0, params.col0, version);
             (HandlerAction::Continue, Some(response))
         }
         Some("shutdown") => {
@@ -245,13 +254,26 @@ fn parse_read_request_params(params: &Value) -> Option<ReadRequestParams> {
     let position = params.get("position")?;
     let line0 = usize::try_from(position.get("line")?.as_u64()?).ok()?;
     let col0 = usize::try_from(position.get("character")?.as_u64()?).ok()?;
-    let version = i32::try_from(params.get("_machinaVersion")?.as_i64()?).ok()?;
+    let version = params
+        .get("mcDocVersion")
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok());
     Some(ReadRequestParams {
         uri,
         line0,
         col0,
         version,
     })
+}
+
+fn read_request_version(
+    session: &AnalysisSession,
+    params: &ReadRequestParams,
+) -> Result<i32, SessionError> {
+    if let Some(version) = params.version {
+        return Ok(version);
+    }
+    Ok(session.lookup_document(&params.uri)?.version)
 }
 
 fn publish_diagnostics_if_current(
@@ -712,8 +734,7 @@ mod tests {
                 "method": "textDocument/hover",
                 "params": {
                     "textDocument": { "uri": "file:///tmp/lsp-hover.mc" },
-                    "position": { "line": 0, "character": 1 },
-                    "_machinaVersion": 4
+                    "position": { "line": 0, "character": 1 }
                 }
             }),
         );
@@ -748,7 +769,7 @@ mod tests {
                 "params": {
                     "textDocument": { "uri": "file:///tmp/lsp-hover-stale.mc" },
                     "position": { "line": 0, "character": 1 },
-                    "_machinaVersion": 9
+                    "mcDocVersion": 9
                 }
             }),
         );
@@ -783,7 +804,7 @@ mod tests {
                 "params": {
                     "textDocument": { "uri": "file:///tmp/lsp-comp-def.mc" },
                     "position": { "line": 1, "character": 5 },
-                    "_machinaVersion": 2
+                    "mcDocVersion": 2
                 }
             }),
         );
@@ -797,11 +818,63 @@ mod tests {
                 "params": {
                     "textDocument": { "uri": "file:///tmp/lsp-comp-def.mc" },
                     "position": { "line": 1, "character": 18 },
-                    "_machinaVersion": 1
+                    "mcDocVersion": 1
                 }
             }),
         );
         let definition = definition.expect("expected definition response");
         assert_eq!(definition["result"], Value::Null);
+    }
+
+    #[test]
+    fn read_requests_without_version_use_current_document_version() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-read-no-version.mc",
+                        "version": 3,
+                        "languageId": "machina",
+                        "text": "fn main() {}"
+                    }
+                }
+            }),
+        );
+
+        let (_hover_action, hover) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 71,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-read-no-version.mc" },
+                    "position": { "line": 0, "character": 1 }
+                }
+            }),
+        );
+        let hover = hover.expect("expected hover response");
+        assert_eq!(hover["id"], 71);
+        assert!(hover.get("error").is_none());
+
+        let (_completion_action, completion) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 72,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-read-no-version.mc" },
+                    "position": { "line": 0, "character": 1 }
+                }
+            }),
+        );
+        let completion = completion.expect("expected completion response");
+        assert_eq!(completion["id"], 72);
+        assert!(completion.get("error").is_none());
     }
 }
