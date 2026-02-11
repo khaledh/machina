@@ -194,6 +194,26 @@ fn main() -> u64 {
 }
 
 #[test]
+fn def_at_returns_none_for_unknown_symbol_target() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 {
+    let y = missing;
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_unknown_target.mc"), source);
+
+    let query_span = span_for_substring(source, "missing");
+    let def_id = db
+        .def_at_file(file_id, query_span)
+        .expect("def_at query should succeed");
+
+    assert_eq!(def_id, None, "unknown symbol should not resolve to a def");
+}
+
+#[test]
 fn def_location_points_to_declaration_site() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -252,6 +272,26 @@ fn main() -> u64 {
 }
 
 #[test]
+fn type_at_returns_none_for_unknown_symbol_target() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 {
+    let y = missing;
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/type_at_unknown_target.mc"), source);
+
+    let query_span = span_for_substring(source, "missing");
+    let ty = db
+        .type_at_file(file_id, query_span)
+        .expect("type_at query should succeed");
+
+    assert_eq!(ty, None, "unknown symbol should not expose unknown type");
+}
+
+#[test]
 fn hover_includes_symbol_and_type() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -272,6 +312,29 @@ fn main() -> u64 { id(1) }
     assert!(
         hover.display.starts_with("id:"),
         "expected hover label to include symbol name"
+    );
+}
+
+#[test]
+fn hover_returns_none_for_unknown_symbol_target() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 {
+    let y = missing;
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/hover_unknown_target.mc"), source);
+
+    let query_span = span_for_substring(source, "missing");
+    let hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("hover query should succeed");
+
+    assert_eq!(
+        hover, None,
+        "unknown symbol should not return hover payload"
     );
 }
 
@@ -299,6 +362,39 @@ fn main() -> u64 { id(1) }
     assert!(
         completions.iter().any(|c| c.label == "Packet"),
         "expected type completion for `Packet`"
+    );
+}
+
+#[test]
+fn completions_still_include_symbols_with_unrelated_resolve_error() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Packet = {
+    id: u64,
+}
+
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 {
+    let y = missing;
+    id(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/completions_partial_resolve.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "main");
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "id"),
+        "expected function completion for `id` even with unrelated resolve error"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "Packet"),
+        "expected type completion for `Packet` even with unrelated resolve error"
     );
 }
 

@@ -26,7 +26,7 @@ use crate::analysis::syntax_index::{
 };
 use crate::diag::Span;
 use crate::frontend::ModuleId;
-use crate::resolve::{DefId, DefKind};
+use crate::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
 use crate::tree::NodeId;
 use crate::types::Type;
 
@@ -144,7 +144,13 @@ impl AnalysisDb {
         let Some(node_id) = node_at_span(&resolved.module, query_span) else {
             return Ok(None);
         };
-        Ok(resolved.def_table.lookup_node_def_id(node_id))
+        if state.poisoned_nodes.contains(&node_id) {
+            return Ok(None);
+        }
+        Ok(resolved
+            .def_table
+            .lookup_node_def_id(node_id)
+            .filter(|id| *id != UNKNOWN_DEF_ID))
     }
 
     pub fn def_location_at_path(
@@ -173,9 +179,15 @@ impl AnalysisDb {
         let Some(use_node_id) = node_at_span(&resolved.module, query_span) else {
             return Ok(None);
         };
+        if state.poisoned_nodes.contains(&use_node_id) {
+            return Ok(None);
+        }
         let Some(def_id) = resolved.def_table.lookup_node_def_id(use_node_id) else {
             return Ok(None);
         };
+        if def_id == UNKNOWN_DEF_ID {
+            return Ok(None);
+        }
         let Some(def_node_id) = resolved.def_table.lookup_def_node_id(def_id) else {
             return Ok(None);
         };
@@ -208,7 +220,13 @@ impl AnalysisDb {
         let Some(node_id) = node_at_span(&typed.module, query_span) else {
             return Ok(None);
         };
-        Ok(typed.type_map.lookup_node_type(node_id))
+        if state.poisoned_nodes.contains(&node_id) {
+            return Ok(None);
+        }
+        Ok(typed
+            .type_map
+            .lookup_node_type(node_id)
+            .filter(|ty| !matches!(ty, Type::Unknown)))
     }
 
     pub fn hover_at_path(
@@ -229,15 +247,26 @@ impl AnalysisDb {
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
         let LookupState {
-            resolved, typed, ..
+            resolved,
+            typed,
+            poisoned_nodes,
         } = self.lookup_state_for_file(file_id)?;
 
         if let Some(typed) = typed {
             if let Some(node_id) = node_at_span(&typed.module, query_span) {
-                let def_id = typed.def_table.lookup_node_def_id(node_id);
+                if poisoned_nodes.contains(&node_id) {
+                    return Ok(None);
+                }
+                let def_id = typed
+                    .def_table
+                    .lookup_node_def_id(node_id)
+                    .filter(|id| *id != UNKNOWN_DEF_ID);
                 let def_name =
                     def_id.and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()));
-                let ty = typed.type_map.lookup_node_type(node_id);
+                let ty = typed
+                    .type_map
+                    .lookup_node_type(node_id)
+                    .filter(|ty| !matches!(ty, Type::Unknown));
                 if def_id.is_none() && ty.is_none() {
                     return Ok(None);
                 }
@@ -260,7 +289,13 @@ impl AnalysisDb {
         let Some(node_id) = node_at_span(&resolved.module, query_span) else {
             return Ok(None);
         };
-        let def_id = resolved.def_table.lookup_node_def_id(node_id);
+        if poisoned_nodes.contains(&node_id) {
+            return Ok(None);
+        }
+        let def_id = resolved
+            .def_table
+            .lookup_node_def_id(node_id)
+            .filter(|id| *id != UNKNOWN_DEF_ID);
         let Some(def_id) = def_id else {
             return Ok(None);
         };
