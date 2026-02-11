@@ -27,6 +27,7 @@ use crate::analysis::syntax_index::{
 use crate::diag::Span;
 use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefKind};
+use crate::tree::NodeId;
 use crate::types::Type;
 
 #[derive(Default)]
@@ -114,6 +115,19 @@ impl AnalysisDb {
         })
     }
 
+    pub fn poisoned_nodes_for_path(&mut self, path: &Path) -> QueryResult<HashSet<NodeId>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(HashSet::new());
+        };
+        self.poisoned_nodes_for_file(file_id)
+    }
+
+    pub fn poisoned_nodes_for_file(&mut self, file_id: FileId) -> QueryResult<HashSet<NodeId>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        Ok(state.poisoned_nodes)
+    }
+
     pub fn def_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<DefId>> {
         let snapshot = self.snapshot();
         let Some(file_id) = snapshot.file_id(path) else {
@@ -131,6 +145,51 @@ impl AnalysisDb {
             return Ok(None);
         };
         Ok(resolved.def_table.lookup_node_def_id(node_id))
+    }
+
+    pub fn def_location_at_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Option<Location>> {
+        let snapshot = self.snapshot();
+        let Some(file_id) = snapshot.file_id(path) else {
+            return Ok(None);
+        };
+        self.def_location_at_file(file_id, query_span)
+    }
+
+    pub fn def_location_at_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<Location>> {
+        let snapshot = self.snapshot();
+        let state = self.lookup_state_for_file(file_id)?;
+        let Some(resolved) = state.resolved else {
+            return Ok(None);
+        };
+
+        let Some(use_node_id) = node_at_span(&resolved.module, query_span) else {
+            return Ok(None);
+        };
+        let Some(def_id) = resolved.def_table.lookup_node_def_id(use_node_id) else {
+            return Ok(None);
+        };
+        let Some(def_node_id) = resolved.def_table.lookup_def_node_id(def_id) else {
+            return Ok(None);
+        };
+
+        let node_spans = node_span_map(&resolved.module);
+        let Some(def_span) = node_spans.get(&def_node_id).copied() else {
+            return Ok(None);
+        };
+
+        Ok(Some(Location {
+            file_id,
+            path: snapshot.path(file_id).map(Path::to_path_buf),
+            span: def_span,
+        }))
     }
 
     pub fn type_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<Type>> {
@@ -169,7 +228,7 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
-        let LookupState { resolved, typed } = self.lookup_state_for_file(file_id)?;
+        let LookupState { resolved, typed, .. } = self.lookup_state_for_file(file_id)?;
 
         if let Some(typed) = typed {
             if let Some(node_id) = node_at_span(&typed.module, query_span) {

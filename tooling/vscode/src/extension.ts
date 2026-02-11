@@ -70,6 +70,23 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
     synchronize: {
       configurationSection: "machina.languageServer",
     },
+    middleware: {
+      async provideDefinition(document, position, token, next) {
+        const debug = isDebugLoggingEnabled();
+        if (debug) {
+          output?.appendLine(
+            `[lsp] definition request uri=${document.uri.toString()} line=${position.line} col=${position.character} docVersion=${document.version}`
+          );
+        }
+
+        const result = await next(document, position, token);
+
+        if (debug) {
+          output?.appendLine(`[lsp] definition response ${summarizeDefinitionResult(result)}`);
+        }
+        return result;
+      },
+    },
     errorHandler: {
       error(error, message, count) {
         output?.appendLine(
@@ -152,4 +169,26 @@ function formatError(error: unknown): string {
     return error.stack ?? error.message;
   }
   return String(error);
+}
+
+function isDebugLoggingEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration("machina.languageServer")
+    .get<boolean>("debugLogging", false);
+}
+
+function summarizeDefinitionResult(
+  result:
+    | vscode.Definition
+    | vscode.LocationLink[]
+    | null
+    | undefined
+): string {
+  if (result == null) {
+    return "result=null";
+  }
+  if (Array.isArray(result)) {
+    return `result=array(len=${result.length})`;
+  }
+  return "result=single-location";
 }

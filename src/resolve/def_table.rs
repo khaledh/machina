@@ -7,6 +7,7 @@ use crate::tree::NodeId;
 pub struct DefTableBuilder {
     defs: Vec<Def>,
     node_def: HashMap<NodeId, DefId>,
+    def_node: HashMap<DefId, NodeId>,
 }
 
 impl Default for DefTableBuilder {
@@ -20,11 +21,13 @@ impl DefTableBuilder {
         Self {
             defs: Vec::new(),
             node_def: HashMap::new(),
+            def_node: HashMap::new(),
         }
     }
 
     pub fn record_def(&mut self, def: Def, node_id: NodeId) {
         self.node_def.insert(node_id, def.id);
+        self.def_node.insert(def.id, node_id);
         self.defs.push(def);
     }
 
@@ -38,6 +41,7 @@ impl DefTableBuilder {
             DefTable {
                 defs: self.defs,
                 node_def: node_def.clone(),
+                def_node: self.def_node,
             },
             NodeDefLookup { node_def },
         )
@@ -50,6 +54,7 @@ impl DefTableBuilder {
 pub struct DefTable {
     defs: Vec<Def>,
     node_def: HashMap<NodeId, DefId>,
+    def_node: HashMap<DefId, NodeId>,
 }
 
 impl DefTable {
@@ -57,6 +62,7 @@ impl DefTable {
         Self {
             defs,
             node_def: HashMap::new(),
+            def_node: HashMap::new(),
         }
     }
 
@@ -72,6 +78,10 @@ impl DefTable {
         self.node_def
             .iter()
             .map(|(node_id, def_id)| (*node_id, *def_id))
+    }
+
+    pub fn lookup_def_node_id(&self, def_id: DefId) -> Option<NodeId> {
+        self.def_node.get(&def_id).copied()
     }
 
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {

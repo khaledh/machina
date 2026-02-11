@@ -1,6 +1,7 @@
 //! Minimal JSON-RPC request handlers for LSP bootstrap methods.
 
 use serde_json::{Value, json};
+use std::path::Path;
 
 use crate::session::{AnalysisSession, SessionError};
 
@@ -363,21 +364,44 @@ fn definition_response(
         Err(error) => return session_error_response(id, &error),
     };
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.def_at_file(file_id, span));
+    let result = session.execute_query(|db| db.def_location_at_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
         return stale_result_response(id);
     }
     match result {
-        Ok(Some(_def_id)) => {
+        Ok(Some(location)) => {
+            let uri = location
+                .path
+                .as_deref()
+                .map(path_to_file_uri)
+                .unwrap_or_else(|| uri.to_string());
             json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "result": []
+                "result": [
+                    {
+                        "uri": uri,
+                        "range": {
+                            "start": {
+                                "line": location.span.start.line.saturating_sub(1),
+                                "character": location.span.start.column.saturating_sub(1)
+                            },
+                            "end": {
+                                "line": location.span.end.line.saturating_sub(1),
+                                "character": location.span.end.column.saturating_sub(1)
+                            }
+                        }
+                    }
+                ]
             })
         }
         Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": []}),
         Err(_) => session_error_response(id, &SessionError::Cancelled),
     }
+}
+
+fn path_to_file_uri(path: &Path) -> String {
+    format!("file://{}", path.to_string_lossy())
 }
 
 fn completion_response(
@@ -824,6 +848,48 @@ mod tests {
         );
         let definition = definition.expect("expected definition response");
         assert_eq!(definition["result"], Value::Null);
+    }
+
+    #[test]
+    fn definition_request_returns_location_when_version_matches() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-definition.mc",
+                        "version": 2,
+                        "languageId": "machina",
+                        "text": "fn id(x: u64) -> u64 { x }\nfn main() -> u64 { id(1) }"
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 90,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-definition.mc" },
+                    "position": { "line": 1, "character": 19 },
+                    "mcDocVersion": 2
+                }
+            }),
+        );
+
+        let response = response.expect("expected definition response");
+        assert_eq!(response["id"], 90);
+        let locations = response["result"]
+            .as_array()
+            .expect("expected location array");
+        assert!(!locations.is_empty(), "expected at least one definition location");
+        assert_eq!(locations[0]["uri"], "file:///tmp/lsp-definition.mc");
     }
 
     #[test]

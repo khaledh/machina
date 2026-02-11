@@ -60,6 +60,11 @@
             "type": "string"
           },
           "description": "Extra command-line arguments passed to machina-lsp."
+        },
+        "machina.languageServer.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose extension-side LSP request/response logging in the Machina output channel."
         }
       }
     }
