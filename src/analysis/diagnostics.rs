@@ -32,6 +32,7 @@ pub enum DiagnosticValue {
 }
 
 pub type DiagnosticMetadata = BTreeMap<String, DiagnosticValue>;
+pub const ANALYSIS_FILE_PATH_KEY: &str = "analysis_file_path";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {

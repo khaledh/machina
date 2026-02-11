@@ -94,6 +94,119 @@ pub(crate) fn flatten_program(
     }
 }
 
+pub(crate) fn rewrite_program_module(
+    program: &ProgramParsedContext,
+    module_id: ModuleId,
+) -> Result<Module, Vec<FrontendError>> {
+    let bindings = ProgramBindings::build(program);
+    let conflicts = collect_conflicting_public_exports(program);
+    let Some(parsed) = program.module(module_id) else {
+        return Ok(Module {
+            requires: Vec::new(),
+            top_level_items: Vec::new(),
+        });
+    };
+
+    let mut module = parsed.module.clone();
+    let alias_symbols = bindings.alias_symbols_for(module_id);
+    let mut rewriter = ModuleAliasCallRewriter {
+        alias_symbols,
+        conflicts: &conflicts,
+        errors: Vec::new(),
+    };
+    rewriter.visit_module(&mut module);
+    if module_id != program.entry() {
+        mangle_dependency_symbols(&mut module, &parsed.source.path, &conflicts);
+    }
+    module
+        .top_level_items
+        .extend(imported_symbol_stubs(program, module_id));
+
+    if rewriter.errors.is_empty() {
+        Ok(module)
+    } else {
+        Err(rewriter.errors)
+    }
+}
+
+fn imported_symbol_stubs(
+    program: &ProgramParsedContext,
+    module_id: ModuleId,
+) -> Vec<parsed::TopLevelItem> {
+    let Some(parsed_module) = program.module(module_id) else {
+        return Vec::new();
+    };
+    let mut stubs = Vec::new();
+    for req in &parsed_module.requires {
+        if req.kind != RequireKind::Symbol {
+            continue;
+        }
+        let Some(member) = &req.member else {
+            continue;
+        };
+        let Some(dep_id) = program.program.by_path.get(&req.module_path).copied() else {
+            continue;
+        };
+        let Some(dep_module) = program.module(dep_id) else {
+            continue;
+        };
+        let Some(export_item) = dep_module.module.top_level_items.iter().find(|item| {
+            top_level_item_export_name(item) == Some(member.as_str())
+                && top_level_item_is_public(item)
+        }) else {
+            continue;
+        };
+        if let Some(stub) = import_stub_from_top_level_item(export_item) {
+            stubs.push(stub);
+        }
+    }
+    stubs
+}
+
+fn top_level_item_export_name(item: &parsed::TopLevelItem) -> Option<&str> {
+    match item {
+        parsed::TopLevelItem::FuncDecl(func_decl) => Some(func_decl.sig.name.as_str()),
+        parsed::TopLevelItem::FuncDef(func_def) => Some(func_def.sig.name.as_str()),
+        parsed::TopLevelItem::TypeDef(type_def) => Some(type_def.name.as_str()),
+        parsed::TopLevelItem::TraitDef(trait_def) => Some(trait_def.name.as_str()),
+        parsed::TopLevelItem::MethodBlock(_) | parsed::TopLevelItem::ClosureDef(_) => None,
+    }
+}
+
+fn top_level_item_is_public(item: &parsed::TopLevelItem) -> bool {
+    match item {
+        parsed::TopLevelItem::FuncDecl(func_decl) => has_public_attr(&func_decl.attrs),
+        parsed::TopLevelItem::FuncDef(func_def) => has_public_attr(&func_def.attrs),
+        parsed::TopLevelItem::TypeDef(type_def) => has_public_attr(&type_def.attrs),
+        parsed::TopLevelItem::TraitDef(trait_def) => has_public_attr(&trait_def.attrs),
+        parsed::TopLevelItem::MethodBlock(_) | parsed::TopLevelItem::ClosureDef(_) => false,
+    }
+}
+
+fn import_stub_from_top_level_item(item: &parsed::TopLevelItem) -> Option<parsed::TopLevelItem> {
+    match item {
+        parsed::TopLevelItem::FuncDecl(func_decl) => {
+            Some(parsed::TopLevelItem::FuncDecl(func_decl.clone()))
+        }
+        parsed::TopLevelItem::FuncDef(func_def) => {
+            Some(parsed::TopLevelItem::FuncDecl(parsed::FuncDecl {
+                id: func_def.id,
+                def_id: func_def.def_id,
+                attrs: func_def.attrs.clone(),
+                sig: func_def.sig.clone(),
+                span: func_def.span,
+            }))
+        }
+        parsed::TopLevelItem::TypeDef(type_def) => {
+            Some(parsed::TopLevelItem::TypeDef(type_def.clone()))
+        }
+        parsed::TopLevelItem::TraitDef(trait_def) => {
+            Some(parsed::TopLevelItem::TraitDef(trait_def.clone()))
+        }
+        parsed::TopLevelItem::MethodBlock(_) | parsed::TopLevelItem::ClosureDef(_) => None,
+    }
+}
+
 fn validate_symbol_imports(
     program: &ProgramParsedContext,
     bindings: &ProgramBindings,

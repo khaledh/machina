@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::analysis::completion::{
     collect as collect_completions, synthesize_member_completion_source,
 };
-use crate::analysis::diagnostics::Diagnostic;
+use crate::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
 use crate::analysis::frontend_support::{
     SnapshotOverlayLoader, frontend_error_diagnostics, infer_project_root, stable_source_revision,
 };
@@ -21,7 +21,8 @@ use crate::analysis::lookups::{
 };
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::pipeline::{
-    LookupState, collect_sorted_diagnostics, run_module_pipeline, to_lookup_state,
+    LookupState, collect_sorted_diagnostics, run_module_pipeline, run_module_pipeline_with_parsed,
+    to_lookup_state,
 };
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
 use crate::analysis::rename::{references as collect_references, rename_plan as build_rename_plan};
@@ -31,7 +32,7 @@ use crate::analysis::results::{
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 use crate::diag::Span;
-use crate::frontend::program::flatten_program;
+use crate::frontend::program::{flatten_program, rewrite_program_module};
 use crate::frontend::{self, ModuleId, ModulePath};
 use crate::resolve::DefId;
 use crate::tree::NodeId;
@@ -164,10 +165,19 @@ impl AnalysisDb {
         );
 
         self.execute_query(diagnostics_key, move |rt| {
+            let tag_with_entry_path = |mut diagnostics: Vec<Diagnostic>| {
+                let entry_file_path = entry_path.to_string_lossy().to_string();
+                for diag in &mut diagnostics {
+                    diag.metadata
+                        .entry(ANALYSIS_FILE_PATH_KEY.to_string())
+                        .or_insert_with(|| DiagnosticValue::String(entry_file_path.clone()));
+                }
+                diagnostics
+            };
             let project_root = infer_project_root(&entry_path);
             let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
                 Ok(path) => path,
-                Err(err) => return Ok(frontend_error_diagnostics(err)),
+                Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
             };
             let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
 
@@ -178,7 +188,7 @@ impl AnalysisDb {
                 &loader,
             ) {
                 Ok(program) => program,
-                Err(err) => return Ok(frontend_error_diagnostics(err)),
+                Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
             };
             let program_context = crate::context::ProgramParsedContext::new(program);
 
@@ -186,6 +196,12 @@ impl AnalysisDb {
                 let mut diagnostics = Vec::new();
                 for err in errs {
                     diagnostics.extend(frontend_error_diagnostics(err));
+                }
+                let entry_file_path = entry_path.to_string_lossy().to_string();
+                for diag in &mut diagnostics {
+                    diag.metadata
+                        .entry(ANALYSIS_FILE_PATH_KEY.to_string())
+                        .or_insert_with(|| DiagnosticValue::String(entry_file_path.clone()));
                 }
                 diagnostics.sort_by_key(|diag| {
                     (
@@ -205,8 +221,44 @@ impl AnalysisDb {
                 };
                 let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
                 let module_revision = stable_source_revision(&parsed.source.source);
-                let state = run_module_pipeline(rt, module_id, module_revision, source)?;
-                all.extend(collect_sorted_diagnostics(&state));
+                let rewritten_module = match rewrite_program_module(&program_context, module_id) {
+                    Ok(module) => module,
+                    Err(errs) => {
+                        let mut diagnostics = Vec::new();
+                        for err in errs {
+                            diagnostics.extend(frontend_error_diagnostics(err));
+                        }
+                        let file_path = parsed.source.file_path.to_string_lossy().to_string();
+                        for diag in &mut diagnostics {
+                            diag.metadata.insert(
+                                ANALYSIS_FILE_PATH_KEY.to_string(),
+                                DiagnosticValue::String(file_path.clone()),
+                            );
+                        }
+                        all.extend(diagnostics);
+                        continue;
+                    }
+                };
+                let parsed_context = crate::context::ParsedContext::new(
+                    rewritten_module,
+                    program_context.next_node_id_gen().clone(),
+                );
+                let state = run_module_pipeline_with_parsed(
+                    rt,
+                    module_id,
+                    module_revision,
+                    source,
+                    Some(parsed_context),
+                )?;
+                let mut module_diags = collect_sorted_diagnostics(&state);
+                let file_path = parsed.source.file_path.to_string_lossy().to_string();
+                for diag in &mut module_diags {
+                    diag.metadata.insert(
+                        ANALYSIS_FILE_PATH_KEY.to_string(),
+                        DiagnosticValue::String(file_path.clone()),
+                    );
+                }
+                all.extend(module_diags);
             }
             all.sort_by_key(|diag| {
                 (

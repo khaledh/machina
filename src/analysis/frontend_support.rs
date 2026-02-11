@@ -6,7 +6,7 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use crate::analysis::diagnostics::Diagnostic;
+use crate::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
 use crate::analysis::snapshot::AnalysisSnapshot;
 use crate::diag::Span;
 use crate::frontend::{self, FrontendError, ModuleLoader, ModulePath};
@@ -77,9 +77,42 @@ pub(crate) fn frontend_error_diagnostics(error: FrontendError) -> Vec<Diagnostic
         }
     }
 
+    fn with_path_metadata(mut diag: Diagnostic, path: Option<&Path>) -> Diagnostic {
+        if let Some(path) = path {
+            diag.metadata.insert(
+                ANALYSIS_FILE_PATH_KEY.to_string(),
+                DiagnosticValue::String(path.to_string_lossy().to_string()),
+            );
+        }
+        diag
+    }
+
     match error {
-        FrontendError::Lex { error, .. } => vec![Diagnostic::from_lex_error(&error)],
-        FrontendError::Parse { error, .. } => vec![Diagnostic::from_parse_error(&error)],
+        FrontendError::Lex { path, error } => {
+            vec![with_path_metadata(
+                Diagnostic::from_lex_error(&error),
+                Some(&path),
+            )]
+        }
+        FrontendError::Parse { path, error } => {
+            vec![with_path_metadata(
+                Diagnostic::from_parse_error(&error),
+                Some(&path),
+            )]
+        }
+        FrontendError::Io(path, io_error) => {
+            vec![with_path_metadata(
+                frontend_diag(
+                    format!(
+                        "failed to read module file {}: {}",
+                        path.display(),
+                        io_error
+                    ),
+                    Span::default(),
+                ),
+                Some(&path),
+            )]
+        }
         FrontendError::UnknownRequireAlias { span, .. }
         | FrontendError::RequireMemberUndefined { span, .. }
         | FrontendError::RequireMemberPrivate { span, .. }

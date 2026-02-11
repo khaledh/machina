@@ -61,10 +61,26 @@ pub(crate) fn run_module_pipeline(
     revision: u64,
     source: Arc<str>,
 ) -> QueryResult<ModulePipelineState> {
+    run_module_pipeline_with_parsed(rt, module_id, revision, source, None)
+}
+
+pub(crate) fn run_module_pipeline_with_parsed(
+    rt: &mut QueryRuntime,
+    module_id: ModuleId,
+    revision: u64,
+    source: Arc<str>,
+    parsed_override: Option<crate::context::ParsedContext>,
+) -> QueryResult<ModulePipelineState> {
     let parse_key = QueryKey::new(QueryKind::ParseModule, module_id, revision);
     let source_for_parse = source.clone();
+    let parsed_override_for_parse = parsed_override.clone();
     let parsed = rt.execute(parse_key, move |_rt| {
         let mut state = ParseStageOutput::default();
+        if let Some(parsed_context) = parsed_override_for_parse {
+            state.product = Some(parsed_context);
+            return Ok(state);
+        }
+
         let lexer = Lexer::new(&source_for_parse);
         let tokens = match lexer.tokenize().collect::<Result<Vec<_>, LexError>>() {
             Ok(tokens) => tokens,

@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use machina::analysis::db::AnalysisDb;
+use machina::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
 use machina::analysis::module_graph::ModuleGraph;
 use machina::analysis::query::{CancellationToken, QueryCancelled, QueryResult};
 use machina::analysis::snapshot::{AnalysisSnapshot, FileId};
@@ -139,9 +140,11 @@ impl AnalysisSession {
         uri: &str,
     ) -> SessionResult<Vec<machina::analysis::diagnostics::Diagnostic>> {
         let state = self.lookup_document(uri)?.clone();
-        self.db
-            .diagnostics_for_file(state.file_id)
-            .map_err(SessionError::from)
+        let diagnostics = self
+            .db
+            .diagnostics_for_program_file(state.file_id)
+            .map_err(SessionError::from)?;
+        Ok(filter_diagnostics_for_path(&diagnostics, &state.path))
     }
 
     pub fn diagnostics_for_uri_if_version(
@@ -155,13 +158,13 @@ impl AnalysisSession {
         }
         let diagnostics = self
             .db
-            .diagnostics_for_file(state.file_id)
+            .diagnostics_for_program_file(state.file_id)
             .map_err(SessionError::from)?;
         let latest = self.lookup_document(uri)?;
         if latest.version != expected_version {
             return Ok(None);
         }
-        Ok(Some(diagnostics))
+        Ok(Some(filter_diagnostics_for_path(&diagnostics, &state.path)))
     }
 
     pub fn is_current_version(&self, uri: &str, expected_version: i32) -> SessionResult<bool> {
@@ -188,6 +191,18 @@ impl AnalysisSession {
     }
 }
 
+fn filter_diagnostics_for_path(diagnostics: &[Diagnostic], path: &Path) -> Vec<Diagnostic> {
+    let expected = path.to_string_lossy();
+    diagnostics
+        .iter()
+        .filter(|diag| match diag.metadata.get(ANALYSIS_FILE_PATH_KEY) {
+            Some(DiagnosticValue::String(file_path)) => file_path == expected.as_ref(),
+            _ => false,
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn uri_to_path(uri: &str) -> SessionResult<PathBuf> {
     if let Some(path) = uri.strip_prefix("file://") {
         if path.is_empty() {
@@ -200,8 +215,12 @@ pub fn uri_to_path(uri: &str) -> SessionResult<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AnalysisSession, SessionError, uri_to_path};
+    use super::{
+        ANALYSIS_FILE_PATH_KEY, AnalysisSession, DiagnosticValue, SessionError, uri_to_path,
+    };
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn uri_to_path_accepts_file_uri() {
@@ -341,5 +360,101 @@ mod tests {
             .diagnostics_for_uri_if_version(uri, 1)
             .expect("query should succeed");
         assert!(stale.is_none(), "stale version should be dropped");
+    }
+
+    #[test]
+    fn diagnostics_for_uri_filters_dependency_module_diagnostics() {
+        let run_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "machina_lsp_diag_filter_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        let app_dir = temp_dir.join("app");
+        fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+        let entry_path = temp_dir.join("main.mc");
+        let dep_path = app_dir.join("dep.mc");
+        let entry_source = r#"
+requires {
+    app::dep as dep
+}
+
+fn main() -> u64 {
+    dep::value()
+}
+"#;
+        let dep_source = r#"
+fn value( {
+"#;
+        fs::write(&entry_path, entry_source).expect("failed to write entry source");
+        fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+        let mut session = AnalysisSession::new();
+        let uri = format!("file://{}", entry_path.to_string_lossy());
+        session
+            .open_document(&uri, 1, entry_source)
+            .expect("open should succeed");
+        let diagnostics = session
+            .diagnostics_for_uri(&uri)
+            .expect("diagnostics query should succeed");
+
+        let expected_path = entry_path.to_string_lossy();
+        for diag in diagnostics {
+            let source_path = diag
+                .metadata
+                .get(ANALYSIS_FILE_PATH_KEY)
+                .expect("program diagnostics should include source path metadata");
+            assert_eq!(
+                source_path,
+                &DiagnosticValue::String(expected_path.to_string()),
+                "diagnostic from dependency leaked into entry file publish list"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn diagnostics_for_uri_resolves_symbol_imports() {
+        let run_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "machina_lsp_symbol_import_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+        let entry_path = temp_dir.join("hello.mc");
+        let source = r#"
+requires {
+    std::io::println
+}
+
+fn main() {
+    println("hello");
+}
+"#;
+        fs::write(&entry_path, source).expect("failed to write source file");
+
+        let mut session = AnalysisSession::new();
+        let uri = format!("file://{}", entry_path.to_string_lossy());
+        session
+            .open_document(&uri, 1, source)
+            .expect("open should succeed");
+        let diagnostics = session
+            .diagnostics_for_uri(&uri)
+            .expect("diagnostics query should succeed");
+        assert!(
+            diagnostics.is_empty(),
+            "symbol import should resolve; diagnostics: {diagnostics:#?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
