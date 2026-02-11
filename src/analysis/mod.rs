@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod code_actions;
+pub mod completion;
 pub mod dataflow;
 pub mod db;
 pub mod diagnostics;
