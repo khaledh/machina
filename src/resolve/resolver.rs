@@ -1,14 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::{
-    ParsedContext, ProgramParsedContext, ProgramResolvedContext, ResolvedContext,
+    ImportedSymbolBinding, ParsedContext, ProgramParsedContext, ProgramResolvedContext,
+    ResolvedContext,
 };
 use crate::diag::Span;
-use crate::frontend::RequireKind;
+use crate::frontend::{ModuleId, RequireKind};
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
-use crate::resolve::{Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility};
+use crate::resolve::{
+    Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, Visibility,
+};
 use crate::tree::ParamMode;
 use crate::tree::parsed::*;
 use crate::tree::resolved::builder::build_module;
@@ -1557,6 +1560,7 @@ pub fn resolve_program(
     let mut modules = HashMap::new();
     let mut errors = Vec::new();
     let mut top_level_owners = HashMap::new();
+    let mut imported_symbol_bindings = HashMap::new();
 
     for module_id in program.dependency_order_from_entry() {
         let Some(parsed_module) = program.module(module_id) else {
@@ -1591,6 +1595,34 @@ pub fn resolve_program(
         match resolve_with_imports(parsed_context, imported_modules) {
             Ok(resolved_context) => {
                 modules.insert(module_id, resolved_context);
+                let mut module_import_bindings = HashMap::<String, ImportedSymbolBinding>::new();
+                for req in &parsed_module.requires {
+                    if req.kind != RequireKind::Symbol {
+                        continue;
+                    }
+                    let Some(member) = &req.member else {
+                        continue;
+                    };
+                    let Some(dep_id) = program.program.by_path.get(&req.module_path).copied()
+                    else {
+                        continue;
+                    };
+                    let Some(dep_context) = modules.get(&dep_id) else {
+                        continue;
+                    };
+                    let binding = collect_imported_symbol_binding(
+                        dep_context,
+                        dep_id,
+                        &req.module_path,
+                        member,
+                    );
+                    if !binding.is_empty() {
+                        module_import_bindings.insert(req.alias.clone(), binding);
+                    }
+                }
+                if !module_import_bindings.is_empty() {
+                    imported_symbol_bindings.insert(module_id, module_import_bindings);
+                }
             }
             Err(mut module_errors) => {
                 errors.append(&mut module_errors);
@@ -1608,7 +1640,47 @@ pub fn resolve_program(
         by_path: program.program.by_path.clone(),
         edges: program.program.edges.clone(),
         top_level_owners,
+        imported_symbol_bindings,
     })
+}
+
+fn collect_imported_symbol_binding(
+    dep_context: &ResolvedContext,
+    dep_module_id: ModuleId,
+    dep_module_path: &crate::frontend::ModulePath,
+    member: &str,
+) -> ImportedSymbolBinding {
+    let mut binding = ImportedSymbolBinding {
+        module_id: dep_module_id,
+        module_path: dep_module_path.clone(),
+        callables: Vec::new(),
+        type_def: None,
+        trait_def: None,
+    };
+
+    for def in dep_context.def_table.clone() {
+        if def.name != member || !def.is_public() {
+            continue;
+        }
+        match def.kind {
+            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
+                binding
+                    .callables
+                    .push(GlobalDefId::new(dep_module_id, def.id));
+            }
+            DefKind::TypeDef { .. } => {
+                binding.type_def = Some(GlobalDefId::new(dep_module_id, def.id));
+            }
+            DefKind::TraitDef { .. } => {
+                binding.trait_def = Some(GlobalDefId::new(dep_module_id, def.id));
+            }
+            _ => {}
+        }
+    }
+
+    binding.callables.sort_by_key(|id| id.def_id);
+    binding.callables.dedup();
+    binding
 }
 
 fn top_level_item_id(item: &TopLevelItem) -> crate::tree::NodeId {

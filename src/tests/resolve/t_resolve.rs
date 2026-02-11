@@ -92,6 +92,107 @@ fn test_resolve_program_resolves_dependencies() {
 }
 
 #[test]
+fn test_resolve_program_tracks_imported_symbol_origins() {
+    let entry_src = r#"
+        requires {
+            app::dep::run
+            app::dep::Config
+            app::dep::Runnable
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+    let dep_src = r#"
+        @[public]
+        fn run() -> u64 { 1 }
+
+        @[public]
+        type Config = { value: u64 }
+
+        @[public]
+        trait Runnable {}
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert("app.dep".to_string(), dep_src.to_string());
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let resolved = resolve_program(ProgramParsedContext::new(program))
+        .expect("program resolve should succeed");
+    let entry_id = resolved.entry;
+    let dep_path = ModulePath::new(vec!["app".to_string(), "dep".to_string()]).unwrap();
+    let dep_id = *resolved
+        .by_path
+        .get(&dep_path)
+        .expect("dependency module id should exist");
+    let dep_module = resolved
+        .module(dep_id)
+        .expect("dependency module should resolve");
+
+    let run_def_id = dep_module
+        .def_table
+        .clone()
+        .into_iter()
+        .find(|def| def.name == "run")
+        .expect("run def should exist")
+        .id;
+    let config_def_id = dep_module
+        .def_table
+        .clone()
+        .into_iter()
+        .find(|def| def.name == "Config")
+        .expect("Config def should exist")
+        .id;
+    let runnable_def_id = dep_module
+        .def_table
+        .clone()
+        .into_iter()
+        .find(|def| def.name == "Runnable")
+        .expect("Runnable def should exist")
+        .id;
+
+    let run_binding = resolved
+        .imported_symbol_binding(entry_id, "run")
+        .expect("run import binding should exist");
+    assert_eq!(
+        run_binding.callables,
+        vec![resolved.global_def_id(dep_id, run_def_id)]
+    );
+    assert!(run_binding.type_def.is_none());
+    assert!(run_binding.trait_def.is_none());
+
+    let config_binding = resolved
+        .imported_symbol_binding(entry_id, "Config")
+        .expect("Config import binding should exist");
+    assert_eq!(
+        config_binding.type_def,
+        Some(resolved.global_def_id(dep_id, config_def_id))
+    );
+    assert!(config_binding.callables.is_empty());
+    assert!(config_binding.trait_def.is_none());
+
+    let trait_binding = resolved
+        .imported_symbol_binding(entry_id, "Runnable")
+        .expect("Runnable import binding should exist");
+    assert_eq!(
+        trait_binding.trait_def,
+        Some(resolved.global_def_id(dep_id, runnable_def_id))
+    );
+    assert!(trait_binding.callables.is_empty());
+    assert!(trait_binding.type_def.is_none());
+}
+
+#[test]
 fn test_resolve_enum_undefined() {
     let source = r#"
         fn main() -> u64 {

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::frontend::{ModuleId, ModulePath, ParsedModule as FrontendParsedModule, ProgramParsed};
-use crate::resolve::{DefId, DefTable};
+use crate::resolve::{DefId, DefTable, GlobalDefId};
 use crate::semck::closure::capture::ClosureCapture;
 use crate::symtab::SymbolTable;
 use crate::tree::normalized::Module as NormalizedModule;
@@ -64,6 +64,7 @@ pub struct ProgramResolvedContext {
     pub by_path: HashMap<ModulePath, ModuleId>,
     pub edges: HashMap<ModuleId, Vec<ModuleId>>,
     pub top_level_owners: HashMap<NodeId, ModuleId>,
+    pub imported_symbol_bindings: HashMap<ModuleId, HashMap<String, ImportedSymbolBinding>>,
 }
 
 impl ProgramResolvedContext {
@@ -75,6 +76,35 @@ impl ProgramResolvedContext {
 
     pub fn module(&self, id: ModuleId) -> Option<&ResolvedContext> {
         self.modules.get(&id)
+    }
+
+    pub fn global_def_id(&self, module_id: ModuleId, def_id: DefId) -> GlobalDefId {
+        GlobalDefId::new(module_id, def_id)
+    }
+
+    pub fn imported_symbol_binding(
+        &self,
+        module_id: ModuleId,
+        symbol: &str,
+    ) -> Option<&ImportedSymbolBinding> {
+        self.imported_symbol_bindings
+            .get(&module_id)
+            .and_then(|bindings| bindings.get(symbol))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedSymbolBinding {
+    pub module_id: ModuleId,
+    pub module_path: ModulePath,
+    pub callables: Vec<GlobalDefId>,
+    pub type_def: Option<GlobalDefId>,
+    pub trait_def: Option<GlobalDefId>,
+}
+
+impl ImportedSymbolBinding {
+    pub fn is_empty(&self) -> bool {
+        self.callables.is_empty() && self.type_def.is_none() && self.trait_def.is_none()
     }
 }
 

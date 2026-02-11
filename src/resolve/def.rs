@@ -1,6 +1,8 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+use crate::frontend::ModuleId;
+
 // Defs store only identifiers and kinds; def kind structure lives in
 // the resolved tree.
 
@@ -14,6 +16,24 @@ pub const UNKNOWN_DEF_ID: DefId = DefId(u32::MAX);
 impl fmt::Display for DefId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobalDefId {
+    pub module_id: ModuleId,
+    pub def_id: DefId,
+}
+
+impl GlobalDefId {
+    pub fn new(module_id: ModuleId, def_id: DefId) -> Self {
+        Self { module_id, def_id }
+    }
+}
+
+impl fmt::Display for GlobalDefId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "m{}::{}", self.module_id.0, self.def_id)
     }
 }
 

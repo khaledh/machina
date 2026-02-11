@@ -6,7 +6,8 @@ mod resolver;
 pub mod symbols;
 
 pub use def::{
-    Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, UNKNOWN_DEF_ID, Visibility,
+    Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, UNKNOWN_DEF_ID,
+    Visibility,
 };
 pub use def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 pub use errors::ResolveError;
