@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::{
-    ImportedSymbolBinding, ParsedContext, ProgramParsedContext, ProgramResolvedContext,
-    ResolvedContext,
+    ImportEnv, ImportedSymbolBinding, ModuleExportFacts, ModuleImportBinding, ParsedContext,
+    ProgramParsedContext, ProgramResolvedContext, ResolvedContext,
 };
 use crate::diag::Span;
 use crate::frontend::{ModuleId, RequireKind};
@@ -1560,7 +1560,8 @@ pub fn resolve_program(
     let mut modules = HashMap::new();
     let mut errors = Vec::new();
     let mut top_level_owners = HashMap::new();
-    let mut imported_symbol_bindings = HashMap::new();
+    let mut export_facts_by_module = HashMap::<ModuleId, ModuleExportFacts>::new();
+    let mut import_env_by_module = HashMap::<ModuleId, ImportEnv>::new();
 
     for module_id in program.dependency_order_from_entry() {
         let Some(parsed_module) = program.module(module_id) else {
@@ -1594,34 +1595,52 @@ pub fn resolve_program(
         );
         match resolve_with_imports(parsed_context, imported_modules) {
             Ok(resolved_context) => {
+                let module_exports = collect_module_export_facts(
+                    &resolved_context,
+                    module_id,
+                    Some(parsed_module.source.path.clone()),
+                );
+                export_facts_by_module.insert(module_id, module_exports.clone());
                 modules.insert(module_id, resolved_context);
-                let mut module_import_bindings = HashMap::<String, ImportedSymbolBinding>::new();
+
+                let mut import_env = ImportEnv::default();
                 for req in &parsed_module.requires {
-                    if req.kind != RequireKind::Symbol {
-                        continue;
-                    }
-                    let Some(member) = &req.member else {
-                        continue;
-                    };
                     let Some(dep_id) = program.program.by_path.get(&req.module_path).copied()
                     else {
                         continue;
                     };
-                    let Some(dep_context) = modules.get(&dep_id) else {
+                    let Some(dep_exports) = export_facts_by_module.get(&dep_id).cloned() else {
                         continue;
                     };
-                    let binding = collect_imported_symbol_binding(
-                        dep_context,
-                        dep_id,
-                        &req.module_path,
-                        member,
-                    );
-                    if !binding.is_empty() {
-                        module_import_bindings.insert(req.alias.clone(), binding);
+                    match req.kind {
+                        RequireKind::Module => {
+                            import_env.module_aliases.insert(
+                                req.alias.clone(),
+                                ModuleImportBinding {
+                                    module_id: dep_id,
+                                    module_path: req.module_path.clone(),
+                                    exports: dep_exports,
+                                },
+                            );
+                        }
+                        RequireKind::Symbol => {
+                            let Some(member) = &req.member else {
+                                continue;
+                            };
+                            let binding = collect_imported_symbol_binding_from_exports(
+                                dep_id,
+                                &req.module_path,
+                                &dep_exports,
+                                member,
+                            );
+                            if !binding.is_empty() {
+                                import_env.symbol_aliases.insert(req.alias.clone(), binding);
+                            }
+                        }
                     }
                 }
-                if !module_import_bindings.is_empty() {
-                    imported_symbol_bindings.insert(module_id, module_import_bindings);
+                if !import_env.module_aliases.is_empty() || !import_env.symbol_aliases.is_empty() {
+                    import_env_by_module.insert(module_id, import_env);
                 }
             }
             Err(mut module_errors) => {
@@ -1640,47 +1659,74 @@ pub fn resolve_program(
         by_path: program.program.by_path.clone(),
         edges: program.program.edges.clone(),
         top_level_owners,
-        imported_symbol_bindings,
+        export_facts_by_module,
+        import_env_by_module,
     })
 }
 
-fn collect_imported_symbol_binding(
-    dep_context: &ResolvedContext,
-    dep_module_id: ModuleId,
-    dep_module_path: &crate::frontend::ModulePath,
-    member: &str,
-) -> ImportedSymbolBinding {
-    let mut binding = ImportedSymbolBinding {
-        module_id: dep_module_id,
-        module_path: dep_module_path.clone(),
-        callables: Vec::new(),
-        type_def: None,
-        trait_def: None,
+fn collect_module_export_facts(
+    resolved_context: &ResolvedContext,
+    module_id: ModuleId,
+    module_path: Option<crate::frontend::ModulePath>,
+) -> ModuleExportFacts {
+    let mut facts = ModuleExportFacts {
+        module_id,
+        module_path,
+        callables: HashMap::new(),
+        types: HashMap::new(),
+        traits: HashMap::new(),
     };
-
-    for def in dep_context.def_table.clone() {
-        if def.name != member || !def.is_public() {
+    for def in resolved_context.def_table.clone() {
+        if !def.is_public() {
             continue;
         }
         match def.kind {
             DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-                binding
+                facts
                     .callables
-                    .push(GlobalDefId::new(dep_module_id, def.id));
+                    .entry(def.name.clone())
+                    .or_default()
+                    .push(GlobalDefId::new(module_id, def.id));
             }
             DefKind::TypeDef { .. } => {
-                binding.type_def = Some(GlobalDefId::new(dep_module_id, def.id));
+                facts
+                    .types
+                    .entry(def.name.clone())
+                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
             }
             DefKind::TraitDef { .. } => {
-                binding.trait_def = Some(GlobalDefId::new(dep_module_id, def.id));
+                facts
+                    .traits
+                    .entry(def.name.clone())
+                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
             }
             _ => {}
         }
     }
+    for overloads in facts.callables.values_mut() {
+        overloads.sort_by_key(|id| id.def_id);
+        overloads.dedup();
+    }
+    facts
+}
 
-    binding.callables.sort_by_key(|id| id.def_id);
-    binding.callables.dedup();
-    binding
+fn collect_imported_symbol_binding_from_exports(
+    dep_module_id: ModuleId,
+    dep_module_path: &crate::frontend::ModulePath,
+    dep_exports: &ModuleExportFacts,
+    member: &str,
+) -> ImportedSymbolBinding {
+    ImportedSymbolBinding {
+        module_id: dep_module_id,
+        module_path: dep_module_path.clone(),
+        callables: dep_exports
+            .callables
+            .get(member)
+            .cloned()
+            .unwrap_or_default(),
+        type_def: dep_exports.types.get(member).copied(),
+        trait_def: dep_exports.traits.get(member).copied(),
+    }
 }
 
 fn top_level_item_id(item: &TopLevelItem) -> crate::tree::NodeId {

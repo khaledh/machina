@@ -64,7 +64,8 @@ pub struct ProgramResolvedContext {
     pub by_path: HashMap<ModulePath, ModuleId>,
     pub edges: HashMap<ModuleId, Vec<ModuleId>>,
     pub top_level_owners: HashMap<NodeId, ModuleId>,
-    pub imported_symbol_bindings: HashMap<ModuleId, HashMap<String, ImportedSymbolBinding>>,
+    pub export_facts_by_module: HashMap<ModuleId, ModuleExportFacts>,
+    pub import_env_by_module: HashMap<ModuleId, ImportEnv>,
 }
 
 impl ProgramResolvedContext {
@@ -82,14 +83,21 @@ impl ProgramResolvedContext {
         GlobalDefId::new(module_id, def_id)
     }
 
+    pub fn export_facts(&self, module_id: ModuleId) -> Option<&ModuleExportFacts> {
+        self.export_facts_by_module.get(&module_id)
+    }
+
+    pub fn import_env(&self, module_id: ModuleId) -> Option<&ImportEnv> {
+        self.import_env_by_module.get(&module_id)
+    }
+
     pub fn imported_symbol_binding(
         &self,
         module_id: ModuleId,
         symbol: &str,
     ) -> Option<&ImportedSymbolBinding> {
-        self.imported_symbol_bindings
-            .get(&module_id)
-            .and_then(|bindings| bindings.get(symbol))
+        self.import_env(module_id)
+            .and_then(|env| env.symbol_aliases.get(symbol))
     }
 }
 
@@ -106,6 +114,28 @@ impl ImportedSymbolBinding {
     pub fn is_empty(&self) -> bool {
         self.callables.is_empty() && self.type_def.is_none() && self.trait_def.is_none()
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModuleExportFacts {
+    pub module_id: ModuleId,
+    pub module_path: Option<ModulePath>,
+    pub callables: HashMap<String, Vec<GlobalDefId>>,
+    pub types: HashMap<String, GlobalDefId>,
+    pub traits: HashMap<String, GlobalDefId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModuleImportBinding {
+    pub module_id: ModuleId,
+    pub module_path: ModulePath,
+    pub exports: ModuleExportFacts,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ImportEnv {
+    pub module_aliases: HashMap<String, ModuleImportBinding>,
+    pub symbol_aliases: HashMap<String, ImportedSymbolBinding>,
 }
 
 // -----------------------------------------------------------------------------

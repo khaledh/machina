@@ -193,6 +193,74 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
 }
 
 #[test]
+fn test_resolve_program_builds_import_env_from_export_facts() {
+    let entry_src = r#"
+        requires {
+            app::dep as dep
+            app::dep::run
+        }
+
+        fn main() -> u64 {
+            0
+        }
+    "#;
+    let dep_src = r#"
+        @[public]
+        fn run() -> u64 { 1 }
+
+        @[public]
+        type Config = { value: u64 }
+
+        type Hidden = { value: u64 }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert("app.dep".to_string(), dep_src.to_string());
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_program_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let resolved = resolve_program(ProgramParsedContext::new(program))
+        .expect("program resolve should succeed");
+    let entry_id = resolved.entry;
+    let import_env = resolved
+        .import_env(entry_id)
+        .expect("entry import env exists");
+
+    let dep_alias = import_env
+        .module_aliases
+        .get("dep")
+        .expect("module alias binding should exist");
+    assert!(
+        dep_alias.exports.callables.contains_key("run"),
+        "module export facts should include public function"
+    );
+    assert!(
+        dep_alias.exports.types.contains_key("Config"),
+        "module export facts should include public type"
+    );
+    assert!(
+        !dep_alias.exports.types.contains_key("Hidden"),
+        "module export facts should exclude private type"
+    );
+
+    let symbol_binding = import_env
+        .symbol_aliases
+        .get("run")
+        .expect("symbol alias binding should exist");
+    assert!(
+        !symbol_binding.callables.is_empty(),
+        "symbol binding should include callable target IDs"
+    );
+}
+
+#[test]
 fn test_resolve_enum_undefined() {
     let source = r#"
         fn main() -> u64 {
