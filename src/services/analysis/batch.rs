@@ -5,11 +5,12 @@
 
 use std::collections::HashMap;
 
+use crate::core::api::{resolve_stage, typecheck_stage};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
-use crate::core::resolve::{ImportedFacts, ResolveError, attach_def_owners, resolve};
+use crate::core::resolve::{ImportedFacts, ResolveError, attach_def_owners};
 use crate::core::tree::NodeId;
-use crate::core::typecheck::{TypeCheckError, type_check_with_imported_facts};
+use crate::core::typecheck::TypeCheckError;
 use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::query::{QueryCancelled, QueryKey, QueryKind};
 use crate::services::analysis::results::{ResolvedModuleResult, TypedModuleResult};
@@ -36,7 +37,8 @@ pub fn query_resolve(
 ) -> Result<ResolvedModuleResult, BatchQueryError> {
     let key = QueryKey::new(QueryKind::ResolveModule, module_id, revision);
     let resolved = db.execute_query(key, move |_rt| {
-        let resolved = resolve(parsed).map(|ctx| attach_def_owners(ctx, &top_level_owners));
+        let resolved = resolve_stage(parsed)
+            .map(|(ctx, _)| attach_def_owners(ctx, &top_level_owners));
         let result = resolved.map(|ctx| ResolvedModuleResult::from_context(module_id, ctx));
         Ok(result)
     })?;
@@ -61,7 +63,7 @@ pub fn query_typecheck_with_imported_facts(
 ) -> Result<TypedModuleResult, BatchQueryError> {
     let key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
     let typed = db.execute_query(key, move |_rt| {
-        let typed = type_check_with_imported_facts(resolved.into_context(), imported_facts)
+        let typed = typecheck_stage(resolved.into_context(), imported_facts)
             .map(|ctx| TypedModuleResult::from_context(module_id, ctx));
         Ok(typed)
     })?;
