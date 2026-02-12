@@ -157,6 +157,6 @@ fn semcheck_diagnostic_is_phase_tagged() {
     let diag = Diagnostic::from_semcheck_error(&err);
 
     assert_eq!(diag.phase, DiagnosticPhase::Semcheck);
-    assert_eq!(diag.code, "MC-SEMCK-ERROR");
+    assert_eq!(diag.code, "MC-SEMCK-DivisionByZero");
     assert_eq!(diag.severity, DiagnosticSeverity::Error);
 }

@@ -304,7 +304,7 @@ impl Diagnostic {
     pub fn from_semcheck_error(error: &SemCheckError) -> Self {
         Self {
             phase: DiagnosticPhase::Semcheck,
-            code: "MC-SEMCK-ERROR".to_string(),
+            code: semcheck_code(error).to_string(),
             severity: DiagnosticSeverity::Error,
             span: error.span(),
             message: error.to_string(),
@@ -431,6 +431,66 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
         }
         _ => {}
+    }
+}
+
+fn semcheck_code(error: &SemCheckError) -> &'static str {
+    match error {
+        SemCheckError::ValueOutOfRange(..) => "MC-SEMCK-ValueOutOfRange",
+        SemCheckError::ValueNotNonZero(..) => "MC-SEMCK-ValueNotNonZero",
+        SemCheckError::InvalidRangeBounds(..) => "MC-SEMCK-InvalidRangeBounds",
+        SemCheckError::DivisionByZero(..) => "MC-SEMCK-DivisionByZero",
+        SemCheckError::InvalidCallee(..) => "MC-SEMCK-InvalidCallee",
+        SemCheckError::UnknownStructType(..) => "MC-SEMCK-UnknownStructType",
+        SemCheckError::DuplicateStructField(..) => "MC-SEMCK-DuplicateStructField",
+        SemCheckError::UnknownStructField(..) => "MC-SEMCK-UnknownStructField",
+        SemCheckError::StructFieldsMissing(..) => "MC-SEMCK-StructFieldsMissing",
+        SemCheckError::UnknownEnumType(..) => "MC-SEMCK-UnknownEnumType",
+        SemCheckError::UnknownEnumVariant(..) => "MC-SEMCK-UnknownEnumVariant",
+        SemCheckError::EnumVariantPayloadArityMismatch(..) => {
+            "MC-SEMCK-EnumVariantPayloadArityMismatch"
+        }
+        SemCheckError::MatchTargetNotEnum(..) => "MC-SEMCK-MatchTargetNotEnum",
+        SemCheckError::MatchPatternEnumMismatch(..) => "MC-SEMCK-MatchPatternEnumMismatch",
+        SemCheckError::NonExhaustiveMatch(..) => "MC-SEMCK-NonExhaustiveMatch",
+        SemCheckError::NonExhaustiveUnionMatch(..) => "MC-SEMCK-NonExhaustiveUnionMatch",
+        SemCheckError::DuplicateMatchVariant(..) => "MC-SEMCK-DuplicateMatchVariant",
+        SemCheckError::InvalidMatchPattern(..) => "MC-SEMCK-InvalidMatchPattern",
+        SemCheckError::WildcardArmNotLast(..) => "MC-SEMCK-WildcardArmNotLast",
+        SemCheckError::TupleMatchRequiresSingleArm(..) => "MC-SEMCK-TupleMatchRequiresSingleArm",
+        SemCheckError::TuplePatternArityMismatch(..) => "MC-SEMCK-TuplePatternArityMismatch",
+        SemCheckError::InOutParamNotAggregate(..) => "MC-SEMCK-InOutParamNotAggregate",
+        SemCheckError::InOutArgNotLvalue(..) => "MC-SEMCK-InOutArgNotLvalue",
+        SemCheckError::InOutArgNotMutable(..) => "MC-SEMCK-InOutArgNotMutable",
+        SemCheckError::InOutArgMissingMode(..) => "MC-SEMCK-InOutArgMissingMode",
+        SemCheckError::InOutArgUnexpected(..) => "MC-SEMCK-InOutArgUnexpected",
+        SemCheckError::OutParamNotAggregate(..) => "MC-SEMCK-OutParamNotAggregate",
+        SemCheckError::OutArgNotLvalue(..) => "MC-SEMCK-OutArgNotLvalue",
+        SemCheckError::OutArgNotMutable(..) => "MC-SEMCK-OutArgNotMutable",
+        SemCheckError::OutArgMissingMode(..) => "MC-SEMCK-OutArgMissingMode",
+        SemCheckError::OutArgUnexpected(..) => "MC-SEMCK-OutArgUnexpected",
+        SemCheckError::OutSelfNotAllowed(..) => "MC-SEMCK-OutSelfNotAllowed",
+        SemCheckError::OutParamNotInitialized(..) => "MC-SEMCK-OutParamNotInitialized",
+        SemCheckError::SinkArgMissingMove(..) => "MC-SEMCK-SinkArgMissingMove",
+        SemCheckError::MoveArgUnexpected(..) => "MC-SEMCK-MoveArgUnexpected",
+        SemCheckError::PartialInitNotAllowed(..) => "MC-SEMCK-PartialInitNotAllowed",
+        SemCheckError::OverlappingLvalueArgs(..) => "MC-SEMCK-OverlappingLvalueArgs",
+        SemCheckError::SinkParamNotOwned(..) => "MC-SEMCK-SinkParamNotOwned",
+        SemCheckError::UseBeforeInit(..) => "MC-SEMCK-UseBeforeInit",
+        SemCheckError::UseAfterMove(..) => "MC-SEMCK-UseAfterMove",
+        SemCheckError::InvalidMoveTarget(..) => "MC-SEMCK-InvalidMoveTarget",
+        SemCheckError::MoveFromParam(..) => "MC-SEMCK-MoveFromParam",
+        SemCheckError::OwnedMoveRequired(..) => "MC-SEMCK-OwnedMoveRequired",
+        SemCheckError::SliceEscapeReturn(..) => "MC-SEMCK-SliceEscapeReturn",
+        SemCheckError::SliceEscapeStore(..) => "MC-SEMCK-SliceEscapeStore",
+        SemCheckError::SliceBorrowConflict(..) => "MC-SEMCK-SliceBorrowConflict",
+        SemCheckError::SliceTargetNotLvalue(..) => "MC-SEMCK-SliceTargetNotLvalue",
+        SemCheckError::ClosureCaptureMove(..) => "MC-SEMCK-ClosureCaptureMove",
+        SemCheckError::ClosureCaptureUnused(..) => "MC-SEMCK-ClosureCaptureUnused",
+        SemCheckError::ClosureBorrowConflict(..) => "MC-SEMCK-ClosureBorrowConflict",
+        SemCheckError::ClosureEscapeReturn(..) => "MC-SEMCK-ClosureEscapeReturn",
+        SemCheckError::ClosureEscapeStore(..) => "MC-SEMCK-ClosureEscapeStore",
+        SemCheckError::ClosureEscapeArg(..) => "MC-SEMCK-ClosureEscapeArg",
     }
 }
 
