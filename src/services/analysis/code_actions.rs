@@ -43,6 +43,22 @@ pub(crate) fn code_actions_for_diagnostic(diag: &Diagnostic) -> Vec<CodeAction> 
             diagnostic_code: diag.code.clone(),
             edits: Vec::new(),
         }],
+        "MC-SEMCK-NonExhaustiveUnionMatch" => {
+            let missing = diag
+                .metadata
+                .get("missing")
+                .and_then(|v| match v {
+                    DiagnosticValue::StringList(items) => Some(items.join(" | ")),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "missing union variants".to_string());
+            vec![CodeAction {
+                title: format!("Add match arms for missing union variants: {missing}"),
+                kind: CodeActionKind::QuickFix,
+                diagnostic_code: diag.code.clone(),
+                edits: Vec::new(),
+            }]
+        }
         _ => Vec::new(),
     }
 }

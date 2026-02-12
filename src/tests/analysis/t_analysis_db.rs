@@ -995,6 +995,42 @@ fn use_try() -> u64 | OtherErr {
 }
 
 #[test]
+fn code_actions_include_union_match_exhaustiveness_fix() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type ParseErr = {}
+type IoErr = {}
+
+fn load() -> u64 | ParseErr | IoErr {
+    IoErr{}
+}
+
+fn main() -> u64 {
+    match load() {
+        v: u64 => v,
+        ParseErr => 0,
+    }
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/code_actions_match_union.mc"), source);
+    let query_span = span_for_substring(source, "match load()");
+
+    let actions = db
+        .code_actions_at_file(file_id, query_span)
+        .expect("code action query should succeed");
+
+    assert!(
+        actions
+            .iter()
+            .any(|a| a
+                .title
+                .contains("Add match arms for missing union variants: ParseErr | IoErr")),
+        "expected union match exhaustiveness quick fix, got: {:?}",
+        actions
+    );
+}
+
+#[test]
 fn code_actions_are_deterministic() {
     let mut db = AnalysisDb::new();
     let source = r#"
