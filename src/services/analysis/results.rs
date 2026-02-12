@@ -11,9 +11,7 @@ use std::path::PathBuf;
 use crate::core::capsule::{ModuleId, ParsedModule};
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
-use crate::core::resolve::{
-    Def, DefId, DefTable, ImportedCallableSig, ImportedFacts, ImportedTraitSig,
-};
+use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symtab::SymbolTable;
 use crate::core::tree::NodeId;
 use crate::core::tree::NodeIdGen;
@@ -46,9 +44,6 @@ pub struct ResolvedModuleResult {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
-    pub imported_type_defs: HashMap<DefId, Type>,
-    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 impl ResolvedModuleResult {
@@ -60,27 +55,6 @@ impl ResolvedModuleResult {
             def_owners: context.def_owners,
             symbols: context.symbols,
             node_id_gen: context.node_id_gen,
-            imported_callable_sigs: HashMap::new(),
-            imported_type_defs: HashMap::new(),
-            imported_trait_defs: HashMap::new(),
-        }
-    }
-
-    pub fn from_parts(
-        module_id: ModuleId,
-        context: ResolvedContext,
-        imported_facts: ImportedFacts,
-    ) -> Self {
-        Self {
-            module_id,
-            module: context.module,
-            def_table: context.def_table,
-            def_owners: context.def_owners,
-            symbols: context.symbols,
-            node_id_gen: context.node_id_gen,
-            imported_callable_sigs: imported_facts.callable_sigs_by_def,
-            imported_type_defs: imported_facts.type_defs_by_def,
-            imported_trait_defs: imported_facts.trait_defs_by_def,
         }
     }
 
@@ -91,14 +65,6 @@ impl ResolvedModuleResult {
             def_owners: self.def_owners,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
-        }
-    }
-
-    pub fn imported_facts(&self) -> ImportedFacts {
-        ImportedFacts {
-            callable_sigs_by_def: self.imported_callable_sigs.clone(),
-            type_defs_by_def: self.imported_type_defs.clone(),
-            trait_defs_by_def: self.imported_trait_defs.clone(),
         }
     }
 }
@@ -114,9 +80,6 @@ pub struct TypedModuleResult {
     pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
-    pub imported_type_defs: HashMap<DefId, Type>,
-    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -259,9 +222,6 @@ impl TypedModuleResult {
             generic_insts: context.generic_insts,
             symbols: context.symbols,
             node_id_gen: context.node_id_gen,
-            imported_callable_sigs: HashMap::new(),
-            imported_type_defs: HashMap::new(),
-            imported_trait_defs: HashMap::new(),
         }
     }
 

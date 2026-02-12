@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
-use crate::core::resolve::{ResolveError, attach_def_owners, resolve};
+use crate::core::resolve::{ImportedFacts, ResolveError, attach_def_owners, resolve};
 use crate::core::tree::NodeId;
 use crate::core::typecheck::{TypeCheckError, type_check_with_imported_facts};
 use crate::services::analysis::db::AnalysisDb;
@@ -49,9 +49,24 @@ pub fn query_typecheck(
     revision: u64,
     resolved: ResolvedModuleResult,
 ) -> Result<TypedModuleResult, BatchQueryError> {
+    query_typecheck_with_imported_facts(
+        db,
+        module_id,
+        revision,
+        resolved,
+        ImportedFacts::default(),
+    )
+}
+
+pub fn query_typecheck_with_imported_facts(
+    db: &mut AnalysisDb,
+    module_id: ModuleId,
+    revision: u64,
+    resolved: ResolvedModuleResult,
+    imported_facts: ImportedFacts,
+) -> Result<TypedModuleResult, BatchQueryError> {
     let key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
     let typed = db.execute_query(key, move |_rt| {
-        let imported_facts = resolved.imported_facts();
         let typed = type_check_with_imported_facts(resolved.into_context(), imported_facts)
             .map(|ctx| TypedModuleResult::from_context(module_id, ctx));
         Ok(typed)
