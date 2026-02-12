@@ -1446,6 +1446,25 @@ fn main() {
 }
 
 #[test]
+fn diagnostics_for_program_file_examples_import_symbols_main_is_clean() {
+    let entry_path = PathBuf::from("examples/modules_visibility/import_symbols/main.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected clean diagnostics for import_symbols example, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn diagnostics_for_program_file_typechecks_symbol_import_calls() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(

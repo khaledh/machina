@@ -1,7 +1,7 @@
 requires {
-    examples::import_symbols::foo::Foo
-    examples::import_symbols::foo::make_foo
-    examples::import_symbols::foo::do_something
+    examples::modules_visibility::import_symbols::foo::Foo
+    examples::modules_visibility::import_symbols::foo::make_foo
+    examples::modules_visibility::import_symbols::foo::do_something
     std::io::println
 }
 

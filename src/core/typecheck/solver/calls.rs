@@ -105,6 +105,20 @@ pub(super) fn check_call_obligations(
             continue;
         }
 
+        let has_unresolved_arg = obligation.arg_terms.iter().any(|arg_term| {
+            let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
+            super::term_utils::is_unresolved(&arg_ty)
+        });
+        let has_unresolved_receiver = obligation
+            .receiver
+            .as_ref()
+            .map(|receiver_term| {
+                let receiver_ty = super::term_utils::resolve_term(receiver_term, unifier);
+                super::term_utils::is_unresolved(&receiver_ty)
+            })
+            .unwrap_or(false);
+        let should_defer_for_unresolved = has_unresolved_arg || has_unresolved_receiver;
+
         let mut candidates: Vec<CollectedCallableSig> = match &obligation.callee {
             CallCallee::NamedFunction { name, .. } => {
                 named_call_candidates(name, obligation.arg_terms.len(), func_sigs)
@@ -154,6 +168,10 @@ pub(super) fn check_call_obligations(
         });
 
         if candidates.is_empty() {
+            if should_defer_for_unresolved {
+                deferred.push(obligation.clone());
+                continue;
+            }
             let name = match &obligation.callee {
                 CallCallee::NamedFunction { name, .. } => name.clone(),
                 CallCallee::Method { name } => name.clone(),
@@ -244,6 +262,10 @@ pub(super) fn check_call_obligations(
 
         if let Some((_, _, next, def_id)) = best_choice {
             if ambiguous_best {
+                if should_defer_for_unresolved {
+                    deferred.push(obligation.clone());
+                    continue;
+                }
                 let name = match &obligation.callee {
                     CallCallee::NamedFunction { name, .. } => name.clone(),
                     CallCallee::Method { name } => name.clone(),
@@ -265,8 +287,16 @@ pub(super) fn check_call_obligations(
             *unifier = next;
             resolved_call_defs.insert(obligation.call_node, def_id);
         } else if let Some(err) = first_error {
+            if should_defer_for_unresolved {
+                deferred.push(obligation.clone());
+                continue;
+            }
             errors.push(err);
         } else {
+            if should_defer_for_unresolved {
+                deferred.push(obligation.clone());
+                continue;
+            }
             let name = match &obligation.callee {
                 CallCallee::NamedFunction { name, .. } => name.clone(),
                 CallCallee::Method { name } => name.clone(),

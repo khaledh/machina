@@ -77,7 +77,8 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 
     let (mut expr_errors, mut covered_exprs, index_nodes, enum_payload_nodes) =
         solve_expr_stage(&constrain, &mut unifier, engine);
-    let (mut call_errors, resolved_call_defs) = solve_call_stage(&constrain, &mut unifier, engine);
+    let (mut call_errors, mut resolved_call_defs, unresolved_calls) =
+        solve_call_stage(&constrain, &mut unifier, engine);
 
     retry_expr_stage(
         &constrain,
@@ -86,6 +87,23 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut expr_errors,
         &mut covered_exprs,
     );
+
+    if !unresolved_calls.is_empty() {
+        let (mut retry_call_errors, retry_resolved, _) = calls::check_call_obligations(
+            &unresolved_calls,
+            &mut unifier,
+            &engine.env().func_sigs,
+            &engine.env().method_sigs,
+            &engine.env().property_sigs,
+            &engine.env().trait_sigs,
+            &engine.env().trait_impls,
+            &constrain.var_trait_bounds,
+            &engine.context().def_table,
+            &engine.context().def_owners,
+        );
+        call_errors.append(&mut retry_call_errors);
+        resolved_call_defs.extend(retry_resolved);
+    }
 
     apply_final_assignability(
         &constrain,
@@ -221,10 +239,15 @@ fn solve_call_stage(
     constrain: &ConstrainOutput,
     unifier: &mut TcUnifier,
     engine: &TypecheckEngine,
-) -> (Vec<TypeCheckError>, HashMap<NodeId, DefId>) {
+) -> (
+    Vec<TypeCheckError>,
+    HashMap<NodeId, DefId>,
+    Vec<crate::core::typecheck::constraints::CallObligation>,
+) {
     let mut call_errors = Vec::new();
     let mut resolved_call_defs = HashMap::new();
     let mut pending_calls = constrain.call_obligations.clone();
+    let mut unresolved_calls = Vec::new();
     while !pending_calls.is_empty() {
         let prior_pending = pending_calls.len();
         let (mut round_errors, round_resolved, deferred) = calls::check_call_obligations(
@@ -243,17 +266,19 @@ fn solve_call_stage(
         resolved_call_defs.extend(round_resolved);
 
         if deferred.is_empty() {
+            unresolved_calls.clear();
             break;
         }
         if deferred.len() == prior_pending {
             // No progress this round: keep legacy behavior for remaining
             // unresolved dynamic calls and let other obligations/late checks
             // decide whether diagnostics are needed.
+            unresolved_calls = deferred;
             break;
         }
         pending_calls = deferred;
     }
-    (call_errors, resolved_call_defs)
+    (call_errors, resolved_call_defs, unresolved_calls)
 }
 
 fn retry_expr_stage(
