@@ -9,9 +9,9 @@
 
 use std::collections::HashMap;
 
-use crate::capsule::{ModuleId, ModulePath, RequireKind};
-use crate::context::CapsuleParsedContext;
-use crate::tree::parsed;
+use crate::core::capsule::{ModuleId, ModulePath, RequireKind};
+use crate::core::context::CapsuleParsedContext;
+use crate::core::tree::parsed;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct MemberAttrs {

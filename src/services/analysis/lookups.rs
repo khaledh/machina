@@ -3,21 +3,21 @@
 //! This module keeps per-feature lookup logic out of `analysis::db` so the DB
 //! focuses on snapshot/query orchestration.
 
-use crate::analysis::code_actions::code_actions_for_diagnostic;
-use crate::analysis::diagnostics::Diagnostic;
-use crate::analysis::pipeline::LookupState;
-use crate::analysis::results::{
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
+use crate::core::types::Type;
+use crate::services::analysis::code_actions::code_actions_for_diagnostic;
+use crate::services::analysis::diagnostics::Diagnostic;
+use crate::services::analysis::pipeline::LookupState;
+use crate::services::analysis::results::{
     CodeAction, DocumentSymbol, HoverInfo, Location, SemanticToken, SemanticTokenKind,
     SignatureHelp,
 };
-use crate::analysis::snapshot::{AnalysisSnapshot, FileId};
-use crate::analysis::syntax_index::{
+use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
+use crate::services::analysis::syntax_index::{
     active_param_index, call_site_at_span, document_symbol_nodes, node_at_span, node_span_map,
     span_intersects_span,
 };
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
-use crate::types::Type;
 
 pub(crate) fn def_at_span(state: &LookupState, query_span: Span) -> Option<DefId> {
     let resolved = state.resolved.as_ref()?;
@@ -269,11 +269,11 @@ fn semantic_token_kind_for_def(kind: &DefKind) -> Option<SemanticTokenKind> {
     }
 }
 
-fn param_mode_name(mode: &crate::tree::ParamMode) -> &'static str {
+fn param_mode_name(mode: &crate::core::tree::ParamMode) -> &'static str {
     match mode {
-        crate::tree::ParamMode::In => "in",
-        crate::tree::ParamMode::InOut => "inout",
-        crate::tree::ParamMode::Out => "out",
-        crate::tree::ParamMode::Sink => "sink",
+        crate::core::tree::ParamMode::In => "in",
+        crate::core::tree::ParamMode::InOut => "inout",
+        crate::core::tree::ParamMode::Out => "out",
+        crate::core::tree::ParamMode::Sink => "sink",
     }
 }

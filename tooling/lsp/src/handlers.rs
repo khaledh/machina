@@ -291,16 +291,16 @@ fn publish_diagnostics_if_current(
     (HandlerAction::Continue, Some(notification))
 }
 
-fn span_from_lsp_position(line0: usize, col0: usize) -> machina::diag::Span {
+fn span_from_lsp_position(line0: usize, col0: usize) -> machina::core::diag::Span {
     let line = line0.saturating_add(1);
     let col = col0.saturating_add(1);
-    machina::diag::Span {
-        start: machina::diag::Position {
+    machina::core::diag::Span {
+        start: machina::core::diag::Position {
             offset: 0,
             line,
             column: col,
         },
-        end: machina::diag::Position {
+        end: machina::core::diag::Position {
             offset: 0,
             line,
             column: col,
@@ -430,13 +430,13 @@ fn completion_response(
                 .into_iter()
                 .map(|item| {
                     let kind = match item.kind {
-                        machina::analysis::results::CompletionKind::Function => 3,
-                        machina::analysis::results::CompletionKind::Type => 7,
-                        machina::analysis::results::CompletionKind::Trait => 7,
-                        machina::analysis::results::CompletionKind::Variable => 6,
-                        machina::analysis::results::CompletionKind::Parameter => 6,
-                        machina::analysis::results::CompletionKind::TypeParameter => 25,
-                        machina::analysis::results::CompletionKind::EnumVariant => 20,
+                        machina::services::analysis::results::CompletionKind::Function => 3,
+                        machina::services::analysis::results::CompletionKind::Type => 7,
+                        machina::services::analysis::results::CompletionKind::Trait => 7,
+                        machina::services::analysis::results::CompletionKind::Variable => 6,
+                        machina::services::analysis::results::CompletionKind::Parameter => 6,
+                        machina::services::analysis::results::CompletionKind::TypeParameter => 25,
+                        machina::services::analysis::results::CompletionKind::EnumVariant => 20,
                     };
                     json!({
                         "label": item.label,
@@ -469,7 +469,7 @@ fn stale_result_response(id: Value) -> Value {
 fn publish_diagnostics_notification(
     uri: &str,
     version: i32,
-    diagnostics: Vec<machina::analysis::diagnostics::Diagnostic>,
+    diagnostics: Vec<machina::services::analysis::diagnostics::Diagnostic>,
 ) -> Value {
     let diagnostics: Vec<Value> = diagnostics
         .into_iter()

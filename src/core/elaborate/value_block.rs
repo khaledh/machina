@@ -7,9 +7,9 @@
 //! - Closure bindings record the mapping for later reference resolution
 //! - Assignments carry initialization info from semck
 
-use crate::elaborate::elaborator::Elaborator;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
 
 impl<'a> Elaborator<'a> {
     /// Elaborate a single block item (statement or expression).

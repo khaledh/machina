@@ -7,15 +7,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::analysis::diagnostics::Diagnostic;
-use crate::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
-use crate::capsule::ModuleId;
-use crate::lexer::{LexError, Lexer};
-use crate::parse::Parser;
-use crate::resolve::{ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial};
-use crate::tree::NodeId;
-use crate::tree::NodeIdGen;
-use crate::typecheck::type_check_partial;
+use crate::core::capsule::ModuleId;
+use crate::core::lexer::{LexError, Lexer};
+use crate::core::parse::Parser;
+use crate::core::resolve::{
+    ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial,
+};
+use crate::core::tree::NodeId;
+use crate::core::tree::NodeIdGen;
+use crate::core::typecheck::type_check_partial;
+use crate::services::analysis::diagnostics::Diagnostic;
+use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
 
 /// Sentinel used when a stage fails before node-level attribution is possible.
 pub(crate) const ROOT_POISON_NODE: NodeId = NodeId(0);
@@ -37,9 +39,9 @@ impl<T> Default for StageOutput<T> {
     }
 }
 
-pub(crate) type ParseStageOutput = StageOutput<crate::context::ParsedContext>;
-pub(crate) type ResolveStageOutput = StageOutput<crate::context::ResolvedContext>;
-pub(crate) type TypecheckStageOutput = StageOutput<crate::context::TypeCheckedContext>;
+pub(crate) type ParseStageOutput = StageOutput<crate::core::context::ParsedContext>;
+pub(crate) type ResolveStageOutput = StageOutput<crate::core::context::ResolvedContext>;
+pub(crate) type TypecheckStageOutput = StageOutput<crate::core::context::TypeCheckedContext>;
 
 #[derive(Clone, Default)]
 pub(crate) struct ModulePipelineState {
@@ -50,8 +52,8 @@ pub(crate) struct ModulePipelineState {
 
 #[derive(Clone, Default)]
 pub(crate) struct LookupState {
-    pub resolved: Option<crate::context::ResolvedContext>,
-    pub typed: Option<crate::context::TypeCheckedContext>,
+    pub resolved: Option<crate::core::context::ResolvedContext>,
+    pub typed: Option<crate::core::context::TypeCheckedContext>,
     pub poisoned_nodes: HashSet<NodeId>,
 }
 
@@ -69,7 +71,7 @@ pub(crate) fn run_module_pipeline_with_parsed(
     module_id: ModuleId,
     revision: u64,
     source: Arc<str>,
-    parsed_override: Option<crate::context::ParsedContext>,
+    parsed_override: Option<crate::core::context::ParsedContext>,
 ) -> QueryResult<ModulePipelineState> {
     run_module_pipeline_with_parsed_and_imports(
         rt,
@@ -89,7 +91,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     module_id: ModuleId,
     revision: u64,
     source: Arc<str>,
-    parsed_override: Option<crate::context::ParsedContext>,
+    parsed_override: Option<crate::core::context::ParsedContext>,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
@@ -118,7 +120,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
         match parser.parse() {
             Ok(module) => {
-                state.product = Some(crate::context::ParsedContext::new(
+                state.product = Some(crate::core::context::ParsedContext::new(
                     module,
                     parser.into_id_gen(),
                 ));

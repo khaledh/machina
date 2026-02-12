@@ -6,12 +6,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use machina::analysis::db::AnalysisDb;
-use machina::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
-use machina::analysis::module_graph::ModuleGraph;
-use machina::analysis::query::{CancellationToken, QueryCancelled, QueryResult};
-use machina::analysis::snapshot::{AnalysisSnapshot, FileId};
-use machina::capsule::ModuleId;
+use machina::core::capsule::ModuleId;
+use machina::services::analysis::db::AnalysisDb;
+use machina::services::analysis::diagnostics::{
+    ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
+};
+use machina::services::analysis::module_graph::ModuleGraph;
+use machina::services::analysis::query::{CancellationToken, QueryCancelled, QueryResult};
+use machina::services::analysis::snapshot::{AnalysisSnapshot, FileId};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +140,7 @@ impl AnalysisSession {
     pub fn diagnostics_for_uri(
         &mut self,
         uri: &str,
-    ) -> SessionResult<Vec<machina::analysis::diagnostics::Diagnostic>> {
+    ) -> SessionResult<Vec<machina::services::analysis::diagnostics::Diagnostic>> {
         let state = self.lookup_document(uri)?.clone();
         let diagnostics = self
             .db
@@ -151,7 +153,7 @@ impl AnalysisSession {
         &mut self,
         uri: &str,
         expected_version: i32,
-    ) -> SessionResult<Option<Vec<machina::analysis::diagnostics::Diagnostic>>> {
+    ) -> SessionResult<Option<Vec<machina::services::analysis::diagnostics::Diagnostic>>> {
         let state = self.lookup_document(uri)?.clone();
         if state.version != expected_version {
             return Ok(None);

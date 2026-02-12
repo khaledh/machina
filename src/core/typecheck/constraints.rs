@@ -11,20 +11,20 @@
 
 use std::collections::HashMap;
 
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind};
-use crate::tree::NodeId;
-use crate::tree::resolved::{
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind};
+use crate::core::tree::NodeId;
+use crate::core::tree::resolved::{
     BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, Expr, ExprKind, FuncDef, MatchArm,
     MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment, StructFieldBindPattern,
     TypeExpr, TypeParam, UnaryOp,
 };
-use crate::typecheck::engine::TypecheckEngine;
-use crate::typecheck::errors::TypeCheckError;
-use crate::typecheck::type_map::{
+use crate::core::typecheck::engine::TypecheckEngine;
+use crate::core::typecheck::errors::TypeCheckError;
+use crate::core::typecheck::type_map::{
     resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
 };
-use crate::types::{TyVarId, Type};
+use crate::core::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
 use super::utils::fn_param_mode;
@@ -283,7 +283,7 @@ struct ClosureSigInfo {
 }
 
 struct ConstraintCollector<'a> {
-    ctx: &'a crate::context::ResolvedContext,
+    ctx: &'a crate::core::context::ResolvedContext,
     type_defs: &'a HashMap<String, Type>,
     vars: &'a mut TypeVarStore,
     out: &'a mut ConstrainOutput,
@@ -293,7 +293,7 @@ struct ConstraintCollector<'a> {
 
 impl<'a> ConstraintCollector<'a> {
     fn new(
-        ctx: &'a crate::context::ResolvedContext,
+        ctx: &'a crate::core::context::ResolvedContext,
         type_defs: &'a HashMap<String, Type>,
         vars: &'a mut TypeVarStore,
         out: &'a mut ConstrainOutput,

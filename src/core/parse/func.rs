@@ -1,5 +1,5 @@
 use super::*;
-use crate::tree::parsed::{TypeParam, TypeParamBound};
+use crate::core::tree::parsed::{TypeParam, TypeParamBound};
 
 impl<'a> Parser<'a> {
     // --- Functions ---

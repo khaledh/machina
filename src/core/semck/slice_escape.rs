@@ -1,10 +1,12 @@
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::tree::normalized::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
-use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::types::{Type, TypeId};
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::semck::SemCheckError;
+use crate::core::tree::normalized::{
+    ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind,
+};
+use crate::core::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
+use crate::core::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = SliceEscapeChecker::new(ctx);

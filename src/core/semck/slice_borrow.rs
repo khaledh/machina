@@ -11,20 +11,20 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::NormalizedContext;
 use crate::core::analysis::dataflow::solve_forward;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::semck::liveness_util;
-use crate::tree::cfg::{
+use crate::core::context::NormalizedContext;
+use crate::core::resolve::DefId;
+use crate::core::semck::SemCheckError;
+use crate::core::semck::liveness_util;
+use crate::core::tree::cfg::{
     AstBlockId, TreeCfg, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
-use crate::tree::normalized::{
+use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
     StmtExprKind,
 };
-use crate::tree::visit::{Visitor, walk_expr};
-use crate::types::{Type, TypeId};
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::types::{Type, TypeId};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();

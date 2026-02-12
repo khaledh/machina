@@ -3,7 +3,7 @@
 //! V1 keeps these checks intentionally conservative and aligned with
 //! currently-supported lowering/runtime behavior.
 
-use crate::types::Type;
+use crate::core::types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Capability {

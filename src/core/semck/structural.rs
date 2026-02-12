@@ -1,17 +1,19 @@
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::resolve::DefKind;
-use crate::semck::SemCheckError;
-use crate::semck::match_check;
-use crate::tree::normalized::{
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::resolve::DefKind;
+use crate::core::semck::SemCheckError;
+use crate::core::semck::match_check;
+use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
     MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
     TypeDefKind,
 };
-use crate::tree::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
-use crate::typecheck::type_map::{CallSig, resolve_type_expr};
-use crate::types::{Type, TypeId};
+use crate::core::tree::visit::{
+    Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr,
+};
+use crate::core::typecheck::type_map::{CallSig, resolve_type_expr};
+use crate::core::types::{Type, TypeId};
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {

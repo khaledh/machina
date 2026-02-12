@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::types::TypeId;
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::types::TypeId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DropGuard {

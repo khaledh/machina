@@ -143,7 +143,7 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
             ExprKind::ArrayLit { init, .. } => match init {
-                crate::tree::resolved::ArrayLitInit::Elems(elems) => {
+                crate::core::tree::resolved::ArrayLitInit::Elems(elems) => {
                     let elem_term = if let ExprKind::ArrayLit {
                         elem_ty: Some(explicit_elem_ty),
                         ..
@@ -168,7 +168,7 @@ impl<'a> ConstraintCollector<'a> {
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 }
-                crate::tree::resolved::ArrayLitInit::Repeat(value, count) => {
+                crate::core::tree::resolved::ArrayLitInit::Repeat(value, count) => {
                     let elem_term = if let ExprKind::ArrayLit {
                         elem_ty: Some(explicit_elem_ty),
                         ..

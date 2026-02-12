@@ -4,8 +4,8 @@
 //! builtin methods on dynamic arrays, sets, and maps. Keeping this in one
 //! place prevents semantic drift between phases.
 
-use crate::tree::ParamMode;
-use crate::types::Type;
+use crate::core::tree::ParamMode;
+use crate::core::types::Type;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BuiltinMethodParam {

@@ -1,13 +1,13 @@
 //! Join-plan and join-session helpers for branching lowering.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::drops::DropSnapshot;
-use crate::backend::lower::locals::{LocalSnapshot, LocalValue};
-use crate::diag::Span;
-use crate::ir::IrTypeId;
-use crate::ir::{BlockId, Terminator, ValueId};
-use crate::resolve::DefId;
-use crate::tree::semantic as sem;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::drops::DropSnapshot;
+use crate::core::backend::lower::locals::{LocalSnapshot, LocalValue};
+use crate::core::diag::Span;
+use crate::core::ir::IrTypeId;
+use crate::core::ir::{BlockId, Terminator, ValueId};
+use crate::core::resolve::DefId;
+use crate::core::tree::semantic as sem;
 
 use super::FuncLowerer;
 

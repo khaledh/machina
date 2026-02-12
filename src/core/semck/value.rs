@@ -1,15 +1,15 @@
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::tree::RefinementKind;
-use crate::tree::normalized::{
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::semck::SemCheckError;
+use crate::core::tree::RefinementKind;
+use crate::core::tree::normalized::{
     BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
     TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
 };
-use crate::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::typecheck::type_map::resolve_type_expr;
-use crate::types::{Type, TypeId};
+use crate::core::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
+use crate::core::typecheck::type_map::resolve_type_expr;
+use crate::core::types::{Type, TypeId};
 use std::collections::HashMap;
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {

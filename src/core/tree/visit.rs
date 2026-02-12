@@ -1,4 +1,4 @@
-use crate::tree::*;
+use crate::core::tree::*;
 
 /// Tree visitor with default traversal helpers.
 ///
@@ -6,8 +6,8 @@ use crate::tree::*;
 /// corresponding `walk_*` function to recurse into children.
 /// Example:
 /// ```rust
-/// use machina::tree::Expr;
-/// use machina::tree::visit::{walk_expr, Visitor};
+/// use machina::core::tree::Expr;
+/// use machina::core::tree::visit::{walk_expr, Visitor};
 ///
 /// struct MyVisitor;
 /// impl Visitor for MyVisitor {

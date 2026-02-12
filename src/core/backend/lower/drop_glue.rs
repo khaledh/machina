@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 
-use crate::backend::lower::globals::GlobalArena;
-use crate::backend::lower::lowerer::FuncLowerer;
-use crate::backend::lower::{LowerToIrError, LoweredFunction};
-use crate::ir::Terminator;
-use crate::resolve::{DefId, DefTable};
-use crate::tree::resolved as res;
-use crate::tree::semantic as sem;
-use crate::typecheck::nominal::NominalKey;
-use crate::typecheck::nominal::TypeView;
-use crate::typecheck::type_map::{TypeMap, resolve_type_expr};
-use crate::typecheck::type_view::TypeViewResolver;
-use crate::types::Type;
-use crate::types::{EnumVariant, StructField};
+use crate::core::backend::lower::globals::GlobalArena;
+use crate::core::backend::lower::lowerer::FuncLowerer;
+use crate::core::backend::lower::{LowerToIrError, LoweredFunction};
+use crate::core::ir::Terminator;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::resolved as res;
+use crate::core::tree::semantic as sem;
+use crate::core::typecheck::nominal::NominalKey;
+use crate::core::typecheck::nominal::TypeView;
+use crate::core::typecheck::type_map::{TypeMap, resolve_type_expr};
+use crate::core::typecheck::type_view::TypeViewResolver;
+use crate::core::types::Type;
+use crate::core::types::{EnumVariant, StructField};
 
 /// Tracks drop-glue functions needed for recursive heap elements.
 ///

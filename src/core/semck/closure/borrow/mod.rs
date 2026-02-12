@@ -14,10 +14,10 @@ mod liveness;
 
 use std::collections::HashMap;
 
-use crate::context::NormalizedContext;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::semck::closure::capture::{CaptureMode, ClosureCapture};
+use crate::core::context::NormalizedContext;
+use crate::core::resolve::DefId;
+use crate::core::semck::SemCheckError;
+use crate::core::semck::closure::capture::{CaptureMode, ClosureCapture};
 
 type CaptureMap = HashMap<DefId, CaptureMode>;
 type ClosureBindings = HashMap<DefId, CaptureMap>;

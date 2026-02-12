@@ -9,11 +9,11 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use crate::resolve::def_table::DefTable;
-use crate::resolve::{Def, DefId};
-use crate::tree::NodeId;
-use crate::typecheck::type_map::TypeMap;
-use crate::types::{Type, TypeId};
+use crate::core::resolve::def_table::DefTable;
+use crate::core::resolve::{Def, DefId};
+use crate::core::tree::NodeId;
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::types::{Type, TypeId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyntheticReason {
@@ -247,7 +247,7 @@ impl DefTableOverlay {
     pub fn add_def(
         &mut self,
         name: String,
-        kind: crate::resolve::DefKind,
+        kind: crate::core::resolve::DefKind,
         stage: impl Into<String>,
         reason: SyntheticReason,
     ) -> DefId {

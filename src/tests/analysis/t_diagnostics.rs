@@ -1,14 +1,14 @@
-use crate::analysis::diagnostics::{
+use crate::core::diag::Span;
+use crate::core::lexer::LexError;
+use crate::core::lexer::{Token, TokenKind};
+use crate::core::parse::ParseError;
+use crate::core::resolve::ResolveError;
+use crate::core::resolve::symbols::SymbolKind;
+use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::types::Type;
+use crate::services::analysis::diagnostics::{
     Diagnostic, DiagnosticPhase, DiagnosticSeverity, DiagnosticValue, collect_partial_diagnostics,
 };
-use crate::diag::Span;
-use crate::lexer::LexError;
-use crate::lexer::{Token, TokenKind};
-use crate::parse::ParseError;
-use crate::resolve::ResolveError;
-use crate::resolve::symbols::SymbolKind;
-use crate::typecheck::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::Type;
 
 fn token(kind: TokenKind, span: Span) -> Token {
     Token { kind, span }
@@ -53,7 +53,7 @@ fn resolve_diagnostic_keeps_structured_metadata() {
     let err = ResolveError::ExpectedType(
         "HasTickCount".to_string(),
         SymbolKind::TraitDef {
-            def_id: crate::resolve::DefId(7),
+            def_id: crate::core::resolve::DefId(7),
         },
         Span::default(),
     );

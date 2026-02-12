@@ -1,9 +1,9 @@
 //! Constant folding and trivial branch simplification for SSA.
 
-use crate::ir::IrTypeId;
+use crate::core::ir::IrTypeId;
 use std::collections::HashMap;
 
-use crate::ir::{
+use crate::core::ir::{
     BinOp, BlockId, CmpOp, ConstValue, Function, InstKind, Terminator, UnOp, ValueDef, ValueId,
 };
 

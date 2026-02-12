@@ -1,10 +1,10 @@
 //! F-string lowering helpers.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::lowerer::{FuncLowerer, LinearValue, ValueSlot};
-use crate::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, ValueId};
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::lowerer::{FuncLowerer, LinearValue, ValueSlot};
+use crate::core::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, ValueId};
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;
 

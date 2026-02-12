@@ -4,16 +4,16 @@
 //! resolves type expressions, records node/def/call typing side tables, and
 //! materializes final `TypeMap` outputs.
 
-use crate::diag::Span;
-use crate::resolve::{Def, DefId, DefKind, DefTable};
-use crate::tree::normalized as norm;
-use crate::tree::resolved as res;
-use crate::tree::semantic as sem;
-use crate::tree::{NodeId, ParamMode, RefinementKind};
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::nominal::NominalKey;
-use crate::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
-use crate::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
+use crate::core::diag::Span;
+use crate::core::resolve::{Def, DefId, DefKind, DefTable};
+use crate::core::tree::normalized as norm;
+use crate::core::tree::resolved as res;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{NodeId, ParamMode, RefinementKind};
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::nominal::NominalKey;
+use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
+use crate::core::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -189,7 +189,7 @@ impl TypeDefLookup for sem::Module {
     }
 }
 
-impl TypeDefLookup for crate::context::ResolvedContext {
+impl TypeDefLookup for crate::core::context::ResolvedContext {
     fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
         self.module.type_def_by_id(def_id)
     }
@@ -199,7 +199,7 @@ impl TypeDefLookup for crate::context::ResolvedContext {
     }
 }
 
-impl TypeDefLookup for crate::context::TypeCheckedContext {
+impl TypeDefLookup for crate::core::context::TypeCheckedContext {
     fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
         self.module.type_def_by_id(def_id)
     }
@@ -449,7 +449,7 @@ fn apply_refinements(
                 ty = Type::Int {
                     signed,
                     bits,
-                    bounds: Some(crate::types::IntBounds {
+                    bounds: Some(crate::core::types::IntBounds {
                         min: *min,
                         max_excl: *max,
                     }),

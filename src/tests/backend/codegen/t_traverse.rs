@@ -1,14 +1,14 @@
-use crate::backend::codegen::graph::CodegenBlockId;
-use crate::backend::codegen::graph::CodegenGraph;
-use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
-use crate::backend::codegen::traverse::{CodegenSink, emit_graph};
-use crate::backend::regalloc::Location;
-use crate::backend::regalloc::moves::{CallMove, MoveOp};
-use crate::backend::regalloc::stack::StackSlotId;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{Callee, ConstValue, FunctionSig, Instruction, Terminator, ValueId};
-use crate::ir::{IrTypeCache, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::backend::codegen::graph::CodegenBlockId;
+use crate::core::backend::codegen::graph::CodegenGraph;
+use crate::core::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
+use crate::core::backend::codegen::traverse::{CodegenSink, emit_graph};
+use crate::core::backend::regalloc::Location;
+use crate::core::backend::regalloc::moves::{CallMove, MoveOp};
+use crate::core::backend::regalloc::stack::StackSlotId;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{Callee, ConstValue, FunctionSig, Instruction, Terminator, ValueId};
+use crate::core::ir::{IrTypeCache, IrTypeKind};
+use crate::core::resolve::DefId;
 
 struct DummySink {
     emitted_moves: usize,

@@ -5,15 +5,15 @@
 //! still potentially used.
 use std::collections::HashSet;
 
-use crate::resolve::DefId;
-use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
-use crate::tree::normalized::{StmtExpr, StmtExprKind};
-use crate::types::TypeId;
+use crate::core::resolve::DefId;
+use crate::core::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
+use crate::core::tree::normalized::{StmtExpr, StmtExprKind};
+use crate::core::types::TypeId;
 
 use super::collect::{
     collect_assignee_defs, collect_bind_pattern_defs, collect_expr_var_uses, collect_stmt_var_uses,
 };
-use crate::semck::liveness_util;
+use crate::core::semck::liveness_util;
 
 pub(super) struct ClosureLiveness {
     pub(super) live_out: Vec<HashSet<DefId>>,

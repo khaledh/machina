@@ -1,9 +1,9 @@
 //! Resolved tree ir: resolved nodes with DefIds where available.
 
-use crate::resolve::DefId;
-use crate::tree::model;
+use crate::core::resolve::DefId;
+use crate::core::tree::model;
 
-pub use crate::tree::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
+pub use crate::core::tree::{BinaryOp, CallArgMode, NodeId, ParamMode, UnaryOp};
 
 // -- Resolved tree aliases (parsed ir specialized with DefId) ---
 

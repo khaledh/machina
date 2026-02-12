@@ -3,10 +3,10 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::regalloc::stack::{StackAllocator, StackSlotId};
-use crate::backend::regalloc::target::{PhysReg, TargetSpec};
-use crate::ir::ValueId;
-use crate::ir::{IrTypeCache, IrTypeId};
+use crate::core::backend::regalloc::stack::{StackAllocator, StackSlotId};
+use crate::core::backend::regalloc::target::{PhysReg, TargetSpec};
+use crate::core::ir::ValueId;
+use crate::core::ir::{IrTypeCache, IrTypeId};
 
 use super::constraints::AbiConstraints;
 use super::intervals::{IntervalAnalysis, LiveInterval};

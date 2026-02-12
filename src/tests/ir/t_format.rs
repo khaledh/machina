@@ -1,8 +1,8 @@
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::format::format_func;
-use crate::ir::{FunctionSig, Terminator};
-use crate::ir::{IrTypeCache, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::format::format_func;
+use crate::core::ir::{FunctionSig, Terminator};
+use crate::core::ir::{IrTypeCache, IrTypeKind};
+use crate::core::resolve::DefId;
 use indoc::indoc;
 
 #[test]

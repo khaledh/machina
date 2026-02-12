@@ -12,11 +12,11 @@
 //! By computing this plan during elaboration, lowering can emit call code
 //! without re-examining signatures or type information.
 
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::tree::{CallArgMode, NodeId, ParamMode};
-use crate::typecheck::type_map::{CallParam, CallSig};
-use crate::types::Type;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{CallArgMode, NodeId, ParamMode};
+use crate::core::typecheck::type_map::{CallParam, CallSig};
+use crate::core::types::Type;
 
 use super::elaborator::Elaborator;
 

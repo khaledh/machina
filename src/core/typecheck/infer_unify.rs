@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::types::{TyVarId, Type};
+use crate::core::types::{TyVarId, Type};
 
 /// Errors that can occur during type unification.
 #[derive(Debug, Clone, PartialEq, Eq)]

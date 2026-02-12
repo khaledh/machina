@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use crate::resolve::DefId;
-use crate::types::{TyVarId, Type};
+use crate::core::resolve::DefId;
+use crate::core::types::{TyVarId, Type};
 
 pub(crate) const INFER_VAR_BASE: u32 = 1_000_000;
 pub(crate) const META_VAR_BASE: u32 = 2_000_000;

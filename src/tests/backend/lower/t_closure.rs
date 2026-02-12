@@ -1,4 +1,4 @@
-use crate::tree::semantic as sem;
+use crate::core::tree::semantic as sem;
 
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
 

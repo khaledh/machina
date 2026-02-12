@@ -8,10 +8,10 @@
 //! This is essentially the inverse of type checking: given a resolved type,
 //! produce the AST representation that would parse to that type.
 
-use crate::diag::Span;
-use crate::tree::semantic as sem;
-use crate::tree::{ParamMode, RefinementKind};
-use crate::types::{FnParamMode, Type};
+use crate::core::diag::Span;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{ParamMode, RefinementKind};
+use crate::core::types::{FnParamMode, Type};
 
 use super::elaborator::Elaborator;
 

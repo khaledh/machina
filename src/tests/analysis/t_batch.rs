@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use crate::analysis::batch::{query_parse_resolve_typecheck, query_typecheck};
-use crate::analysis::db::AnalysisDb;
-use crate::analysis::results::{ResolvedModuleResult, TypeLookup};
-use crate::capsule::ModuleId;
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer};
-use crate::parse::Parser;
-use crate::resolve::{attach_def_owners, resolve};
-use crate::tree::NodeIdGen;
-use crate::typecheck::type_check;
+use crate::core::capsule::ModuleId;
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer};
+use crate::core::parse::Parser;
+use crate::core::resolve::{attach_def_owners, resolve};
+use crate::core::tree::NodeIdGen;
+use crate::core::typecheck::type_check;
+use crate::services::analysis::batch::{query_parse_resolve_typecheck, query_typecheck};
+use crate::services::analysis::db::AnalysisDb;
+use crate::services::analysis::results::{ResolvedModuleResult, TypeLookup};
 
 fn parsed_context(source: &str) -> ParsedContext {
     let id_gen = NodeIdGen::new();

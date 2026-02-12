@@ -1,15 +1,15 @@
 //! Shared lowering helpers for locals, views, bounds, and blob operations.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::locals::{LocalStorage, LocalValue};
-use crate::backend::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
-use crate::diag::Span;
-use crate::ir::{
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
+use crate::core::backend::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
+use crate::core::diag::Span;
+use crate::core::ir::{
     BinOp, Callee, CastKind, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
 };
-use crate::resolve::DefId;
-use crate::tree::semantic as sem;
-use crate::types::{Type, TypeAssignability, type_assignable};
+use crate::core::resolve::DefId;
+use crate::core::tree::semantic as sem;
+use crate::core::types::{Type, TypeAssignability, type_assignable};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lookup_local(&self, def_id: DefId) -> LocalValue {

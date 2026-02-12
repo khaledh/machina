@@ -3,10 +3,10 @@
 //! This pass handles semantic checks that are not pure type equalities or
 //! assignability relations (e.g. `break`/`continue` scope and return rules).
 
-use crate::typecheck::constraints::ControlFact;
-use crate::typecheck::engine::TypecheckEngine;
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::types::Type;
+use crate::core::typecheck::constraints::ControlFact;
+use crate::core::typecheck::engine::TypecheckEngine;
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::types::Type;
 
 /// Pass 4: semantic checks that are not pure type equalities/assignability.
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {

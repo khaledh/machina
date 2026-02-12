@@ -1,11 +1,11 @@
 //! Semantic tree: place/value split tree used after semantic checks.
 
 use super::StringFmtPlan;
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::tree as ast_model;
-use crate::tree::{BinaryOp, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
-use crate::types::TypeId;
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::tree as ast_model;
+use crate::core::tree::{BinaryOp, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
+use crate::core::types::TypeId;
 
 // -- Semantic tree type aliases (reused parsed fragments) ---
 

@@ -3,15 +3,15 @@
 //! Implements switch-based lowering for enum/bool/int matches, using
 //! precomputed match plans to avoid pattern re-derivation.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::locals::LocalValue;
-use crate::backend::lower::lowerer::{BranchResult, FuncLowerer};
-use crate::ir::IrTypeId;
-use crate::ir::{
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::locals::LocalValue;
+use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer};
+use crate::core::ir::IrTypeId;
+use crate::core::ir::{
     BlockId, CastKind, CmpOp, ConstValue, IrTypeKind, SwitchCase, Terminator, ValueId,
 };
-use crate::tree::semantic as sem;
-use crate::types::{Type, TypeId};
+use crate::core::tree::semantic as sem;
+use crate::core::types::{Type, TypeId};
 
 pub(super) struct MatchLowerer<'a, 'b, 'g> {
     lowerer: &'a mut FuncLowerer<'b, 'g>,

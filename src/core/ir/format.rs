@@ -1,8 +1,8 @@
 //! Text formatter for SSA IR.
 
 use super::model::*;
-use crate::ir::{IrTypeCache, IrTypeId, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::ir::{IrTypeCache, IrTypeId, IrTypeKind};
+use crate::core::resolve::DefId;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 

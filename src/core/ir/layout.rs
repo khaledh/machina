@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ir::{IrTypeId, IrTypeInfo, IrTypeKind};
+use crate::core::ir::{IrTypeId, IrTypeInfo, IrTypeKind};
 
 /// Layout information for an SSA IR type.
 #[derive(Debug, Clone, PartialEq, Eq)]

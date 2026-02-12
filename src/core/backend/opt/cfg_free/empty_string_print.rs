@@ -2,8 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::ir::{Block, Callee, CastKind, ConstValue, Function, InstKind, RuntimeFn, ValueId};
+use crate::core::backend::opt::Pass;
+use crate::core::ir::{
+    Block, Callee, CastKind, ConstValue, Function, InstKind, RuntimeFn, ValueId,
+};
 
 /// Replace empty-string `__rt_print` calls with direct null/zero arguments and
 /// drop the now-redundant `__rt_string_drop`.

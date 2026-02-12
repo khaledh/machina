@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::backend::opt::Pass;
-use crate::ir::{Callee, ConstValue, Function, InstKind, RuntimeFn, ValueId};
+use crate::core::backend::opt::Pass;
+use crate::core::ir::{Callee, ConstValue, Function, InstKind, RuntimeFn, ValueId};
 
 /// Lowers MemCopy/MemSet into call instructions so call clobbers are modeled.
 pub struct MemOps;

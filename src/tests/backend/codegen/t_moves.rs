@@ -1,13 +1,15 @@
-use crate::backend::analysis::liveness;
-use crate::backend::codegen::moves::{EdgeMovePlacement, EdgeMovePlan, EdgeTarget, MoveSchedule};
-use crate::backend::regalloc::moves::{EdgeMove, MoveOp};
-use crate::backend::regalloc::stack::StackSlotId;
-use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{Location, TargetSpec, regalloc};
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{Callee, FunctionSig, InstKind, Terminator};
-use crate::ir::{IrTypeCache, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::backend::analysis::liveness;
+use crate::core::backend::codegen::moves::{
+    EdgeMovePlacement, EdgeMovePlan, EdgeTarget, MoveSchedule,
+};
+use crate::core::backend::regalloc::moves::{EdgeMove, MoveOp};
+use crate::core::backend::regalloc::stack::StackSlotId;
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::{Location, TargetSpec, regalloc};
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{Callee, FunctionSig, InstKind, Terminator};
+use crate::core::ir::{IrTypeCache, IrTypeKind};
+use crate::core::resolve::DefId;
 
 struct CallTarget {
     allocatable: Vec<PhysReg>,

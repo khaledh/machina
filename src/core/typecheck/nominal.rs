@@ -4,8 +4,8 @@
 //! (`StructView` / `EnumView`) so callers can reason about identity and
 //! expansion state independently.
 
-use crate::resolve::DefId;
-use crate::types::Type;
+use crate::core::resolve::DefId;
+use crate::core::types::Type;
 
 /// Canonical identity for a nominal type definition instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::ir::IrTypeId;
-use crate::ir::{Function, InstKind, ValueId, replace_value_in_func};
+use crate::core::backend::opt::Pass;
+use crate::core::ir::IrTypeId;
+use crate::core::ir::{Function, InstKind, ValueId, replace_value_in_func};
 
 /// Reuses earlier field_addr results when the base and field index match.
 pub struct FieldAddrCse;

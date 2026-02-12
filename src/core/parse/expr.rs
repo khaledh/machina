@@ -1,5 +1,5 @@
 use super::*;
-use crate::types::is_builtin_type_name;
+use crate::core::types::is_builtin_type_name;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GenericLitKind {

@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::ir::{Function, InstKind, ValueId, replace_value_in_func};
+use crate::core::backend::opt::Pass;
+use crate::core::ir::{Function, InstKind, ValueId, replace_value_in_func};
 
 /// Reuses the first load result when the same pointer is loaded again and no
 /// side-effecting memory operation occurs in between.

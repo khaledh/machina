@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 
-use crate::backend::codegen::graph::CodegenBlockId;
-use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
-use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{Location, ValueAllocMap};
-use crate::ir::layout::IrLayout;
-use crate::ir::{BinOp, ConstValue, GlobalData, Instruction, LocalId, Terminator, ValueId};
-use crate::ir::{IrTypeCache, IrTypeId};
-use crate::resolve::DefId;
+use crate::core::backend::codegen::graph::CodegenBlockId;
+use crate::core::backend::regalloc::moves::{MoveOp, ParamCopy};
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::{Location, ValueAllocMap};
+use crate::core::ir::layout::IrLayout;
+use crate::core::ir::{BinOp, ConstValue, GlobalData, Instruction, LocalId, Terminator, ValueId};
+use crate::core::ir::{IrTypeCache, IrTypeId};
+use crate::core::resolve::DefId;
 
 /// Minimal instruction selection interface for SSA codegen.
 pub trait CodegenEmitter {

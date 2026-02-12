@@ -1,16 +1,16 @@
-use crate::backend::lower::types::TypeLowerer;
-use crate::context::{ParsedContext, SemanticContext};
-use crate::elaborate::elaborate;
-use crate::ir::IrTypeKind;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::sem_check;
-use crate::tree::semantic as sem;
-use crate::typecheck::type_check;
-use crate::typecheck::type_map::resolve_type_expr;
-use crate::types::{EnumVariant, FnParam, FnParamMode, Type, TypeId};
+use crate::core::backend::lower::types::TypeLowerer;
+use crate::core::context::{ParsedContext, SemanticContext};
+use crate::core::elaborate::elaborate;
+use crate::core::ir::IrTypeKind;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::sem_check;
+use crate::core::tree::semantic as sem;
+use crate::core::typecheck::type_check;
+use crate::core::typecheck::type_map::resolve_type_expr;
+use crate::core::types::{EnumVariant, FnParam, FnParamMode, Type, TypeId};
 use indoc::indoc;
 
 fn analyze(source: &str) -> SemanticContext {

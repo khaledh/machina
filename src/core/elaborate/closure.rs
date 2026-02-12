@@ -43,13 +43,13 @@
 //! ```
 
 use crate::core::analysis::facts::SyntheticReason;
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind, TypeAttrs};
-use crate::semck::closure::capture::CaptureMode;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::tree::{NodeId, ParamMode};
-use crate::types::{StructField, Type, TypeId};
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind, TypeAttrs};
+use crate::core::semck::closure::capture::CaptureMode;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{NodeId, ParamMode};
+use crate::core::types::{StructField, Type, TypeId};
 
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
 

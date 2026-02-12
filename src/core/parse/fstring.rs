@@ -1,5 +1,5 @@
 use super::*;
-use crate::lexer::{LexError, Lexer, Token};
+use crate::core::lexer::{LexError, Lexer, Token};
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_fstring(&mut self) -> Result<Expr, ParseError> {

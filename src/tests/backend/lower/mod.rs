@@ -1,11 +1,11 @@
-use crate::context::{ParsedContext, SemanticContext};
-use crate::elaborate::elaborate;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::sem_check;
-use crate::typecheck::type_check;
+use crate::core::context::{ParsedContext, SemanticContext};
+use crate::core::elaborate::elaborate;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::sem_check;
+use crate::core::typecheck::type_check;
 
 pub(super) fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);
@@ -32,9 +32,9 @@ pub(super) fn assert_ir_eq(actual: impl AsRef<str>, expected: impl AsRef<str>) {
     assert_eq!(actual, expected);
 }
 
-pub(super) use crate::backend::lower::lower_func;
-pub(super) use crate::backend::lower::lower_module;
-pub(super) use crate::ir::format::format_func;
+pub(super) use crate::core::backend::lower::lower_func;
+pub(super) use crate::core::backend::lower::lower_module;
+pub(super) use crate::core::ir::format::format_func;
 pub(super) use indoc::indoc;
 
 #[path = "t_branching.rs"]

@@ -1,8 +1,8 @@
-use crate::backend::opt::cfg_free::PassManager;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::format::format_func;
-use crate::ir::{FunctionSig, IrTypeCache, IrTypeKind, Terminator};
-use crate::resolve::DefId;
+use crate::core::backend::opt::cfg_free::PassManager;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::format::format_func;
+use crate::core::ir::{FunctionSig, IrTypeCache, IrTypeKind, Terminator};
+use crate::core::resolve::DefId;
 
 #[test]
 fn test_index_addr_zero_fold() {

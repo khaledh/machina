@@ -2,7 +2,7 @@
 //!
 //! These helpers normalize and infer join result types from arm types.
 
-use crate::types::Type;
+use crate::core::types::Type;
 
 pub(super) fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
     let mut variants = Vec::new();

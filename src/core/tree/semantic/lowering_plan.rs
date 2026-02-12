@@ -3,8 +3,8 @@
 //! Classifies each value expression as either linear (single-block) or
 //! branching (may introduce control flow), so lowering can dispatch directly.
 
-use crate::tree::NodeId;
-use crate::tree::semantic::{CallPlanMap, IndexPlanMap, MatchPlanMap, SlicePlanMap};
+use crate::core::tree::NodeId;
+use crate::core::tree::semantic::{CallPlanMap, IndexPlanMap, MatchPlanMap, SlicePlanMap};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,19 +27,28 @@ impl LoweringPlanMap {
         self.value_plans.get(&node).cloned()
     }
 
-    pub fn lookup_call_plan(&self, node: NodeId) -> Option<crate::tree::semantic::CallPlan> {
+    pub fn lookup_call_plan(&self, node: NodeId) -> Option<crate::core::tree::semantic::CallPlan> {
         self.call_plans.get(&node).cloned()
     }
 
-    pub fn lookup_index_plan(&self, node: NodeId) -> Option<crate::tree::semantic::IndexPlan> {
+    pub fn lookup_index_plan(
+        &self,
+        node: NodeId,
+    ) -> Option<crate::core::tree::semantic::IndexPlan> {
         self.index_plans.get(&node).cloned()
     }
 
-    pub fn lookup_match_plan(&self, node: NodeId) -> Option<crate::tree::semantic::MatchPlan> {
+    pub fn lookup_match_plan(
+        &self,
+        node: NodeId,
+    ) -> Option<crate::core::tree::semantic::MatchPlan> {
         self.match_plans.get(&node).cloned()
     }
 
-    pub fn lookup_slice_plan(&self, node: NodeId) -> Option<crate::tree::semantic::SlicePlan> {
+    pub fn lookup_slice_plan(
+        &self,
+        node: NodeId,
+    ) -> Option<crate::core::tree::semantic::SlicePlan> {
         self.slice_plans.get(&node).cloned()
     }
 

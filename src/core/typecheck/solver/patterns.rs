@@ -5,17 +5,19 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::ModuleId;
-use crate::context::ResolvedContext;
-use crate::diag::Span;
-use crate::resolve::{DefId, DefTable};
-use crate::tree::NodeId;
-use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding};
-use crate::typecheck::constraints::PatternObligation;
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
-use crate::typecheck::unify::TcUnifier;
-use crate::types::{Type, TypeAssignability, type_assignable};
+use crate::core::capsule::ModuleId;
+use crate::core::context::ResolvedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::NodeId;
+use crate::core::tree::resolved::{
+    BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding,
+};
+use crate::core::typecheck::constraints::PatternObligation;
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::{Type, TypeAssignability, type_assignable};
 
 pub(super) fn check_pattern_obligations(
     obligations: &[PatternObligation],
@@ -225,7 +227,7 @@ fn bind_match_pattern_types(
 fn resolve_pattern_enum_type(
     pattern_id: NodeId,
     enum_name: &Option<String>,
-    type_args: &[crate::tree::resolved::TypeExpr],
+    type_args: &[crate::core::tree::resolved::TypeExpr],
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
     ctx: &ResolvedContext,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::tree::RefinementKind;
+use crate::core::tree::RefinementKind;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {

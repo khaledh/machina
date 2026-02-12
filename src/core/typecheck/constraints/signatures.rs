@@ -5,7 +5,7 @@ use super::*;
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_closure_signature(
         &mut self,
-        params: &[crate::tree::resolved::Param],
+        params: &[crate::core::tree::resolved::Param],
         return_ty: &TypeExpr,
     ) -> Option<ClosureSigInfo> {
         let mut fn_params = Vec::with_capacity(params.len());
@@ -16,7 +16,7 @@ impl<'a> ConstraintCollector<'a> {
             } else {
                 self.resolve_type_in_scope(&param.typ).ok()?
             };
-            fn_params.push(crate::types::FnParam {
+            fn_params.push(crate::core::types::FnParam {
                 mode: fn_param_mode(param.mode.clone()),
                 ty: param_ty.clone(),
             });
@@ -41,7 +41,7 @@ impl<'a> ConstraintCollector<'a> {
 
     pub(super) fn collect_function_signature(
         &self,
-        sig: &crate::tree::resolved::FunctionSig,
+        sig: &crate::core::tree::resolved::FunctionSig,
     ) -> Option<Type> {
         let params = self.resolve_fn_params(&sig.params)?;
         self.resolve_fn_type(params, &sig.ret_ty_expr)
@@ -55,7 +55,7 @@ impl<'a> ConstraintCollector<'a> {
         let self_ty = self.type_defs.get(type_name).cloned()?;
         let tail_params = self.resolve_fn_params(&sig.params)?;
         let mut params = Vec::with_capacity(sig.params.len() + 1);
-        params.push(crate::types::FnParam {
+        params.push(crate::core::types::FnParam {
             mode: fn_param_mode(sig.self_param.mode.clone()),
             ty: self_ty,
         });
@@ -65,14 +65,14 @@ impl<'a> ConstraintCollector<'a> {
 
     fn resolve_fn_params(
         &self,
-        params: &[crate::tree::resolved::Param],
-    ) -> Option<Vec<crate::types::FnParam>> {
+        params: &[crate::core::tree::resolved::Param],
+    ) -> Option<Vec<crate::core::types::FnParam>> {
         params
             .iter()
             .map(|param| {
                 self.resolve_type_in_scope(&param.typ)
                     .ok()
-                    .map(|ty| crate::types::FnParam {
+                    .map(|ty| crate::core::types::FnParam {
                         mode: fn_param_mode(param.mode.clone()),
                         ty,
                     })
@@ -82,7 +82,7 @@ impl<'a> ConstraintCollector<'a> {
 
     fn resolve_fn_type(
         &self,
-        params: Vec<crate::types::FnParam>,
+        params: Vec<crate::core::types::FnParam>,
         return_ty: &TypeExpr,
     ) -> Option<Type> {
         let ret_ty = self.resolve_return_type_in_scope(return_ty).ok()?;
@@ -94,5 +94,8 @@ impl<'a> ConstraintCollector<'a> {
 }
 
 fn is_infer_type_expr(type_expr: &TypeExpr) -> bool {
-    matches!(type_expr.kind, crate::tree::resolved::TypeExprKind::Infer)
+    matches!(
+        type_expr.kind,
+        crate::core::tree::resolved::TypeExprKind::Infer
+    )
 }

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use machina::compile::{CompileOptions, compile_with_path};
+use machina::driver::compile::{CompileOptions, compile_with_path};
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -89,7 +89,7 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
 fn compile_source_with_opts(
     source_path: &Path,
     opts: &CompileOptions,
-) -> machina::compile::CompileOutput {
+) -> machina::driver::compile::CompileOutput {
     let source = std::fs::read_to_string(source_path).expect("failed to read temp source");
     compile_with_path(&source, Some(source_path), opts).expect("compile failed")
 }

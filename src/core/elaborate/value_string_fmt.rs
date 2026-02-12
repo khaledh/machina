@@ -18,10 +18,10 @@
 //! use a conservative upper bound (20 chars for u64); string segments require
 //! runtime length queries.
 
-use crate::elaborate::elaborator::Elaborator;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 /// Maximum decimal digits in a u64 (used for reserve length estimation).
 const MAX_U64_DEC_LEN: usize = 20;

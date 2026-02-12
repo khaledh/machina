@@ -1,27 +1,27 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::analysis::batch::{self, BatchQueryError};
-use crate::analysis::db::AnalysisDb;
-use crate::backend;
-use crate::backend::regalloc::arm64::Arm64Target;
-use crate::capsule;
-use crate::capsule::ModuleId;
-use crate::capsule::compose::{flatten_capsule, merge_modules};
-use crate::context::{CapsuleParsedContext, ParsedContext};
-use crate::diag::CompileError;
-use crate::elaborate;
-use crate::ir::GlobalData;
-use crate::ir::format::format_func_with_comments_and_names;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::monomorphize;
-use crate::normalize;
-use crate::nrvo::NrvoAnalyzer;
-use crate::parse::Parser;
-use crate::resolve::attach_def_owners;
-use crate::semck::sem_check;
-use crate::tree::NodeIdGen;
-use crate::tree::parsed::Module;
+use crate::core::backend;
+use crate::core::backend::regalloc::arm64::Arm64Target;
+use crate::core::capsule;
+use crate::core::capsule::ModuleId;
+use crate::core::capsule::compose::{flatten_capsule, merge_modules};
+use crate::core::context::{CapsuleParsedContext, ParsedContext};
+use crate::core::diag::CompileError;
+use crate::core::elaborate;
+use crate::core::ir::GlobalData;
+use crate::core::ir::format::format_func_with_comments_and_names;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::monomorphize;
+use crate::core::normalize;
+use crate::core::nrvo::NrvoAnalyzer;
+use crate::core::parse::Parser;
+use crate::core::resolve::attach_def_owners;
+use crate::core::semck::sem_check;
+use crate::core::tree::NodeIdGen;
+use crate::core::tree::parsed::Module;
+use crate::services::analysis::batch::{self, BatchQueryError};
+use crate::services::analysis::db::AnalysisDb;
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -93,7 +93,7 @@ pub fn check_with_path(
                 .map_err(|e| vec![e.into()])?;
         typed_result = batch::query_typecheck(&mut analysis_db, module_id, 1, {
             let monomorphized_context = attach_def_owners(monomorphized_context, &top_level_owners);
-            crate::analysis::results::ResolvedModuleResult::from_context(
+            crate::services::analysis::results::ResolvedModuleResult::from_context(
                 module_id,
                 monomorphized_context,
             )
@@ -242,7 +242,7 @@ pub fn compile_with_path(
                 .map_err(|e| vec![e.into()])?;
         typed_result = batch::query_typecheck(&mut analysis_db, module_id, 1, {
             let monomorphized_context = attach_def_owners(monomorphized_context, &top_level_owners);
-            crate::analysis::results::ResolvedModuleResult::from_context(
+            crate::services::analysis::results::ResolvedModuleResult::from_context(
                 module_id,
                 monomorphized_context,
             )

@@ -5,9 +5,9 @@
 
 use thiserror::Error;
 
-use crate::diag::Span;
-use crate::tree::resolved::{BindPattern, ExprKind};
-use crate::types::Type;
+use crate::core::diag::Span;
+use crate::core::tree::resolved::{BindPattern, ExprKind};
+use crate::core::types::Type;
 
 #[derive(Debug, Clone, Error)]
 #[error(transparent)]

@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::results::DocumentSymbolKind;
-use crate::diag::{Position, Span};
-use crate::tree::visit::{self, Visitor};
-use crate::tree::{Expr, MatchPattern, MatchPatternBinding, NodeId, StmtExpr};
+use crate::core::diag::{Position, Span};
+use crate::core::tree::visit::{self, Visitor};
+use crate::core::tree::{Expr, MatchPattern, MatchPatternBinding, NodeId, StmtExpr};
+use crate::services::analysis::results::DocumentSymbolKind;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CallSite {
@@ -18,7 +18,7 @@ pub(crate) struct CallSite {
 }
 
 pub(crate) fn node_at_span<D, T>(
-    module: &crate::tree::Module<D, T>,
+    module: &crate::core::tree::Module<D, T>,
     query_span: Span,
 ) -> Option<NodeId> {
     let mut collector = NodeSpanCollector::default();
@@ -42,14 +42,16 @@ pub(crate) fn node_at_span<D, T>(
     best.map(|(node_id, _)| node_id)
 }
 
-pub(crate) fn node_span_map<D, T>(module: &crate::tree::Module<D, T>) -> HashMap<NodeId, Span> {
+pub(crate) fn node_span_map<D, T>(
+    module: &crate::core::tree::Module<D, T>,
+) -> HashMap<NodeId, Span> {
     let mut collector = NodeSpanCollector::default();
     collector.visit_module(module);
     collector.nodes.into_iter().collect()
 }
 
 pub(crate) fn call_site_at_span<D, T>(
-    module: &crate::tree::Module<D, T>,
+    module: &crate::core::tree::Module<D, T>,
     query_span: Span,
 ) -> Option<CallSite> {
     let mut collector = CallSiteCollector::default();
@@ -82,7 +84,7 @@ pub(crate) fn active_param_index(arg_spans: &[Span], pos: Position) -> usize {
 }
 
 pub(crate) fn document_symbol_nodes<D, T>(
-    module: &crate::tree::Module<D, T>,
+    module: &crate::core::tree::Module<D, T>,
 ) -> Vec<(NodeId, DocumentSymbolKind)> {
     let mut collector = DocumentSymbolNodeCollector::default();
     collector.visit_module(module);
@@ -113,8 +115,8 @@ struct CallSiteCollector {
 impl<D, T> Visitor<D, T> for CallSiteCollector {
     fn visit_expr(&mut self, expr: &Expr<D, T>) {
         match &expr.kind {
-            crate::tree::ExprKind::Call { args, .. }
-            | crate::tree::ExprKind::MethodCall { args, .. } => {
+            crate::core::tree::ExprKind::Call { args, .. }
+            | crate::core::tree::ExprKind::MethodCall { args, .. } => {
                 self.calls.push(CallSite {
                     node_id: expr.id,
                     span: expr.span,
@@ -133,44 +135,44 @@ struct DocumentSymbolNodeCollector {
 }
 
 impl<D, T> Visitor<D, T> for DocumentSymbolNodeCollector {
-    fn visit_type_def(&mut self, type_def: &crate::tree::TypeDef<D>) {
+    fn visit_type_def(&mut self, type_def: &crate::core::tree::TypeDef<D>) {
         self.nodes.push((type_def.id, DocumentSymbolKind::Type));
         visit::walk_type_def::<Self, D, T>(self, type_def);
     }
 
-    fn visit_trait_def(&mut self, trait_def: &crate::tree::TraitDef<D>) {
+    fn visit_trait_def(&mut self, trait_def: &crate::core::tree::TraitDef<D>) {
         self.nodes.push((trait_def.id, DocumentSymbolKind::Trait));
         visit::walk_trait_def::<Self, D, T>(self, trait_def);
     }
 
-    fn visit_func_decl(&mut self, func_decl: &crate::tree::FuncDecl<D>) {
+    fn visit_func_decl(&mut self, func_decl: &crate::core::tree::FuncDecl<D>) {
         self.nodes
             .push((func_decl.id, DocumentSymbolKind::Function));
         visit::walk_func_decl::<Self, D, T>(self, func_decl);
     }
 
-    fn visit_func_def(&mut self, func_def: &crate::tree::FuncDef<D, T>) {
+    fn visit_func_def(&mut self, func_def: &crate::core::tree::FuncDef<D, T>) {
         self.nodes.push((func_def.id, DocumentSymbolKind::Function));
         visit::walk_func_def(self, func_def);
     }
 
-    fn visit_method_decl(&mut self, method_decl: &crate::tree::MethodDecl<D>) {
+    fn visit_method_decl(&mut self, method_decl: &crate::core::tree::MethodDecl<D>) {
         self.nodes
             .push((method_decl.id, DocumentSymbolKind::Method));
         visit::walk_method_decl::<Self, D, T>(self, method_decl);
     }
 
-    fn visit_method_def(&mut self, method_def: &crate::tree::MethodDef<D, T>) {
+    fn visit_method_def(&mut self, method_def: &crate::core::tree::MethodDef<D, T>) {
         self.nodes.push((method_def.id, DocumentSymbolKind::Method));
         visit::walk_method_def(self, method_def);
     }
 
-    fn visit_trait_method(&mut self, method: &crate::tree::TraitMethod<D>) {
+    fn visit_trait_method(&mut self, method: &crate::core::tree::TraitMethod<D>) {
         self.nodes.push((method.id, DocumentSymbolKind::Method));
         visit::walk_trait_method::<Self, D, T>(self, method);
     }
 
-    fn visit_trait_property(&mut self, property: &crate::tree::TraitProperty<D>) {
+    fn visit_trait_property(&mut self, property: &crate::core::tree::TraitProperty<D>) {
         self.nodes.push((property.id, DocumentSymbolKind::Property));
         visit::walk_trait_property::<Self, D, T>(self, property);
     }
@@ -188,72 +190,72 @@ impl NodeSpanCollector {
 }
 
 impl<D, T> Visitor<D, T> for NodeSpanCollector {
-    fn visit_type_def(&mut self, type_def: &crate::tree::TypeDef<D>) {
+    fn visit_type_def(&mut self, type_def: &crate::core::tree::TypeDef<D>) {
         self.record(type_def.id, type_def.span);
         visit::walk_type_def::<Self, D, T>(self, type_def);
     }
 
-    fn visit_trait_def(&mut self, trait_def: &crate::tree::TraitDef<D>) {
+    fn visit_trait_def(&mut self, trait_def: &crate::core::tree::TraitDef<D>) {
         self.record(trait_def.id, trait_def.span);
         visit::walk_trait_def::<Self, D, T>(self, trait_def);
     }
 
-    fn visit_trait_method(&mut self, method: &crate::tree::TraitMethod<D>) {
+    fn visit_trait_method(&mut self, method: &crate::core::tree::TraitMethod<D>) {
         self.record(method.id, method.span);
         visit::walk_trait_method::<Self, D, T>(self, method);
     }
 
-    fn visit_trait_property(&mut self, property: &crate::tree::TraitProperty<D>) {
+    fn visit_trait_property(&mut self, property: &crate::core::tree::TraitProperty<D>) {
         self.record(property.id, property.span);
         visit::walk_trait_property::<Self, D, T>(self, property);
     }
 
-    fn visit_type_expr(&mut self, type_expr: &crate::tree::TypeExpr<D>) {
+    fn visit_type_expr(&mut self, type_expr: &crate::core::tree::TypeExpr<D>) {
         self.record(type_expr.id, type_expr.span);
         visit::walk_type_expr::<Self, D, T>(self, type_expr);
     }
 
-    fn visit_func_decl(&mut self, func_decl: &crate::tree::FuncDecl<D>) {
+    fn visit_func_decl(&mut self, func_decl: &crate::core::tree::FuncDecl<D>) {
         self.record(func_decl.id, func_decl.span);
         visit::walk_func_decl::<Self, D, T>(self, func_decl);
     }
 
-    fn visit_func_def(&mut self, func_def: &crate::tree::FuncDef<D, T>) {
+    fn visit_func_def(&mut self, func_def: &crate::core::tree::FuncDef<D, T>) {
         self.record(func_def.id, func_def.span);
         visit::walk_func_def(self, func_def);
     }
 
-    fn visit_type_param(&mut self, param: &crate::tree::TypeParam<D>) {
+    fn visit_type_param(&mut self, param: &crate::core::tree::TypeParam<D>) {
         self.record(param.id, param.span);
         visit::walk_type_param::<Self, D, T>(self, param);
     }
 
-    fn visit_method_block(&mut self, method_block: &crate::tree::MethodBlock<D, T>) {
+    fn visit_method_block(&mut self, method_block: &crate::core::tree::MethodBlock<D, T>) {
         self.record(method_block.id, method_block.span);
         visit::walk_method_block(self, method_block);
     }
 
-    fn visit_method_decl(&mut self, method_decl: &crate::tree::MethodDecl<D>) {
+    fn visit_method_decl(&mut self, method_decl: &crate::core::tree::MethodDecl<D>) {
         self.record(method_decl.id, method_decl.span);
         visit::walk_method_decl::<Self, D, T>(self, method_decl);
     }
 
-    fn visit_method_def(&mut self, method_def: &crate::tree::MethodDef<D, T>) {
+    fn visit_method_def(&mut self, method_def: &crate::core::tree::MethodDef<D, T>) {
         self.record(method_def.id, method_def.span);
         visit::walk_method_def(self, method_def);
     }
 
-    fn visit_closure_def(&mut self, closure_def: &crate::tree::ClosureDef<D, T>) {
+    fn visit_closure_def(&mut self, closure_def: &crate::core::tree::ClosureDef<D, T>) {
         self.record(closure_def.id, closure_def.span);
         visit::walk_closure_def(self, closure_def);
     }
 
-    fn visit_param(&mut self, param: &crate::tree::Param<D>) {
+    fn visit_param(&mut self, param: &crate::core::tree::Param<D>) {
         self.record(param.id, param.span);
         visit::walk_param::<Self, D, T>(self, param);
     }
 
-    fn visit_bind_pattern(&mut self, pattern: &crate::tree::BindPattern<D>) {
+    fn visit_bind_pattern(&mut self, pattern: &crate::core::tree::BindPattern<D>) {
         self.record(pattern.id, pattern.span);
         visit::walk_bind_pattern::<Self, D, T>(self, pattern);
     }
@@ -279,7 +281,7 @@ impl<D, T> Visitor<D, T> for NodeSpanCollector {
         visit::walk_match_pattern_binding::<Self, D, T>(self, binding);
     }
 
-    fn visit_match_arm(&mut self, arm: &crate::tree::MatchArm<D, T>) {
+    fn visit_match_arm(&mut self, arm: &crate::core::tree::MatchArm<D, T>) {
         self.record(arm.id, arm.span);
         visit::walk_match_arm(self, arm);
     }

@@ -8,16 +8,16 @@
 //! variables are rewritten to access the closure's environment struct
 //! (`env.<field>` for move captures, `*env.<field>` for borrow captures).
 
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
 
 use super::elaborator::Elaborator;
 
 impl<'a> Elaborator<'a> {
-    fn peel_place_base_type(&self, ty: &crate::types::Type) -> crate::types::Type {
+    fn peel_place_base_type(&self, ty: &crate::core::types::Type) -> crate::core::types::Type {
         let mut curr = ty.clone();
-        while let crate::types::Type::Heap { elem_ty } | crate::types::Type::Ref { elem_ty, .. } =
-            curr
+        while let crate::core::types::Type::Heap { elem_ty }
+        | crate::core::types::Type::Ref { elem_ty, .. } = curr
         {
             curr = (*elem_ty).clone();
         }
@@ -79,8 +79,8 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::Deref { expr: inner } => {
                 let inner_ty = self.type_map.type_table().get(inner.ty).clone();
                 match inner_ty {
-                    crate::types::Type::Heap { elem_ty }
-                    | crate::types::Type::Ref { elem_ty, .. } => {
+                    crate::core::types::Type::Heap { elem_ty }
+                    | crate::core::types::Type::Ref { elem_ty, .. } => {
                         self.insert_synth_node_type(expr.id, (*elem_ty).clone())
                     }
                     _ => expr.ty,
@@ -90,7 +90,7 @@ impl<'a> Elaborator<'a> {
                 let target_ty =
                     self.peel_place_base_type(self.type_map.type_table().get(target.ty));
                 match target_ty {
-                    crate::types::Type::Tuple { field_tys } => field_tys
+                    crate::core::types::Type::Tuple { field_tys } => field_tys
                         .get(*index)
                         .cloned()
                         .map(|ty| self.insert_synth_node_type(expr.id, ty))
@@ -102,7 +102,7 @@ impl<'a> Elaborator<'a> {
                 let target_ty =
                     self.peel_place_base_type(self.type_map.type_table().get(target.ty));
                 match target_ty {
-                    crate::types::Type::Struct { fields, .. } => fields
+                    crate::core::types::Type::Struct { fields, .. } => fields
                         .iter()
                         .find(|f| f.name == *field)
                         .map(|f| self.insert_synth_node_type(expr.id, f.ty.clone()))

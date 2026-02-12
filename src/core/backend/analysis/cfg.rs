@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::DataflowGraph;
-use crate::ir::{BlockId, Function, Terminator};
+use crate::core::ir::{BlockId, Function, Terminator};
 
 /// Control-flow graph for a single SSA function.
 pub struct Cfg {

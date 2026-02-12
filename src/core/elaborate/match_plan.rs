@@ -20,11 +20,11 @@
 //! The plan encodes everything lowering needs to emit efficient matching code
 //! without re-examining pattern structure.
 
-use crate::elaborate::elaborator::Elaborator;
-use crate::tree::NodeId;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::tree::NodeId;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     /// Build a complete match plan for a match expression.

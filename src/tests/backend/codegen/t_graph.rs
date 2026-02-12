@@ -1,13 +1,13 @@
-use crate::backend::codegen::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
-use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
-use crate::backend::regalloc::Location;
-use crate::backend::regalloc::moves::CallMove;
-use crate::backend::regalloc::moves::{EdgeMove, MoveOp};
-use crate::backend::regalloc::stack::StackSlotId;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{Callee, FunctionSig, InstKind, Terminator};
-use crate::ir::{IrTypeCache, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::backend::codegen::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};
+use crate::core::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
+use crate::core::backend::regalloc::Location;
+use crate::core::backend::regalloc::moves::CallMove;
+use crate::core::backend::regalloc::moves::{EdgeMove, MoveOp};
+use crate::core::backend::regalloc::stack::StackSlotId;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{Callee, FunctionSig, InstKind, Terminator};
+use crate::core::ir::{IrTypeCache, IrTypeKind};
+use crate::core::resolve::DefId;
 
 #[test]
 fn test_codegen_graph_inserts_move_block() {

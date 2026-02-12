@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::capsule::ModuleId;
+use crate::core::capsule::ModuleId;
 
 #[derive(Debug, Clone, Default)]
 pub struct ModuleGraph {

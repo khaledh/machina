@@ -10,12 +10,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::context::{ResolvedContext, TypeCheckedContext};
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::tree::ParamMode;
-use crate::typecheck::errors::TypeCheckError;
-use crate::types::{TyVarId, Type};
+use crate::core::context::{ResolvedContext, TypeCheckedContext};
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::tree::ParamMode;
+use crate::core::typecheck::errors::TypeCheckError;
+use crate::core::types::{TyVarId, Type};
 
 use super::{collect, constraints, finalize, solver, typesys, validate};
 

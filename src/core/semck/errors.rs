@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-use crate::diag::Span;
-use crate::tree::normalized::ExprKind;
-use crate::types::Type;
+use crate::core::diag::Span;
+use crate::core::tree::normalized::ExprKind;
+use crate::core::types::Type;
 
 #[derive(Debug, Clone, Error)]
 pub enum SemCheckError {

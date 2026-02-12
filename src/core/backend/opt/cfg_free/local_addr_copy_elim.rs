@@ -2,8 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::ir::{Callee, Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+use crate::core::backend::opt::Pass;
+use crate::core::ir::{
+    Callee, Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func,
+};
 
 type DefUseMaps = (
     HashMap<ValueId, (usize, usize)>,

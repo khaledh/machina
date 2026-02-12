@@ -1,8 +1,8 @@
 use crate::common::run_program;
-use machina::capsule::CapsuleError;
-use machina::compile::{CompileOptions, check_with_path, compile_with_path};
-use machina::diag::CompileError;
-use machina::typecheck::TypeCheckErrorKind;
+use machina::core::capsule::CapsuleError;
+use machina::core::diag::CompileError;
+use machina::core::typecheck::TypeCheckErrorKind;
+use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -76,7 +76,7 @@ fn with_temp_program(
 fn typecheck_with_modules(
     entry_path: &Path,
     entry_source: &str,
-) -> Result<machina::compile::CompileOutput, Vec<CompileError>> {
+) -> Result<machina::driver::compile::CompileOutput, Vec<CompileError>> {
     compile_with_path(
         entry_source,
         Some(entry_path),

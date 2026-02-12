@@ -1,8 +1,8 @@
 //! Shared term/type normalization helpers for solver modules.
 
-use crate::typecheck::typesys::TypeVarStore;
-use crate::typecheck::unify::TcUnifier;
-use crate::types::Type;
+use crate::core::typecheck::typesys::TypeVarStore;
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::Type;
 
 pub(super) fn resolve_term_for_diagnostics(ty: &Type, unifier: &TcUnifier) -> Type {
     default_infer_ints_for_diagnostics(resolve_term(ty, unifier), unifier.vars())
@@ -17,7 +17,7 @@ pub(super) fn default_infer_ints_for_diagnostics(ty: Type, vars: &TypeVarStore) 
         Type::Var(var)
             if matches!(
                 vars.kind(var),
-                Some(crate::typecheck::typesys::TypeVarKind::InferInt)
+                Some(crate::core::typecheck::typesys::TypeVarKind::InferInt)
             ) =>
         {
             Type::sint(32)

@@ -1,10 +1,12 @@
 //! Typed tree ir: nodes with DefIds and TypeIds.
 
-use crate::resolve::DefId;
-use crate::tree as model;
-use crate::types::TypeId;
+use crate::core::resolve::DefId;
+use crate::core::tree as model;
+use crate::core::types::TypeId;
 
-pub use crate::tree::{BinaryOp, CallArgMode, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
+pub use crate::core::tree::{
+    BinaryOp, CallArgMode, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp,
+};
 
 // -- Typed tree aliases (parsed ir specialized with DefId + TypeId) ---
 

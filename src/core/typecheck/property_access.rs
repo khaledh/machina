@@ -6,9 +6,9 @@
 
 use std::collections::HashMap;
 
-use crate::resolve::DefId;
-use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, lookup_property};
-use crate::types::{TyVarId, Type};
+use crate::core::resolve::DefId;
+use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, lookup_property};
+use crate::core::types::{TyVarId, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PropertyLookupError {

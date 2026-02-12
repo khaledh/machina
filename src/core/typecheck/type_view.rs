@@ -5,13 +5,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::resolve::DefTable;
-use crate::tree::resolved as res;
-use crate::typecheck::nominal::{
+use crate::core::resolve::DefTable;
+use crate::core::tree::resolved as res;
+use crate::core::typecheck::nominal::{
     EnumVariantView, EnumView, ExpansionState, NominalKey, StructFieldView, StructView, TypeView,
 };
-use crate::typecheck::type_map::{TypeDefLookup, resolve_type_def_with_args};
-use crate::types::Type;
+use crate::core::typecheck::type_map::{TypeDefLookup, resolve_type_def_with_args};
+use crate::core::types::Type;
 
 pub(crate) struct TypeViewResolver<'a, M: TypeDefLookup> {
     def_table: &'a DefTable,

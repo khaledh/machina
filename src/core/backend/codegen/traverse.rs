@@ -2,17 +2,17 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::backend::regalloc::ValueAllocMap;
-use crate::backend::regalloc::moves::MoveOp;
-use crate::backend::regalloc::target::PhysReg;
-use crate::ir::for_each_inst_use;
-use crate::ir::layout::IrLayout;
-use crate::ir::{
+use crate::core::backend::regalloc::ValueAllocMap;
+use crate::core::backend::regalloc::moves::MoveOp;
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::ir::for_each_inst_use;
+use crate::core::ir::layout::IrLayout;
+use crate::core::ir::{
     Block, BlockId, Callee, ConstValue, Function, InstKind, Instruction, LocalId, Terminator,
     ValueId,
 };
-use crate::ir::{IrTypeCache, IrTypeId, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::ir::{IrTypeCache, IrTypeId, IrTypeKind};
+use crate::core::resolve::DefId;
 
 use super::emitter::{CodegenEmitter, LocationResolver};
 use super::graph::{CodegenBlockId, CodegenEmit, CodegenGraph};

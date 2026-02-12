@@ -1,11 +1,11 @@
 use super::*;
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::typecheck::engine::TypecheckEngine;
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::typecheck::engine::TypecheckEngine;
 
-fn resolve_source(source: &str) -> crate::context::ResolvedContext {
+fn resolve_source(source: &str) -> crate::core::context::ResolvedContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

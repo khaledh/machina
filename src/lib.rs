@@ -1,23 +1,3 @@
 pub mod core;
 pub mod driver;
 pub mod services;
-
-pub use core::backend;
-pub use core::capsule;
-pub use core::context;
-pub use core::diag;
-pub use core::elaborate;
-pub use core::ir;
-pub use core::lexer;
-pub use core::monomorphize;
-pub use core::normalize;
-pub use core::nrvo;
-pub use core::parse;
-pub use core::resolve;
-pub use core::semck;
-pub use core::symtab;
-pub use core::tree;
-pub use core::typecheck;
-pub use core::types;
-pub use driver::compile;
-pub use services::analysis;

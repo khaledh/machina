@@ -3,11 +3,11 @@
 //! The drop plan records scope-based drops and control-flow drop depths so
 //! SSA lowering can emit drops without re-deriving semantic intent.
 
-use crate::resolve::{DefId, DefTable};
-use crate::tree::semantic as sem;
-use crate::tree::semantic::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
-use crate::tree::{NodeId, ParamMode};
-use crate::typecheck::type_map::TypeMap;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::semantic as sem;
+use crate::core::tree::semantic::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
+use crate::core::tree::{NodeId, ParamMode};
+use crate::core::typecheck::type_map::TypeMap;
 
 pub fn build_drop_plans(
     module: &sem::Module,

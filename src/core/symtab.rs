@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::resolve::{DefId, DefTable};
-use crate::tree::resolved::Module;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::resolved::Module;
 
 #[derive(Debug, Clone)]
 pub struct SymbolTable {

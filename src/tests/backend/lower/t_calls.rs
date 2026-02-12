@@ -1,5 +1,5 @@
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
-use crate::tree::semantic::MethodItem;
+use crate::core::tree::semantic::MethodItem;
 
 #[test]
 fn test_lower_call_with_params() {

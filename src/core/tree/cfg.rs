@@ -1,8 +1,8 @@
 //! Parsed-tree-based CFG construction.
 
 use crate::core::analysis::dataflow::DataflowGraph;
-use crate::resolve::DefId;
-use crate::tree::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
+use crate::core::resolve::DefId;
+use crate::core::tree::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);

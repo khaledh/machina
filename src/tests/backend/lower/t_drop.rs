@@ -1,6 +1,6 @@
 use super::{analyze, format_func, indoc, lower_func};
-use crate::backend::lower::lower_module_with_opts;
-use crate::ir::format::format_func_with_comments;
+use crate::core::backend::lower::lower_module_with_opts;
+use crate::core::ir::format::format_func_with_comments;
 
 fn count(text: &str, needle: &str) -> usize {
     text.matches(needle).count()

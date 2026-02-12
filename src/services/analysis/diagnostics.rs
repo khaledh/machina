@@ -5,11 +5,11 @@
 
 use std::collections::BTreeMap;
 
-use crate::diag::Span;
-use crate::lexer::LexError;
-use crate::parse::ParseError;
-use crate::resolve::ResolveError;
-use crate::typecheck::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::diag::Span;
+use crate::core::lexer::LexError;
+use crate::core::parse::ParseError;
+use crate::core::resolve::ResolveError;
+use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiagnosticPhase {

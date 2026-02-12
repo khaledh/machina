@@ -1,7 +1,7 @@
-use crate::backend::codegen::emitter::{LocationResolver, binop_mnemonic};
-use crate::backend::regalloc::Location;
-use crate::backend::regalloc::arm64::INDIRECT_CALL_REG;
-use crate::ir::{
+use crate::core::backend::codegen::emitter::{LocationResolver, binop_mnemonic};
+use crate::core::backend::regalloc::Location;
+use crate::core::backend::regalloc::arm64::INDIRECT_CALL_REG;
+use crate::core::ir::{
     BinOp, Callee, CastKind, ConstValue, InstKind, Instruction, IrTypeKind, RuntimeFn, UnOp,
 };
 

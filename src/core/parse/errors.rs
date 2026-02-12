@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use crate::diag::Span;
-use crate::lexer::{Token, TokenKind};
+use crate::core::diag::Span;
+use crate::core::lexer::{Token, TokenKind};
 
 #[derive(Debug, Error)]
 #[allow(clippy::enum_variant_names)]

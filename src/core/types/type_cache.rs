@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::Type;
+use crate::core::types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(u32);
@@ -116,7 +116,7 @@ fn type_info_score(ty: &Type) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{EnumVariant, StructField};
+    use crate::core::types::{EnumVariant, StructField};
 
     #[test]
     fn test_intern_upgrades_struct_when_richer_type_arrives() {

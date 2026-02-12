@@ -1,22 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::{ModuleId, RequireKind};
-use crate::context::{
+use crate::core::capsule::{ModuleId, RequireKind};
+use crate::core::context::{
     CapsuleParsedContext, CapsuleResolvedContext, ImportEnv, ImportedSymbolBinding,
     ModuleExportFacts, ModuleImportBinding, ParsedContext, ResolvedContext,
 };
-use crate::diag::Span;
-use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
-use crate::resolve::errors::ResolveError;
-use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
-use crate::resolve::{
+use crate::core::diag::Span;
+use crate::core::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
+use crate::core::resolve::errors::ResolveError;
+use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
+use crate::core::resolve::{
     Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, Visibility,
 };
-use crate::tree::ParamMode;
-use crate::tree::parsed::*;
-use crate::tree::resolved::builder::build_module;
-use crate::tree::visit::*;
-use crate::types::{BUILTIN_TYPES, Type};
+use crate::core::tree::ParamMode;
+use crate::core::tree::parsed::*;
+use crate::core::tree::resolved::builder::build_module;
+use crate::core::tree::visit::*;
+use crate::core::types::{BUILTIN_TYPES, Type};
 
 #[derive(Clone, Debug)]
 pub struct ImportedModule {
@@ -1824,7 +1824,7 @@ pub fn resolve_program(
 fn collect_module_export_facts(
     resolved_context: &ResolvedContext,
     module_id: ModuleId,
-    module_path: Option<crate::capsule::ModulePath>,
+    module_path: Option<crate::core::capsule::ModulePath>,
 ) -> ModuleExportFacts {
     let mut facts = ModuleExportFacts {
         module_id,
@@ -1869,7 +1869,7 @@ fn collect_module_export_facts(
 
 fn collect_imported_symbol_binding_from_exports(
     dep_module_id: ModuleId,
-    dep_module_path: &crate::capsule::ModulePath,
+    dep_module_path: &crate::core::capsule::ModulePath,
     dep_exports: &ModuleExportFacts,
     member: &str,
 ) -> ImportedSymbolBinding {
@@ -1886,7 +1886,7 @@ fn collect_imported_symbol_binding_from_exports(
     }
 }
 
-fn top_level_item_id(item: &TopLevelItem) -> crate::tree::NodeId {
+fn top_level_item_id(item: &TopLevelItem) -> crate::core::tree::NodeId {
     match item {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,

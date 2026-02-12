@@ -2,12 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::backend::opt::dataflow::ptr_utils::{
+use crate::core::backend::opt::Pass;
+use crate::core::backend::opt::dataflow::ptr_utils::{
     is_read_only_ptr, peel_ptr_cast, source_stable_after,
 };
-use crate::ir::IrTypeId;
-use crate::ir::{
+use crate::core::ir::IrTypeId;
+use crate::core::ir::{
     Function, InstKind, LocalId, Terminator, ValueId, for_each_inst_use, replace_value_in_func,
 };
 

@@ -8,18 +8,20 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::NormalizedContext;
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind};
-use crate::semck::SemCheckError;
-use crate::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
-use crate::tree::normalized::{
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind};
+use crate::core::semck::SemCheckError;
+use crate::core::tree::cfg::{
+    AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
+};
+use crate::core::tree::normalized::{
     ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
     MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
 };
-use crate::tree::visit::{Visitor, walk_expr};
-use crate::types::{Type, TypeId};
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::types::{Type, TypeId};
 
 pub(super) struct DefInitResult {
     pub errors: Vec<SemCheckError>,

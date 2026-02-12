@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::ir::{Block, BlockId, Function, InstKind, Instruction, Terminator};
+use crate::core::ir::{Block, BlockId, Function, InstKind, Instruction, Terminator};
 
 use super::moves::{EdgeMovePlan, EdgeTarget, MoveBlockId, MoveSchedule};
-use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
+use crate::core::backend::regalloc::moves::{MoveOp, ParamCopy};
 
 /// Identifier for a codegen block (SSA block or synthetic move block).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

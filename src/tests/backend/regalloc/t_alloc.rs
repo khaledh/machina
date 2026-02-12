@@ -1,9 +1,9 @@
-use crate::backend::analysis::liveness;
-use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{Location, TargetSpec, regalloc};
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{BinOp, Callee, FunctionSig, IrTypeCache, IrTypeKind, Terminator};
-use crate::resolve::DefId;
+use crate::core::backend::analysis::liveness;
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::{Location, TargetSpec, regalloc};
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{BinOp, Callee, FunctionSig, IrTypeCache, IrTypeKind, Terminator};
+use crate::core::resolve::DefId;
 
 struct TestTarget {
     regs: Vec<PhysReg>,

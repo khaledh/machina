@@ -5,17 +5,17 @@
 //! ways while a closure is live. It also rejects escaping captured closures.
 use std::collections::{HashMap, HashSet};
 
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::semck::closure::capture::CaptureMode;
-use crate::tree::NodeId;
-use crate::tree::cfg::{TreeCfgBuilder, TreeCfgItem, TreeCfgTerminator};
-use crate::tree::normalized::ArrayLitInit;
-use crate::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExprKind};
-use crate::tree::visit::{Visitor, walk_expr};
-use crate::types::TypeId;
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::semck::SemCheckError;
+use crate::core::semck::closure::capture::CaptureMode;
+use crate::core::tree::NodeId;
+use crate::core::tree::cfg::{TreeCfgBuilder, TreeCfgItem, TreeCfgTerminator};
+use crate::core::tree::normalized::ArrayLitInit;
+use crate::core::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExprKind};
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::types::TypeId;
 
 use super::bindings::{analyze_closure_bindings, apply_item_bindings};
 use super::collect::{collect_expr_var_uses, collect_item_var_uses, lvalue_base_def_id};

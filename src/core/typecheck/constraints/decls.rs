@@ -15,15 +15,15 @@ impl<'a> ConstraintCollector<'a> {
         for method_block in self.ctx.module.method_blocks() {
             for method_item in &method_block.method_items {
                 let sig = match method_item {
-                    crate::tree::resolved::MethodItem::Decl(method_decl) => &method_decl.sig,
-                    crate::tree::resolved::MethodItem::Def(method_def) => &method_def.sig,
+                    crate::core::tree::resolved::MethodItem::Decl(method_decl) => &method_decl.sig,
+                    crate::core::tree::resolved::MethodItem::Def(method_def) => &method_def.sig,
                 };
                 self.collect_method_def(&method_block.type_name, method_item, sig);
             }
         }
     }
 
-    fn collect_func_decl(&mut self, func_decl: &crate::tree::resolved::FuncDecl) {
+    fn collect_func_decl(&mut self, func_decl: &crate::core::tree::resolved::FuncDecl) {
         self.with_type_params(&func_decl.sig.type_params, |this| {
             if let Some(fn_ty) = this.collect_function_signature(&func_decl.sig) {
                 let def_term = this.def_term(func_decl.def_id);
@@ -91,16 +91,16 @@ impl<'a> ConstraintCollector<'a> {
     fn collect_method_def(
         &mut self,
         type_name: &str,
-        method_item: &crate::tree::resolved::MethodItem,
+        method_item: &crate::core::tree::resolved::MethodItem,
         sig: &MethodSig,
     ) {
         let method_def_id = match method_item {
-            crate::tree::resolved::MethodItem::Decl(method_decl) => method_decl.def_id,
-            crate::tree::resolved::MethodItem::Def(method_def) => method_def.def_id,
+            crate::core::tree::resolved::MethodItem::Decl(method_decl) => method_decl.def_id,
+            crate::core::tree::resolved::MethodItem::Def(method_def) => method_def.def_id,
         };
         let method_span = match method_item {
-            crate::tree::resolved::MethodItem::Decl(method_decl) => method_decl.span,
-            crate::tree::resolved::MethodItem::Def(method_def) => method_def.span,
+            crate::core::tree::resolved::MethodItem::Decl(method_decl) => method_decl.span,
+            crate::core::tree::resolved::MethodItem::Def(method_def) => method_def.span,
         };
 
         self.with_type_params(&sig.type_params, |this| {
@@ -119,7 +119,7 @@ impl<'a> ConstraintCollector<'a> {
                 .ok()
                 .or(declared_ret_ty)
                 .unwrap_or_else(|| this.fresh_var_term());
-            if let crate::tree::resolved::MethodItem::Def(method_def) = method_item {
+            if let crate::core::tree::resolved::MethodItem::Def(method_def) = method_item {
                 let method_node_term = this.node_term(method_def.id);
                 this.push_eq(
                     method_node_term,
@@ -161,7 +161,7 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
 
-            if let crate::tree::resolved::MethodItem::Def(method_def) = method_item {
+            if let crate::core::tree::resolved::MethodItem::Def(method_def) = method_item {
                 let body_ty = this.collect_expr(&method_def.body, Some(return_term.clone()));
                 this.push_assignable(
                     body_ty,

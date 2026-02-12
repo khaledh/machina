@@ -1,16 +1,17 @@
-use crate::context::ParsedContext;
-use crate::monomorphize::monomorphize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::tree::resolved as res;
-use crate::typecheck::type_check;
-use crate::{lexer::Lexer, resolve::DefTable};
+use crate::core::context::ParsedContext;
+use crate::core::lexer::Lexer;
+use crate::core::monomorphize::monomorphize;
+use crate::core::parse::Parser;
+use crate::core::resolve::DefTable;
+use crate::core::resolve::resolve;
+use crate::core::tree::resolved as res;
+use crate::core::typecheck::type_check;
 
-fn resolve_context(source: &str) -> (crate::context::ResolvedContext, DefTable) {
+fn resolve_context(source: &str) -> (crate::core::context::ResolvedContext, DefTable) {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
-        .collect::<Result<Vec<crate::lexer::Token>, crate::lexer::LexError>>()
+        .collect::<Result<Vec<crate::core::lexer::Token>, crate::core::lexer::LexError>>()
         .expect("Failed to tokenize");
     let mut parser = Parser::new(&tokens);
     let module = parser.parse().expect("Failed to parse");

@@ -1,11 +1,11 @@
 //! Build the resolved tree from the parsed tree.
 
-use crate::resolve::def_table::NodeDefLookup;
-use crate::resolve::{DefId, UNKNOWN_DEF_ID};
-use crate::tree::NodeId;
-use crate::tree::map::TreeMapper;
-use crate::tree::parsed as par;
-use crate::tree::resolved as res;
+use crate::core::resolve::def_table::NodeDefLookup;
+use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
+use crate::core::tree::NodeId;
+use crate::core::tree::map::TreeMapper;
+use crate::core::tree::parsed as par;
+use crate::core::tree::resolved as res;
 
 struct ResolvedTreeMapper<'a> {
     node_def_lookup: &'a NodeDefLookup,

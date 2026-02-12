@@ -4,13 +4,13 @@
 //! when at least one argument is mutated (inout/out/sink mode).
 //! Read-only aliasing (`in` mode) is allowed.
 
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::semck::SemCheckError;
-use crate::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
-use crate::tree::visit::{Visitor, walk_expr};
-use crate::types::TypeId;
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::semck::SemCheckError;
+use crate::core::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::types::TypeId;
 
 /// An argument access: its mode, lvalue path, and source location.
 struct ArgAccess {

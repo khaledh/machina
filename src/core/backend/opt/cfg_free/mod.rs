@@ -1,8 +1,8 @@
 //! CFG-free SSA optimizations.
 
-use crate::ir::Function;
+use crate::core::ir::Function;
 
-pub use crate::backend::opt::Pass;
+pub use crate::core::backend::opt::Pass;
 
 pub mod const_fold;
 pub mod empty_string_print;

@@ -1,11 +1,11 @@
 use super::*;
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::typecheck::{collect, constraints, solver, validate};
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::typecheck::{collect, constraints, solver, validate};
 
-fn resolve_source(source: &str) -> crate::context::ResolvedContext {
+fn resolve_source(source: &str) -> crate::core::context::ResolvedContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -75,17 +75,20 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
         .expect("missing main")
         .body;
     let local_b_def_id = match &main_body.kind {
-        crate::tree::typed::ExprKind::Block { items, .. } => items
+        crate::core::tree::typed::ExprKind::Block { items, .. } => items
             .iter()
             .find_map(|item| {
-                let crate::tree::typed::BlockItem::Stmt(stmt) = item else {
+                let crate::core::tree::typed::BlockItem::Stmt(stmt) = item else {
                     return None;
                 };
-                let crate::tree::typed::StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+                let crate::core::tree::typed::StmtExprKind::LetBind { pattern, .. } = &stmt.kind
+                else {
                     return None;
                 };
                 match &pattern.kind {
-                    crate::tree::typed::BindPatternKind::Name { ident, def_id } if ident == "b" => {
+                    crate::core::tree::typed::BindPatternKind::Name { ident, def_id }
+                        if ident == "b" =>
+                    {
                         Some(*def_id)
                     }
                     _ => None,
@@ -114,14 +117,14 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
 fn test_infer_type_args_from_instance_matches_generic_nominal_shape() {
     let template = Type::Struct {
         name: "Box<T0>".to_string(),
-        fields: vec![crate::types::StructField {
+        fields: vec![crate::core::types::StructField {
             name: "value".to_string(),
             ty: Type::Var(TyVarId::new(0)),
         }],
     };
     let concrete = Type::Struct {
         name: "Box<i32>".to_string(),
-        fields: vec![crate::types::StructField {
+        fields: vec![crate::core::types::StructField {
             name: "value".to_string(),
             ty: Type::sint(32),
         }],
@@ -137,11 +140,11 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
     let template = Type::Enum {
         name: "Option<T0>".to_string(),
         variants: vec![
-            crate::types::EnumVariant {
+            crate::core::types::EnumVariant {
                 name: "None".to_string(),
                 payload: Vec::new(),
             },
-            crate::types::EnumVariant {
+            crate::core::types::EnumVariant {
                 name: "Some".to_string(),
                 payload: vec![Type::Var(TyVarId::new(0))],
             },
@@ -150,11 +153,11 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
     let concrete = Type::Enum {
         name: "Option<T42>".to_string(),
         variants: vec![
-            crate::types::EnumVariant {
+            crate::core::types::EnumVariant {
                 name: "None".to_string(),
                 payload: Vec::new(),
             },
-            crate::types::EnumVariant {
+            crate::core::types::EnumVariant {
                 name: "Some".to_string(),
                 payload: vec![Type::Var(TyVarId::new(42))],
             },

@@ -1,7 +1,7 @@
 //! Indexing and slicing plan construction.
 
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 use super::elaborator::Elaborator;
 

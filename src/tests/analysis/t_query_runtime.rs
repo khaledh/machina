@@ -1,7 +1,7 @@
-use crate::analysis::query::{
+use crate::core::capsule::ModuleId;
+use crate::services::analysis::query::{
     CancellationToken, QueryCancelled, QueryKey, QueryKind, QueryRuntime,
 };
-use crate::capsule::ModuleId;
 
 #[test]
 fn query_runtime_memoizes_by_key() {

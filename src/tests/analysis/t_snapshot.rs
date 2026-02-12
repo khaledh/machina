@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::analysis::snapshot::SourceStore;
+use crate::services::analysis::snapshot::SourceStore;
 
 #[test]
 fn overlay_text_shadows_disk_text_in_snapshot() {

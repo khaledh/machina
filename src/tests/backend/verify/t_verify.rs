@@ -1,17 +1,17 @@
-use crate::backend::lower::LoweredModule;
-use crate::backend::lower::lower_module;
-use crate::backend::verify::verify_module;
-use crate::context::{ParsedContext, SemanticContext};
-use crate::elaborate::elaborate;
-use crate::ir::{
+use crate::core::backend::lower::LoweredModule;
+use crate::core::backend::lower::lower_module;
+use crate::core::backend::verify::verify_module;
+use crate::core::context::{ParsedContext, SemanticContext};
+use crate::core::elaborate::elaborate;
+use crate::core::ir::{
     BinOp, ConstValue, InstKind, Instruction, IrTypeKind, Terminator, ValueDef, ValueId,
 };
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::sem_check;
-use crate::typecheck::type_check;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::sem_check;
+use crate::core::typecheck::type_check;
 
 fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);

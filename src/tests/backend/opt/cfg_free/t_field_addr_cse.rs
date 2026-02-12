@@ -1,9 +1,9 @@
-use crate::backend::opt::cfg_free::PassManager;
-use crate::ir::FunctionSig;
-use crate::ir::Terminator;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{BinOp, InstKind, IrStructField, IrTypeCache, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::backend::opt::cfg_free::PassManager;
+use crate::core::ir::FunctionSig;
+use crate::core::ir::Terminator;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{BinOp, InstKind, IrStructField, IrTypeCache, IrTypeKind};
+use crate::core::resolve::DefId;
 
 #[test]
 fn test_field_addr_cse() {

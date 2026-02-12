@@ -1,8 +1,10 @@
-use crate::backend::opt::cfg_free::PassManager;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::format::format_func;
-use crate::ir::{Callee, FunctionSig, InstKind, IrTypeCache, IrTypeKind, RuntimeFn, Terminator};
-use crate::resolve::DefId;
+use crate::core::backend::opt::cfg_free::PassManager;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::format::format_func;
+use crate::core::ir::{
+    Callee, FunctionSig, InstKind, IrTypeCache, IrTypeKind, RuntimeFn, Terminator,
+};
+use crate::core::resolve::DefId;
 
 #[test]
 fn test_local_load_forward() {

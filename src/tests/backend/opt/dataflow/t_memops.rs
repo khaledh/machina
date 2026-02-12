@@ -1,10 +1,10 @@
 use super::lower_and_optimize;
-use crate::backend::lower::lower_func;
-use crate::backend::opt::dataflow::PassManager;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::format::format_func;
-use crate::ir::{FunctionSig, IrTypeCache, IrTypeKind, Terminator};
-use crate::resolve::DefId;
+use crate::core::backend::lower::lower_func;
+use crate::core::backend::opt::dataflow::PassManager;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::format::format_func;
+use crate::core::ir::{FunctionSig, IrTypeCache, IrTypeKind, Terminator};
+use crate::core::resolve::DefId;
 use indoc::indoc;
 
 #[test]

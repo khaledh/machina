@@ -1,14 +1,14 @@
 //! Straight-line (single-block) lowering routines.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::locals::LocalValue;
-use crate::backend::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
-use crate::backend::lower::mapping::{map_binop, map_cmp};
-use crate::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, Terminator, UnOp, ValueId};
-use crate::resolve::DefKind;
-use crate::tree::semantic as sem;
-use crate::tree::{BinaryOp, CoerceKind, ParamMode, UnaryOp};
-use crate::types::Type;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::locals::LocalValue;
+use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
+use crate::core::backend::lower::mapping::{map_binop, map_cmp};
+use crate::core::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, Terminator, UnOp, ValueId};
+use crate::core::resolve::DefKind;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{BinaryOp, CoerceKind, ParamMode, UnaryOp};
+use crate::core::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a linear value expression directly from the semantic tree.

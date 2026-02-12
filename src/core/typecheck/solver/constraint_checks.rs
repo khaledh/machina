@@ -3,12 +3,12 @@
 //! This module keeps constraint-application mechanics separate from the main
 //! solver orchestration loop.
 
-use crate::diag::Span;
-use crate::tree::NodeId;
-use crate::typecheck::constraints::{Constraint, ConstraintReason};
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::unify::{TcUnifier, TcUnifyError};
-use crate::types::Type;
+use crate::core::diag::Span;
+use crate::core::tree::NodeId;
+use crate::core::typecheck::constraints::{Constraint, ConstraintReason};
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};
+use crate::core::types::Type;
 
 pub(super) fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
     if let Constraint::Assignable { from, to, .. } = constraint {

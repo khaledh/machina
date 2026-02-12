@@ -1,14 +1,14 @@
-use crate::backend::lower::lower_func;
-use crate::backend::opt::cfg_free::PassManager;
-use crate::context::{ParsedContext, SemanticContext};
-use crate::elaborate::elaborate;
-use crate::ir::format::format_func;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::sem_check;
-use crate::typecheck::type_check;
+use crate::core::backend::lower::lower_func;
+use crate::core::backend::opt::cfg_free::PassManager;
+use crate::core::context::{ParsedContext, SemanticContext};
+use crate::core::elaborate::elaborate;
+use crate::core::ir::format::format_func;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::sem_check;
+use crate::core::typecheck::type_check;
 
 fn analyze(source: &str) -> SemanticContext {
     let lexer = Lexer::new(source);

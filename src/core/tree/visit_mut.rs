@@ -1,4 +1,4 @@
-use crate::tree::*;
+use crate::core::tree::*;
 
 /// Tree mutable visitor with default traversal helpers.
 ///

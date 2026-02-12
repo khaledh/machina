@@ -1,5 +1,5 @@
-use crate::tree::model;
-pub use crate::tree::node::*;
+use crate::core::tree::model;
+pub use crate::core::tree::node::*;
 
 // -- String-specialized parsed tree aliases ---
 

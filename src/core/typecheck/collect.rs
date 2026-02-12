@@ -12,22 +12,22 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diag::Span;
-use crate::resolve::{DefId, ImportedCallableSig, ImportedTraitSig};
-use crate::tree::ParamMode;
-use crate::tree::resolved::{
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, ImportedCallableSig, ImportedTraitSig};
+use crate::core::tree::ParamMode;
+use crate::core::tree::resolved::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField,
     TypeDefKind, TypeParam,
 };
-use crate::typecheck::engine::{
+use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitMethodSig,
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
 };
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::type_map::{
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::type_map::{
     resolve_return_type_expr_with_params, resolve_type_expr, resolve_type_expr_with_params,
 };
-use crate::types::{EnumVariant, StructField, TyVarId, Type};
+use crate::core::types::{EnumVariant, StructField, TyVarId, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PropertyAccessorKind {
@@ -98,7 +98,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 }
 
 fn collect_type_defs(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     type_symbols: &mut HashMap<String, DefId>,
     type_defs: &mut HashMap<String, Type>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
@@ -139,7 +139,7 @@ fn collect_type_defs(
 }
 
 fn resolve_struct_type(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     fields: &[StructDefField],
 ) -> Result<Vec<StructField>, TypeCheckError> {
     let mut out = Vec::with_capacity(fields.len());
@@ -154,7 +154,7 @@ fn resolve_struct_type(
 }
 
 fn resolve_enum_type(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     variants: &[EnumDefVariant],
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
     let mut out = Vec::with_capacity(variants.len());
@@ -173,7 +173,7 @@ fn resolve_enum_type(
 }
 
 fn collect_trait_sigs(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     trait_sigs: &mut HashMap<String, CollectedTraitSig>,
     errors: &mut Vec<TypeCheckError>,
 ) {
@@ -254,7 +254,7 @@ fn collect_trait_sigs(
 }
 
 fn collect_function_sigs(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     func_sigs: &mut HashMap<String, Vec<CollectedCallableSig>>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
@@ -371,7 +371,7 @@ fn imported_trait_sig_to_collected(
 }
 
 fn collect_method_sigs(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     type_defs: &HashMap<String, Type>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     trait_impls: &mut HashMap<String, HashSet<String>>,
@@ -578,7 +578,7 @@ fn collect_method_sigs(
 }
 
 fn collect_callable_sig(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     def_id: DefId,
     sig: &FunctionSig,
     self_mode: Option<ParamMode>,
@@ -628,7 +628,7 @@ fn collect_callable_sig(
 }
 
 fn collect_trait_method_sig(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     sig: &MethodSig,
     errors: &mut Vec<TypeCheckError>,
 ) -> Option<CollectedTraitMethodSig> {
@@ -731,7 +731,7 @@ fn validate_trait_method_impl(
 }
 
 fn build_param_sigs(
-    ctx: &crate::context::ResolvedContext,
+    ctx: &crate::core::context::ResolvedContext,
     params: &[Param],
     type_params: Option<&HashMap<DefId, TyVarId>>,
 ) -> Result<Vec<CollectedParamSig>, TypeCheckError> {

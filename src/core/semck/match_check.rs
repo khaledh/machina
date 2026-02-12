@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::semck::SemCheckError;
-use crate::tree::normalized::{Expr, MatchArm};
-use crate::tree::resolved::MatchPattern;
-use crate::typecheck::type_map::resolve_type_expr;
-use crate::types::{EnumVariant, Type};
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::semck::SemCheckError;
+use crate::core::tree::normalized::{Expr, MatchArm};
+use crate::core::tree::resolved::MatchPattern;
+use crate::core::typecheck::type_map::resolve_type_expr;
+use crate::core::types::{EnumVariant, Type};
 
 pub(super) fn check_match(
     ctx: &NormalizedContext,

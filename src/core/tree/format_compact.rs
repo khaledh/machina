@@ -1,7 +1,7 @@
 //! Compact formatting helpers for semantic nodes.
 
-use crate::tree::semantic as sem;
-use crate::tree::{BinaryOp, ParamMode, UnaryOp};
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{BinaryOp, ParamMode, UnaryOp};
 
 pub fn format_semantic_stmt_compact(stmt: &sem::StmtExpr) -> String {
     match &stmt.kind {

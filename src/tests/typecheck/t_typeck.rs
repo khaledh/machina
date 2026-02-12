@@ -1,12 +1,12 @@
 use super::*;
 use std::collections::HashMap;
 
-use crate::capsule::ModuleId;
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::types::Type;
+use crate::core::capsule::ModuleId;
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::types::Type;
 
 fn type_check_source(source: &str) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
     let lexer = Lexer::new(source);

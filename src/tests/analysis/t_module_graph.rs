@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::module_graph::ModuleGraph;
-use crate::analysis::query::{QueryCancelled, QueryKey, QueryKind, QueryRuntime};
-use crate::capsule::ModuleId;
+use crate::core::capsule::ModuleId;
+use crate::services::analysis::module_graph::ModuleGraph;
+use crate::services::analysis::query::{QueryCancelled, QueryKey, QueryKind, QueryRuntime};
 
 #[test]
 fn invalidation_closure_includes_transitive_dependents() {

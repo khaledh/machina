@@ -1,8 +1,8 @@
 use super::assert_ir_eq;
 use super::lower_and_optimize;
-use crate::backend::lower::lower_func;
-use crate::backend::opt::dataflow::PassManager;
-use crate::ir::format::format_func;
+use crate::core::backend::lower::lower_func;
+use crate::core::backend::opt::dataflow::PassManager;
+use crate::core::ir::format::format_func;
 use indoc::indoc;
 
 #[test]

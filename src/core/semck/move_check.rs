@@ -9,19 +9,21 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::NormalizedContext;
 use crate::core::analysis::dataflow::solve_forward;
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind};
-use crate::semck::SemCheckError;
-use crate::semck::ast_liveness::{self, AstLiveness};
-use crate::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
-use crate::tree::normalized::{
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind};
+use crate::core::semck::SemCheckError;
+use crate::core::semck::ast_liveness::{self, AstLiveness};
+use crate::core::tree::cfg::{
+    AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
+};
+use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CaptureSpec, Expr, ExprKind, FuncDef, NodeId, ParamMode,
     StmtExpr, StmtExprKind,
 };
-use crate::tree::visit::{Visitor, walk_expr};
-use crate::types::TypeId;
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::types::TypeId;
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,

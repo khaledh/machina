@@ -1,13 +1,17 @@
-use crate::analysis::results::{ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult};
-use crate::capsule::ModuleId;
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer};
-use crate::parse::Parser;
-use crate::resolve::{ResolveError, resolve};
-use crate::tree::NodeIdGen;
-use crate::typecheck::type_check;
+use crate::core::capsule::ModuleId;
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer};
+use crate::core::parse::Parser;
+use crate::core::resolve::{ResolveError, resolve};
+use crate::core::tree::NodeIdGen;
+use crate::core::typecheck::type_check;
+use crate::services::analysis::results::{
+    ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult,
+};
 
-fn resolve_source(source: &str) -> Result<crate::context::ResolvedContext, Vec<ResolveError>> {
+fn resolve_source(
+    source: &str,
+) -> Result<crate::core::context::ResolvedContext, Vec<ResolveError>> {
     let id_gen = NodeIdGen::new();
     let lexer = Lexer::new(source);
     let tokens = lexer

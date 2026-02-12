@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::resolve::{Def, DefId, DefKind};
-use crate::tree::NodeId;
+use crate::core::resolve::{Def, DefId, DefKind};
+use crate::core::tree::NodeId;
 
 pub struct DefTableBuilder {
     defs: Vec<Def>,

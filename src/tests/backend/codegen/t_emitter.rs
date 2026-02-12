@@ -1,19 +1,19 @@
-use crate::backend::analysis::liveness;
-use crate::backend::codegen::arm64::Arm64Emitter;
-use crate::backend::codegen::emit_module_arm64;
-use crate::backend::codegen::emitter::CodegenEmitter;
-use crate::backend::codegen::graph::CodegenGraph;
-use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
-use crate::backend::codegen::traverse::emit_graph_with_emitter as emit_graph_with_emitter_impl;
-use crate::backend::lower::{LoweredFunction, LoweredModule};
-use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{AllocationResult, TargetSpec, ValueAllocMap, regalloc};
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{
+use crate::core::backend::analysis::liveness;
+use crate::core::backend::codegen::arm64::Arm64Emitter;
+use crate::core::backend::codegen::emit_module_arm64;
+use crate::core::backend::codegen::emitter::CodegenEmitter;
+use crate::core::backend::codegen::graph::CodegenGraph;
+use crate::core::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
+use crate::core::backend::codegen::traverse::emit_graph_with_emitter as emit_graph_with_emitter_impl;
+use crate::core::backend::lower::{LoweredFunction, LoweredModule};
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::{AllocationResult, TargetSpec, ValueAllocMap, regalloc};
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{
     BinOp, Callee, CmpOp, ConstValue, Function, FunctionSig, GlobalData, GlobalId, IrStructField,
     IrTypeCache, IrTypeId, IrTypeKind, RuntimeFn, SwitchCase, Terminator,
 };
-use crate::resolve::DefId;
+use crate::core::resolve::DefId;
 
 // ============================================================================
 // Test Helpers

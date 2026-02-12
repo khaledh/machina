@@ -1,10 +1,10 @@
-use crate::context::{AnalyzedContext, SemanticContext};
-use crate::resolve::{DefId, DefTable};
-use crate::tree::semantic::{
+use crate::core::context::{AnalyzedContext, SemanticContext};
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::semantic::{
     ArrayLitInit, BlockItem, CallArg, FuncDef, MethodReceiver, PlaceExpr, PlaceExprKind as PEK,
     SegmentKind, StmtExpr, StmtExprKind as SEK, ValueExpr, ValueExprKind as VEK,
 };
-use crate::typecheck::type_map::TypeMap;
+use crate::core::typecheck::type_map::TypeMap;
 
 /// NRVO (Named Return Value Optimization) analyzer.
 ///

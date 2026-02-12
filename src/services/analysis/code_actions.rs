@@ -3,9 +3,9 @@
 //! This keeps quick-fix mapping separate from `AnalysisDb` orchestration so new
 //! actions can be added without growing query plumbing code.
 
-use crate::analysis::diagnostics::{Diagnostic, DiagnosticValue};
-use crate::analysis::results::{CodeAction, CodeActionKind, TextEdit};
-use crate::diag::Span;
+use crate::core::diag::Span;
+use crate::services::analysis::diagnostics::{Diagnostic, DiagnosticValue};
+use crate::services::analysis::results::{CodeAction, CodeActionKind, TextEdit};
 
 pub(crate) fn code_actions_for_diagnostic(diag: &Diagnostic) -> Vec<CodeAction> {
     match diag.code.as_str() {

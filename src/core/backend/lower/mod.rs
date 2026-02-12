@@ -24,15 +24,15 @@ mod slots;
 mod types;
 mod util;
 
-use crate::backend::lower::drop_glue::DropGlueRegistry;
-use crate::backend::lower::globals::GlobalArena;
-use crate::backend::lower::lowerer::BranchResult;
-use crate::ir::IrTypeCache;
-use crate::ir::{Function, GlobalData, Terminator};
-use crate::resolve::DefTable;
-use crate::tree::semantic as sem;
-use crate::typecheck::type_map::TypeMap;
-use crate::types::Type;
+use crate::core::backend::lower::drop_glue::DropGlueRegistry;
+use crate::core::backend::lower::globals::GlobalArena;
+use crate::core::backend::lower::lowerer::BranchResult;
+use crate::core::ir::IrTypeCache;
+use crate::core::ir::{Function, GlobalData, Terminator};
+use crate::core::resolve::DefTable;
+use crate::core::tree::semantic as sem;
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::types::Type;
 use lowerer::FuncLowerer;
 
 pub struct LoweredFunction {

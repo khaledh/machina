@@ -1,12 +1,12 @@
 //! Type lowering from semantic types to SSA IR types.
 
-use crate::ir::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
-use crate::resolve::DefTable;
-use crate::tree::semantic as sem;
-use crate::typecheck::nominal::{NominalKey, TypeView};
-use crate::typecheck::type_map::TypeMap;
-use crate::typecheck::type_view::TypeViewResolver;
-use crate::types::{EnumVariant, FnParamMode, StructField, Type, TypeId};
+use crate::core::ir::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
+use crate::core::resolve::DefTable;
+use crate::core::tree::semantic as sem;
+use crate::core::typecheck::nominal::{NominalKey, TypeView};
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::typecheck::type_view::TypeViewResolver;
+use crate::core::types::{EnumVariant, FnParamMode, StructField, Type, TypeId};
 use std::collections::HashMap;
 
 /// Lowers type-checker types to SSA IR types with caching.

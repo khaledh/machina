@@ -6,19 +6,19 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::NormalizedContext;
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind};
-use crate::semck::SemCheckError;
-use crate::tree::normalized::{
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind};
+use crate::core::semck::SemCheckError;
+use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, CaptureSpec, Expr, ExprKind, MatchPattern,
     MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind,
 };
-use crate::tree::visit::{
+use crate::core::tree::visit::{
     Visitor, walk_bind_pattern, walk_expr, walk_match_pattern, walk_match_pattern_binding,
     walk_match_pattern_bindings, walk_stmt_expr,
 };
-use crate::types::TypeId;
+use crate::core::types::TypeId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {

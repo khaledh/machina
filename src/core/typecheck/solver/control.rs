@@ -5,12 +5,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::typecheck::constraints::ExprObligation;
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::unify::TcUnifier;
-use crate::types::{Type, TypeAssignability, type_assignable};
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::typecheck::constraints::ExprObligation;
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::{Type, TypeAssignability, type_assignable};
 
 pub(super) fn try_check_expr_obligation_control(
     obligation: &ExprObligation,

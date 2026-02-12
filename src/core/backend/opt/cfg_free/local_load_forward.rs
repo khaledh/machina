@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::ir::{Callee, Function, InstKind, Terminator, ValueId, replace_value_in_func};
+use crate::core::backend::opt::Pass;
+use crate::core::ir::{Callee, Function, InstKind, Terminator, ValueId, replace_value_in_func};
 
 /// Eliminates `load` from a local address when a dominating store is in the same block.
 pub struct LocalLoadForward;

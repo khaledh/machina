@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::backend::opt::dataflow::ptr_utils::{is_read_only_ptr, peel_ptr_cast};
-use crate::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
+use crate::core::backend::opt::Pass;
+use crate::core::backend::opt::dataflow::ptr_utils::{is_read_only_ptr, peel_ptr_cast};
+use crate::core::ir::{Function, InstKind, ValueId, for_each_inst_use, replace_value_in_func};
 
 type DefUseMaps = (
     HashMap<ValueId, (usize, usize)>,

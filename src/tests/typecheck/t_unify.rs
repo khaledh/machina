@@ -1,5 +1,5 @@
-use crate::typecheck::{Unifier, UnifyError};
-use crate::types::{FnParam, FnParamMode, Type};
+use crate::core::typecheck::{Unifier, UnifyError};
+use crate::core::types::{FnParam, FnParamMode, Type};
 
 #[test]
 fn test_unify_var_with_concrete() {

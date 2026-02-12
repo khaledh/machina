@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use machina::compile::CompileOptions;
+use machina::driver::compile::CompileOptions;
 
 use crate::common::run_program_with_opts;
 

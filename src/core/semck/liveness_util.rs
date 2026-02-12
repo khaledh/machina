@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use crate::core::analysis::dataflow::solve_backward;
-use crate::resolve::DefId;
-use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
-use crate::types::TypeId;
+use crate::core::resolve::DefId;
+use crate::core::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
+use crate::core::types::TypeId;
 
 pub(crate) struct LivenessResult {
     pub(crate) live_in: Vec<HashSet<DefId>>,

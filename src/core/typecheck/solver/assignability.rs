@@ -3,8 +3,8 @@
 //! Centralizes type-assignability unification and ranking logic used by
 //! constraint solving and call overload selection.
 
-use crate::typecheck::unify::{TcUnifier, TcUnifyError};
-use crate::types::{Type, TypeAssignability, array_to_slice_assignable, type_assignable};
+use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};
+use crate::core::types::{Type, TypeAssignability, array_to_slice_assignable, type_assignable};
 
 pub(super) fn solve_assignable(
     from: &Type,

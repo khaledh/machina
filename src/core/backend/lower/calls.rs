@@ -1,13 +1,13 @@
 //! Call lowering.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::lowerer::{FuncLowerer, LinearValue};
-use crate::diag::Span;
-use crate::ir::{Callee, RuntimeFn, ValueId};
-use crate::resolve::DefId;
-use crate::tree::{InitInfo, ParamMode};
-use crate::tree::{NodeId, semantic as sem};
-use crate::types::Type;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::lowerer::{FuncLowerer, LinearValue};
+use crate::core::diag::Span;
+use crate::core::ir::{Callee, RuntimeFn, ValueId};
+use crate::core::resolve::DefId;
+use crate::core::tree::{InitInfo, ParamMode};
+use crate::core::tree::{NodeId, semantic as sem};
+use crate::core::types::Type;
 
 enum OutProj<'a> {
     Struct(&'a str),
@@ -720,7 +720,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let one_u32 = self.builder.const_int(1, false, 32, tag_ty);
                 let tag = self
                     .builder
-                    .binop(crate::ir::BinOp::Xor, one_u32, hit_u32, tag_ty);
+                    .binop(crate::core::ir::BinOp::Xor, one_u32, hit_u32, tag_ty);
                 self.store_field(union_slot.addr, 0, tag_ty, tag);
 
                 let payload = self.builder.load(value_slot.addr, value_ir_ty);

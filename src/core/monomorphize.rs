@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::context::ResolvedContext;
-use crate::diag::Span;
-use crate::resolve::{DefId, DefKind, DefTable};
-use crate::tree::map::TreeMapper;
-use crate::tree::resolved as res;
-use crate::tree::visit_mut::{VisitorMut, walk_expr, walk_type_expr};
-use crate::tree::{NodeId, NodeIdGen, ParamMode, RefinementKind};
-use crate::typecheck::type_map::{GenericInst, GenericInstMap};
-use crate::types::{FnParamMode, Type};
+use crate::core::context::ResolvedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind, DefTable};
+use crate::core::tree::map::TreeMapper;
+use crate::core::tree::resolved as res;
+use crate::core::tree::visit_mut::{VisitorMut, walk_expr, walk_type_expr};
+use crate::core::tree::{NodeId, NodeIdGen, ParamMode, RefinementKind};
+use crate::core::typecheck::type_map::{GenericInst, GenericInstMap};
+use crate::core::types::{FnParamMode, Type};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -251,7 +251,7 @@ pub fn monomorphize(
 
     ctx.module.top_level_items = new_items;
     ctx.node_id_gen = node_id_gen;
-    ctx.symbols = crate::symtab::SymbolTable::new(&ctx.module, &ctx.def_table);
+    ctx.symbols = crate::core::symtab::SymbolTable::new(&ctx.module, &ctx.def_table);
     Ok(ctx)
 }
 

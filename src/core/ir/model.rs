@@ -5,8 +5,8 @@
 
 use std::fmt;
 
-use crate::ir::{IrTypeId, IrTypeKind};
-use crate::resolve::DefId;
+use crate::core::ir::{IrTypeId, IrTypeKind};
+use crate::core::resolve::DefId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValueId(pub u32);

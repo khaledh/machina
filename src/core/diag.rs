@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
-use crate::backend::lower::LowerToIrError as SsaLoweringError;
-use crate::backend::verify::VerifyIrError as SsaVerifyError;
-use crate::capsule::CapsuleError;
-use crate::lexer::LexError;
-use crate::monomorphize::MonomorphizeError;
-use crate::parse::ParseError;
-use crate::resolve::ResolveError;
-use crate::semck::SemCheckError;
-use crate::typecheck::TypeCheckError;
+use crate::core::backend::lower::LowerToIrError as SsaLoweringError;
+use crate::core::backend::verify::VerifyIrError as SsaVerifyError;
+use crate::core::capsule::CapsuleError;
+use crate::core::lexer::LexError;
+use crate::core::monomorphize::MonomorphizeError;
+use crate::core::parse::ParseError;
+use crate::core::resolve::ResolveError;
+use crate::core::semck::SemCheckError;
+use crate::core::typecheck::TypeCheckError;
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;
 

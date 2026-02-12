@@ -1,10 +1,12 @@
-use crate::backend::analysis::liveness;
-use crate::backend::regalloc::moves::{EdgeMove, MoveOp, MovePlan};
-use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{Location, StackSlotId, TargetSpec, regalloc};
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{BlockId, Callee, FunctionSig, IrStructField, IrTypeCache, IrTypeKind, Terminator};
-use crate::resolve::DefId;
+use crate::core::backend::analysis::liveness;
+use crate::core::backend::regalloc::moves::{EdgeMove, MoveOp, MovePlan};
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::{Location, StackSlotId, TargetSpec, regalloc};
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{
+    BlockId, Callee, FunctionSig, IrStructField, IrTypeCache, IrTypeKind, Terminator,
+};
+use crate::core::resolve::DefId;
 
 // ============================================================================
 // Test Target Specs

@@ -1,22 +1,22 @@
 //! SSA lowering state and shared helpers.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::drop_glue::DropGlueRegistry;
-use crate::backend::lower::drops::DropTracker;
-use crate::backend::lower::globals::GlobalArena;
-use crate::backend::lower::locals::{LocalMap, LocalValue};
-use crate::backend::lower::types::TypeLowerer;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
-use crate::resolve::{Def, DefId, DefTable};
-use crate::tree::NodeId;
-use crate::tree::ParamMode;
-use crate::tree::format_compact::{
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::drop_glue::DropGlueRegistry;
+use crate::core::backend::lower::drops::DropTracker;
+use crate::core::backend::lower::globals::GlobalArena;
+use crate::core::backend::lower::locals::{LocalMap, LocalValue};
+use crate::core::backend::lower::types::TypeLowerer;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
+use crate::core::resolve::{Def, DefId, DefTable};
+use crate::core::tree::NodeId;
+use crate::core::tree::ParamMode;
+use crate::core::tree::format_compact::{
     format_semantic_stmt_compact, format_semantic_value_expr_compact,
 };
-use crate::tree::semantic as sem;
-use crate::typecheck::type_map::TypeMap;
-use crate::types::Type;
+use crate::core::tree::semantic as sem;
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::types::Type;
 
 /// An SSA value produced by linear (single-block) expression lowering.
 pub(super) type LinearValue = ValueId;

@@ -1,10 +1,10 @@
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::{SemCheckError, move_check};
-use crate::typecheck::type_check;
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::{SemCheckError, move_check};
+use crate::core::typecheck::type_check;
 
 fn move_check_source(source: &str) -> move_check::MoveCheckResult {
     let lexer = Lexer::new(source);

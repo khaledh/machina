@@ -13,11 +13,11 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::diag::Span;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::parse::{ParseError, Parser};
-use crate::tree::NodeIdGen;
-use crate::tree::parsed::{Module, Require};
+use crate::core::diag::Span;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::{ParseError, Parser};
+use crate::core::tree::NodeIdGen;
+use crate::core::tree::parsed::{Module, Require};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModulePath {

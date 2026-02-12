@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use crate::tree::semantic as sem;
-use crate::tree::{BinaryOp, NodeId, UnaryOp};
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{BinaryOp, NodeId, UnaryOp};
 
 pub fn build_lowering_plans(
     module: &sem::Module,

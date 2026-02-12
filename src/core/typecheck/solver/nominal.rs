@@ -6,15 +6,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::ModuleId;
-use crate::resolve::{DefId, DefTable};
-use crate::tree::NodeId;
-use crate::typecheck::builtin_methods;
-use crate::typecheck::constraints::ExprObligation;
-use crate::typecheck::engine::{CollectedPropertySig, CollectedTraitSig};
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::unify::TcUnifier;
-use crate::types::{TyVarId, Type, TypeAssignability, type_assignable};
+use crate::core::capsule::ModuleId;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::NodeId;
+use crate::core::typecheck::builtin_methods;
+use crate::core::typecheck::constraints::ExprObligation;
+use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig};
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::{TyVarId, Type, TypeAssignability, type_assignable};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn try_check_expr_obligation_nominal(

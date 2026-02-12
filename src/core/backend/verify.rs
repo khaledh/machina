@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::backend::lower::{LoweredFunction, LoweredModule};
-use crate::ir::{
+use crate::core::backend::lower::{LoweredFunction, LoweredModule};
+use crate::core::ir::{
     Block, BlockId, Callee, Function, InstKind, IrTypeCache, IrTypeId, IrTypeKind, Terminator,
     ValueDef, ValueId, for_each_inst_use,
 };

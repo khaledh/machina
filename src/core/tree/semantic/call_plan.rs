@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::tree::ParamMode;
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::tree::ParamMode;
 
 #[derive(Clone, Debug)]
 pub enum IntrinsicCall {

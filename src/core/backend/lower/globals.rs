@@ -2,7 +2,7 @@
 //!
 //! Provides stable, module-wide IDs for global data such as string literals.
 
-use crate::ir::{GlobalData, GlobalId};
+use crate::core::ir::{GlobalData, GlobalId};
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]

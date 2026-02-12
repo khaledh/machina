@@ -3,11 +3,11 @@
 //! This is the first normalize step: it is a 1:1 mapping of the typed tree,
 //! leaving coercions to the normalize pass.
 
-use crate::resolve::DefId;
-use crate::tree::map::TreeMapper;
-use crate::tree::normalized as norm;
-use crate::tree::typed as typ;
-use crate::types::TypeId;
+use crate::core::resolve::DefId;
+use crate::core::tree::map::TreeMapper;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::typed as typ;
+use crate::core::types::TypeId;
 
 struct NormalizedTreeMapper;
 

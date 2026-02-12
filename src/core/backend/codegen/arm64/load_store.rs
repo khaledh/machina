@@ -1,6 +1,6 @@
 use super::*;
-use crate::backend::regalloc::StackSlotId;
-use crate::ir::IrTypeId;
+use crate::core::backend::regalloc::StackSlotId;
+use crate::core::ir::IrTypeId;
 
 impl Arm64Emitter {
     pub(super) fn emit_add_imm(&mut self, dst: &str, base: &str, offset: u32) {

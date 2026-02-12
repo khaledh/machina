@@ -5,14 +5,14 @@
 //! without pulling in the full type checker.
 use std::collections::HashSet;
 
-use crate::resolve::DefId;
-use crate::tree::cfg::TreeCfgItem;
-use crate::tree::normalized::{
+use crate::core::resolve::DefId;
+use crate::core::tree::cfg::TreeCfgItem;
+use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternBinding,
     StmtExpr, StmtExprKind,
 };
-use crate::tree::visit::{Visitor, walk_bind_pattern, walk_expr, walk_match_pattern};
-use crate::types::TypeId;
+use crate::core::tree::visit::{Visitor, walk_bind_pattern, walk_expr, walk_match_pattern};
+use crate::core::types::TypeId;
 
 pub(super) fn collect_bind_pattern_defs(pattern: &BindPattern, defs: &mut HashSet<DefId>) {
     // Bind patterns introduce new locals; collect all def_ids.

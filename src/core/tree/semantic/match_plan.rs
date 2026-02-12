@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::types::Type;
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::types::Type;
 
 #[derive(Clone, Debug)]
 pub struct MatchPlan {

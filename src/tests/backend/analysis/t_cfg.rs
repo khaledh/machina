@@ -1,13 +1,13 @@
-use crate::backend::analysis::cfg::Cfg;
-use crate::backend::lower::lower_func;
-use crate::context::{ParsedContext, SemanticContext};
-use crate::elaborate::elaborate;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::sem_check;
-use crate::typecheck::type_check;
+use crate::core::backend::analysis::cfg::Cfg;
+use crate::core::backend::lower::lower_func;
+use crate::core::context::{ParsedContext, SemanticContext};
+use crate::core::elaborate::elaborate;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::sem_check;
+use crate::core::typecheck::type_check;
 use indoc::indoc;
 
 fn analyze(source: &str) -> SemanticContext {

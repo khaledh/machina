@@ -4,10 +4,10 @@ use std::sync::Arc;
 use crate::core::analysis::facts::{
     DefTableOverlay, FactOrigin, FactOverlayMap, SyntheticReason, TypeMapOverlay,
 };
-use crate::resolve::def_table::DefTable;
-use crate::resolve::{Def, DefId, DefKind};
-use crate::tree::NodeId;
-use crate::types::Type;
+use crate::core::resolve::def_table::DefTable;
+use crate::core::resolve::{Def, DefId, DefKind};
+use crate::core::tree::NodeId;
+use crate::core::types::Type;
 
 #[test]
 fn overlay_returns_base_when_no_synthetic_value_exists() {
@@ -94,7 +94,7 @@ fn type_map_overlay_tracks_source_and_synthetic_origins() {
             is_mutable: false,
         },
     };
-    let mut base = crate::typecheck::type_map::TypeMapBuilder::new();
+    let mut base = crate::core::typecheck::type_map::TypeMapBuilder::new();
     base.record_def_type(source_def.clone(), Type::uint(64));
     let base = base.finish().0;
 

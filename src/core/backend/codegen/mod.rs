@@ -8,11 +8,11 @@ pub mod traverse;
 
 use std::collections::HashMap;
 
-use crate::backend::analysis::liveness;
-use crate::backend::codegen::emitter::CodegenEmitter;
-use crate::backend::lower::{LoweredFunction, LoweredModule};
-use crate::backend::regalloc::{TargetSpec, regalloc};
-use crate::resolve::DefId;
+use crate::core::backend::analysis::liveness;
+use crate::core::backend::codegen::emitter::CodegenEmitter;
+use crate::core::backend::lower::{LoweredFunction, LoweredModule};
+use crate::core::backend::regalloc::{TargetSpec, regalloc};
+use crate::core::resolve::DefId;
 
 /// Emit a full SSA module (globals + functions) using the provided emitter.
 pub fn emit_module_with_emitter(

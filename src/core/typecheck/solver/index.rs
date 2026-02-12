@@ -5,12 +5,12 @@
 
 use std::collections::HashSet;
 
-use crate::tree::NodeId;
-use crate::typecheck::constraints::ExprObligation;
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::typesys::TypeVarKind;
-use crate::typecheck::unify::TcUnifier;
-use crate::types::Type;
+use crate::core::tree::NodeId;
+use crate::core::typecheck::constraints::ExprObligation;
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::typesys::TypeVarKind;
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::Type;
 
 pub(super) fn try_check_expr_obligation_index(
     obligation: &ExprObligation,
@@ -406,8 +406,8 @@ fn emit_bad_int_index(
     covered_exprs: &mut HashSet<NodeId>,
     expr_id: NodeId,
     index_nodes: &[NodeId],
-    index_spans: &[crate::diag::Span],
-    fallback_span: crate::diag::Span,
+    index_spans: &[crate::core::diag::Span],
+    fallback_span: crate::core::diag::Span,
     idx_i: usize,
     bad_idx_ty: Type,
 ) {

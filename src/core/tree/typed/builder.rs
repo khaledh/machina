@@ -2,13 +2,13 @@
 //!
 //! This is the typed step: nodes are annotated with TypeIds.
 
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::tree::map::TreeMapper;
-use crate::tree::resolved as res;
-use crate::tree::typed as typ;
-use crate::typecheck::type_map::TypeMap;
-use crate::types::TypeId;
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::tree::map::TreeMapper;
+use crate::core::tree::resolved as res;
+use crate::core::tree::typed as typ;
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::types::TypeId;
 
 struct TypedTreeMapper<'a> {
     type_map: &'a TypeMap,

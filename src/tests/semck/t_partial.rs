@@ -1,15 +1,15 @@
 use std::collections::HashSet;
 
-use crate::context::ParsedContext;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::normalize::normalize;
-use crate::parse::Parser;
-use crate::resolve::resolve;
-use crate::semck::{SemCheckError, sem_check_partial};
-use crate::tree::NodeId;
-use crate::typecheck::type_check;
+use crate::core::context::ParsedContext;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::normalize::normalize;
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
+use crate::core::semck::{SemCheckError, sem_check_partial};
+use crate::core::tree::NodeId;
+use crate::core::typecheck::type_check;
 
-fn normalized_context(source: &str) -> crate::context::NormalizedContext {
+fn normalized_context(source: &str) -> crate::core::context::NormalizedContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

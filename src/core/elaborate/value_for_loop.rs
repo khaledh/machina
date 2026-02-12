@@ -30,13 +30,13 @@
 //! and the element is just the current index value.
 
 use crate::core::analysis::facts::SyntheticReason;
-use crate::diag::Span;
-use crate::elaborate::elaborator::Elaborator;
-use crate::resolve::{DefId, DefKind};
-use crate::tree::BinaryOp;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::diag::Span;
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::resolve::{DefId, DefKind};
+use crate::core::tree::BinaryOp;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 /// Metadata for a synthesized local variable in the desugared loop.
 struct ForLocal {

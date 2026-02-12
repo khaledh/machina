@@ -5,10 +5,10 @@
 
 use std::collections::HashSet;
 
-use crate::tree::NodeId;
-use crate::typecheck::constraints::ExprObligation;
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::unify::TcUnifier;
+use crate::core::tree::NodeId;
+use crate::core::typecheck::constraints::ExprObligation;
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::unify::TcUnifier;
 
 pub(super) fn try_check_expr_obligation_collections(
     obligation: &ExprObligation,

@@ -1,15 +1,15 @@
-use crate::context::{NormalizedContext, TypeCheckedContext};
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
-use crate::resolve::DefId;
-use crate::resolve::DefKind;
-use crate::resolve::def_table::DefTable;
-use crate::tree::NodeIdGen;
-use crate::tree::normalized as norm;
-use crate::tree::normalized::build_module;
-use crate::tree::visit_mut;
-use crate::tree::visit_mut::VisitorMut;
-use crate::typecheck::type_map::{CallParam, CallSigMap};
-use crate::types::{
+use crate::core::context::{NormalizedContext, TypeCheckedContext};
+use crate::core::resolve::DefId;
+use crate::core::resolve::DefKind;
+use crate::core::resolve::def_table::DefTable;
+use crate::core::tree::NodeIdGen;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::normalized::build_module;
+use crate::core::tree::visit_mut;
+use crate::core::tree::visit_mut::VisitorMut;
+use crate::core::typecheck::type_map::{CallParam, CallSigMap};
+use crate::core::types::{
     Type, TypeId, array_to_dyn_array_assignable, array_to_slice_assignable,
     dyn_array_to_slice_assignable,
 };

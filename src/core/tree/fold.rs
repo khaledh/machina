@@ -1,4 +1,4 @@
-use crate::tree::*;
+use crate::core::tree::*;
 
 type FoldBlockResult<O, E> = Result<(Vec<O>, Option<O>), E>;
 type FoldIfResult<O, E> = Result<(O, O, O), E>;
@@ -9,7 +9,7 @@ type FoldIfResult<O, E> = Result<(O, O, O), E>;
 /// corresponding `walk_*` function to recurse into children.
 /// Example:
 /// ```rust
-/// use machina::tree::fold::{TreeFolder, Expr, ExprKind, StmtExpr};
+/// use machina::core::tree::fold::{TreeFolder, Expr, ExprKind, StmtExpr};
 ///
 /// struct CountExprs;
 /// impl TreeFolder for CountExprs {

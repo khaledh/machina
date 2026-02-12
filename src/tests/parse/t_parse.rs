@@ -1,6 +1,6 @@
 use super::*;
-use crate::lexer::{LexError, Lexer, Token};
-use crate::tree::RefinementKind;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::tree::RefinementKind;
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
     let lexer = Lexer::new(source);

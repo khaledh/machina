@@ -1,10 +1,10 @@
 use clap::Parser as ClapParser;
-use machina::analysis::db::AnalysisDb;
-use machina::analysis::diagnostics::Diagnostic;
-use machina::analysis::diagnostics::DiagnosticPhase;
-use machina::capsule::CapsuleError;
-use machina::compile::{CompileOptions, check_with_path, compile_with_path};
-use machina::diag::{CompileError, Position, Span, format_error};
+use machina::core::capsule::CapsuleError;
+use machina::core::diag::{CompileError, Position, Span, format_error};
+use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
+use machina::services::analysis::db::AnalysisDb;
+use machina::services::analysis::diagnostics::Diagnostic;
+use machina::services::analysis::diagnostics::DiagnosticPhase;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;

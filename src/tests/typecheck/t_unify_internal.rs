@@ -1,6 +1,6 @@
 use super::*;
-use crate::resolve::DefId;
-use crate::types::Type;
+use crate::core::resolve::DefId;
+use crate::core::types::Type;
 
 #[test]
 fn test_unify_binds_infer_var() {

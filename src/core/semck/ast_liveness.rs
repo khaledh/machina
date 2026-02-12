@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::context::NormalizedContext;
-use crate::resolve::DefId;
-use crate::semck::liveness_util;
-use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
-use crate::tree::normalized::{
+use crate::core::context::NormalizedContext;
+use crate::core::resolve::DefId;
+use crate::core::semck::liveness_util;
+use crate::core::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
+use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind,
 };
-use crate::tree::visit::{Visitor, walk_expr};
-use crate::types::TypeId;
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::types::TypeId;
 
 // ============================================================================
 // Public API

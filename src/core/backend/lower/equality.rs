@@ -5,9 +5,9 @@
 //! 1. Build an `EqPlan` from semantic type shape.
 //! 2. Emit IR for that plan.
 
-use crate::backend::lower::lowerer::FuncLowerer;
-use crate::ir::{BinOp, Callee, CastKind, CmpOp, IrTypeId, RuntimeFn, ValueId};
-use crate::types::{EnumVariant, Type};
+use crate::core::backend::lower::lowerer::FuncLowerer;
+use crate::core::ir::{BinOp, Callee, CastKind, CmpOp, IrTypeId, RuntimeFn, ValueId};
+use crate::core::types::{EnumVariant, Type};
 
 #[derive(Clone)]
 enum EqPlan {

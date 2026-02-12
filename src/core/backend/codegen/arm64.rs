@@ -2,13 +2,13 @@
 
 use std::fmt::Write;
 
-use crate::backend::codegen::emitter::{CodegenEmitter, LocationResolver};
-use crate::backend::codegen::graph::CodegenBlockId;
-use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
-use crate::backend::regalloc::target::PhysReg;
-use crate::backend::regalloc::{Location, StackSlotId};
-use crate::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
-use crate::ir::{IrTypeId, IrTypeKind};
+use crate::core::backend::codegen::emitter::{CodegenEmitter, LocationResolver};
+use crate::core::backend::codegen::graph::CodegenBlockId;
+use crate::core::backend::regalloc::moves::{MoveOp, ParamCopy};
+use crate::core::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::{Location, StackSlotId};
+use crate::core::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
+use crate::core::ir::{IrTypeId, IrTypeKind};
 
 mod frame;
 mod globals;

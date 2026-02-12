@@ -22,8 +22,8 @@ pub use engine::TypecheckOutput;
 pub use errors::{TypeCheckError, TypeCheckErrorKind};
 pub use infer_unify::{Unifier, UnifyError};
 
-use crate::context::{ResolvedContext, TypeCheckedContext};
-use crate::typecheck::engine::TypecheckEngine;
+use crate::core::context::{ResolvedContext, TypeCheckedContext};
+use crate::core::typecheck::engine::TypecheckEngine;
 
 pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
     TypecheckEngine::new(context).run()

@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::ir::IrTypeId;
-use crate::ir::ValueId;
-use crate::resolve::DefId;
+use crate::core::ir::IrTypeId;
+use crate::core::ir::ValueId;
+use crate::core::resolve::DefId;
 
 /// Storage kind for a local variable.
 #[derive(Clone, Copy, PartialEq, Eq)]

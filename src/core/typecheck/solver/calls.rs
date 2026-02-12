@@ -5,18 +5,18 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::ModuleId;
-use crate::resolve::{DefId, DefTable};
-use crate::tree::NodeId;
-use crate::typecheck::builtin_methods;
-use crate::typecheck::builtin_methods::BuiltinMethodRet;
-use crate::typecheck::constraints::{CallCallee, CallObligation};
-use crate::typecheck::engine::{
+use crate::core::capsule::ModuleId;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::NodeId;
+use crate::core::typecheck::builtin_methods;
+use crate::core::typecheck::builtin_methods::BuiltinMethodRet;
+use crate::core::typecheck::constraints::{CallCallee, CallObligation};
+use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
 };
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::unify::TcUnifier;
-use crate::types::{TyVarId, Type};
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::{TyVarId, Type};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check_call_obligations(

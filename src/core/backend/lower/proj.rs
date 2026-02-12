@@ -1,8 +1,8 @@
 //! Shared projection helpers for SSA lowering.
 
-use crate::backend::lower::lowerer::FuncLowerer;
-use crate::ir::IrTypeId;
-use crate::types::{Type, TypeId};
+use crate::core::backend::lower::lowerer::FuncLowerer;
+use crate::core::ir::IrTypeId;
+use crate::core::types::{Type, TypeId};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Resolves a tuple field type from the semantic type table.

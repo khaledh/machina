@@ -6,26 +6,28 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::TypeCheckedContext;
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::tree::map::TreeMapper;
-use crate::tree::resolved as res;
-use crate::tree::typed::build_module;
-use crate::typecheck::Unifier;
-use crate::typecheck::builtin_methods;
-use crate::typecheck::constraints::{CallCallee, ExprObligation};
-use crate::typecheck::engine::TypecheckEngine;
-use crate::typecheck::engine::{CollectedCallableSig, CollectedPropertySig, CollectedTraitSig};
-use crate::typecheck::errors::TypeCheckError;
-use crate::typecheck::nominal::NominalKey;
-use crate::typecheck::property_access;
-use crate::typecheck::type_map::{
+use crate::core::context::TypeCheckedContext;
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::tree::map::TreeMapper;
+use crate::core::tree::resolved as res;
+use crate::core::tree::typed::build_module;
+use crate::core::typecheck::Unifier;
+use crate::core::typecheck::builtin_methods;
+use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
+use crate::core::typecheck::engine::TypecheckEngine;
+use crate::core::typecheck::engine::{
+    CollectedCallableSig, CollectedPropertySig, CollectedTraitSig,
+};
+use crate::core::typecheck::errors::TypeCheckError;
+use crate::core::typecheck::nominal::NominalKey;
+use crate::core::typecheck::property_access;
+use crate::core::typecheck::type_map::{
     CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
     resolve_type_def_with_args, resolve_type_expr,
 };
-use crate::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
-use crate::types::{FnParam, TyVarId, Type};
+use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
+use crate::core::types::{FnParam, TyVarId, Type};
 
 #[derive(Debug, Clone)]
 pub(crate) struct FinalizeOutput {
@@ -191,7 +193,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             let params = arg_types
                 .into_iter()
                 .map(|ty| CallParam {
-                    mode: crate::tree::ParamMode::In,
+                    mode: crate::core::tree::ParamMode::In,
                     ty,
                 })
                 .collect::<Vec<_>>();
@@ -272,7 +274,7 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                     CallSig {
                         def_id: prop.getter_def,
                         receiver: Some(CallParam {
-                            mode: crate::tree::ParamMode::In,
+                            mode: crate::core::tree::ParamMode::In,
                             ty: target_ty,
                         }),
                         params: Vec::new(),
@@ -305,11 +307,11 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                     CallSig {
                         def_id: prop.setter_def,
                         receiver: Some(CallParam {
-                            mode: crate::tree::ParamMode::InOut,
+                            mode: crate::core::tree::ParamMode::InOut,
                             ty: target_ty,
                         }),
                         params: vec![CallParam {
-                            mode: crate::tree::ParamMode::In,
+                            mode: crate::core::tree::ParamMode::In,
                             ty: resolve_term(value, engine),
                         }],
                     },
@@ -368,7 +370,7 @@ struct NominalKeyResolver {
 }
 
 impl NominalKeyResolver {
-    fn new(resolved: &crate::context::ResolvedContext) -> Self {
+    fn new(resolved: &crate::core::context::ResolvedContext) -> Self {
         Self {
             explicit_nominal_keys: collect_explicit_nominal_keys(resolved),
             nominal_templates: collect_nominal_templates(resolved),
@@ -426,7 +428,9 @@ fn infer_type_args_from_instance(
     Some(args)
 }
 
-fn collect_nominal_templates(resolved: &crate::context::ResolvedContext) -> Vec<NominalTemplate> {
+fn collect_nominal_templates(
+    resolved: &crate::core::context::ResolvedContext,
+) -> Vec<NominalTemplate> {
     let mut templates = Vec::new();
     for type_def in resolved.module.type_defs() {
         if !matches!(
@@ -640,13 +644,13 @@ struct ExplicitNominalUse {
 }
 
 struct ExplicitNominalCollector<'a> {
-    def_table: &'a crate::resolve::DefTable,
+    def_table: &'a crate::core::resolve::DefTable,
     uses: Vec<ExplicitNominalUse>,
 }
 
 impl<'a> ExplicitNominalCollector<'a> {
     fn collect(
-        def_table: &'a crate::resolve::DefTable,
+        def_table: &'a crate::core::resolve::DefTable,
         module: &res::Module,
     ) -> Vec<ExplicitNominalUse> {
         let mut collector = Self {
@@ -701,7 +705,7 @@ impl TreeMapper for ExplicitNominalCollector<'_> {
         {
             self.push_use(*def_id, type_args);
         }
-        crate::tree::map::walk_type_expr(self, type_expr, ctx)
+        crate::core::tree::map::walk_type_expr(self, type_expr, ctx)
     }
 
     fn map_expr_kind(
@@ -719,7 +723,7 @@ impl TreeMapper for ExplicitNominalCollector<'_> {
             }
             _ => {}
         }
-        crate::tree::map::walk_expr_kind(self, expr_id, expr, ctx)
+        crate::core::tree::map::walk_expr_kind(self, expr_id, expr, ctx)
     }
 
     fn map_match_pattern(
@@ -737,12 +741,12 @@ impl TreeMapper for ExplicitNominalCollector<'_> {
         {
             self.push_use(def_id, type_args);
         }
-        crate::tree::map::walk_match_pattern(self, pattern, ctx)
+        crate::core::tree::map::walk_match_pattern(self, pattern, ctx)
     }
 }
 
 fn collect_explicit_nominal_keys(
-    resolved: &crate::context::ResolvedContext,
+    resolved: &crate::core::context::ResolvedContext,
 ) -> HashMap<String, NominalKey> {
     let mut out = HashMap::new();
     let uses = ExplicitNominalCollector::collect(&resolved.def_table, &resolved.module);
@@ -849,7 +853,7 @@ fn resolve_named_call(
     engine: &TypecheckEngine,
     name: &str,
     arg_types: &[Type],
-    span: crate::diag::Span,
+    span: crate::core::diag::Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
@@ -868,7 +872,7 @@ fn resolve_named_call_by_def_id(
     name: &str,
     def_id: DefId,
     arg_types: &[Type],
-    span: crate::diag::Span,
+    span: crate::core::diag::Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
@@ -889,7 +893,7 @@ fn resolve_method_call(
     receiver: Option<&Type>,
     method_name: &str,
     arg_types: &[Type],
-    span: crate::diag::Span,
+    span: crate::core::diag::Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
@@ -902,7 +906,10 @@ fn resolve_method_call(
     let overloads = by_name.get(method_name)?;
     let sig = pick_overload(overloads, arg_types.len())?;
     let receiver = Some(CallParam {
-        mode: sig.self_mode.clone().unwrap_or(crate::tree::ParamMode::In),
+        mode: sig
+            .self_mode
+            .clone()
+            .unwrap_or(crate::core::tree::ParamMode::In),
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
@@ -946,7 +953,7 @@ fn resolve_method_call_by_def_id(
     method_name: &str,
     def_id: DefId,
     arg_types: &[Type],
-    span: crate::diag::Span,
+    span: crate::core::diag::Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
@@ -961,7 +968,10 @@ fn resolve_method_call_by_def_id(
         .iter()
         .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())?;
     let receiver = Some(CallParam {
-        mode: sig.self_mode.clone().unwrap_or(crate::tree::ParamMode::In),
+        mode: sig
+            .self_mode
+            .clone()
+            .unwrap_or(crate::core::tree::ParamMode::In),
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
@@ -990,7 +1000,7 @@ fn instantiate_call_sig(
     sig: &CollectedCallableSig,
     arg_types: &[Type],
     receiver: Option<CallParam>,
-    span: crate::diag::Span,
+    span: crate::core::diag::Span,
     expected_ret: &Type,
 ) -> ResolvedCall {
     if sig.type_param_count == 0 {

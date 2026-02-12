@@ -4,8 +4,8 @@
 //! lowering without exposing the raw ID allocation details.
 
 use super::model::*;
-use crate::ir::IrTypeId;
-use crate::resolve::DefId;
+use crate::core::ir::IrTypeId;
+use crate::core::resolve::DefId;
 
 /// Constructs SSA functions while managing ID allocation.
 ///

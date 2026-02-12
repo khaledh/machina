@@ -8,37 +8,41 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::analysis::completion::{
+use crate::core::capsule::bind::CapsuleBindings;
+use crate::core::capsule::{self, ModuleId, ModulePath};
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::tree::NodeId;
+use crate::core::typecheck::type_check_partial;
+use crate::core::types::Type;
+use crate::services::analysis::completion::{
     collect as collect_completions, synthesize_member_completion_source,
 };
-use crate::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
-use crate::analysis::frontend_support::{
+use crate::services::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
+use crate::services::analysis::frontend_support::{
     SnapshotOverlayLoader, frontend_error_diagnostics, infer_project_root, stable_source_revision,
 };
-use crate::analysis::lookups::{
+use crate::services::analysis::lookups::{
     code_actions_for_range, def_at_span, def_location_at_span, document_symbols, hover_at_span,
     semantic_tokens, signature_help_at_span, type_at_span,
 };
-use crate::analysis::module_graph::ModuleGraph;
-use crate::analysis::pipeline::{
+use crate::services::analysis::module_graph::ModuleGraph;
+use crate::services::analysis::pipeline::{
     LookupState, collect_sorted_diagnostics, run_module_pipeline,
     run_module_pipeline_with_parsed_and_imports, to_lookup_state,
 };
-use crate::analysis::program_imports::ProgramImportFactsCache;
-use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
-use crate::analysis::rename::{references as collect_references, rename_plan as build_rename_plan};
-use crate::analysis::results::{
+use crate::services::analysis::program_imports::ProgramImportFactsCache;
+use crate::services::analysis::query::{
+    CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime,
+};
+use crate::services::analysis::rename::{
+    references as collect_references, rename_plan as build_rename_plan,
+};
+use crate::services::analysis::results::{
     CodeAction, CompletionItem, DocumentSymbol, HoverInfo, Location, RenamePlan, SemanticToken,
     SignatureHelp,
 };
-use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
-use crate::capsule::bind::CapsuleBindings;
-use crate::capsule::{self, ModuleId, ModulePath};
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::tree::NodeId;
-use crate::typecheck::type_check_partial;
-use crate::types::Type;
+use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 
 #[derive(Default)]
 pub struct AnalysisDb {
@@ -124,7 +128,7 @@ impl AnalysisDb {
         let module_id = ModuleId(file_id.0);
 
         let diagnostics_key = QueryKey::new(
-            crate::analysis::query::QueryKind::Diagnostics,
+            crate::services::analysis::query::QueryKind::Diagnostics,
             module_id,
             revision,
         );
@@ -160,7 +164,7 @@ impl AnalysisDb {
         let revision = snapshot.revision();
         let module_id = ModuleId(file_id.0);
         let diagnostics_key = QueryKey::new(
-            crate::analysis::query::QueryKind::Diagnostics,
+            crate::services::analysis::query::QueryKind::Diagnostics,
             module_id,
             revision,
         );
@@ -191,7 +195,7 @@ impl AnalysisDb {
                 Ok(program) => program,
                 Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
             };
-            let program_context = crate::context::CapsuleParsedContext::new(program);
+            let program_context = crate::core::context::CapsuleParsedContext::new(program);
             let bindings = CapsuleBindings::build(&program_context);
             let mut import_facts = ProgramImportFactsCache::default();
 
@@ -202,7 +206,7 @@ impl AnalysisDb {
                 };
                 let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
                 let module_revision = stable_source_revision(&parsed.source.source);
-                let parsed_context = crate::context::ParsedContext::new(
+                let parsed_context = crate::core::context::ParsedContext::new(
                     parsed.module.clone(),
                     program_context.next_node_id_gen().clone(),
                 );
@@ -473,7 +477,7 @@ impl AnalysisDb {
         let module_id = ModuleId(file_id.0);
 
         let lookup_key = QueryKey::new(
-            crate::analysis::query::QueryKind::LookupState,
+            crate::services::analysis::query::QueryKind::LookupState,
             module_id,
             revision,
         );

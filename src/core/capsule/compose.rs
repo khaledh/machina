@@ -5,14 +5,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::ModuleId;
-use crate::capsule::bind::{AliasSymbols, CapsuleBindings};
-use crate::capsule::{CapsuleError, ModulePath, RequireKind};
-use crate::context::CapsuleParsedContext;
-use crate::diag::Span;
-use crate::tree::NodeId;
-use crate::tree::parsed::{self, Module};
-use crate::tree::visit_mut::{self, VisitorMut};
+use crate::core::capsule::ModuleId;
+use crate::core::capsule::bind::{AliasSymbols, CapsuleBindings};
+use crate::core::capsule::{CapsuleError, ModulePath, RequireKind};
+use crate::core::context::CapsuleParsedContext;
+use crate::core::diag::Span;
+use crate::core::tree::NodeId;
+use crate::core::tree::parsed::{self, Module};
+use crate::core::tree::visit_mut::{self, VisitorMut};
 
 /// Merge prelude declarations ahead of user declarations.
 pub(crate) fn merge_modules(prelude_module: &Module, user_module: &Module) -> Module {

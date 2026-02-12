@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::opt::Pass;
-use crate::ir::IrTypeId;
-use crate::ir::{
+use crate::core::backend::opt::Pass;
+use crate::core::ir::IrTypeId;
+use crate::core::ir::{
     BlockId, CastKind, ConstValue, Function, InstKind, Terminator, ValueId, replace_value_in_func,
 };
 

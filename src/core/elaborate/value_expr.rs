@@ -14,11 +14,11 @@
 //! 4. **Simple expressions**: Direct translation of literals, operators,
 //!    control flow, etc.
 
-use crate::elaborate::elaborator::Elaborator;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::tree::{CoerceKind, ParamMode};
-use crate::typecheck::type_map::{CallParam, CallSig};
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{CoerceKind, ParamMode};
+use crate::core::typecheck::type_map::{CallParam, CallSig};
 
 impl<'a> Elaborator<'a> {
     /// Main entry point for elaborating a value expression.
@@ -80,7 +80,7 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::ArrayIndex { target, .. }
                 if !matches!(
                     self.type_map.type_table().get(target.ty).peel_heap(),
-                    crate::types::Type::Map { .. }
+                    crate::core::types::Type::Map { .. }
                 ) =>
             {
                 let place = self.elab_place(expr);
@@ -408,7 +408,7 @@ impl<'a> Elaborator<'a> {
             norm::ExprKind::ArrayIndex { target, indices }
                 if matches!(
                     self.type_map.type_table().get(target.ty).peel_heap(),
-                    crate::types::Type::Map { .. }
+                    crate::core::types::Type::Map { .. }
                 ) =>
             {
                 let key_expr = indices

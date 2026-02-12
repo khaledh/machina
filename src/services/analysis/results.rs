@@ -8,18 +8,18 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::analysis::snapshot::FileId;
-use crate::capsule::{ModuleId, ParsedModule};
-use crate::context::{ResolvedContext, TypeCheckedContext};
-use crate::diag::Span;
-use crate::resolve::{Def, DefId, DefTable, ImportedCallableSig, ImportedTraitSig};
-use crate::symtab::SymbolTable;
-use crate::tree::NodeId;
-use crate::tree::NodeIdGen;
-use crate::tree::resolved::Module as ResolvedModule;
-use crate::tree::typed::Module as TypedModule;
-use crate::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
-use crate::types::Type;
+use crate::core::capsule::{ModuleId, ParsedModule};
+use crate::core::context::{ResolvedContext, TypeCheckedContext};
+use crate::core::diag::Span;
+use crate::core::resolve::{Def, DefId, DefTable, ImportedCallableSig, ImportedTraitSig};
+use crate::core::symtab::SymbolTable;
+use crate::core::tree::NodeId;
+use crate::core::tree::NodeIdGen;
+use crate::core::tree::resolved::Module as ResolvedModule;
+use crate::core::tree::typed::Module as TypedModule;
+use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
+use crate::core::types::Type;
+use crate::services::analysis::snapshot::FileId;
 
 #[derive(Clone)]
 pub struct ParsedModuleResult {

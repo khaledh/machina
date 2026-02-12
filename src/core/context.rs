@@ -1,18 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::{CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule};
-use crate::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig, ImportedTraitSig};
-use crate::semck::closure::capture::ClosureCapture;
-use crate::symtab::SymbolTable;
-use crate::tree::normalized::Module as NormalizedModule;
-use crate::tree::parsed::Module as ParsedModule;
-use crate::tree::resolved::Module as ResolvedModule;
-use crate::tree::semantic::Module as SemanticModule;
-use crate::tree::semantic::{DropPlanMap, LoweringPlanMap};
-use crate::tree::typed::Module as TypedModule;
-use crate::tree::{NodeId, NodeIdGen};
-use crate::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
-use crate::types::Type;
+use crate::core::capsule::{CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule};
+use crate::core::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig, ImportedTraitSig};
+use crate::core::semck::closure::capture::ClosureCapture;
+use crate::core::symtab::SymbolTable;
+use crate::core::tree::normalized::Module as NormalizedModule;
+use crate::core::tree::parsed::Module as ParsedModule;
+use crate::core::tree::resolved::Module as ResolvedModule;
+use crate::core::tree::semantic::Module as SemanticModule;
+use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap};
+use crate::core::tree::typed::Module as TypedModule;
+use crate::core::tree::{NodeId, NodeIdGen};
+use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
+use crate::core::types::Type;
 
 // -----------------------------------------------------------------------------
 // Capsule Parsed Context

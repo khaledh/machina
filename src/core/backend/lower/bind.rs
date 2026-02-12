@@ -1,10 +1,10 @@
 //! Bind pattern lowering for let/var bindings.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::locals::{LocalStorage, LocalValue};
-use crate::backend::lower::lowerer::FuncLowerer;
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
+use crate::core::backend::lower::lowerer::FuncLowerer;
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Binds a pattern to a value, updating the locals map.

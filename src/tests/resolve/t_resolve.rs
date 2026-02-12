@@ -2,13 +2,13 @@ use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::capsule::{
+use crate::core::capsule::{
     CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
 };
-use crate::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
-use crate::lexer::{LexError, Lexer, Token};
-use crate::parse::Parser;
-use crate::resolve::{DefKind, Visibility, resolve, resolve_partial, resolve_program};
+use crate::core::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::Parser;
+use crate::core::resolve::{DefKind, Visibility, resolve, resolve_partial, resolve_program};
 
 struct MockLoader {
     modules: HashMap<String, String>,

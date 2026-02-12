@@ -1,7 +1,7 @@
 //! Operator mapping helpers for SSA lowering.
 
-use crate::ir::{BinOp, CmpOp};
-use crate::tree::BinaryOp;
+use crate::core::ir::{BinOp, CmpOp};
+use crate::core::tree::BinaryOp;
 
 pub(super) fn map_binop(op: BinaryOp) -> Option<BinOp> {
     match op {

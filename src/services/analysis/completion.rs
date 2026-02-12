@@ -5,20 +5,20 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::results::{CompletionItem, CompletionKind};
-use crate::analysis::syntax_index::{node_at_span, position_leq};
-use crate::capsule::ModuleId;
-use crate::diag::{Position, Span};
-use crate::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
-use crate::tree::resolved as res;
-use crate::tree::{BlockItem, NodeId, StmtExprKind};
-use crate::types::Type;
+use crate::core::capsule::ModuleId;
+use crate::core::diag::{Position, Span};
+use crate::core::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
+use crate::core::tree::resolved as res;
+use crate::core::tree::{BlockItem, NodeId, StmtExprKind};
+use crate::core::types::Type;
+use crate::services::analysis::results::{CompletionItem, CompletionKind};
+use crate::services::analysis::syntax_index::{node_at_span, position_leq};
 
 pub(crate) fn collect(
     source: &str,
     query_span: Span,
-    resolved: &crate::context::ResolvedContext,
-    typed: Option<&crate::context::TypeCheckedContext>,
+    resolved: &crate::core::context::ResolvedContext,
+    typed: Option<&crate::core::context::TypeCheckedContext>,
 ) -> Vec<CompletionItem> {
     let context = completion_context(source, query_span, typed);
     match context {
@@ -84,7 +84,7 @@ enum CompletionContext {
 fn completion_context(
     source: &str,
     query_span: Span,
-    typed: Option<&crate::context::TypeCheckedContext>,
+    typed: Option<&crate::core::context::TypeCheckedContext>,
 ) -> CompletionContext {
     let offset = offset_for_position(source, query_span.start).unwrap_or(source.len());
     let bytes = source.as_bytes();
@@ -131,8 +131,8 @@ fn completion_context(
 }
 
 fn scope_completions(
-    resolved: &crate::context::ResolvedContext,
-    cursor: crate::diag::Position,
+    resolved: &crate::core::context::ResolvedContext,
+    cursor: crate::core::diag::Position,
 ) -> Vec<CompletionItem> {
     let mut scopes = vec![global_scope(resolved)];
 
@@ -157,7 +157,7 @@ fn scope_completions(
 }
 
 fn member_completions(
-    resolved: &crate::context::ResolvedContext,
+    resolved: &crate::core::context::ResolvedContext,
     receiver_ty: &Type,
     caller_def_id: Option<DefId>,
 ) -> Vec<CompletionItem> {
@@ -237,7 +237,7 @@ fn push_builtin_method(out: &mut Vec<CompletionItem>, label: &str, detail: &str)
 }
 
 fn nominal_method_completions(
-    resolved: &crate::context::ResolvedContext,
+    resolved: &crate::core::context::ResolvedContext,
     owner_ty: &Type,
     caller_def_id: Option<DefId>,
 ) -> Vec<CompletionItem> {
@@ -283,7 +283,7 @@ fn nominal_method_completions(
 }
 
 fn method_accessible(
-    resolved: &crate::context::ResolvedContext,
+    resolved: &crate::core::context::ResolvedContext,
     target_def_id: DefId,
     caller_def_id: Option<DefId>,
 ) -> bool {
@@ -312,7 +312,7 @@ fn method_accessible(
 }
 
 fn struct_fields_accessible(
-    resolved: &crate::context::ResolvedContext,
+    resolved: &crate::core::context::ResolvedContext,
     type_name: &str,
     caller_def_id: Option<DefId>,
 ) -> bool {
@@ -341,7 +341,9 @@ fn struct_fields_accessible(
     caller_module == owner_module
 }
 
-fn global_scope(resolved: &crate::context::ResolvedContext) -> HashMap<String, CompletionItem> {
+fn global_scope(
+    resolved: &crate::core::context::ResolvedContext,
+) -> HashMap<String, CompletionItem> {
     let mut allowed_nodes = HashSet::new();
     for item in &resolved.module.top_level_items {
         match item {
@@ -424,7 +426,7 @@ impl<'a> CallableAtCursor<'a> {
 
 fn containing_callable(
     module: &res::Module,
-    cursor: crate::diag::Position,
+    cursor: crate::core::diag::Position,
 ) -> Option<CallableAtCursor<'_>> {
     let mut best: Option<CallableAtCursor<'_>> = None;
     for item in &module.top_level_items {
@@ -451,7 +453,7 @@ fn containing_callable(
 fn choose_smallest_callable<'a>(
     best: &mut Option<CallableAtCursor<'a>>,
     candidate: CallableAtCursor<'a>,
-    cursor: crate::diag::Position,
+    cursor: crate::core::diag::Position,
 ) {
     if !span_contains_pos(candidate.span(), cursor) {
         return;
@@ -466,7 +468,7 @@ fn choose_smallest_callable<'a>(
 
 fn add_callable_params_to_scope(
     callable: &CallableAtCursor<'_>,
-    def_table: &crate::resolve::DefTable,
+    def_table: &crate::core::resolve::DefTable,
     scope: &mut HashMap<String, CompletionItem>,
 ) {
     match callable {
@@ -497,8 +499,8 @@ fn add_callable_params_to_scope(
 
 fn collect_defs_before_cursor_in_expr(
     expr: &res::Expr,
-    cursor: crate::diag::Position,
-    def_table: &crate::resolve::DefTable,
+    cursor: crate::core::diag::Position,
+    def_table: &crate::core::resolve::DefTable,
     scopes: &mut Vec<HashMap<String, CompletionItem>>,
 ) {
     if !span_contains_pos(expr.span, cursor) {
@@ -577,9 +579,9 @@ fn collect_defs_before_cursor_in_expr(
 }
 
 fn collect_defs_at_cursor_in_stmt(
-    stmt: &crate::tree::StmtExpr<DefId>,
-    cursor: crate::diag::Position,
-    def_table: &crate::resolve::DefTable,
+    stmt: &crate::core::tree::StmtExpr<DefId>,
+    cursor: crate::core::diag::Position,
+    def_table: &crate::core::resolve::DefTable,
     scopes: &mut Vec<HashMap<String, CompletionItem>>,
 ) {
     match &stmt.kind {
@@ -631,8 +633,8 @@ fn collect_defs_at_cursor_in_stmt(
 }
 
 fn collect_stmt_bindings(
-    stmt: &crate::tree::StmtExpr<DefId>,
-    def_table: &crate::resolve::DefTable,
+    stmt: &crate::core::tree::StmtExpr<DefId>,
+    def_table: &crate::core::resolve::DefTable,
     scope: &mut HashMap<String, CompletionItem>,
 ) {
     match &stmt.kind {
@@ -647,21 +649,21 @@ fn collect_stmt_bindings(
 }
 
 fn collect_bind_pattern_bindings(
-    pattern: &crate::tree::BindPattern<DefId>,
-    def_table: &crate::resolve::DefTable,
+    pattern: &crate::core::tree::BindPattern<DefId>,
+    def_table: &crate::core::resolve::DefTable,
     scope: &mut HashMap<String, CompletionItem>,
 ) {
     match &pattern.kind {
-        crate::tree::BindPatternKind::Name { def_id, .. } => {
+        crate::core::tree::BindPatternKind::Name { def_id, .. } => {
             insert_def_into_scope(*def_id, def_table, scope);
         }
-        crate::tree::BindPatternKind::Array { patterns }
-        | crate::tree::BindPatternKind::Tuple { patterns } => {
+        crate::core::tree::BindPatternKind::Array { patterns }
+        | crate::core::tree::BindPatternKind::Tuple { patterns } => {
             for sub in patterns {
                 collect_bind_pattern_bindings(sub, def_table, scope);
             }
         }
-        crate::tree::BindPatternKind::Struct { fields, .. } => {
+        crate::core::tree::BindPatternKind::Struct { fields, .. } => {
             for field in fields {
                 collect_bind_pattern_bindings(&field.pattern, def_table, scope);
             }
@@ -670,23 +672,23 @@ fn collect_bind_pattern_bindings(
 }
 
 fn collect_match_pattern_bindings(
-    pattern: &crate::tree::MatchPattern<DefId>,
-    def_table: &crate::resolve::DefTable,
+    pattern: &crate::core::tree::MatchPattern<DefId>,
+    def_table: &crate::core::resolve::DefTable,
     scope: &mut HashMap<String, CompletionItem>,
 ) {
     match pattern {
-        crate::tree::MatchPattern::Binding { def_id, .. }
-        | crate::tree::MatchPattern::TypedBinding { def_id, .. } => {
+        crate::core::tree::MatchPattern::Binding { def_id, .. }
+        | crate::core::tree::MatchPattern::TypedBinding { def_id, .. } => {
             insert_def_into_scope(*def_id, def_table, scope);
         }
-        crate::tree::MatchPattern::Tuple { patterns, .. } => {
+        crate::core::tree::MatchPattern::Tuple { patterns, .. } => {
             for sub in patterns {
                 collect_match_pattern_bindings(sub, def_table, scope);
             }
         }
-        crate::tree::MatchPattern::EnumVariant { bindings, .. } => {
+        crate::core::tree::MatchPattern::EnumVariant { bindings, .. } => {
             for binding in bindings {
-                if let crate::tree::MatchPatternBinding::Named { def_id, .. } = binding {
+                if let crate::core::tree::MatchPatternBinding::Named { def_id, .. } = binding {
                     insert_def_into_scope(*def_id, def_table, scope);
                 }
             }
@@ -697,7 +699,7 @@ fn collect_match_pattern_bindings(
 
 fn insert_def_into_scope(
     def_id: DefId,
-    def_table: &crate::resolve::DefTable,
+    def_table: &crate::core::resolve::DefTable,
     scope: &mut HashMap<String, CompletionItem>,
 ) {
     let Some(def) = def_table.lookup_def(def_id) else {
@@ -718,8 +720,8 @@ fn insert_def_into_scope(
 }
 
 fn enclosing_callable_def_id(
-    module: &crate::tree::typed::Module,
-    cursor: crate::diag::Position,
+    module: &crate::core::tree::typed::Module,
+    cursor: crate::core::diag::Position,
 ) -> Option<DefId> {
     let mut best: Option<(DefId, Span)> = None;
     for callable in module.callables() {
@@ -749,7 +751,7 @@ fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
     }
 }
 
-fn span_contains_pos(span: Span, pos: crate::diag::Position) -> bool {
+fn span_contains_pos(span: Span, pos: crate::core::diag::Position) -> bool {
     position_leq(span.start, pos) && position_leq(pos, span.end)
 }
 
@@ -761,7 +763,7 @@ fn is_ident_byte(byte: u8) -> bool {
     byte == b'_' || byte.is_ascii_alphanumeric()
 }
 
-fn offset_for_position(source: &str, pos: crate::diag::Position) -> Option<usize> {
+fn offset_for_position(source: &str, pos: crate::core::diag::Position) -> Option<usize> {
     if pos.line == 0 || pos.column == 0 {
         return Some(0);
     }
@@ -781,7 +783,7 @@ fn offset_for_position(source: &str, pos: crate::diag::Position) -> Option<usize
     (line == pos.line && col == pos.column).then_some(source.len())
 }
 
-fn position_for_offset(source: &str, target_offset: usize) -> Option<crate::diag::Position> {
+fn position_for_offset(source: &str, target_offset: usize) -> Option<crate::core::diag::Position> {
     if target_offset > source.len() {
         return None;
     }
@@ -789,7 +791,7 @@ fn position_for_offset(source: &str, target_offset: usize) -> Option<crate::diag
     let mut column = 1usize;
     for (offset, ch) in source.char_indices() {
         if offset == target_offset {
-            return Some(crate::diag::Position {
+            return Some(crate::core::diag::Position {
                 offset: target_offset,
                 line,
                 column,
@@ -803,7 +805,7 @@ fn position_for_offset(source: &str, target_offset: usize) -> Option<crate::diag
         }
     }
     if target_offset == source.len() {
-        return Some(crate::diag::Position {
+        return Some(crate::core::diag::Position {
             offset: target_offset,
             line,
             column,

@@ -1,6 +1,6 @@
 //! Shared diagnostic-shaping helpers for solver modules.
 
-use crate::types::Type;
+use crate::core::types::Type;
 
 pub(super) fn compact_type_name(ty: &Type) -> String {
     match ty {

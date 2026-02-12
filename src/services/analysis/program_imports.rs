@@ -2,18 +2,18 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::capsule::bind::CapsuleBindings;
-use crate::capsule::{ModuleId, RequireKind};
-use crate::context::{CapsuleParsedContext, TypeCheckedContext};
-use crate::resolve::{
+use crate::core::capsule::bind::CapsuleBindings;
+use crate::core::capsule::{ModuleId, RequireKind};
+use crate::core::context::{CapsuleParsedContext, TypeCheckedContext};
+use crate::core::resolve::{
     ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
     ImportedTraitPropertySig, ImportedTraitSig,
 };
-use crate::tree::ParamMode;
-use crate::typecheck::type_map::{
+use crate::core::tree::ParamMode;
+use crate::core::typecheck::type_map::{
     resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
 };
-use crate::types::{FnParamMode, TyVarId, Type};
+use crate::core::types::{FnParamMode, TyVarId, Type};
 
 #[derive(Default)]
 pub(crate) struct ProgramImportFactsCache {
@@ -176,8 +176,12 @@ fn collect_public_callable_sigs(
     let mut out = HashMap::<String, Vec<ImportedCallableSig>>::new();
     for item in &typed.module.top_level_items {
         let callable = match item {
-            crate::tree::typed::TopLevelItem::FuncDecl(decl) => Some((&decl.sig.name, decl.def_id)),
-            crate::tree::typed::TopLevelItem::FuncDef(def) => Some((&def.sig.name, def.def_id)),
+            crate::core::tree::typed::TopLevelItem::FuncDecl(decl) => {
+                Some((&decl.sig.name, decl.def_id))
+            }
+            crate::core::tree::typed::TopLevelItem::FuncDef(def) => {
+                Some((&def.sig.name, def.def_id))
+            }
             _ => None,
         };
         let Some((name, def_id)) = callable else {
@@ -281,7 +285,7 @@ fn collect_public_trait_sigs(typed: &TypeCheckedContext) -> HashMap<String, Impo
 
 fn collect_imported_trait_method_sig(
     typed: &TypeCheckedContext,
-    sig: &crate::tree::typed::MethodSig,
+    sig: &crate::core::tree::typed::MethodSig,
 ) -> Option<ImportedTraitMethodSig> {
     let type_param_map = if sig.type_params.is_empty() {
         None

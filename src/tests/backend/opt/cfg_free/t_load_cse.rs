@@ -1,7 +1,7 @@
-use crate::backend::opt::cfg_free::PassManager;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{BinOp, FunctionSig, InstKind, IrTypeCache, IrTypeKind, Terminator};
-use crate::resolve::DefId;
+use crate::core::backend::opt::cfg_free::PassManager;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{BinOp, FunctionSig, InstKind, IrTypeCache, IrTypeKind, Terminator};
+use crate::core::resolve::DefId;
 
 #[test]
 fn test_load_cse() {

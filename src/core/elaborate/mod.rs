@@ -27,9 +27,9 @@
 //! The output semantic tree contains all information needed for lowering to
 //! proceed without further semantic reasoning.
 
-use crate::context::{SemanticCheckedContext, SemanticContext};
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
-use crate::tree::semantic as sem;
+use crate::core::context::{SemanticCheckedContext, SemanticContext};
+use crate::core::tree::semantic as sem;
 mod bind_pattern;
 mod calls;
 mod closure;
@@ -42,9 +42,9 @@ mod place;
 mod types;
 mod value;
 
-use crate::elaborate::drop_plan::build_drop_plans;
-use crate::elaborate::elaborator::Elaborator;
-use crate::elaborate::lowering_plan::build_lowering_plans;
+use crate::core::elaborate::drop_plan::build_drop_plans;
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::elaborate::lowering_plan::build_lowering_plans;
 
 /// Transform a normalized tree into a semantic tree using the results from
 /// semantic analysis.

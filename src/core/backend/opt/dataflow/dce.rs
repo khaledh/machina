@@ -2,9 +2,9 @@
 
 use std::collections::HashSet;
 
-use crate::backend::analysis::liveness;
-use crate::backend::opt::Pass;
-use crate::ir::{Function, InstKind, Instruction, Terminator, ValueId, for_each_inst_use};
+use crate::core::backend::analysis::liveness;
+use crate::core::backend::opt::Pass;
+use crate::core::ir::{Function, InstKind, Instruction, Terminator, ValueId, for_each_inst_use};
 
 pub struct DeadCodeElim;
 

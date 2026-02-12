@@ -31,7 +31,7 @@ impl<'a> ConstraintCollector<'a> {
             }
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let crate::tree::resolved::MatchPatternBinding::Named {
+                    if let crate::core::tree::resolved::MatchPatternBinding::Named {
                         def_id,
                         id,
                         span,

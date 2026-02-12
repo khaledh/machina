@@ -1,9 +1,9 @@
-use crate::backend::opt::cfg_free::PassManager;
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{
+use crate::core::backend::opt::cfg_free::PassManager;
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{
     Callee, FunctionSig, InstKind, IrStructField, IrTypeCache, IrTypeKind, Terminator,
 };
-use crate::resolve::DefId;
+use crate::core::resolve::DefId;
 
 #[test]
 fn test_local_addr_copy_elim() {

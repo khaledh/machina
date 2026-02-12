@@ -3,7 +3,7 @@
 //! This unifier respects variable kinds from `TypeVarStore`, including rigid
 //! generic parameters and inference variables.
 
-use crate::types::{TyVarId, Type};
+use crate::core::types::{TyVarId, Type};
 
 use super::typesys::{TypeVarKind, TypeVarStore};
 

@@ -9,15 +9,15 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::facts::{DefTableOverlay, SyntheticReason, TypeMapOverlay};
-use crate::diag::Span;
-use crate::resolve::DefId;
-use crate::semck::closure::capture::CaptureMode;
-use crate::semck::closure::capture::ClosureCapture;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
-use crate::typecheck::type_map::CallSigMap;
-use crate::types::{Type, TypeId};
+use crate::core::diag::Span;
+use crate::core::resolve::DefId;
+use crate::core::semck::closure::capture::CaptureMode;
+use crate::core::semck::closure::capture::ClosureCapture;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
+use crate::core::typecheck::type_map::CallSigMap;
+use crate::core::types::{Type, TypeId};
 
 /// Information about a single captured variable in a closure's environment.
 /// Used to build the closure struct fields and rewrite captured variable
@@ -268,7 +268,11 @@ impl<'a> Elaborator<'a> {
             .insert_node_type(node_id, ty, "elaborate", SyntheticReason::ClosureLowering)
     }
 
-    pub(super) fn insert_closure_def_type(&mut self, def: crate::resolve::Def, ty: Type) -> TypeId {
+    pub(super) fn insert_closure_def_type(
+        &mut self,
+        def: crate::core::resolve::Def,
+        ty: Type,
+    ) -> TypeId {
         self.type_map
             .insert_def_type(def, ty, "elaborate", SyntheticReason::ClosureLowering)
     }
@@ -276,7 +280,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn add_synthetic_def(
         &mut self,
         name: String,
-        kind: crate::resolve::DefKind,
+        kind: crate::core::resolve::DefKind,
         reason: SyntheticReason,
     ) -> DefId {
         self.def_table.add_def(name, kind, "elaborate", reason)

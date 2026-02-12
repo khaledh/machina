@@ -1,7 +1,7 @@
-use crate::elaborate::elaborator::Elaborator;
-use crate::tree::normalized as norm;
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::tree::normalized as norm;
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     pub(super) fn elab_bind_pattern(

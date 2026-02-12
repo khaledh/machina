@@ -3,14 +3,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::analysis::db::AnalysisDb;
-use crate::analysis::diagnostics::DiagnosticPhase;
-use crate::analysis::module_graph::ModuleGraph;
-use crate::analysis::pipeline::ROOT_POISON_NODE;
-use crate::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
-use crate::capsule::ModuleId;
-use crate::diag::{Position, Span};
-use crate::types::Type;
+use crate::core::capsule::ModuleId;
+use crate::core::diag::{Position, Span};
+use crate::core::types::Type;
+use crate::services::analysis::db::AnalysisDb;
+use crate::services::analysis::diagnostics::DiagnosticPhase;
+use crate::services::analysis::module_graph::ModuleGraph;
+use crate::services::analysis::pipeline::ROOT_POISON_NODE;
+use crate::services::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
 
 static ANALYSIS_TMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 

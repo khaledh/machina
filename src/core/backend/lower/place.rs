@@ -1,9 +1,9 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
-use crate::backend::lower::LowerToIrError;
-use crate::ir::{IrTypeId, IrTypeKind, ValueId};
-use crate::tree::semantic as sem;
-use crate::types::Type;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::ir::{IrTypeId, IrTypeKind, ValueId};
+use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 use super::FuncLowerer;
 
@@ -180,7 +180,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         base_addr: ValueId,
         base_ty: &Type,
         field: &str,
-        place_ty: crate::types::TypeId,
+        place_ty: crate::core::types::TypeId,
     ) -> Option<PlaceAddr> {
         let target_ir_ty = self.type_lowerer.lower_type_id(place_ty);
         let value = match field {
@@ -221,27 +221,27 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let cap_raw = self.load_field(base_addr, 2, u32_ty);
                     let cap_mask = self.builder.const_int(0x7fff_ffff, false, 32, u32_ty);
-                    let cap = self
-                        .builder
-                        .binop(crate::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
+                    let cap =
+                        self.builder
+                            .binop(crate::core::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
                     self.cast_int_if_needed(cap, u32_ty, target_ir_ty)
                 }
                 Type::Set { .. } => {
                     let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let cap_raw = self.load_field(base_addr, 2, u32_ty);
                     let cap_mask = self.builder.const_int(0x7fff_ffff, false, 32, u32_ty);
-                    let cap = self
-                        .builder
-                        .binop(crate::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
+                    let cap =
+                        self.builder
+                            .binop(crate::core::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
                     self.cast_int_if_needed(cap, u32_ty, target_ir_ty)
                 }
                 Type::Map { .. } => {
                     let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let cap_raw = self.load_field(base_addr, 2, u32_ty);
                     let cap_mask = self.builder.const_int(0x7fff_ffff, false, 32, u32_ty);
-                    let cap = self
-                        .builder
-                        .binop(crate::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
+                    let cap =
+                        self.builder
+                            .binop(crate::core::ir::BinOp::And, cap_raw, cap_mask, u32_ty);
                     self.cast_int_if_needed(cap, u32_ty, target_ir_ty)
                 }
                 _ => return None,
@@ -252,21 +252,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let len = self.load_field(base_addr, 1, u32_ty);
                     let zero = self.builder.const_int(0, false, 32, u32_ty);
                     self.builder
-                        .cmp(crate::ir::CmpOp::Eq, len, zero, target_ir_ty)
+                        .cmp(crate::core::ir::CmpOp::Eq, len, zero, target_ir_ty)
                 }
                 Type::Set { .. } => {
                     let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let len = self.load_field(base_addr, 1, u32_ty);
                     let zero = self.builder.const_int(0, false, 32, u32_ty);
                     self.builder
-                        .cmp(crate::ir::CmpOp::Eq, len, zero, target_ir_ty)
+                        .cmp(crate::core::ir::CmpOp::Eq, len, zero, target_ir_ty)
                 }
                 Type::Map { .. } => {
                     let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
                     let len = self.load_field(base_addr, 1, u32_ty);
                     let zero = self.builder.const_int(0, false, 32, u32_ty);
                     self.builder
-                        .cmp(crate::ir::CmpOp::Eq, len, zero, target_ir_ty)
+                        .cmp(crate::core::ir::CmpOp::Eq, len, zero, target_ir_ty)
                 }
                 _ => return None,
             },

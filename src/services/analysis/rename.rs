@@ -3,13 +3,13 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::analysis::pipeline::LookupState;
-use crate::analysis::query::QueryResult;
-use crate::analysis::results::{Location, RenameConflict, RenameEdit, RenamePlan};
-use crate::analysis::snapshot::{AnalysisSnapshot, FileId};
-use crate::analysis::syntax_index::node_span_map;
-use crate::capsule::ModuleId;
-use crate::resolve::DefId;
+use crate::core::capsule::ModuleId;
+use crate::core::resolve::DefId;
+use crate::services::analysis::pipeline::LookupState;
+use crate::services::analysis::query::QueryResult;
+use crate::services::analysis::results::{Location, RenameConflict, RenameEdit, RenamePlan};
+use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
+use crate::services::analysis::syntax_index::node_span_map;
 
 pub(crate) fn references<F>(
     snapshot: &AnalysisSnapshot,

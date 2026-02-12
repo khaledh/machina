@@ -6,10 +6,10 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use crate::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
-use crate::analysis::snapshot::AnalysisSnapshot;
-use crate::capsule::{self, CapsuleError, ModuleLoader, ModulePath};
-use crate::diag::Span;
+use crate::core::capsule::{self, CapsuleError, ModuleLoader, ModulePath};
+use crate::core::diag::Span;
+use crate::services::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
+use crate::services::analysis::snapshot::AnalysisSnapshot;
 
 pub(crate) struct SnapshotOverlayLoader {
     snapshot: AnalysisSnapshot,
@@ -68,9 +68,9 @@ pub(crate) fn stable_source_revision(source: &str) -> u64 {
 pub(crate) fn frontend_error_diagnostics(error: CapsuleError) -> Vec<Diagnostic> {
     fn frontend_diag(message: String, span: Span) -> Diagnostic {
         Diagnostic {
-            phase: crate::analysis::diagnostics::DiagnosticPhase::Resolve,
+            phase: crate::services::analysis::diagnostics::DiagnosticPhase::Resolve,
             code: "MC-FRONTEND".to_string(),
-            severity: crate::analysis::diagnostics::DiagnosticSeverity::Error,
+            severity: crate::services::analysis::diagnostics::DiagnosticSeverity::Error,
             span,
             message,
             metadata: Default::default(),

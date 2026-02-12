@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-use crate::backend::analysis::liveness::LiveMap;
-use crate::ir::{Function, InstKind, IrTypeCache, ValueId};
+use crate::core::backend::analysis::liveness::LiveMap;
+use crate::core::ir::{Function, InstKind, IrTypeCache, ValueId};
 
 pub mod alloc;
 pub mod arm64;

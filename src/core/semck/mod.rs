@@ -15,8 +15,8 @@ use std::collections::HashSet;
 
 pub use errors::SemCheckError;
 
-use crate::context::{NormalizedContext, SemanticCheckedContext};
-use crate::tree::NodeId;
+use crate::core::context::{NormalizedContext, SemanticCheckedContext};
+use crate::core::tree::NodeId;
 
 pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {
     let output = sem_check_partial(ctx, &HashSet::new());

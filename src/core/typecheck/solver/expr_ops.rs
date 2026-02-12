@@ -5,13 +5,13 @@
 
 use std::collections::HashSet;
 
-use crate::diag::Span;
-use crate::tree::NodeId;
-use crate::typecheck::capability::ensure_equatable;
-use crate::typecheck::constraints::ExprObligation;
-use crate::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
-use crate::typecheck::unify::TcUnifier;
-use crate::types::Type;
+use crate::core::diag::Span;
+use crate::core::tree::NodeId;
+use crate::core::typecheck::capability::ensure_equatable;
+use crate::core::typecheck::constraints::ExprObligation;
+use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::unify::TcUnifier;
+use crate::core::types::Type;
 
 pub(super) fn try_check_expr_obligation_ops(
     obligation: &ExprObligation,
@@ -30,16 +30,16 @@ pub(super) fn try_check_expr_obligation_ops(
             let left_ty = super::term_utils::resolve_term_for_diagnostics(left, unifier);
             let right_ty = super::term_utils::resolve_term_for_diagnostics(right, unifier);
             match op {
-                crate::tree::resolved::BinaryOp::Add
-                | crate::tree::resolved::BinaryOp::Sub
-                | crate::tree::resolved::BinaryOp::Mul
-                | crate::tree::resolved::BinaryOp::Div
-                | crate::tree::resolved::BinaryOp::Mod
-                | crate::tree::resolved::BinaryOp::BitOr
-                | crate::tree::resolved::BinaryOp::BitXor
-                | crate::tree::resolved::BinaryOp::BitAnd
-                | crate::tree::resolved::BinaryOp::Shl
-                | crate::tree::resolved::BinaryOp::Shr => {
+                crate::core::tree::resolved::BinaryOp::Add
+                | crate::core::tree::resolved::BinaryOp::Sub
+                | crate::core::tree::resolved::BinaryOp::Mul
+                | crate::core::tree::resolved::BinaryOp::Div
+                | crate::core::tree::resolved::BinaryOp::Mod
+                | crate::core::tree::resolved::BinaryOp::BitOr
+                | crate::core::tree::resolved::BinaryOp::BitXor
+                | crate::core::tree::resolved::BinaryOp::BitAnd
+                | crate::core::tree::resolved::BinaryOp::Shl
+                | crate::core::tree::resolved::BinaryOp::Shr => {
                     if let Some(err) =
                         first_non_int_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -47,7 +47,8 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::tree::resolved::BinaryOp::Eq | crate::tree::resolved::BinaryOp::Ne => {
+                crate::core::tree::resolved::BinaryOp::Eq
+                | crate::core::tree::resolved::BinaryOp::Ne => {
                     if let Some(err) =
                         first_non_equatable_cmp_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -55,10 +56,10 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::tree::resolved::BinaryOp::Lt
-                | crate::tree::resolved::BinaryOp::Gt
-                | crate::tree::resolved::BinaryOp::LtEq
-                | crate::tree::resolved::BinaryOp::GtEq => {
+                crate::core::tree::resolved::BinaryOp::Lt
+                | crate::core::tree::resolved::BinaryOp::Gt
+                | crate::core::tree::resolved::BinaryOp::LtEq
+                | crate::core::tree::resolved::BinaryOp::GtEq => {
                     if let Some(err) =
                         first_non_int_cmp_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -66,8 +67,8 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::tree::resolved::BinaryOp::LogicalAnd
-                | crate::tree::resolved::BinaryOp::LogicalOr => {
+                crate::core::tree::resolved::BinaryOp::LogicalAnd
+                | crate::core::tree::resolved::BinaryOp::LogicalOr => {
                     if let Some(err) =
                         first_non_bool_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -87,7 +88,8 @@ pub(super) fn try_check_expr_obligation_ops(
         } => {
             let operand_ty = super::term_utils::resolve_term_for_diagnostics(operand, unifier);
             match op {
-                crate::tree::resolved::UnaryOp::Neg | crate::tree::resolved::UnaryOp::BitNot => {
+                crate::core::tree::resolved::UnaryOp::Neg
+                | crate::core::tree::resolved::UnaryOp::BitNot => {
                     if !super::term_utils::is_int_like(&operand_ty)
                         && !super::term_utils::is_unresolved(&operand_ty)
                     {
@@ -97,7 +99,7 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::tree::resolved::UnaryOp::LogicalNot => {
+                crate::core::tree::resolved::UnaryOp::LogicalNot => {
                     if operand_ty != Type::Bool && !super::term_utils::is_unresolved(&operand_ty) {
                         errors.push(
                             TypeCheckErrorKind::LogicalOperandNotBoolean(operand_ty, *span).into(),
@@ -105,7 +107,7 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::tree::resolved::UnaryOp::Try => {}
+                crate::core::tree::resolved::UnaryOp::Try => {}
             }
             true
         }

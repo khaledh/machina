@@ -28,10 +28,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::backend::regalloc::StackSlotId;
-use crate::backend::regalloc::target::{PhysReg, TargetSpec};
-use crate::ir::IrTypeCache;
-use crate::ir::{
+use crate::core::backend::regalloc::StackSlotId;
+use crate::core::backend::regalloc::target::{PhysReg, TargetSpec};
+use crate::core::ir::IrTypeCache;
+use crate::core::ir::{
     Block, BlockId, Callee, Function, InstKind, IrTypeId, Terminator, ValueDef, ValueId,
 };
 

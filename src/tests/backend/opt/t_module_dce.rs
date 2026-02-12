@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
-use crate::backend::lower::{LoweredFunction, LoweredModule};
-use crate::backend::opt::module_dce::{prune_globals, reachable_def_ids};
-use crate::ir::builder::FunctionBuilder;
-use crate::ir::{
+use crate::core::backend::lower::{LoweredFunction, LoweredModule};
+use crate::core::backend::opt::module_dce::{prune_globals, reachable_def_ids};
+use crate::core::ir::builder::FunctionBuilder;
+use crate::core::ir::{
     Callee, ConstValue, FunctionSig, GlobalData, GlobalId, InstKind, IrTypeCache, IrTypeId,
     IrTypeKind, RuntimeFn, Terminator,
 };
-use crate::resolve::DefId;
+use crate::core::resolve::DefId;
 
 fn unit_sig(types: &mut IrTypeCache) -> (FunctionSig, IrTypeId) {
     let unit = types.add(IrTypeKind::Unit);

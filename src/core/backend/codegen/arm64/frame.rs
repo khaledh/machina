@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
-use crate::backend::regalloc::StackSlotId;
-use crate::backend::regalloc::target::PhysReg;
+use crate::core::backend::regalloc::StackSlotId;
+use crate::core::backend::regalloc::target::PhysReg;
 
 use super::Arm64Emitter;
 

@@ -5,14 +5,14 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::db::AnalysisDb;
-use crate::analysis::query::{QueryCancelled, QueryKey, QueryKind};
-use crate::analysis::results::{ResolvedModuleResult, TypedModuleResult};
-use crate::capsule::ModuleId;
-use crate::context::ParsedContext;
-use crate::resolve::{ResolveError, attach_def_owners, resolve};
-use crate::tree::NodeId;
-use crate::typecheck::{TypeCheckError, type_check};
+use crate::core::capsule::ModuleId;
+use crate::core::context::ParsedContext;
+use crate::core::resolve::{ResolveError, attach_def_owners, resolve};
+use crate::core::tree::NodeId;
+use crate::core::typecheck::{TypeCheckError, type_check};
+use crate::services::analysis::db::AnalysisDb;
+use crate::services::analysis::query::{QueryCancelled, QueryKey, QueryKind};
+use crate::services::analysis::results::{ResolvedModuleResult, TypedModuleResult};
 
 #[derive(Debug)]
 pub enum BatchQueryError {

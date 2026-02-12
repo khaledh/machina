@@ -1,13 +1,13 @@
 //! Branching (multi-block) lowering routines.
 
-use crate::backend::lower::LowerToIrError;
-use crate::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
-use crate::backend::lower::r#match::MatchLowerer;
-use crate::ir::IrTypeId;
-use crate::ir::{CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
-use crate::resolve::DefId;
-use crate::tree::{BinaryOp, UnaryOp, semantic as sem};
-use crate::types::Type;
+use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
+use crate::core::backend::lower::r#match::MatchLowerer;
+use crate::core::ir::IrTypeId;
+use crate::core::ir::{CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
+use crate::core::resolve::DefId;
+use crate::core::tree::{BinaryOp, UnaryOp, semantic as sem};
+use crate::core::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a branching expression, potentially creating multiple basic blocks.

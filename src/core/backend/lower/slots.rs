@@ -1,10 +1,10 @@
 //! Helpers for materializing values into addressable slots.
 
-use crate::backend::lower::locals::{LocalStorage, LocalValue};
-use crate::backend::lower::lowerer::{FuncLowerer, ValueSlot};
-use crate::ir::IrTypeId;
-use crate::ir::ValueId;
-use crate::types::Type;
+use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
+use crate::core::backend::lower::lowerer::{FuncLowerer, ValueSlot};
+use crate::core::ir::IrTypeId;
+use crate::core::ir::ValueId;
+use crate::core::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Allocates a new local of the given value type and returns its address.
