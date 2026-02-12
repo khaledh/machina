@@ -1012,7 +1012,10 @@ fn main() -> u64 {
     }
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/code_actions_match_union.mc"), source);
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/code_actions_match_union.mc"),
+        source,
+    );
     let query_span = span_for_substring(source, "match load()");
 
     let actions = db
@@ -1020,13 +1023,29 @@ fn main() -> u64 {
         .expect("code action query should succeed");
 
     assert!(
-        actions
-            .iter()
-            .any(|a| a
-                .title
-                .contains("Add match arms for missing union variants: ParseErr | IoErr")),
+        actions.iter().any(|a| a
+            .title
+            .contains("Add match arms for missing union variants: ParseErr | IoErr")),
         "expected union match exhaustiveness quick fix, got: {:?}",
         actions
+    );
+    let union_fix = actions
+        .iter()
+        .find(|a| a.diagnostic_code == "MC-SEMCK-NonExhaustiveUnionMatch")
+        .expect("expected semcheck union quick fix action");
+    assert!(
+        !union_fix.edits.is_empty(),
+        "expected actionable text edits"
+    );
+    assert!(
+        union_fix.edits[0].new_text.contains("v0: ParseErr =>"),
+        "expected generated ParseErr arm edit, got: {:?}",
+        union_fix.edits
+    );
+    assert!(
+        union_fix.edits[0].new_text.contains("v1: IoErr =>"),
+        "expected generated IoErr arm edit, got: {:?}",
+        union_fix.edits
     );
 }
 

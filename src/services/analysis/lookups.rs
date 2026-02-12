@@ -6,7 +6,7 @@
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
 use crate::core::types::Type;
-use crate::services::analysis::code_actions::code_actions_for_diagnostic;
+use crate::services::analysis::code_actions::code_actions_for_diagnostic_with_source;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::{
@@ -223,13 +223,17 @@ pub(crate) fn semantic_tokens(state: &LookupState) -> Vec<SemanticToken> {
     out
 }
 
-pub(crate) fn code_actions_for_range(diagnostics: &[Diagnostic], range: Span) -> Vec<CodeAction> {
+pub(crate) fn code_actions_for_range(
+    diagnostics: &[Diagnostic],
+    range: Span,
+    source: Option<&str>,
+) -> Vec<CodeAction> {
     let mut actions = Vec::new();
     for diag in diagnostics {
         if !span_intersects_span(diag.span, range) {
             continue;
         }
-        actions.extend(code_actions_for_diagnostic(diag));
+        actions.extend(code_actions_for_diagnostic_with_source(diag, source));
     }
     actions.sort_by_key(|action| {
         (

@@ -454,7 +454,13 @@ impl AnalysisDb {
         range: Span,
     ) -> QueryResult<Vec<CodeAction>> {
         let diagnostics = self.diagnostics_for_file(file_id)?;
-        Ok(code_actions_for_range(&diagnostics, range))
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        Ok(code_actions_for_range(
+            &diagnostics,
+            range,
+            source.as_deref(),
+        ))
     }
 
     pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {

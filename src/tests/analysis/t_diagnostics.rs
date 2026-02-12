@@ -184,6 +184,12 @@ fn semcheck_diagnostic_keeps_structured_metadata() {
         diag.metadata.get("variant"),
         Some(&DiagnosticValue::String("Some".to_string()))
     );
-    assert_eq!(diag.metadata.get("expected"), Some(&DiagnosticValue::Number(2)));
-    assert_eq!(diag.metadata.get("found"), Some(&DiagnosticValue::Number(1)));
+    assert_eq!(
+        diag.metadata.get("expected"),
+        Some(&DiagnosticValue::Number(2))
+    );
+    assert_eq!(
+        diag.metadata.get("found"),
+        Some(&DiagnosticValue::Number(1))
+    );
 }
