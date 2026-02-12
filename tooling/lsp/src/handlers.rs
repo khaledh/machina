@@ -401,7 +401,7 @@ fn hover_response(
         Err(error) => return session_error_response(id, &error),
     };
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.hover_at_file(file_id, span));
+    let result = session.execute_query(|db| db.hover_at_program_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
         return stale_result_response(id);
     }
@@ -497,7 +497,7 @@ fn completion_response(
         Err(error) => return session_error_response(id, &error),
     };
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.completions_at_file(file_id, span));
+    let result = session.execute_query(|db| db.completions_at_program_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
         return stale_result_response(id);
     }

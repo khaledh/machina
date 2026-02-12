@@ -308,69 +308,16 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<Location>> {
-        let snapshot = self.snapshot();
-        let Some(entry_source) = snapshot.text(file_id) else {
+        let Some(program_lookup) = self.lookup_state_for_program_file(file_id)? else {
             return Ok(None);
         };
-        let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
-            return Ok(None);
-        };
-        let project_root = infer_project_root(&entry_path);
-        let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
-            Ok(path) => path,
-            Err(_) => return Ok(None),
-        };
-        let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
-        let program = match capsule::discover_and_parse_capsule_with_loader(
-            &entry_source,
-            &entry_path,
-            entry_module_path,
-            &loader,
-        ) {
-            Ok(program) => program,
-            Err(_) => return Ok(None),
-        };
-        let program_context = crate::core::context::CapsuleParsedContext::new(program);
-        let entry_module_id = program_context.entry();
-        let bindings = CapsuleBindings::build(&program_context);
-        let mut import_facts = ProgramImportFactsCache::default();
-        let mut module_states = HashMap::<ModuleId, LookupState>::new();
-        let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
-
-        for module_id in program_context.dependency_order_from_entry() {
-            let Some(parsed) = program_context.module(module_id) else {
-                continue;
-            };
-            let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
-            let module_revision = stable_source_revision(&parsed.source.source);
-            let parsed_context = crate::core::context::ParsedContext::new(
-                module_with_implicit_prelude(parsed, prelude_module.as_ref()),
-                program_context.next_node_id_gen().clone(),
-            );
-            let imported_modules =
-                import_facts.imported_modules_for(&program_context, &bindings, module_id);
-            let imported_symbols =
-                import_facts.imported_symbols_for(&program_context, &bindings, module_id);
-            let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
-            let state = run_module_pipeline_with_parsed_and_imports(
-                &mut self.runtime,
-                module_id,
-                module_revision,
-                source,
-                Some(parsed_context),
-                imported_modules,
-                imported_symbols,
-                skip_typecheck,
-            )?;
-            if let Some(resolved) = &state.resolved.product {
-                import_facts.ingest_resolved(module_id, &resolved.context);
-            }
-            if let Some(typed) = &state.typechecked.product {
-                import_facts.ingest_typed(module_id, typed);
-            }
-            module_states.insert(module_id, to_lookup_state(&state));
-        }
-
+        let ProgramLookupState {
+            snapshot,
+            entry_path,
+            entry_module_id,
+            program_context,
+            module_states,
+        } = program_lookup;
         let Some(entry_state) = module_states.get(&entry_module_id) else {
             return Ok(None);
         };
@@ -471,6 +418,35 @@ impl AnalysisDb {
         Ok(hover_at_span(&state, query_span))
     }
 
+    pub fn hover_at_program_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Option<HoverInfo>> {
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.hover_at_program_file(file_id, query_span),
+        )
+    }
+
+    pub fn hover_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<HoverInfo>> {
+        let state = if let Some(lookup) = self.lookup_state_for_program_file(file_id)? {
+            lookup
+                .module_states
+                .get(&lookup.entry_module_id)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            self.lookup_state_for_file(file_id)?
+        };
+        Ok(hover_at_span(&state, query_span))
+    }
+
     pub fn completions_at_path(
         &mut self,
         path: &Path,
@@ -490,13 +466,54 @@ impl AnalysisDb {
         let Some(source) = snapshot.text(file_id).map(|s| s.to_string()) else {
             return Ok(Vec::new());
         };
+        let state = self.lookup_state_for_file(file_id)?;
+        self.completions_for_state(file_id, query_span, source, state)
+    }
+
+    pub fn completions_at_program_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Vec<CompletionItem>> {
+        self.with_file_id(path, Vec::new, |db, file_id| {
+            db.completions_at_program_file(file_id, query_span)
+        })
+    }
+
+    pub fn completions_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Vec<CompletionItem>> {
+        let snapshot = self.snapshot();
+        let Some(source) = snapshot.text(file_id).map(|s| s.to_string()) else {
+            return Ok(Vec::new());
+        };
+        let state = if let Some(lookup) = self.lookup_state_for_program_file(file_id)? {
+            lookup
+                .module_states
+                .get(&lookup.entry_module_id)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            self.lookup_state_for_file(file_id)?
+        };
+        self.completions_for_state(file_id, query_span, source, state)
+    }
+
+    fn completions_for_state(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+        source: String,
+        mut state: LookupState,
+    ) -> QueryResult<Vec<CompletionItem>> {
         let cursor = Span {
             start: query_span.end,
             end: query_span.end,
         };
 
         let mut active_source = source;
-        let mut state = self.lookup_state_for_file(file_id)?;
         if state.resolved.is_none()
             && let Some(synthetic_source) =
                 synthesize_member_completion_source(&active_source, cursor.start)
@@ -665,6 +682,82 @@ impl AnalysisDb {
         Ok(Some(to_lookup_state(&pipeline)))
     }
 
+    fn lookup_state_for_program_file(
+        &mut self,
+        file_id: FileId,
+    ) -> QueryResult<Option<ProgramLookupState>> {
+        let snapshot = self.snapshot();
+        let Some(entry_source) = snapshot.text(file_id) else {
+            return Ok(None);
+        };
+        let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
+            return Ok(None);
+        };
+        let project_root = infer_project_root(&entry_path);
+        let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
+            Ok(path) => path,
+            Err(_) => return Ok(None),
+        };
+        let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
+        let program = match capsule::discover_and_parse_capsule_with_loader(
+            &entry_source,
+            &entry_path,
+            entry_module_path,
+            &loader,
+        ) {
+            Ok(program) => program,
+            Err(_) => return Ok(None),
+        };
+        let program_context = crate::core::context::CapsuleParsedContext::new(program);
+        let entry_module_id = program_context.entry();
+        let bindings = CapsuleBindings::build(&program_context);
+        let mut import_facts = ProgramImportFactsCache::default();
+        let mut module_states = HashMap::<ModuleId, LookupState>::new();
+        let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
+
+        for module_id in program_context.dependency_order_from_entry() {
+            let Some(parsed) = program_context.module(module_id) else {
+                continue;
+            };
+            let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
+            let module_revision = stable_source_revision(&parsed.source.source);
+            let parsed_context = crate::core::context::ParsedContext::new(
+                module_with_implicit_prelude(parsed, prelude_module.as_ref()),
+                program_context.next_node_id_gen().clone(),
+            );
+            let imported_modules =
+                import_facts.imported_modules_for(&program_context, &bindings, module_id);
+            let imported_symbols =
+                import_facts.imported_symbols_for(&program_context, &bindings, module_id);
+            let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
+            let state = run_module_pipeline_with_parsed_and_imports(
+                &mut self.runtime,
+                module_id,
+                module_revision,
+                source,
+                Some(parsed_context),
+                imported_modules,
+                imported_symbols,
+                skip_typecheck,
+            )?;
+            if let Some(resolved) = &state.resolved.product {
+                import_facts.ingest_resolved(module_id, &resolved.context);
+            }
+            if let Some(typed) = &state.typechecked.product {
+                import_facts.ingest_typed(module_id, typed);
+            }
+            module_states.insert(module_id, to_lookup_state(&state));
+        }
+
+        Ok(Some(ProgramLookupState {
+            snapshot,
+            entry_path,
+            entry_module_id,
+            program_context,
+            module_states,
+        }))
+    }
+
     pub fn execute_query<T, F>(&mut self, key: QueryKey, compute: F) -> QueryResult<T>
     where
         T: Clone + Send + Sync + 'static,
@@ -690,6 +783,14 @@ impl AnalysisDb {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
     }
+}
+
+struct ProgramLookupState {
+    snapshot: AnalysisSnapshot,
+    entry_path: PathBuf,
+    entry_module_id: ModuleId,
+    program_context: crate::core::context::CapsuleParsedContext,
+    module_states: HashMap<ModuleId, LookupState>,
 }
 
 #[derive(Clone, Copy)]

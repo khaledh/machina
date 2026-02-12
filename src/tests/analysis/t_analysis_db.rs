@@ -1465,6 +1465,103 @@ fn diagnostics_for_program_file_examples_import_symbols_main_is_clean() {
 }
 
 #[test]
+fn hover_at_program_file_resolves_imported_symbol_type() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_hover_symbol_import_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run()
+}
+"#;
+    let dep_source = r#"
+@[public]
+fn run() -> u64 { 1 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = span_for_last_substring(entry_source, "run");
+    let hover = db
+        .hover_at_program_file(entry_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for imported symbol");
+    assert_eq!(hover.def_name.as_deref(), Some("run"));
+    assert!(
+        hover.display.contains("run:"),
+        "expected hover display to include resolved type info, got: {}",
+        hover.display
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn completions_at_program_file_include_imported_symbols() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_completion_symbol_import_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    ru;
+    0
+}
+"#;
+    let dep_source = r#"
+@[public]
+fn run() -> u64 { 1 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let mut query_span = span_for_last_substring(entry_source, "ru");
+    query_span.start = query_span.end;
+    let completions = db
+        .completions_at_program_file(entry_id, query_span)
+        .expect("program completion query should succeed");
+    assert!(
+        completions.iter().any(|item| item.label == "run"),
+        "expected imported symbol completion, got: {completions:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn diagnostics_for_program_file_typechecks_symbol_import_calls() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
