@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::core::api::{
-    ParseModuleError, elaborate_stage, normalize_stage, parse_module_with_id_gen, semcheck_stage,
+    FrontendPolicy, ParseModuleError, ResolveInputs, elaborate_stage, normalize_stage,
+    parse_module_with_id_gen, resolve_stage_with_policy, semcheck_stage,
+    typecheck_stage_with_policy,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
@@ -17,10 +19,9 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::monomorphize;
 use crate::core::nrvo::NrvoAnalyzer;
 use crate::core::resolve::attach_def_owners;
+use crate::core::tree::NodeId;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::Module as ParsedModule;
-use crate::services::analysis::batch::{self, BatchQueryError};
-use crate::services::analysis::db::AnalysisDb;
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -73,34 +74,7 @@ pub fn check_with_path(
     id_gen = id_gen_out;
 
     let ast_context = ParsedContext::new(module, id_gen);
-    let module_id = program_context.entry();
-    let mut analysis_db = AnalysisDb::new();
-    let (resolved_result, mut typed_result) = batch::query_parse_resolve_typecheck(
-        &mut analysis_db,
-        module_id,
-        0,
-        ast_context,
-        top_level_owners.clone(),
-    )
-    .map_err(map_batch_query_error)?;
-    let resolved_context = resolved_result.into_context();
-
-    // Preserve compile-path parity: re-type-check after monomorphization if instantiations exist.
-    if !typed_result.generic_insts.is_empty() {
-        let monomorphized_context =
-            monomorphize::monomorphize(resolved_context, &typed_result.generic_insts)
-                .map_err(|e| vec![e.into()])?;
-        typed_result = batch::query_typecheck(&mut analysis_db, module_id, 1, {
-            let monomorphized_context = attach_def_owners(monomorphized_context, &top_level_owners);
-            crate::services::analysis::results::ResolvedModuleResult::from_context(
-                module_id,
-                monomorphized_context,
-            )
-        })
-        .map_err(map_batch_query_error)?;
-    }
-
-    let _ = typed_result;
+    let _ = resolve_and_typecheck_strict(ast_context, &top_level_owners)?;
     Ok(())
 }
 
@@ -208,20 +182,8 @@ pub fn compile_with_path(
     // --- Resolve Defs/Uses (parsed -> resolved) ---
 
     let ast_context = ParsedContext::new(module, id_gen);
-    let module_id = program_context
-        .as_ref()
-        .map(CapsuleParsedContext::entry)
-        .unwrap_or(ModuleId(0));
-    let mut analysis_db = AnalysisDb::new();
-    let (resolved_result, mut typed_result) = batch::query_parse_resolve_typecheck(
-        &mut analysis_db,
-        module_id,
-        0,
-        ast_context,
-        top_level_owners.clone(),
-    )
-    .map_err(map_batch_query_error)?;
-    let resolved_context = resolved_result.into_context();
+    let (resolved_context, type_checked_context) =
+        resolve_and_typecheck_strict(ast_context, &top_level_owners)?;
 
     if dump_def_table {
         println!("Def Map:");
@@ -231,24 +193,6 @@ pub fn compile_with_path(
     }
 
     // --- Type Check (resolved -> type-checked) ---
-
-    let mut type_checked_context = typed_result.clone().into_context();
-
-    // If any generic instantiations were recorded, monomorphize and re-type-check.
-    if !type_checked_context.generic_insts.is_empty() {
-        let monomorphized_context =
-            monomorphize::monomorphize(resolved_context, &type_checked_context.generic_insts)
-                .map_err(|e| vec![e.into()])?;
-        typed_result = batch::query_typecheck(&mut analysis_db, module_id, 1, {
-            let monomorphized_context = attach_def_owners(monomorphized_context, &top_level_owners);
-            crate::services::analysis::results::ResolvedModuleResult::from_context(
-                module_id,
-                monomorphized_context,
-            )
-        })
-        .map_err(map_batch_query_error)?;
-        type_checked_context = typed_result.into_context();
-    }
 
     if dump_type_map {
         println!("Type Map:");
@@ -393,12 +337,73 @@ fn parse_with_id_gen(
     })
 }
 
-fn map_batch_query_error(err: BatchQueryError) -> Vec<CompileError> {
-    match err {
-        BatchQueryError::Cancelled => vec![CompileError::QueryCancelled],
-        BatchQueryError::Resolve(errs) => errs.into_iter().map(CompileError::from).collect(),
-        BatchQueryError::TypeCheck(errs) => errs.into_iter().map(CompileError::from).collect(),
+fn resolve_and_typecheck_strict(
+    ast_context: ParsedContext,
+    top_level_owners: &HashMap<NodeId, ModuleId>,
+) -> Result<
+    (
+        crate::core::context::ResolvedContext,
+        crate::core::context::TypeCheckedContext,
+    ),
+    Vec<CompileError>,
+> {
+    let resolved = resolve_stage_with_policy(
+        ast_context,
+        ResolveInputs::default(),
+        FrontendPolicy::Strict,
+    );
+    if resolved.has_errors() {
+        return Err(resolved
+            .errors
+            .into_iter()
+            .map(CompileError::from)
+            .collect());
     }
+    let resolved_context = resolved
+        .context
+        .expect("strict resolve should produce context when no errors");
+    let resolved_context = attach_def_owners(resolved_context, top_level_owners);
+
+    let typechecked = typecheck_stage_with_policy(
+        resolved_context.clone(),
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    );
+    if typechecked.has_errors() {
+        return Err(typechecked
+            .errors
+            .into_iter()
+            .map(CompileError::from)
+            .collect());
+    }
+    let mut typed_context = typechecked
+        .context
+        .expect("strict typecheck should produce context when no errors");
+
+    if !typed_context.generic_insts.is_empty() {
+        let monomorphized_context =
+            monomorphize::monomorphize(resolved_context, &typed_context.generic_insts)
+                .map_err(|e| vec![e.into()])?;
+        let monomorphized_context = attach_def_owners(monomorphized_context, top_level_owners);
+        let second_pass = typecheck_stage_with_policy(
+            monomorphized_context.clone(),
+            crate::core::resolve::ImportedFacts::default(),
+            FrontendPolicy::Strict,
+        );
+        if second_pass.has_errors() {
+            return Err(second_pass
+                .errors
+                .into_iter()
+                .map(CompileError::from)
+                .collect());
+        }
+        typed_context = second_pass
+            .context
+            .expect("strict second typecheck pass should produce context when no errors");
+        return Ok((monomorphized_context, typed_context));
+    }
+
+    Ok((resolved_context, typed_context))
 }
 
 #[cfg(test)]
