@@ -23,6 +23,7 @@ pub enum QueryKind {
     SemcheckModule,
     Diagnostics,
     LookupState,
+    ProgramPipeline,
 }
 
 /// Query identity keyed by semantic stage, module, and revision snapshot.

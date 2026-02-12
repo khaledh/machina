@@ -156,105 +156,7 @@ impl AnalysisDb {
         &mut self,
         file_id: FileId,
     ) -> QueryResult<Vec<Diagnostic>> {
-        let snapshot = self.snapshot();
-        let Some(entry_source) = snapshot.text(file_id) else {
-            return Ok(Vec::new());
-        };
-        let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
-            return Ok(Vec::new());
-        };
-        let revision = snapshot.revision();
-        let module_id = ModuleId(file_id.0);
-        let diagnostics_key = QueryKey::new(
-            crate::services::analysis::query::QueryKind::Diagnostics,
-            module_id,
-            revision,
-        );
-
-        self.execute_query(diagnostics_key, move |rt| {
-            let tag_with_entry_path = |mut diagnostics: Vec<Diagnostic>| {
-                let entry_file_path = entry_path.to_string_lossy().to_string();
-                for diag in &mut diagnostics {
-                    diag.metadata
-                        .entry(ANALYSIS_FILE_PATH_KEY.to_string())
-                        .or_insert_with(|| DiagnosticValue::String(entry_file_path.clone()));
-                }
-                diagnostics
-            };
-            let project_root = infer_project_root(&entry_path);
-            let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
-                Ok(path) => path,
-                Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
-            };
-            let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
-
-            let program = match capsule::discover_and_parse_capsule_with_loader(
-                &entry_source,
-                &entry_path,
-                entry_module_path,
-                &loader,
-            ) {
-                Ok(program) => program,
-                Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
-            };
-            let program_context = crate::core::context::CapsuleParsedContext::new(program);
-            let bindings = CapsuleBindings::build(&program_context);
-            let mut import_facts = ProgramImportFactsCache::default();
-            let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
-
-            let mut all = Vec::new();
-            for module_id in program_context.dependency_order_from_entry() {
-                let Some(parsed) = program_context.module(module_id) else {
-                    continue;
-                };
-                let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
-                let module_revision = stable_source_revision(&parsed.source.source);
-                let parsed_context = crate::core::context::ParsedContext::new(
-                    module_with_implicit_prelude(parsed, prelude_module.as_ref()),
-                    program_context.next_node_id_gen().clone(),
-                );
-                let imported_modules =
-                    import_facts.imported_modules_for(&program_context, &bindings, module_id);
-                let imported_symbols =
-                    import_facts.imported_symbols_for(&program_context, &bindings, module_id);
-                let skip_typecheck =
-                    ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
-                let state = run_module_pipeline_with_parsed_and_imports(
-                    rt,
-                    module_id,
-                    module_revision,
-                    source,
-                    Some(parsed_context),
-                    imported_modules,
-                    imported_symbols,
-                    skip_typecheck,
-                )?;
-                if let Some(resolved) = &state.resolved.product {
-                    import_facts.ingest_resolved(module_id, &resolved.context);
-                }
-                if let Some(typed) = &state.typechecked.product {
-                    import_facts.ingest_typed(module_id, typed);
-                }
-                let mut module_diags = collect_sorted_diagnostics(&state);
-                let file_path = parsed.source.file_path.to_string_lossy().to_string();
-                for diag in &mut module_diags {
-                    diag.metadata.insert(
-                        ANALYSIS_FILE_PATH_KEY.to_string(),
-                        DiagnosticValue::String(file_path.clone()),
-                    );
-                }
-                all.extend(module_diags);
-            }
-            all.sort_by_key(|diag| {
-                (
-                    diag.phase,
-                    diag.span.start.line,
-                    diag.span.start.column,
-                    diag.code.clone(),
-                )
-            });
-            Ok(all)
-        })
+        Ok(self.program_pipeline_for_file(file_id)?.diagnostics)
     }
 
     pub fn poisoned_nodes_for_path(&mut self, path: &Path) -> QueryResult<HashSet<NodeId>> {
@@ -308,16 +210,18 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<Location>> {
-        let Some(program_lookup) = self.lookup_state_for_program_file(file_id)? else {
+        let snapshot = self.snapshot();
+        let program_lookup = self.program_pipeline_for_file(file_id)?;
+        let Some(entry_module_id) = program_lookup.entry_module_id else {
             return Ok(None);
         };
-        let ProgramLookupState {
-            snapshot,
-            entry_path,
-            entry_module_id,
-            program_context,
-            module_states,
-        } = program_lookup;
+        let Some(entry_path) = program_lookup.entry_path.clone() else {
+            return Ok(None);
+        };
+        let Some(program_context) = program_lookup.program_context.as_ref() else {
+            return Ok(None);
+        };
+        let module_states = &program_lookup.module_states;
         let Some(entry_state) = module_states.get(&entry_module_id) else {
             return Ok(None);
         };
@@ -329,8 +233,8 @@ impl AnalysisDb {
         };
 
         if let Some(imported_target) = resolve_imported_symbol_target(
-            &program_context,
-            &module_states,
+            program_context,
+            module_states,
             entry_module_id,
             def_id,
             &entry_resolved.def_table,
@@ -435,12 +339,12 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
-        let state = if let Some(lookup) = self.lookup_state_for_program_file(file_id)? {
-            lookup
-                .module_states
-                .get(&lookup.entry_module_id)
-                .cloned()
-                .unwrap_or_default()
+        let program = self.program_pipeline_for_file(file_id)?;
+        let state = if let Some(state) = program
+            .entry_module_id
+            .and_then(|entry| program.module_states.get(&entry).cloned())
+        {
+            state
         } else {
             self.lookup_state_for_file(file_id)?
         };
@@ -489,12 +393,12 @@ impl AnalysisDb {
         let Some(source) = snapshot.text(file_id).map(|s| s.to_string()) else {
             return Ok(Vec::new());
         };
-        let state = if let Some(lookup) = self.lookup_state_for_program_file(file_id)? {
-            lookup
-                .module_states
-                .get(&lookup.entry_module_id)
-                .cloned()
-                .unwrap_or_default()
+        let program = self.program_pipeline_for_file(file_id)?;
+        let state = if let Some(state) = program
+            .entry_module_id
+            .and_then(|entry| program.module_states.get(&entry).cloned())
+        {
+            state
         } else {
             self.lookup_state_for_file(file_id)?
         };
@@ -682,80 +586,120 @@ impl AnalysisDb {
         Ok(Some(to_lookup_state(&pipeline)))
     }
 
-    fn lookup_state_for_program_file(
-        &mut self,
-        file_id: FileId,
-    ) -> QueryResult<Option<ProgramLookupState>> {
+    fn program_pipeline_for_file(&mut self, file_id: FileId) -> QueryResult<ProgramPipelineResult> {
         let snapshot = self.snapshot();
         let Some(entry_source) = snapshot.text(file_id) else {
-            return Ok(None);
+            return Ok(ProgramPipelineResult::default());
         };
         let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
-            return Ok(None);
+            return Ok(ProgramPipelineResult::default());
         };
-        let project_root = infer_project_root(&entry_path);
-        let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
-            Ok(path) => path,
-            Err(_) => return Ok(None),
-        };
-        let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
-        let program = match capsule::discover_and_parse_capsule_with_loader(
-            &entry_source,
-            &entry_path,
-            entry_module_path,
-            &loader,
-        ) {
-            Ok(program) => program,
-            Err(_) => return Ok(None),
-        };
-        let program_context = crate::core::context::CapsuleParsedContext::new(program);
-        let entry_module_id = program_context.entry();
-        let bindings = CapsuleBindings::build(&program_context);
-        let mut import_facts = ProgramImportFactsCache::default();
-        let mut module_states = HashMap::<ModuleId, LookupState>::new();
-        let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
-
-        for module_id in program_context.dependency_order_from_entry() {
-            let Some(parsed) = program_context.module(module_id) else {
-                continue;
+        let key = QueryKey::new(
+            crate::services::analysis::query::QueryKind::ProgramPipeline,
+            ModuleId(file_id.0),
+            snapshot.revision(),
+        );
+        self.execute_query(key, move |rt| {
+            let mut result = ProgramPipelineResult {
+                entry_path: Some(entry_path.clone()),
+                ..ProgramPipelineResult::default()
             };
-            let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
-            let module_revision = stable_source_revision(&parsed.source.source);
-            let parsed_context = crate::core::context::ParsedContext::new(
-                module_with_implicit_prelude(parsed, prelude_module.as_ref()),
-                program_context.next_node_id_gen().clone(),
-            );
-            let imported_modules =
-                import_facts.imported_modules_for(&program_context, &bindings, module_id);
-            let imported_symbols =
-                import_facts.imported_symbols_for(&program_context, &bindings, module_id);
-            let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
-            let state = run_module_pipeline_with_parsed_and_imports(
-                &mut self.runtime,
-                module_id,
-                module_revision,
-                source,
-                Some(parsed_context),
-                imported_modules,
-                imported_symbols,
-                skip_typecheck,
-            )?;
-            if let Some(resolved) = &state.resolved.product {
-                import_facts.ingest_resolved(module_id, &resolved.context);
-            }
-            if let Some(typed) = &state.typechecked.product {
-                import_facts.ingest_typed(module_id, typed);
-            }
-            module_states.insert(module_id, to_lookup_state(&state));
-        }
+            let tag_with_entry_path = |mut diagnostics: Vec<Diagnostic>| {
+                let entry_file_path = entry_path.to_string_lossy().to_string();
+                for diag in &mut diagnostics {
+                    diag.metadata
+                        .entry(ANALYSIS_FILE_PATH_KEY.to_string())
+                        .or_insert_with(|| DiagnosticValue::String(entry_file_path.clone()));
+                }
+                diagnostics
+            };
+            let project_root = infer_project_root(&entry_path);
+            let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
+                Ok(path) => path,
+                Err(err) => {
+                    result.diagnostics = tag_with_entry_path(frontend_error_diagnostics(err));
+                    return Ok(result);
+                }
+            };
+            let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
+            let program = match capsule::discover_and_parse_capsule_with_loader(
+                &entry_source,
+                &entry_path,
+                entry_module_path,
+                &loader,
+            ) {
+                Ok(program) => program,
+                Err(err) => {
+                    result.diagnostics = tag_with_entry_path(frontend_error_diagnostics(err));
+                    return Ok(result);
+                }
+            };
+            let program_context = crate::core::context::CapsuleParsedContext::new(program);
+            let entry_module_id = program_context.entry();
+            let bindings = CapsuleBindings::build(&program_context);
+            let mut import_facts = ProgramImportFactsCache::default();
+            let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
+            let mut all_diagnostics = Vec::new();
+            let mut module_states = HashMap::<ModuleId, LookupState>::new();
 
-        Ok(Some(ProgramLookupState {
-            snapshot,
-            entry_path,
-            entry_module_id,
-            program_context,
-            module_states,
-        }))
+            for module_id in program_context.dependency_order_from_entry() {
+                let Some(parsed) = program_context.module(module_id) else {
+                    continue;
+                };
+                let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
+                let module_revision = stable_source_revision(&parsed.source.source);
+                let parsed_context = crate::core::context::ParsedContext::new(
+                    module_with_implicit_prelude(parsed, prelude_module.as_ref()),
+                    program_context.next_node_id_gen().clone(),
+                );
+                let imported_modules =
+                    import_facts.imported_modules_for(&program_context, &bindings, module_id);
+                let imported_symbols =
+                    import_facts.imported_symbols_for(&program_context, &bindings, module_id);
+                let skip_typecheck =
+                    ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
+                let state = run_module_pipeline_with_parsed_and_imports(
+                    rt,
+                    module_id,
+                    module_revision,
+                    source,
+                    Some(parsed_context),
+                    imported_modules,
+                    imported_symbols,
+                    skip_typecheck,
+                )?;
+                if let Some(resolved) = &state.resolved.product {
+                    import_facts.ingest_resolved(module_id, &resolved.context);
+                }
+                if let Some(typed) = &state.typechecked.product {
+                    import_facts.ingest_typed(module_id, typed);
+                }
+                let mut module_diags = collect_sorted_diagnostics(&state);
+                let file_path = parsed.source.file_path.to_string_lossy().to_string();
+                for diag in &mut module_diags {
+                    diag.metadata.insert(
+                        ANALYSIS_FILE_PATH_KEY.to_string(),
+                        DiagnosticValue::String(file_path.clone()),
+                    );
+                }
+                all_diagnostics.extend(module_diags);
+                module_states.insert(module_id, to_lookup_state(&state));
+            }
+
+            all_diagnostics.sort_by_key(|diag| {
+                (
+                    diag.phase,
+                    diag.span.start.line,
+                    diag.span.start.column,
+                    diag.code.clone(),
+                )
+            });
+            result.diagnostics = all_diagnostics;
+            result.entry_module_id = Some(entry_module_id);
+            result.program_context = Some(program_context);
+            result.module_states = module_states;
+            Ok(result)
+        })
     }
 
     pub fn execute_query<T, F>(&mut self, key: QueryKey, compute: F) -> QueryResult<T>
@@ -785,11 +729,12 @@ impl AnalysisDb {
     }
 }
 
-struct ProgramLookupState {
-    snapshot: AnalysisSnapshot,
-    entry_path: PathBuf,
-    entry_module_id: ModuleId,
-    program_context: crate::core::context::CapsuleParsedContext,
+#[derive(Clone, Default)]
+struct ProgramPipelineResult {
+    diagnostics: Vec<Diagnostic>,
+    entry_path: Option<PathBuf>,
+    entry_module_id: Option<ModuleId>,
+    program_context: Option<crate::core::context::CapsuleParsedContext>,
     module_states: HashMap<ModuleId, LookupState>,
 }
 
