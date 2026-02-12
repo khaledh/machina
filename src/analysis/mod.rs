@@ -11,6 +11,7 @@ pub mod frontend_support;
 pub mod lookups;
 pub mod module_graph;
 pub mod pipeline;
+pub mod program_imports;
 pub mod query;
 pub mod rename;
 pub mod results;

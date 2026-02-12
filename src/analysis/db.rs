@@ -5,7 +5,7 @@
 //! - query memoization/dependency tracking,
 //! - module-closure invalidation.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::analysis::completion::{
@@ -20,6 +20,7 @@ use crate::analysis::lookups::{
     semantic_tokens, signature_help_at_span, type_at_span,
 };
 use crate::analysis::module_graph::ModuleGraph;
+use crate::analysis::program_imports::ProgramImportFactsCache;
 use crate::analysis::pipeline::{
     LookupState, collect_sorted_diagnostics, run_module_pipeline,
     run_module_pipeline_with_parsed_and_imports, to_lookup_state,
@@ -31,21 +32,13 @@ use crate::analysis::results::{
     SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
-use crate::context::{ProgramParsedContext, TypeCheckedContext};
 use crate::diag::Span;
 use crate::frontend::bind::ProgramBindings;
-use crate::frontend::{self, ModuleId, ModulePath, RequireKind};
-use crate::resolve::{
-    DefId, ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol,
-    ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
-};
+use crate::frontend::{self, ModuleId, ModulePath};
+use crate::resolve::DefId;
 use crate::tree::NodeId;
-use crate::tree::ParamMode;
 use crate::typecheck::type_check_partial;
-use crate::typecheck::type_map::{
-    resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
-};
-use crate::types::{FnParamMode, TyVarId, Type};
+use crate::types::Type;
 
 #[derive(Default)]
 pub struct AnalysisDb {
@@ -200,13 +193,7 @@ impl AnalysisDb {
             };
             let program_context = crate::context::ProgramParsedContext::new(program);
             let bindings = ProgramBindings::build(&program_context);
-            let mut callable_sigs_by_module: HashMap<
-                ModuleId,
-                HashMap<String, Vec<ImportedCallableSig>>,
-            > = HashMap::new();
-            let mut type_tys_by_module: HashMap<ModuleId, HashMap<String, Type>> = HashMap::new();
-            let mut trait_sigs_by_module: HashMap<ModuleId, HashMap<String, ImportedTraitSig>> =
-                HashMap::new();
+            let mut import_facts = ProgramImportFactsCache::default();
 
             let mut all = Vec::new();
             for module_id in program_context.dependency_order_from_entry() {
@@ -220,20 +207,10 @@ impl AnalysisDb {
                     program_context.next_node_id_gen().clone(),
                 );
                 let imported_modules =
-                    build_analysis_imported_modules(&program_context, &bindings, module_id);
-                let imported_symbols = build_analysis_imported_symbols(
-                    &program_context,
-                    &bindings,
-                    &callable_sigs_by_module,
-                    &type_tys_by_module,
-                    &trait_sigs_by_module,
-                    module_id,
-                );
-                let skip_typecheck = imported_symbols.values().any(|imported| {
-                    (imported.has_type && imported.type_ty.is_none())
-                        || (imported.has_trait && imported.trait_sig.is_none())
-                        || (imported.has_callable && imported.callable_sigs.is_empty())
-                });
+                    import_facts.imported_modules_for(&program_context, &bindings, module_id);
+                let imported_symbols =
+                    import_facts.imported_symbols_for(&program_context, &bindings, module_id);
+                let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
                 let state = run_module_pipeline_with_parsed_and_imports(
                     rt,
                     module_id,
@@ -245,9 +222,7 @@ impl AnalysisDb {
                     skip_typecheck,
                 )?;
                 if let Some(typed) = &state.typechecked.product {
-                    callable_sigs_by_module.insert(module_id, collect_public_callable_sigs(typed));
-                    type_tys_by_module.insert(module_id, collect_public_type_tys(typed));
-                    trait_sigs_by_module.insert(module_id, collect_public_trait_sigs(typed));
+                    import_facts.ingest_typed(module_id, typed);
                 }
                 let mut module_diags = collect_sorted_diagnostics(&state);
                 let file_path = parsed.source.file_path.to_string_lossy().to_string();
@@ -552,307 +527,6 @@ impl AnalysisDb {
     pub fn invalidate_changed_modules(&mut self, changed: &HashSet<ModuleId>) {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
-    }
-}
-
-fn build_analysis_imported_modules(
-    program_context: &ProgramParsedContext,
-    bindings: &ProgramBindings,
-    module_id: ModuleId,
-) -> HashMap<String, ImportedModule> {
-    let mut out = HashMap::new();
-    let Some(parsed) = program_context.module(module_id) else {
-        return out;
-    };
-
-    for req in &parsed.requires {
-        if req.kind != RequireKind::Module {
-            continue;
-        }
-        let Some(dep_id) = program_context
-            .program
-            .by_path
-            .get(&req.module_path)
-            .copied()
-        else {
-            continue;
-        };
-        let Some(exports) = bindings.exports_for(dep_id) else {
-            continue;
-        };
-        let mut members = std::collections::HashSet::new();
-        for (name, attrs) in &exports.callables {
-            if attrs.public {
-                members.insert(name.clone());
-            }
-        }
-        for (name, attrs) in &exports.types {
-            if attrs.public {
-                members.insert(name.clone());
-            }
-        }
-        for (name, attrs) in &exports.traits {
-            if attrs.public {
-                members.insert(name.clone());
-            }
-        }
-        out.insert(
-            req.alias.clone(),
-            ImportedModule {
-                path: req.module_path.to_string(),
-                members,
-            },
-        );
-    }
-
-    out
-}
-
-fn build_analysis_imported_symbols(
-    program_context: &ProgramParsedContext,
-    bindings: &ProgramBindings,
-    callable_sigs_by_module: &HashMap<ModuleId, HashMap<String, Vec<ImportedCallableSig>>>,
-    type_tys_by_module: &HashMap<ModuleId, HashMap<String, Type>>,
-    trait_sigs_by_module: &HashMap<ModuleId, HashMap<String, ImportedTraitSig>>,
-    module_id: ModuleId,
-) -> HashMap<String, ImportedSymbol> {
-    let mut out = HashMap::new();
-    let Some(parsed) = program_context.module(module_id) else {
-        return out;
-    };
-
-    for req in &parsed.requires {
-        if req.kind != RequireKind::Symbol {
-            continue;
-        }
-        let Some(member) = &req.member else {
-            continue;
-        };
-        let Some(dep_id) = program_context
-            .program
-            .by_path
-            .get(&req.module_path)
-            .copied()
-        else {
-            continue;
-        };
-        let Some(exports) = bindings.exports_for(dep_id) else {
-            continue;
-        };
-        let dep_callable_sigs = callable_sigs_by_module.get(&dep_id);
-        let dep_type_tys = type_tys_by_module.get(&dep_id);
-        let dep_trait_sigs = trait_sigs_by_module.get(&dep_id);
-        let has_callable = exports
-            .callables
-            .get(member)
-            .is_some_and(|attrs| attrs.public);
-        let has_type = exports.types.get(member).is_some_and(|attrs| attrs.public);
-        let has_trait = exports.traits.get(member).is_some_and(|attrs| attrs.public);
-        let imported = ImportedSymbol {
-            has_callable,
-            callable_sigs: if has_callable {
-                dep_callable_sigs
-                    .and_then(|module_sigs| module_sigs.get(member))
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            },
-            has_type,
-            type_ty: if has_type {
-                dep_type_tys
-                    .and_then(|module_types| module_types.get(member))
-                    .cloned()
-            } else {
-                None
-            },
-            has_trait,
-            trait_sig: if has_trait {
-                dep_trait_sigs
-                    .and_then(|module_traits| module_traits.get(member))
-                    .cloned()
-            } else {
-                None
-            },
-        };
-        if imported.has_callable || imported.has_type || imported.has_trait {
-            out.insert(req.alias.clone(), imported);
-        }
-    }
-
-    out
-}
-
-fn collect_public_callable_sigs(
-    typed: &TypeCheckedContext,
-) -> HashMap<String, Vec<ImportedCallableSig>> {
-    let mut out = HashMap::<String, Vec<ImportedCallableSig>>::new();
-    for item in &typed.module.top_level_items {
-        let callable = match item {
-            crate::tree::typed::TopLevelItem::FuncDecl(decl) => Some((&decl.sig.name, decl.def_id)),
-            crate::tree::typed::TopLevelItem::FuncDef(def) => Some((&def.sig.name, def.def_id)),
-            _ => None,
-        };
-        let Some((name, def_id)) = callable else {
-            continue;
-        };
-        let Some(def) = typed.def_table.lookup_def(def_id) else {
-            continue;
-        };
-        if !def.is_public() {
-            continue;
-        }
-        let Some(def_ty) = typed.type_map.lookup_def_type(def) else {
-            continue;
-        };
-        let Type::Fn { params, ret_ty } = def_ty else {
-            continue;
-        };
-        out.entry(name.clone())
-            .or_default()
-            .push(ImportedCallableSig {
-                params: params
-                    .into_iter()
-                    .map(|param| ImportedParamSig {
-                        mode: param_mode_from_fn_param(param.mode),
-                        ty: param.ty,
-                    })
-                    .collect(),
-                ret_ty: *ret_ty,
-            });
-    }
-    out
-}
-
-fn collect_public_type_tys(typed: &TypeCheckedContext) -> HashMap<String, Type> {
-    let mut out = HashMap::<String, Type>::new();
-    for type_def in typed.module.type_defs() {
-        if !type_def.type_params.is_empty() {
-            continue;
-        }
-        let Some(def) = typed.def_table.lookup_def(type_def.def_id) else {
-            continue;
-        };
-        if !def.is_public() {
-            continue;
-        }
-        let Ok(ty) =
-            resolve_type_def_with_args(&typed.def_table, &typed.module, type_def.def_id, &[])
-        else {
-            continue;
-        };
-        out.insert(type_def.name.clone(), ty);
-    }
-    out
-}
-
-fn collect_public_trait_sigs(typed: &TypeCheckedContext) -> HashMap<String, ImportedTraitSig> {
-    let mut out = HashMap::<String, ImportedTraitSig>::new();
-    for trait_def in typed.module.trait_defs() {
-        let Some(def) = typed.def_table.lookup_def(trait_def.def_id) else {
-            continue;
-        };
-        if !def.is_public() {
-            continue;
-        }
-
-        let mut methods = HashMap::new();
-        for method in &trait_def.methods {
-            let Some(sig) = collect_imported_trait_method_sig(typed, &method.sig) else {
-                continue;
-            };
-            methods.insert(method.sig.name.clone(), sig);
-        }
-
-        let mut properties = HashMap::new();
-        for property in &trait_def.properties {
-            let Ok(ty) = resolve_type_expr_with_params(&typed.def_table, typed, &property.ty, None)
-            else {
-                continue;
-            };
-            properties.insert(
-                property.name.clone(),
-                ImportedTraitPropertySig {
-                    name: property.name.clone(),
-                    ty,
-                    has_get: property.has_get,
-                    has_set: property.has_set,
-                },
-            );
-        }
-
-        out.insert(
-            trait_def.name.clone(),
-            ImportedTraitSig {
-                methods,
-                properties,
-            },
-        );
-    }
-    out
-}
-
-fn collect_imported_trait_method_sig(
-    typed: &TypeCheckedContext,
-    sig: &crate::tree::typed::MethodSig,
-) -> Option<ImportedTraitMethodSig> {
-    let type_param_map = if sig.type_params.is_empty() {
-        None
-    } else {
-        Some(
-            sig.type_params
-                .iter()
-                .enumerate()
-                .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
-                .collect::<HashMap<_, _>>(),
-        )
-    };
-
-    let mut params = Vec::with_capacity(sig.params.len());
-    for param in &sig.params {
-        let Ok(ty) = resolve_type_expr_with_params(
-            &typed.def_table,
-            typed,
-            &param.typ,
-            type_param_map.as_ref(),
-        ) else {
-            return None;
-        };
-        params.push(ImportedParamSig {
-            mode: param.mode.clone(),
-            ty,
-        });
-    }
-
-    let Ok(ret_ty) = resolve_return_type_expr_with_params(
-        &typed.def_table,
-        typed,
-        &sig.ret_ty_expr,
-        type_param_map.as_ref(),
-    ) else {
-        return None;
-    };
-
-    Some(ImportedTraitMethodSig {
-        name: sig.name.clone(),
-        params,
-        ret_ty,
-        type_param_count: sig.type_params.len(),
-        type_param_bounds: sig
-            .type_params
-            .iter()
-            .map(|param| param.bound.as_ref().map(|bound| bound.name.clone()))
-            .collect(),
-        self_mode: sig.self_param.mode.clone(),
-    })
-}
-
-fn param_mode_from_fn_param(mode: FnParamMode) -> ParamMode {
-    match mode {
-        FnParamMode::In => ParamMode::In,
-        FnParamMode::InOut => ParamMode::InOut,
-        FnParamMode::Out => ParamMode::Out,
-        FnParamMode::Sink => ParamMode::Sink,
     }
 }
 
