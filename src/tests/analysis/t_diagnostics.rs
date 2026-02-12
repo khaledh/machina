@@ -4,6 +4,7 @@ use crate::core::lexer::{Token, TokenKind};
 use crate::core::parse::ParseError;
 use crate::core::resolve::ResolveError;
 use crate::core::resolve::symbols::SymbolKind;
+use crate::core::semck::SemCheckError;
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 use crate::core::types::Type;
 use crate::services::analysis::diagnostics::{
@@ -148,4 +149,14 @@ fn typecheck_stable_code_exists_for_newer_variants() {
         TypeCheckErrorKind::StringFmtExprUnsupportedType(Type::Bool, Span::default()).into();
     let diag = Diagnostic::from_typecheck_error(&err);
     assert_eq!(diag.code, "MC-TYPECHECK-StringFmtExprUnsupportedType");
+}
+
+#[test]
+fn semcheck_diagnostic_is_phase_tagged() {
+    let err = SemCheckError::DivisionByZero(Span::default());
+    let diag = Diagnostic::from_semcheck_error(&err);
+
+    assert_eq!(diag.phase, DiagnosticPhase::Semcheck);
+    assert_eq!(diag.code, "MC-SEMCK-ERROR");
+    assert_eq!(diag.severity, DiagnosticSeverity::Error);
 }

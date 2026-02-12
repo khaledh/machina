@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::core::api::{
-    ParseModuleError, parse_module_with_id_gen, resolve_stage_partial, typecheck_stage_partial,
+    ParseModuleError, normalize_stage, parse_module_with_id_gen, resolve_stage_partial,
+    semcheck_stage_partial, typecheck_stage_partial,
 };
 use crate::core::capsule::ModuleId;
 use crate::core::resolve::{ImportedFacts, ImportedModule, ImportedSymbol};
@@ -46,12 +47,14 @@ pub(crate) struct ResolvedStageProduct {
 
 pub(crate) type ResolveStageOutput = StageOutput<ResolvedStageProduct>;
 pub(crate) type TypecheckStageOutput = StageOutput<crate::core::context::TypeCheckedContext>;
+pub(crate) type SemcheckStageOutput = StageOutput<crate::core::context::SemanticCheckedContext>;
 
 #[derive(Clone, Default)]
 pub(crate) struct ModulePipelineState {
     pub parsed: ParseStageOutput,
     pub resolved: ResolveStageOutput,
     pub typechecked: TypecheckStageOutput,
+    pub semchecked: SemcheckStageOutput,
 }
 
 #[derive(Clone, Default)]
@@ -179,10 +182,42 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         Ok(state)
     })?;
 
+    let mut upstream_poisoned = parsed.poisoned_nodes.clone();
+    upstream_poisoned.extend(resolved.poisoned_nodes.iter().copied());
+    upstream_poisoned.extend(typechecked.poisoned_nodes.iter().copied());
+
+    let semcheck_key = QueryKey::new(QueryKind::SemcheckModule, module_id, revision);
+    let semcheck_input = if !skip_typecheck && typechecked.diagnostics.is_empty() {
+        typechecked
+            .product
+            .clone()
+            .map(|typed| (normalize_stage(typed), upstream_poisoned))
+    } else {
+        None
+    };
+    let semchecked = rt.execute(semcheck_key, move |_rt| {
+        let mut state = SemcheckStageOutput::default();
+        if let Some((normalized, upstream_poisoned_nodes)) = semcheck_input {
+            let semchecked = semcheck_stage_partial(normalized, &upstream_poisoned_nodes);
+            state.product = Some(semchecked.context);
+            state.poisoned_nodes = semchecked.poisoned_nodes;
+            if !semchecked.errors.is_empty() {
+                state.diagnostics.extend(
+                    semchecked
+                        .errors
+                        .iter()
+                        .map(Diagnostic::from_semcheck_error),
+                );
+            }
+        }
+        Ok(state)
+    })?;
+
     Ok(ModulePipelineState {
         parsed,
         resolved,
         typechecked,
+        semchecked,
     })
 }
 
@@ -190,6 +225,7 @@ pub(crate) fn collect_sorted_diagnostics(state: &ModulePipelineState) -> Vec<Dia
     let mut diagnostics = state.parsed.diagnostics.clone();
     diagnostics.extend(state.resolved.diagnostics.iter().cloned());
     diagnostics.extend(state.typechecked.diagnostics.iter().cloned());
+    diagnostics.extend(state.semchecked.diagnostics.iter().cloned());
     diagnostics.sort_by_key(|diag| {
         (
             diag.phase,
@@ -205,6 +241,7 @@ pub(crate) fn to_lookup_state(state: &ModulePipelineState) -> LookupState {
     let mut poisoned_nodes = state.parsed.poisoned_nodes.clone();
     poisoned_nodes.extend(state.resolved.poisoned_nodes.iter().copied());
     poisoned_nodes.extend(state.typechecked.poisoned_nodes.iter().copied());
+    poisoned_nodes.extend(state.semchecked.poisoned_nodes.iter().copied());
 
     LookupState {
         resolved: state

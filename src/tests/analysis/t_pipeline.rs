@@ -19,6 +19,7 @@ fn pipeline_marks_parse_failure_as_poisoned() {
     assert!(lookup.poisoned_nodes.contains(&ROOT_POISON_NODE));
     assert!(lookup.resolved.is_none());
     assert!(lookup.typed.is_none());
+    assert!(state.semchecked.product.is_none());
 }
 
 #[test]
@@ -37,6 +38,7 @@ fn pipeline_marks_resolve_failure_as_poisoned() {
     assert!(lookup.poisoned_nodes.contains(&ROOT_POISON_NODE));
     assert!(lookup.resolved.is_some());
     assert!(lookup.typed.is_none());
+    assert!(state.semchecked.product.is_none());
 }
 
 #[test]
@@ -51,6 +53,36 @@ fn pipeline_marks_typecheck_failure_as_poisoned() {
     assert!(!state.typechecked.diagnostics.is_empty());
     assert!(state.typechecked.product.is_some());
     assert!(state.typechecked.poisoned_nodes.contains(&ROOT_POISON_NODE));
+
+    let lookup = to_lookup_state(&state);
+    assert!(lookup.poisoned_nodes.contains(&ROOT_POISON_NODE));
+    assert!(lookup.resolved.is_some());
+    assert!(lookup.typed.is_some());
+    assert!(state.semchecked.product.is_none());
+}
+
+#[test]
+fn pipeline_marks_semcheck_failure_as_poisoned() {
+    let mut rt = QueryRuntime::new();
+    let source = Arc::<str>::from(
+        r#"
+        type Point = { x: u64, y: u64 }
+        fn main() -> u64 {
+            let p = Point { x: 1, x: 2, y: 3 };
+            p.y
+        }
+        "#,
+    );
+
+    let state = run_module_pipeline(&mut rt, ModuleId(3), 1, source).expect("pipeline should run");
+
+    assert!(state.parsed.product.is_some());
+    assert!(state.resolved.product.is_some());
+    assert!(state.typechecked.product.is_some());
+    assert!(state.typechecked.diagnostics.is_empty());
+    assert!(state.semchecked.product.is_some());
+    assert!(!state.semchecked.diagnostics.is_empty());
+    assert!(state.semchecked.poisoned_nodes.contains(&ROOT_POISON_NODE));
 
     let lookup = to_lookup_state(&state);
     assert!(lookup.poisoned_nodes.contains(&ROOT_POISON_NODE));

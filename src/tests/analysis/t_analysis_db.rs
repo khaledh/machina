@@ -1308,8 +1308,8 @@ requires {
 }
 
 fn main() -> u64 {
-    let x: Num = 1;
-    if x { 1 } else { 0 }
+    let x: Num = true;
+    true
 }
 "#;
     let dep_source = r#"

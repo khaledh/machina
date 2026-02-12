@@ -20,6 +20,7 @@ pub enum QueryKind {
     ParseModule,
     ResolveModule,
     TypecheckModule,
+    SemcheckModule,
     Diagnostics,
     LookupState,
 }

@@ -434,6 +434,7 @@ fn print_structured_diag(source: &str, diag: Diagnostic) {
         DiagnosticPhase::Parse => "parse",
         DiagnosticPhase::Resolve => "resolve",
         DiagnosticPhase::Typecheck => "typecheck",
+        DiagnosticPhase::Semcheck => "semcheck",
     };
     let message = format!("[{phase}:{}] {}", diag.code, diag.message);
     println!("{}", format_error(source, diag.span, message));

@@ -1,6 +1,6 @@
 //! Unified diagnostics model for analysis queries and IDE adapters.
 //!
-//! This layer normalizes parse/resolve/typecheck diagnostics into one
+//! This layer normalizes parse/resolve/typecheck/semcheck diagnostics into one
 //! phase-tagged representation with stable codes and structured metadata.
 
 use std::collections::BTreeMap;
@@ -9,6 +9,7 @@ use crate::core::diag::Span;
 use crate::core::lexer::LexError;
 use crate::core::parse::ParseError;
 use crate::core::resolve::ResolveError;
+use crate::core::semck::SemCheckError;
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -16,6 +17,7 @@ pub enum DiagnosticPhase {
     Parse,
     Resolve,
     Typecheck,
+    Semcheck,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -296,6 +298,17 @@ impl Diagnostic {
             span: error.span(),
             message: error.to_string(),
             metadata,
+        }
+    }
+
+    pub fn from_semcheck_error(error: &SemCheckError) -> Self {
+        Self {
+            phase: DiagnosticPhase::Semcheck,
+            code: "MC-SEMCK-ERROR".to_string(),
+            severity: DiagnosticSeverity::Error,
+            span: error.span(),
+            message: error.to_string(),
+            metadata: DiagnosticMetadata::new(),
         }
     }
 
