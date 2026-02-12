@@ -18,6 +18,9 @@ pub use errors::SemCheckError;
 use crate::core::context::{SemCheckStageInput, SemCheckStageOutput};
 use crate::core::tree::NodeId;
 
+/// Internal stage entrypoint.
+///
+/// Prefer `crate::core::api::semcheck_stage` from orchestration code.
 pub fn sem_check(ctx: SemCheckStageInput) -> Result<SemCheckStageOutput, Vec<SemCheckError>> {
     let output = sem_check_partial(ctx, &HashSet::new());
     if output.errors.is_empty() {

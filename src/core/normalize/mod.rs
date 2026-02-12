@@ -18,6 +18,9 @@ use crate::core::types::{
 ///
 /// Step 1: 1:1 mapping of the typed tree into a normalized tree, plus explicit
 /// array-to-slice coercions on call arguments.
+///
+/// Internal stage entrypoint; prefer `crate::core::api::normalize_stage` from
+/// orchestration code.
 pub fn normalize(ctx: NormalizeStageInput) -> NormalizeStageOutput {
     let NormalizeStageInput {
         module,

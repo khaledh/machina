@@ -26,6 +26,9 @@ use crate::core::context::{TypecheckStageInput, TypecheckStageOutput};
 use crate::core::resolve::ImportedFacts;
 use crate::core::typecheck::engine::TypecheckEngine;
 
+/// Internal stage entrypoint.
+///
+/// Prefer `crate::core::api::typecheck_stage` from orchestration code.
 pub fn type_check(
     context: TypecheckStageInput,
 ) -> Result<TypecheckStageOutput, Vec<TypeCheckError>> {

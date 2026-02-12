@@ -48,6 +48,9 @@ use crate::core::elaborate::lowering_plan::build_lowering_plans;
 
 /// Transform a normalized tree into a semantic tree using the results from
 /// semantic analysis.
+///
+/// Internal stage entrypoint; prefer `crate::core::api::elaborate_stage` from
+/// orchestration code.
 pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     let ElaborateStageInput {
         module,

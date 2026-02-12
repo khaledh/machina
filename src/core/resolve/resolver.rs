@@ -1627,6 +1627,9 @@ impl Visitor<()> for SymbolResolver {
     }
 }
 
+/// Internal stage entrypoint.
+///
+/// Prefer `crate::core::api::resolve_stage` from orchestration code.
 pub fn resolve(ast_context: ResolveStageInput) -> Result<ResolveStageOutput, Vec<ResolveError>> {
     resolve_with_imports_and_symbols(ast_context, HashMap::new(), HashMap::new())
 }

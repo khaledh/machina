@@ -13,8 +13,8 @@ use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
-use crate::core::typecheck::type_check_partial;
 use crate::core::types::Type;
+use crate::core::{api, resolve};
 use crate::services::analysis::completion::{
     collect as collect_completions, synthesize_member_completion_source,
 };
@@ -378,7 +378,10 @@ impl AnalysisDb {
         // Keep member completions useful when unrelated resolve errors suppress
         // typed lookup-state output by running a local best-effort typecheck.
         let fallback_typed = if typed.is_none() {
-            Some(type_check_partial(resolved.clone()).context)
+            Some(
+                api::typecheck_stage_partial(resolved.clone(), resolve::ImportedFacts::default())
+                    .context,
+            )
         } else {
             None
         };
