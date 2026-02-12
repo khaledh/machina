@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::context::TypeCheckedContext;
-use crate::core::resolve::DefId;
+use crate::core::resolve::{DefId, ImportedFacts};
 use crate::core::tree::NodeId;
 use crate::core::tree::map::TreeMapper;
 use crate::core::tree::resolved as res;
@@ -23,8 +23,8 @@ use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::property_access;
 use crate::core::typecheck::type_map::{
-    CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
-    resolve_type_def_with_args, resolve_type_expr,
+    CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeDefLookup, TypeMap,
+    TypeMapBuilder, resolve_type_def_with_args, resolve_type_expr,
 };
 use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
 use crate::core::types::{FnParam, TyVarId, Type};
@@ -73,7 +73,7 @@ pub(crate) fn materialize(
 
 fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     let mut builder = TypeMapBuilder::new();
-    let nominal_keys = NominalKeyResolver::new(engine.context());
+    let nominal_keys = NominalKeyResolver::new(engine.context(), &engine.env().imported_facts);
 
     // Seed all payload nodes so every AST node has a type entry, even if a
     // specific node was not explicitly solved.
@@ -370,9 +370,15 @@ struct NominalKeyResolver {
 }
 
 impl NominalKeyResolver {
-    fn new(resolved: &crate::core::context::ResolvedContext) -> Self {
+    fn new(
+        resolved: &crate::core::context::ResolvedContext,
+        imported_facts: &ImportedFacts,
+    ) -> Self {
         Self {
-            explicit_nominal_keys: collect_explicit_nominal_keys(resolved),
+            explicit_nominal_keys: collect_explicit_nominal_keys(
+                resolved,
+                &imported_facts.type_defs_by_def,
+            ),
             nominal_templates: collect_nominal_templates(resolved),
         }
     }
@@ -745,11 +751,31 @@ impl TreeMapper for ExplicitNominalCollector<'_> {
     }
 }
 
+struct ResolvedTypeLookup<'a> {
+    context: &'a crate::core::context::ResolvedContext,
+    imported_type_defs: &'a HashMap<DefId, Type>,
+}
+
+impl TypeDefLookup for ResolvedTypeLookup<'_> {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::core::tree::resolved::TypeDef> {
+        self.context.module.type_def_by_id(def_id)
+    }
+
+    fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
+        self.imported_type_defs.get(&def_id)
+    }
+}
+
 fn collect_explicit_nominal_keys(
     resolved: &crate::core::context::ResolvedContext,
+    imported_type_defs: &HashMap<DefId, Type>,
 ) -> HashMap<String, NominalKey> {
     let mut out = HashMap::new();
     let uses = ExplicitNominalCollector::collect(&resolved.def_table, &resolved.module);
+    let type_lookup = ResolvedTypeLookup {
+        context: resolved,
+        imported_type_defs,
+    };
 
     for usage in uses {
         let Some(type_def) = resolved.module.type_def_by_id(usage.def_id) else {
@@ -776,7 +802,7 @@ fn collect_explicit_nominal_keys(
             let mut args = Vec::with_capacity(usage.type_args.len());
             let mut ok = true;
             for arg in &usage.type_args {
-                match resolve_type_expr(&resolved.def_table, resolved, arg) {
+                match resolve_type_expr(&resolved.def_table, &type_lookup, arg) {
                     Ok(ty) => args.push(ty),
                     Err(_) => {
                         ok = false;
@@ -790,9 +816,12 @@ fn collect_explicit_nominal_keys(
             args
         };
 
-        let Ok(inst_ty) =
-            resolve_type_def_with_args(&resolved.def_table, resolved, usage.def_id, &resolved_args)
-        else {
+        let Ok(inst_ty) = resolve_type_def_with_args(
+            &resolved.def_table,
+            &type_lookup,
+            usage.def_id,
+            &resolved_args,
+        ) else {
             continue;
         };
         let inst_name = match inst_ty {

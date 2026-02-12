@@ -28,7 +28,7 @@ fn test_finalize_materializes_typechecked_context() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved);
+    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     constraints::run(&mut engine).expect("constrain pass failed");
     solver::run(&mut engine).expect("solve pass failed");
@@ -52,7 +52,7 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved);
+    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     constraints::run(&mut engine).expect("constrain pass failed");
     solver::run(&mut engine).expect("solve pass failed");

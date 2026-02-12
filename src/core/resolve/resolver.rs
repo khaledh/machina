@@ -70,6 +70,13 @@ pub struct ImportedTraitSig {
     pub properties: HashMap<String, ImportedTraitPropertySig>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportedFacts {
+    pub callable_sigs_by_def: HashMap<DefId, Vec<ImportedCallableSig>>,
+    pub type_defs_by_def: HashMap<DefId, Type>,
+    pub trait_defs_by_def: HashMap<DefId, ImportedTraitSig>,
+}
+
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
@@ -90,6 +97,7 @@ pub struct SymbolResolver {
 #[derive(Clone)]
 pub struct ResolveOutput {
     pub context: ResolvedContext,
+    pub imported_facts: ImportedFacts,
     pub errors: Vec<ResolveError>,
 }
 
@@ -1666,18 +1674,15 @@ pub fn resolve_with_imports_and_symbols_partial(
 
     // Build resolved tree from parsed tree + NodeDefLookup
     let resolved_module = build_module(&node_def_lookup, &ast_context.module);
-    let imported_callable_sigs = std::mem::take(&mut resolver.imported_callable_sigs);
-    let imported_type_defs = std::mem::take(&mut resolver.imported_type_defs);
-    let imported_trait_defs = std::mem::take(&mut resolver.imported_trait_defs);
+    let imported_facts = ImportedFacts {
+        callable_sigs_by_def: std::mem::take(&mut resolver.imported_callable_sigs),
+        type_defs_by_def: std::mem::take(&mut resolver.imported_type_defs),
+        trait_defs_by_def: std::mem::take(&mut resolver.imported_trait_defs),
+    };
 
     ResolveOutput {
-        context: ast_context
-            .with_def_table(def_table, resolved_module)
-            .with_imported_facts(
-                imported_callable_sigs,
-                imported_type_defs,
-                imported_trait_defs,
-            ),
+        context: ast_context.with_def_table(def_table, resolved_module),
+        imported_facts,
         errors,
     }
 }

@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, ImportedCallableSig, ImportedTraitSig};
+use crate::core::resolve::{DefId, ImportedCallableSig, ImportedFacts, ImportedTraitSig};
 use crate::core::tree::ParamMode;
 use crate::core::tree::resolved::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField,
@@ -25,7 +25,8 @@ use crate::core::typecheck::engine::{
 };
 use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::core::typecheck::type_map::{
-    resolve_return_type_expr_with_params, resolve_type_expr, resolve_type_expr_with_params,
+    TypeDefLookup, resolve_return_type_expr_with_params, resolve_type_expr,
+    resolve_type_expr_with_params,
 };
 use crate::core::types::{EnumVariant, StructField, TyVarId, Type};
 
@@ -35,9 +36,37 @@ enum PropertyAccessorKind {
     Set,
 }
 
+struct ResolvedTypeLookup<'a> {
+    context: &'a crate::core::context::ResolvedContext,
+    imported_type_defs: &'a HashMap<DefId, Type>,
+}
+
+impl<'a> ResolvedTypeLookup<'a> {
+    fn new(
+        context: &'a crate::core::context::ResolvedContext,
+        imported_type_defs: &'a HashMap<DefId, Type>,
+    ) -> Self {
+        Self {
+            context,
+            imported_type_defs,
+        }
+    }
+}
+
+impl TypeDefLookup for ResolvedTypeLookup<'_> {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::core::tree::resolved::TypeDef> {
+        self.context.module.type_def_by_id(def_id)
+    }
+
+    fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
+        self.imported_type_defs.get(&def_id)
+    }
+}
+
 /// Pass 1: collect global symbols/signatures into the engine environment.
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {
     let ctx = engine.context().clone();
+    let imported_facts = engine.env().imported_facts.clone();
 
     let mut type_symbols = HashMap::new();
     let mut type_defs = HashMap::new();
@@ -53,6 +82,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     // 1) Collect nominal types and type symbols.
     collect_type_defs(
         &ctx,
+        &imported_facts,
         &mut type_symbols,
         &mut type_defs,
         &mut generic_envs,
@@ -60,14 +90,21 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     );
 
     // 2) Collect trait method contracts.
-    collect_trait_sigs(&ctx, &mut trait_sigs, &mut errors);
+    collect_trait_sigs(&ctx, &imported_facts, &mut trait_sigs, &mut errors);
 
     // 3) Collect function overloads.
-    collect_function_sigs(&ctx, &mut func_sigs, &mut generic_envs, &mut errors);
+    collect_function_sigs(
+        &ctx,
+        &imported_facts,
+        &mut func_sigs,
+        &mut generic_envs,
+        &mut errors,
+    );
 
     // 4) Collect method overloads and synthesized property signatures.
     collect_method_sigs(
         &ctx,
+        &imported_facts,
         &type_defs,
         &trait_sigs,
         &mut trait_impls,
@@ -99,11 +136,13 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 
 fn collect_type_defs(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     type_symbols: &mut HashMap<String, DefId>,
     type_defs: &mut HashMap<String, Type>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
 ) {
+    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
     for type_def in ctx.module.type_defs() {
         type_symbols.insert(type_def.name.clone(), type_def.def_id);
         record_generic_env(type_def.def_id, &type_def.type_params, generic_envs);
@@ -113,21 +152,22 @@ fn collect_type_defs(
             continue;
         }
 
-        let resolved = match &type_def.kind {
-            TypeDefKind::Alias { aliased_ty } => resolve_type_expr(&ctx.def_table, ctx, aliased_ty),
-            TypeDefKind::Struct { fields } => {
-                resolve_struct_type(ctx, fields).map(|fields| Type::Struct {
-                    name: type_def.name.clone(),
-                    fields,
-                })
-            }
-            TypeDefKind::Enum { variants } => {
-                resolve_enum_type(ctx, variants).map(|variants| Type::Enum {
-                    name: type_def.name.clone(),
-                    variants,
-                })
-            }
-        };
+        let resolved =
+            match &type_def.kind {
+                TypeDefKind::Alias { aliased_ty } => {
+                    resolve_type_expr(&ctx.def_table, &type_lookup, aliased_ty)
+                }
+                TypeDefKind::Struct { fields } => resolve_struct_type(ctx, &type_lookup, fields)
+                    .map(|fields| Type::Struct {
+                        name: type_def.name.clone(),
+                        fields,
+                    }),
+                TypeDefKind::Enum { variants } => resolve_enum_type(ctx, &type_lookup, variants)
+                    .map(|variants| Type::Enum {
+                        name: type_def.name.clone(),
+                        variants,
+                    }),
+            };
 
         match resolved {
             Ok(ty) => {
@@ -140,11 +180,12 @@ fn collect_type_defs(
 
 fn resolve_struct_type(
     ctx: &crate::core::context::ResolvedContext,
+    type_lookup: &ResolvedTypeLookup<'_>,
     fields: &[StructDefField],
 ) -> Result<Vec<StructField>, TypeCheckError> {
     let mut out = Vec::with_capacity(fields.len());
     for field in fields {
-        let field_ty = resolve_type_expr(&ctx.def_table, ctx, &field.ty)?;
+        let field_ty = resolve_type_expr(&ctx.def_table, type_lookup, &field.ty)?;
         out.push(StructField {
             name: field.name.clone(),
             ty: field_ty,
@@ -155,6 +196,7 @@ fn resolve_struct_type(
 
 fn resolve_enum_type(
     ctx: &crate::core::context::ResolvedContext,
+    type_lookup: &ResolvedTypeLookup<'_>,
     variants: &[EnumDefVariant],
 ) -> Result<Vec<EnumVariant>, TypeCheckError> {
     let mut out = Vec::with_capacity(variants.len());
@@ -162,7 +204,7 @@ fn resolve_enum_type(
         let payload = variant
             .payload
             .iter()
-            .map(|payload_ty| resolve_type_expr(&ctx.def_table, ctx, payload_ty))
+            .map(|payload_ty| resolve_type_expr(&ctx.def_table, type_lookup, payload_ty))
             .collect::<Result<Vec<_>, _>>()?;
         out.push(EnumVariant {
             name: variant.name.clone(),
@@ -174,15 +216,19 @@ fn resolve_enum_type(
 
 fn collect_trait_sigs(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     trait_sigs: &mut HashMap<String, CollectedTraitSig>,
     errors: &mut Vec<TypeCheckError>,
 ) {
+    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
     for trait_def in ctx.module.trait_defs() {
         let mut methods = HashMap::new();
         let mut properties = HashMap::new();
 
         for method in &trait_def.methods {
-            let Some(collected) = collect_trait_method_sig(ctx, &method.sig, errors) else {
+            let Some(collected) =
+                collect_trait_method_sig(ctx, imported_facts, &method.sig, errors)
+            else {
                 continue;
             };
 
@@ -199,7 +245,7 @@ fn collect_trait_sigs(
         }
 
         for property in &trait_def.properties {
-            let ty = match resolve_type_expr(&ctx.def_table, ctx, &property.ty) {
+            let ty = match resolve_type_expr(&ctx.def_table, &type_lookup, &property.ty) {
                 Ok(ty) => ty,
                 Err(err) => {
                     errors.push(err);
@@ -242,7 +288,7 @@ fn collect_trait_sigs(
         );
     }
 
-    for (def_id, imported) in &ctx.imported_trait_defs {
+    for (def_id, imported) in &imported_facts.trait_defs_by_def {
         let Some(def) = ctx.def_table.lookup_def(*def_id) else {
             continue;
         };
@@ -255,6 +301,7 @@ fn collect_trait_sigs(
 
 fn collect_function_sigs(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     func_sigs: &mut HashMap<String, Vec<CollectedCallableSig>>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
@@ -270,6 +317,7 @@ fn collect_function_sigs(
     for (def_id, sig) in overloads {
         collect_callable_sig(
             ctx,
+            imported_facts,
             def_id,
             &sig,
             None,
@@ -280,7 +328,7 @@ fn collect_function_sigs(
         );
     }
 
-    for (def_id, imported_sigs) in &ctx.imported_callable_sigs {
+    for (def_id, imported_sigs) in &imported_facts.callable_sigs_by_def {
         let Some(def) = ctx.def_table.lookup_def(*def_id) else {
             continue;
         };
@@ -372,6 +420,7 @@ fn imported_trait_sig_to_collected(
 
 fn collect_method_sigs(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     type_defs: &HashMap<String, Type>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     trait_impls: &mut HashMap<String, HashSet<String>>,
@@ -429,6 +478,7 @@ fn collect_method_sigs(
             let mut collected = Vec::new();
             collect_callable_sig(
                 ctx,
+                imported_facts,
                 def_id,
                 &function_sig_from_method(&sig),
                 Some(sig.self_param.mode.clone()),
@@ -579,6 +629,7 @@ fn collect_method_sigs(
 
 fn collect_callable_sig(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     def_id: DefId,
     sig: &FunctionSig,
     self_mode: Option<ParamMode>,
@@ -595,7 +646,7 @@ fn collect_callable_sig(
         Some(map)
     };
 
-    let params = match build_param_sigs(ctx, &sig.params, type_param_map.as_ref()) {
+    let params = match build_param_sigs(ctx, imported_facts, &sig.params, type_param_map.as_ref()) {
         Ok(params) => params,
         Err(err) => {
             errors.push(err);
@@ -603,9 +654,10 @@ fn collect_callable_sig(
         }
     };
 
+    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
     let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
-        ctx,
+        &type_lookup,
         &sig.ret_ty_expr,
         type_param_map.as_ref(),
     ) {
@@ -629,6 +681,7 @@ fn collect_callable_sig(
 
 fn collect_trait_method_sig(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     sig: &MethodSig,
     errors: &mut Vec<TypeCheckError>,
 ) -> Option<CollectedTraitMethodSig> {
@@ -638,7 +691,7 @@ fn collect_trait_method_sig(
         Some(type_param_map(&sig.type_params))
     };
 
-    let params = match build_param_sigs(ctx, &sig.params, type_param_map.as_ref()) {
+    let params = match build_param_sigs(ctx, imported_facts, &sig.params, type_param_map.as_ref()) {
         Ok(params) => params,
         Err(err) => {
             errors.push(err);
@@ -646,9 +699,10 @@ fn collect_trait_method_sig(
         }
     };
 
+    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
     let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
-        ctx,
+        &type_lookup,
         &sig.ret_ty_expr,
         type_param_map.as_ref(),
     ) {
@@ -732,12 +786,15 @@ fn validate_trait_method_impl(
 
 fn build_param_sigs(
     ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
     params: &[Param],
     type_params: Option<&HashMap<DefId, TyVarId>>,
 ) -> Result<Vec<CollectedParamSig>, TypeCheckError> {
+    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
     let mut out = Vec::with_capacity(params.len());
     for param in params {
-        let ty = resolve_type_expr_with_params(&ctx.def_table, ctx, &param.typ, type_params)?;
+        let ty =
+            resolve_type_expr_with_params(&ctx.def_table, &type_lookup, &param.typ, type_params)?;
         let name = ctx
             .def_table
             .lookup_def(param.def_id)

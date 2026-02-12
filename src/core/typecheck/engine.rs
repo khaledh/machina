@@ -12,7 +12,7 @@ use std::collections::HashSet;
 
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
-use crate::core::resolve::DefId;
+use crate::core::resolve::{DefId, ImportedFacts};
 use crate::core::tree::ParamMode;
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::types::{TyVarId, Type};
@@ -23,6 +23,7 @@ use super::{collect, constraints, finalize, solver, typesys, validate};
 #[derive(Clone)]
 pub(crate) struct TcEnv {
     pub(crate) context: ResolvedContext,
+    pub(crate) imported_facts: ImportedFacts,
     pub(crate) type_symbols: HashMap<String, DefId>,
     pub(crate) type_defs: HashMap<String, Type>,
     pub(crate) trait_sigs: HashMap<String, CollectedTraitSig>,
@@ -147,10 +148,11 @@ pub(crate) struct TypecheckEngine {
 }
 
 impl TypecheckEngine {
-    pub(crate) fn new(context: ResolvedContext) -> Self {
+    pub(crate) fn new(context: ResolvedContext, imported_facts: ImportedFacts) -> Self {
         Self {
             env: TcEnv {
                 context,
+                imported_facts,
                 type_symbols: HashMap::new(),
                 type_defs: HashMap::new(),
                 trait_sigs: HashMap::new(),

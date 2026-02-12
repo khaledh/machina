@@ -9,7 +9,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
 use crate::core::resolve::{ResolveError, attach_def_owners, resolve};
 use crate::core::tree::NodeId;
-use crate::core::typecheck::{TypeCheckError, type_check};
+use crate::core::typecheck::{TypeCheckError, type_check_with_imported_facts};
 use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::query::{QueryCancelled, QueryKey, QueryKind};
 use crate::services::analysis::results::{ResolvedModuleResult, TypedModuleResult};
@@ -51,7 +51,8 @@ pub fn query_typecheck(
 ) -> Result<TypedModuleResult, BatchQueryError> {
     let key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
     let typed = db.execute_query(key, move |_rt| {
-        let typed = type_check(resolved.into_context())
+        let imported_facts = resolved.imported_facts();
+        let typed = type_check_with_imported_facts(resolved.into_context(), imported_facts)
             .map(|ctx| TypedModuleResult::from_context(module_id, ctx));
         Ok(typed)
     })?;

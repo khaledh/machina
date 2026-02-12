@@ -23,14 +23,29 @@ pub use errors::{TypeCheckError, TypeCheckErrorKind};
 pub use infer_unify::{Unifier, UnifyError};
 
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
+use crate::core::resolve::ImportedFacts;
 use crate::core::typecheck::engine::TypecheckEngine;
 
 pub fn type_check(context: ResolvedContext) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
-    TypecheckEngine::new(context).run()
+    TypecheckEngine::new(context, ImportedFacts::default()).run()
 }
 
 pub fn type_check_partial(context: ResolvedContext) -> TypecheckOutput {
-    TypecheckEngine::new(context).run_partial()
+    TypecheckEngine::new(context, ImportedFacts::default()).run_partial()
+}
+
+pub fn type_check_with_imported_facts(
+    context: ResolvedContext,
+    imported_facts: ImportedFacts,
+) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+    TypecheckEngine::new(context, imported_facts).run()
+}
+
+pub fn type_check_partial_with_imported_facts(
+    context: ResolvedContext,
+    imported_facts: ImportedFacts,
+) -> TypecheckOutput {
+    TypecheckEngine::new(context, imported_facts).run_partial()
 }
 
 #[cfg(test)]

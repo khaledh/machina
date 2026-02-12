@@ -11,11 +11,11 @@ use crate::core::capsule::ModuleId;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::Parser;
 use crate::core::resolve::{
-    ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial,
+    ImportedFacts, ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial,
 };
 use crate::core::tree::NodeId;
 use crate::core::tree::NodeIdGen;
-use crate::core::typecheck::type_check_partial;
+use crate::core::typecheck::type_check_partial_with_imported_facts;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
 
@@ -40,7 +40,13 @@ impl<T> Default for StageOutput<T> {
 }
 
 pub(crate) type ParseStageOutput = StageOutput<crate::core::context::ParsedContext>;
-pub(crate) type ResolveStageOutput = StageOutput<crate::core::context::ResolvedContext>;
+#[derive(Clone)]
+pub(crate) struct ResolvedStageProduct {
+    pub context: crate::core::context::ResolvedContext,
+    pub imported_facts: ImportedFacts,
+}
+
+pub(crate) type ResolveStageOutput = StageOutput<ResolvedStageProduct>;
 pub(crate) type TypecheckStageOutput = StageOutput<crate::core::context::TypeCheckedContext>;
 
 #[derive(Clone, Default)]
@@ -145,7 +151,10 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
                 imported_modules_for_resolve,
                 imported_symbols_for_resolve,
             );
-            state.product = Some(resolved.context);
+            state.product = Some(ResolvedStageProduct {
+                context: resolved.context,
+                imported_facts: resolved.imported_facts,
+            });
             if !resolved.errors.is_empty() {
                 state
                     .diagnostics
@@ -160,14 +169,17 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     // Do not run type checking when resolution emitted errors. This keeps
     // lookup behavior stable (no leaked inference vars on unresolved symbols).
     let typecheck_input = if !skip_typecheck && resolved.diagnostics.is_empty() {
-        resolved.product.clone()
+        resolved
+            .product
+            .clone()
+            .map(|resolved| (resolved.context, resolved.imported_facts))
     } else {
         None
     };
     let typechecked = rt.execute(typecheck_key, move |_rt| {
         let mut state = TypecheckStageOutput::default();
-        if let Some(resolved) = typecheck_input {
-            let typed = type_check_partial(resolved);
+        if let Some((resolved, imported_facts)) = typecheck_input {
+            let typed = type_check_partial_with_imported_facts(resolved, imported_facts);
             state.product = Some(typed.context);
             if !typed.errors.is_empty() {
                 state
@@ -207,7 +219,11 @@ pub(crate) fn to_lookup_state(state: &ModulePipelineState) -> LookupState {
     poisoned_nodes.extend(state.typechecked.poisoned_nodes.iter().copied());
 
     LookupState {
-        resolved: state.resolved.product.clone(),
+        resolved: state
+            .resolved
+            .product
+            .clone()
+            .map(|resolved| resolved.context),
         typed: state.typechecked.product.clone(),
         poisoned_nodes,
     }

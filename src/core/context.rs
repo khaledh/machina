@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::{CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule};
-use crate::core::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig, ImportedTraitSig};
+use crate::core::resolve::{DefId, DefTable, GlobalDefId};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symtab::SymbolTable;
 use crate::core::tree::normalized::Module as NormalizedModule;
@@ -12,7 +12,6 @@ use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap};
 use crate::core::tree::typed::Module as TypedModule;
 use crate::core::tree::{NodeId, NodeIdGen};
 use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
-use crate::core::types::Type;
 
 // -----------------------------------------------------------------------------
 // Capsule Parsed Context
@@ -165,9 +164,6 @@ impl ParsedContext {
             def_owners: HashMap::new(),
             symbols,
             node_id_gen: self.node_id_gen,
-            imported_callable_sigs: HashMap::new(),
-            imported_type_defs: HashMap::new(),
-            imported_trait_defs: HashMap::new(),
         }
     }
 }
@@ -183,9 +179,6 @@ pub struct ResolvedContext {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
-    pub imported_type_defs: HashMap<DefId, Type>,
-    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 impl ResolvedContext {
@@ -210,22 +203,7 @@ impl ResolvedContext {
             generic_insts,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
-            imported_callable_sigs: self.imported_callable_sigs,
-            imported_type_defs: self.imported_type_defs,
-            imported_trait_defs: self.imported_trait_defs,
         }
-    }
-
-    pub fn with_imported_facts(
-        mut self,
-        imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
-        imported_type_defs: HashMap<DefId, Type>,
-        imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
-    ) -> Self {
-        self.imported_callable_sigs = imported_callable_sigs;
-        self.imported_type_defs = imported_type_defs;
-        self.imported_trait_defs = imported_trait_defs;
-        self
     }
 }
 
@@ -243,9 +221,6 @@ pub struct TypeCheckedContext {
     pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
-    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
-    pub imported_type_defs: HashMap<DefId, Type>,
-    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 // -----------------------------------------------------------------------------

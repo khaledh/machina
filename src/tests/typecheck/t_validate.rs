@@ -20,7 +20,7 @@ fn resolve_source(source: &str) -> crate::core::context::ResolvedContext {
 
 fn run_validate(source: &str) -> Result<(), Vec<TypeCheckError>> {
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved);
+    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     constraints::run(&mut engine).expect("constrain pass failed");
     solver::run(&mut engine).expect("solve pass failed");

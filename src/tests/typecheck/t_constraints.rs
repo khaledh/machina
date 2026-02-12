@@ -20,7 +20,7 @@ fn resolve_source(source: &str) -> crate::core::context::ResolvedContext {
 
 fn collect_constraints(source: &str) -> ConstrainOutput {
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved);
+    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     run(&mut engine).expect("constrain pass failed");
     engine.state().constrain.clone()
