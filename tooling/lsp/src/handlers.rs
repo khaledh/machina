@@ -1,6 +1,6 @@
 //! Minimal JSON-RPC request handlers for LSP bootstrap methods.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::path::Path;
 
 use crate::session::{AnalysisSession, SessionError};
@@ -38,6 +38,13 @@ struct ReadRequestParams {
     version: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodeActionRequestParams {
+    uri: String,
+    range: machina::core::diag::Span,
+    version: Option<i32>,
+}
+
 pub fn handle_message(
     session: &mut AnalysisSession,
     message: Value,
@@ -68,7 +75,7 @@ pub fn handle_message(
                         "signatureHelpProvider": Value::Null,
                         "semanticTokensProvider": Value::Null,
                         "documentSymbolProvider": false,
-                        "codeActionProvider": false
+                        "codeActionProvider": true
                     },
                     "serverInfo": {
                         "name": "machina-lsp",
@@ -184,6 +191,28 @@ pub fn handle_message(
                 completion_response(session, id, &params.uri, params.line0, params.col0, version);
             (HandlerAction::Continue, Some(response))
         }
+        Some("textDocument/codeAction") => {
+            let Some(params) = params.and_then(parse_code_action_request_params) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let version = match params.version {
+                Some(version) => version,
+                None => match session.lookup_document(&params.uri) {
+                    Ok(doc) => doc.version,
+                    Err(error) => {
+                        return (
+                            HandlerAction::Continue,
+                            Some(session_error_response(id, &error)),
+                        );
+                    }
+                },
+            };
+            let response = code_action_response(session, id, &params.uri, params.range, version);
+            (HandlerAction::Continue, Some(response))
+        }
         Some("shutdown") => {
             let response = json!({
                 "jsonrpc": "2.0",
@@ -263,6 +292,39 @@ fn parse_read_request_params(params: &Value) -> Option<ReadRequestParams> {
         uri,
         line0,
         col0,
+        version,
+    })
+}
+
+fn parse_code_action_request_params(params: &Value) -> Option<CodeActionRequestParams> {
+    let text_doc = params.get("textDocument")?;
+    let uri = text_doc.get("uri")?.as_str()?.to_string();
+    let range = params.get("range")?;
+    let start = range.get("start")?;
+    let end = range.get("end")?;
+    let start_line = usize::try_from(start.get("line")?.as_u64()?).ok()?;
+    let start_col = usize::try_from(start.get("character")?.as_u64()?).ok()?;
+    let end_line = usize::try_from(end.get("line")?.as_u64()?).ok()?;
+    let end_col = usize::try_from(end.get("character")?.as_u64()?).ok()?;
+    let version = params
+        .get("mcDocVersion")
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok());
+    let range = machina::core::diag::Span {
+        start: machina::core::diag::Position {
+            offset: 0,
+            line: start_line.saturating_add(1),
+            column: start_col.saturating_add(1),
+        },
+        end: machina::core::diag::Position {
+            offset: 0,
+            line: end_line.saturating_add(1),
+            column: end_col.saturating_add(1),
+        },
+    };
+    Some(CodeActionRequestParams {
+        uri,
+        range,
         version,
     })
 }
@@ -452,6 +514,72 @@ fn completion_response(
                     "isIncomplete": false,
                     "items": items
                 }
+            })
+        }
+        Err(_) => session_error_response(id, &SessionError::Cancelled),
+    }
+}
+
+fn code_action_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    range: machina::core::diag::Span,
+    version: i32,
+) -> Value {
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    let file_id = match session.file_id_for_uri(uri) {
+        Ok(file_id) => file_id,
+        Err(error) => return session_error_response(id, &error),
+    };
+    let result = session.execute_query(|db| db.code_actions_at_file(file_id, range));
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    match result {
+        Ok(actions) => {
+            let items: Vec<Value> = actions
+                .into_iter()
+                .map(|action| {
+                    let edits: Vec<Value> = action
+                        .edits
+                        .into_iter()
+                        .map(|edit| {
+                            json!({
+                                "range": {
+                                    "start": {
+                                        "line": edit.span.start.line.saturating_sub(1),
+                                        "character": edit.span.start.column.saturating_sub(1)
+                                    },
+                                    "end": {
+                                        "line": edit.span.end.line.saturating_sub(1),
+                                        "character": edit.span.end.column.saturating_sub(1)
+                                    }
+                                },
+                                "newText": edit.new_text
+                            })
+                        })
+                        .collect();
+                    let mut changes = Map::new();
+                    changes.insert(uri.to_string(), Value::Array(edits));
+                    json!({
+                        "title": action.title,
+                        "kind": "quickfix",
+                        "edit": {
+                            "changes": changes
+                        },
+                        "data": {
+                            "diagnosticCode": action.diagnostic_code
+                        }
+                    })
+                })
+                .collect();
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": items
             })
         }
         Err(_) => session_error_response(id, &SessionError::Cancelled),
@@ -945,5 +1073,75 @@ mod tests {
         let completion = completion.expect("expected completion response");
         assert_eq!(completion["id"], 72);
         assert!(completion.get("error").is_none());
+    }
+
+    #[test]
+    fn code_action_request_returns_union_match_quickfix_with_edits() {
+        let mut session = AnalysisSession::new();
+        let source = r#"type ParseErr = {}
+type IoErr = {}
+fn load() -> u64 | ParseErr | IoErr { IoErr{} }
+fn main() -> u64 {
+    match load() {
+        v: u64 => v,
+    }
+}"#;
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-code-action.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 100,
+                "method": "textDocument/codeAction",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-code-action.mc" },
+                    "range": {
+                        "start": { "line": 4, "character": 4 },
+                        "end": { "line": 6, "character": 5 }
+                    },
+                    "mcDocVersion": 1,
+                    "context": { "diagnostics": [] }
+                }
+            }),
+        );
+
+        let response = response.expect("expected code action response");
+        assert_eq!(response["id"], 100);
+        let actions = response["result"]
+            .as_array()
+            .expect("expected code action result array");
+        assert!(
+            actions.iter().any(|a| a["kind"] == "quickfix"),
+            "expected quick fix action"
+        );
+        let union_fix = actions
+            .iter()
+            .find(|a| {
+                a["title"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("Add match arms for missing union variants")
+            })
+            .expect("expected union match quick fix");
+        let edit_text = union_fix["edit"]["changes"]["file:///tmp/lsp-code-action.mc"][0]["newText"]
+            .as_str()
+            .expect("expected generated edit text");
+        assert!(edit_text.contains("v0: ParseErr =>"));
+        assert!(edit_text.contains("v1: IoErr =>"));
     }
 }
