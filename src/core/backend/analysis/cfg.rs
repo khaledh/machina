@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::dataflow::DataflowGraph;
+use crate::core::analysis::dataflow::DataflowGraph;
 use crate::ir::{BlockId, Function, Terminator};
 
 /// Control-flow graph for a single SSA function.

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::analysis::facts::{
+use crate::core::analysis::facts::{
     DefTableOverlay, FactOrigin, FactOverlayMap, SyntheticReason, TypeMapOverlay,
 };
 use crate::resolve::def_table::DefTable;

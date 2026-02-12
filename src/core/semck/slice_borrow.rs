@@ -11,8 +11,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::dataflow::solve_forward;
 use crate::context::NormalizedContext;
+use crate::core::analysis::dataflow::solve_forward;
 use crate::resolve::DefId;
 use crate::semck::SemCheckError;
 use crate::semck::liveness_util;

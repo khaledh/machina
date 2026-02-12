@@ -1,8 +1,8 @@
-use crate::analysis::dataflow::DataflowGraph;
 use crate::backend::analysis::cfg::Cfg;
 use crate::backend::analysis::liveness::analyze as liveness_analyze;
 use crate::backend::lower::lower_func;
 use crate::context::{ParsedContext, SemanticContext};
+use crate::core::analysis::dataflow::DataflowGraph;
 use crate::elaborate::elaborate;
 use crate::ir::Terminator;
 use crate::lexer::{LexError, Lexer, Token};

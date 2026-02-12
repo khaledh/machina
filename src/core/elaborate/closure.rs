@@ -42,7 +42,7 @@
 //! }
 //! ```
 
-use crate::analysis::facts::SyntheticReason;
+use crate::core::analysis::facts::SyntheticReason;
 use crate::diag::Span;
 use crate::resolve::{DefId, DefKind, TypeAttrs};
 use crate::semck::closure::capture::CaptureMode;

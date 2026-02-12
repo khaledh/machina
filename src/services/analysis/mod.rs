@@ -3,10 +3,8 @@
 pub mod batch;
 pub mod code_actions;
 pub mod completion;
-pub mod dataflow;
 pub mod db;
 pub mod diagnostics;
-pub mod facts;
 pub mod frontend_support;
 pub mod lookups;
 pub mod module_graph;

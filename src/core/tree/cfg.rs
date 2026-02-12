@@ -1,6 +1,6 @@
 //! Parsed-tree-based CFG construction.
 
-use crate::analysis::dataflow::DataflowGraph;
+use crate::core::analysis::dataflow::DataflowGraph;
 use crate::resolve::DefId;
 use crate::tree::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 

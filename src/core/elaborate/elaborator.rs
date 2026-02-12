@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::facts::{DefTableOverlay, SyntheticReason, TypeMapOverlay};
+use crate::core::analysis::facts::{DefTableOverlay, SyntheticReason, TypeMapOverlay};
 use crate::diag::Span;
 use crate::resolve::DefId;
 use crate::semck::closure::capture::CaptureMode;

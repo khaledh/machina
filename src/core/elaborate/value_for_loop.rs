@@ -29,7 +29,7 @@
 //! For range loops (`for i in 0..10`), the iterator binding is omitted
 //! and the element is just the current index value.
 
-use crate::analysis::facts::SyntheticReason;
+use crate::core::analysis::facts::SyntheticReason;
 use crate::diag::Span;
 use crate::elaborate::elaborator::Elaborator;
 use crate::resolve::{DefId, DefKind};

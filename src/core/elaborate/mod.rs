@@ -27,8 +27,8 @@
 //! The output semantic tree contains all information needed for lowering to
 //! proceed without further semantic reasoning.
 
-use crate::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::context::{SemanticCheckedContext, SemanticContext};
+use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::tree::semantic as sem;
 mod bind_pattern;
 mod calls;

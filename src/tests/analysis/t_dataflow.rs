@@ -1,4 +1,4 @@
-use crate::analysis::dataflow::{DataflowGraph, solve_backward, solve_forward};
+use crate::core::analysis::dataflow::{DataflowGraph, solve_backward, solve_forward};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ToyNode(usize);

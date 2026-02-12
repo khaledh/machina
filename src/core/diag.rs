@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use crate::analysis::query::QueryCancelled;
 use crate::backend::lower::LowerToIrError as SsaLoweringError;
 use crate::backend::verify::VerifyIrError as SsaVerifyError;
 use crate::capsule::CapsuleError;
@@ -47,12 +46,6 @@ pub enum CompileError {
 
     #[error("IO error: {0}")]
     Io(PathBuf, std::io::Error),
-}
-
-impl From<QueryCancelled> for CompileError {
-    fn from(_: QueryCancelled) -> Self {
-        CompileError::QueryCancelled
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

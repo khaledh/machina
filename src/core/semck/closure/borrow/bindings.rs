@@ -5,7 +5,7 @@
 //! which captures are "active" at each program point.
 use std::collections::HashMap;
 
-use crate::analysis::dataflow::solve_forward;
+use crate::core::analysis::dataflow::solve_forward;
 use crate::resolve::DefId;
 use crate::semck::closure::capture::{CaptureMode, ClosureCapture};
 use crate::tree::cfg::{AstBlockId, TreeCfg, TreeCfgItem, TreeCfgNode};

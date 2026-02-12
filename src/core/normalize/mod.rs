@@ -1,5 +1,5 @@
-use crate::analysis::facts::{SyntheticReason, TypeMapOverlay};
 use crate::context::{NormalizedContext, TypeCheckedContext};
+use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
 use crate::resolve::DefId;
 use crate::resolve::DefKind;
 use crate::resolve::def_table::DefTable;

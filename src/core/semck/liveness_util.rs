@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::analysis::dataflow::solve_backward;
+use crate::core::analysis::dataflow::solve_backward;
 use crate::resolve::DefId;
 use crate::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
 use crate::types::TypeId;
