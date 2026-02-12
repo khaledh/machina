@@ -441,7 +441,7 @@ fn definition_response(
         Err(error) => return session_error_response(id, &error),
     };
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.def_location_at_file(file_id, span));
+    let result = session.execute_query(|db| db.def_location_at_program_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
         return stale_result_response(id);
     }
@@ -1054,6 +1054,81 @@ mod tests {
             "expected at least one definition location"
         );
         assert_eq!(locations[0]["uri"], "file:///tmp/lsp-definition.mc");
+    }
+
+    #[test]
+    fn definition_request_resolves_imported_symbol_location_across_modules() {
+        let run_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "machina_lsp_def_import_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        let app_dir = temp_dir.join("app");
+        std::fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+        let entry_path = temp_dir.join("main.mc");
+        let dep_path = app_dir.join("dep.mc");
+        let entry_source = r#"requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run()
+}"#;
+        let dep_source = r#"@[public]
+fn run() -> u64 { 1 }
+"#;
+        std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
+        std::fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+        let entry_uri = format!("file://{}", entry_path.to_string_lossy());
+        let dep_uri = format!("file://{}", dep_path.to_string_lossy());
+
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": entry_uri,
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": entry_source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 91,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": entry_uri },
+                    "position": { "line": 5, "character": 5 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+
+        let response = response.expect("expected definition response");
+        assert_eq!(response["id"], 91);
+        let locations = response["result"]
+            .as_array()
+            .expect("expected location array");
+        assert_eq!(locations.len(), 1, "expected one definition location");
+        assert_eq!(locations[0]["uri"], dep_uri);
+        assert_eq!(locations[0]["range"]["start"]["line"], 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

@@ -5,13 +5,15 @@
 //! - query memoization/dependency tracking,
 //! - module-closure invalidation.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::core::capsule::bind::CapsuleBindings;
+use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::diag::Span;
-use crate::core::resolve::DefId;
+use crate::core::resolve::{DefId, DefKind};
 use crate::core::tree::NodeId;
 use crate::core::types::Type;
 use crate::core::{api, resolve};
@@ -198,6 +200,7 @@ impl AnalysisDb {
             let program_context = crate::core::context::CapsuleParsedContext::new(program);
             let bindings = CapsuleBindings::build(&program_context);
             let mut import_facts = ProgramImportFactsCache::default();
+            let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
 
             let mut all = Vec::new();
             for module_id in program_context.dependency_order_from_entry() {
@@ -207,7 +210,7 @@ impl AnalysisDb {
                 let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
                 let module_revision = stable_source_revision(&parsed.source.source);
                 let parsed_context = crate::core::context::ParsedContext::new(
-                    parsed.module.clone(),
+                    module_with_implicit_prelude(parsed, prelude_module.as_ref()),
                     program_context.next_node_id_gen().clone(),
                 );
                 let imported_modules =
@@ -298,6 +301,140 @@ impl AnalysisDb {
         let snapshot = self.snapshot();
         let state = self.lookup_state_for_file(file_id)?;
         Ok(def_location_at_span(&snapshot, file_id, &state, query_span))
+    }
+
+    pub fn def_location_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<Location>> {
+        let snapshot = self.snapshot();
+        let Some(entry_source) = snapshot.text(file_id) else {
+            return Ok(None);
+        };
+        let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
+            return Ok(None);
+        };
+        let project_root = infer_project_root(&entry_path);
+        let entry_module_path = match ModulePath::from_file(&entry_path, &project_root) {
+            Ok(path) => path,
+            Err(_) => return Ok(None),
+        };
+        let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
+        let program = match capsule::discover_and_parse_capsule_with_loader(
+            &entry_source,
+            &entry_path,
+            entry_module_path,
+            &loader,
+        ) {
+            Ok(program) => program,
+            Err(_) => return Ok(None),
+        };
+        let program_context = crate::core::context::CapsuleParsedContext::new(program);
+        let entry_module_id = program_context.entry();
+        let bindings = CapsuleBindings::build(&program_context);
+        let mut import_facts = ProgramImportFactsCache::default();
+        let mut module_states = HashMap::<ModuleId, LookupState>::new();
+        let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
+
+        for module_id in program_context.dependency_order_from_entry() {
+            let Some(parsed) = program_context.module(module_id) else {
+                continue;
+            };
+            let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
+            let module_revision = stable_source_revision(&parsed.source.source);
+            let parsed_context = crate::core::context::ParsedContext::new(
+                module_with_implicit_prelude(parsed, prelude_module.as_ref()),
+                program_context.next_node_id_gen().clone(),
+            );
+            let imported_modules =
+                import_facts.imported_modules_for(&program_context, &bindings, module_id);
+            let imported_symbols =
+                import_facts.imported_symbols_for(&program_context, &bindings, module_id);
+            let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
+            let state = run_module_pipeline_with_parsed_and_imports(
+                &mut self.runtime,
+                module_id,
+                module_revision,
+                source,
+                Some(parsed_context),
+                imported_modules,
+                imported_symbols,
+                skip_typecheck,
+            )?;
+            if let Some(resolved) = &state.resolved.product {
+                import_facts.ingest_resolved(module_id, &resolved.context);
+            }
+            if let Some(typed) = &state.typechecked.product {
+                import_facts.ingest_typed(module_id, typed);
+            }
+            module_states.insert(module_id, to_lookup_state(&state));
+        }
+
+        let Some(entry_state) = module_states.get(&entry_module_id) else {
+            return Ok(None);
+        };
+        let Some(def_id) = def_at_span(entry_state, query_span) else {
+            return Ok(None);
+        };
+        let Some(entry_resolved) = entry_state.resolved.as_ref() else {
+            return Ok(None);
+        };
+
+        if let Some(imported_target) = resolve_imported_symbol_target(
+            &program_context,
+            &module_states,
+            entry_module_id,
+            def_id,
+            &entry_resolved.def_table,
+        ) {
+            let Some(target_state) = module_states.get(&imported_target.module_id) else {
+                return Ok(None);
+            };
+            let Some(target_resolved) = target_state.resolved.as_ref() else {
+                return Ok(None);
+            };
+            let Some(span) = target_resolved
+                .def_table
+                .lookup_def_span(imported_target.def_id)
+            else {
+                return Ok(None);
+            };
+            let path = program_context
+                .module(imported_target.module_id)
+                .map(|m| m.source.file_path.clone());
+            let target_file_id = path
+                .as_deref()
+                .and_then(|p| snapshot.file_id(p))
+                .unwrap_or(file_id);
+            return Ok(Some(Location {
+                file_id: target_file_id,
+                path,
+                span,
+            }));
+        }
+
+        if let Some(entry_def) = entry_resolved.def_table.lookup_def(def_id)
+            && entry_def.is_runtime()
+            && let Some((prelude_path, prelude_span)) =
+                prelude_decl_runtime_def_location(&entry_def.name)
+        {
+            let target_file_id = snapshot.file_id(&prelude_path).unwrap_or(file_id);
+            return Ok(Some(Location {
+                file_id: target_file_id,
+                path: Some(prelude_path),
+                span: prelude_span,
+            }));
+        }
+
+        let Some(span) = entry_resolved.def_table.lookup_def_span(def_id) else {
+            return Ok(None);
+        };
+        Ok(Some(Location {
+            file_id,
+            path: Some(entry_path),
+            span,
+        }))
     }
 
     pub fn type_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<Type>> {
@@ -553,6 +690,137 @@ impl AnalysisDb {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
     }
+}
+
+#[derive(Clone, Copy)]
+struct ImportedTargetDef {
+    module_id: ModuleId,
+    def_id: DefId,
+}
+
+fn resolve_imported_symbol_target(
+    program: &crate::core::context::CapsuleParsedContext,
+    module_states: &HashMap<ModuleId, LookupState>,
+    entry_module_id: ModuleId,
+    local_def_id: DefId,
+    entry_def_table: &crate::core::resolve::DefTable,
+) -> Option<ImportedTargetDef> {
+    let local_def = entry_def_table.lookup_def(local_def_id)?;
+    let local_kind = &local_def.kind;
+    let alias = &local_def.name;
+    let parsed = program.module(entry_module_id)?;
+    let req = parsed
+        .requires
+        .iter()
+        .find(|req| req.kind == crate::core::capsule::RequireKind::Symbol && req.alias == *alias)?;
+    let member = req.member.as_deref()?;
+    let dep_module_id = program.capsule.by_path.get(&req.module_path).copied()?;
+    let dep_resolved = module_states.get(&dep_module_id)?.resolved.as_ref()?;
+
+    let best_match = dep_resolved
+        .def_table
+        .defs()
+        .iter()
+        .filter(|def| {
+            def.name == member && def.is_public() && def_kind_compatible(local_kind, &def.kind)
+        })
+        .min_by_key(|def| def_kind_priority(&def.kind))?;
+
+    Some(ImportedTargetDef {
+        module_id: dep_module_id,
+        def_id: best_match.id,
+    })
+}
+
+fn def_kind_compatible(local: &DefKind, target: &DefKind) -> bool {
+    match local {
+        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
+            matches!(target, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
+        }
+        DefKind::TypeDef { .. } => matches!(target, DefKind::TypeDef { .. }),
+        DefKind::TraitDef { .. } => matches!(target, DefKind::TraitDef { .. }),
+        _ => false,
+    }
+}
+
+fn def_kind_priority(kind: &DefKind) -> u8 {
+    match kind {
+        DefKind::FuncDef { .. } => 0,
+        DefKind::FuncDecl { .. } => 1,
+        DefKind::TypeDef { .. } => 0,
+        DefKind::TraitDef { .. } => 0,
+        _ => 9,
+    }
+}
+
+fn module_with_implicit_prelude(
+    parsed: &crate::core::capsule::ParsedModule,
+    prelude_module: Option<&crate::core::tree::parsed::Module>,
+) -> crate::core::tree::parsed::Module {
+    let Some(prelude_module) = prelude_module else {
+        return parsed.module.clone();
+    };
+    if is_std_prelude_decl(parsed) {
+        parsed.module.clone()
+    } else {
+        merge_modules(prelude_module, &parsed.module)
+    }
+}
+
+fn is_std_prelude_decl(parsed: &crate::core::capsule::ParsedModule) -> bool {
+    matches!(
+        parsed.source.path.segments(),
+        [std_seg, prelude_seg] if std_seg == "std" && prelude_seg == "prelude_decl"
+    )
+}
+
+fn parsed_prelude_decl_module(
+    id_gen: &crate::core::tree::NodeIdGen,
+) -> Option<crate::core::tree::parsed::Module> {
+    let prelude_path = prelude_decl_path();
+    let prelude_src = std::fs::read_to_string(prelude_path).ok()?;
+    let (module, _) = api::parse_module_with_id_gen(&prelude_src, id_gen.clone()).ok()?;
+    Some(module)
+}
+
+fn prelude_decl_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("std")
+        .join("prelude_decl.mc")
+}
+
+fn prelude_decl_runtime_def_location(name: &str) -> Option<(PathBuf, Span)> {
+    static PRELUDE_RUNTIME_SPANS: OnceLock<HashMap<String, Span>> = OnceLock::new();
+    let spans = PRELUDE_RUNTIME_SPANS.get_or_init(build_prelude_runtime_spans);
+    spans
+        .get(name)
+        .copied()
+        .map(|span| (prelude_decl_path(), span))
+}
+
+fn build_prelude_runtime_spans() -> HashMap<String, Span> {
+    let prelude_path = prelude_decl_path();
+    let Ok(prelude_src) = std::fs::read_to_string(prelude_path) else {
+        return HashMap::new();
+    };
+    let Ok((module, id_gen)) =
+        api::parse_module_with_id_gen(&prelude_src, crate::core::tree::NodeIdGen::new())
+    else {
+        return HashMap::new();
+    };
+    let parsed = crate::core::context::ParsedContext::new(module, id_gen);
+    let resolved = api::resolve_stage_partial(parsed, HashMap::new(), HashMap::new());
+    let mut spans = HashMap::new();
+    for def in resolved.context.def_table.defs() {
+        if !def.is_runtime() {
+            continue;
+        }
+        let Some(span) = resolved.context.def_table.lookup_def_span(def.id) else {
+            continue;
+        };
+        spans.insert(def.name.clone(), span);
+    }
+    spans
 }
 
 #[cfg(test)]

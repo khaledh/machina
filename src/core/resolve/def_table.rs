@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefKind};
 use crate::core::tree::NodeId;
 
@@ -8,6 +9,7 @@ pub struct DefTableBuilder {
     defs: Vec<Def>,
     node_def: HashMap<NodeId, DefId>,
     def_node: HashMap<DefId, NodeId>,
+    def_span: HashMap<DefId, Span>,
 }
 
 impl Default for DefTableBuilder {
@@ -22,12 +24,14 @@ impl DefTableBuilder {
             defs: Vec::new(),
             node_def: HashMap::new(),
             def_node: HashMap::new(),
+            def_span: HashMap::new(),
         }
     }
 
-    pub fn record_def(&mut self, def: Def, node_id: NodeId) {
+    pub fn record_def(&mut self, def: Def, node_id: NodeId, span: Span) {
         self.node_def.insert(node_id, def.id);
         self.def_node.insert(def.id, node_id);
+        self.def_span.insert(def.id, span);
         self.defs.push(def);
     }
 
@@ -42,6 +46,7 @@ impl DefTableBuilder {
                 defs: self.defs,
                 node_def: node_def.clone(),
                 def_node: self.def_node,
+                def_span: self.def_span,
             },
             NodeDefLookup { node_def },
         )
@@ -55,6 +60,7 @@ pub struct DefTable {
     defs: Vec<Def>,
     node_def: HashMap<NodeId, DefId>,
     def_node: HashMap<DefId, NodeId>,
+    def_span: HashMap<DefId, Span>,
 }
 
 impl DefTable {
@@ -63,6 +69,7 @@ impl DefTable {
             defs,
             node_def: HashMap::new(),
             def_node: HashMap::new(),
+            def_span: HashMap::new(),
         }
     }
 
@@ -82,6 +89,10 @@ impl DefTable {
 
     pub fn lookup_def_node_id(&self, def_id: DefId) -> Option<NodeId> {
         self.def_node.get(&def_id).copied()
+    }
+
+    pub fn lookup_def_span(&self, def_id: DefId) -> Option<Span> {
+        self.def_span.get(&def_id).copied()
     }
 
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {

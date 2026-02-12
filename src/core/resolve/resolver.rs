@@ -191,7 +191,7 @@ impl SymbolResolver {
             name: name.to_string(),
             kind: DefKind::Param { index, is_mutable },
         };
-        self.def_table_builder.record_def(def, id);
+        self.def_table_builder.record_def(def, id, span);
         self.insert_symbol(
             name,
             Symbol {
@@ -209,7 +209,7 @@ impl SymbolResolver {
             name: param.ident.clone(),
             kind: DefKind::TypeParam,
         };
-        self.def_table_builder.record_def(def, param.id);
+        self.def_table_builder.record_def(def, param.id, param.span);
         self.insert_symbol(
             &param.ident,
             Symbol {
@@ -474,7 +474,8 @@ impl SymbolResolver {
             attrs.intrinsic = true;
             self.intrinsic_type_defs.insert(def_id);
         }
-        self.def_table_builder.record_def(def, NodeId(0));
+        self.def_table_builder
+            .record_def(def, NodeId(0), Span::default());
         self.insert_symbol(
             name,
             Symbol {
@@ -583,7 +584,8 @@ impl SymbolResolver {
                 name: trait_def.name.clone(),
                 kind: DefKind::TraitDef { attrs: trait_attrs },
             };
-            self.def_table_builder.record_def(def, trait_def.id);
+            self.def_table_builder
+                .record_def(def, trait_def.id, trait_def.span);
             self.insert_symbol(
                 &trait_def.name,
                 Symbol {
@@ -639,7 +641,8 @@ impl SymbolResolver {
             };
 
             // Record the def
-            self.def_table_builder.record_def(def, type_def.id);
+            self.def_table_builder
+                .record_def(def, type_def.id, type_def.span);
 
             if type_attrs.intrinsic {
                 self.intrinsic_type_defs.insert(def_id);
@@ -707,7 +710,8 @@ impl SymbolResolver {
                 | CallableRef::ClosureDef(_) => DefKind::FuncDef { attrs: func_attrs },
             },
         };
-        self.def_table_builder.record_def(def, callable.id());
+        self.def_table_builder
+            .record_def(def, callable.id(), callable.span());
         self.insert_symbol(
             &callable.name(),
             Symbol {
@@ -860,7 +864,8 @@ impl SymbolResolver {
                         is_mutable,
                     },
                 };
-                self.def_table_builder.record_def(def, pattern.id);
+                self.def_table_builder
+                    .record_def(def, pattern.id, pattern.span);
                 self.insert_symbol(
                     var_name,
                     Symbol {
@@ -994,7 +999,7 @@ impl SymbolResolver {
                 is_mutable: false,
             },
         };
-        self.def_table_builder.record_def(def, id);
+        self.def_table_builder.record_def(def, id, span);
         self.insert_symbol(
             name,
             Symbol {
@@ -1340,7 +1345,7 @@ impl Visitor<()> for SymbolResolver {
                         nrvo_eligible: false,
                     },
                 };
-                self.def_table_builder.record_def(def, stmt.id);
+                self.def_table_builder.record_def(def, stmt.id, stmt.span);
                 self.insert_symbol(
                     ident,
                     Symbol {
@@ -1459,7 +1464,7 @@ impl Visitor<()> for SymbolResolver {
                                 name: name.to_string(),
                                 kind: DefKind::EnumVariantName,
                             };
-                            self.def_table_builder.record_def(def, expr.id);
+                            self.def_table_builder.record_def(def, expr.id, expr.span);
                             self.variant_placeholders.insert(name.to_string(), def_id);
                         }
                     } else {
@@ -1579,7 +1584,7 @@ impl Visitor<()> for SymbolResolver {
                         attrs: FuncAttrs::default(),
                     },
                 };
-                self.def_table_builder.record_def(def, expr.id);
+                self.def_table_builder.record_def(def, expr.id, expr.span);
 
                 if !captures.is_empty() {
                     for capture in captures {

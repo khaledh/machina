@@ -239,6 +239,53 @@ fn main() -> u64 { id(1) }
 }
 
 #[test]
+fn def_location_at_program_file_points_to_imported_symbol_definition() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_defloc_imported_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run()
+}
+"#;
+    let dep_source = r#"@[public]
+fn run() -> u64 { 1 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let mut use_span = span_for_substring(entry_source, "run()");
+    use_span.end = position_at(entry_source, use_span.start.offset + 3);
+    let location = db
+        .def_location_at_program_file(entry_id, use_span)
+        .expect("program definition location query should succeed")
+        .expect("expected definition location for imported symbol");
+
+    assert_eq!(location.path.as_deref(), Some(dep_path.as_path()));
+    assert_eq!(location.span.start.line, 2);
+    assert_eq!(location.span.start.column, 1);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn type_at_returns_expression_type() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -1323,6 +1370,77 @@ fn run() -> u64 { 1 }
         diagnostics.is_empty(),
         "expected symbol import to resolve without diagnostics, got: {diagnostics:#?}"
     );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn diagnostics_for_program_file_injects_prelude_decl_for_runtime_intrinsics() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_prelude_inject_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    fs::create_dir_all(&temp_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let entry_source = r#"
+fn main() {
+    __rt_print("", 1);
+}
+"#;
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected runtime intrinsic to resolve via implicit prelude, got: {diagnostics:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn def_location_at_program_file_maps_runtime_intrinsic_to_prelude_decl() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_runtime_defloc_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    fs::create_dir_all(&temp_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let entry_source = r#"
+fn main() {
+    __rt_print("", 1);
+}
+"#;
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    let mut use_span = span_for_substring(entry_source, "__rt_print");
+    use_span.end = position_at(entry_source, use_span.start.offset + "__rt_print".len());
+
+    let location = db
+        .def_location_at_program_file(entry_id, use_span)
+        .expect("program definition location query should succeed")
+        .expect("expected runtime intrinsic definition location");
+
+    let path = location.path.expect("expected definition path");
+    assert!(
+        path.to_string_lossy().ends_with("std/prelude_decl.mc"),
+        "expected prelude decl definition path, got: {}",
+        path.display()
+    );
+    assert!(location.span.start.line > 0);
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
