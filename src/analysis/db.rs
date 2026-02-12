@@ -5,7 +5,7 @@
 //! - query memoization/dependency tracking,
 //! - module-closure invalidation.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::analysis::completion::{
@@ -21,8 +21,8 @@ use crate::analysis::lookups::{
 };
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::pipeline::{
-    LookupState, collect_sorted_diagnostics, run_module_pipeline, run_module_pipeline_with_parsed,
-    to_lookup_state,
+    LookupState, collect_sorted_diagnostics, run_module_pipeline,
+    run_module_pipeline_with_parsed_and_imports, to_lookup_state,
 };
 use crate::analysis::query::{CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime};
 use crate::analysis::rename::{references as collect_references, rename_plan as build_rename_plan};
@@ -31,10 +31,11 @@ use crate::analysis::results::{
     SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
+use crate::context::ProgramParsedContext;
 use crate::diag::Span;
-use crate::frontend::program::{flatten_program, rewrite_program_module};
-use crate::frontend::{self, ModuleId, ModulePath};
-use crate::resolve::DefId;
+use crate::frontend::bind::ProgramBindings;
+use crate::frontend::{self, ModuleId, ModulePath, RequireKind};
+use crate::resolve::{DefId, ImportedModule, ImportedSymbol};
 use crate::tree::NodeId;
 use crate::typecheck::type_check_partial;
 use crate::types::Type;
@@ -191,28 +192,7 @@ impl AnalysisDb {
                 Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
             };
             let program_context = crate::context::ProgramParsedContext::new(program);
-
-            if let Err(errs) = flatten_program(&program_context) {
-                let mut diagnostics = Vec::new();
-                for err in errs {
-                    diagnostics.extend(frontend_error_diagnostics(err));
-                }
-                let entry_file_path = entry_path.to_string_lossy().to_string();
-                for diag in &mut diagnostics {
-                    diag.metadata
-                        .entry(ANALYSIS_FILE_PATH_KEY.to_string())
-                        .or_insert_with(|| DiagnosticValue::String(entry_file_path.clone()));
-                }
-                diagnostics.sort_by_key(|diag| {
-                    (
-                        diag.phase,
-                        diag.span.start.line,
-                        diag.span.start.column,
-                        diag.code.clone(),
-                    )
-                });
-                return Ok(diagnostics);
-            }
+            let bindings = ProgramBindings::build(&program_context);
 
             let mut all = Vec::new();
             for module_id in program_context.dependency_order_from_entry() {
@@ -221,34 +201,24 @@ impl AnalysisDb {
                 };
                 let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
                 let module_revision = stable_source_revision(&parsed.source.source);
-                let rewritten_module = match rewrite_program_module(&program_context, module_id) {
-                    Ok(module) => module,
-                    Err(errs) => {
-                        let mut diagnostics = Vec::new();
-                        for err in errs {
-                            diagnostics.extend(frontend_error_diagnostics(err));
-                        }
-                        let file_path = parsed.source.file_path.to_string_lossy().to_string();
-                        for diag in &mut diagnostics {
-                            diag.metadata.insert(
-                                ANALYSIS_FILE_PATH_KEY.to_string(),
-                                DiagnosticValue::String(file_path.clone()),
-                            );
-                        }
-                        all.extend(diagnostics);
-                        continue;
-                    }
-                };
                 let parsed_context = crate::context::ParsedContext::new(
-                    rewritten_module,
+                    parsed.module.clone(),
                     program_context.next_node_id_gen().clone(),
                 );
-                let state = run_module_pipeline_with_parsed(
+                let imported_modules =
+                    build_analysis_imported_modules(&program_context, &bindings, module_id);
+                let imported_symbols =
+                    build_analysis_imported_symbols(&program_context, &bindings, module_id);
+                let skip_typecheck = !imported_symbols.is_empty();
+                let state = run_module_pipeline_with_parsed_and_imports(
                     rt,
                     module_id,
                     module_revision,
                     source,
                     Some(parsed_context),
+                    imported_modules,
+                    imported_symbols,
+                    skip_typecheck,
                 )?;
                 let mut module_diags = collect_sorted_diagnostics(&state);
                 let file_path = parsed.source.file_path.to_string_lossy().to_string();
@@ -554,6 +524,103 @@ impl AnalysisDb {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
     }
+}
+
+fn build_analysis_imported_modules(
+    program_context: &ProgramParsedContext,
+    bindings: &ProgramBindings,
+    module_id: ModuleId,
+) -> HashMap<String, ImportedModule> {
+    let mut out = HashMap::new();
+    let Some(parsed) = program_context.module(module_id) else {
+        return out;
+    };
+
+    for req in &parsed.requires {
+        if req.kind != RequireKind::Module {
+            continue;
+        }
+        let Some(dep_id) = program_context
+            .program
+            .by_path
+            .get(&req.module_path)
+            .copied()
+        else {
+            continue;
+        };
+        let Some(exports) = bindings.exports_for(dep_id) else {
+            continue;
+        };
+        let mut members = std::collections::HashSet::new();
+        for (name, attrs) in &exports.callables {
+            if attrs.public {
+                members.insert(name.clone());
+            }
+        }
+        for (name, attrs) in &exports.types {
+            if attrs.public {
+                members.insert(name.clone());
+            }
+        }
+        for (name, attrs) in &exports.traits {
+            if attrs.public {
+                members.insert(name.clone());
+            }
+        }
+        out.insert(
+            req.alias.clone(),
+            ImportedModule {
+                path: req.module_path.to_string(),
+                members,
+            },
+        );
+    }
+
+    out
+}
+
+fn build_analysis_imported_symbols(
+    program_context: &ProgramParsedContext,
+    bindings: &ProgramBindings,
+    module_id: ModuleId,
+) -> HashMap<String, ImportedSymbol> {
+    let mut out = HashMap::new();
+    let Some(parsed) = program_context.module(module_id) else {
+        return out;
+    };
+
+    for req in &parsed.requires {
+        if req.kind != RequireKind::Symbol {
+            continue;
+        }
+        let Some(member) = &req.member else {
+            continue;
+        };
+        let Some(dep_id) = program_context
+            .program
+            .by_path
+            .get(&req.module_path)
+            .copied()
+        else {
+            continue;
+        };
+        let Some(exports) = bindings.exports_for(dep_id) else {
+            continue;
+        };
+        let imported = ImportedSymbol {
+            has_callable: exports
+                .callables
+                .get(member)
+                .is_some_and(|attrs| attrs.public),
+            has_type: exports.types.get(member).is_some_and(|attrs| attrs.public),
+            has_trait: exports.traits.get(member).is_some_and(|attrs| attrs.public),
+        };
+        if imported.has_callable || imported.has_type || imported.has_trait {
+            out.insert(req.alias.clone(), imported);
+        }
+    }
+
+    out
 }
 
 #[cfg(test)]

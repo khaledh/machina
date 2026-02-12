@@ -4,7 +4,7 @@
 //! orchestration used by analysis queries, while preserving per-stage
 //! diagnostics and query cache boundaries.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::analysis::diagnostics::Diagnostic;
@@ -12,7 +12,7 @@ use crate::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
 use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer};
 use crate::parse::Parser;
-use crate::resolve::resolve_partial;
+use crate::resolve::{ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial};
 use crate::tree::NodeId;
 use crate::tree::NodeIdGen;
 use crate::typecheck::type_check_partial;
@@ -71,6 +71,29 @@ pub(crate) fn run_module_pipeline_with_parsed(
     source: Arc<str>,
     parsed_override: Option<crate::context::ParsedContext>,
 ) -> QueryResult<ModulePipelineState> {
+    run_module_pipeline_with_parsed_and_imports(
+        rt,
+        module_id,
+        revision,
+        source,
+        parsed_override,
+        HashMap::new(),
+        HashMap::new(),
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_module_pipeline_with_parsed_and_imports(
+    rt: &mut QueryRuntime,
+    module_id: ModuleId,
+    revision: u64,
+    source: Arc<str>,
+    parsed_override: Option<crate::context::ParsedContext>,
+    imported_modules: HashMap<String, ImportedModule>,
+    imported_symbols: HashMap<String, ImportedSymbol>,
+    skip_typecheck: bool,
+) -> QueryResult<ModulePipelineState> {
     let parse_key = QueryKey::new(QueryKind::ParseModule, module_id, revision);
     let source_for_parse = source.clone();
     let parsed_override_for_parse = parsed_override.clone();
@@ -110,10 +133,16 @@ pub(crate) fn run_module_pipeline_with_parsed(
 
     let resolve_key = QueryKey::new(QueryKind::ResolveModule, module_id, revision);
     let resolve_input = parsed.product.clone();
+    let imported_modules_for_resolve = imported_modules.clone();
+    let imported_symbols_for_resolve = imported_symbols.clone();
     let resolved = rt.execute(resolve_key, move |_rt| {
         let mut state = ResolveStageOutput::default();
         if let Some(parsed) = resolve_input {
-            let resolved = resolve_partial(parsed);
+            let resolved = resolve_with_imports_and_symbols_partial(
+                parsed,
+                imported_modules_for_resolve,
+                imported_symbols_for_resolve,
+            );
             state.product = Some(resolved.context);
             if !resolved.errors.is_empty() {
                 state
@@ -128,7 +157,7 @@ pub(crate) fn run_module_pipeline_with_parsed(
     let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
     // Do not run type checking when resolution emitted errors. This keeps
     // lookup behavior stable (no leaked inference vars on unresolved symbols).
-    let typecheck_input = if resolved.diagnostics.is_empty() {
+    let typecheck_input = if !skip_typecheck && resolved.diagnostics.is_empty() {
         resolved.product.clone()
     } else {
         None

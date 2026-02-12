@@ -24,6 +24,13 @@ pub struct ImportedModule {
     pub members: HashSet<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ImportedSymbol {
+    pub has_callable: bool,
+    pub has_type: bool,
+    pub has_trait: bool,
+}
+
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
@@ -35,6 +42,7 @@ pub struct SymbolResolver {
     variant_placeholders: HashMap<String, DefId>,
     require_aliases: HashSet<String>,
     imported_modules: HashMap<String, ImportedModule>,
+    imported_symbols: HashMap<String, ImportedSymbol>,
 }
 
 #[derive(Clone)]
@@ -64,6 +72,7 @@ impl SymbolResolver {
             variant_placeholders: HashMap::new(),
             require_aliases: HashSet::new(),
             imported_modules: HashMap::new(),
+            imported_symbols: HashMap::new(),
         }
     }
 
@@ -464,6 +473,38 @@ impl SymbolResolver {
 
         // Populate callable declarations
         self.populate_callables(&module.callables());
+
+        // Populate imported symbol aliases so resolve can bind unqualified uses
+        // (e.g. `requires { std::io::println }` then `println(...)`).
+        self.populate_imported_symbol_aliases();
+    }
+
+    fn populate_imported_symbol_aliases(&mut self) {
+        let aliases = self.imported_symbols.clone();
+        for (alias, imported) in aliases {
+            if imported.has_callable {
+                self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::Func {
+                    overloads: vec![def_id],
+                });
+                continue;
+            }
+
+            if imported.has_type {
+                self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
+                    def_id,
+                    ty_expr: TypeExpr {
+                        id: NodeId(0),
+                        kind: TypeExprKind::Infer,
+                        span: Span::default(),
+                    },
+                });
+                continue;
+            }
+
+            if imported.has_trait {
+                self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
+            }
+        }
     }
 
     fn populate_trait_defs(&mut self, trait_defs: &[&TraitDef]) {
@@ -1518,18 +1559,27 @@ impl Visitor<()> for SymbolResolver {
 }
 
 pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<ResolveError>> {
-    resolve_with_imports(ast_context, HashMap::new())
+    resolve_with_imports_and_symbols(ast_context, HashMap::new(), HashMap::new())
 }
 
 pub fn resolve_partial(ast_context: ParsedContext) -> ResolveOutput {
-    resolve_with_imports_partial(ast_context, HashMap::new())
+    resolve_with_imports_and_symbols_partial(ast_context, HashMap::new(), HashMap::new())
 }
 
 pub fn resolve_with_imports(
     ast_context: ParsedContext,
     imported_modules: HashMap<String, ImportedModule>,
 ) -> Result<ResolvedContext, Vec<ResolveError>> {
-    let output = resolve_with_imports_partial(ast_context, imported_modules);
+    resolve_with_imports_and_symbols(ast_context, imported_modules, HashMap::new())
+}
+
+pub fn resolve_with_imports_and_symbols(
+    ast_context: ParsedContext,
+    imported_modules: HashMap<String, ImportedModule>,
+    imported_symbols: HashMap<String, ImportedSymbol>,
+) -> Result<ResolvedContext, Vec<ResolveError>> {
+    let output =
+        resolve_with_imports_and_symbols_partial(ast_context, imported_modules, imported_symbols);
     if output.errors.is_empty() {
         Ok(output.context)
     } else {
@@ -1541,8 +1591,17 @@ pub fn resolve_with_imports_partial(
     ast_context: ParsedContext,
     imported_modules: HashMap<String, ImportedModule>,
 ) -> ResolveOutput {
+    resolve_with_imports_and_symbols_partial(ast_context, imported_modules, HashMap::new())
+}
+
+pub fn resolve_with_imports_and_symbols_partial(
+    ast_context: ParsedContext,
+    imported_modules: HashMap<String, ImportedModule>,
+    imported_symbols: HashMap<String, ImportedSymbol>,
+) -> ResolveOutput {
     let mut resolver = SymbolResolver::new();
     resolver.imported_modules = imported_modules;
+    resolver.imported_symbols = imported_symbols;
     let (def_table, node_def_lookup, errors) = resolver.resolve_partial(&ast_context.module);
 
     // Build resolved tree from parsed tree + NodeDefLookup
@@ -1588,12 +1647,38 @@ pub fn resolve_program(
                 );
             }
         }
+        let mut imported_symbols = HashMap::<String, ImportedSymbol>::new();
+        for req in &parsed_module.requires {
+            if req.kind != RequireKind::Symbol {
+                continue;
+            }
+            let Some(dep_id) = program.program.by_path.get(&req.module_path).copied() else {
+                continue;
+            };
+            let Some(dep_exports) = export_facts_by_module.get(&dep_id) else {
+                continue;
+            };
+            let Some(member) = &req.member else {
+                continue;
+            };
+            let imported = ImportedSymbol {
+                has_callable: dep_exports
+                    .callables
+                    .get(member)
+                    .is_some_and(|overloads| !overloads.is_empty()),
+                has_type: dep_exports.types.contains_key(member),
+                has_trait: dep_exports.traits.contains_key(member),
+            };
+            if imported.has_callable || imported.has_type || imported.has_trait {
+                imported_symbols.insert(req.alias.clone(), imported);
+            }
+        }
 
         let parsed_context = ParsedContext::new(
             parsed_module.module.clone(),
             program.next_node_id_gen().clone(),
         );
-        match resolve_with_imports(parsed_context, imported_modules) {
+        match resolve_with_imports_and_symbols(parsed_context, imported_modules, imported_symbols) {
             Ok(resolved_context) => {
                 let module_exports = collect_module_export_facts(
                     &resolved_context,

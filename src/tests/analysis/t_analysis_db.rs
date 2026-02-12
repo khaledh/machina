@@ -1191,6 +1191,51 @@ fn value() -> u64 {
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
+#[test]
+fn diagnostics_for_program_file_resolves_public_symbol_imports() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_symbol_import_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run()
+}
+"#;
+    let dep_source = r#"
+@[public]
+fn run() -> u64 { 1 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected symbol import to resolve without diagnostics, got: {diagnostics:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)
