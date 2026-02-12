@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use crate::core::api::{resolve_stage, typecheck_stage};
+use crate::core::api::{
+    FrontendPolicy, ResolveInputs, resolve_stage_with_policy, typecheck_stage_with_policy,
+};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
 use crate::core::resolve::{ImportedFacts, ResolveError, attach_def_owners};
@@ -38,9 +40,15 @@ pub fn query_resolve(
     let key = QueryKey::new(QueryKind::ResolveModule, module_id, revision);
     let resolved = db.execute_query(key, move |_rt| {
         let resolved =
-            resolve_stage(parsed).map(|(ctx, _)| attach_def_owners(ctx, &top_level_owners));
-        let result = resolved.map(|ctx| ResolvedModuleResult::from_context(module_id, ctx));
-        Ok(result)
+            resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+        if resolved.has_errors() {
+            return Ok(Err(resolved.errors));
+        }
+        let Some(ctx) = resolved.context else {
+            return Ok(Err(Vec::new()));
+        };
+        let ctx = attach_def_owners(ctx, &top_level_owners);
+        Ok(Ok(ResolvedModuleResult::from_context(module_id, ctx)))
     })?;
     resolved.map_err(BatchQueryError::Resolve)
 }
@@ -63,9 +71,18 @@ pub fn query_typecheck_with_imported_facts(
 ) -> Result<TypedModuleResult, BatchQueryError> {
     let key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
     let typed = db.execute_query(key, move |_rt| {
-        let typed = typecheck_stage(resolved.into_context(), imported_facts)
-            .map(|ctx| TypedModuleResult::from_context(module_id, ctx));
-        Ok(typed)
+        let typed = typecheck_stage_with_policy(
+            resolved.into_context(),
+            imported_facts,
+            FrontendPolicy::Strict,
+        );
+        if typed.has_errors() {
+            return Ok(Err(typed.errors));
+        }
+        let Some(ctx) = typed.context else {
+            return Ok(Err(Vec::new()));
+        };
+        Ok(Ok(TypedModuleResult::from_context(module_id, ctx)))
     })?;
     typed.map_err(BatchQueryError::TypeCheck)
 }

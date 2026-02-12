@@ -9,8 +9,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::core::api::{
-    ParseModuleError, normalize_stage, parse_module_with_id_gen, resolve_stage_partial,
-    semcheck_stage_partial, typecheck_stage_partial,
+    FrontendPolicy, ParseModuleError, ResolveInputs, normalize_stage, parse_module_with_id_gen,
+    resolve_stage_with_policy, semcheck_stage_with_policy, typecheck_stage_with_policy,
 };
 use crate::core::capsule::ModuleId;
 use crate::core::resolve::{
@@ -170,14 +170,18 @@ fn run_module_pipeline_with_inputs(
     let resolved_eval = rt.execute(resolve_key, move |_rt| {
         let mut eval = ResolveEval::default();
         if let Some(parsed) = resolve_input {
-            let resolved = resolve_stage_partial(
+            let resolved = resolve_stage_with_policy(
                 parsed,
-                imported_modules_for_resolve,
-                imported_symbols_for_resolve,
+                ResolveInputs {
+                    imported_modules: imported_modules_for_resolve,
+                    imported_symbols: imported_symbols_for_resolve,
+                },
+                FrontendPolicy::Partial,
             );
-            eval.state.product = Some(resolved.context);
+            let has_errors = resolved.has_errors();
+            eval.state.product = resolved.context;
             eval.imported_facts = resolved.imported_facts;
-            if !resolved.errors.is_empty() {
+            if has_errors {
                 eval.state
                     .diagnostics
                     .extend(resolved.errors.iter().map(Diagnostic::from_resolve_error));
@@ -203,9 +207,11 @@ fn run_module_pipeline_with_inputs(
     let typechecked = rt.execute(typecheck_key, move |_rt| {
         let mut state = TypecheckStageOutput::default();
         if let Some((resolved, imported_facts)) = typecheck_input {
-            let typed = typecheck_stage_partial(resolved, imported_facts);
-            state.product = Some(typed.context);
-            if !typed.errors.is_empty() {
+            let typed =
+                typecheck_stage_with_policy(resolved, imported_facts, FrontendPolicy::Partial);
+            let has_errors = typed.has_errors();
+            state.product = typed.context;
+            if has_errors {
                 state
                     .diagnostics
                     .extend(typed.errors.iter().map(Diagnostic::from_typecheck_error));
@@ -231,10 +237,15 @@ fn run_module_pipeline_with_inputs(
     let semchecked = rt.execute(semcheck_key, move |_rt| {
         let mut state = SemcheckStageOutput::default();
         if let Some((normalized, upstream_poisoned_nodes)) = semcheck_input {
-            let semchecked = semcheck_stage_partial(normalized, &upstream_poisoned_nodes);
-            state.product = Some(semchecked.context);
+            let semchecked = semcheck_stage_with_policy(
+                normalized,
+                FrontendPolicy::Partial,
+                &upstream_poisoned_nodes,
+            );
+            let has_errors = semchecked.has_errors();
+            state.product = semchecked.context;
             state.poisoned_nodes = semchecked.poisoned_nodes;
-            if !semchecked.errors.is_empty() {
+            if has_errors {
                 state.diagnostics.extend(
                     semchecked
                         .errors

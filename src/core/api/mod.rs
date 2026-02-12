@@ -37,6 +37,63 @@ pub enum ParseModuleError {
     Parse(#[from] ParseError),
 }
 
+/// Frontend semantic execution mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendPolicy {
+    /// Fail-fast semantics used by batch compilation.
+    Strict,
+    /// Best-effort semantics used by IDE analysis.
+    Partial,
+}
+
+/// Additional inputs for the resolve stage.
+#[derive(Debug, Clone, Default)]
+pub struct ResolveInputs {
+    pub imported_modules: HashMap<String, ImportedModule>,
+    pub imported_symbols: HashMap<String, ImportedSymbol>,
+}
+
+/// Unified resolve-stage result for strict/partial policies.
+#[derive(Clone, Default)]
+pub struct ResolveStageResult {
+    pub context: Option<TypecheckStageInput>,
+    pub imported_facts: ImportedFacts,
+    pub errors: Vec<ResolveError>,
+}
+
+impl ResolveStageResult {
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
+/// Unified typecheck-stage result for strict/partial policies.
+#[derive(Clone, Default)]
+pub struct TypecheckStageResult {
+    pub context: Option<TypecheckStageOutput>,
+    pub errors: Vec<TypeCheckError>,
+}
+
+impl TypecheckStageResult {
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
+/// Unified semcheck-stage result for strict/partial policies.
+#[derive(Clone, Default)]
+pub struct SemcheckStageResult {
+    pub context: Option<SemCheckStageOutput>,
+    pub errors: Vec<SemCheckError>,
+    pub poisoned_nodes: HashSet<NodeId>,
+}
+
+impl SemcheckStageResult {
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
 pub fn parse_module_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
@@ -51,11 +108,15 @@ pub fn parse_module_with_id_gen(
 pub fn resolve_stage(
     input: ResolveStageInput,
 ) -> Result<(TypecheckStageInput, ImportedFacts), Vec<ResolveError>> {
-    let output = resolve_with_imports_and_symbols_partial(input, HashMap::new(), HashMap::new());
-    if output.errors.is_empty() {
-        Ok((output.context, output.imported_facts))
+    let out = resolve_stage_with_policy(input, ResolveInputs::default(), FrontendPolicy::Strict);
+    if out.errors.is_empty() {
+        Ok((
+            out.context
+                .expect("strict resolve should yield context on success"),
+            out.imported_facts,
+        ))
     } else {
-        Err(output.errors)
+        Err(out.errors)
     }
 }
 
@@ -64,12 +125,22 @@ pub fn resolve_stage_with_imports(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
 ) -> Result<(TypecheckStageInput, ImportedFacts), Vec<ResolveError>> {
-    let output =
-        resolve_with_imports_and_symbols_partial(input, imported_modules, imported_symbols);
-    if output.errors.is_empty() {
-        Ok((output.context, output.imported_facts))
+    let out = resolve_stage_with_policy(
+        input,
+        ResolveInputs {
+            imported_modules,
+            imported_symbols,
+        },
+        FrontendPolicy::Strict,
+    );
+    if out.errors.is_empty() {
+        Ok((
+            out.context
+                .expect("strict resolve should yield context on success"),
+            out.imported_facts,
+        ))
     } else {
-        Err(output.errors)
+        Err(out.errors)
     }
 }
 
@@ -78,21 +149,98 @@ pub fn resolve_stage_partial(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
 ) -> ResolveOutput {
-    resolve_with_imports_and_symbols_partial(input, imported_modules, imported_symbols)
+    let out = resolve_stage_with_policy(
+        input,
+        ResolveInputs {
+            imported_modules,
+            imported_symbols,
+        },
+        FrontendPolicy::Partial,
+    );
+    ResolveOutput {
+        context: out
+            .context
+            .expect("partial resolve should always produce a context"),
+        imported_facts: out.imported_facts,
+        errors: out.errors,
+    }
+}
+
+pub fn resolve_stage_with_policy(
+    input: ResolveStageInput,
+    inputs: ResolveInputs,
+    policy: FrontendPolicy,
+) -> ResolveStageResult {
+    let output = resolve_with_imports_and_symbols_partial(
+        input,
+        inputs.imported_modules,
+        inputs.imported_symbols,
+    );
+    match policy {
+        FrontendPolicy::Strict if !output.errors.is_empty() => ResolveStageResult {
+            context: None,
+            imported_facts: ImportedFacts::default(),
+            errors: output.errors,
+        },
+        FrontendPolicy::Strict | FrontendPolicy::Partial => ResolveStageResult {
+            context: Some(output.context),
+            imported_facts: output.imported_facts,
+            errors: output.errors,
+        },
+    }
 }
 
 pub fn typecheck_stage(
     input: TypecheckStageInput,
     imported_facts: ImportedFacts,
 ) -> Result<TypecheckStageOutput, Vec<TypeCheckError>> {
-    type_check_with_imported_facts(input, imported_facts)
+    let out = typecheck_stage_with_policy(input, imported_facts, FrontendPolicy::Strict);
+    if out.errors.is_empty() {
+        Ok(out
+            .context
+            .expect("strict typecheck should yield context on success"))
+    } else {
+        Err(out.errors)
+    }
 }
 
 pub fn typecheck_stage_partial(
     input: TypecheckStageInput,
     imported_facts: ImportedFacts,
 ) -> TypecheckOutput {
-    type_check_partial_with_imported_facts(input, imported_facts)
+    let out = typecheck_stage_with_policy(input, imported_facts, FrontendPolicy::Partial);
+    TypecheckOutput {
+        context: out
+            .context
+            .expect("partial typecheck should always produce a context"),
+        errors: out.errors,
+    }
+}
+
+pub fn typecheck_stage_with_policy(
+    input: TypecheckStageInput,
+    imported_facts: ImportedFacts,
+    policy: FrontendPolicy,
+) -> TypecheckStageResult {
+    match policy {
+        FrontendPolicy::Strict => match type_check_with_imported_facts(input, imported_facts) {
+            Ok(context) => TypecheckStageResult {
+                context: Some(context),
+                errors: Vec::new(),
+            },
+            Err(errors) => TypecheckStageResult {
+                context: None,
+                errors,
+            },
+        },
+        FrontendPolicy::Partial => {
+            let out = type_check_partial_with_imported_facts(input, imported_facts);
+            TypecheckStageResult {
+                context: Some(out.context),
+                errors: out.errors,
+            }
+        }
+    }
 }
 
 pub fn normalize_stage(input: NormalizeStageInput) -> NormalizeStageOutput {
@@ -102,16 +250,63 @@ pub fn normalize_stage(input: NormalizeStageInput) -> NormalizeStageOutput {
 pub fn semcheck_stage(
     input: SemCheckStageInput,
 ) -> Result<SemCheckStageOutput, Vec<SemCheckError>> {
-    semck::sem_check(input)
+    let out = semcheck_stage_with_policy(input, FrontendPolicy::Strict, &HashSet::new());
+    if out.errors.is_empty() {
+        Ok(out
+            .context
+            .expect("strict semcheck should yield context on success"))
+    } else {
+        Err(out.errors)
+    }
 }
 
 pub fn semcheck_stage_partial(
     input: SemCheckStageInput,
     upstream_poisoned_nodes: &HashSet<NodeId>,
 ) -> semck::SemCheckOutput {
-    semck::sem_check_partial(input, upstream_poisoned_nodes)
+    let out = semcheck_stage_with_policy(input, FrontendPolicy::Partial, upstream_poisoned_nodes);
+    semck::SemCheckOutput {
+        context: out
+            .context
+            .expect("partial semcheck should always produce a context"),
+        errors: out.errors,
+        poisoned_nodes: out.poisoned_nodes,
+    }
+}
+
+pub fn semcheck_stage_with_policy(
+    input: SemCheckStageInput,
+    policy: FrontendPolicy,
+    upstream_poisoned_nodes: &HashSet<NodeId>,
+) -> SemcheckStageResult {
+    match policy {
+        FrontendPolicy::Strict => match semck::sem_check(input) {
+            Ok(context) => SemcheckStageResult {
+                context: Some(context),
+                errors: Vec::new(),
+                poisoned_nodes: HashSet::new(),
+            },
+            Err(errors) => SemcheckStageResult {
+                context: None,
+                errors,
+                poisoned_nodes: HashSet::new(),
+            },
+        },
+        FrontendPolicy::Partial => {
+            let out = semck::sem_check_partial(input, upstream_poisoned_nodes);
+            SemcheckStageResult {
+                context: Some(out.context),
+                errors: out.errors,
+                poisoned_nodes: out.poisoned_nodes,
+            }
+        }
+    }
 }
 
 pub fn elaborate_stage(input: ElaborateStageInput) -> ElaborateStageOutput {
     elaborate::elaborate(input)
 }
+
+#[cfg(test)]
+#[path = "../../tests/core/t_api.rs"]
+mod tests;
