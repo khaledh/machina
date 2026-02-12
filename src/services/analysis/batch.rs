@@ -37,8 +37,8 @@ pub fn query_resolve(
 ) -> Result<ResolvedModuleResult, BatchQueryError> {
     let key = QueryKey::new(QueryKind::ResolveModule, module_id, revision);
     let resolved = db.execute_query(key, move |_rt| {
-        let resolved = resolve_stage(parsed)
-            .map(|(ctx, _)| attach_def_owners(ctx, &top_level_owners));
+        let resolved =
+            resolve_stage(parsed).map(|(ctx, _)| attach_def_owners(ctx, &top_level_owners));
         let result = resolved.map(|ctx| ResolvedModuleResult::from_context(module_id, ctx));
         Ok(result)
     })?;

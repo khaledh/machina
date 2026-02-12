@@ -234,6 +234,19 @@ Introduce query-native result products:
 
 Batch contexts should become thin wrappers around these products.
 
+## Shared Stage Entrypoints
+
+To keep batch compilation and IDE analysis aligned, frontend stage invocation is
+centralized behind `core::api`:
+
+- parse (`parse_module_with_id_gen`)
+- resolve (`resolve_stage`, partial variants)
+- typecheck (`typecheck_stage`, partial variants)
+- normalize/semck/elaborate wrappers for linear backend entry
+
+Both `/src/driver/compile.rs` and `/src/services/analysis/*` should call these
+entrypoints instead of invoking stage internals directly.
+
 ## Migration Plan
 
 1. Add `AnalysisDb` facade over current frontend/resolve/typecheck.
