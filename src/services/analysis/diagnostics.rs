@@ -302,13 +302,15 @@ impl Diagnostic {
     }
 
     pub fn from_semcheck_error(error: &SemCheckError) -> Self {
+        let mut metadata = DiagnosticMetadata::new();
+        populate_semcheck_metadata(error, &mut metadata);
         Self {
             phase: DiagnosticPhase::Semcheck,
             code: semcheck_code(error).to_string(),
             severity: DiagnosticSeverity::Error,
             span: error.span(),
             message: error.to_string(),
-            metadata: DiagnosticMetadata::new(),
+            metadata,
         }
     }
 
@@ -491,6 +493,61 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckError::ClosureEscapeReturn(..) => "MC-SEMCK-ClosureEscapeReturn",
         SemCheckError::ClosureEscapeStore(..) => "MC-SEMCK-ClosureEscapeStore",
         SemCheckError::ClosureEscapeArg(..) => "MC-SEMCK-ClosureEscapeArg",
+    }
+}
+
+fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMetadata) {
+    match error {
+        SemCheckError::UnknownStructType(name, _)
+        | SemCheckError::DuplicateStructField(name, _)
+        | SemCheckError::UnknownStructField(name, _)
+        | SemCheckError::StructFieldsMissing(name, _)
+        | SemCheckError::UnknownEnumType(name, _)
+        | SemCheckError::DuplicateMatchVariant(name, _)
+        | SemCheckError::OutParamNotInitialized(name, _)
+        | SemCheckError::UseBeforeInit(name, _)
+        | SemCheckError::UseAfterMove(name, _)
+        | SemCheckError::ClosureCaptureMove(name, _)
+        | SemCheckError::ClosureCaptureUnused(name, _)
+        | SemCheckError::ClosureBorrowConflict(name, _) => {
+            metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
+        }
+        SemCheckError::UnknownEnumVariant(enum_name, variant_name, _)
+        | SemCheckError::MatchPatternEnumMismatch(enum_name, variant_name, _) => {
+            metadata.insert(
+                "enum".to_string(),
+                DiagnosticValue::String(enum_name.clone()),
+            );
+            metadata.insert(
+                "variant".to_string(),
+                DiagnosticValue::String(variant_name.clone()),
+            );
+        }
+        SemCheckError::EnumVariantPayloadArityMismatch(variant, expected, found, _) => {
+            metadata.insert(
+                "variant".to_string(),
+                DiagnosticValue::String(variant.clone()),
+            );
+            metadata.insert(
+                "expected".to_string(),
+                DiagnosticValue::Number(*expected as i64),
+            );
+            metadata.insert("found".to_string(), DiagnosticValue::Number(*found as i64));
+        }
+        SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
+            metadata.insert(
+                "missing".to_string(),
+                DiagnosticValue::StringList(missing.clone()),
+            );
+        }
+        SemCheckError::MatchTargetNotEnum(ty, _)
+        | SemCheckError::InvalidMatchPattern(ty, _)
+        | SemCheckError::InOutParamNotAggregate(ty, _)
+        | SemCheckError::OutParamNotAggregate(ty, _)
+        | SemCheckError::SinkParamNotOwned(ty, _) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
+        }
+        _ => {}
     }
 }
 

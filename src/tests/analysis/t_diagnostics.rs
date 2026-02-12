@@ -160,3 +160,30 @@ fn semcheck_diagnostic_is_phase_tagged() {
     assert_eq!(diag.code, "MC-SEMCK-DivisionByZero");
     assert_eq!(diag.severity, DiagnosticSeverity::Error);
 }
+
+#[test]
+fn semcheck_diagnostic_keeps_structured_metadata() {
+    let err = SemCheckError::NonExhaustiveUnionMatch(
+        vec!["IoError".to_string(), "ParseError".to_string()],
+        Span::default(),
+    );
+    let diag = Diagnostic::from_semcheck_error(&err);
+    assert_eq!(diag.code, "MC-SEMCK-NonExhaustiveUnionMatch");
+    assert_eq!(
+        diag.metadata.get("missing"),
+        Some(&DiagnosticValue::StringList(vec![
+            "IoError".to_string(),
+            "ParseError".to_string()
+        ]))
+    );
+
+    let err =
+        SemCheckError::EnumVariantPayloadArityMismatch("Some".to_string(), 2, 1, Span::default());
+    let diag = Diagnostic::from_semcheck_error(&err);
+    assert_eq!(
+        diag.metadata.get("variant"),
+        Some(&DiagnosticValue::String("Some".to_string()))
+    );
+    assert_eq!(diag.metadata.get("expected"), Some(&DiagnosticValue::Number(2)));
+    assert_eq!(diag.metadata.get("found"), Some(&DiagnosticValue::Number(1)));
+}
