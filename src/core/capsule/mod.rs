@@ -1,11 +1,11 @@
-//! Program-level frontend pipeline scaffolding.
+//! Capsule-level frontend pipeline scaffolding.
 //!
 //! This layer discovers and parses a module graph before module-local resolve
 //! and type checking. It keeps module-loading concerns out of existing parser
 //! and resolver logic.
 
 pub mod bind;
-pub mod program;
+pub mod compose;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -25,18 +25,18 @@ pub struct ModulePath {
 }
 
 impl ModulePath {
-    pub fn new(segments: Vec<String>) -> Result<Self, FrontendError> {
+    pub fn new(segments: Vec<String>) -> Result<Self, CapsuleError> {
         if segments.is_empty() || segments.iter().any(|s| s.is_empty()) {
-            return Err(FrontendError::InvalidModulePath(segments.join(".")));
+            return Err(CapsuleError::InvalidModulePath(segments.join(".")));
         }
         Ok(Self { segments })
     }
 
-    pub fn from_require(req: &Require) -> Result<Self, FrontendError> {
+    pub fn from_require(req: &Require) -> Result<Self, CapsuleError> {
         Self::new(req.path.clone())
     }
 
-    pub fn from_file(path: &Path, root: &Path) -> Result<Self, FrontendError> {
+    pub fn from_file(path: &Path, root: &Path) -> Result<Self, CapsuleError> {
         let rel = path.strip_prefix(root).unwrap_or(path);
         let mut segments = rel
             .iter()
@@ -95,7 +95,7 @@ pub struct ParsedModule {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProgramParsed {
+pub struct CapsuleParsed {
     pub entry: ModuleId,
     pub modules: HashMap<ModuleId, ParsedModule>,
     pub by_path: HashMap<ModulePath, ModuleId>,
@@ -103,11 +103,11 @@ pub struct ProgramParsed {
     pub next_node_id_gen: NodeIdGen,
 }
 
-impl ProgramParsed {
+impl CapsuleParsed {
     pub fn entry_module(&self) -> &ParsedModule {
         self.modules
             .get(&self.entry)
-            .expect("frontend entry module should exist")
+            .expect("capsule entry module should exist")
     }
 
     pub fn module(&self, id: ModuleId) -> Option<&ParsedModule> {
@@ -141,7 +141,7 @@ impl ProgramParsed {
 }
 
 #[derive(Debug, Error)]
-pub enum FrontendError {
+pub enum CapsuleError {
     #[error("invalid module path: {0}")]
     InvalidModulePath(String),
 
@@ -206,7 +206,7 @@ pub enum FrontendError {
 }
 
 pub trait ModuleLoader {
-    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError>;
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError>;
 }
 
 pub struct FsModuleLoader {
@@ -243,30 +243,30 @@ impl FsModuleLoader {
 }
 
 impl ModuleLoader for FsModuleLoader {
-    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError> {
         let file_path = self.module_to_path(path);
         let source = std::fs::read_to_string(&file_path)
-            .map_err(|e| FrontendError::Io(file_path.clone(), e))?;
+            .map_err(|e| CapsuleError::Io(file_path.clone(), e))?;
         Ok((file_path, source))
     }
 }
 
-pub fn discover_and_parse_program(
+pub fn discover_and_parse_capsule(
     entry_source: &str,
     entry_file: &Path,
-) -> Result<ProgramParsed, FrontendError> {
+) -> Result<CapsuleParsed, CapsuleError> {
     let project_root = infer_project_root(entry_file);
     let entry_path = ModulePath::from_file(entry_file, &project_root)?;
     let loader = FsModuleLoader::new(project_root);
-    discover_and_parse_program_with_loader(entry_source, entry_file, entry_path, &loader)
+    discover_and_parse_capsule_with_loader(entry_source, entry_file, entry_path, &loader)
 }
 
-pub fn discover_and_parse_program_with_loader(
+pub fn discover_and_parse_capsule_with_loader(
     entry_source: &str,
     entry_file: &Path,
     entry_path: ModulePath,
     loader: &impl ModuleLoader,
-) -> Result<ProgramParsed, FrontendError> {
+) -> Result<CapsuleParsed, CapsuleError> {
     let mut id_gen = NodeIdGen::new();
     let mut next_module_id = 0u32;
 
@@ -347,7 +347,7 @@ pub fn discover_and_parse_program_with_loader(
 
     ensure_acyclic(&modules, &edges)?;
 
-    Ok(ProgramParsed {
+    Ok(CapsuleParsed {
         entry: entry_id,
         modules,
         by_path,
@@ -359,7 +359,7 @@ pub fn discover_and_parse_program_with_loader(
 fn collect_requires(
     module_path: &ModulePath,
     module: &Module,
-) -> Result<Vec<RequireSpec>, FrontendError> {
+) -> Result<Vec<RequireSpec>, CapsuleError> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for req in &module.requires {
@@ -370,7 +370,7 @@ fn collect_requires(
             .or_else(|| req.path.last().cloned())
             .unwrap_or_default();
         if !seen.insert(alias.clone()) {
-            return Err(FrontendError::DuplicateRequireAlias {
+            return Err(CapsuleError::DuplicateRequireAlias {
                 module: module_path.clone(),
                 alias,
                 span: req.span,
@@ -391,7 +391,7 @@ fn resolve_require_target(
     req: &mut RequireSpec,
     by_path: &HashMap<ModulePath, ModuleId>,
     loader: &impl ModuleLoader,
-) -> Result<(), FrontendError> {
+) -> Result<(), CapsuleError> {
     // Exact module path always wins when it exists.
     if by_path.contains_key(&req.module_path) || loader.load(&req.module_path).is_ok() {
         req.kind = RequireKind::Module;
@@ -402,14 +402,14 @@ fn resolve_require_target(
     // Fallback: treat `<module>::<symbol>` as importing `symbol` from `<module>`.
     let segments = req.module_path.segments();
     if segments.len() < 2 {
-        return Err(FrontendError::UnknownModule(req.module_path.clone()));
+        return Err(CapsuleError::UnknownModule(req.module_path.clone()));
     }
 
     let parent = ModulePath::new(segments[..segments.len() - 1].to_vec())?;
     let member = segments.last().cloned().unwrap_or_default();
     if by_path.contains_key(&parent) || loader.load(&parent).is_ok() {
         if req.alias != member {
-            return Err(FrontendError::SymbolImportAliasUnsupported {
+            return Err(CapsuleError::SymbolImportAliasUnsupported {
                 module: parent,
                 member,
                 alias: req.alias.clone(),
@@ -422,25 +422,25 @@ fn resolve_require_target(
         return Ok(());
     }
 
-    Err(FrontendError::UnknownModule(req.module_path.clone()))
+    Err(CapsuleError::UnknownModule(req.module_path.clone()))
 }
 
 fn parse_module(
     source: &str,
     path: &Path,
     id_gen: NodeIdGen,
-) -> Result<(Module, NodeIdGen), FrontendError> {
+) -> Result<(Module, NodeIdGen), CapsuleError> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
         .collect::<Result<Vec<Token>, LexError>>()
-        .map_err(|error| FrontendError::Lex {
+        .map_err(|error| CapsuleError::Lex {
             path: path.to_path_buf(),
             error,
         })?;
 
     let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
-    let module = parser.parse().map_err(|error| FrontendError::Parse {
+    let module = parser.parse().map_err(|error| CapsuleError::Parse {
         path: path.to_path_buf(),
         error,
     })?;
@@ -462,7 +462,7 @@ fn infer_project_root(entry_file: &Path) -> PathBuf {
 fn ensure_acyclic(
     modules: &HashMap<ModuleId, ParsedModule>,
     edges: &HashMap<ModuleId, Vec<ModuleId>>,
-) -> Result<(), FrontendError> {
+) -> Result<(), CapsuleError> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Mark {
         Visiting,
@@ -475,7 +475,7 @@ fn ensure_acyclic(
         edges: &HashMap<ModuleId, Vec<ModuleId>>,
         marks: &mut HashMap<ModuleId, Mark>,
         stack: &mut Vec<ModuleId>,
-    ) -> Result<(), FrontendError> {
+    ) -> Result<(), CapsuleError> {
         if let Some(mark) = marks.get(&node) {
             if *mark == Mark::Visiting {
                 let cycle = stack
@@ -486,7 +486,7 @@ fn ensure_acyclic(
                     .filter_map(|id| modules.get(&id).map(|m| m.source.path.to_string()))
                     .collect::<Vec<_>>()
                     .join(" -> ");
-                return Err(FrontendError::ModuleDependencyCycle(cycle));
+                return Err(CapsuleError::ModuleDependencyCycle(cycle));
             }
             return Ok(());
         }
@@ -520,18 +520,18 @@ mod tests {
     }
 
     impl ModuleLoader for MockLoader {
-        fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+        fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError> {
             let key = path.to_string();
             if let Some(src) = self.modules.get(&key) {
                 Ok((PathBuf::from(format!("{key}.mc")), src.clone()))
             } else {
-                Err(FrontendError::UnknownModule(path.clone()))
+                Err(CapsuleError::UnknownModule(path.clone()))
             }
         }
     }
 
     #[test]
-    fn discover_program_collects_dependencies() {
+    fn discover_capsule_collects_dependencies() {
         let entry_src = r#"
             requires {
                 app::util
@@ -543,7 +543,7 @@ mod tests {
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-        let program = discover_and_parse_program_with_loader(
+        let program = discover_and_parse_capsule_with_loader(
             entry_src,
             Path::new("app/main.mc"),
             entry_path,
@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_program_reports_cycle() {
+    fn discover_capsule_reports_cycle() {
         let entry_src = r#"
             requires {
                 app::a
@@ -577,7 +577,7 @@ mod tests {
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-        let err = discover_and_parse_program_with_loader(
+        let err = discover_and_parse_capsule_with_loader(
             entry_src,
             Path::new("app/main.mc"),
             entry_path,
@@ -585,7 +585,7 @@ mod tests {
         )
         .expect_err("cycle should be rejected");
 
-        assert!(matches!(err, FrontendError::ModuleDependencyCycle(_)));
+        assert!(matches!(err, CapsuleError::ModuleDependencyCycle(_)));
     }
 
     #[test]
@@ -613,7 +613,7 @@ mod tests {
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-        let program = discover_and_parse_program_with_loader(
+        let program = discover_and_parse_capsule_with_loader(
             entry_src,
             Path::new("app/main.mc"),
             entry_path,
@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_program_resolves_symbol_import_to_parent_module() {
+    fn discover_capsule_resolves_symbol_import_to_parent_module() {
         let entry_src = r#"
             requires {
                 app::util::answer
@@ -654,7 +654,7 @@ mod tests {
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-        let program = discover_and_parse_program_with_loader(
+        let program = discover_and_parse_capsule_with_loader(
             entry_src,
             Path::new("app/main.mc"),
             entry_path,
@@ -675,7 +675,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_program_rejects_symbol_import_alias_for_now() {
+    fn discover_capsule_rejects_symbol_import_alias_for_now() {
         let entry_src = r#"
             requires {
                 app::util::answer as a
@@ -690,7 +690,7 @@ mod tests {
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-        let err = discover_and_parse_program_with_loader(
+        let err = discover_and_parse_capsule_with_loader(
             entry_src,
             Path::new("app/main.mc"),
             entry_path,
@@ -699,7 +699,7 @@ mod tests {
         .expect_err("symbol import aliases should be rejected");
         assert!(matches!(
             err,
-            FrontendError::SymbolImportAliasUnsupported { .. }
+            CapsuleError::SymbolImportAliasUnsupported { .. }
         ));
     }
 }

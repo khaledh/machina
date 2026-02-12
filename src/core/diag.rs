@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::analysis::query::QueryCancelled;
 use crate::backend::lower::LowerToIrError as SsaLoweringError;
 use crate::backend::verify::VerifyIrError as SsaVerifyError;
-use crate::frontend::FrontendError;
+use crate::capsule::CapsuleError;
 use crate::lexer::LexError;
 use crate::monomorphize::MonomorphizeError;
 use crate::parse::ParseError;
@@ -40,7 +40,7 @@ pub enum CompileError {
     VerifyIr(#[from] SsaVerifyError),
 
     #[error(transparent)]
-    Frontend(#[from] FrontendError),
+    Capsule(#[from] CapsuleError),
 
     #[error("analysis query cancelled")]
     QueryCancelled,

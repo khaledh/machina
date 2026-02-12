@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::results::{CompletionItem, CompletionKind};
 use crate::analysis::syntax_index::{node_at_span, position_leq};
+use crate::capsule::ModuleId;
 use crate::diag::{Position, Span};
-use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
 use crate::tree::resolved as res;
 use crate::tree::{BlockItem, NodeId, StmtExprKind};

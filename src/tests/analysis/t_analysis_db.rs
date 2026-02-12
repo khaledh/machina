@@ -8,8 +8,8 @@ use crate::analysis::diagnostics::DiagnosticPhase;
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::pipeline::ROOT_POISON_NODE;
 use crate::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
+use crate::capsule::ModuleId;
 use crate::diag::{Position, Span};
-use crate::frontend::ModuleId;
 use crate::types::Type;
 
 static ANALYSIS_TMP_COUNTER: AtomicUsize = AtomicUsize::new(0);

@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
 use crate::typecheck::builtin_methods;

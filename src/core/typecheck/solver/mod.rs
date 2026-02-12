@@ -26,8 +26,8 @@ mod term_utils;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::capsule::ModuleId;
 use crate::diag::Span;
-use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefKind, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind};

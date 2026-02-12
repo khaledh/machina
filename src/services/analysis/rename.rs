@@ -8,7 +8,7 @@ use crate::analysis::query::QueryResult;
 use crate::analysis::results::{Location, RenameConflict, RenameEdit, RenamePlan};
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId};
 use crate::analysis::syntax_index::node_span_map;
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 use crate::resolve::DefId;
 
 pub(crate) fn references<F>(

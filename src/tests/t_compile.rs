@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::context::ProgramParsedContext;
-use crate::frontend::bind::ProgramBindings;
-use crate::frontend::program::{flatten_program, flatten_program_module};
-use crate::frontend::{
-    FrontendError, ModuleLoader, ModulePath, discover_and_parse_program_with_loader,
+use crate::capsule::bind::CapsuleBindings;
+use crate::capsule::compose::{flatten_capsule, flatten_capsule_module};
+use crate::capsule::{
+    CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
 };
+use crate::context::CapsuleParsedContext;
 use crate::tree::parsed::{Expr, ExprKind, MethodBlock, TypeExpr, TypeExprKind, TypeParam};
 use crate::tree::visit::{self, Visitor};
 
@@ -15,12 +15,12 @@ struct MockLoader {
 }
 
 impl ModuleLoader for MockLoader {
-    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError> {
         let key = path.to_string();
         if let Some(src) = self.modules.get(&key) {
             Ok((PathBuf::from(format!("{key}.mc")), src.clone()))
         } else {
-            Err(FrontendError::UnknownModule(path.clone()))
+            Err(CapsuleError::UnknownModule(path.clone()))
         }
     }
 }
@@ -104,7 +104,7 @@ impl Visitor<()> for CallRewriteStats {
 }
 
 #[test]
-fn flatten_program_rewrites_alias_method_call_to_plain_call() {
+fn flatten_capsule_rewrites_alias_method_call_to_plain_call() {
     let entry_src = r#"
         requires {
             app::util
@@ -122,7 +122,7 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -130,7 +130,7 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
@@ -140,7 +140,7 @@ fn flatten_program_rewrites_alias_method_call_to_plain_call() {
 }
 
 #[test]
-fn flatten_program_rewrites_alias_member_access_to_var() {
+fn flatten_capsule_rewrites_alias_member_access_to_var() {
     let entry_src = r#"
         requires {
             app::util
@@ -159,7 +159,7 @@ fn flatten_program_rewrites_alias_member_access_to_var() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -167,7 +167,7 @@ fn flatten_program_rewrites_alias_member_access_to_var() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
@@ -177,7 +177,7 @@ fn flatten_program_rewrites_alias_member_access_to_var() {
 }
 
 #[test]
-fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
+fn flatten_capsule_rewrites_alias_type_reference_to_plain_type_name() {
     let entry_src = r#"
         requires {
             app::config as cfg
@@ -195,7 +195,7 @@ fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -203,7 +203,7 @@ fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
@@ -213,7 +213,7 @@ fn flatten_program_rewrites_alias_type_reference_to_plain_type_name() {
 }
 
 #[test]
-fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
+fn flatten_capsule_rewrites_alias_trait_bound_to_plain_trait_name() {
     let entry_src = r#"
         requires {
             app::runnable as rt
@@ -231,7 +231,7 @@ fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -239,7 +239,7 @@ fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
@@ -249,7 +249,7 @@ fn flatten_program_rewrites_alias_trait_bound_to_plain_trait_name() {
 }
 
 #[test]
-fn flatten_program_rewrites_alias_trait_name_in_method_block() {
+fn flatten_capsule_rewrites_alias_trait_name_in_method_block() {
     let entry_src = r#"
         requires {
             app::runnable as rt
@@ -271,7 +271,7 @@ fn flatten_program_rewrites_alias_trait_name_in_method_block() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -279,7 +279,7 @@ fn flatten_program_rewrites_alias_trait_name_in_method_block() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
@@ -289,7 +289,7 @@ fn flatten_program_rewrites_alias_trait_name_in_method_block() {
 }
 
 #[test]
-fn flatten_program_reports_unknown_alias_in_type_reference() {
+fn flatten_capsule_reports_unknown_alias_in_type_reference() {
     let entry_src = r#"
         fn use_config(c: cfg::Config) -> cfg::Config {
             c
@@ -299,7 +299,7 @@ fn flatten_program_reports_unknown_alias_in_type_reference() {
         modules: HashMap::new(),
     };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -307,17 +307,17 @@ fn flatten_program_reports_unknown_alias_in_type_reference() {
     )
     .expect("program should parse");
 
-    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let result = flatten_capsule_module(&CapsuleParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
     assert!(
         errors.iter().any(
-            |e| matches!(e, FrontendError::UnknownRequireAlias { alias, .. } if alias == "cfg")
+            |e| matches!(e, CapsuleError::UnknownRequireAlias { alias, .. } if alias == "cfg")
         )
     );
 }
 
 #[test]
-fn flatten_program_reports_missing_trait_member_on_alias() {
+fn flatten_capsule_reports_missing_trait_member_on_alias() {
     let entry_src = r#"
         requires {
             app::runnable as rt
@@ -334,7 +334,7 @@ fn flatten_program_reports_missing_trait_member_on_alias() {
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -342,19 +342,19 @@ fn flatten_program_reports_missing_trait_member_on_alias() {
     )
     .expect("program should parse");
 
-    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let result = flatten_capsule_module(&CapsuleParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
     assert!(errors.iter().any(|e| {
         matches!(
             e,
-            FrontendError::RequireMemberUndefined { alias, member, expected_kind, .. }
+            CapsuleError::RequireMemberUndefined { alias, member, expected_kind, .. }
                 if alias == "rt" && member == "Missing" && *expected_kind == "trait"
         )
     }));
 }
 
 #[test]
-fn flatten_program_reports_private_function_on_alias() {
+fn flatten_capsule_reports_private_function_on_alias() {
     let entry_src = r#"
         requires {
             app::util
@@ -371,7 +371,7 @@ fn flatten_program_reports_private_function_on_alias() {
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -379,19 +379,19 @@ fn flatten_program_reports_private_function_on_alias() {
     )
     .expect("program should parse");
 
-    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let result = flatten_capsule_module(&CapsuleParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
     assert!(errors.iter().any(|e| {
         matches!(
             e,
-            FrontendError::RequireMemberPrivate { alias, member, expected_kind, .. }
+            CapsuleError::RequireMemberPrivate { alias, member, expected_kind, .. }
                 if alias == "util" && member == "secret" && *expected_kind == "function"
         )
     }));
 }
 
 #[test]
-fn flatten_program_reports_private_type_on_alias() {
+fn flatten_capsule_reports_private_type_on_alias() {
     let entry_src = r#"
         requires {
             app::config as cfg
@@ -408,7 +408,7 @@ fn flatten_program_reports_private_type_on_alias() {
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -416,19 +416,19 @@ fn flatten_program_reports_private_type_on_alias() {
     )
     .expect("program should parse");
 
-    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let result = flatten_capsule_module(&CapsuleParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
     assert!(errors.iter().any(|e| {
         matches!(
             e,
-            FrontendError::RequireMemberPrivate { alias, member, expected_kind, .. }
+            CapsuleError::RequireMemberPrivate { alias, member, expected_kind, .. }
                 if alias == "cfg" && member == "Config" && *expected_kind == "type"
         )
     }));
 }
 
 #[test]
-fn flatten_program_reports_private_trait_on_alias() {
+fn flatten_capsule_reports_private_trait_on_alias() {
     let entry_src = r#"
         requires {
             app::runnable as rt
@@ -445,7 +445,7 @@ fn flatten_program_reports_private_trait_on_alias() {
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -453,19 +453,19 @@ fn flatten_program_reports_private_trait_on_alias() {
     )
     .expect("program should parse");
 
-    let result = flatten_program_module(&ProgramParsedContext::new(program));
+    let result = flatten_capsule_module(&CapsuleParsedContext::new(program));
     let errors = result.expect_err("flatten should fail");
     assert!(errors.iter().any(|e| {
         matches!(
             e,
-            FrontendError::RequireMemberPrivate { alias, member, expected_kind, .. }
+            CapsuleError::RequireMemberPrivate { alias, member, expected_kind, .. }
                 if alias == "rt" && member == "Runnable" && *expected_kind == "trait"
         )
     }));
 }
 
 #[test]
-fn flatten_program_allows_conflicting_public_export_names_via_module_qualification() {
+fn flatten_capsule_allows_conflicting_public_export_names_via_module_qualification() {
     let entry_src = r#"
         requires {
             app::util as util
@@ -487,7 +487,7 @@ fn flatten_program_allows_conflicting_public_export_names_via_module_qualificati
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -496,7 +496,7 @@ fn flatten_program_allows_conflicting_public_export_names_via_module_qualificati
     .expect("program should parse");
 
     let flattened =
-        flatten_program_module(&ProgramParsedContext::new(program)).expect("flatten should pass");
+        flatten_capsule_module(&CapsuleParsedContext::new(program)).expect("flatten should pass");
 
     #[derive(Default)]
     struct CalledFnNames {
@@ -531,7 +531,7 @@ fn flatten_program_allows_conflicting_public_export_names_via_module_qualificati
 }
 
 #[test]
-fn flatten_program_mangles_private_dependency_function_names() {
+fn flatten_capsule_mangles_private_dependency_function_names() {
     let entry_src = r#"
         requires {
             app::util
@@ -552,7 +552,7 @@ fn flatten_program_mangles_private_dependency_function_names() {
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -560,7 +560,7 @@ fn flatten_program_mangles_private_dependency_function_names() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
 
     let mut callable_names = Vec::new();
@@ -612,16 +612,16 @@ fn program_bindings_include_visibility_and_opaque_flags() {
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
         &loader,
     )
     .expect("program should parse");
-    let program_ctx = ProgramParsedContext::new(program);
+    let program_ctx = CapsuleParsedContext::new(program);
 
-    let bindings = ProgramBindings::build(&program_ctx);
+    let bindings = CapsuleBindings::build(&program_ctx);
     let aliases = bindings.alias_symbols_for(program_ctx.entry());
     let util = aliases.get("util").expect("util alias should be bound");
 
@@ -636,7 +636,7 @@ fn program_bindings_include_visibility_and_opaque_flags() {
 }
 
 #[test]
-fn flatten_program_tracks_top_level_item_owners() {
+fn flatten_capsule_tracks_top_level_item_owners() {
     let entry_src = r#"
         requires {
             app::util
@@ -654,26 +654,26 @@ fn flatten_program_tracks_top_level_item_owners() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
     let util_path = ModulePath::new(vec!["app".to_string(), "util".to_string()]).unwrap();
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path.clone(),
         &loader,
     )
     .expect("program should parse");
-    let program_ctx = ProgramParsedContext::new(program);
+    let program_ctx = CapsuleParsedContext::new(program);
     let entry_id = *program_ctx
-        .program
+        .capsule
         .by_path
         .get(&entry_path)
         .expect("entry module id should exist");
     let util_id = *program_ctx
-        .program
+        .capsule
         .by_path
         .get(&util_path)
         .expect("util module id should exist");
 
-    let flattened = flatten_program(&program_ctx).expect("flatten should succeed");
+    let flattened = flatten_capsule(&program_ctx).expect("flatten should succeed");
     let mut owner_by_func = HashMap::new();
 
     for item in &flattened.module.top_level_items {
@@ -692,7 +692,7 @@ fn flatten_program_tracks_top_level_item_owners() {
 }
 
 #[test]
-fn flatten_program_accepts_public_symbol_import() {
+fn flatten_capsule_accepts_public_symbol_import() {
     let entry_src = r#"
         requires {
             app::util::answer
@@ -710,7 +710,7 @@ fn flatten_program_accepts_public_symbol_import() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -718,7 +718,7 @@ fn flatten_program_accepts_public_symbol_import() {
     )
     .expect("program should parse");
 
-    let flattened = flatten_program_module(&ProgramParsedContext::new(program))
+    let flattened = flatten_capsule_module(&CapsuleParsedContext::new(program))
         .expect("flatten should succeed");
     let mut stats = CallRewriteStats::default();
     stats.visit_module(&flattened);
@@ -727,7 +727,7 @@ fn flatten_program_accepts_public_symbol_import() {
 }
 
 #[test]
-fn flatten_program_rejects_private_symbol_import() {
+fn flatten_capsule_rejects_private_symbol_import() {
     let entry_src = r#"
         requires {
             app::util::secret
@@ -745,7 +745,7 @@ fn flatten_program_rejects_private_symbol_import() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -754,11 +754,11 @@ fn flatten_program_rejects_private_symbol_import() {
     .expect("program should parse");
 
     let errors =
-        flatten_program_module(&ProgramParsedContext::new(program)).expect_err("flatten fails");
+        flatten_capsule_module(&CapsuleParsedContext::new(program)).expect_err("flatten fails");
     assert!(errors.iter().any(|error| {
         matches!(
             error,
-            FrontendError::RequireMemberPrivate {
+            CapsuleError::RequireMemberPrivate {
                 alias,
                 expected_kind,
                 ..

@@ -2,9 +2,9 @@ use clap::Parser as ClapParser;
 use machina::analysis::db::AnalysisDb;
 use machina::analysis::diagnostics::Diagnostic;
 use machina::analysis::diagnostics::DiagnosticPhase;
+use machina::capsule::CapsuleError;
 use machina::compile::{CompileOptions, check_with_path, compile_with_path};
 use machina::diag::{CompileError, Position, Span, format_error};
-use machina::frontend::FrontendError;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -343,7 +343,7 @@ fn main() {
                     CompileError::VerifyIr(e) => {
                         println!("{}", format_error(&source, Span::default(), e));
                     }
-                    CompileError::Frontend(e) => {
+                    CompileError::Capsule(e) => {
                         println!("{e}");
                     }
                     CompileError::Io(path, e) => {
@@ -394,7 +394,7 @@ fn print_check_error(entry_source: &str, error: CompileError) -> usize {
             print_structured_diag(entry_source, Diagnostic::from_typecheck_error(&e));
             1
         }
-        CompileError::Frontend(frontend) => print_frontend_check_error(frontend),
+        CompileError::Capsule(capsule_error) => print_capsule_check_error(capsule_error),
         CompileError::Io(path, err) => {
             println!("{}: {}", path.display(), err);
             1
@@ -410,14 +410,14 @@ fn print_check_error(entry_source: &str, error: CompileError) -> usize {
     }
 }
 
-fn print_frontend_check_error(error: FrontendError) -> usize {
+fn print_capsule_check_error(error: CapsuleError) -> usize {
     match error {
-        FrontendError::Lex { path, error } => {
+        CapsuleError::Lex { path, error } => {
             let source = std::fs::read_to_string(&path).unwrap_or_default();
             print_structured_diag(&source, Diagnostic::from_lex_error(&error));
             1
         }
-        FrontendError::Parse { path, error } => {
+        CapsuleError::Parse { path, error } => {
             let source = std::fs::read_to_string(&path).unwrap_or_default();
             print_structured_diag(&source, Diagnostic::from_parse_error(&error));
             1

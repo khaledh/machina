@@ -5,12 +5,12 @@ use crate::analysis::batch::{self, BatchQueryError};
 use crate::analysis::db::AnalysisDb;
 use crate::backend;
 use crate::backend::regalloc::arm64::Arm64Target;
-use crate::context::{ParsedContext, ProgramParsedContext};
+use crate::capsule;
+use crate::capsule::ModuleId;
+use crate::capsule::compose::{flatten_capsule, merge_modules};
+use crate::context::{CapsuleParsedContext, ParsedContext};
 use crate::diag::CompileError;
 use crate::elaborate;
-use crate::frontend;
-use crate::frontend::ModuleId;
-use crate::frontend::program::{flatten_program, merge_modules};
 use crate::ir::GlobalData;
 use crate::ir::format::format_func_with_comments_and_names;
 use crate::lexer::{LexError, Lexer, Token};
@@ -38,17 +38,17 @@ pub struct CompileOutput {
     pub ir: Option<String>,
 }
 
-/// Run a module-aware frontend check (parse/resolve/typecheck) without backend lowering.
+/// Run a module-aware capsule check (parse/resolve/typecheck) without backend lowering.
 pub fn check_with_path(
     source: &str,
     source_path: &std::path::Path,
     inject_prelude: bool,
 ) -> Result<(), Vec<CompileError>> {
     let program =
-        frontend::discover_and_parse_program(source, source_path).map_err(|e| vec![e.into()])?;
-    let program_context = ProgramParsedContext::new(program);
+        capsule::discover_and_parse_capsule(source, source_path).map_err(|e| vec![e.into()])?;
+    let program_context = CapsuleParsedContext::new(program);
 
-    let flattened = flatten_program(&program_context).map_err(|errs| {
+    let flattened = flatten_capsule(&program_context).map_err(|errs| {
         errs.into_iter()
             .map(CompileError::from)
             .collect::<Vec<CompileError>>()
@@ -116,8 +116,8 @@ pub fn compile_with_path(
 ) -> Result<CompileOutput, Vec<CompileError>> {
     let program_context = if let Some(path) = source_path {
         let program =
-            frontend::discover_and_parse_program(source, path).map_err(|e| vec![e.into()])?;
-        Some(ProgramParsedContext::new(program))
+            capsule::discover_and_parse_capsule(source, path).map_err(|e| vec![e.into()])?;
+        Some(CapsuleParsedContext::new(program))
     } else {
         None
     };
@@ -169,7 +169,7 @@ pub fn compile_with_path(
     // --- Parse ---
 
     let (user_module, id_gen, top_level_owners) = if let Some(program) = &program_context {
-        let flattened = flatten_program(program).map_err(|errs| {
+        let flattened = flatten_capsule(program).map_err(|errs| {
             errs.into_iter()
                 .map(CompileError::from)
                 .collect::<Vec<CompileError>>()
@@ -211,7 +211,7 @@ pub fn compile_with_path(
     let ast_context = ParsedContext::new(module, id_gen);
     let module_id = program_context
         .as_ref()
-        .map(ProgramParsedContext::entry)
+        .map(CapsuleParsedContext::entry)
         .unwrap_or(ModuleId(0));
     let mut analysis_db = AnalysisDb::new();
     let (resolved_result, mut typed_result) = batch::query_parse_resolve_typecheck(

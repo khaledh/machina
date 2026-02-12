@@ -1,7 +1,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 
 // Defs store only identifiers and kinds; def kind structure lives in
 // the resolved tree.

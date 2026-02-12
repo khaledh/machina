@@ -8,25 +8,25 @@ use std::path::{Path, PathBuf};
 
 use crate::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
 use crate::analysis::snapshot::AnalysisSnapshot;
+use crate::capsule::{self, CapsuleError, ModuleLoader, ModulePath};
 use crate::diag::Span;
-use crate::frontend::{self, FrontendError, ModuleLoader, ModulePath};
 
 pub(crate) struct SnapshotOverlayLoader {
     snapshot: AnalysisSnapshot,
-    fs_loader: frontend::FsModuleLoader,
+    fs_loader: capsule::FsModuleLoader,
 }
 
 impl SnapshotOverlayLoader {
     pub(crate) fn new(snapshot: AnalysisSnapshot, project_root: PathBuf) -> Self {
         Self {
             snapshot,
-            fs_loader: frontend::FsModuleLoader::new(project_root),
+            fs_loader: capsule::FsModuleLoader::new(project_root),
         }
     }
 }
 
 impl ModuleLoader for SnapshotOverlayLoader {
-    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError> {
         let (file_path, disk_source) = self.fs_loader.load(path)?;
         if let Some(overlay) = snapshot_text_for_path(&self.snapshot, &file_path) {
             return Ok((file_path, overlay));
@@ -65,7 +65,7 @@ pub(crate) fn stable_source_revision(source: &str) -> u64 {
     hasher.finish()
 }
 
-pub(crate) fn frontend_error_diagnostics(error: FrontendError) -> Vec<Diagnostic> {
+pub(crate) fn frontend_error_diagnostics(error: CapsuleError) -> Vec<Diagnostic> {
     fn frontend_diag(message: String, span: Span) -> Diagnostic {
         Diagnostic {
             phase: crate::analysis::diagnostics::DiagnosticPhase::Resolve,
@@ -88,19 +88,19 @@ pub(crate) fn frontend_error_diagnostics(error: FrontendError) -> Vec<Diagnostic
     }
 
     match error {
-        FrontendError::Lex { path, error } => {
+        CapsuleError::Lex { path, error } => {
             vec![with_path_metadata(
                 Diagnostic::from_lex_error(&error),
                 Some(&path),
             )]
         }
-        FrontendError::Parse { path, error } => {
+        CapsuleError::Parse { path, error } => {
             vec![with_path_metadata(
                 Diagnostic::from_parse_error(&error),
                 Some(&path),
             )]
         }
-        FrontendError::Io(path, io_error) => {
+        CapsuleError::Io(path, io_error) => {
             vec![with_path_metadata(
                 frontend_diag(
                     format!(
@@ -113,11 +113,11 @@ pub(crate) fn frontend_error_diagnostics(error: FrontendError) -> Vec<Diagnostic
                 Some(&path),
             )]
         }
-        FrontendError::UnknownRequireAlias { span, .. }
-        | FrontendError::RequireMemberUndefined { span, .. }
-        | FrontendError::RequireMemberPrivate { span, .. }
-        | FrontendError::DuplicateRequireAlias { span, .. }
-        | FrontendError::SymbolImportAliasUnsupported { span, .. } => {
+        CapsuleError::UnknownRequireAlias { span, .. }
+        | CapsuleError::RequireMemberUndefined { span, .. }
+        | CapsuleError::RequireMemberPrivate { span, .. }
+        | CapsuleError::DuplicateRequireAlias { span, .. }
+        | CapsuleError::SymbolImportAliasUnsupported { span, .. } => {
             vec![frontend_diag(error.to_string(), span)]
         }
         _ => vec![frontend_diag(error.to_string(), Span::default())],

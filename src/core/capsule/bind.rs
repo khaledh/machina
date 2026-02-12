@@ -1,4 +1,4 @@
-//! Program-level import/export binding helpers.
+//! Capsule-level import/export binding helpers.
 //!
 //! This pass computes, for each module:
 //! - its exported symbol surface (with visibility metadata), and
@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 
-use crate::context::ProgramParsedContext;
-use crate::frontend::{ModuleId, ModulePath, RequireKind};
+use crate::capsule::{ModuleId, ModulePath, RequireKind};
+use crate::context::CapsuleParsedContext;
 use crate::tree::parsed;
 
 #[derive(Clone, Copy, Default)]
@@ -68,13 +68,13 @@ pub(crate) struct AliasSymbols {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct ProgramBindings {
+pub(crate) struct CapsuleBindings {
     alias_symbols_by_module: HashMap<ModuleId, HashMap<String, AliasSymbols>>,
     exports_by_module: HashMap<ModuleId, ModuleExports>,
 }
 
-impl ProgramBindings {
-    pub(crate) fn build(program: &ProgramParsedContext) -> Self {
+impl CapsuleBindings {
+    pub(crate) fn build(program: &CapsuleParsedContext) -> Self {
         let mut exports_by_module = HashMap::<ModuleId, ModuleExports>::new();
         for module_id in program.dependency_order_from_entry() {
             if let Some(parsed) = program.module(module_id) {
@@ -92,7 +92,7 @@ impl ProgramBindings {
                 if req.kind != RequireKind::Module {
                     continue;
                 }
-                if let Some(dep_id) = program.program.by_path.get(&req.module_path)
+                if let Some(dep_id) = program.capsule.by_path.get(&req.module_path)
                     && let Some(dep_exports) = exports_by_module.get(dep_id)
                 {
                     aliases.insert(

@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 
 /// Coarse query families used by the initial analysis runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

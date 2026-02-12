@@ -1,15 +1,15 @@
-//! Program-level module preparation helpers.
+//! Capsule-level module preparation helpers.
 //!
 //! This module contains logic that is specific to composing a discovered
-//! multi-module program into a single compile unit for the current pipeline.
+//! multi-module capsule into a single compile unit for the current pipeline.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::ProgramParsedContext;
+use crate::capsule::ModuleId;
+use crate::capsule::bind::{AliasSymbols, CapsuleBindings};
+use crate::capsule::{CapsuleError, ModulePath, RequireKind};
+use crate::context::CapsuleParsedContext;
 use crate::diag::Span;
-use crate::frontend::ModuleId;
-use crate::frontend::bind::{AliasSymbols, ProgramBindings};
-use crate::frontend::{FrontendError, ModulePath, RequireKind};
 use crate::tree::NodeId;
 use crate::tree::parsed::{self, Module};
 use crate::tree::visit_mut::{self, VisitorMut};
@@ -39,16 +39,16 @@ pub(crate) fn merge_modules(prelude_module: &Module, user_module: &Module) -> Mo
 /// rewritten into unqualified names to fit the current single-module
 /// resolve/typecheck/codegen pipeline.
 #[derive(Clone)]
-pub(crate) struct FlattenedProgram {
+pub(crate) struct FlattenedCapsule {
     pub module: Module,
     #[allow(dead_code)]
     pub top_level_owners: HashMap<NodeId, ModuleId>,
 }
 
-pub(crate) fn flatten_program(
-    program: &ProgramParsedContext,
-) -> Result<FlattenedProgram, Vec<FrontendError>> {
-    let bindings = ProgramBindings::build(program);
+pub(crate) fn flatten_capsule(
+    program: &CapsuleParsedContext,
+) -> Result<FlattenedCapsule, Vec<CapsuleError>> {
+    let bindings = CapsuleBindings::build(program);
     let conflicts = collect_conflicting_public_exports(program);
 
     let mut merged = Module {
@@ -85,7 +85,7 @@ pub(crate) fn flatten_program(
     }
 
     if errors.is_empty() {
-        Ok(FlattenedProgram {
+        Ok(FlattenedCapsule {
             module: merged,
             top_level_owners,
         })
@@ -95,9 +95,9 @@ pub(crate) fn flatten_program(
 }
 
 fn validate_symbol_imports(
-    program: &ProgramParsedContext,
-    bindings: &ProgramBindings,
-) -> Vec<FrontendError> {
+    program: &CapsuleParsedContext,
+    bindings: &CapsuleBindings,
+) -> Vec<CapsuleError> {
     let mut errors = Vec::new();
     for module_id in program.dependency_order_from_entry() {
         let Some(parsed) = program.module(module_id) else {
@@ -110,7 +110,7 @@ fn validate_symbol_imports(
             let Some(member) = &req.member else {
                 continue;
             };
-            let Some(dep_id) = program.program.by_path.get(&req.module_path) else {
+            let Some(dep_id) = program.capsule.by_path.get(&req.module_path) else {
                 continue;
             };
             let Some(exports) = bindings.exports_for(*dep_id) else {
@@ -125,7 +125,7 @@ fn validate_symbol_imports(
                 || type_def.is_some_and(|m| m.public)
                 || trait_def.is_some_and(|m| m.public);
             if !has_any {
-                errors.push(FrontendError::RequireMemberUndefined {
+                errors.push(CapsuleError::RequireMemberUndefined {
                     alias: req.alias.clone(),
                     module: req.module_path.clone(),
                     member: member.clone(),
@@ -135,7 +135,7 @@ fn validate_symbol_imports(
                 continue;
             }
             if !is_public {
-                errors.push(FrontendError::RequireMemberPrivate {
+                errors.push(CapsuleError::RequireMemberPrivate {
                     alias: req.alias.clone(),
                     module: req.module_path.clone(),
                     member: member.clone(),
@@ -178,7 +178,7 @@ impl ConflictingPublicExports {
     }
 }
 
-fn collect_conflicting_public_exports(program: &ProgramParsedContext) -> ConflictingPublicExports {
+fn collect_conflicting_public_exports(program: &CapsuleParsedContext) -> ConflictingPublicExports {
     let mut callable_origins = HashMap::<String, HashSet<ModulePath>>::new();
     let mut type_origins = HashMap::<String, HashSet<ModulePath>>::new();
     let mut trait_origins = HashMap::<String, HashSet<ModulePath>>::new();
@@ -253,10 +253,10 @@ fn mangled_module_symbol(module_path: &ModulePath, symbol: &str) -> String {
 }
 
 #[cfg(test)]
-pub(crate) fn flatten_program_module(
-    program: &ProgramParsedContext,
-) -> Result<Module, Vec<FrontendError>> {
-    flatten_program(program).map(|flattened| flattened.module)
+pub(crate) fn flatten_capsule_module(
+    program: &CapsuleParsedContext,
+) -> Result<Module, Vec<CapsuleError>> {
+    flatten_capsule(program).map(|flattened| flattened.module)
 }
 
 fn top_level_item_id(item: &parsed::TopLevelItem) -> NodeId {
@@ -273,7 +273,7 @@ fn top_level_item_id(item: &parsed::TopLevelItem) -> NodeId {
 struct ModuleAliasCallRewriter<'a> {
     alias_symbols: HashMap<String, AliasSymbols>,
     conflicts: &'a ConflictingPublicExports,
-    errors: Vec<FrontendError>,
+    errors: Vec<CapsuleError>,
 }
 
 #[derive(Clone, Copy)]
@@ -334,7 +334,7 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
                     return;
                 };
                 if !member.public {
-                    self.errors.push(FrontendError::RequireMemberPrivate {
+                    self.errors.push(CapsuleError::RequireMemberPrivate {
                         alias: alias.clone(),
                         module: symbols.module_path.clone(),
                         member: method_name.clone(),
@@ -372,7 +372,7 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
                     return;
                 };
                 if !member.public {
-                    self.errors.push(FrontendError::RequireMemberPrivate {
+                    self.errors.push(CapsuleError::RequireMemberPrivate {
                         alias: alias.clone(),
                         module: symbols.module_path.clone(),
                         member: field.clone(),
@@ -430,7 +430,7 @@ impl ModuleAliasCallRewriter<'_> {
         };
 
         let Some(symbols) = self.alias_symbols.get(alias) else {
-            self.errors.push(FrontendError::UnknownRequireAlias {
+            self.errors.push(CapsuleError::UnknownRequireAlias {
                 alias: alias.to_string(),
                 span,
             });
@@ -444,7 +444,7 @@ impl ModuleAliasCallRewriter<'_> {
         };
 
         if !found {
-            self.errors.push(FrontendError::RequireMemberUndefined {
+            self.errors.push(CapsuleError::RequireMemberUndefined {
                 alias: alias.to_string(),
                 module: symbols.module_path.clone(),
                 member: member.to_string(),
@@ -470,7 +470,7 @@ impl ModuleAliasCallRewriter<'_> {
         };
 
         if !public {
-            self.errors.push(FrontendError::RequireMemberPrivate {
+            self.errors.push(CapsuleError::RequireMemberPrivate {
                 alias: alias.to_string(),
                 module: symbols.module_path.clone(),
                 member: member.to_string(),
@@ -510,7 +510,7 @@ impl ModuleAliasCallRewriter<'_> {
         let (alias, member) = split_qualified_name(ident)?;
         let symbols = self.alias_symbols.get(alias)?;
         let Some(member_attrs) = symbols.callables.get(member) else {
-            self.errors.push(FrontendError::RequireMemberUndefined {
+            self.errors.push(CapsuleError::RequireMemberUndefined {
                 alias: alias.to_string(),
                 module: symbols.module_path.clone(),
                 member: member.to_string(),
@@ -521,7 +521,7 @@ impl ModuleAliasCallRewriter<'_> {
         };
 
         if !member_attrs.public {
-            self.errors.push(FrontendError::RequireMemberPrivate {
+            self.errors.push(CapsuleError::RequireMemberPrivate {
                 alias: alias.to_string(),
                 module: symbols.module_path.clone(),
                 member: member.to_string(),

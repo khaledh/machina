@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::context::{ProgramParsedContext, TypeCheckedContext};
-use crate::frontend::bind::ProgramBindings;
-use crate::frontend::{ModuleId, RequireKind};
+use crate::capsule::bind::CapsuleBindings;
+use crate::capsule::{ModuleId, RequireKind};
+use crate::context::{CapsuleParsedContext, TypeCheckedContext};
 use crate::resolve::{
     ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
     ImportedTraitPropertySig, ImportedTraitSig,
@@ -25,8 +25,8 @@ pub(crate) struct ProgramImportFactsCache {
 impl ProgramImportFactsCache {
     pub(crate) fn imported_modules_for(
         &self,
-        program_context: &ProgramParsedContext,
-        bindings: &ProgramBindings,
+        program_context: &CapsuleParsedContext,
+        bindings: &CapsuleBindings,
         module_id: ModuleId,
     ) -> HashMap<String, ImportedModule> {
         let mut out = HashMap::new();
@@ -39,7 +39,7 @@ impl ProgramImportFactsCache {
                 continue;
             }
             let Some(dep_id) = program_context
-                .program
+                .capsule
                 .by_path
                 .get(&req.module_path)
                 .copied()
@@ -79,8 +79,8 @@ impl ProgramImportFactsCache {
 
     pub(crate) fn imported_symbols_for(
         &self,
-        program_context: &ProgramParsedContext,
-        bindings: &ProgramBindings,
+        program_context: &CapsuleParsedContext,
+        bindings: &CapsuleBindings,
         module_id: ModuleId,
     ) -> HashMap<String, ImportedSymbol> {
         let mut out = HashMap::new();
@@ -96,7 +96,7 @@ impl ProgramImportFactsCache {
                 continue;
             };
             let Some(dep_id) = program_context
-                .program
+                .capsule
                 .by_path
                 .get(&req.module_path)
                 .copied()

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::analysis::module_graph::ModuleGraph;
 use crate::analysis::query::{QueryCancelled, QueryKey, QueryKind, QueryRuntime};
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 
 #[test]
 fn invalidation_closure_includes_transitive_dependents() {

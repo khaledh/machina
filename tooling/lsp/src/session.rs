@@ -11,7 +11,7 @@ use machina::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, Diagnos
 use machina::analysis::module_graph::ModuleGraph;
 use machina::analysis::query::{CancellationToken, QueryCancelled, QueryResult};
 use machina::analysis::snapshot::{AnalysisSnapshot, FileId};
-use machina::frontend::ModuleId;
+use machina::capsule::ModuleId;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

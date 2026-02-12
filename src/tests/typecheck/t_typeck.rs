@@ -1,8 +1,8 @@
 use super::*;
 use std::collections::HashMap;
 
+use crate::capsule::ModuleId;
 use crate::context::ParsedContext;
-use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
 use crate::resolve::resolve;

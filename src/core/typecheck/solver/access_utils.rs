@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 use crate::resolve::{DefId, DefTable};
 
 pub(super) fn type_def_id_for_nominal_name(

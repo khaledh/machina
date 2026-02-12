@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::frontend::{ModuleId, ModulePath, ParsedModule as FrontendParsedModule, ProgramParsed};
+use crate::capsule::{CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule};
 use crate::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig, ImportedTraitSig};
 use crate::semck::closure::capture::ClosureCapture;
 use crate::symtab::SymbolTable;
@@ -15,51 +15,51 @@ use crate::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
 use crate::types::Type;
 
 // -----------------------------------------------------------------------------
-// Program Parsed Context
+// Capsule Parsed Context
 // -----------------------------------------------------------------------------
 
-/// Program-level parsed context produced by frontend module discovery/parsing.
+/// Capsule-level parsed context produced by module discovery/parsing.
 ///
 /// This keeps module-graph data in one place so later resolve/typecheck work
-/// can consume a stable program abstraction rather than ad-hoc maps.
+/// can consume a stable capsule abstraction rather than ad-hoc maps.
 #[derive(Clone)]
-pub struct ProgramParsedContext {
-    pub program: ProgramParsed,
+pub struct CapsuleParsedContext {
+    pub capsule: CapsuleParsed,
 }
 
-impl ProgramParsedContext {
-    pub fn new(program: ProgramParsed) -> Self {
-        Self { program }
+impl CapsuleParsedContext {
+    pub fn new(capsule: CapsuleParsed) -> Self {
+        Self { capsule }
     }
 
     pub fn entry(&self) -> ModuleId {
-        self.program.entry
+        self.capsule.entry
     }
 
-    pub fn entry_module(&self) -> &FrontendParsedModule {
-        self.program.entry_module()
+    pub fn entry_module(&self) -> &CapsuleModule {
+        self.capsule.entry_module()
     }
 
-    pub fn module(&self, id: ModuleId) -> Option<&FrontendParsedModule> {
-        self.program.module(id)
+    pub fn module(&self, id: ModuleId) -> Option<&CapsuleModule> {
+        self.capsule.module(id)
     }
 
     pub fn dependency_order_from_entry(&self) -> Vec<ModuleId> {
-        self.program.dependency_order_from_entry()
+        self.capsule.dependency_order_from_entry()
     }
 
     pub fn next_node_id_gen(&self) -> &NodeIdGen {
-        &self.program.next_node_id_gen
+        &self.capsule.next_node_id_gen
     }
 }
 
 // -----------------------------------------------------------------------------
-// Program Resolved Context
+// Capsule Resolved Context
 // -----------------------------------------------------------------------------
 
-/// Program-level resolved context keyed by module id.
+/// Capsule-level resolved context keyed by module id.
 #[derive(Clone)]
-pub struct ProgramResolvedContext {
+pub struct CapsuleResolvedContext {
     pub entry: ModuleId,
     pub modules: HashMap<ModuleId, ResolvedContext>,
     pub by_path: HashMap<ModulePath, ModuleId>,
@@ -69,7 +69,7 @@ pub struct ProgramResolvedContext {
     pub import_env_by_module: HashMap<ModuleId, ImportEnv>,
 }
 
-impl ProgramResolvedContext {
+impl CapsuleResolvedContext {
     pub fn entry_module(&self) -> &ResolvedContext {
         self.modules
             .get(&self.entry)

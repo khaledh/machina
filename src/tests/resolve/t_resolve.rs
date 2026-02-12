@@ -2,10 +2,10 @@ use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::context::{ParsedContext, ProgramParsedContext, ResolvedContext};
-use crate::frontend::{
-    FrontendError, ModuleLoader, ModulePath, discover_and_parse_program_with_loader,
+use crate::capsule::{
+    CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
 };
+use crate::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
 use crate::lexer::{LexError, Lexer, Token};
 use crate::parse::Parser;
 use crate::resolve::{DefKind, Visibility, resolve, resolve_partial, resolve_program};
@@ -15,12 +15,12 @@ struct MockLoader {
 }
 
 impl ModuleLoader for MockLoader {
-    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), FrontendError> {
+    fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError> {
         let key = path.to_string();
         if let Some(src) = self.modules.get(&key) {
             Ok((PathBuf::from(format!("{key}.mc")), src.clone()))
         } else {
-            Err(FrontendError::UnknownModule(path.clone()))
+            Err(CapsuleError::UnknownModule(path.clone()))
         }
     }
 }
@@ -71,7 +71,7 @@ fn test_resolve_program_resolves_dependencies() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -79,7 +79,7 @@ fn test_resolve_program_resolves_dependencies() {
     )
     .expect("program should parse");
 
-    let resolved = resolve_program(ProgramParsedContext::new(program));
+    let resolved = resolve_program(CapsuleParsedContext::new(program));
     assert!(resolved.is_ok());
 
     let resolved = resolved.expect("program resolve should succeed");
@@ -119,7 +119,7 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -127,7 +127,7 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
     )
     .expect("program should parse");
 
-    let resolved = resolve_program(ProgramParsedContext::new(program))
+    let resolved = resolve_program(CapsuleParsedContext::new(program))
         .expect("program resolve should succeed");
     let entry_id = resolved.entry;
     let dep_path = ModulePath::new(vec!["app".to_string(), "dep".to_string()]).unwrap();
@@ -218,7 +218,7 @@ fn test_resolve_program_builds_import_env_from_export_facts() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -226,7 +226,7 @@ fn test_resolve_program_builds_import_env_from_export_facts() {
     )
     .expect("program should parse");
 
-    let resolved = resolve_program(ProgramParsedContext::new(program))
+    let resolved = resolve_program(CapsuleParsedContext::new(program))
         .expect("program resolve should succeed");
     let entry_id = resolved.entry;
     let import_env = resolved
@@ -609,7 +609,7 @@ fn test_resolve_program_module_member_undefined() {
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
 
-    let program = discover_and_parse_program_with_loader(
+    let program = discover_and_parse_capsule_with_loader(
         entry_src,
         Path::new("app/main.mc"),
         entry_path,
@@ -617,7 +617,7 @@ fn test_resolve_program_module_member_undefined() {
     )
     .expect("program should parse");
 
-    let resolved = resolve_program(ProgramParsedContext::new(program));
+    let resolved = resolve_program(CapsuleParsedContext::new(program));
     assert!(resolved.is_err());
 
     if let Err(errors) = resolved {

@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::analysis::snapshot::FileId;
+use crate::capsule::{ModuleId, ParsedModule};
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diag::Span;
-use crate::frontend::{ModuleId, ParsedModule};
 use crate::resolve::{Def, DefId, DefTable, ImportedCallableSig, ImportedTraitSig};
 use crate::symtab::SymbolTable;
 use crate::tree::NodeId;

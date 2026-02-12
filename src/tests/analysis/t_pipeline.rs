@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::analysis::pipeline::{ROOT_POISON_NODE, run_module_pipeline, to_lookup_state};
 use crate::analysis::query::QueryRuntime;
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 
 #[test]
 fn pipeline_marks_parse_failure_as_poisoned() {

@@ -7,8 +7,8 @@
 
 use std::collections::HashMap;
 
+use crate::capsule::ModuleId;
 use crate::context::ResolvedContext;
-use crate::frontend::ModuleId;
 use crate::tree::NodeId;
 use crate::tree::visit::{self, Visitor};
 

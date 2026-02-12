@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::analysis::diagnostics::Diagnostic;
 use crate::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
-use crate::frontend::ModuleId;
+use crate::capsule::ModuleId;
 use crate::lexer::{LexError, Lexer};
 use crate::parse::Parser;
 use crate::resolve::{ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial};

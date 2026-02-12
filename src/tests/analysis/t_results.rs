@@ -1,6 +1,6 @@
 use crate::analysis::results::{ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult};
+use crate::capsule::ModuleId;
 use crate::context::ParsedContext;
-use crate::frontend::ModuleId;
 use crate::lexer::{LexError, Lexer};
 use crate::parse::Parser;
 use crate::resolve::{ResolveError, resolve};

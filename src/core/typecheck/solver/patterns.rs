@@ -5,9 +5,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::capsule::ModuleId;
 use crate::context::ResolvedContext;
 use crate::diag::Span;
-use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefTable};
 use crate::tree::NodeId;
 use crate::tree::resolved::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding};

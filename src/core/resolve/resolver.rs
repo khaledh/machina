@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::capsule::{ModuleId, RequireKind};
 use crate::context::{
-    ImportEnv, ImportedSymbolBinding, ModuleExportFacts, ModuleImportBinding, ParsedContext,
-    ProgramParsedContext, ProgramResolvedContext, ResolvedContext,
+    CapsuleParsedContext, CapsuleResolvedContext, ImportEnv, ImportedSymbolBinding,
+    ModuleExportFacts, ModuleImportBinding, ParsedContext, ResolvedContext,
 };
 use crate::diag::Span;
-use crate::frontend::{ModuleId, RequireKind};
 use crate::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::resolve::errors::ResolveError;
 use crate::resolve::symbols::{Scope, Symbol, SymbolKind};
@@ -1683,8 +1683,8 @@ pub fn resolve_with_imports_and_symbols_partial(
 }
 
 pub fn resolve_program(
-    program: ProgramParsedContext,
-) -> Result<ProgramResolvedContext, Vec<ResolveError>> {
+    program: CapsuleParsedContext,
+) -> Result<CapsuleResolvedContext, Vec<ResolveError>> {
     let mut modules = HashMap::new();
     let mut errors = Vec::new();
     let mut top_level_owners = HashMap::new();
@@ -1704,7 +1704,7 @@ pub fn resolve_program(
                 continue;
             }
             let alias = req.alias.clone();
-            if let Some(dep_id) = program.program.by_path.get(&req.module_path)
+            if let Some(dep_id) = program.capsule.by_path.get(&req.module_path)
                 && let Some(dep_module) = program.module(*dep_id)
             {
                 imported_modules.insert(
@@ -1721,7 +1721,7 @@ pub fn resolve_program(
             if req.kind != RequireKind::Symbol {
                 continue;
             }
-            let Some(dep_id) = program.program.by_path.get(&req.module_path).copied() else {
+            let Some(dep_id) = program.capsule.by_path.get(&req.module_path).copied() else {
                 continue;
             };
             let Some(dep_exports) = export_facts_by_module.get(&dep_id) else {
@@ -1762,7 +1762,7 @@ pub fn resolve_program(
 
                 let mut import_env = ImportEnv::default();
                 for req in &parsed_module.requires {
-                    let Some(dep_id) = program.program.by_path.get(&req.module_path).copied()
+                    let Some(dep_id) = program.capsule.by_path.get(&req.module_path).copied()
                     else {
                         continue;
                     };
@@ -1810,11 +1810,11 @@ pub fn resolve_program(
         return Err(errors);
     }
 
-    Ok(ProgramResolvedContext {
+    Ok(CapsuleResolvedContext {
         entry: program.entry(),
         modules,
-        by_path: program.program.by_path.clone(),
-        edges: program.program.edges.clone(),
+        by_path: program.capsule.by_path.clone(),
+        edges: program.capsule.edges.clone(),
         top_level_owners,
         export_facts_by_module,
         import_env_by_module,
@@ -1824,7 +1824,7 @@ pub fn resolve_program(
 fn collect_module_export_facts(
     resolved_context: &ResolvedContext,
     module_id: ModuleId,
-    module_path: Option<crate::frontend::ModulePath>,
+    module_path: Option<crate::capsule::ModulePath>,
 ) -> ModuleExportFacts {
     let mut facts = ModuleExportFacts {
         module_id,
@@ -1869,7 +1869,7 @@ fn collect_module_export_facts(
 
 fn collect_imported_symbol_binding_from_exports(
     dep_module_id: ModuleId,
-    dep_module_path: &crate::frontend::ModulePath,
+    dep_module_path: &crate::capsule::ModulePath,
     dep_exports: &ModuleExportFacts,
     member: &str,
 ) -> ImportedSymbolBinding {

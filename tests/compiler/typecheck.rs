@@ -1,7 +1,7 @@
 use crate::common::run_program;
+use machina::capsule::CapsuleError;
 use machina::compile::{CompileOptions, check_with_path, compile_with_path};
 use machina::diag::CompileError;
-use machina::frontend::FrontendError;
 use machina::typecheck::TypeCheckErrorKind;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -542,7 +542,7 @@ fn test_modules_private_trait_bound_rejected() {
                 assert!(errors.iter().any(|err| {
                     matches!(
                         err,
-                        CompileError::Frontend(FrontendError::RequireMemberPrivate {
+                        CompileError::Capsule(CapsuleError::RequireMemberPrivate {
                             alias,
                             member,
                             expected_kind,

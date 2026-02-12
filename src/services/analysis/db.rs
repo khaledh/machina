@@ -32,9 +32,9 @@ use crate::analysis::results::{
     SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
+use crate::capsule::bind::CapsuleBindings;
+use crate::capsule::{self, ModuleId, ModulePath};
 use crate::diag::Span;
-use crate::frontend::bind::ProgramBindings;
-use crate::frontend::{self, ModuleId, ModulePath};
 use crate::resolve::DefId;
 use crate::tree::NodeId;
 use crate::typecheck::type_check_partial;
@@ -182,7 +182,7 @@ impl AnalysisDb {
             };
             let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
 
-            let program = match frontend::discover_and_parse_program_with_loader(
+            let program = match capsule::discover_and_parse_capsule_with_loader(
                 &entry_source,
                 &entry_path,
                 entry_module_path,
@@ -191,8 +191,8 @@ impl AnalysisDb {
                 Ok(program) => program,
                 Err(err) => return Ok(tag_with_entry_path(frontend_error_diagnostics(err))),
             };
-            let program_context = crate::context::ProgramParsedContext::new(program);
-            let bindings = ProgramBindings::build(&program_context);
+            let program_context = crate::context::CapsuleParsedContext::new(program);
+            let bindings = CapsuleBindings::build(&program_context);
             let mut import_facts = ProgramImportFactsCache::default();
 
             let mut all = Vec::new();
