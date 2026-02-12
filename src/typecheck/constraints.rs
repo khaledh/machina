@@ -346,7 +346,7 @@ impl<'a> ConstraintCollector<'a> {
     fn resolve_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
         resolve_type_expr_with_params(
             &self.ctx.def_table,
-            &self.ctx.module,
+            self.ctx,
             ty_expr,
             self.current_type_params(),
         )
@@ -355,7 +355,7 @@ impl<'a> ConstraintCollector<'a> {
     fn resolve_return_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
         resolve_return_type_expr_with_params(
             &self.ctx.def_table,
-            &self.ctx.module,
+            self.ctx,
             ty_expr,
             self.current_type_params(),
         )

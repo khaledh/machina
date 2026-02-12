@@ -29,6 +29,7 @@ pub struct ImportedSymbol {
     pub has_callable: bool,
     pub callable_sigs: Vec<ImportedCallableSig>,
     pub has_type: bool,
+    pub type_ty: Option<Type>,
     pub has_trait: bool,
 }
 
@@ -57,6 +58,7 @@ pub struct SymbolResolver {
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+    imported_type_defs: HashMap<DefId, Type>,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,7 @@ impl SymbolResolver {
             imported_modules: HashMap::new(),
             imported_symbols: HashMap::new(),
             imported_callable_sigs: HashMap::new(),
+            imported_type_defs: HashMap::new(),
         }
     }
 
@@ -510,14 +513,18 @@ impl SymbolResolver {
             }
 
             if imported.has_type {
-                let _ = self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
-                    def_id,
-                    ty_expr: TypeExpr {
-                        id: NodeId(0),
-                        kind: TypeExprKind::Infer,
-                        span: Span::default(),
-                    },
-                });
+                let def_id =
+                    self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
+                        def_id,
+                        ty_expr: TypeExpr {
+                            id: NodeId(0),
+                            kind: TypeExprKind::Infer,
+                            span: Span::default(),
+                        },
+                    });
+                if let Some(type_ty) = imported.type_ty.clone() {
+                    self.imported_type_defs.insert(def_id, type_ty);
+                }
                 continue;
             }
 
@@ -1630,11 +1637,12 @@ pub fn resolve_with_imports_and_symbols_partial(
     // Build resolved tree from parsed tree + NodeDefLookup
     let resolved_module = build_module(&node_def_lookup, &ast_context.module);
     let imported_callable_sigs = std::mem::take(&mut resolver.imported_callable_sigs);
+    let imported_type_defs = std::mem::take(&mut resolver.imported_type_defs);
 
     ResolveOutput {
         context: ast_context
             .with_def_table(def_table, resolved_module)
-            .with_imported_callable_sigs(imported_callable_sigs),
+            .with_imported_facts(imported_callable_sigs, imported_type_defs),
         errors,
     }
 }
@@ -1694,6 +1702,7 @@ pub fn resolve_program(
                     .is_some_and(|overloads| !overloads.is_empty()),
                 callable_sigs: Vec::new(),
                 has_type: dep_exports.types.contains_key(member),
+                type_ty: None,
                 has_trait: dep_exports.traits.contains_key(member),
             };
             if imported.has_callable || imported.has_type || imported.has_trait {

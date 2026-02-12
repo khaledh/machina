@@ -41,6 +41,7 @@ use crate::resolve::{
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::typecheck::type_check_partial;
+use crate::typecheck::type_map::resolve_type_def_with_args;
 use crate::types::{FnParamMode, Type};
 
 #[derive(Default)]
@@ -200,6 +201,7 @@ impl AnalysisDb {
                 ModuleId,
                 HashMap<String, Vec<ImportedCallableSig>>,
             > = HashMap::new();
+            let mut type_tys_by_module: HashMap<ModuleId, HashMap<String, Type>> = HashMap::new();
 
             let mut all = Vec::new();
             for module_id in program_context.dependency_order_from_entry() {
@@ -218,10 +220,11 @@ impl AnalysisDb {
                     &program_context,
                     &bindings,
                     &callable_sigs_by_module,
+                    &type_tys_by_module,
                     module_id,
                 );
                 let skip_typecheck = imported_symbols.values().any(|imported| {
-                    imported.has_type
+                    (imported.has_type && imported.type_ty.is_none())
                         || imported.has_trait
                         || (imported.has_callable && imported.callable_sigs.is_empty())
                 });
@@ -237,6 +240,7 @@ impl AnalysisDb {
                 )?;
                 if let Some(typed) = &state.typechecked.product {
                     callable_sigs_by_module.insert(module_id, collect_public_callable_sigs(typed));
+                    type_tys_by_module.insert(module_id, collect_public_type_tys(typed));
                 }
                 let mut module_diags = collect_sorted_diagnostics(&state);
                 let file_path = parsed.source.file_path.to_string_lossy().to_string();
@@ -601,6 +605,7 @@ fn build_analysis_imported_symbols(
     program_context: &ProgramParsedContext,
     bindings: &ProgramBindings,
     callable_sigs_by_module: &HashMap<ModuleId, HashMap<String, Vec<ImportedCallableSig>>>,
+    type_tys_by_module: &HashMap<ModuleId, HashMap<String, Type>>,
     module_id: ModuleId,
 ) -> HashMap<String, ImportedSymbol> {
     let mut out = HashMap::new();
@@ -627,10 +632,12 @@ fn build_analysis_imported_symbols(
             continue;
         };
         let dep_callable_sigs = callable_sigs_by_module.get(&dep_id);
+        let dep_type_tys = type_tys_by_module.get(&dep_id);
         let has_callable = exports
             .callables
             .get(member)
             .is_some_and(|attrs| attrs.public);
+        let has_type = exports.types.get(member).is_some_and(|attrs| attrs.public);
         let imported = ImportedSymbol {
             has_callable,
             callable_sigs: if has_callable {
@@ -641,7 +648,14 @@ fn build_analysis_imported_symbols(
             } else {
                 Vec::new()
             },
-            has_type: exports.types.get(member).is_some_and(|attrs| attrs.public),
+            has_type,
+            type_ty: if has_type {
+                dep_type_tys
+                    .and_then(|module_types| module_types.get(member))
+                    .cloned()
+            } else {
+                None
+            },
             has_trait: exports.traits.get(member).is_some_and(|attrs| attrs.public),
         };
         if imported.has_callable || imported.has_type || imported.has_trait {
@@ -689,6 +703,28 @@ fn collect_public_callable_sigs(
                     .collect(),
                 ret_ty: *ret_ty,
             });
+    }
+    out
+}
+
+fn collect_public_type_tys(typed: &TypeCheckedContext) -> HashMap<String, Type> {
+    let mut out = HashMap::<String, Type>::new();
+    for type_def in typed.module.type_defs() {
+        if !type_def.type_params.is_empty() {
+            continue;
+        }
+        let Some(def) = typed.def_table.lookup_def(type_def.def_id) else {
+            continue;
+        };
+        if !def.is_public() {
+            continue;
+        }
+        let Ok(ty) =
+            resolve_type_def_with_args(&typed.def_table, &typed.module, type_def.def_id, &[])
+        else {
+            continue;
+        };
+        out.insert(type_def.name.clone(), ty);
     }
     out
 }

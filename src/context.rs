@@ -12,6 +12,7 @@ use crate::tree::semantic::{DropPlanMap, LoweringPlanMap};
 use crate::tree::typed::Module as TypedModule;
 use crate::tree::{NodeId, NodeIdGen};
 use crate::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
+use crate::types::Type;
 
 // -----------------------------------------------------------------------------
 // Program Parsed Context
@@ -165,6 +166,7 @@ impl ParsedContext {
             symbols,
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: HashMap::new(),
+            imported_type_defs: HashMap::new(),
         }
     }
 }
@@ -181,6 +183,7 @@ pub struct ResolvedContext {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+    pub imported_type_defs: HashMap<DefId, Type>,
 }
 
 impl ResolvedContext {
@@ -206,14 +209,17 @@ impl ResolvedContext {
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: self.imported_callable_sigs,
+            imported_type_defs: self.imported_type_defs,
         }
     }
 
-    pub fn with_imported_callable_sigs(
+    pub fn with_imported_facts(
         mut self,
         imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+        imported_type_defs: HashMap<DefId, Type>,
     ) -> Self {
         self.imported_callable_sigs = imported_callable_sigs;
+        self.imported_type_defs = imported_type_defs;
         self
     }
 }
@@ -233,6 +239,7 @@ pub struct TypeCheckedContext {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+    pub imported_type_defs: HashMap<DefId, Type>,
 }
 
 // -----------------------------------------------------------------------------

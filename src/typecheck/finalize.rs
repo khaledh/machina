@@ -772,7 +772,7 @@ fn collect_explicit_nominal_keys(
             let mut args = Vec::with_capacity(usage.type_args.len());
             let mut ok = true;
             for arg in &usage.type_args {
-                match resolve_type_expr(&resolved.def_table, &resolved.module, arg) {
+                match resolve_type_expr(&resolved.def_table, resolved, arg) {
                     Ok(ty) => args.push(ty),
                     Err(_) => {
                         ok = false;
@@ -786,12 +786,9 @@ fn collect_explicit_nominal_keys(
             args
         };
 
-        let Ok(inst_ty) = resolve_type_def_with_args(
-            &resolved.def_table,
-            &resolved.module,
-            usage.def_id,
-            &resolved_args,
-        ) else {
+        let Ok(inst_ty) =
+            resolve_type_def_with_args(&resolved.def_table, resolved, usage.def_id, &resolved_args)
+        else {
             continue;
         };
         let inst_name = match inst_ty {

@@ -186,7 +186,7 @@ fn prepass_pattern_obligations(
         &engine.env().type_symbols,
         &engine.context().def_table,
         &engine.context().def_owners,
-        &engine.context().module,
+        engine.context(),
     );
 }
 
@@ -363,7 +363,7 @@ fn solve_pattern_stage(
         &engine.env().type_symbols,
         &engine.context().def_table,
         &engine.context().def_owners,
-        &engine.context().module,
+        engine.context(),
     );
     for (pattern_id, err, span) in deferred_pattern_errors {
         if !covered_patterns.contains(&pattern_id) {

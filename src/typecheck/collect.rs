@@ -114,9 +114,7 @@ fn collect_type_defs(
         }
 
         let resolved = match &type_def.kind {
-            TypeDefKind::Alias { aliased_ty } => {
-                resolve_type_expr(&ctx.def_table, &ctx.module, aliased_ty)
-            }
+            TypeDefKind::Alias { aliased_ty } => resolve_type_expr(&ctx.def_table, ctx, aliased_ty),
             TypeDefKind::Struct { fields } => {
                 resolve_struct_type(ctx, fields).map(|fields| Type::Struct {
                     name: type_def.name.clone(),
@@ -146,7 +144,7 @@ fn resolve_struct_type(
 ) -> Result<Vec<StructField>, TypeCheckError> {
     let mut out = Vec::with_capacity(fields.len());
     for field in fields {
-        let field_ty = resolve_type_expr(&ctx.def_table, &ctx.module, &field.ty)?;
+        let field_ty = resolve_type_expr(&ctx.def_table, ctx, &field.ty)?;
         out.push(StructField {
             name: field.name.clone(),
             ty: field_ty,
@@ -164,7 +162,7 @@ fn resolve_enum_type(
         let payload = variant
             .payload
             .iter()
-            .map(|payload_ty| resolve_type_expr(&ctx.def_table, &ctx.module, payload_ty))
+            .map(|payload_ty| resolve_type_expr(&ctx.def_table, ctx, payload_ty))
             .collect::<Result<Vec<_>, _>>()?;
         out.push(EnumVariant {
             name: variant.name.clone(),
@@ -201,7 +199,7 @@ fn collect_trait_sigs(
         }
 
         for property in &trait_def.properties {
-            let ty = match resolve_type_expr(&ctx.def_table, &ctx.module, &property.ty) {
+            let ty = match resolve_type_expr(&ctx.def_table, ctx, &property.ty) {
                 Ok(ty) => ty,
                 Err(err) => {
                     errors.push(err);
@@ -542,7 +540,7 @@ fn collect_callable_sig(
 
     let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
-        &ctx.module,
+        ctx,
         &sig.ret_ty_expr,
         type_param_map.as_ref(),
     ) {
@@ -585,7 +583,7 @@ fn collect_trait_method_sig(
 
     let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
-        &ctx.module,
+        ctx,
         &sig.ret_ty_expr,
         type_param_map.as_ref(),
     ) {
@@ -674,8 +672,7 @@ fn build_param_sigs(
 ) -> Result<Vec<CollectedParamSig>, TypeCheckError> {
     let mut out = Vec::with_capacity(params.len());
     for param in params {
-        let ty =
-            resolve_type_expr_with_params(&ctx.def_table, &ctx.module, &param.typ, type_params)?;
+        let ty = resolve_type_expr_with_params(&ctx.def_table, ctx, &param.typ, type_params)?;
         let name = ctx
             .def_table
             .lookup_def(param.def_id)

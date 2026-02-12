@@ -74,6 +74,18 @@ pub(crate) fn resolve_type_def_with_args(
     let def = def_table
         .lookup_def(def_id)
         .ok_or(TypeCheckErrorKind::UnknownType(Span::default()))?;
+    if let Some(imported_ty) = module.imported_type_by_id(def_id) {
+        if !type_args.is_empty() {
+            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                def.name.clone(),
+                0,
+                type_args.len(),
+                Span::default(),
+            )
+            .into());
+        }
+        return Ok(imported_ty.clone());
+    }
     let type_def = module
         .type_def_by_id(def_id)
         .ok_or(TypeCheckErrorKind::UnknownType(Span::default()))?;
@@ -153,6 +165,10 @@ fn resolve_type_expr_with_params_and_args(
 
 pub(crate) trait TypeDefLookup {
     fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef>;
+
+    fn imported_type_by_id(&self, _def_id: DefId) -> Option<&Type> {
+        None
+    }
 }
 
 impl TypeDefLookup for res::Module {
@@ -170,6 +186,16 @@ impl TypeDefLookup for norm::Module {
 impl TypeDefLookup for sem::Module {
     fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
         sem::Module::type_def_by_id(self, def_id)
+    }
+}
+
+impl TypeDefLookup for crate::context::ResolvedContext {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
+        self.module.type_def_by_id(def_id)
+    }
+
+    fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
+        self.imported_type_defs.get(&def_id)
     }
 }
 
@@ -573,9 +599,21 @@ fn resolve_named_type(
             Err(TypeCheckErrorKind::UnknownType(type_expr.span).into())
         }
         DefKind::TypeDef { .. } => {
-            let type_def = module
-                .type_def_by_id(*def_id)
-                .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
+            let Some(type_def) = module.type_def_by_id(*def_id) else {
+                if let Some(imported_ty) = module.imported_type_by_id(*def_id) {
+                    if !type_arg_exprs.is_empty() {
+                        return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                            def.name.clone(),
+                            0,
+                            type_arg_exprs.len(),
+                            type_expr.span,
+                        )
+                        .into());
+                    }
+                    return Ok(imported_ty.clone());
+                }
+                return Err(TypeCheckErrorKind::UnknownType(type_expr.span).into());
+            };
             if type_def.type_params.is_empty() {
                 if !type_arg_exprs.is_empty() {
                     return Err(TypeCheckErrorKind::TypeArgCountMismatch(

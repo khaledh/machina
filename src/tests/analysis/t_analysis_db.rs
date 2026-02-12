@@ -1289,6 +1289,60 @@ fn run(x: u64) -> u64 { x }
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
+#[test]
+fn diagnostics_for_program_file_typechecks_symbol_import_types() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_symbol_import_type_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::Num
+}
+
+fn main() -> u64 {
+    let x: Num = 1;
+    if x { 1 } else { 0 }
+}
+"#;
+    let dep_source = r#"
+@[public]
+type Num = bool
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.phase == DiagnosticPhase::Typecheck),
+        "expected imported public type alias to participate in typecheck, got: {diagnostics:#?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.phase != DiagnosticPhase::Resolve),
+        "expected symbol import to resolve before typecheck, got: {diagnostics:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)

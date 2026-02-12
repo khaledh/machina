@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::context::ResolvedContext;
 use crate::diag::Span;
 use crate::frontend::ModuleId;
 use crate::resolve::{DefId, DefTable};
@@ -24,7 +25,7 @@ pub(super) fn check_pattern_obligations(
     type_symbols: &HashMap<String, DefId>,
     def_table: &DefTable,
     def_owners: &HashMap<DefId, ModuleId>,
-    module: &crate::tree::resolved::Module,
+    ctx: &ResolvedContext,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
     let mut covered = HashSet::new();
@@ -67,7 +68,7 @@ pub(super) fn check_pattern_obligations(
                     unifier,
                     type_defs,
                     def_table,
-                    module,
+                    ctx,
                     &mut errors,
                     &mut covered,
                     *arm_id,
@@ -87,7 +88,7 @@ fn bind_match_pattern_types(
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
-    module: &crate::tree::resolved::Module,
+    ctx: &ResolvedContext,
     errors: &mut Vec<TypeCheckError>,
     covered: &mut HashSet<NodeId>,
     pattern_id: NodeId,
@@ -117,7 +118,7 @@ fn bind_match_pattern_types(
             span,
             ..
         } => {
-            if let Ok(pat_ty) = resolve_type_expr(def_table, module, ty_expr) {
+            if let Ok(pat_ty) = resolve_type_expr(def_table, ctx, ty_expr) {
                 let scrutinee_applied = unifier.apply(scrutinee_ty);
                 if let Type::ErrorUnion { ok_ty, err_tys } = &scrutinee_applied {
                     let variants = std::iter::once(ok_ty.as_ref())
@@ -161,7 +162,7 @@ fn bind_match_pattern_types(
             if let Type::Tuple { field_tys } = scrutinee_ty {
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
                     bind_match_pattern_types(
-                        child, child_ty, def_terms, unifier, type_defs, def_table, module, errors,
+                        child, child_ty, def_terms, unifier, type_defs, def_table, ctx, errors,
                         covered, pattern_id,
                     );
                 }
@@ -176,7 +177,7 @@ fn bind_match_pattern_types(
                 let _ = unifier.unify(scrutinee_ty, &inferred_tuple);
                 for (child, child_ty) in patterns.iter().zip(inferred_fields.iter()) {
                     bind_match_pattern_types(
-                        child, child_ty, def_terms, unifier, type_defs, def_table, module, errors,
+                        child, child_ty, def_terms, unifier, type_defs, def_table, ctx, errors,
                         covered, pattern_id,
                     );
                 }
@@ -197,7 +198,7 @@ fn bind_match_pattern_types(
                 matched_variant = variants.iter().find(|v| v.name == *variant_name).cloned();
             } else if super::term_utils::is_unresolved(&owner_ty) {
                 let inferred_enum = resolve_pattern_enum_type(
-                    *id, enum_name, type_args, type_defs, def_table, module, unifier,
+                    *id, enum_name, type_args, type_defs, def_table, ctx, unifier,
                 );
                 if let Some(enum_ty) = inferred_enum {
                     let _ = unifier.unify(&owner_ty, &enum_ty);
@@ -227,11 +228,11 @@ fn resolve_pattern_enum_type(
     type_args: &[crate::tree::resolved::TypeExpr],
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
-    module: &crate::tree::resolved::Module,
+    ctx: &ResolvedContext,
     unifier: &mut TcUnifier,
 ) -> Option<Type> {
     if let Some(def_id) = def_table.lookup_node_def_id(pattern_id) {
-        let type_def = module.type_def_by_id(def_id)?;
+        let type_def = ctx.module.type_def_by_id(def_id)?;
         let resolved_args = if type_args.is_empty() {
             type_def
                 .type_params
@@ -241,12 +242,12 @@ fn resolve_pattern_enum_type(
         } else {
             type_args
                 .iter()
-                .map(|arg| resolve_type_expr(def_table, module, arg))
+                .map(|arg| resolve_type_expr(def_table, ctx, arg))
                 .collect::<Result<Vec<_>, _>>()
                 .ok()?
         };
 
-        let ty = resolve_type_def_with_args(def_table, module, def_id, &resolved_args).ok()?;
+        let ty = resolve_type_def_with_args(def_table, ctx, def_id, &resolved_args).ok()?;
         return matches!(ty, Type::Enum { .. }).then_some(ty);
     }
 

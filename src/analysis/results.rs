@@ -45,6 +45,7 @@ pub struct ResolvedModuleResult {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+    pub imported_type_defs: HashMap<DefId, Type>,
 }
 
 impl ResolvedModuleResult {
@@ -57,6 +58,7 @@ impl ResolvedModuleResult {
             symbols: context.symbols,
             node_id_gen: context.node_id_gen,
             imported_callable_sigs: context.imported_callable_sigs,
+            imported_type_defs: context.imported_type_defs,
         }
     }
 
@@ -68,6 +70,7 @@ impl ResolvedModuleResult {
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: self.imported_callable_sigs,
+            imported_type_defs: self.imported_type_defs,
         }
     }
 }
@@ -84,6 +87,7 @@ pub struct TypedModuleResult {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+    pub imported_type_defs: HashMap<DefId, Type>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,6 +231,7 @@ impl TypedModuleResult {
             symbols: context.symbols,
             node_id_gen: context.node_id_gen,
             imported_callable_sigs: context.imported_callable_sigs,
+            imported_type_defs: context.imported_type_defs,
         }
     }
 
@@ -241,6 +246,7 @@ impl TypedModuleResult {
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: self.imported_callable_sigs,
+            imported_type_defs: self.imported_type_defs,
         }
     }
 }
