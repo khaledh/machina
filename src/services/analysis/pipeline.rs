@@ -43,13 +43,7 @@ impl<T> Default for StageOutput<T> {
 }
 
 pub(crate) type ParseStageOutput = StageOutput<crate::core::context::ParsedContext>;
-#[derive(Clone)]
-pub(crate) struct ResolvedStageProduct {
-    pub context: crate::core::context::ResolvedContext,
-    pub imported_facts: ImportedFacts,
-}
-
-pub(crate) type ResolveStageOutput = StageOutput<ResolvedStageProduct>;
+pub(crate) type ResolveStageOutput = StageOutput<crate::core::context::ResolvedContext>;
 pub(crate) type TypecheckStageOutput = StageOutput<crate::core::context::TypeCheckedContext>;
 pub(crate) type SemcheckStageOutput = StageOutput<crate::core::context::SemanticCheckedContext>;
 
@@ -68,31 +62,29 @@ pub(crate) struct LookupState {
     pub poisoned_nodes: HashSet<NodeId>,
 }
 
+/// Analysis-side overlays/controls layered on top of core stage contexts.
+///
+/// These are intentionally kept out of core `ResolvedContext`/`TypeCheckedContext`.
+#[derive(Clone, Default)]
+pub(crate) struct ModulePipelineInputs {
+    pub parsed_override: Option<crate::core::context::ParsedContext>,
+    pub imported_modules: HashMap<String, ImportedModule>,
+    pub imported_symbols: HashMap<String, ImportedSymbol>,
+    pub skip_typecheck: bool,
+}
+
 pub(crate) fn run_module_pipeline(
     rt: &mut QueryRuntime,
     module_id: ModuleId,
     revision: u64,
     source: Arc<str>,
 ) -> QueryResult<ModulePipelineState> {
-    run_module_pipeline_with_parsed(rt, module_id, revision, source, None)
-}
-
-pub(crate) fn run_module_pipeline_with_parsed(
-    rt: &mut QueryRuntime,
-    module_id: ModuleId,
-    revision: u64,
-    source: Arc<str>,
-    parsed_override: Option<crate::core::context::ParsedContext>,
-) -> QueryResult<ModulePipelineState> {
-    run_module_pipeline_with_parsed_and_imports(
+    run_module_pipeline_with_inputs(
         rt,
         module_id,
         revision,
         source,
-        parsed_override,
-        HashMap::new(),
-        HashMap::new(),
-        false,
+        ModulePipelineInputs::default(),
     )
 }
 
@@ -107,6 +99,35 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
 ) -> QueryResult<ModulePipelineState> {
+    let inputs = ModulePipelineInputs {
+        parsed_override,
+        imported_modules,
+        imported_symbols,
+        skip_typecheck,
+    };
+    run_module_pipeline_with_inputs(rt, module_id, revision, source, inputs)
+}
+
+fn run_module_pipeline_with_inputs(
+    rt: &mut QueryRuntime,
+    module_id: ModuleId,
+    revision: u64,
+    source: Arc<str>,
+    inputs: ModulePipelineInputs,
+) -> QueryResult<ModulePipelineState> {
+    #[derive(Clone, Default)]
+    struct ResolveEval {
+        state: ResolveStageOutput,
+        imported_facts: ImportedFacts,
+    }
+
+    let ModulePipelineInputs {
+        parsed_override,
+        imported_modules,
+        imported_symbols,
+        skip_typecheck,
+    } = inputs;
+
     let semantic_fingerprint = semantic_input_fingerprint(
         parsed_override.as_ref(),
         &imported_modules,
@@ -146,27 +167,27 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     let resolve_input = parsed.product.clone();
     let imported_modules_for_resolve = imported_modules.clone();
     let imported_symbols_for_resolve = imported_symbols.clone();
-    let resolved = rt.execute(resolve_key, move |_rt| {
-        let mut state = ResolveStageOutput::default();
+    let resolved_eval = rt.execute(resolve_key, move |_rt| {
+        let mut eval = ResolveEval::default();
         if let Some(parsed) = resolve_input {
             let resolved = resolve_stage_partial(
                 parsed,
                 imported_modules_for_resolve,
                 imported_symbols_for_resolve,
             );
-            state.product = Some(ResolvedStageProduct {
-                context: resolved.context,
-                imported_facts: resolved.imported_facts,
-            });
+            eval.state.product = Some(resolved.context);
+            eval.imported_facts = resolved.imported_facts;
             if !resolved.errors.is_empty() {
-                state
+                eval.state
                     .diagnostics
                     .extend(resolved.errors.iter().map(Diagnostic::from_resolve_error));
-                state.poisoned_nodes.insert(ROOT_POISON_NODE);
+                eval.state.poisoned_nodes.insert(ROOT_POISON_NODE);
             }
         }
-        Ok(state)
+        Ok(eval)
     })?;
+    let resolved = resolved_eval.state;
+    let imported_facts_for_typecheck = resolved_eval.imported_facts;
 
     let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, query_revision);
     // Do not run type checking when resolution emitted errors. This keeps
@@ -175,7 +196,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         resolved
             .product
             .clone()
-            .map(|resolved| (resolved.context, resolved.imported_facts))
+            .map(|resolved| (resolved, imported_facts_for_typecheck.clone()))
     } else {
         None
     };
@@ -393,11 +414,7 @@ pub(crate) fn to_lookup_state(state: &ModulePipelineState) -> LookupState {
     poisoned_nodes.extend(state.semchecked.poisoned_nodes.iter().copied());
 
     LookupState {
-        resolved: state
-            .resolved
-            .product
-            .clone()
-            .map(|resolved| resolved.context),
+        resolved: state.resolved.product.clone(),
         typed: state.typechecked.product.clone(),
         poisoned_nodes,
     }

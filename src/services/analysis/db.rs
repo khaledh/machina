@@ -669,7 +669,7 @@ impl AnalysisDb {
                     skip_typecheck,
                 )?;
                 if let Some(resolved) = &state.resolved.product {
-                    import_facts.ingest_resolved(module_id, &resolved.context);
+                    import_facts.ingest_resolved(module_id, resolved);
                 }
                 if let Some(typed) = &state.typechecked.product {
                     import_facts.ingest_typed(module_id, typed);
