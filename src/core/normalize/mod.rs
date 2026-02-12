@@ -1,5 +1,5 @@
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
-use crate::core::context::{NormalizedContext, TypeCheckedContext};
+use crate::core::context::{NormalizeStageInput, NormalizeStageOutput};
 use crate::core::resolve::DefId;
 use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
@@ -18,8 +18,8 @@ use crate::core::types::{
 ///
 /// Step 1: 1:1 mapping of the typed tree into a normalized tree, plus explicit
 /// array-to-slice coercions on call arguments.
-pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
-    let TypeCheckedContext {
+pub fn normalize(ctx: NormalizeStageInput) -> NormalizeStageOutput {
+    let NormalizeStageInput {
         module,
         def_table,
         def_owners,
@@ -34,7 +34,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
     let mut node_id_gen = node_id_gen;
     let mut normalizer = Normalizer::new(&def_table, &mut type_map, &call_sigs, &mut node_id_gen);
     normalizer.visit_module(&mut module);
-    NormalizedContext {
+    NormalizeStageOutput {
         module,
         def_table,
         def_owners,

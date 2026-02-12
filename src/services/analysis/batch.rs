@@ -49,13 +49,7 @@ pub fn query_typecheck(
     revision: u64,
     resolved: ResolvedModuleResult,
 ) -> Result<TypedModuleResult, BatchQueryError> {
-    query_typecheck_with_imported_facts(
-        db,
-        module_id,
-        revision,
-        resolved,
-        ImportedFacts::default(),
-    )
+    query_typecheck_with_imported_facts(db, module_id, revision, resolved, ImportedFacts::default())
 }
 
 pub fn query_typecheck_with_imported_facts(

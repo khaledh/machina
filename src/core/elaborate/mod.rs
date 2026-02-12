@@ -28,7 +28,7 @@
 //! proceed without further semantic reasoning.
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
-use crate::core::context::{SemanticCheckedContext, SemanticContext};
+use crate::core::context::{ElaborateStageInput, ElaborateStageOutput};
 use crate::core::tree::semantic as sem;
 mod bind_pattern;
 mod calls;
@@ -48,8 +48,8 @@ use crate::core::elaborate::lowering_plan::build_lowering_plans;
 
 /// Transform a normalized tree into a semantic tree using the results from
 /// semantic analysis.
-pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
-    let SemanticCheckedContext {
+pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
+    let ElaborateStageInput {
         module,
         def_table,
         def_owners,
@@ -112,7 +112,7 @@ pub fn elaborate(ctx: SemanticCheckedContext) -> SemanticContext {
         }
     }
 
-    SemanticContext {
+    ElaborateStageOutput {
         module,
         def_table: def_table.into_inner(),
         def_owners,

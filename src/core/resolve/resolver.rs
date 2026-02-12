@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::{ModuleId, RequireKind};
 use crate::core::context::{
-    CapsuleParsedContext, CapsuleResolvedContext, ImportEnv, ImportedSymbolBinding,
-    ModuleExportFacts, ModuleImportBinding, ParsedContext, ResolvedContext,
+    CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ImportedSymbolBinding,
+    ModuleExportFacts, ModuleImportBinding, ParsedContext, ResolveStageInput, ResolveStageOutput,
+    ResolvedContext,
 };
 use crate::core::diag::Span;
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
@@ -96,7 +97,7 @@ pub struct SymbolResolver {
 
 #[derive(Clone)]
 pub struct ResolveOutput {
-    pub context: ResolvedContext,
+    pub context: ResolveStageOutput,
     pub imported_facts: ImportedFacts,
     pub errors: Vec<ResolveError>,
 }
@@ -1626,26 +1627,26 @@ impl Visitor<()> for SymbolResolver {
     }
 }
 
-pub fn resolve(ast_context: ParsedContext) -> Result<ResolvedContext, Vec<ResolveError>> {
+pub fn resolve(ast_context: ResolveStageInput) -> Result<ResolveStageOutput, Vec<ResolveError>> {
     resolve_with_imports_and_symbols(ast_context, HashMap::new(), HashMap::new())
 }
 
-pub fn resolve_partial(ast_context: ParsedContext) -> ResolveOutput {
+pub fn resolve_partial(ast_context: ResolveStageInput) -> ResolveOutput {
     resolve_with_imports_and_symbols_partial(ast_context, HashMap::new(), HashMap::new())
 }
 
 pub fn resolve_with_imports(
-    ast_context: ParsedContext,
+    ast_context: ResolveStageInput,
     imported_modules: HashMap<String, ImportedModule>,
-) -> Result<ResolvedContext, Vec<ResolveError>> {
+) -> Result<ResolveStageOutput, Vec<ResolveError>> {
     resolve_with_imports_and_symbols(ast_context, imported_modules, HashMap::new())
 }
 
 pub fn resolve_with_imports_and_symbols(
-    ast_context: ParsedContext,
+    ast_context: ResolveStageInput,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
-) -> Result<ResolvedContext, Vec<ResolveError>> {
+) -> Result<ResolveStageOutput, Vec<ResolveError>> {
     let output =
         resolve_with_imports_and_symbols_partial(ast_context, imported_modules, imported_symbols);
     if output.errors.is_empty() {
@@ -1656,14 +1657,14 @@ pub fn resolve_with_imports_and_symbols(
 }
 
 pub fn resolve_with_imports_partial(
-    ast_context: ParsedContext,
+    ast_context: ResolveStageInput,
     imported_modules: HashMap<String, ImportedModule>,
 ) -> ResolveOutput {
     resolve_with_imports_and_symbols_partial(ast_context, imported_modules, HashMap::new())
 }
 
 pub fn resolve_with_imports_and_symbols_partial(
-    ast_context: ParsedContext,
+    ast_context: ResolveStageInput,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
 ) -> ResolveOutput {
@@ -1688,8 +1689,8 @@ pub fn resolve_with_imports_and_symbols_partial(
 }
 
 pub fn resolve_program(
-    program: CapsuleParsedContext,
-) -> Result<CapsuleResolvedContext, Vec<ResolveError>> {
+    program: CapsuleResolveStageInput,
+) -> Result<CapsuleResolveStageOutput, Vec<ResolveError>> {
     let mut modules = HashMap::new();
     let mut errors = Vec::new();
     let mut top_level_owners = HashMap::new();
@@ -1815,7 +1816,7 @@ pub fn resolve_program(
         return Err(errors);
     }
 
-    Ok(CapsuleResolvedContext {
+    Ok(CapsuleResolveStageOutput {
         entry: program.entry(),
         modules,
         by_path: program.capsule.by_path.clone(),

@@ -26,6 +26,9 @@ pub struct CapsuleParsedContext {
     pub capsule: CapsuleParsed,
 }
 
+/// Stage contract alias: capsule resolve input.
+pub type CapsuleResolveStageInput = CapsuleParsedContext;
+
 impl CapsuleParsedContext {
     pub fn new(capsule: CapsuleParsed) -> Self {
         Self { capsule }
@@ -67,6 +70,9 @@ pub struct CapsuleResolvedContext {
     pub export_facts_by_module: HashMap<ModuleId, ModuleExportFacts>,
     pub import_env_by_module: HashMap<ModuleId, ImportEnv>,
 }
+
+/// Stage contract alias: capsule resolve output.
+pub type CapsuleResolveStageOutput = CapsuleResolvedContext;
 
 impl CapsuleResolvedContext {
     pub fn entry_module(&self) -> &ResolvedContext {
@@ -148,6 +154,9 @@ pub struct ParsedContext {
     pub node_id_gen: NodeIdGen,
 }
 
+/// Stage contract alias: resolve input.
+pub type ResolveStageInput = ParsedContext;
+
 impl ParsedContext {
     pub fn new(module: ParsedModule, node_id_gen: NodeIdGen) -> Self {
         Self {
@@ -180,6 +189,11 @@ pub struct ResolvedContext {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
+
+/// Stage contract alias: resolve output, typecheck input.
+pub type ResolveStageOutput = ResolvedContext;
+/// Stage contract alias: typecheck input.
+pub type TypecheckStageInput = ResolvedContext;
 
 impl ResolvedContext {
     pub fn with_def_owners(mut self, def_owners: HashMap<DefId, ModuleId>) -> Self {
@@ -223,6 +237,11 @@ pub struct TypeCheckedContext {
     pub node_id_gen: NodeIdGen,
 }
 
+/// Stage contract alias: typecheck output, normalize input.
+pub type TypecheckStageOutput = TypeCheckedContext;
+/// Stage contract alias: normalize input.
+pub type NormalizeStageInput = TypeCheckedContext;
+
 // -----------------------------------------------------------------------------
 // Normalized Context
 // -----------------------------------------------------------------------------
@@ -238,6 +257,11 @@ pub struct NormalizedContext {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
 }
+
+/// Stage contract alias: normalize output, semck input.
+pub type NormalizeStageOutput = NormalizedContext;
+/// Stage contract alias: semck input.
+pub type SemCheckStageInput = NormalizedContext;
 
 impl NormalizedContext {
     pub fn with_sem_results(
@@ -284,6 +308,11 @@ pub struct SemanticCheckedContext {
     pub closure_captures: HashMap<DefId, Vec<ClosureCapture>>,
 }
 
+/// Stage contract alias: semck output, elaborate input.
+pub type SemCheckStageOutput = SemanticCheckedContext;
+/// Stage contract alias: elaborate input.
+pub type ElaborateStageInput = SemanticCheckedContext;
+
 // -----------------------------------------------------------------------------
 // Semantic Context
 // -----------------------------------------------------------------------------
@@ -301,6 +330,11 @@ pub struct SemanticContext {
     pub generic_insts: GenericInstMap,
 }
 
+/// Stage contract alias: elaborate output, NRVO input.
+pub type ElaborateStageOutput = SemanticContext;
+/// Stage contract alias: NRVO input.
+pub type NrvoStageInput = SemanticContext;
+
 // -----------------------------------------------------------------------------
 // Analyzed Context
 // -----------------------------------------------------------------------------
@@ -317,5 +351,8 @@ pub struct AnalyzedContext {
     pub node_id_gen: NodeIdGen,
     pub generic_insts: GenericInstMap,
 }
+
+/// Stage contract alias: NRVO output.
+pub type NrvoStageOutput = AnalyzedContext;
 
 impl AnalyzedContext {}

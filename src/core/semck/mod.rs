@@ -15,10 +15,10 @@ use std::collections::HashSet;
 
 pub use errors::SemCheckError;
 
-use crate::core::context::{NormalizedContext, SemanticCheckedContext};
+use crate::core::context::{SemCheckStageInput, SemCheckStageOutput};
 use crate::core::tree::NodeId;
 
-pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<SemCheckError>> {
+pub fn sem_check(ctx: SemCheckStageInput) -> Result<SemCheckStageOutput, Vec<SemCheckError>> {
     let output = sem_check_partial(ctx, &HashSet::new());
     if output.errors.is_empty() {
         Ok(output.context)
@@ -32,7 +32,7 @@ pub fn sem_check(ctx: NormalizedContext) -> Result<SemanticCheckedContext, Vec<S
 /// If the upstream pipeline is already root-poisoned, semantic checks are
 /// skipped and a default semantic context is materialized.
 pub fn sem_check_partial(
-    ctx: NormalizedContext,
+    ctx: SemCheckStageInput,
     upstream_poisoned_nodes: &HashSet<NodeId>,
 ) -> SemCheckOutput {
     const ROOT_POISON_NODE: NodeId = NodeId(0);
@@ -86,7 +86,7 @@ pub fn sem_check_partial(
 
 #[derive(Clone)]
 pub struct SemCheckOutput {
-    pub context: SemanticCheckedContext,
+    pub context: SemCheckStageOutput,
     pub errors: Vec<SemCheckError>,
     pub poisoned_nodes: HashSet<NodeId>,
 }

@@ -2,7 +2,7 @@ use super::*;
 use std::collections::HashMap;
 
 use crate::core::capsule::ModuleId;
-use crate::core::context::ParsedContext;
+use crate::core::context::{ParsedContext, TypeCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
