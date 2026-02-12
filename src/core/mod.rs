@@ -1,6 +1,7 @@
 //! Core Machina compiler pipeline and language model.
 
 pub mod analysis;
+pub mod api;
 pub mod backend;
 pub mod capsule;
 pub mod context;

@@ -7,15 +7,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::core::capsule::ModuleId;
-use crate::core::lexer::{LexError, Lexer};
-use crate::core::parse::Parser;
-use crate::core::resolve::{
-    ImportedFacts, ImportedModule, ImportedSymbol, resolve_with_imports_and_symbols_partial,
+use crate::core::api::{
+    ParseModuleError, parse_module_with_id_gen, resolve_stage_partial, typecheck_stage_partial,
 };
+use crate::core::capsule::ModuleId;
+use crate::core::resolve::{ImportedFacts, ImportedModule, ImportedSymbol};
 use crate::core::tree::NodeId;
 use crate::core::tree::NodeIdGen;
-use crate::core::typecheck::type_check_partial_with_imported_facts;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
 
@@ -112,26 +110,16 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
             return Ok(state);
         }
 
-        let lexer = Lexer::new(&source_for_parse);
-        let tokens = match lexer.tokenize().collect::<Result<Vec<_>, LexError>>() {
-            Ok(tokens) => tokens,
-            Err(error) => {
+        match parse_module_with_id_gen(&source_for_parse, NodeIdGen::new()) {
+            Ok((module, id_gen)) => {
+                state.product = Some(crate::core::context::ParsedContext::new(module, id_gen));
+            }
+            Err(ParseModuleError::Lex(error)) => {
                 state.diagnostics.push(Diagnostic::from_lex_error(&error));
                 state.poisoned_nodes.insert(ROOT_POISON_NODE);
                 return Ok(state);
             }
-        };
-
-        let id_gen = NodeIdGen::new();
-        let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
-        match parser.parse() {
-            Ok(module) => {
-                state.product = Some(crate::core::context::ParsedContext::new(
-                    module,
-                    parser.into_id_gen(),
-                ));
-            }
-            Err(error) => {
+            Err(ParseModuleError::Parse(error)) => {
                 state.diagnostics.push(Diagnostic::from_parse_error(&error));
                 state.poisoned_nodes.insert(ROOT_POISON_NODE);
             }
@@ -146,7 +134,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     let resolved = rt.execute(resolve_key, move |_rt| {
         let mut state = ResolveStageOutput::default();
         if let Some(parsed) = resolve_input {
-            let resolved = resolve_with_imports_and_symbols_partial(
+            let resolved = resolve_stage_partial(
                 parsed,
                 imported_modules_for_resolve,
                 imported_symbols_for_resolve,
@@ -179,7 +167,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     let typechecked = rt.execute(typecheck_key, move |_rt| {
         let mut state = TypecheckStageOutput::default();
         if let Some((resolved, imported_facts)) = typecheck_input {
-            let typed = type_check_partial_with_imported_facts(resolved, imported_facts);
+            let typed = typecheck_stage_partial(resolved, imported_facts);
             state.product = Some(typed.context);
             if !typed.errors.is_empty() {
                 state

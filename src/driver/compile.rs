@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::core::api::{
+    ParseModuleError, elaborate_stage, normalize_stage, parse_module_with_id_gen, semcheck_stage,
+};
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
 use crate::core::capsule;
@@ -8,18 +11,14 @@ use crate::core::capsule::ModuleId;
 use crate::core::capsule::compose::{flatten_capsule, merge_modules};
 use crate::core::context::{CapsuleParsedContext, ParsedContext};
 use crate::core::diag::CompileError;
-use crate::core::elaborate;
 use crate::core::ir::GlobalData;
 use crate::core::ir::format::format_func_with_comments_and_names;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::monomorphize;
-use crate::core::normalize;
 use crate::core::nrvo::NrvoAnalyzer;
-use crate::core::parse::Parser;
 use crate::core::resolve::attach_def_owners;
-use crate::core::semck::sem_check;
 use crate::core::tree::NodeIdGen;
-use crate::core::tree::parsed::Module;
+use crate::core::tree::parsed::Module as ParsedModule;
 use crate::services::analysis::batch::{self, BatchQueryError};
 use crate::services::analysis::db::AnalysisDb;
 
@@ -260,11 +259,11 @@ pub fn compile_with_path(
 
     // --- Normalize (typed -> normalized) ---
 
-    let normalized_context = normalize::normalize(type_checked_context);
+    let normalized_context = normalize_stage(type_checked_context);
 
     // --- Semantic Check ---
 
-    let semantic_checked_context = sem_check(normalized_context).map_err(|errs| {
+    let semantic_checked_context = semcheck_stage(normalized_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()
@@ -272,7 +271,7 @@ pub fn compile_with_path(
 
     // --- Elaborate (normalized -> semantic) ---
 
-    let elaborated_context = elaborate::elaborate(semantic_checked_context);
+    let elaborated_context = elaborate_stage(semantic_checked_context);
 
     // --- NRVO Analysis ---
 
@@ -387,20 +386,11 @@ pub fn compile_with_path(
 fn parse_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
-) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
-    // Lex
-    let lexer = Lexer::new(source);
-    let tokens = lexer
-        .tokenize()
-        .collect::<Result<Vec<Token>, LexError>>()
-        .map_err(|e| vec![e.into()])?;
-
-    // Parse with the given id_gen
-    let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
-    let module = parser.parse().map_err(|e| vec![e.into()])?;
-    let id_gen = parser.into_id_gen();
-
-    Ok((module, id_gen))
+) -> Result<(ParsedModule, NodeIdGen), Vec<CompileError>> {
+    parse_module_with_id_gen(source, id_gen).map_err(|e| match e {
+        ParseModuleError::Lex(e) => vec![e.into()],
+        ParseModuleError::Parse(e) => vec![e.into()],
+    })
 }
 
 fn map_batch_query_error(err: BatchQueryError) -> Vec<CompileError> {
