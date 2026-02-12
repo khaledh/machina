@@ -1280,6 +1280,75 @@ fn value() -> u64 {
 }
 
 #[test]
+fn program_module_queries_are_disjoint_for_different_import_signatures() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_base = std::env::temp_dir().join(format!(
+        "machina_analysis_program_import_sig_disjoint_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let proj_a = temp_base.join("a");
+    let proj_b = temp_base.join("b");
+    fs::create_dir_all(proj_a.join("app")).expect("failed to create temp project A");
+    fs::create_dir_all(proj_b.join("app")).expect("failed to create temp project B");
+
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run(true)
+}
+"#;
+    let dep_bad = r#"
+@[public]
+fn run(x: u64) -> u64 { x }
+"#;
+    let dep_good = r#"
+@[public]
+fn run(x: bool) -> u64 {
+    if x { 1 } else { 0 }
+}
+"#;
+
+    let entry_a = proj_a.join("main.mc");
+    let dep_a = proj_a.join("app").join("dep.mc");
+    let entry_b = proj_b.join("main.mc");
+    let dep_b = proj_b.join("app").join("dep.mc");
+    fs::write(&entry_a, entry_source).expect("failed to write project A entry");
+    fs::write(&dep_a, dep_bad).expect("failed to write project A dependency");
+    fs::write(&entry_b, entry_source).expect("failed to write project B entry");
+    fs::write(&dep_b, dep_good).expect("failed to write project B dependency");
+
+    let mut db = AnalysisDb::new();
+    let entry_a_id = db.upsert_disk_text(entry_a.clone(), entry_source);
+    db.upsert_disk_text(dep_a.clone(), dep_bad);
+    let entry_b_id = db.upsert_disk_text(entry_b.clone(), entry_source);
+    db.upsert_disk_text(dep_b.clone(), dep_good);
+
+    let diags_a = db
+        .diagnostics_for_program_file(entry_a_id)
+        .expect("program A diagnostics query should succeed");
+    assert!(
+        diags_a
+            .iter()
+            .any(|d| d.phase == DiagnosticPhase::Typecheck && d.message.contains("arg 1")),
+        "expected type mismatch in project A, got: {diags_a:#?}"
+    );
+
+    let diags_b = db
+        .diagnostics_for_program_file(entry_b_id)
+        .expect("program B diagnostics query should succeed");
+    assert!(
+        diags_b.is_empty(),
+        "expected project B to be clean; cache should not leak project A import signatures, got: {diags_b:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_base);
+}
+
+#[test]
 fn program_pipeline_query_is_reused_across_program_lookups() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(

@@ -5,6 +5,7 @@
 //! diagnostics and query cache boundaries.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::core::api::{
@@ -12,7 +13,10 @@ use crate::core::api::{
     semcheck_stage_partial, typecheck_stage_partial,
 };
 use crate::core::capsule::ModuleId;
-use crate::core::resolve::{ImportedFacts, ImportedModule, ImportedSymbol};
+use crate::core::resolve::{
+    ImportedCallableSig, ImportedFacts, ImportedModule, ImportedParamSig, ImportedSymbol,
+    ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
+};
 use crate::core::tree::NodeId;
 use crate::core::tree::NodeIdGen;
 use crate::services::analysis::diagnostics::Diagnostic;
@@ -103,7 +107,15 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
 ) -> QueryResult<ModulePipelineState> {
-    let parse_key = QueryKey::new(QueryKind::ParseModule, module_id, revision);
+    let semantic_fingerprint = semantic_input_fingerprint(
+        parsed_override.as_ref(),
+        &imported_modules,
+        &imported_symbols,
+        skip_typecheck,
+    );
+    let query_revision = revision ^ semantic_fingerprint;
+
+    let parse_key = QueryKey::new(QueryKind::ParseModule, module_id, query_revision);
     let source_for_parse = source.clone();
     let parsed_override_for_parse = parsed_override.clone();
     let parsed = rt.execute(parse_key, move |_rt| {
@@ -130,7 +142,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         Ok(state)
     })?;
 
-    let resolve_key = QueryKey::new(QueryKind::ResolveModule, module_id, revision);
+    let resolve_key = QueryKey::new(QueryKind::ResolveModule, module_id, query_revision);
     let resolve_input = parsed.product.clone();
     let imported_modules_for_resolve = imported_modules.clone();
     let imported_symbols_for_resolve = imported_symbols.clone();
@@ -156,7 +168,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         Ok(state)
     })?;
 
-    let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, revision);
+    let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, query_revision);
     // Do not run type checking when resolution emitted errors. This keeps
     // lookup behavior stable (no leaked inference vars on unresolved symbols).
     let typecheck_input = if !skip_typecheck && resolved.diagnostics.is_empty() {
@@ -186,7 +198,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     upstream_poisoned.extend(resolved.poisoned_nodes.iter().copied());
     upstream_poisoned.extend(typechecked.poisoned_nodes.iter().copied());
 
-    let semcheck_key = QueryKey::new(QueryKind::SemcheckModule, module_id, revision);
+    let semcheck_key = QueryKey::new(QueryKind::SemcheckModule, module_id, query_revision);
     let semcheck_input = if !skip_typecheck && typechecked.diagnostics.is_empty() {
         typechecked
             .product
@@ -219,6 +231,143 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         typechecked,
         semchecked,
     })
+}
+
+fn semantic_input_fingerprint(
+    parsed_override: Option<&crate::core::context::ParsedContext>,
+    imported_modules: &HashMap<String, ImportedModule>,
+    imported_symbols: &HashMap<String, ImportedSymbol>,
+    skip_typecheck: bool,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Keep file-local and program-mode pipelines disjoint in cache identity.
+    parsed_override.is_some().hash(&mut hasher);
+    skip_typecheck.hash(&mut hasher);
+    hash_imported_modules(&mut hasher, imported_modules);
+    hash_imported_symbols(&mut hasher, imported_symbols);
+    hasher.finish()
+}
+
+fn hash_imported_modules(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    imported_modules: &HashMap<String, ImportedModule>,
+) {
+    let mut aliases: Vec<_> = imported_modules.keys().collect();
+    aliases.sort();
+    for alias in aliases {
+        alias.hash(hasher);
+        if let Some(module) = imported_modules.get(alias) {
+            module.path.hash(hasher);
+            let mut members: Vec<_> = module.members.iter().collect();
+            members.sort();
+            for member in members {
+                member.hash(hasher);
+            }
+        }
+    }
+}
+
+fn hash_imported_symbols(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    imported_symbols: &HashMap<String, ImportedSymbol>,
+) {
+    let mut aliases: Vec<_> = imported_symbols.keys().collect();
+    aliases.sort();
+    for alias in aliases {
+        alias.hash(hasher);
+        if let Some(symbol) = imported_symbols.get(alias) {
+            symbol.has_callable.hash(hasher);
+            symbol.has_type.hash(hasher);
+            symbol.has_trait.hash(hasher);
+            if let Some(ty) = symbol.type_ty.as_ref() {
+                ty.hash(hasher);
+            }
+            for sig in canonicalize_callable_sigs(&symbol.callable_sigs) {
+                sig.hash(hasher);
+            }
+            if let Some(trait_sig) = symbol.trait_sig.as_ref() {
+                hash_trait_sig(hasher, trait_sig);
+            }
+        }
+    }
+}
+
+fn canonicalize_callable_sigs(callable_sigs: &[ImportedCallableSig]) -> Vec<String> {
+    let mut rendered: Vec<_> = callable_sigs.iter().map(render_callable_sig).collect();
+    rendered.sort();
+    rendered
+}
+
+fn render_callable_sig(sig: &ImportedCallableSig) -> String {
+    let params = sig
+        .params
+        .iter()
+        .map(render_param_sig)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("({params})->{}", sig.ret_ty)
+}
+
+fn render_param_sig(sig: &ImportedParamSig) -> String {
+    format!("{}:{}", param_mode_tag(&sig.mode), sig.ty)
+}
+
+fn hash_trait_sig(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    trait_sig: &ImportedTraitSig,
+) {
+    let mut method_names: Vec<_> = trait_sig.methods.keys().collect();
+    method_names.sort();
+    for name in method_names {
+        name.hash(hasher);
+        if let Some(method) = trait_sig.methods.get(name) {
+            hash_trait_method_sig(hasher, method);
+        }
+    }
+
+    let mut property_names: Vec<_> = trait_sig.properties.keys().collect();
+    property_names.sort();
+    for name in property_names {
+        name.hash(hasher);
+        if let Some(property) = trait_sig.properties.get(name) {
+            hash_trait_property_sig(hasher, property);
+        }
+    }
+}
+
+fn hash_trait_method_sig(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    method: &ImportedTraitMethodSig,
+) {
+    method.name.hash(hasher);
+    param_mode_tag(&method.self_mode).hash(hasher);
+    method.type_param_count.hash(hasher);
+    for bound in &method.type_param_bounds {
+        bound.hash(hasher);
+    }
+    for param in &method.params {
+        render_param_sig(param).hash(hasher);
+    }
+    method.ret_ty.hash(hasher);
+}
+
+fn hash_trait_property_sig(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    property: &ImportedTraitPropertySig,
+) {
+    property.name.hash(hasher);
+    property.ty.hash(hasher);
+    property.has_get.hash(hasher);
+    property.has_set.hash(hasher);
+}
+
+fn param_mode_tag(mode: &crate::core::tree::ParamMode) -> u8 {
+    match mode {
+        crate::core::tree::ParamMode::In => 0,
+        crate::core::tree::ParamMode::InOut => 1,
+        crate::core::tree::ParamMode::Out => 2,
+        crate::core::tree::ParamMode::Sink => 3,
+    }
 }
 
 pub(crate) fn collect_sorted_diagnostics(state: &ModulePipelineState) -> Vec<Diagnostic> {
