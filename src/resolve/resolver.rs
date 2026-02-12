@@ -27,8 +27,21 @@ pub struct ImportedModule {
 #[derive(Clone, Debug, Default)]
 pub struct ImportedSymbol {
     pub has_callable: bool,
+    pub callable_sigs: Vec<ImportedCallableSig>,
     pub has_type: bool,
     pub has_trait: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedCallableSig {
+    pub params: Vec<ImportedParamSig>,
+    pub ret_ty: Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedParamSig {
+    pub mode: ParamMode,
+    pub ty: Type,
 }
 
 pub struct SymbolResolver {
@@ -43,6 +56,7 @@ pub struct SymbolResolver {
     require_aliases: HashSet<String>,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
+    imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
 }
 
 #[derive(Clone)]
@@ -73,6 +87,7 @@ impl SymbolResolver {
             require_aliases: HashSet::new(),
             imported_modules: HashMap::new(),
             imported_symbols: HashMap::new(),
+            imported_callable_sigs: HashMap::new(),
         }
     }
 
@@ -405,7 +420,7 @@ impl SymbolResolver {
         resolved
     }
 
-    fn add_built_in_symbol<F>(&mut self, name: &str, intrinsic: bool, kind_fn: F)
+    fn add_built_in_symbol<F>(&mut self, name: &str, intrinsic: bool, kind_fn: F) -> DefId
     where
         F: FnOnce(DefId) -> SymbolKind,
     {
@@ -429,6 +444,7 @@ impl SymbolResolver {
             },
             Span::default(),
         );
+        def_id
     }
 
     fn check_requires(&mut self, module: &Module) {
@@ -483,14 +499,18 @@ impl SymbolResolver {
         let aliases = self.imported_symbols.clone();
         for (alias, imported) in aliases {
             if imported.has_callable {
-                self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::Func {
+                let def_id = self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::Func {
                     overloads: vec![def_id],
                 });
+                if !imported.callable_sigs.is_empty() {
+                    self.imported_callable_sigs
+                        .insert(def_id, imported.callable_sigs.clone());
+                }
                 continue;
             }
 
             if imported.has_type {
-                self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
+                let _ = self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
                     def_id,
                     ty_expr: TypeExpr {
                         id: NodeId(0),
@@ -502,7 +522,8 @@ impl SymbolResolver {
             }
 
             if imported.has_trait {
-                self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
+                let _ = self
+                    .add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
             }
         }
     }
@@ -664,20 +685,22 @@ impl SymbolResolver {
             for ty in BUILTIN_TYPES {
                 let ty_name = ty.to_string();
                 let intrinsic = matches!(ty, Type::String);
-                resolver.add_built_in_symbol(&ty_name, intrinsic, |def_id| SymbolKind::TypeAlias {
-                    def_id,
-                    ty_expr: TypeExpr {
-                        id: NodeId(0),
-                        kind: TypeExprKind::Named {
-                            ident: ty_name.clone(),
-                            def_id: (),
-                            type_args: Vec::new(),
+                let _ = resolver.add_built_in_symbol(&ty_name, intrinsic, |def_id| {
+                    SymbolKind::TypeAlias {
+                        def_id,
+                        ty_expr: TypeExpr {
+                            id: NodeId(0),
+                            kind: TypeExprKind::Named {
+                                ident: ty_name.clone(),
+                                def_id: (),
+                                type_args: Vec::new(),
+                            },
+                            span: Span::default(),
                         },
-                        span: Span::default(),
-                    },
+                    }
                 });
             }
-            resolver.add_built_in_symbol("set", false, |def_id| SymbolKind::TypeAlias {
+            let _ = resolver.add_built_in_symbol("set", false, |def_id| SymbolKind::TypeAlias {
                 def_id,
                 ty_expr: TypeExpr {
                     id: NodeId(0),
@@ -689,7 +712,7 @@ impl SymbolResolver {
                     span: Span::default(),
                 },
             });
-            resolver.add_built_in_symbol("map", false, |def_id| SymbolKind::TypeAlias {
+            let _ = resolver.add_built_in_symbol("map", false, |def_id| SymbolKind::TypeAlias {
                 def_id,
                 ty_expr: TypeExpr {
                     id: NodeId(0),
@@ -1606,9 +1629,12 @@ pub fn resolve_with_imports_and_symbols_partial(
 
     // Build resolved tree from parsed tree + NodeDefLookup
     let resolved_module = build_module(&node_def_lookup, &ast_context.module);
+    let imported_callable_sigs = std::mem::take(&mut resolver.imported_callable_sigs);
 
     ResolveOutput {
-        context: ast_context.with_def_table(def_table, resolved_module),
+        context: ast_context
+            .with_def_table(def_table, resolved_module)
+            .with_imported_callable_sigs(imported_callable_sigs),
         errors,
     }
 }
@@ -1666,6 +1692,7 @@ pub fn resolve_program(
                     .callables
                     .get(member)
                     .is_some_and(|overloads| !overloads.is_empty()),
+                callable_sigs: Vec::new(),
                 has_type: dep_exports.types.contains_key(member),
                 has_trait: dep_exports.traits.contains_key(member),
             };

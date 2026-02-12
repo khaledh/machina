@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::frontend::{ModuleId, ModulePath, ParsedModule as FrontendParsedModule, ProgramParsed};
-use crate::resolve::{DefId, DefTable, GlobalDefId};
+use crate::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig};
 use crate::semck::closure::capture::ClosureCapture;
 use crate::symtab::SymbolTable;
 use crate::tree::normalized::Module as NormalizedModule;
@@ -164,6 +164,7 @@ impl ParsedContext {
             def_owners: HashMap::new(),
             symbols,
             node_id_gen: self.node_id_gen,
+            imported_callable_sigs: HashMap::new(),
         }
     }
 }
@@ -179,6 +180,7 @@ pub struct ResolvedContext {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
 }
 
 impl ResolvedContext {
@@ -203,7 +205,16 @@ impl ResolvedContext {
             generic_insts,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
+            imported_callable_sigs: self.imported_callable_sigs,
         }
+    }
+
+    pub fn with_imported_callable_sigs(
+        mut self,
+        imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
+    ) -> Self {
+        self.imported_callable_sigs = imported_callable_sigs;
+        self
     }
 }
 
@@ -221,6 +232,7 @@ pub struct TypeCheckedContext {
     pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
 }
 
 // -----------------------------------------------------------------------------

@@ -12,7 +12,7 @@ use crate::analysis::snapshot::FileId;
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diag::Span;
 use crate::frontend::{ModuleId, ParsedModule};
-use crate::resolve::{Def, DefId, DefTable};
+use crate::resolve::{Def, DefId, DefTable, ImportedCallableSig};
 use crate::symtab::SymbolTable;
 use crate::tree::NodeId;
 use crate::tree::NodeIdGen;
@@ -44,6 +44,7 @@ pub struct ResolvedModuleResult {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
 }
 
 impl ResolvedModuleResult {
@@ -55,6 +56,7 @@ impl ResolvedModuleResult {
             def_owners: context.def_owners,
             symbols: context.symbols,
             node_id_gen: context.node_id_gen,
+            imported_callable_sigs: context.imported_callable_sigs,
         }
     }
 
@@ -65,6 +67,7 @@ impl ResolvedModuleResult {
             def_owners: self.def_owners,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
+            imported_callable_sigs: self.imported_callable_sigs,
         }
     }
 }
@@ -80,6 +83,7 @@ pub struct TypedModuleResult {
     pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,6 +226,7 @@ impl TypedModuleResult {
             generic_insts: context.generic_insts,
             symbols: context.symbols,
             node_id_gen: context.node_id_gen,
+            imported_callable_sigs: context.imported_callable_sigs,
         }
     }
 
@@ -235,6 +240,7 @@ impl TypedModuleResult {
             generic_insts: self.generic_insts,
             symbols: self.symbols,
             node_id_gen: self.node_id_gen,
+            imported_callable_sigs: self.imported_callable_sigs,
         }
     }
 }

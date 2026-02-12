@@ -13,9 +13,10 @@ pub use def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 pub use errors::ResolveError;
 pub use owners::attach_def_owners;
 pub use resolver::{
-    ImportedModule, ImportedSymbol, ResolveOutput, SymbolResolver, resolve, resolve_partial,
-    resolve_program, resolve_with_imports, resolve_with_imports_and_symbols,
-    resolve_with_imports_and_symbols_partial, resolve_with_imports_partial,
+    ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ResolveOutput,
+    SymbolResolver, resolve, resolve_partial, resolve_program, resolve_with_imports,
+    resolve_with_imports_and_symbols, resolve_with_imports_and_symbols_partial,
+    resolve_with_imports_partial,
 };
 pub use symbols::SymbolKind;
 

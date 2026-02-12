@@ -31,14 +31,17 @@ use crate::analysis::results::{
     SignatureHelp,
 };
 use crate::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
-use crate::context::ProgramParsedContext;
+use crate::context::{ProgramParsedContext, TypeCheckedContext};
 use crate::diag::Span;
 use crate::frontend::bind::ProgramBindings;
 use crate::frontend::{self, ModuleId, ModulePath, RequireKind};
-use crate::resolve::{DefId, ImportedModule, ImportedSymbol};
+use crate::resolve::{
+    DefId, ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol,
+};
 use crate::tree::NodeId;
+use crate::tree::ParamMode;
 use crate::typecheck::type_check_partial;
-use crate::types::Type;
+use crate::types::{FnParamMode, Type};
 
 #[derive(Default)]
 pub struct AnalysisDb {
@@ -193,6 +196,10 @@ impl AnalysisDb {
             };
             let program_context = crate::context::ProgramParsedContext::new(program);
             let bindings = ProgramBindings::build(&program_context);
+            let mut callable_sigs_by_module: HashMap<
+                ModuleId,
+                HashMap<String, Vec<ImportedCallableSig>>,
+            > = HashMap::new();
 
             let mut all = Vec::new();
             for module_id in program_context.dependency_order_from_entry() {
@@ -207,9 +214,17 @@ impl AnalysisDb {
                 );
                 let imported_modules =
                     build_analysis_imported_modules(&program_context, &bindings, module_id);
-                let imported_symbols =
-                    build_analysis_imported_symbols(&program_context, &bindings, module_id);
-                let skip_typecheck = !imported_symbols.is_empty();
+                let imported_symbols = build_analysis_imported_symbols(
+                    &program_context,
+                    &bindings,
+                    &callable_sigs_by_module,
+                    module_id,
+                );
+                let skip_typecheck = imported_symbols.values().any(|imported| {
+                    imported.has_type
+                        || imported.has_trait
+                        || (imported.has_callable && imported.callable_sigs.is_empty())
+                });
                 let state = run_module_pipeline_with_parsed_and_imports(
                     rt,
                     module_id,
@@ -220,6 +235,9 @@ impl AnalysisDb {
                     imported_symbols,
                     skip_typecheck,
                 )?;
+                if let Some(typed) = &state.typechecked.product {
+                    callable_sigs_by_module.insert(module_id, collect_public_callable_sigs(typed));
+                }
                 let mut module_diags = collect_sorted_diagnostics(&state);
                 let file_path = parsed.source.file_path.to_string_lossy().to_string();
                 for diag in &mut module_diags {
@@ -582,6 +600,7 @@ fn build_analysis_imported_modules(
 fn build_analysis_imported_symbols(
     program_context: &ProgramParsedContext,
     bindings: &ProgramBindings,
+    callable_sigs_by_module: &HashMap<ModuleId, HashMap<String, Vec<ImportedCallableSig>>>,
     module_id: ModuleId,
 ) -> HashMap<String, ImportedSymbol> {
     let mut out = HashMap::new();
@@ -607,11 +626,21 @@ fn build_analysis_imported_symbols(
         let Some(exports) = bindings.exports_for(dep_id) else {
             continue;
         };
+        let dep_callable_sigs = callable_sigs_by_module.get(&dep_id);
+        let has_callable = exports
+            .callables
+            .get(member)
+            .is_some_and(|attrs| attrs.public);
         let imported = ImportedSymbol {
-            has_callable: exports
-                .callables
-                .get(member)
-                .is_some_and(|attrs| attrs.public),
+            has_callable,
+            callable_sigs: if has_callable {
+                dep_callable_sigs
+                    .and_then(|module_sigs| module_sigs.get(member))
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            },
             has_type: exports.types.get(member).is_some_and(|attrs| attrs.public),
             has_trait: exports.traits.get(member).is_some_and(|attrs| attrs.public),
         };
@@ -621,6 +650,56 @@ fn build_analysis_imported_symbols(
     }
 
     out
+}
+
+fn collect_public_callable_sigs(
+    typed: &TypeCheckedContext,
+) -> HashMap<String, Vec<ImportedCallableSig>> {
+    let mut out = HashMap::<String, Vec<ImportedCallableSig>>::new();
+    for item in &typed.module.top_level_items {
+        let callable = match item {
+            crate::tree::typed::TopLevelItem::FuncDecl(decl) => Some((&decl.sig.name, decl.def_id)),
+            crate::tree::typed::TopLevelItem::FuncDef(def) => Some((&def.sig.name, def.def_id)),
+            _ => None,
+        };
+        let Some((name, def_id)) = callable else {
+            continue;
+        };
+        let Some(def) = typed.def_table.lookup_def(def_id) else {
+            continue;
+        };
+        if !def.is_public() {
+            continue;
+        }
+        let Some(def_ty) = typed.type_map.lookup_def_type(def) else {
+            continue;
+        };
+        let Type::Fn { params, ret_ty } = def_ty else {
+            continue;
+        };
+        out.entry(name.clone())
+            .or_default()
+            .push(ImportedCallableSig {
+                params: params
+                    .into_iter()
+                    .map(|param| ImportedParamSig {
+                        mode: param_mode_from_fn_param(param.mode),
+                        ty: param.ty,
+                    })
+                    .collect(),
+                ret_ty: *ret_ty,
+            });
+    }
+    out
+}
+
+fn param_mode_from_fn_param(mode: FnParamMode) -> ParamMode {
+    match mode {
+        FnParamMode::In => ParamMode::In,
+        FnParamMode::InOut => ParamMode::InOut,
+        FnParamMode::Out => ParamMode::Out,
+        FnParamMode::Sink => ParamMode::Sink,
+    }
 }
 
 #[cfg(test)]

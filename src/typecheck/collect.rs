@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::diag::Span;
-use crate::resolve::DefId;
+use crate::resolve::{DefId, ImportedCallableSig};
 use crate::tree::ParamMode;
 use crate::tree::resolved::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField,
@@ -270,6 +270,40 @@ fn collect_function_sigs(
             generic_envs,
             errors,
         );
+    }
+
+    for (def_id, imported_sigs) in &ctx.imported_callable_sigs {
+        let Some(def) = ctx.def_table.lookup_def(*def_id) else {
+            continue;
+        };
+        let out = func_sigs.entry(def.name.clone()).or_default();
+        for imported in imported_sigs {
+            out.push(imported_callable_sig_to_collected(*def_id, imported));
+        }
+    }
+}
+
+fn imported_callable_sig_to_collected(
+    def_id: DefId,
+    imported: &ImportedCallableSig,
+) -> CollectedCallableSig {
+    CollectedCallableSig {
+        def_id,
+        params: imported
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| CollectedParamSig {
+                name: format!("arg{index}"),
+                ty: param.ty.clone(),
+                mode: param.mode.clone(),
+            })
+            .collect(),
+        ret_ty: imported.ret_ty.clone(),
+        type_param_count: 0,
+        type_param_bounds: Vec::new(),
+        self_mode: None,
+        impl_trait: None,
     }
 }
 
