@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::frontend::{ModuleId, ModulePath, ParsedModule as FrontendParsedModule, ProgramParsed};
-use crate::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig};
+use crate::resolve::{DefId, DefTable, GlobalDefId, ImportedCallableSig, ImportedTraitSig};
 use crate::semck::closure::capture::ClosureCapture;
 use crate::symtab::SymbolTable;
 use crate::tree::normalized::Module as NormalizedModule;
@@ -167,6 +167,7 @@ impl ParsedContext {
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: HashMap::new(),
             imported_type_defs: HashMap::new(),
+            imported_trait_defs: HashMap::new(),
         }
     }
 }
@@ -184,6 +185,7 @@ pub struct ResolvedContext {
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
     pub imported_type_defs: HashMap<DefId, Type>,
+    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 impl ResolvedContext {
@@ -210,6 +212,7 @@ impl ResolvedContext {
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: self.imported_callable_sigs,
             imported_type_defs: self.imported_type_defs,
+            imported_trait_defs: self.imported_trait_defs,
         }
     }
 
@@ -217,9 +220,11 @@ impl ResolvedContext {
         mut self,
         imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
         imported_type_defs: HashMap<DefId, Type>,
+        imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
     ) -> Self {
         self.imported_callable_sigs = imported_callable_sigs;
         self.imported_type_defs = imported_type_defs;
+        self.imported_trait_defs = imported_trait_defs;
         self
     }
 }
@@ -240,6 +245,7 @@ pub struct TypeCheckedContext {
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
     pub imported_type_defs: HashMap<DefId, Type>,
+    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 // -----------------------------------------------------------------------------

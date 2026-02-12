@@ -30,6 +30,7 @@ pub fn normalize(ctx: TypeCheckedContext) -> NormalizedContext {
         node_id_gen,
         imported_callable_sigs: _,
         imported_type_defs: _,
+        imported_trait_defs: _,
     } = ctx;
     let mut module = build_module(&module);
     let mut type_map = TypeMapOverlay::new(type_map);

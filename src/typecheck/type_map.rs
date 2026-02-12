@@ -199,6 +199,16 @@ impl TypeDefLookup for crate::context::ResolvedContext {
     }
 }
 
+impl TypeDefLookup for crate::context::TypeCheckedContext {
+    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
+        self.module.type_def_by_id(def_id)
+    }
+
+    fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
+        self.imported_type_defs.get(&def_id)
+    }
+}
+
 fn resolve_type_expr_impl(
     def_table: &DefTable,
     module: &impl TypeDefLookup,

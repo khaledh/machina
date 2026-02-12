@@ -12,7 +12,7 @@ use crate::analysis::snapshot::FileId;
 use crate::context::{ResolvedContext, TypeCheckedContext};
 use crate::diag::Span;
 use crate::frontend::{ModuleId, ParsedModule};
-use crate::resolve::{Def, DefId, DefTable, ImportedCallableSig};
+use crate::resolve::{Def, DefId, DefTable, ImportedCallableSig, ImportedTraitSig};
 use crate::symtab::SymbolTable;
 use crate::tree::NodeId;
 use crate::tree::NodeIdGen;
@@ -46,6 +46,7 @@ pub struct ResolvedModuleResult {
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
     pub imported_type_defs: HashMap<DefId, Type>,
+    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 impl ResolvedModuleResult {
@@ -59,6 +60,7 @@ impl ResolvedModuleResult {
             node_id_gen: context.node_id_gen,
             imported_callable_sigs: context.imported_callable_sigs,
             imported_type_defs: context.imported_type_defs,
+            imported_trait_defs: context.imported_trait_defs,
         }
     }
 
@@ -71,6 +73,7 @@ impl ResolvedModuleResult {
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: self.imported_callable_sigs,
             imported_type_defs: self.imported_type_defs,
+            imported_trait_defs: self.imported_trait_defs,
         }
     }
 }
@@ -88,6 +91,7 @@ pub struct TypedModuleResult {
     pub node_id_gen: NodeIdGen,
     pub imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
     pub imported_type_defs: HashMap<DefId, Type>,
+    pub imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -232,6 +236,7 @@ impl TypedModuleResult {
             node_id_gen: context.node_id_gen,
             imported_callable_sigs: context.imported_callable_sigs,
             imported_type_defs: context.imported_type_defs,
+            imported_trait_defs: context.imported_trait_defs,
         }
     }
 
@@ -247,6 +252,7 @@ impl TypedModuleResult {
             node_id_gen: self.node_id_gen,
             imported_callable_sigs: self.imported_callable_sigs,
             imported_type_defs: self.imported_type_defs,
+            imported_trait_defs: self.imported_trait_defs,
         }
     }
 }

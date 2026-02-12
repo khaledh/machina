@@ -31,6 +31,7 @@ pub struct ImportedSymbol {
     pub has_type: bool,
     pub type_ty: Option<Type>,
     pub has_trait: bool,
+    pub trait_sig: Option<ImportedTraitSig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +44,30 @@ pub struct ImportedCallableSig {
 pub struct ImportedParamSig {
     pub mode: ParamMode,
     pub ty: Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedTraitMethodSig {
+    pub name: String,
+    pub params: Vec<ImportedParamSig>,
+    pub ret_ty: Type,
+    pub type_param_count: usize,
+    pub type_param_bounds: Vec<Option<String>>,
+    pub self_mode: ParamMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedTraitPropertySig {
+    pub name: String,
+    pub ty: Type,
+    pub has_get: bool,
+    pub has_set: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedTraitSig {
+    pub methods: HashMap<String, ImportedTraitMethodSig>,
+    pub properties: HashMap<String, ImportedTraitPropertySig>,
 }
 
 pub struct SymbolResolver {
@@ -59,6 +84,7 @@ pub struct SymbolResolver {
     imported_symbols: HashMap<String, ImportedSymbol>,
     imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
     imported_type_defs: HashMap<DefId, Type>,
+    imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
 }
 
 #[derive(Clone)]
@@ -91,6 +117,7 @@ impl SymbolResolver {
             imported_symbols: HashMap::new(),
             imported_callable_sigs: HashMap::new(),
             imported_type_defs: HashMap::new(),
+            imported_trait_defs: HashMap::new(),
         }
     }
 
@@ -529,8 +556,11 @@ impl SymbolResolver {
             }
 
             if imported.has_trait {
-                let _ = self
+                let def_id = self
                     .add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
+                if let Some(trait_sig) = imported.trait_sig.clone() {
+                    self.imported_trait_defs.insert(def_id, trait_sig);
+                }
             }
         }
     }
@@ -1638,11 +1668,16 @@ pub fn resolve_with_imports_and_symbols_partial(
     let resolved_module = build_module(&node_def_lookup, &ast_context.module);
     let imported_callable_sigs = std::mem::take(&mut resolver.imported_callable_sigs);
     let imported_type_defs = std::mem::take(&mut resolver.imported_type_defs);
+    let imported_trait_defs = std::mem::take(&mut resolver.imported_trait_defs);
 
     ResolveOutput {
         context: ast_context
             .with_def_table(def_table, resolved_module)
-            .with_imported_facts(imported_callable_sigs, imported_type_defs),
+            .with_imported_facts(
+                imported_callable_sigs,
+                imported_type_defs,
+                imported_trait_defs,
+            ),
         errors,
     }
 }
@@ -1704,6 +1739,7 @@ pub fn resolve_program(
                 has_type: dep_exports.types.contains_key(member),
                 type_ty: None,
                 has_trait: dep_exports.traits.contains_key(member),
+                trait_sig: None,
             };
             if imported.has_callable || imported.has_type || imported.has_trait {
                 imported_symbols.insert(req.alias.clone(), imported);

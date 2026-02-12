@@ -37,12 +37,15 @@ use crate::frontend::bind::ProgramBindings;
 use crate::frontend::{self, ModuleId, ModulePath, RequireKind};
 use crate::resolve::{
     DefId, ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol,
+    ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
 };
 use crate::tree::NodeId;
 use crate::tree::ParamMode;
 use crate::typecheck::type_check_partial;
-use crate::typecheck::type_map::resolve_type_def_with_args;
-use crate::types::{FnParamMode, Type};
+use crate::typecheck::type_map::{
+    resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
+};
+use crate::types::{FnParamMode, TyVarId, Type};
 
 #[derive(Default)]
 pub struct AnalysisDb {
@@ -202,6 +205,8 @@ impl AnalysisDb {
                 HashMap<String, Vec<ImportedCallableSig>>,
             > = HashMap::new();
             let mut type_tys_by_module: HashMap<ModuleId, HashMap<String, Type>> = HashMap::new();
+            let mut trait_sigs_by_module: HashMap<ModuleId, HashMap<String, ImportedTraitSig>> =
+                HashMap::new();
 
             let mut all = Vec::new();
             for module_id in program_context.dependency_order_from_entry() {
@@ -221,11 +226,12 @@ impl AnalysisDb {
                     &bindings,
                     &callable_sigs_by_module,
                     &type_tys_by_module,
+                    &trait_sigs_by_module,
                     module_id,
                 );
                 let skip_typecheck = imported_symbols.values().any(|imported| {
                     (imported.has_type && imported.type_ty.is_none())
-                        || imported.has_trait
+                        || (imported.has_trait && imported.trait_sig.is_none())
                         || (imported.has_callable && imported.callable_sigs.is_empty())
                 });
                 let state = run_module_pipeline_with_parsed_and_imports(
@@ -241,6 +247,7 @@ impl AnalysisDb {
                 if let Some(typed) = &state.typechecked.product {
                     callable_sigs_by_module.insert(module_id, collect_public_callable_sigs(typed));
                     type_tys_by_module.insert(module_id, collect_public_type_tys(typed));
+                    trait_sigs_by_module.insert(module_id, collect_public_trait_sigs(typed));
                 }
                 let mut module_diags = collect_sorted_diagnostics(&state);
                 let file_path = parsed.source.file_path.to_string_lossy().to_string();
@@ -606,6 +613,7 @@ fn build_analysis_imported_symbols(
     bindings: &ProgramBindings,
     callable_sigs_by_module: &HashMap<ModuleId, HashMap<String, Vec<ImportedCallableSig>>>,
     type_tys_by_module: &HashMap<ModuleId, HashMap<String, Type>>,
+    trait_sigs_by_module: &HashMap<ModuleId, HashMap<String, ImportedTraitSig>>,
     module_id: ModuleId,
 ) -> HashMap<String, ImportedSymbol> {
     let mut out = HashMap::new();
@@ -633,11 +641,13 @@ fn build_analysis_imported_symbols(
         };
         let dep_callable_sigs = callable_sigs_by_module.get(&dep_id);
         let dep_type_tys = type_tys_by_module.get(&dep_id);
+        let dep_trait_sigs = trait_sigs_by_module.get(&dep_id);
         let has_callable = exports
             .callables
             .get(member)
             .is_some_and(|attrs| attrs.public);
         let has_type = exports.types.get(member).is_some_and(|attrs| attrs.public);
+        let has_trait = exports.traits.get(member).is_some_and(|attrs| attrs.public);
         let imported = ImportedSymbol {
             has_callable,
             callable_sigs: if has_callable {
@@ -656,7 +666,14 @@ fn build_analysis_imported_symbols(
             } else {
                 None
             },
-            has_trait: exports.traits.get(member).is_some_and(|attrs| attrs.public),
+            has_trait,
+            trait_sig: if has_trait {
+                dep_trait_sigs
+                    .and_then(|module_traits| module_traits.get(member))
+                    .cloned()
+            } else {
+                None
+            },
         };
         if imported.has_callable || imported.has_type || imported.has_trait {
             out.insert(req.alias.clone(), imported);
@@ -727,6 +744,107 @@ fn collect_public_type_tys(typed: &TypeCheckedContext) -> HashMap<String, Type> 
         out.insert(type_def.name.clone(), ty);
     }
     out
+}
+
+fn collect_public_trait_sigs(typed: &TypeCheckedContext) -> HashMap<String, ImportedTraitSig> {
+    let mut out = HashMap::<String, ImportedTraitSig>::new();
+    for trait_def in typed.module.trait_defs() {
+        let Some(def) = typed.def_table.lookup_def(trait_def.def_id) else {
+            continue;
+        };
+        if !def.is_public() {
+            continue;
+        }
+
+        let mut methods = HashMap::new();
+        for method in &trait_def.methods {
+            let Some(sig) = collect_imported_trait_method_sig(typed, &method.sig) else {
+                continue;
+            };
+            methods.insert(method.sig.name.clone(), sig);
+        }
+
+        let mut properties = HashMap::new();
+        for property in &trait_def.properties {
+            let Ok(ty) = resolve_type_expr_with_params(&typed.def_table, typed, &property.ty, None)
+            else {
+                continue;
+            };
+            properties.insert(
+                property.name.clone(),
+                ImportedTraitPropertySig {
+                    name: property.name.clone(),
+                    ty,
+                    has_get: property.has_get,
+                    has_set: property.has_set,
+                },
+            );
+        }
+
+        out.insert(
+            trait_def.name.clone(),
+            ImportedTraitSig {
+                methods,
+                properties,
+            },
+        );
+    }
+    out
+}
+
+fn collect_imported_trait_method_sig(
+    typed: &TypeCheckedContext,
+    sig: &crate::tree::typed::MethodSig,
+) -> Option<ImportedTraitMethodSig> {
+    let type_param_map = if sig.type_params.is_empty() {
+        None
+    } else {
+        Some(
+            sig.type_params
+                .iter()
+                .enumerate()
+                .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
+                .collect::<HashMap<_, _>>(),
+        )
+    };
+
+    let mut params = Vec::with_capacity(sig.params.len());
+    for param in &sig.params {
+        let Ok(ty) = resolve_type_expr_with_params(
+            &typed.def_table,
+            typed,
+            &param.typ,
+            type_param_map.as_ref(),
+        ) else {
+            return None;
+        };
+        params.push(ImportedParamSig {
+            mode: param.mode.clone(),
+            ty,
+        });
+    }
+
+    let Ok(ret_ty) = resolve_return_type_expr_with_params(
+        &typed.def_table,
+        typed,
+        &sig.ret_ty_expr,
+        type_param_map.as_ref(),
+    ) else {
+        return None;
+    };
+
+    Some(ImportedTraitMethodSig {
+        name: sig.name.clone(),
+        params,
+        ret_ty,
+        type_param_count: sig.type_params.len(),
+        type_param_bounds: sig
+            .type_params
+            .iter()
+            .map(|param| param.bound.as_ref().map(|bound| bound.name.clone()))
+            .collect(),
+        self_mode: sig.self_param.mode.clone(),
+    })
 }
 
 fn param_mode_from_fn_param(mode: FnParamMode) -> ParamMode {

@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::diag::Span;
-use crate::resolve::{DefId, ImportedCallableSig};
+use crate::resolve::{DefId, ImportedCallableSig, ImportedTraitSig};
 use crate::tree::ParamMode;
 use crate::tree::resolved::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField,
@@ -241,6 +241,16 @@ fn collect_trait_sigs(
             },
         );
     }
+
+    for (def_id, imported) in &ctx.imported_trait_defs {
+        let Some(def) = ctx.def_table.lookup_def(*def_id) else {
+            continue;
+        };
+        trait_sigs.insert(
+            def.name.clone(),
+            imported_trait_sig_to_collected(*def_id, imported),
+        );
+    }
 }
 
 fn collect_function_sigs(
@@ -302,6 +312,61 @@ fn imported_callable_sig_to_collected(
         type_param_bounds: Vec::new(),
         self_mode: None,
         impl_trait: None,
+    }
+}
+
+fn imported_trait_sig_to_collected(
+    def_id: DefId,
+    imported: &ImportedTraitSig,
+) -> CollectedTraitSig {
+    let methods = imported
+        .methods
+        .iter()
+        .map(|(name, method)| {
+            (
+                name.clone(),
+                CollectedTraitMethodSig {
+                    name: method.name.clone(),
+                    params: method
+                        .params
+                        .iter()
+                        .enumerate()
+                        .map(|(index, param)| CollectedParamSig {
+                            name: format!("arg{index}"),
+                            ty: param.ty.clone(),
+                            mode: param.mode.clone(),
+                        })
+                        .collect(),
+                    ret_ty: method.ret_ty.clone(),
+                    type_param_count: method.type_param_count,
+                    type_param_bounds: method.type_param_bounds.clone(),
+                    self_mode: method.self_mode.clone(),
+                    span: Span::default(),
+                },
+            )
+        })
+        .collect();
+    let properties = imported
+        .properties
+        .iter()
+        .map(|(name, property)| {
+            (
+                name.clone(),
+                CollectedTraitPropertySig {
+                    name: property.name.clone(),
+                    ty: property.ty.clone(),
+                    has_get: property.has_get,
+                    has_set: property.has_set,
+                    span: Span::default(),
+                },
+            )
+        })
+        .collect();
+    CollectedTraitSig {
+        def_id,
+        methods,
+        properties,
+        span: Span::default(),
     }
 }
 

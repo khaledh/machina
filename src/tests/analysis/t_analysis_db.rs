@@ -1343,6 +1343,67 @@ type Num = bool
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
+#[test]
+fn diagnostics_for_program_file_typechecks_symbol_import_traits() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_symbol_import_trait_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::Runnable
+}
+
+type Process = {
+    id: u64,
+}
+
+Process :: Runnable {
+    fn run(self) -> u64 {
+        self.id
+    }
+}
+
+fn accept<T: Runnable>(value: T) -> u64 {
+    value.run()
+}
+
+fn main() -> u64 {
+    accept(Process { id: 7 })
+}
+"#;
+    let dep_source = r#"
+@[public]
+trait Runnable {
+    fn run(self) -> u64;
+}
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected imported public trait to resolve and typecheck, got: {diagnostics:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)
