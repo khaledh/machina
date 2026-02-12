@@ -1050,6 +1050,42 @@ fn main() -> u64 {
 }
 
 #[test]
+fn code_actions_include_non_exhaustive_match_wildcard_fix() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Flag = On | Off
+
+fn describe_flag(f: Flag) -> u64 {
+    match f {
+        Flag::On => 1,
+    }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/code_actions_non_exhaustive_match.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "match f");
+    let actions = db
+        .code_actions_at_file(file_id, query_span)
+        .expect("code action query should succeed");
+    let wildcard_fix = actions
+        .iter()
+        .find(|a| a.diagnostic_code == "MC-SEMCK-NonExhaustiveMatch")
+        .expect("expected non-exhaustive match quick fix");
+    assert_eq!(wildcard_fix.title, "Add wildcard match arm");
+    assert!(
+        !wildcard_fix.edits.is_empty(),
+        "expected actionable wildcard edit"
+    );
+    assert!(
+        wildcard_fix.edits[0].new_text.contains("_ => {"),
+        "expected wildcard arm edit, got: {:?}",
+        wildcard_fix.edits
+    );
+}
+
+#[test]
 fn code_actions_are_deterministic() {
     let mut db = AnalysisDb::new();
     let source = r#"

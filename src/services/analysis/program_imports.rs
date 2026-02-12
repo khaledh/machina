@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::bind::CapsuleBindings;
 use crate::core::capsule::{ModuleId, RequireKind};
-use crate::core::context::{CapsuleParsedContext, TypeCheckedContext};
+use crate::core::context::{CapsuleParsedContext, ResolvedContext, TypeCheckedContext};
 use crate::core::resolve::{
     ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
     ImportedTraitPropertySig, ImportedTraitSig,
@@ -160,6 +160,12 @@ impl ProgramImportFactsCache {
         })
     }
 
+    pub(crate) fn ingest_resolved(&mut self, module_id: ModuleId, resolved: &ResolvedContext) {
+        self.callable_sigs_by_module
+            .entry(module_id)
+            .or_insert_with(|| collect_public_callable_sigs_resolved(resolved));
+    }
+
     pub(crate) fn ingest_typed(&mut self, module_id: ModuleId, typed: &TypeCheckedContext) {
         self.callable_sigs_by_module
             .insert(module_id, collect_public_callable_sigs(typed));
@@ -211,6 +217,67 @@ fn collect_public_callable_sigs(
                     .collect(),
                 ret_ty: *ret_ty,
             });
+    }
+    out
+}
+
+fn collect_public_callable_sigs_resolved(
+    resolved: &ResolvedContext,
+) -> HashMap<String, Vec<ImportedCallableSig>> {
+    let mut out = HashMap::<String, Vec<ImportedCallableSig>>::new();
+    for item in &resolved.module.top_level_items {
+        let callable = match item {
+            crate::core::tree::resolved::TopLevelItem::FuncDecl(decl) => {
+                Some((&decl.sig.name, decl.def_id, &decl.sig))
+            }
+            crate::core::tree::resolved::TopLevelItem::FuncDef(def) => {
+                Some((&def.sig.name, def.def_id, &def.sig))
+            }
+            _ => None,
+        };
+        let Some((name, def_id, sig)) = callable else {
+            continue;
+        };
+        if !sig.type_params.is_empty() {
+            continue;
+        }
+        let Some(def) = resolved.def_table.lookup_def(def_id) else {
+            continue;
+        };
+        if !def.is_public() {
+            continue;
+        }
+
+        let mut params = Vec::with_capacity(sig.params.len());
+        let mut failed = false;
+        for param in &sig.params {
+            match resolve_type_expr_with_params(&resolved.def_table, resolved, &param.typ, None) {
+                Ok(ty) => params.push(ImportedParamSig {
+                    mode: param.mode.clone(),
+                    ty,
+                }),
+                Err(_) => {
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        if failed {
+            continue;
+        }
+
+        let Ok(ret_ty) = resolve_return_type_expr_with_params(
+            &resolved.def_table,
+            resolved,
+            &sig.ret_ty_expr,
+            None,
+        ) else {
+            continue;
+        };
+
+        out.entry(name.clone())
+            .or_default()
+            .push(ImportedCallableSig { params, ret_ty });
     }
     out
 }

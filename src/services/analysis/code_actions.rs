@@ -70,6 +70,17 @@ pub(crate) fn code_actions_for_diagnostic_with_source(
                 edits,
             }]
         }
+        "MC-SEMCK-NonExhaustiveMatch" => {
+            let edits = source
+                .and_then(|src| build_wildcard_match_arm_edit(diag, src))
+                .unwrap_or_default();
+            vec![CodeAction {
+                title: "Add wildcard match arm".to_string(),
+                kind: CodeActionKind::QuickFix,
+                diagnostic_code: diag.code.clone(),
+                edits,
+            }]
+        }
         _ => Vec::new(),
     }
 }
@@ -104,23 +115,52 @@ fn build_union_match_arm_edits(
     }])
 }
 
+fn build_wildcard_match_arm_edit(diag: &Diagnostic, source: &str) -> Option<Vec<TextEdit>> {
+    let insertion_offset = find_match_closing_brace_offset(source, diag.span)?;
+    let close_indent = line_indent_before_offset(source, insertion_offset);
+    let arm_indent = format!("{close_indent}    ");
+    let mut new_text = String::new();
+    if !source[..insertion_offset].ends_with('\n') {
+        new_text.push('\n');
+    }
+    new_text.push_str(&format!(
+        "{arm_indent}_ => {{\n{arm_indent}    // TODO: handle remaining cases\n{arm_indent}}},\n"
+    ));
+    let insert_pos = offset_to_position(source, insertion_offset);
+    Some(vec![TextEdit {
+        span: Span {
+            start: insert_pos,
+            end: insert_pos,
+        },
+        new_text,
+    }])
+}
+
 fn find_match_closing_brace_offset(source: &str, span: Span) -> Option<usize> {
-    let start = span.start.offset.min(source.len());
-    let end = span.end.offset.min(source.len());
+    let start = span_start_offset(source, span);
+    let end = span_end_offset(source, span);
     if start >= end {
         return None;
     }
+
     let bytes = source.as_bytes();
     let mut open = None;
-    for (idx, byte) in bytes.iter().enumerate().take(end).skip(start) {
-        if *byte == b'{' {
-            open = Some(idx);
-            break;
+    if let Some(match_kw) = find_match_keyword_offset(source, start, end)
+        && let Some(rel) = source[match_kw..].find('{')
+    {
+        open = Some(match_kw + rel);
+    }
+    if open.is_none() {
+        for (idx, byte) in bytes.iter().enumerate().take(end).skip(start) {
+            if *byte == b'{' {
+                open = Some(idx);
+                break;
+            }
         }
     }
     let open = open?;
     let mut depth = 0usize;
-    for (idx, byte) in bytes.iter().enumerate().take(end).skip(open) {
+    for (idx, byte) in bytes.iter().enumerate().skip(open) {
         match *byte {
             b'{' => depth += 1,
             b'}' => {
@@ -136,6 +176,70 @@ fn find_match_closing_brace_offset(source: &str, span: Span) -> Option<usize> {
         }
     }
     None
+}
+
+fn find_match_keyword_offset(source: &str, start: usize, end: usize) -> Option<usize> {
+    if start >= end || end > source.len() {
+        return None;
+    }
+    let window = &source[start..end];
+    let mut rel = 0usize;
+    while let Some(found) = window[rel..].find("match") {
+        let idx = rel + found;
+        let abs = start + idx;
+        let prev_ok = abs == 0
+            || !source[..abs]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+        let next_abs = abs + "match".len();
+        let next_ok = next_abs >= source.len()
+            || !source[next_abs..]
+                .chars()
+                .next()
+                .is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+        if prev_ok && next_ok {
+            return Some(abs);
+        }
+        rel = idx + "match".len();
+    }
+    None
+}
+
+fn span_start_offset(source: &str, span: Span) -> usize {
+    if span.start.offset > 0 && span.start.offset <= source.len() {
+        span.start.offset
+    } else {
+        position_to_offset(source, span.start.line, span.start.column)
+    }
+}
+
+fn span_end_offset(source: &str, span: Span) -> usize {
+    if span.end.offset > 0 && span.end.offset <= source.len() {
+        span.end.offset
+    } else {
+        position_to_offset(source, span.end.line, span.end.column)
+    }
+}
+
+fn position_to_offset(source: &str, line: usize, column: usize) -> usize {
+    if line <= 1 {
+        return column.saturating_sub(1).min(source.len());
+    }
+    let mut current_line = 1usize;
+    let mut line_start = 0usize;
+    for (idx, ch) in source.char_indices() {
+        if ch == '\n' {
+            current_line += 1;
+            line_start = idx + 1;
+            if current_line == line {
+                break;
+            }
+        }
+    }
+    line_start
+        .saturating_add(column.saturating_sub(1))
+        .min(source.len())
 }
 
 fn line_indent_before_offset(source: &str, offset: usize) -> String {

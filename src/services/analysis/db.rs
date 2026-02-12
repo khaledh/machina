@@ -226,6 +226,9 @@ impl AnalysisDb {
                     imported_symbols,
                     skip_typecheck,
                 )?;
+                if let Some(resolved) = &state.resolved.product {
+                    import_facts.ingest_resolved(module_id, &resolved.context);
+                }
                 if let Some(typed) = &state.typechecked.product {
                     import_facts.ingest_typed(module_id, typed);
                 }
@@ -454,8 +457,16 @@ impl AnalysisDb {
         range: Span,
     ) -> QueryResult<Vec<CodeAction>> {
         let diagnostics = self.diagnostics_for_file(file_id)?;
-        let snapshot = self.snapshot();
-        let source = snapshot.text(file_id);
+        self.code_actions_for_diagnostics_at_file(file_id, range, diagnostics)
+    }
+
+    pub fn code_actions_for_diagnostics_at_file(
+        &mut self,
+        file_id: FileId,
+        range: Span,
+        diagnostics: Vec<Diagnostic>,
+    ) -> QueryResult<Vec<CodeAction>> {
+        let source = self.snapshot().text(file_id);
         Ok(code_actions_for_range(
             &diagnostics,
             range,

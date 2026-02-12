@@ -122,6 +122,21 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         }
         return result;
       },
+      async provideCodeActions(document, range, context, token, next) {
+        const debug = isDebugLoggingEnabled();
+        if (debug) {
+          output?.appendLine(
+            `[lsp] codeAction request uri=${document.uri.toString()} range=(${range.start.line}:${range.start.character})-(${range.end.line}:${range.end.character}) contextDiagnostics=${context.diagnostics.length} docVersion=${document.version}`
+          );
+        }
+
+        const result = await next(document, range, context, token);
+
+        if (debug) {
+          output?.appendLine(`[lsp] codeAction response ${summarizeCodeActionResult(result)}`);
+        }
+        return result;
+      },
     },
     errorHandler: {
       error(error, message, count) {
@@ -266,4 +281,20 @@ function completionLabels(
   return items.map((item) =>
     typeof item.label === "string" ? item.label : item.label.label
   );
+}
+
+function summarizeCodeActionResult(
+  result:
+    | readonly (vscode.Command | vscode.CodeAction)[]
+    | vscode.Command
+    | null
+    | undefined
+): string {
+  if (result == null) {
+    return "result=null";
+  }
+  if (Array.isArray(result)) {
+    return `result=array(len=${result.length})`;
+  }
+  return "result=single-command";
 }

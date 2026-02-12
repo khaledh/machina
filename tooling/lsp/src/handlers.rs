@@ -43,6 +43,7 @@ struct CodeActionRequestParams {
     uri: String,
     range: machina::core::diag::Span,
     version: Option<i32>,
+    context_diagnostics: Vec<Value>,
 }
 
 pub fn handle_message(
@@ -210,7 +211,14 @@ pub fn handle_message(
                     }
                 },
             };
-            let response = code_action_response(session, id, &params.uri, params.range, version);
+            let response = code_action_response(
+                session,
+                id,
+                &params.uri,
+                params.range,
+                version,
+                params.context_diagnostics,
+            );
             (HandlerAction::Continue, Some(response))
         }
         Some("shutdown") => {
@@ -310,6 +318,12 @@ fn parse_code_action_request_params(params: &Value) -> Option<CodeActionRequestP
         .get("mcDocVersion")
         .and_then(Value::as_i64)
         .and_then(|v| i32::try_from(v).ok());
+    let context_diagnostics = params
+        .get("context")
+        .and_then(|ctx| ctx.get("diagnostics"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let range = machina::core::diag::Span {
         start: machina::core::diag::Position {
             offset: 0,
@@ -326,6 +340,7 @@ fn parse_code_action_request_params(params: &Value) -> Option<CodeActionRequestP
         uri,
         range,
         version,
+        context_diagnostics,
     })
 }
 
@@ -526,6 +541,7 @@ fn code_action_response(
     uri: &str,
     range: machina::core::diag::Span,
     version: i32,
+    context_diagnostics: Vec<Value>,
 ) -> Value {
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
         return stale_result_response(id);
@@ -534,7 +550,14 @@ fn code_action_response(
         Ok(file_id) => file_id,
         Err(error) => return session_error_response(id, &error),
     };
-    let result = session.execute_query(|db| db.code_actions_at_file(file_id, range));
+    let diagnostics = match session.diagnostics_for_uri_if_version(uri, version) {
+        Ok(Some(diag)) => diag,
+        Ok(None) => return stale_result_response(id),
+        Err(error) => return session_error_response(id, &error),
+    };
+    let result = session.execute_query(move |db| {
+        db.code_actions_for_diagnostics_at_file(file_id, range, diagnostics)
+    });
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
         return stale_result_response(id);
     }
@@ -564,9 +587,19 @@ fn code_action_response(
                         .collect();
                     let mut changes = Map::new();
                     changes.insert(uri.to_string(), Value::Array(edits));
+                    let action_diagnostics: Vec<Value> = context_diagnostics
+                        .iter()
+                        .filter(|diag| {
+                            diag.get("code")
+                                .and_then(Value::as_str)
+                                .is_some_and(|code| code == action.diagnostic_code)
+                        })
+                        .cloned()
+                        .collect();
                     json!({
                         "title": action.title,
                         "kind": "quickfix",
+                        "diagnostics": action_diagnostics,
                         "edit": {
                             "changes": changes
                         },
@@ -1138,10 +1171,287 @@ fn main() -> u64 {
                     .contains("Add match arms for missing union variants")
             })
             .expect("expected union match quick fix");
-        let edit_text = union_fix["edit"]["changes"]["file:///tmp/lsp-code-action.mc"][0]["newText"]
-            .as_str()
-            .expect("expected generated edit text");
+        let edit_text =
+            union_fix["edit"]["changes"]["file:///tmp/lsp-code-action.mc"][0]["newText"]
+                .as_str()
+                .expect("expected generated edit text");
         assert!(edit_text.contains("v0: ParseErr =>"));
         assert!(edit_text.contains("v1: IoErr =>"));
+    }
+
+    #[test]
+    fn code_action_request_attaches_matching_context_diagnostics() {
+        let mut session = AnalysisSession::new();
+        let source = r#"type ParseErr = {}
+type IoErr = {}
+fn load() -> u64 | ParseErr | IoErr { IoErr{} }
+fn main() -> u64 {
+    match load() {
+        v: u64 => v,
+    }
+}"#;
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-code-action-diag.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "textDocument/codeAction",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-code-action-diag.mc" },
+                    "range": {
+                        "start": { "line": 4, "character": 4 },
+                        "end": { "line": 6, "character": 5 }
+                    },
+                    "mcDocVersion": 1,
+                    "context": {
+                        "diagnostics": [
+                            {
+                                "range": {
+                                    "start": { "line": 4, "character": 4 },
+                                    "end": { "line": 6, "character": 5 }
+                                },
+                                "code": "MC-SEMCK-NonExhaustiveUnionMatch",
+                                "message": "missing",
+                                "source": "machina"
+                            }
+                        ]
+                    }
+                }
+            }),
+        );
+
+        let response = response.expect("expected code action response");
+        let actions = response["result"]
+            .as_array()
+            .expect("expected code action result array");
+        let union_fix = actions
+            .iter()
+            .find(|a| a["data"]["diagnosticCode"] == "MC-SEMCK-NonExhaustiveUnionMatch")
+            .expect("expected union fix action");
+        let attached = union_fix["diagnostics"]
+            .as_array()
+            .expect("expected diagnostics array on action");
+        assert_eq!(attached.len(), 1);
+        assert_eq!(attached[0]["code"], "MC-SEMCK-NonExhaustiveUnionMatch");
+    }
+
+    #[test]
+    fn code_action_request_returns_non_exhaustive_match_wildcard_fix() {
+        let mut session = AnalysisSession::new();
+        let source = r#"type Flag = On | Off
+
+fn describe_flag(f: Flag) -> u64 {
+    match f {
+        Flag::On => 1,
+    }
+}"#;
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-code-action-match.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "textDocument/codeAction",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-code-action-match.mc" },
+                    "range": {
+                        "start": { "line": 3, "character": 4 },
+                        "end": { "line": 5, "character": 5 }
+                    },
+                    "mcDocVersion": 1,
+                    "context": {
+                        "diagnostics": [
+                            {
+                                "range": {
+                                    "start": { "line": 3, "character": 4 },
+                                    "end": { "line": 5, "character": 5 }
+                                },
+                                "code": "MC-SEMCK-NonExhaustiveMatch",
+                                "message": "Match is not exhaustive",
+                                "source": "machina"
+                            }
+                        ]
+                    }
+                }
+            }),
+        );
+        let response = response.expect("expected code action response");
+        let actions = response["result"]
+            .as_array()
+            .expect("expected code action result array");
+        let wildcard_fix = actions
+            .iter()
+            .find(|a| a["data"]["diagnosticCode"] == "MC-SEMCK-NonExhaustiveMatch")
+            .expect("expected non-exhaustive match quick fix");
+        let edit_text = wildcard_fix["edit"]["changes"]["file:///tmp/lsp-code-action-match.mc"][0]
+            ["newText"]
+            .as_str()
+            .expect("expected generated wildcard edit text");
+        assert!(edit_text.contains("_ => {"));
+    }
+
+    #[test]
+    fn did_open_publishes_semcheck_diagnostic_for_non_exhaustive_match() {
+        let mut session = AnalysisSession::new();
+        let source = r#"requires {
+    std::io::println
+}
+
+type Flag = On | Off
+
+fn describe_flag(f: Flag) -> u64 {
+    match f {
+        Flag::On => 1,
+    }
+}
+
+fn main() {
+    let d = describe_flag(Flag::Off);
+    println(d);
+}"#;
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-semcheck-match.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": source
+                    }
+                }
+            }),
+        );
+
+        let response = response.expect("expected diagnostics notification");
+        let diagnostics = response["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics must be array");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d["code"] == "MC-SEMCK-NonExhaustiveMatch"),
+            "expected semcheck non-exhaustive match diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn code_action_uses_program_diagnostics_for_non_exhaustive_match() {
+        let mut session = AnalysisSession::new();
+        let source = r#"requires {
+    std::io::println
+}
+
+type Flag = On | Off
+
+fn describe_flag(f: Flag) -> u64 {
+    match f {
+        Flag::On => 1,
+        // Flag::Off => 0,
+    }
+}
+
+fn main() {
+    let d = describe_flag(Flag::Off);
+    println(d);
+}"#;
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-code-action-program-match.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 103,
+                "method": "textDocument/codeAction",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-code-action-program-match.mc" },
+                    "range": {
+                        "start": { "line": 7, "character": 4 },
+                        "end": { "line": 9, "character": 5 }
+                    },
+                    "mcDocVersion": 1,
+                    "context": {
+                        "diagnostics": [
+                            {
+                                "range": {
+                                    "start": { "line": 7, "character": 4 },
+                                    "end": { "line": 9, "character": 5 }
+                                },
+                                "code": "MC-SEMCK-NonExhaustiveMatch",
+                                "message": "Match is not exhaustive",
+                                "source": "machina"
+                            }
+                        ]
+                    }
+                }
+            }),
+        );
+
+        let response = response.expect("expected code action response");
+        let actions = response["result"]
+            .as_array()
+            .expect("expected code action result array");
+        let wildcard_fix = actions
+            .iter()
+            .find(|a| a["data"]["diagnosticCode"] == "MC-SEMCK-NonExhaustiveMatch")
+            .expect("expected non-exhaustive match quick fix");
+        assert_eq!(
+            wildcard_fix["edit"]["changes"]["file:///tmp/lsp-code-action-program-match.mc"][0]["range"]
+                ["start"]["line"],
+            10
+        );
+        let edit_text =
+            wildcard_fix["edit"]["changes"]["file:///tmp/lsp-code-action-program-match.mc"][0]
+                ["newText"]
+                .as_str()
+                .expect("expected generated wildcard edit text");
+        assert!(edit_text.contains("_ => {"));
     }
 }
