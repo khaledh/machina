@@ -11,6 +11,9 @@ use std::sync::OnceLock;
 
 use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, ModuleId, ModulePath, RequireKind};
+use crate::core::context::{
+    ImportEnv, ImportedSymbolBinding, ModuleExportFacts, ModuleImportBinding,
+};
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, GlobalDefId};
 use crate::core::tree::NodeId;
@@ -239,11 +242,16 @@ impl AnalysisDb {
             }));
         }
 
-        let target = program_lookup
-            .imported_symbol_targets_by_module
-            .get(&entry_module_id)
-            .and_then(|targets| targets.get(&def_id))
-            .copied()
+        let target = entry_resolved
+            .def_table
+            .lookup_def(def_id)
+            .and_then(|def| {
+                resolve_imported_symbol_target_from_import_env(
+                    entry_module_id,
+                    def,
+                    &program_lookup.import_env_by_module,
+                )
+            })
             .unwrap_or_else(|| GlobalDefId::new(entry_module_id, def_id));
         let Some(target_state) = module_states.get(&target.module_id) else {
             return Ok(None);
@@ -709,9 +717,8 @@ impl AnalysisDb {
             let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
             let mut all_diagnostics = Vec::new();
             let mut module_states = HashMap::<ModuleId, LookupState>::new();
-            let mut exports_by_module = HashMap::<ModuleId, ModuleResolvedExports>::new();
-            let mut imported_symbol_targets_by_module =
-                HashMap::<ModuleId, HashMap<DefId, GlobalDefId>>::new();
+            let mut exports_by_module = HashMap::<ModuleId, ModuleExportFacts>::new();
+            let mut import_env_by_module = HashMap::<ModuleId, ImportEnv>::new();
 
             for module_id in program_context.dependency_order_from_entry() {
                 let Some(parsed) = program_context.module(module_id) else {
@@ -742,15 +749,19 @@ impl AnalysisDb {
                 )?;
                 if let Some(resolved) = &state.resolved.product {
                     import_facts.ingest_resolved(module_id, resolved);
-                    let exports = collect_module_resolved_exports(module_id, resolved);
-                    let imported_targets = collect_module_imported_symbol_targets(
-                        &program_context,
+                    let exports = collect_module_export_facts(
                         module_id,
+                        parsed.source.path.clone(),
                         resolved,
-                        &exports_by_module,
                     );
+                    let import_env =
+                        collect_module_import_env(&program_context, module_id, &exports_by_module);
                     exports_by_module.insert(module_id, exports);
-                    imported_symbol_targets_by_module.insert(module_id, imported_targets);
+                    if !import_env.module_aliases.is_empty()
+                        || !import_env.symbol_aliases.is_empty()
+                    {
+                        import_env_by_module.insert(module_id, import_env);
+                    }
                 }
                 if let Some(typed) = &state.typechecked.product {
                     import_facts.ingest_typed(module_id, typed);
@@ -778,7 +789,7 @@ impl AnalysisDb {
             result.diagnostics = all_diagnostics;
             result.entry_module_id = Some(entry_module_id);
             result.module_states = module_states;
-            result.imported_symbol_targets_by_module = imported_symbol_targets_by_module;
+            result.import_env_by_module = import_env_by_module;
             Ok(result)
         })
     }
@@ -815,21 +826,21 @@ struct ProgramPipelineResult {
     diagnostics: Vec<Diagnostic>,
     entry_module_id: Option<ModuleId>,
     module_states: HashMap<ModuleId, LookupState>,
-    imported_symbol_targets_by_module: HashMap<ModuleId, HashMap<DefId, GlobalDefId>>,
+    import_env_by_module: HashMap<ModuleId, ImportEnv>,
 }
 
-#[derive(Clone, Default)]
-struct ModuleResolvedExports {
-    callables: HashMap<String, Vec<GlobalDefId>>,
-    types: HashMap<String, GlobalDefId>,
-    traits: HashMap<String, GlobalDefId>,
-}
-
-fn collect_module_resolved_exports(
+fn collect_module_export_facts(
     module_id: ModuleId,
+    module_path: ModulePath,
     resolved: &crate::core::context::ResolvedContext,
-) -> ModuleResolvedExports {
-    let mut out = ModuleResolvedExports::default();
+) -> ModuleExportFacts {
+    let mut out = ModuleExportFacts {
+        module_id,
+        module_path: Some(module_path),
+        callables: HashMap::new(),
+        types: HashMap::new(),
+        traits: HashMap::new(),
+    };
     for def in resolved.def_table.defs() {
         if !def.is_public() {
             continue;
@@ -861,51 +872,108 @@ fn collect_module_resolved_exports(
     out
 }
 
-fn collect_module_imported_symbol_targets(
+fn collect_module_import_env(
     program: &crate::core::context::CapsuleParsedContext,
     module_id: ModuleId,
-    resolved: &crate::core::context::ResolvedContext,
-    exports_by_module: &HashMap<ModuleId, ModuleResolvedExports>,
-) -> HashMap<DefId, GlobalDefId> {
-    let mut out = HashMap::new();
+    exports_by_module: &HashMap<ModuleId, ModuleExportFacts>,
+) -> ImportEnv {
+    let mut out = ImportEnv::default();
     let Some(parsed) = program.module(module_id) else {
         return out;
     };
     for req in &parsed.requires {
-        if req.kind != RequireKind::Symbol {
-            continue;
-        }
         let Some(dep_module_id) = program.capsule.by_path.get(&req.module_path).copied() else {
             continue;
         };
         let Some(dep_exports) = exports_by_module.get(&dep_module_id) else {
             continue;
         };
-        let Some(member) = req.member.as_deref() else {
-            continue;
-        };
-        for local_def in resolved
-            .def_table
-            .defs()
-            .iter()
-            .filter(|d| d.name == req.alias)
-        {
-            let target = match local_def.kind {
-                DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => dep_exports
-                    .callables
-                    .get(member)
-                    .and_then(|overloads| overloads.first())
-                    .copied(),
-                DefKind::TypeDef { .. } => dep_exports.types.get(member).copied(),
-                DefKind::TraitDef { .. } => dep_exports.traits.get(member).copied(),
-                _ => None,
-            };
-            if let Some(target) = target {
-                out.insert(local_def.id, target);
+        match req.kind {
+            RequireKind::Module => {
+                out.module_aliases.insert(
+                    req.alias.clone(),
+                    ModuleImportBinding {
+                        module_id: dep_module_id,
+                        module_path: req.module_path.clone(),
+                        exports: dep_exports.clone(),
+                    },
+                );
+            }
+            RequireKind::Symbol => {
+                let Some(member) = &req.member else {
+                    continue;
+                };
+                let binding = collect_imported_symbol_binding_from_exports(
+                    dep_module_id,
+                    &req.module_path,
+                    dep_exports,
+                    member,
+                );
+                if !binding.is_empty() {
+                    out.symbol_aliases.insert(req.alias.clone(), binding);
+                }
             }
         }
     }
     out
+}
+
+fn collect_imported_symbol_binding_from_exports(
+    dep_module_id: ModuleId,
+    dep_module_path: &ModulePath,
+    dep_exports: &ModuleExportFacts,
+    member: &str,
+) -> ImportedSymbolBinding {
+    let callables = dep_exports
+        .callables
+        .get(member)
+        .cloned()
+        .unwrap_or_default();
+    let type_def = dep_exports.types.get(member).copied();
+    let trait_def = dep_exports.traits.get(member).copied();
+    ImportedSymbolBinding {
+        module_id: dep_module_id,
+        module_path: dep_module_path.clone(),
+        callables,
+        type_def,
+        trait_def,
+    }
+}
+
+fn resolve_imported_symbol_target_from_import_env(
+    module_id: ModuleId,
+    local_def: &crate::core::resolve::Def,
+    import_env_by_module: &HashMap<ModuleId, ImportEnv>,
+) -> Option<GlobalDefId> {
+    let import_env = import_env_by_module.get(&module_id)?;
+    let binding = import_env.symbol_aliases.get(&local_def.name)?;
+    let target = match local_def.kind {
+        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => binding.callables.first().copied(),
+        DefKind::TypeDef { .. } => binding.type_def,
+        DefKind::TraitDef { .. } => binding.trait_def,
+        _ => None,
+    };
+    if target.is_some() {
+        return target;
+    }
+
+    // Partial/errored resolve may classify imported symbol aliases conservatively.
+    // If the import binding has only one possible export target, use it.
+    let mut candidates = Vec::new();
+    if let Some(callable) = binding.callables.first().copied() {
+        candidates.push(callable);
+    }
+    if let Some(type_def) = binding.type_def {
+        candidates.push(type_def);
+    }
+    if let Some(trait_def) = binding.trait_def {
+        candidates.push(trait_def);
+    }
+    candidates.dedup();
+    if candidates.len() == 1 {
+        return candidates.first().copied();
+    }
+    None
 }
 
 fn module_with_implicit_prelude(
