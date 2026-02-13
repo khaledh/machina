@@ -327,13 +327,21 @@ impl<'a> Elaborator<'a> {
         ty: Type,
         reason: SyntheticReason,
     ) -> DefId {
-        let def_id = self.add_synthetic_def(name, kind, reason);
+        let def_id = self.add_synthetic_def(name, kind, reason.clone());
         if let Some(def) = self.def_table.lookup_def(def_id) {
             let _ = self
                 .type_map
                 .insert_def_type(def.clone(), ty, "elaborate", reason);
         }
         def_id
+    }
+
+    pub(super) fn insert_def_id_type(&mut self, def_id: DefId, ty: Type, reason: SyntheticReason) {
+        if let Some(def) = self.def_table.lookup_def(def_id) {
+            let _ = self
+                .type_map
+                .insert_def_type(def.clone(), ty, "elaborate", reason);
+        }
     }
 
     /// Retrieve initialization status for an assignment target from semck.

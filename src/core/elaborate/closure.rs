@@ -234,16 +234,6 @@ impl<'a> Elaborator<'a> {
         };
         self.closure_types.push(type_def);
 
-        let self_def_name = "env".to_string();
-        let self_def_id = self.add_synthetic_def(
-            self_def_name,
-            DefKind::Param {
-                index: 0,
-                is_mutable: false,
-            },
-            SyntheticReason::ClosureLowering,
-        );
-
         let closure_fields: Vec<StructField> = captures
             .iter()
             .map(|capture| StructField {
@@ -255,12 +245,18 @@ impl<'a> Elaborator<'a> {
             name: type_name.clone(),
             fields: closure_fields,
         };
+        let self_def_name = "env".to_string();
+        let self_def_id = self.add_typed_synthetic_def(
+            self_def_name,
+            DefKind::Param {
+                index: 0,
+                is_mutable: false,
+            },
+            closure_ty.clone(),
+            SyntheticReason::ClosureLowering,
+        );
         let closure_ty_node = self.node_id_gen.new_id();
         let ty_id = self.insert_closure_node_type(closure_ty_node, closure_ty.clone());
-        if let Some(def) = self.def_table.lookup_def(self_def_id) {
-            let _ = self.insert_closure_def_type(def.clone(), closure_ty.clone());
-        }
-
         (type_name, ty_id, closure_ty, self_def_id)
     }
 
@@ -364,9 +360,7 @@ impl<'a> Elaborator<'a> {
         self.collect_bind_pattern_defs(pattern, &mut defs);
         for def_id in defs {
             self.closure_bindings.insert(def_id, closure_def_id);
-            if let Some(def) = self.def_table.lookup_def(def_id) {
-                let _ = self.insert_closure_def_type(def.clone(), info.ty.clone());
-            }
+            self.insert_def_id_type(def_id, info.ty.clone(), SyntheticReason::ClosureLowering);
         }
     }
 
