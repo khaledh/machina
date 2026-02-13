@@ -1,6 +1,6 @@
 use crate::core::context::ParsedContext;
 use crate::core::lexer::Lexer;
-use crate::core::monomorphize::{monomorphize, monomorphize_with_stats};
+use crate::core::monomorphize::{monomorphize_resolved, monomorphize_resolved_with_stats};
 use crate::core::parse::Parser;
 use crate::core::resolve::DefTable;
 use crate::core::resolve::resolve;
@@ -70,8 +70,8 @@ fn test_monomorphize_allows_multiple_instantiations() {
 
     let (resolved_context, _def_table) = resolve_context(source);
     let type_checked = type_check(resolved_context.clone()).expect("type check failed");
-    let monomorphized =
-        monomorphize(resolved_context, &type_checked.generic_insts).expect("monomorphize failed");
+    let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
+        .expect("monomorphize failed");
 
     let id_count = monomorphized
         .module
@@ -103,8 +103,8 @@ fn test_monomorphize_strips_type_params_for_single_inst() {
 
     let (resolved_context, _def_table) = resolve_context(source);
     let type_checked = type_check(resolved_context.clone()).expect("type check failed");
-    let monomorphized =
-        monomorphize(resolved_context, &type_checked.generic_insts).expect("monomorphize failed");
+    let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
+        .expect("monomorphize failed");
 
     let func_def = find_func_def(&monomorphized.module, &monomorphized.def_table, "id")
         .expect("expected monomorphized id function");
@@ -134,8 +134,8 @@ fn test_monomorphize_generic_methods_multiple_instantiations() {
 
     let (resolved_context, _def_table) = resolve_context(source);
     let type_checked = type_check(resolved_context.clone()).expect("type check failed");
-    let monomorphized =
-        monomorphize(resolved_context, &type_checked.generic_insts).expect("monomorphize failed");
+    let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
+        .expect("monomorphize failed");
 
     let count = count_method_defs(&monomorphized.module, "cast");
     assert_eq!(count, 2, "expected two monomorphized cast methods");
@@ -156,7 +156,7 @@ fn test_monomorphize_reuses_duplicate_instantiation_requests() {
     let (resolved_context, _def_table) = resolve_context(source);
     let type_checked = type_check(resolved_context.clone()).expect("type check failed");
     let (monomorphized, stats) =
-        monomorphize_with_stats(resolved_context, &type_checked.generic_insts)
+        monomorphize_resolved_with_stats(resolved_context, &type_checked.generic_insts)
             .expect("monomorphize failed");
 
     let id_count = monomorphized

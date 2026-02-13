@@ -1113,6 +1113,16 @@ impl TypeMap {
     pub fn type_table(&self) -> &TypeCache {
         &self.type_table
     }
+
+    pub(crate) fn iter_node_type_ids(&self) -> impl Iterator<Item = (NodeId, TypeId)> + '_ {
+        self.node_type
+            .iter()
+            .map(|(node_id, type_id)| (*node_id, *type_id))
+    }
+
+    pub(crate) fn iter_def_type_ids(&self) -> impl Iterator<Item = (&Def, TypeId)> + '_ {
+        self.def_type.iter().map(|(def, type_id)| (def, *type_id))
+    }
 }
 
 impl<'a> IntoIterator for &'a TypeMap {

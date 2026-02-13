@@ -6,9 +6,15 @@ use crate::core::capsule::compose::{flatten_capsule, flatten_capsule_module};
 use crate::core::capsule::{
     CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
 };
-use crate::core::context::CapsuleParsedContext;
+use crate::core::context::{CapsuleParsedContext, ParsedContext};
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::monomorphize::{build_retype_context, monomorphize_with_plan};
+use crate::core::parse::Parser;
+use crate::core::resolve::resolve;
 use crate::core::tree::parsed::{Expr, ExprKind, MethodBlock, TypeExpr, TypeExprKind, TypeParam};
+use crate::core::tree::resolved as res;
 use crate::core::tree::visit::{self, Visitor};
+use crate::core::typecheck::type_check;
 use crate::driver::compile::{CompileOptions, compile};
 
 struct MockLoader {
@@ -855,4 +861,75 @@ fn main() -> u64 {
             "ASM dump changed between deterministic runs (run={run})"
         );
     }
+}
+
+#[test]
+fn retype_context_skips_unchanged_function_bodies_after_monomorphization() {
+    let source = r#"
+fn id<T>(x: T) -> T { x }
+
+fn uses_generic() -> u64 {
+    id(7)
+}
+
+fn untouched() -> u64 {
+    let a = 1;
+    a + 2
+}
+"#;
+
+    let tokens = Lexer::new(source)
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("tokenize");
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("parse");
+    let ast_context = ParsedContext::new(module, parser.into_id_gen());
+    let resolved_context = resolve(ast_context).expect("resolve");
+    let type_checked_context = type_check(resolved_context.clone()).expect("typecheck");
+
+    assert!(
+        !type_checked_context.generic_insts.is_empty(),
+        "fixture should trigger generic instantiation"
+    );
+
+    let (monomorphized, _stats, plan) =
+        monomorphize_with_plan(resolved_context, &type_checked_context.generic_insts)
+            .expect("monomorphize with plan");
+    let sparse = build_retype_context(&monomorphized, &plan.retype_def_ids);
+
+    let mut saw_id_def = false;
+    let mut saw_untouched_decl = false;
+    for item in &sparse.module.top_level_items {
+        match item {
+            res::TopLevelItem::FuncDef(func_def) => {
+                let name = sparse
+                    .def_table
+                    .lookup_def(func_def.def_id)
+                    .map(|def| def.name.as_str());
+                if name == Some("id") {
+                    saw_id_def = true;
+                }
+            }
+            res::TopLevelItem::FuncDecl(func_decl) => {
+                let name = sparse
+                    .def_table
+                    .lookup_def(func_decl.def_id)
+                    .map(|def| def.name.as_str());
+                if name == Some("untouched") {
+                    saw_untouched_decl = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert!(
+        saw_id_def,
+        "instantiated generic def should remain in second-pass retype scope"
+    );
+    assert!(
+        saw_untouched_decl,
+        "unchanged function body should be downgraded to decl and skipped by second pass"
+    );
 }

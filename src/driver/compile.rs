@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::core::api::{
     FrontendPolicy, ParseModuleError, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
-    semcheck_stage, typecheck_stage_with_policy,
+    semcheck_stage,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
@@ -12,12 +12,10 @@ use crate::core::capsule::ModuleId;
 use crate::core::capsule::compose::{flatten_capsule, merge_modules};
 use crate::core::context::{CapsuleParsedContext, ParsedContext};
 use crate::core::diag::CompileError;
-use crate::core::ir::GlobalData;
-use crate::core::ir::format::format_func_with_comments_and_names;
+use crate::core::ir::format::{format_func_with_comments_and_names, format_globals};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::monomorphize;
 use crate::core::nrvo::NrvoAnalyzer;
-use crate::core::resolve::attach_def_owners;
 use crate::core::tree::NodeId;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::Module as ParsedModule;
@@ -282,7 +280,7 @@ pub fn compile_with_path(
 
     let formatted_ir = if opts.emit_ir || dump_ir {
         let mut out = String::new();
-        out.push_str(&format_ssa_globals(&lowered.globals));
+        out.push_str(&format_globals(&lowered.globals));
         for (idx, func) in lowered.funcs.iter().enumerate() {
             if idx > 0 {
                 out.push('\n');
@@ -342,6 +340,7 @@ fn resolve_and_typecheck_strict(
     ),
     Vec<CompileError>,
 > {
+    // Phase 1: resolve + initial strict typecheck on the flattened module.
     let first_pass = crate::core::api::resolve_typecheck_pipeline_with_policy(
         ast_context,
         ResolveInputs::default(),
@@ -362,80 +361,30 @@ fn resolve_and_typecheck_strict(
             .map(CompileError::from)
             .collect());
     }
+
+    // Extract strict-pass products (safe because we already checked errors).
     let resolved_context = first_pass
         .resolved_context
         .expect("strict resolve should produce context when no errors");
-    let mut typed_context = first_pass
+    let typed_context = first_pass
         .typed_context
         .expect("strict typecheck should produce context when no errors");
 
-    if !typed_context.generic_insts.is_empty() {
-        let monomorphized_context =
-            monomorphize::monomorphize(resolved_context, &typed_context.generic_insts)
-                .map_err(|e| vec![e.into()])?;
-        let monomorphized_context = attach_def_owners(monomorphized_context, top_level_owners);
-        let second_pass = typecheck_stage_with_policy(
-            monomorphized_context.clone(),
-            crate::core::resolve::ImportedFacts::default(),
-            FrontendPolicy::Strict,
-        );
-        if second_pass.has_errors() {
-            return Err(second_pass
-                .errors
-                .into_iter()
-                .map(CompileError::from)
-                .collect());
-        }
-        typed_context = second_pass
-            .context
-            .expect("strict second typecheck pass should produce context when no errors");
-        return Ok((monomorphized_context, typed_context));
-    }
-
+    // Phase 2: monomorphize + sparse retype (internally handled by core).
+    let (resolved_context, typed_context, _mono_stats) =
+        monomorphize::monomorphize(resolved_context, typed_context, Some(top_level_owners))
+            .map_err(|e| match e {
+                monomorphize::MonomorphizePipelineError::Monomorphize(err) => {
+                    vec![CompileError::from(err)]
+                }
+                monomorphize::MonomorphizePipelineError::Retype(errors) => errors
+                    .into_iter()
+                    .map(CompileError::from)
+                    .collect::<Vec<CompileError>>(),
+            })?;
     Ok((resolved_context, typed_context))
 }
 
 #[cfg(test)]
 #[path = "../tests/t_compile.rs"]
 mod tests;
-
-// --- Formatting ---
-fn format_ssa_globals(globals: &[GlobalData]) -> String {
-    let mut out = String::new();
-    for global in globals {
-        if let Some(text) = format_bytes_as_string(&global.bytes) {
-            out.push_str(&format!("global _g{} = \"{}\"\n", global.id.0, text));
-            continue;
-        }
-        out.push_str(&format!("global _g{} = bytes [", global.id.0));
-        for (idx, byte) in global.bytes.iter().enumerate() {
-            if idx > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(&byte.to_string());
-        }
-        out.push_str("]\n");
-    }
-    if !globals.is_empty() {
-        out.push('\n');
-    }
-    out
-}
-
-fn format_bytes_as_string(bytes: &[u8]) -> Option<String> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ' ' => out.push(' '),
-            _ if ch.is_ascii_graphic() => out.push(ch),
-            _ => return None,
-        }
-    }
-    Some(out)
-}

@@ -38,6 +38,46 @@ pub fn format_func_with_comments_and_names(
     formatter.finish()
 }
 
+pub fn format_globals(globals: &[GlobalData]) -> String {
+    let mut out = String::new();
+    for global in globals {
+        if let Some(text) = format_bytes_as_string(&global.bytes) {
+            let _ = writeln!(&mut out, "global _g{} = \"{}\"", global.id.0, text);
+            continue;
+        }
+        let _ = write!(&mut out, "global _g{} = bytes [", global.id.0);
+        for (idx, byte) in global.bytes.iter().enumerate() {
+            if idx > 0 {
+                let _ = write!(&mut out, ", ");
+            }
+            let _ = write!(&mut out, "{}", byte);
+        }
+        let _ = writeln!(&mut out, "]");
+    }
+    if !globals.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+fn format_bytes_as_string(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ' ' => out.push(' '),
+            _ if ch.is_ascii_graphic() => out.push(ch),
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
 struct Formatter<'a> {
     types: &'a IrTypeCache,
     def_names: Option<&'a HashMap<DefId, String>>,
