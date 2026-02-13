@@ -21,7 +21,7 @@ pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &norm::Module) -> sem
 
     // Pass 1 (current combined core): syntax desugaring + place/value lowering.
     // This currently also discovers closure conversions while traversing items.
-    let mut items = run_desugar_and_place_value_pass(elaborator, module);
+    let mut items = run_place_value_planning_pass(elaborator, module);
 
     // Pass 2: materialize closure conversion artifacts into top-level items.
     run_closure_materialization_pass(elaborator, &mut items);
@@ -31,11 +31,11 @@ pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &norm::Module) -> sem
     }
 }
 
-fn run_desugar_and_place_value_pass(
+fn run_place_value_planning_pass(
     elaborator: &mut Elaborator<'_>,
     module: &norm::Module,
 ) -> Vec<sem::TopLevelItem> {
-    elaborator.elaborate_module_items(module)
+    elaborator.run_place_value_planning_pass(module)
 }
 
 fn run_closure_materialization_pass(

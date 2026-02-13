@@ -155,7 +155,7 @@ impl<'a> Elaborator<'a> {
     }
 
     /// Reset per-module elaboration state before processing a new module.
-    pub fn reset_module_state(&mut self) {
+    pub(super) fn reset_module_state(&mut self) {
         self.closure_types.clear();
         self.closure_methods.clear();
         self.closure_funcs.clear();
@@ -169,8 +169,15 @@ impl<'a> Elaborator<'a> {
         self.slice_plans.clear();
     }
 
-    /// Elaborate top-level items without appending lifted closure artifacts.
-    pub fn elaborate_module_items(&mut self, module: &norm::Module) -> Vec<sem::TopLevelItem> {
+    /// Pass 1 core elaboration: normalize-level desugaring + place/value
+    /// lowering + planning.
+    ///
+    /// Closure artifacts discovered here are queued and materialized by the
+    /// dedicated closure materialization pass.
+    pub(super) fn run_place_value_planning_pass(
+        &mut self,
+        module: &norm::Module,
+    ) -> Vec<sem::TopLevelItem> {
         module
             .top_level_items
             .iter()
