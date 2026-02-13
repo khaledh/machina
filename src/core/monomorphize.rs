@@ -11,6 +11,13 @@ use crate::core::typecheck::type_map::{GenericInst, GenericInstMap};
 use crate::core::types::{FnParamMode, Type};
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MonomorphizeStats {
+    pub requested_instantiations: usize,
+    pub unique_instantiations: usize,
+    pub reused_requests: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct InstKey {
     def_id: DefId,
@@ -52,6 +59,14 @@ pub fn monomorphize(
     ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
 ) -> Result<ResolvedContext, MonomorphizeError> {
+    let (ctx, _stats) = monomorphize_with_stats(ctx, generic_insts)?;
+    Ok(ctx)
+}
+
+pub fn monomorphize_with_stats(
+    ctx: ResolvedContext,
+    generic_insts: &GenericInstMap,
+) -> Result<(ResolvedContext, MonomorphizeStats), MonomorphizeError> {
     let ResolvedContext {
         mut module,
         payload: tables,
@@ -59,29 +74,44 @@ pub fn monomorphize(
     let mut def_table = tables.def_table;
     let def_owners = tables.def_owners;
     let mut node_id_gen = tables.node_id_gen;
+    let mut stats = MonomorphizeStats {
+        requested_instantiations: generic_insts.len(),
+        ..MonomorphizeStats::default()
+    };
 
     if generic_insts.is_empty() {
         let symbols = crate::core::symtab::SymbolTable::new(&module, &def_table);
-        return Ok(ResolvedContext {
-            module,
-            payload: crate::core::context::ResolvedTables {
-                def_table,
-                def_owners,
-                symbols,
-                node_id_gen,
+        return Ok((
+            ResolvedContext {
+                module,
+                payload: crate::core::context::ResolvedTables {
+                    def_table,
+                    def_owners,
+                    symbols,
+                    node_id_gen,
+                },
             },
-        });
+            stats,
+        ));
     }
 
-    let mut insts_by_def: HashMap<DefId, Vec<GenericInst>> = HashMap::new();
+    let mut unique_inst_reqs: HashMap<InstKey, GenericInst> = HashMap::new();
     for inst in generic_insts.values() {
-        let entry = insts_by_def.entry(inst.def_id).or_default();
-        if !entry
-            .iter()
-            .any(|existing| existing.type_args == inst.type_args)
-        {
-            entry.push(inst.clone());
-        }
+        unique_inst_reqs
+            .entry(inst_key_for_inst(inst))
+            .or_insert_with(|| inst.clone());
+    }
+    stats.unique_instantiations = unique_inst_reqs.len();
+    stats.reused_requests = stats
+        .requested_instantiations
+        .saturating_sub(stats.unique_instantiations);
+
+    let mut insts_by_def: HashMap<DefId, Vec<GenericInst>> = HashMap::new();
+    for inst in unique_inst_reqs.values() {
+        insts_by_def
+            .entry(inst.def_id)
+            .or_default()
+            .push(inst.clone());
     }
 
     let mut inst_to_def: HashMap<InstKey, DefId> = HashMap::new();
@@ -107,10 +137,7 @@ pub fn monomorphize(
 
     let mut call_inst_map: HashMap<NodeId, DefId> = HashMap::new();
     for (call_id, inst) in generic_insts {
-        if let Some(def_id) = inst_to_def.get(&InstKey {
-            def_id: inst.def_id,
-            type_args: inst.type_args.clone(),
-        }) {
+        if let Some(def_id) = inst_to_def.get(&inst_key_for_inst(inst)) {
             call_inst_map.insert(*call_id, *def_id);
         }
     }
@@ -256,15 +283,25 @@ pub fn monomorphize(
 
     module.top_level_items = new_items;
     let symbols = crate::core::symtab::SymbolTable::new(&module, &def_table);
-    Ok(ResolvedContext {
-        module,
-        payload: crate::core::context::ResolvedTables {
-            def_table,
-            def_owners,
-            symbols,
-            node_id_gen,
+    Ok((
+        ResolvedContext {
+            module,
+            payload: crate::core::context::ResolvedTables {
+                def_table,
+                def_owners,
+                symbols,
+                node_id_gen,
+            },
         },
-    })
+        stats,
+    ))
+}
+
+fn inst_key_for_inst(inst: &GenericInst) -> InstKey {
+    InstKey {
+        def_id: inst.def_id,
+        type_args: inst.type_args.clone(),
+    }
 }
 
 struct CallInstRewriter<'a> {

@@ -1,6 +1,6 @@
 use crate::core::context::ParsedContext;
 use crate::core::lexer::Lexer;
-use crate::core::monomorphize::monomorphize;
+use crate::core::monomorphize::{monomorphize, monomorphize_with_stats};
 use crate::core::parse::Parser;
 use crate::core::resolve::DefTable;
 use crate::core::resolve::resolve;
@@ -139,4 +139,52 @@ fn test_monomorphize_generic_methods_multiple_instantiations() {
 
     let count = count_method_defs(&monomorphized.module, "cast");
     assert_eq!(count, 2, "expected two monomorphized cast methods");
+}
+
+#[test]
+fn test_monomorphize_reuses_duplicate_instantiation_requests() {
+    let source = r#"
+        fn id<T>(x: T) -> T { x }
+
+        fn test() -> u64 {
+            let a = id(1);
+            let b = id(2);
+            a + b
+        }
+    "#;
+
+    let (resolved_context, _def_table) = resolve_context(source);
+    let type_checked = type_check(resolved_context.clone()).expect("type check failed");
+    let (monomorphized, stats) =
+        monomorphize_with_stats(resolved_context, &type_checked.generic_insts)
+            .expect("monomorphize failed");
+
+    let id_count = monomorphized
+        .module
+        .top_level_items
+        .iter()
+        .filter(|item| {
+            if let res::TopLevelItem::FuncDef(func_def) = item {
+                let name = monomorphized
+                    .def_table
+                    .lookup_def(func_def.def_id)
+                    .map(|def| def.name.as_str());
+                return name == Some("id");
+            }
+            false
+        })
+        .count();
+    assert_eq!(
+        id_count, 1,
+        "expected one monomorphized id definition for repeated u64 instantiation requests"
+    );
+    assert_eq!(
+        stats.requested_instantiations, 2,
+        "expected two call-site requests"
+    );
+    assert_eq!(
+        stats.unique_instantiations, 1,
+        "expected one unique instantiation key"
+    );
+    assert_eq!(stats.reused_requests, 1, "expected one memoized reuse");
 }
