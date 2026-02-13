@@ -47,13 +47,7 @@ impl<'a> Parser<'a> {
                             items.push(BlockItem::Stmt(stmt));
                         }
                         TK::Semicolon => {
-                            let semi_span = self.curr_token.span;
                             self.advance();
-                            let expr = Expr {
-                                ty: (),
-                                span: Span::new(expr.span.start, semi_span.end),
-                                ..expr
-                            };
                             items.push(BlockItem::Expr(expr));
                         }
                         _ => {
