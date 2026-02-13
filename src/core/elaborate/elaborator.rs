@@ -316,6 +316,26 @@ impl<'a> Elaborator<'a> {
         self.def_table.add_def(name, kind, "elaborate", reason)
     }
 
+    pub(super) fn next_synthetic_def_id_hint(&self) -> DefId {
+        self.def_table.next_def_id()
+    }
+
+    pub(super) fn add_typed_synthetic_def(
+        &mut self,
+        name: String,
+        kind: crate::core::resolve::DefKind,
+        ty: Type,
+        reason: SyntheticReason,
+    ) -> DefId {
+        let def_id = self.add_synthetic_def(name, kind, reason);
+        if let Some(def) = self.def_table.lookup_def(def_id) {
+            let _ = self
+                .type_map
+                .insert_def_type(def.clone(), ty, "elaborate", reason);
+        }
+        def_id
+    }
+
     /// Retrieve initialization status for an assignment target from semck.
     /// Used by lowering to determine whether an assignment is an initial
     /// write (for out-params) or a full initialization (for partial init).

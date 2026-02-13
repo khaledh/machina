@@ -193,24 +193,17 @@ impl<'a> Elaborator<'a> {
     }
 
     fn new_for_local(&mut self, suffix: &str, ty: Type, is_mutable: bool, span: Span) -> ForLocal {
-        let def_id = self.def_table.next_def_id();
-        let name = format!("__for_{}_{}", suffix, def_id.0);
-        let def_id = self.add_synthetic_def(
+        let hint = self.next_synthetic_def_id_hint();
+        let name = format!("__for_{}_{}", suffix, hint.0);
+        let def_id = self.add_typed_synthetic_def(
             name.clone(),
             DefKind::LocalVar {
                 nrvo_eligible: false,
                 is_mutable,
             },
+            ty.clone(),
             SyntheticReason::ElaborateSyntheticNode,
         );
-        if let Some(def) = self.def_table.lookup_def(def_id) {
-            let _ = self.type_map.insert_def_type(
-                def.clone(),
-                ty.clone(),
-                "elaborate",
-                SyntheticReason::ElaborateSyntheticNode,
-            );
-        }
         let pattern = sem::BindPattern {
             id: self.node_id_gen.new_id(),
             kind: sem::BindPatternKind::Name {
