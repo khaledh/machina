@@ -545,6 +545,9 @@ fn definition_response(
         Ok(file_id) => file_id,
         Err(error) => return session_error_response(id, &error),
     };
+    if is_position_in_line_comment(session, file_id, line0, col0) {
+        return json!({"jsonrpc":"2.0","id":id,"result": []});
+    }
     let span = span_from_lsp_position(line0, col0);
     let result = session.execute_query(|db| db.def_location_at_program_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
@@ -655,6 +658,9 @@ fn signature_help_response(
         Ok(file_id) => file_id,
         Err(error) => return session_error_response(id, &error),
     };
+    if is_position_in_line_comment(session, file_id, line0, col0) {
+        return json!({"jsonrpc":"2.0","id":id,"result": Value::Null});
+    }
     let span = span_from_lsp_position(line0, col0);
     let result = session.execute_query(|db| db.signature_help_at_program_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
@@ -1246,6 +1252,44 @@ mod tests {
     }
 
     #[test]
+    fn definition_request_returns_empty_over_line_comment() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-definition-comment.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": "fn id(x: u64) -> u64 { x }\nfn main() -> u64 {\n    // id(1)\n    id(1)\n}\n"
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 905,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-definition-comment.mc" },
+                    "position": { "line": 2, "character": 8 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+
+        let response = response.expect("expected definition response");
+        assert_eq!(response["id"], 905);
+        assert_eq!(response["result"], json!([]));
+    }
+
+    #[test]
     fn definition_request_resolves_imported_symbol_location_across_modules() {
         let run_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1462,6 +1506,44 @@ fn run(x: u64, y: bool) -> u64 { x }
         assert_eq!(response["result"]["activeParameter"], 1);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn signature_help_request_returns_null_over_line_comment() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-signature-comment.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": "fn add(a: u64, b: u64) -> u64 { a + b }\nfn main() {\n    // add(\n    add(1, 2);\n}\n"
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 906,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-signature-comment.mc" },
+                    "position": { "line": 2, "character": 9 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+
+        let response = response.expect("expected signature-help response");
+        assert_eq!(response["id"], 906);
+        assert_eq!(response["result"], Value::Null);
     }
 
     #[test]
