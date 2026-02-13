@@ -54,6 +54,21 @@ use crate::core::types::{StructField, Type, TypeId};
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
 
 impl<'a> Elaborator<'a> {
+    /// Append lifted closure artifacts (types/methods/functions) to module
+    /// items. This is the closure-conversion materialization boundary.
+    pub(super) fn append_lifted_closure_items(
+        &mut self,
+        top_level_items: &mut Vec<sem::TopLevelItem>,
+    ) {
+        top_level_items.extend(self.closure_types.drain(..).map(sem::TopLevelItem::TypeDef));
+        top_level_items.extend(
+            self.closure_methods
+                .drain(..)
+                .map(sem::TopLevelItem::MethodBlock),
+        );
+        top_level_items.extend(self.closure_funcs.drain(..).map(sem::TopLevelItem::FuncDef));
+    }
+
     /// Returns true when a closure has no captures (or no capture metadata).
     pub(super) fn is_captureless_closure(&self, def_id: DefId) -> bool {
         self.closure_captures

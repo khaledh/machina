@@ -178,18 +178,6 @@ impl<'a> Elaborator<'a> {
             .collect()
     }
 
-    /// Append lifted closure types/methods/functions produced while elaborating
-    /// module items.
-    pub fn append_lifted_closure_items(&mut self, top_level_items: &mut Vec<sem::TopLevelItem>) {
-        top_level_items.extend(self.closure_types.drain(..).map(sem::TopLevelItem::TypeDef));
-        top_level_items.extend(
-            self.closure_methods
-                .drain(..)
-                .map(sem::TopLevelItem::MethodBlock),
-        );
-        top_level_items.extend(self.closure_funcs.drain(..).map(sem::TopLevelItem::FuncDef));
-    }
-
     fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> sem::TopLevelItem {
         match item {
             norm::TopLevelItem::TraitDef(def) => sem::TopLevelItem::TraitDef(def.clone()),
