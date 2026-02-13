@@ -52,20 +52,26 @@ use crate::core::elaborate::lowering_plan::build_lowering_plans;
 /// Internal stage entrypoint; prefer `crate::core::api::elaborate_stage` from
 /// orchestration code.
 pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
-    let ElaborateStageInput {
-        module,
-        def_table,
-        def_owners,
-        type_map,
-        call_sigs,
-        generic_insts,
-        symbols,
-        node_id_gen,
+    let ElaborateStageInput { module, payload } = ctx;
+    let crate::core::context::SemCheckedPayload {
+        typed,
         implicit_moves,
         init_assigns,
         full_init_assigns,
         closure_captures,
-    } = ctx;
+    } = payload;
+    let crate::core::context::TypedTables {
+        resolved,
+        type_map,
+        call_sigs,
+        generic_insts,
+    } = typed;
+    let crate::core::context::ResolvedTables {
+        def_table,
+        def_owners,
+        symbols,
+        node_id_gen,
+    } = resolved;
     let mut node_id_gen = node_id_gen;
     let mut def_table = DefTableOverlay::new(def_table);
     let mut type_map = TypeMapOverlay::new(type_map);
@@ -117,13 +123,20 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
 
     ElaborateStageOutput {
         module,
-        def_table: def_table.into_inner(),
-        def_owners,
-        type_map: type_map.into_inner(),
-        lowering_plans,
-        drop_plans,
-        symbols,
-        node_id_gen,
-        generic_insts,
+        payload: crate::core::context::SemanticPayload {
+            typed: crate::core::context::TypedTables {
+                resolved: crate::core::context::ResolvedTables {
+                    def_table: def_table.into_inner(),
+                    def_owners,
+                    symbols,
+                    node_id_gen,
+                },
+                type_map: type_map.into_inner(),
+                call_sigs,
+                generic_insts,
+            },
+            lowering_plans,
+            drop_plans,
+        },
     }
 }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::core::capsule::{ModuleId, ParsedModule};
-use crate::core::context::{ResolvedContext, TypeCheckedContext};
+use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symtab::SymbolTable;
@@ -48,23 +48,35 @@ pub struct ResolvedModuleResult {
 
 impl ResolvedModuleResult {
     pub fn from_context(module_id: ModuleId, context: ResolvedContext) -> Self {
+        let ResolvedContext {
+            module,
+            payload: tables,
+        } = context;
+        let ResolvedTables {
+            def_table,
+            def_owners,
+            symbols,
+            node_id_gen,
+        } = tables;
         Self {
             module_id,
-            module: context.module,
-            def_table: context.def_table,
-            def_owners: context.def_owners,
-            symbols: context.symbols,
-            node_id_gen: context.node_id_gen,
+            module,
+            def_table,
+            def_owners,
+            symbols,
+            node_id_gen,
         }
     }
 
     pub fn into_context(self) -> ResolvedContext {
         ResolvedContext {
             module: self.module,
-            def_table: self.def_table,
-            def_owners: self.def_owners,
-            symbols: self.symbols,
-            node_id_gen: self.node_id_gen,
+            payload: ResolvedTables {
+                def_table: self.def_table,
+                def_owners: self.def_owners,
+                symbols: self.symbols,
+                node_id_gen: self.node_id_gen,
+            },
         }
     }
 }
@@ -212,29 +224,49 @@ impl RenamePlan {
 
 impl TypedModuleResult {
     pub fn from_context(module_id: ModuleId, context: TypeCheckedContext) -> Self {
+        let TypeCheckedContext {
+            module,
+            payload: tables,
+        } = context;
+        let TypedTables {
+            resolved,
+            type_map,
+            call_sigs,
+            generic_insts,
+        } = tables;
+        let ResolvedTables {
+            def_table,
+            def_owners,
+            symbols,
+            node_id_gen,
+        } = resolved;
         Self {
             module_id,
-            module: context.module,
-            def_table: context.def_table,
-            def_owners: context.def_owners,
-            type_map: context.type_map,
-            call_sigs: context.call_sigs,
-            generic_insts: context.generic_insts,
-            symbols: context.symbols,
-            node_id_gen: context.node_id_gen,
+            module,
+            def_table,
+            def_owners,
+            type_map,
+            call_sigs,
+            generic_insts,
+            symbols,
+            node_id_gen,
         }
     }
 
     pub fn into_context(self) -> TypeCheckedContext {
         TypeCheckedContext {
             module: self.module,
-            def_table: self.def_table,
-            def_owners: self.def_owners,
-            type_map: self.type_map,
-            call_sigs: self.call_sigs,
-            generic_insts: self.generic_insts,
-            symbols: self.symbols,
-            node_id_gen: self.node_id_gen,
+            payload: TypedTables {
+                resolved: ResolvedTables {
+                    def_table: self.def_table,
+                    def_owners: self.def_owners,
+                    symbols: self.symbols,
+                    node_id_gen: self.node_id_gen,
+                },
+                type_map: self.type_map,
+                call_sigs: self.call_sigs,
+                generic_insts: self.generic_insts,
+            },
         }
     }
 }

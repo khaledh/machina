@@ -49,11 +49,28 @@ impl MonomorphizeError {
 }
 
 pub fn monomorphize(
-    mut ctx: ResolvedContext,
+    ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
 ) -> Result<ResolvedContext, MonomorphizeError> {
+    let ResolvedContext {
+        mut module,
+        payload: tables,
+    } = ctx;
+    let mut def_table = tables.def_table;
+    let def_owners = tables.def_owners;
+    let mut node_id_gen = tables.node_id_gen;
+
     if generic_insts.is_empty() {
-        return Ok(ctx);
+        let symbols = crate::core::symtab::SymbolTable::new(&module, &def_table);
+        return Ok(ResolvedContext {
+            module,
+            payload: crate::core::context::ResolvedTables {
+                def_table,
+                def_owners,
+                symbols,
+                node_id_gen,
+            },
+        });
     }
 
     let mut insts_by_def: HashMap<DefId, Vec<GenericInst>> = HashMap::new();
@@ -69,16 +86,15 @@ pub fn monomorphize(
 
     let mut inst_to_def: HashMap<InstKey, DefId> = HashMap::new();
     for (def_id, insts) in insts_by_def.iter() {
-        let def = ctx
-            .def_table
+        let def = def_table
             .lookup_def(*def_id)
             .ok_or_else(|| MonomorphizeError::UnknownType {
-                name: def_name(&ctx.def_table, *def_id),
+                name: def_name(&def_table, *def_id),
                 span: insts.first().map(|inst| inst.call_span).unwrap_or_default(),
             })?
             .clone();
         for inst in insts {
-            let new_def_id = ctx.def_table.add_def(def.name.clone(), def.kind.clone());
+            let new_def_id = def_table.add_def(def.name.clone(), def.kind.clone());
             inst_to_def.insert(
                 InstKey {
                     def_id: *def_id,
@@ -99,10 +115,9 @@ pub fn monomorphize(
         }
     }
 
-    let mut new_items = Vec::with_capacity(ctx.module.top_level_items.len());
-    let mut node_id_gen = ctx.node_id_gen;
+    let mut new_items = Vec::with_capacity(module.top_level_items.len());
 
-    for mut item in ctx.module.top_level_items.into_iter() {
+    for mut item in module.top_level_items.into_iter() {
         match &mut item {
             res::TopLevelItem::FuncDef(func_def) => {
                 if func_def.sig.type_params.is_empty() {
@@ -120,14 +135,9 @@ pub fn monomorphize(
                         }) {
                             cloned.def_id = *new_def_id;
                         }
-                        apply_inst_to_func_def(
-                            &mut cloned,
-                            inst,
-                            &ctx.def_table,
-                            &mut node_id_gen,
-                        )?;
+                        apply_inst_to_func_def(&mut cloned, inst, &def_table, &mut node_id_gen)?;
                         let mut cloned_item = res::TopLevelItem::FuncDef(cloned);
-                        cloned_item = remap_local_defs_in_item(cloned_item, &mut ctx.def_table);
+                        cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
                         rewrite_calls_in_item(&mut cloned_item, &call_inst_map);
                         reseed_ids_in_item(&mut cloned_item, &mut node_id_gen);
                         new_items.push(cloned_item);
@@ -150,14 +160,9 @@ pub fn monomorphize(
                         }) {
                             cloned.def_id = *new_def_id;
                         }
-                        apply_inst_to_func_decl(
-                            &mut cloned,
-                            inst,
-                            &ctx.def_table,
-                            &mut node_id_gen,
-                        )?;
+                        apply_inst_to_func_decl(&mut cloned, inst, &def_table, &mut node_id_gen)?;
                         let mut cloned_item = res::TopLevelItem::FuncDecl(cloned);
-                        cloned_item = remap_local_defs_in_item(cloned_item, &mut ctx.def_table);
+                        cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
                         rewrite_calls_in_item(&mut cloned_item, &call_inst_map);
                         reseed_ids_in_item(&mut cloned_item, &mut node_id_gen);
                         new_items.push(cloned_item);
@@ -186,13 +191,13 @@ pub fn monomorphize(
                                     apply_inst_to_method_def(
                                         &mut cloned,
                                         inst,
-                                        &ctx.def_table,
+                                        &def_table,
                                         &mut node_id_gen,
                                     )?;
                                     let mut cloned_item = res::MethodItem::Def(cloned);
                                     cloned_item = remap_local_defs_in_method_item(
                                         cloned_item,
-                                        &mut ctx.def_table,
+                                        &mut def_table,
                                     );
                                     rewrite_calls_in_method_item(&mut cloned_item, &call_inst_map);
                                     reseed_ids_in_method_item(&mut cloned_item, &mut node_id_gen);
@@ -218,13 +223,13 @@ pub fn monomorphize(
                                     apply_inst_to_method_decl(
                                         &mut cloned,
                                         inst,
-                                        &ctx.def_table,
+                                        &def_table,
                                         &mut node_id_gen,
                                     )?;
                                     let mut cloned_item = res::MethodItem::Decl(cloned);
                                     cloned_item = remap_local_defs_in_method_item(
                                         cloned_item,
-                                        &mut ctx.def_table,
+                                        &mut def_table,
                                     );
                                     rewrite_calls_in_method_item(&mut cloned_item, &call_inst_map);
                                     reseed_ids_in_method_item(&mut cloned_item, &mut node_id_gen);
@@ -249,10 +254,17 @@ pub fn monomorphize(
         }
     }
 
-    ctx.module.top_level_items = new_items;
-    ctx.node_id_gen = node_id_gen;
-    ctx.symbols = crate::core::symtab::SymbolTable::new(&ctx.module, &ctx.def_table);
-    Ok(ctx)
+    module.top_level_items = new_items;
+    let symbols = crate::core::symtab::SymbolTable::new(&module, &def_table);
+    Ok(ResolvedContext {
+        module,
+        payload: crate::core::context::ResolvedTables {
+            def_table,
+            def_owners,
+            symbols,
+            node_id_gen,
+        },
+    })
 }
 
 struct CallInstRewriter<'a> {

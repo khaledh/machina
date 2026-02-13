@@ -22,16 +22,19 @@ use crate::core::types::{
 /// Internal stage entrypoint; prefer `crate::core::api::normalize_stage` from
 /// orchestration code.
 pub fn normalize(ctx: NormalizeStageInput) -> NormalizeStageOutput {
-    let NormalizeStageInput {
-        module,
-        def_table,
-        def_owners,
+    let NormalizeStageInput { module, payload } = ctx;
+    let crate::core::context::TypedTables {
+        resolved,
         type_map,
         call_sigs,
         generic_insts,
+    } = payload;
+    let crate::core::context::ResolvedTables {
+        def_table,
+        def_owners,
         symbols,
         node_id_gen,
-    } = ctx;
+    } = resolved;
     let mut module = build_module(&module);
     let mut type_map = TypeMapOverlay::new(type_map);
     let mut node_id_gen = node_id_gen;
@@ -39,13 +42,17 @@ pub fn normalize(ctx: NormalizeStageInput) -> NormalizeStageOutput {
     normalizer.visit_module(&mut module);
     NormalizeStageOutput {
         module,
-        def_table,
-        def_owners,
-        type_map: type_map.into_inner(),
-        call_sigs,
-        generic_insts,
-        symbols,
-        node_id_gen,
+        payload: crate::core::context::TypedTables {
+            resolved: crate::core::context::ResolvedTables {
+                def_table,
+                def_owners,
+                symbols,
+                node_id_gen,
+            },
+            type_map: type_map.into_inner(),
+            call_sigs,
+            generic_insts,
+        },
     }
 }
 

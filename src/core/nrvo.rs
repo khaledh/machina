@@ -20,17 +20,24 @@ impl NrvoAnalyzer {
     }
 
     pub fn analyze(self) -> AnalyzedContext {
-        let SemanticContext {
-            module,
-            def_table,
-            def_owners,
-            type_map,
+        let SemanticContext { module, payload } = self.ctx;
+        let crate::core::context::SemanticPayload {
+            typed,
             lowering_plans,
             drop_plans,
+        } = payload;
+        let crate::core::context::TypedTables {
+            resolved,
+            type_map,
+            call_sigs,
+            generic_insts,
+        } = typed;
+        let crate::core::context::ResolvedTables {
+            def_table,
+            def_owners,
             symbols,
             node_id_gen,
-            generic_insts,
-        } = self.ctx;
+        } = resolved;
 
         let mut def_table = def_table;
 
@@ -40,14 +47,21 @@ impl NrvoAnalyzer {
 
         AnalyzedContext {
             module,
-            def_table,
-            def_owners,
-            type_map,
-            lowering_plans,
-            drop_plans,
-            symbols,
-            node_id_gen,
-            generic_insts,
+            payload: crate::core::context::SemanticPayload {
+                typed: crate::core::context::TypedTables {
+                    resolved: crate::core::context::ResolvedTables {
+                        def_table,
+                        def_owners,
+                        symbols,
+                        node_id_gen,
+                    },
+                    type_map,
+                    call_sigs,
+                    generic_insts,
+                },
+                lowering_plans,
+                drop_plans,
+            },
         }
     }
 
