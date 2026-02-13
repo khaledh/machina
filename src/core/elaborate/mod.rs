@@ -38,6 +38,7 @@ mod elaborator;
 mod index_plan;
 mod lowering_plan;
 mod match_plan;
+mod pipeline;
 mod place;
 mod types;
 mod value;
@@ -86,7 +87,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         &closure_captures,
     );
 
-    let module = elaborator.elaborate_module(&module);
+    let module = pipeline::run(&mut elaborator, &module);
     let lowering_plans = build_lowering_plans(
         &module,
         &elaborator.call_plans,

@@ -154,11 +154,8 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    /// Elaborate an entire module, returning the transformed semantic tree.
-    ///
-    /// Processes all top-level items and appends any closure struct types
-    /// and method blocks that were generated during elaboration.
-    pub fn elaborate_module(&mut self, module: &norm::Module) -> sem::Module {
+    /// Reset per-module elaboration state before processing a new module.
+    pub fn reset_module_state(&mut self) {
         self.closure_types.clear();
         self.closure_methods.clear();
         self.closure_funcs.clear();
@@ -170,14 +167,20 @@ impl<'a> Elaborator<'a> {
         self.index_plans.clear();
         self.match_plans.clear();
         self.slice_plans.clear();
+    }
 
-        let mut top_level_items: Vec<_> = module
+    /// Elaborate top-level items without appending lifted closure artifacts.
+    pub fn elaborate_module_items(&mut self, module: &norm::Module) -> Vec<sem::TopLevelItem> {
+        module
             .top_level_items
             .iter()
             .map(|item| self.elab_top_level_item(item))
-            .collect();
+            .collect()
+    }
 
-        // Append lifted closure types, invoke methods, and captureless functions.
+    /// Append lifted closure types/methods/functions produced while elaborating
+    /// module items.
+    pub fn append_lifted_closure_items(&mut self, top_level_items: &mut Vec<sem::TopLevelItem>) {
         top_level_items.extend(self.closure_types.drain(..).map(sem::TopLevelItem::TypeDef));
         top_level_items.extend(
             self.closure_methods
@@ -185,7 +188,6 @@ impl<'a> Elaborator<'a> {
                 .map(sem::TopLevelItem::MethodBlock),
         );
         top_level_items.extend(self.closure_funcs.drain(..).map(sem::TopLevelItem::FuncDef));
-        sem::Module { top_level_items }
     }
 
     fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> sem::TopLevelItem {
