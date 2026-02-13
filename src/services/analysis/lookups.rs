@@ -46,12 +46,7 @@ pub(crate) fn def_location_at_span(
     if def_id == UNKNOWN_DEF_ID {
         return None;
     }
-    let def_span = resolved.def_table.lookup_def_span(def_id).or_else(|| {
-        // Fallback for older/synthetic defs without direct span metadata.
-        let def_node_id = resolved.def_table.lookup_def_node_id(def_id)?;
-        let node_spans = node_span_map(&resolved.module);
-        node_spans.get(&def_node_id).copied()
-    })?;
+    let def_span = resolved.def_table.lookup_def_span(def_id)?;
 
     Some(Location {
         file_id,

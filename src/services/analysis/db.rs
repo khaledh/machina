@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::core::capsule::compose::merge_modules;
-use crate::core::capsule::{self, ModuleId, ModulePath};
+use crate::core::capsule::{self, ModuleId, ModulePath, RequireKind};
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefKind};
+use crate::core::resolve::{DefId, DefKind, GlobalDefId};
 use crate::core::tree::NodeId;
 use crate::core::types::Type;
 use crate::core::{api, resolve};
@@ -215,12 +215,6 @@ impl AnalysisDb {
         let Some(entry_module_id) = program_lookup.entry_module_id else {
             return Ok(None);
         };
-        let Some(entry_path) = program_lookup.entry_path.clone() else {
-            return Ok(None);
-        };
-        let Some(program_context) = program_lookup.program_context.as_ref() else {
-            return Ok(None);
-        };
         let module_states = &program_lookup.module_states;
         let Some(entry_state) = module_states.get(&entry_module_id) else {
             return Ok(None);
@@ -231,39 +225,6 @@ impl AnalysisDb {
         let Some(entry_resolved) = entry_state.resolved.as_ref() else {
             return Ok(None);
         };
-
-        if let Some(imported_target) = resolve_imported_symbol_target(
-            program_context,
-            module_states,
-            entry_module_id,
-            def_id,
-            &entry_resolved.def_table,
-        ) {
-            let Some(target_state) = module_states.get(&imported_target.module_id) else {
-                return Ok(None);
-            };
-            let Some(target_resolved) = target_state.resolved.as_ref() else {
-                return Ok(None);
-            };
-            let Some(span) = target_resolved
-                .def_table
-                .lookup_def_span(imported_target.def_id)
-            else {
-                return Ok(None);
-            };
-            let path = program_context
-                .module(imported_target.module_id)
-                .map(|m| m.source.file_path.clone());
-            let target_file_id = path
-                .as_deref()
-                .and_then(|p| snapshot.file_id(p))
-                .unwrap_or(file_id);
-            return Ok(Some(Location {
-                file_id: target_file_id,
-                path,
-                span,
-            }));
-        }
 
         if let Some(entry_def) = entry_resolved.def_table.lookup_def(def_id)
             && entry_def.is_runtime()
@@ -278,13 +239,20 @@ impl AnalysisDb {
             }));
         }
 
-        let Some(span) = entry_resolved.def_table.lookup_def_span(def_id) else {
+        let target = program_lookup
+            .imported_symbol_targets_by_module
+            .get(&entry_module_id)
+            .and_then(|targets| targets.get(&def_id))
+            .copied()
+            .unwrap_or_else(|| GlobalDefId::new(entry_module_id, def_id));
+        let Some(loc) = program_lookup.global_def_locations.get(&target) else {
             return Ok(None);
         };
+        let target_file_id = snapshot.file_id(&loc.path).unwrap_or(file_id);
         Ok(Some(Location {
-            file_id,
-            path: Some(entry_path),
-            span,
+            file_id: target_file_id,
+            path: Some(loc.path.clone()),
+            span: loc.span,
         }))
     }
 
@@ -694,10 +662,7 @@ impl AnalysisDb {
             snapshot.revision(),
         );
         self.execute_query(key, move |rt| {
-            let mut result = ProgramPipelineResult {
-                entry_path: Some(entry_path.clone()),
-                ..ProgramPipelineResult::default()
-            };
+            let mut result = ProgramPipelineResult::default();
             let tag_with_entry_path = |mut diagnostics: Vec<Diagnostic>| {
                 let entry_file_path = entry_path.to_string_lossy().to_string();
                 for diag in &mut diagnostics {
@@ -734,6 +699,10 @@ impl AnalysisDb {
             let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
             let mut all_diagnostics = Vec::new();
             let mut module_states = HashMap::<ModuleId, LookupState>::new();
+            let mut exports_by_module = HashMap::<ModuleId, ModuleResolvedExports>::new();
+            let mut imported_symbol_targets_by_module =
+                HashMap::<ModuleId, HashMap<DefId, GlobalDefId>>::new();
+            let mut global_def_locations = HashMap::<GlobalDefId, ProgramDefLocation>::new();
 
             for module_id in program_context.dependency_order_from_entry() {
                 let Some(parsed) = program_context.module(module_id) else {
@@ -763,6 +732,27 @@ impl AnalysisDb {
                 )?;
                 if let Some(resolved) = &state.resolved.product {
                     import_facts.ingest_resolved(module_id, resolved);
+                    let exports = collect_module_resolved_exports(module_id, resolved);
+                    let imported_targets = collect_module_imported_symbol_targets(
+                        &program_context,
+                        module_id,
+                        resolved,
+                        &exports_by_module,
+                    );
+                    let module_path = parsed.source.file_path.clone();
+                    for def in resolved.def_table.defs() {
+                        if let Some(span) = resolved.def_table.lookup_def_span(def.id) {
+                            global_def_locations.insert(
+                                GlobalDefId::new(module_id, def.id),
+                                ProgramDefLocation {
+                                    path: module_path.clone(),
+                                    span,
+                                },
+                            );
+                        }
+                    }
+                    exports_by_module.insert(module_id, exports);
+                    imported_symbol_targets_by_module.insert(module_id, imported_targets);
                 }
                 if let Some(typed) = &state.typechecked.product {
                     import_facts.ingest_typed(module_id, typed);
@@ -789,8 +779,9 @@ impl AnalysisDb {
             });
             result.diagnostics = all_diagnostics;
             result.entry_module_id = Some(entry_module_id);
-            result.program_context = Some(program_context);
             result.module_states = module_states;
+            result.global_def_locations = global_def_locations;
+            result.imported_symbol_targets_by_module = imported_symbol_targets_by_module;
             Ok(result)
         })
     }
@@ -825,71 +816,106 @@ impl AnalysisDb {
 #[derive(Clone, Default)]
 struct ProgramPipelineResult {
     diagnostics: Vec<Diagnostic>,
-    entry_path: Option<PathBuf>,
     entry_module_id: Option<ModuleId>,
-    program_context: Option<crate::core::context::CapsuleParsedContext>,
     module_states: HashMap<ModuleId, LookupState>,
+    global_def_locations: HashMap<GlobalDefId, ProgramDefLocation>,
+    imported_symbol_targets_by_module: HashMap<ModuleId, HashMap<DefId, GlobalDefId>>,
 }
 
-#[derive(Clone, Copy)]
-struct ImportedTargetDef {
+#[derive(Clone)]
+struct ProgramDefLocation {
+    path: PathBuf,
+    span: Span,
+}
+
+#[derive(Clone, Default)]
+struct ModuleResolvedExports {
+    callables: HashMap<String, Vec<GlobalDefId>>,
+    types: HashMap<String, GlobalDefId>,
+    traits: HashMap<String, GlobalDefId>,
+}
+
+fn collect_module_resolved_exports(
     module_id: ModuleId,
-    def_id: DefId,
-}
-
-fn resolve_imported_symbol_target(
-    program: &crate::core::context::CapsuleParsedContext,
-    module_states: &HashMap<ModuleId, LookupState>,
-    entry_module_id: ModuleId,
-    local_def_id: DefId,
-    entry_def_table: &crate::core::resolve::DefTable,
-) -> Option<ImportedTargetDef> {
-    let local_def = entry_def_table.lookup_def(local_def_id)?;
-    let local_kind = &local_def.kind;
-    let alias = &local_def.name;
-    let parsed = program.module(entry_module_id)?;
-    let req = parsed
-        .requires
-        .iter()
-        .find(|req| req.kind == crate::core::capsule::RequireKind::Symbol && req.alias == *alias)?;
-    let member = req.member.as_deref()?;
-    let dep_module_id = program.capsule.by_path.get(&req.module_path).copied()?;
-    let dep_resolved = module_states.get(&dep_module_id)?.resolved.as_ref()?;
-
-    let best_match = dep_resolved
-        .def_table
-        .defs()
-        .iter()
-        .filter(|def| {
-            def.name == member && def.is_public() && def_kind_compatible(local_kind, &def.kind)
-        })
-        .min_by_key(|def| def_kind_priority(&def.kind))?;
-
-    Some(ImportedTargetDef {
-        module_id: dep_module_id,
-        def_id: best_match.id,
-    })
-}
-
-fn def_kind_compatible(local: &DefKind, target: &DefKind) -> bool {
-    match local {
-        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-            matches!(target, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
+    resolved: &crate::core::context::ResolvedContext,
+) -> ModuleResolvedExports {
+    let mut out = ModuleResolvedExports::default();
+    for def in resolved.def_table.defs() {
+        if !def.is_public() {
+            continue;
         }
-        DefKind::TypeDef { .. } => matches!(target, DefKind::TypeDef { .. }),
-        DefKind::TraitDef { .. } => matches!(target, DefKind::TraitDef { .. }),
-        _ => false,
+        match def.kind {
+            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
+                out.callables
+                    .entry(def.name.clone())
+                    .or_default()
+                    .push(GlobalDefId::new(module_id, def.id));
+            }
+            DefKind::TypeDef { .. } => {
+                out.types
+                    .entry(def.name.clone())
+                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
+            }
+            DefKind::TraitDef { .. } => {
+                out.traits
+                    .entry(def.name.clone())
+                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
+            }
+            _ => {}
+        }
     }
+    for overloads in out.callables.values_mut() {
+        overloads.sort_by_key(|id| id.def_id);
+        overloads.dedup();
+    }
+    out
 }
 
-fn def_kind_priority(kind: &DefKind) -> u8 {
-    match kind {
-        DefKind::FuncDef { .. } => 0,
-        DefKind::FuncDecl { .. } => 1,
-        DefKind::TypeDef { .. } => 0,
-        DefKind::TraitDef { .. } => 0,
-        _ => 9,
+fn collect_module_imported_symbol_targets(
+    program: &crate::core::context::CapsuleParsedContext,
+    module_id: ModuleId,
+    resolved: &crate::core::context::ResolvedContext,
+    exports_by_module: &HashMap<ModuleId, ModuleResolvedExports>,
+) -> HashMap<DefId, GlobalDefId> {
+    let mut out = HashMap::new();
+    let Some(parsed) = program.module(module_id) else {
+        return out;
+    };
+    for req in &parsed.requires {
+        if req.kind != RequireKind::Symbol {
+            continue;
+        }
+        let Some(dep_module_id) = program.capsule.by_path.get(&req.module_path).copied() else {
+            continue;
+        };
+        let Some(dep_exports) = exports_by_module.get(&dep_module_id) else {
+            continue;
+        };
+        let Some(member) = req.member.as_deref() else {
+            continue;
+        };
+        for local_def in resolved
+            .def_table
+            .defs()
+            .iter()
+            .filter(|d| d.name == req.alias)
+        {
+            let target = match local_def.kind {
+                DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => dep_exports
+                    .callables
+                    .get(member)
+                    .and_then(|overloads| overloads.first())
+                    .copied(),
+                DefKind::TypeDef { .. } => dep_exports.types.get(member).copied(),
+                DefKind::TraitDef { .. } => dep_exports.traits.get(member).copied(),
+                _ => None,
+            };
+            if let Some(target) = target {
+                out.insert(local_def.id, target);
+            }
+        }
     }
+    out
 }
 
 fn module_with_implicit_prelude(
