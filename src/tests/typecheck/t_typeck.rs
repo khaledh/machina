@@ -119,6 +119,37 @@ fn test_typed_array_repeat_literal_type_mismatch() {
 }
 
 #[test]
+fn test_function_call_arg_errors_in_stmt_position() {
+    let source = r#"
+        fn foo(n: u64, fact: bool) {
+            // empty
+        }
+
+        fn main() {
+            foo(42, 'a');
+            foo(42);
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::ArgTypeMismatch(_, _, _, _)))
+        );
+        assert!(errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ArgCountMismatch(_, _, _, _)
+                    | TypeCheckErrorKind::OverloadNoMatch(_, _)
+            )
+        }));
+    }
+}
+
+#[test]
 fn test_set_literal_type() {
     let source = r#"
         fn test() -> u64 {

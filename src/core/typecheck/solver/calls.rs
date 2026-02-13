@@ -105,10 +105,6 @@ pub(super) fn check_call_obligations(
             continue;
         }
 
-        let has_unresolved_arg = obligation.arg_terms.iter().any(|arg_term| {
-            let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
-            super::term_utils::is_unresolved(&arg_ty)
-        });
         let has_unresolved_receiver = obligation
             .receiver
             .as_ref()
@@ -117,7 +113,11 @@ pub(super) fn check_call_obligations(
                 super::term_utils::is_unresolved(&receiver_ty)
             })
             .unwrap_or(false);
-        let should_defer_for_unresolved = has_unresolved_arg || has_unresolved_receiver;
+        // Defer primarily on unresolved receiver types. Deferring on unresolved
+        // arguments (e.g. integer literals) suppresses concrete call-site
+        // diagnostics like arity/type mismatches and can leak unsolved vars to
+        // later stages.
+        let should_defer_for_unresolved = has_unresolved_receiver;
 
         let mut candidates: Vec<CollectedCallableSig> = match &obligation.callee {
             CallCallee::NamedFunction { name, .. } => {
