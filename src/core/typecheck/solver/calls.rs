@@ -30,6 +30,7 @@ pub(super) fn check_call_obligations(
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
     def_table: &DefTable,
     def_owners: &HashMap<DefId, ModuleId>,
+    defer_on_unresolved_args: bool,
 ) -> (
     Vec<TypeCheckError>,
     HashMap<NodeId, DefId>,
@@ -113,11 +114,15 @@ pub(super) fn check_call_obligations(
                 super::term_utils::is_unresolved(&receiver_ty)
             })
             .unwrap_or(false);
-        // Defer primarily on unresolved receiver types. Deferring on unresolved
-        // arguments (e.g. integer literals) suppresses concrete call-site
-        // diagnostics like arity/type mismatches and can leak unsolved vars to
-        // later stages.
-        let should_defer_for_unresolved = has_unresolved_receiver;
+        // Receiver uncertainty almost always merits deferring. For arguments,
+        // defer only in rounds that explicitly allow it; the final retry pass
+        // runs with this disabled so concrete diagnostics still surface.
+        let has_unresolved_args = obligation.arg_terms.iter().any(|arg_term| {
+            let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
+            super::term_utils::is_unresolved(&arg_ty)
+        });
+        let should_defer_for_unresolved =
+            has_unresolved_receiver || (defer_on_unresolved_args && has_unresolved_args);
 
         let mut candidates: Vec<CollectedCallableSig> = match &obligation.callee {
             CallCallee::NamedFunction { name, .. } => {

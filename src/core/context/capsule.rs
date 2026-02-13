@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use crate::core::capsule::{CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule};
-use crate::core::resolve::{DefId, GlobalDefId};
+use crate::core::capsule::{
+    CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule, RequireKind,
+};
+use crate::core::resolve::{DefId, DefKind, DefTable, GlobalDefId};
 use crate::core::tree::{NodeId, NodeIdGen};
 
 /// Capsule-level parsed context produced by module discovery/parsing.
@@ -125,4 +127,115 @@ pub struct ModuleImportBinding {
 pub struct ImportEnv {
     pub module_aliases: HashMap<String, ModuleImportBinding>,
     pub symbol_aliases: HashMap<String, ImportedSymbolBinding>,
+}
+
+pub fn module_export_facts_from_def_table(
+    module_id: ModuleId,
+    module_path: Option<ModulePath>,
+    def_table: &DefTable,
+) -> ModuleExportFacts {
+    let mut facts = ModuleExportFacts {
+        module_id,
+        module_path,
+        callables: HashMap::new(),
+        types: HashMap::new(),
+        traits: HashMap::new(),
+    };
+    for def in def_table.defs() {
+        if !def.is_public() {
+            continue;
+        }
+        match def.kind {
+            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
+                facts
+                    .callables
+                    .entry(def.name.clone())
+                    .or_default()
+                    .push(GlobalDefId::new(module_id, def.id));
+            }
+            DefKind::TypeDef { .. } => {
+                facts
+                    .types
+                    .entry(def.name.clone())
+                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
+            }
+            DefKind::TraitDef { .. } => {
+                facts
+                    .traits
+                    .entry(def.name.clone())
+                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
+            }
+            _ => {}
+        }
+    }
+    for overloads in facts.callables.values_mut() {
+        overloads.sort_by_key(|id| id.def_id);
+        overloads.dedup();
+    }
+    facts
+}
+
+pub fn imported_symbol_binding_from_exports(
+    dep_module_id: ModuleId,
+    dep_module_path: &ModulePath,
+    dep_exports: &ModuleExportFacts,
+    member: &str,
+) -> ImportedSymbolBinding {
+    ImportedSymbolBinding {
+        module_id: dep_module_id,
+        module_path: dep_module_path.clone(),
+        callables: dep_exports
+            .callables
+            .get(member)
+            .cloned()
+            .unwrap_or_default(),
+        type_def: dep_exports.types.get(member).copied(),
+        trait_def: dep_exports.traits.get(member).copied(),
+    }
+}
+
+pub fn import_env_from_requires(
+    program: &CapsuleParsedContext,
+    module_id: ModuleId,
+    exports_by_module: &HashMap<ModuleId, ModuleExportFacts>,
+) -> ImportEnv {
+    let mut out = ImportEnv::default();
+    let Some(parsed) = program.module(module_id) else {
+        return out;
+    };
+    for req in &parsed.requires {
+        let Some(dep_module_id) = program.capsule.by_path.get(&req.module_path).copied() else {
+            continue;
+        };
+        let Some(dep_exports) = exports_by_module.get(&dep_module_id) else {
+            continue;
+        };
+        match req.kind {
+            RequireKind::Module => {
+                out.module_aliases.insert(
+                    req.alias.clone(),
+                    ModuleImportBinding {
+                        module_id: dep_module_id,
+                        module_path: req.module_path.clone(),
+                        exports: dep_exports.clone(),
+                    },
+                );
+            }
+            RequireKind::Symbol => {
+                let Some(member) = &req.member else {
+                    continue;
+                };
+                let binding = imported_symbol_binding_from_exports(
+                    dep_module_id,
+                    &req.module_path,
+                    dep_exports,
+                    member,
+                );
+                if !binding.is_empty() {
+                    out.symbol_aliases.insert(req.alias.clone(), binding);
+                }
+            }
+        }
+    }
+    out
 }

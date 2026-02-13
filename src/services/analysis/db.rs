@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::core::capsule::compose::merge_modules;
-use crate::core::capsule::{self, ModuleId, ModulePath, RequireKind};
+use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::context::{
-    ImportEnv, ImportedSymbolBinding, ModuleExportFacts, ModuleImportBinding,
+    ImportEnv, ModuleExportFacts, import_env_from_requires, module_export_facts_from_def_table,
 };
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, DefLocation, GlobalDefId};
@@ -737,13 +737,13 @@ impl AnalysisDb {
                 if let Some(resolved) = &mut state.resolved.product {
                     apply_prelude_runtime_def_locations(parsed, resolved);
                     import_facts.ingest_resolved(module_id, resolved);
-                    let exports = collect_module_export_facts(
+                    let exports = module_export_facts_from_def_table(
                         module_id,
-                        parsed.source.path.clone(),
-                        resolved,
+                        Some(parsed.source.path.clone()),
+                        &resolved.def_table,
                     );
                     let import_env =
-                        collect_module_import_env(&program_context, module_id, &exports_by_module);
+                        import_env_from_requires(&program_context, module_id, &exports_by_module);
                     exports_by_module.insert(module_id, exports);
                     if !import_env.module_aliases.is_empty()
                         || !import_env.symbol_aliases.is_empty()
@@ -815,117 +815,6 @@ struct ProgramPipelineResult {
     entry_module_id: Option<ModuleId>,
     module_states: HashMap<ModuleId, LookupState>,
     import_env_by_module: HashMap<ModuleId, ImportEnv>,
-}
-
-fn collect_module_export_facts(
-    module_id: ModuleId,
-    module_path: ModulePath,
-    resolved: &crate::core::context::ResolvedContext,
-) -> ModuleExportFacts {
-    let mut out = ModuleExportFacts {
-        module_id,
-        module_path: Some(module_path),
-        callables: HashMap::new(),
-        types: HashMap::new(),
-        traits: HashMap::new(),
-    };
-    for def in resolved.def_table.defs() {
-        if !def.is_public() {
-            continue;
-        }
-        match def.kind {
-            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-                out.callables
-                    .entry(def.name.clone())
-                    .or_default()
-                    .push(GlobalDefId::new(module_id, def.id));
-            }
-            DefKind::TypeDef { .. } => {
-                out.types
-                    .entry(def.name.clone())
-                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
-            }
-            DefKind::TraitDef { .. } => {
-                out.traits
-                    .entry(def.name.clone())
-                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
-            }
-            _ => {}
-        }
-    }
-    for overloads in out.callables.values_mut() {
-        overloads.sort_by_key(|id| id.def_id);
-        overloads.dedup();
-    }
-    out
-}
-
-fn collect_module_import_env(
-    program: &crate::core::context::CapsuleParsedContext,
-    module_id: ModuleId,
-    exports_by_module: &HashMap<ModuleId, ModuleExportFacts>,
-) -> ImportEnv {
-    let mut out = ImportEnv::default();
-    let Some(parsed) = program.module(module_id) else {
-        return out;
-    };
-    for req in &parsed.requires {
-        let Some(dep_module_id) = program.capsule.by_path.get(&req.module_path).copied() else {
-            continue;
-        };
-        let Some(dep_exports) = exports_by_module.get(&dep_module_id) else {
-            continue;
-        };
-        match req.kind {
-            RequireKind::Module => {
-                out.module_aliases.insert(
-                    req.alias.clone(),
-                    ModuleImportBinding {
-                        module_id: dep_module_id,
-                        module_path: req.module_path.clone(),
-                        exports: dep_exports.clone(),
-                    },
-                );
-            }
-            RequireKind::Symbol => {
-                let Some(member) = &req.member else {
-                    continue;
-                };
-                let binding = collect_imported_symbol_binding_from_exports(
-                    dep_module_id,
-                    &req.module_path,
-                    dep_exports,
-                    member,
-                );
-                if !binding.is_empty() {
-                    out.symbol_aliases.insert(req.alias.clone(), binding);
-                }
-            }
-        }
-    }
-    out
-}
-
-fn collect_imported_symbol_binding_from_exports(
-    dep_module_id: ModuleId,
-    dep_module_path: &ModulePath,
-    dep_exports: &ModuleExportFacts,
-    member: &str,
-) -> ImportedSymbolBinding {
-    let callables = dep_exports
-        .callables
-        .get(member)
-        .cloned()
-        .unwrap_or_default();
-    let type_def = dep_exports.types.get(member).copied();
-    let trait_def = dep_exports.traits.get(member).copied();
-    ImportedSymbolBinding {
-        module_id: dep_module_id,
-        module_path: dep_module_path.clone(),
-        callables,
-        type_def,
-        trait_def,
-    }
 }
 
 fn resolve_imported_symbol_target_from_import_env(

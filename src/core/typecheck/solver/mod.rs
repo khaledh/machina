@@ -100,6 +100,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
             &constrain.var_trait_bounds,
             &engine.context().def_table,
             &engine.context().def_owners,
+            false,
         );
         call_errors.append(&mut retry_call_errors);
         resolved_call_defs.extend(retry_resolved);
@@ -261,6 +262,7 @@ fn solve_call_stage(
             &constrain.var_trait_bounds,
             &engine.context().def_table,
             &engine.context().def_owners,
+            true,
         );
         call_errors.append(&mut round_errors);
         resolved_call_defs.extend(round_resolved);

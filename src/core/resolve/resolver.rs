@@ -2,16 +2,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::{ModuleId, RequireKind};
 use crate::core::context::{
-    CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ImportedSymbolBinding,
-    ModuleExportFacts, ModuleImportBinding, ParsedContext, ResolveStageInput, ResolveStageOutput,
-    ResolvedContext,
+    CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ModuleExportFacts,
+    ParsedContext, ResolveStageInput, ResolveStageOutput, import_env_from_requires,
+    module_export_facts_from_def_table,
 };
 use crate::core::diag::Span;
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
 use crate::core::resolve::errors::ResolveError;
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::core::resolve::{
-    Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, Visibility,
+    Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility,
 };
 use crate::core::tree::ParamMode;
 use crate::core::tree::parsed::*;
@@ -1767,50 +1767,16 @@ pub fn resolve_program(
         .with_source_path(parsed_module.source.file_path.clone());
         match resolve_with_imports_and_symbols(parsed_context, imported_modules, imported_symbols) {
             Ok(resolved_context) => {
-                let module_exports = collect_module_export_facts(
-                    &resolved_context,
+                let module_exports = module_export_facts_from_def_table(
                     module_id,
                     Some(parsed_module.source.path.clone()),
+                    &resolved_context.def_table,
                 );
                 export_facts_by_module.insert(module_id, module_exports.clone());
                 modules.insert(module_id, resolved_context);
 
-                let mut import_env = ImportEnv::default();
-                for req in &parsed_module.requires {
-                    let Some(dep_id) = program.capsule.by_path.get(&req.module_path).copied()
-                    else {
-                        continue;
-                    };
-                    let Some(dep_exports) = export_facts_by_module.get(&dep_id).cloned() else {
-                        continue;
-                    };
-                    match req.kind {
-                        RequireKind::Module => {
-                            import_env.module_aliases.insert(
-                                req.alias.clone(),
-                                ModuleImportBinding {
-                                    module_id: dep_id,
-                                    module_path: req.module_path.clone(),
-                                    exports: dep_exports,
-                                },
-                            );
-                        }
-                        RequireKind::Symbol => {
-                            let Some(member) = &req.member else {
-                                continue;
-                            };
-                            let binding = collect_imported_symbol_binding_from_exports(
-                                dep_id,
-                                &req.module_path,
-                                &dep_exports,
-                                member,
-                            );
-                            if !binding.is_empty() {
-                                import_env.symbol_aliases.insert(req.alias.clone(), binding);
-                            }
-                        }
-                    }
-                }
+                let import_env =
+                    import_env_from_requires(&program, module_id, &export_facts_by_module);
                 if !import_env.module_aliases.is_empty() || !import_env.symbol_aliases.is_empty() {
                     import_env_by_module.insert(module_id, import_env);
                 }
@@ -1834,71 +1800,6 @@ pub fn resolve_program(
         export_facts_by_module,
         import_env_by_module,
     })
-}
-
-fn collect_module_export_facts(
-    resolved_context: &ResolvedContext,
-    module_id: ModuleId,
-    module_path: Option<crate::core::capsule::ModulePath>,
-) -> ModuleExportFacts {
-    let mut facts = ModuleExportFacts {
-        module_id,
-        module_path,
-        callables: HashMap::new(),
-        types: HashMap::new(),
-        traits: HashMap::new(),
-    };
-    for def in resolved_context.def_table.clone() {
-        if !def.is_public() {
-            continue;
-        }
-        match def.kind {
-            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-                facts
-                    .callables
-                    .entry(def.name.clone())
-                    .or_default()
-                    .push(GlobalDefId::new(module_id, def.id));
-            }
-            DefKind::TypeDef { .. } => {
-                facts
-                    .types
-                    .entry(def.name.clone())
-                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
-            }
-            DefKind::TraitDef { .. } => {
-                facts
-                    .traits
-                    .entry(def.name.clone())
-                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
-            }
-            _ => {}
-        }
-    }
-    for overloads in facts.callables.values_mut() {
-        overloads.sort_by_key(|id| id.def_id);
-        overloads.dedup();
-    }
-    facts
-}
-
-fn collect_imported_symbol_binding_from_exports(
-    dep_module_id: ModuleId,
-    dep_module_path: &crate::core::capsule::ModulePath,
-    dep_exports: &ModuleExportFacts,
-    member: &str,
-) -> ImportedSymbolBinding {
-    ImportedSymbolBinding {
-        module_id: dep_module_id,
-        module_path: dep_module_path.clone(),
-        callables: dep_exports
-            .callables
-            .get(member)
-            .cloned()
-            .unwrap_or_default(),
-        type_def: dep_exports.types.get(member).copied(),
-        trait_def: dep_exports.traits.get(member).copied(),
-    }
 }
 
 fn top_level_item_id(item: &TopLevelItem) -> crate::core::tree::NodeId {
