@@ -10,6 +10,7 @@ pub mod lookups;
 pub mod module_graph;
 pub mod pipeline;
 pub mod program_imports;
+pub mod program_pipeline;
 pub mod query;
 pub mod rename;
 pub mod results;
