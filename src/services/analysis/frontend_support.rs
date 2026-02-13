@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::core::capsule::{self, CapsuleError, ModuleLoader, ModulePath};
 use crate::core::diag::Span;
 use crate::services::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
-use crate::services::analysis::snapshot::AnalysisSnapshot;
+use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
 
 pub(crate) struct SnapshotOverlayLoader {
     snapshot: AnalysisSnapshot,
@@ -36,13 +36,21 @@ impl ModuleLoader for SnapshotOverlayLoader {
 }
 
 pub(crate) fn snapshot_text_for_path(snapshot: &AnalysisSnapshot, path: &Path) -> Option<String> {
-    if let Some(file_id) = snapshot.file_id(path) {
+    if let Some(file_id) = snapshot_file_id_for_path(snapshot, path) {
         return snapshot.text(file_id).map(|s| s.to_string());
     }
-    if let Ok(canon) = path.canonicalize()
-        && let Some(file_id) = snapshot.file_id(&canon)
-    {
-        return snapshot.text(file_id).map(|s| s.to_string());
+    None
+}
+
+pub(crate) fn snapshot_file_id_for_path(
+    snapshot: &AnalysisSnapshot,
+    path: &Path,
+) -> Option<FileId> {
+    if let Some(file_id) = snapshot.file_id(path) {
+        return Some(file_id);
+    }
+    if let Ok(canon) = path.canonicalize() {
+        return snapshot.file_id(&canon);
     }
     None
 }

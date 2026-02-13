@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use machina::core::capsule::ModuleId;
 use machina::services::analysis::db::AnalysisDb;
 use machina::services::analysis::diagnostics::{
-    ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
+    ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
 };
 use machina::services::analysis::module_graph::ModuleGraph;
 use machina::services::analysis::query::{CancellationToken, QueryCancelled, QueryResult};
@@ -146,7 +146,12 @@ impl AnalysisSession {
             .db
             .diagnostics_for_program_file(state.file_id)
             .map_err(SessionError::from)?;
-        Ok(filter_diagnostics_for_path(&diagnostics, &state.path))
+        let snapshot = self.snapshot();
+        Ok(filter_diagnostics_for_file(
+            &diagnostics,
+            &snapshot,
+            state.file_id,
+        ))
     }
 
     pub fn diagnostics_for_uri_if_version(
@@ -166,7 +171,12 @@ impl AnalysisSession {
         if latest.version != expected_version {
             return Ok(None);
         }
-        Ok(Some(filter_diagnostics_for_path(&diagnostics, &state.path)))
+        let snapshot = self.snapshot();
+        Ok(Some(filter_diagnostics_for_file(
+            &diagnostics,
+            &snapshot,
+            state.file_id,
+        )))
     }
 
     pub fn is_current_version(&self, uri: &str, expected_version: i32) -> SessionResult<bool> {
@@ -193,16 +203,36 @@ impl AnalysisSession {
     }
 }
 
-fn filter_diagnostics_for_path(diagnostics: &[Diagnostic], path: &Path) -> Vec<Diagnostic> {
-    let expected = path.to_string_lossy();
+fn filter_diagnostics_for_file(
+    diagnostics: &[Diagnostic],
+    snapshot: &AnalysisSnapshot,
+    target_file_id: FileId,
+) -> Vec<Diagnostic> {
     diagnostics
         .iter()
-        .filter(|diag| match diag.metadata.get(ANALYSIS_FILE_PATH_KEY) {
-            Some(DiagnosticValue::String(file_path)) => file_path == expected.as_ref(),
-            _ => false,
-        })
+        .filter(|diag| diagnostic_file_id(diag, snapshot) == Some(target_file_id))
         .cloned()
         .collect()
+}
+
+fn diagnostic_file_id(diag: &Diagnostic, snapshot: &AnalysisSnapshot) -> Option<FileId> {
+    if let Some(DiagnosticValue::Number(n)) = diag.metadata.get(ANALYSIS_FILE_ID_KEY)
+        && *n >= 0
+        && *n <= u32::MAX as i64
+    {
+        return Some(FileId(*n as u32));
+    }
+    let file_path = match diag.metadata.get(ANALYSIS_FILE_PATH_KEY) {
+        Some(DiagnosticValue::String(file_path)) => PathBuf::from(file_path),
+        _ => return None,
+    };
+    if let Some(file_id) = snapshot.file_id(&file_path) {
+        return Some(file_id);
+    }
+    if let Ok(canon) = file_path.canonicalize() {
+        return snapshot.file_id(&canon);
+    }
+    None
 }
 
 pub fn uri_to_path(uri: &str) -> SessionResult<PathBuf> {
@@ -218,7 +248,7 @@ pub fn uri_to_path(uri: &str) -> SessionResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ANALYSIS_FILE_PATH_KEY, AnalysisSession, DiagnosticValue, SessionError, uri_to_path,
+        ANALYSIS_FILE_ID_KEY, AnalysisSession, DiagnosticValue, SessionError, uri_to_path,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -400,19 +430,22 @@ fn value( {
         session
             .open_document(&uri, 1, entry_source)
             .expect("open should succeed");
+        let entry_file_id = session
+            .lookup_document(&uri)
+            .expect("entry doc should be tracked")
+            .file_id;
         let diagnostics = session
             .diagnostics_for_uri(&uri)
             .expect("diagnostics query should succeed");
 
-        let expected_path = entry_path.to_string_lossy();
         for diag in diagnostics {
-            let source_path = diag
+            let source_file_id = diag
                 .metadata
-                .get(ANALYSIS_FILE_PATH_KEY)
-                .expect("program diagnostics should include source path metadata");
+                .get(ANALYSIS_FILE_ID_KEY)
+                .expect("program diagnostics should include source file id metadata");
             assert_eq!(
-                source_path,
-                &DiagnosticValue::String(expected_path.to_string()),
+                source_file_id,
+                &DiagnosticValue::Number(entry_file_id.0 as i64),
                 "diagnostic from dependency leaked into entry file publish list"
             );
         }

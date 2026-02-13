@@ -17,9 +17,12 @@ use crate::core::context::{
 };
 use crate::core::resolve::{DefId, DefKind, DefLocation, GlobalDefId};
 use crate::core::tree::NodeIdGen;
-use crate::services::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
+use crate::services::analysis::diagnostics::{
+    ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
+};
 use crate::services::analysis::frontend_support::{
-    SnapshotOverlayLoader, frontend_error_diagnostics, infer_project_root, stable_source_revision,
+    SnapshotOverlayLoader, frontend_error_diagnostics, infer_project_root,
+    snapshot_file_id_for_path, stable_source_revision,
 };
 use crate::services::analysis::pipeline::{
     LookupState, collect_sorted_diagnostics, run_module_pipeline_with_parsed_and_imports,
@@ -61,6 +64,9 @@ pub(crate) fn run_program_pipeline_for_file(
                 diag.metadata
                     .entry(ANALYSIS_FILE_PATH_KEY.to_string())
                     .or_insert_with(|| DiagnosticValue::String(entry_file_path.clone()));
+                diag.metadata
+                    .entry(ANALYSIS_FILE_ID_KEY.to_string())
+                    .or_insert_with(|| DiagnosticValue::Number(file_id.0 as i64));
             }
             diagnostics
         };
@@ -138,11 +144,17 @@ pub(crate) fn run_program_pipeline_for_file(
             }
             let mut module_diags = collect_sorted_diagnostics(&state);
             let file_path = parsed.source.file_path.to_string_lossy().to_string();
+            let file_id_meta = snapshot_file_id_for_path(&snapshot, &parsed.source.file_path)
+                .map(|id| DiagnosticValue::Number(id.0 as i64));
             for diag in &mut module_diags {
                 diag.metadata.insert(
                     ANALYSIS_FILE_PATH_KEY.to_string(),
                     DiagnosticValue::String(file_path.clone()),
                 );
+                if let Some(file_id_val) = file_id_meta.clone() {
+                    diag.metadata
+                        .insert(ANALYSIS_FILE_ID_KEY.to_string(), file_id_val);
+                }
             }
             all_diagnostics.extend(module_diags);
             module_states.insert(module_id, to_lookup_state(&state));

@@ -7,7 +7,9 @@ use crate::core::capsule::ModuleId;
 use crate::core::diag::{Position, Span};
 use crate::core::types::Type;
 use crate::services::analysis::db::AnalysisDb;
-use crate::services::analysis::diagnostics::DiagnosticPhase;
+use crate::services::analysis::diagnostics::{
+    ANALYSIS_FILE_ID_KEY, DiagnosticPhase, DiagnosticValue,
+};
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::ROOT_POISON_NODE;
 use crate::services::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
@@ -1400,6 +1402,62 @@ fn value() -> u64 {
         !after.is_empty(),
         "expected dependency overlay parse error to surface via entry diagnostics"
     );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn diagnostics_for_program_file_attach_file_id_metadata() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_diag_file_id_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = temp_dir.join("app").join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep as dep
+}
+
+fn main() -> u64 {
+    dep::value()
+}
+"#;
+    let dep_source = r#"
+@[public]
+fn value() -> u64 {
+    true
+}
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    let dep_id = db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        !diagnostics.is_empty(),
+        "expected dependency diagnostics for broken dep source"
+    );
+    assert!(diagnostics.iter().all(|diag| matches!(
+        diag.metadata.get(ANALYSIS_FILE_ID_KEY),
+        Some(DiagnosticValue::Number(_))
+    )));
+    assert!(diagnostics.iter().any(|diag| {
+        matches!(
+            diag.metadata.get(ANALYSIS_FILE_ID_KEY),
+            Some(DiagnosticValue::Number(id)) if *id == dep_id.0 as i64
+        )
+    }));
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
